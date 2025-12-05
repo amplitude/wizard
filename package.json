@@ -1,0 +1,52 @@
+{
+  "name": "@amplitude/wizard",
+  "version": "0.1.0",
+  "description": "AI-powered CLI wizard to integrate Amplitude Unified SDK into your project",
+  "type": "module",
+  "bin": {
+    "amplitude-wizard": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && npm run copy-templates",
+    "copy-templates": "mkdir -p dist/rules/templates && cp src/rules/templates/*.md dist/rules/templates/",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "test": "vitest",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\""
+  },
+  "keywords": [
+    "amplitude",
+    "analytics",
+    "experiment",
+    "feature-flags",
+    "wizard",
+    "cli",
+    "ai"
+  ],
+  "author": "Amplitude",
+  "license": "MIT",
+  "dependencies": {
+    "@amplitude/analytics-node": "1.5.26",
+    "@anthropic-ai/sdk": "0.32.1",
+    "@inquirer/prompts": "8.0.1",
+    "@inquirer/search": "2.0.1",
+    "chalk": "5.6.2",
+    "commander": "12.1.0",
+    "execa": "9.6.1",
+    "fast-glob": "3.3.3",
+    "ora": "8.2.0",
+    "zod": "3.25.76",
+    "zod-to-json-schema": "3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.1",
+    "eslint": "9.39.1",
+    "prettier": "3.7.3",
+    "typescript": "5.9.3",
+    "vitest": "2.1.9"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
