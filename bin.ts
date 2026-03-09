@@ -342,6 +342,121 @@ yargs(hideBin(process.argv))
       }
     },
   )
+  .command(
+    'login',
+    'Log in to your Amplitude account',
+    (yargs) => {
+      return yargs.options({
+        zone: {
+          describe: 'Amplitude data center zone (us or eu)',
+          choices: ['us', 'eu'] as const,
+          default: 'us' as const,
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        setUI(new LoggingUI());
+        const { performAmplitudeAuth } = await import('./src/utils/oauth.js');
+        const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+        const { storeToken } = await import('./src/utils/ampli-settings.js');
+        const zone = argv.zone as 'us' | 'eu';
+
+        try {
+          const auth = await performAmplitudeAuth({ zone });
+          const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
+          storeToken(
+            {
+              id: user.id,
+              firstName: user.firstName,
+              lastName: user.lastName,
+              email: user.email,
+              zone: auth.zone,
+            },
+            {
+              accessToken: auth.accessToken,
+              idToken: auth.idToken,
+              refreshToken: auth.refreshToken,
+              expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+            },
+          );
+          console.log(
+            chalk.green(
+              `✔ Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
+            ),
+          ); // eslint-disable-line no-console
+          if (user.orgs.length > 0) {
+            console.log(
+              chalk.dim(`  Org: ${user.orgs.map((o) => o.name).join(', ')}`),
+            ); // eslint-disable-line no-console
+          }
+        } catch (e) {
+          console.error(
+            chalk.red(
+              `Login failed: ${e instanceof Error ? e.message : String(e)}`,
+            ),
+          ); // eslint-disable-line no-console
+          process.exit(1);
+        }
+      })();
+    },
+  )
+  .command(
+    'logout',
+    'Log out of your Amplitude account',
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    () => {},
+    (_argv) => {
+      void (async () => {
+        const { getStoredUser } = await import('./src/utils/ampli-settings.js');
+        const fs = await import('node:fs');
+        const os = await import('node:os');
+        const path = await import('node:path');
+        const configPath = path.join(os.homedir(), 'ampli.json');
+        const user = getStoredUser();
+        try {
+          fs.writeFileSync(configPath, '{}', 'utf-8');
+          if (user) {
+            console.log(chalk.green(`✔ Logged out ${user.email}`)); // eslint-disable-line no-console
+          } else {
+            console.log(chalk.dim('No active session found.')); // eslint-disable-line no-console
+          }
+        } catch {
+          console.log(chalk.dim('No active session found.')); // eslint-disable-line no-console
+        }
+      })();
+    },
+  )
+  .command(
+    'whoami',
+    'Show the currently logged-in Amplitude account',
+    // eslint-disable-next-line @typescript-eslint/no-empty-function
+    () => {},
+    (_argv) => {
+      void (async () => {
+        const { getStoredUser, getStoredToken } = await import(
+          './src/utils/ampli-settings.js'
+        );
+        const user = getStoredUser();
+        const token = getStoredToken();
+        if (user && token && user.id !== 'pending') {
+          console.log(
+            `Logged in as ${chalk.bold(
+              user.firstName + ' ' + user.lastName,
+            )} <${user.email}>`,
+          ); // eslint-disable-line no-console
+          if (user.zone !== 'us') console.log(chalk.dim(`Zone: ${user.zone}`)); // eslint-disable-line no-console
+        } else {
+          console.log(
+            chalk.yellow(
+              'Not logged in. Run `amplitude-wizard login` to authenticate.',
+            ),
+          ); // eslint-disable-line no-console
+        }
+      })();
+    },
+  )
   .command('mcp <command>', 'MCP server management commands', (yargs) => {
     return yargs
       .command(
