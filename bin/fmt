@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+
+# Format/lint code
+echo "Formatting and linting code..."
+pnpm fix

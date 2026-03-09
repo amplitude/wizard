@@ -1,0 +1,7 @@
+#!/bin/bash
+set -e
+
+# Start the project (build and run the wizard)
+echo "Starting project..."
+pnpm build
+pnpm try

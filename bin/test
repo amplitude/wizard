@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+
+# Run tests (includes linting and formatting)
+echo "Running tests..."
+pnpm test

@@ -1,0 +1,31 @@
+{
+  "extends": "./tsconfig.build.json",
+
+  "compilerOptions": {
+    "moduleResolution": "node16",
+    "module": "node16",
+    "types": ["node", "jest"],
+    "typeRoots": ["./node_modules/@types", "./types"],
+    "declaration": true,
+    "resolveJsonModule": true,
+    "outDir": "dist"
+  },
+  "include": [
+    "__tests__",
+    "__mocks__/**/*",
+    "index.ts",
+    "bin.ts",
+    "src/lib/**/*",
+    "spec/**/*",
+    "src/**/*",
+    "test/**/*",
+    "e2e-tests/**/*",
+    "types/**/*"
+  ],
+  "exclude": [
+    "e2e-tests/test-applications/**/*"
+  ],
+  "ts-node": {
+    "files": true
+  }
+}
