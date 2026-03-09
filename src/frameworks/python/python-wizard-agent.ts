@@ -1,4 +1,4 @@
-/* Generic Python language wizard using posthog-agent with PostHog MCP */
+/* Generic Python language wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { PYTHON_PACKAGE_INSTALLATION } from '../../lib/framework-config';
@@ -24,7 +24,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
     name: 'Python Language',
     integration: Integration.python,
     beta: true,
-    docsUrl: 'https://posthog.com/docs/libraries/python',
+    docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const packageManager = await detectPackageManager(options);
       return { packageManager };
@@ -143,9 +143,8 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, host: string) => ({
-      POSTHOG_API_KEY: apiKey,
-      POSTHOG_HOST: host,
+    getEnvVars: (apiKey: string, _host: string) => ({
+      AMPLITUDE_API_KEY: apiKey,
     }),
   },
 
@@ -171,14 +170,14 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
 
       return [
         `Package manager: ${packageManagerName}`,
-        `Framework docs ID: python (use posthog://docs/frameworks/python for documentation)`,
+        `Framework docs ID: python (use amplitude://docs/frameworks/python for documentation)`,
         `Project type: Generic Python application (CLI, script, worker, data pipeline, etc.)`,
       ];
     },
   },
 
   ui: {
-    successMessage: 'PostHog integration complete',
+    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const packageManagerName = context.packageManager
@@ -186,18 +185,18 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
         : 'package manager';
       return [
         `Analyzed your Python project structure`,
-        `Installed the PostHog Python package using ${packageManagerName}`,
-        `Created PostHog initialization using instance-based API (Posthog class)`,
+        `Installed the Amplitude Python package using ${packageManagerName}`,
+        `Created Amplitude initialization using instance-based API (Amplitude class)`,
         `Configured exception autocapture and graceful shutdown`,
         `Added example code for events, feature flags, and error capture (without PII)`,
       ];
     },
     getOutroNextSteps: () => [
-      'Use Posthog() class (not module-level posthog) with enable_exception_autocapture=True',
-      'Call posthog_client.shutdown() on application exit (use atexit.register)',
+      'Use the Amplitude client for all tracking calls',
+      'Call amplitude_client.shutdown() on application exit (use atexit.register)',
       'NEVER send PII in event properties (no emails, names, or user content)',
-      'Use posthog_client.capture() for events and posthog_client.identify() for users',
-      'Visit your PostHog dashboard to see incoming events',
+      'Use amplitude_client.track() for events and amplitude_client.identify() for users',
+      'Visit your Amplitude dashboard to see incoming events',
     ],
   },
 };

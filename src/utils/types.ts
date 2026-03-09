@@ -1,7 +1,10 @@
-export type PostHogProjectData = Record<string, unknown>;
+export type AmplitudeProjectData = Record<string, unknown>;
+
+/** @deprecated Use AmplitudeProjectData */
+export type PostHogProjectData = AmplitudeProjectData;
 
 export type PreselectedProject = {
-  project: PostHogProjectData;
+  project: AmplitudeProjectData;
   authToken: string;
 };
 
@@ -32,7 +35,7 @@ export type WizardOptions = {
   default: boolean;
 
   /**
-   * Whether to create a new PostHog account during setup.
+   * Whether to create a new Amplitude account during setup.
    */
   signup: boolean;
 
@@ -52,7 +55,7 @@ export type WizardOptions = {
   apiKey?: string;
 
   /**
-   * PostHog project ID. When set (e.g. in CI with --project-id), the wizard uses this project
+   * Amplitude project ID. When set (e.g. in CI with --project-id), the wizard uses this project
    * instead of the default from the API key or OAuth.
    */
   projectId?: number;
@@ -65,7 +68,7 @@ export type WizardOptions = {
   /**
    * Whether to run in benchmark mode with per-phase token tracking.
    * When enabled, the wizard runs each workflow phase as a separate agent call
-   * and writes detailed usage data to /tmp/posthog-wizard-benchmark.json.
+   * and writes detailed usage data to /tmp/amplitude-wizard-benchmark.json.
    */
   benchmark: boolean;
 };

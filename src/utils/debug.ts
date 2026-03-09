@@ -4,7 +4,7 @@ import { prepareMessage } from './logging';
 import { getUI } from '../ui';
 
 let debugEnabled = false;
-let logFilePath = '/tmp/posthog-wizard.log';
+let logFilePath = '/tmp/amplitude-wizard.log';
 let logEnabled = true;
 
 export function getLogFilePath(): string {
@@ -33,7 +33,7 @@ export function initLogFile() {
   try {
     const header = `\n${'='.repeat(
       60,
-    )}\nPostHog Wizard Run: ${new Date().toISOString()}\n${'='.repeat(60)}\n`;
+    )}\nAmplitude Wizard Run: ${new Date().toISOString()}\n${'='.repeat(60)}\n`;
     appendFileSync(logFilePath, header);
   } catch {
     // Silently ignore - logging is non-critical

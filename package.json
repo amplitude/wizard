@@ -1,11 +1,11 @@
 {
-  "name": "@posthog/wizard",
+  "name": "@amplitude/wizard",
   "version": "1.36.1",
-  "homepage": "https://github.com/PostHog/wizard",
-  "repository": "https://github.com/PostHog/wizard",
-  "description": "The PostHog wizard helps you to configure your project",
+  "homepage": "https://github.com/amplitude/wizard",
+  "repository": "https://github.com/amplitude/wizard",
+  "description": "The Amplitude wizard helps you to configure your project",
   "keywords": [
-    "posthog",
+    "amplitude",
     "wizard",
     "sdk",
     "cli",
@@ -15,7 +15,7 @@
     "configure"
   ],
   "bin": {
-    "wizard": "dist/bin.js"
+    "amplitude-wizard": "dist/bin.js"
   },
   "publishConfig": {
     "access": "public"
@@ -46,7 +46,7 @@
     "magicast": "^0.2.10",
     "nanostores": "^1.1.1",
     "opn": "^5.4.0",
-    "posthog-node": "^5.24.17",
+    "@amplitude/analytics-browser": "^2.0.0",
     "react": "^19.2.4",
     "read-env": "^1.3.0",
     "recast": "^0.23.3",
@@ -103,7 +103,7 @@
     "build:watch": "pnpm tsc -w",
     "build": "pnpm tsc",
     "postbuild": "chmod +x ./dist/bin.js && cp -r scripts/** dist && cp -r src/utils/rules dist/src/utils && cp src/ui/tui/package.json dist/src/ui/tui/package.json && pnpm test:smoke",
-    "test:smoke": "node -e \"require('./dist/bin.js')\" 2>&1 | head -5 | grep -q 'PostHog Wizard' || (echo 'Smoke test failed: compiled binary crashed on load' && exit 1)",
+    "test:smoke": "node -e \"require('./dist/bin.js')\" 2>&1 | head -5 | grep -q 'Amplitude Wizard' || (echo 'Smoke test failed: compiled binary crashed on load' && exit 1)",
     "lint": "pnpm lint:prettier && pnpm lint:eslint",
     "lint:prettier": "prettier --check \"{lib,src,test}/**/*.ts\"",
     "lint:eslint": "eslint . --cache --format stylish",
@@ -157,7 +157,7 @@
   "lint-staged": {
     "*.{js,ts,tsx,jsx}": "pnpm fix"
   },
-  "author": "PostHog",
+  "author": "Amplitude",
   "license": "MIT",
   "volta": {
     "node": "20.18.2",

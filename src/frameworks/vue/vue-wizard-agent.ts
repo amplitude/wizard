@@ -1,4 +1,4 @@
-/* Vue wizard using posthog-agent with PostHog MCP */
+/* Vue wizard for Amplitude */
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { detectNodePackageManagers } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
@@ -18,7 +18,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
   metadata: {
     name: 'Vue',
     integration: Integration.vue,
-    docsUrl: 'https://posthog.com/docs/libraries/vue',
+    docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     beta: true,
   },
 
@@ -41,9 +41,8 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
 
   environment: {
     uploadToHosting: true,
-    getEnvVars: (apiKey: string, host: string) => ({
-      VITE_POSTHOG_KEY: apiKey,
-      VITE_POSTHOG_HOST: host,
+    getEnvVars: (apiKey: string, _host: string) => ({
+      VITE_AMPLITUDE_API_KEY: apiKey,
     }),
   },
 
@@ -57,22 +56,22 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     getAdditionalContextLines: () => {
       const frameworkId = 'vue';
       return [
-        `Framework docs ID: ${frameworkId} (use posthog://docs/frameworks/${frameworkId} for documentation)`,
+        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
       ];
     },
   },
 
   ui: {
-    successMessage: 'PostHog integration complete',
+    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: () => [
       'Analyzed your Vue project structure',
-      'Created and configured PostHog initializers',
-      'Integrated PostHog into your application',
+      'Created and configured Amplitude initializers',
+      'Integrated Amplitude into your application',
     ],
     getOutroNextSteps: () => [
-      'Start your development server to see PostHog in action',
-      'Visit your PostHog dashboard to see incoming events',
+      'Start your development server to see Amplitude in action',
+      'Visit your Amplitude dashboard to see incoming events',
     ],
   },
 };

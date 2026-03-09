@@ -1,4 +1,4 @@
-/* FastAPI wizard using posthog-agent with PostHog MCP */
+/* FastAPI wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { PYTHON_PACKAGE_INSTALLATION } from '../../lib/framework-config';
@@ -24,8 +24,8 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
   metadata: {
     name: 'FastAPI',
     integration: Integration.fastapi,
-    docsUrl: 'https://posthog.com/docs/libraries/python',
-    unsupportedVersionDocsUrl: 'https://posthog.com/docs/libraries/python',
+    docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
+    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const projectType = await getFastAPIProjectType(options);
       const appFile = await findFastAPIAppFile(options);
@@ -123,9 +123,8 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, host: string) => ({
-      POSTHOG_API_KEY: apiKey,
-      POSTHOG_HOST: host,
+    getEnvVars: (apiKey: string, _host: string) => ({
+      AMPLITUDE_API_KEY: apiKey,
     }),
   },
 
@@ -159,7 +158,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
 
       const lines = [
         `Project type: ${projectTypeName}`,
-        `Framework docs ID: ${frameworkId} (use posthog://docs/frameworks/${frameworkId} for documentation)`,
+        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
       ];
 
       if (context.appFile) {
@@ -171,7 +170,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
   },
 
   ui: {
-    successMessage: 'PostHog integration complete',
+    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context: any) => {
       const projectType = context.projectType as FastAPIProjectType;
@@ -180,15 +179,15 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
         : 'FastAPI';
       return [
         `Analyzed your ${projectTypeName} project structure`,
-        `Installed the PostHog Python package`,
-        `Configured PostHog in your FastAPI application`,
-        `Added PostHog initialization with lifespan event handling`,
+        `Installed the Amplitude Python package`,
+        `Configured Amplitude in your FastAPI application`,
+        `Added Amplitude initialization with lifespan event handling`,
       ];
     },
     getOutroNextSteps: () => [
-      'Start your FastAPI development server to see PostHog in action',
-      'Visit your PostHog dashboard to see incoming events',
-      'Use posthog.identify() to associate events with users',
+      'Start your FastAPI development server to see Amplitude in action',
+      'Visit your Amplitude dashboard to see incoming events',
+      'Use amplitude.identify() to associate events with users',
     ],
   },
 };

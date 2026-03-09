@@ -1,4 +1,4 @@
-/* Generic Node.js language wizard using posthog-agent with PostHog MCP */
+/* Generic Node.js language wizard using Amplitude */
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
 import { tryGetPackageJson } from '../../utils/setup-utils';
@@ -12,11 +12,11 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
       name: 'Node.js',
       integration: Integration.javascriptNode,
       beta: true,
-      docsUrl: 'https://posthog.com/docs/libraries/node',
+      docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     },
 
     detection: {
-      packageName: 'posthog-node',
+      packageName: '@amplitude/analytics-node',
       packageDisplayName: 'Node.js',
       usesPackageJson: false,
       getVersion: () => undefined,
@@ -29,9 +29,8 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
 
     environment: {
       uploadToHosting: false,
-      getEnvVars: (apiKey: string, host: string) => ({
-        POSTHOG_API_KEY: apiKey,
-        POSTHOG_HOST: host,
+      getEnvVars: (apiKey: string, _host: string) => ({
+        AMPLITUDE_API_KEY: apiKey,
       }),
     },
 
@@ -43,28 +42,26 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
       projectTypeDetection:
         'This is a server-side Node.js project. Look for package.json and lockfiles to confirm.',
       packageInstallation:
-        'Use npm, yarn, pnpm, or bun based on the existing lockfile (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb). Install posthog-node as a regular dependency.',
+        'Use npm, yarn, pnpm, or bun based on the existing lockfile (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb). Install @amplitude/analytics-node as a regular dependency.',
       getAdditionalContextLines: () => [
-        `Framework docs ID: javascript_node (use posthog://docs/frameworks/javascript_node for documentation)`,
+        `Framework docs ID: javascript_node (use amplitude://docs/frameworks/javascript_node for documentation)`,
       ],
     },
 
     ui: {
-      successMessage: 'PostHog integration complete',
+      successMessage: 'Amplitude integration complete',
       estimatedDurationMinutes: 5,
       getOutroChanges: () => [
         `Analyzed your Node.js project structure`,
-        `Installed the posthog-node package`,
-        `Created PostHog initialization with proper configuration`,
-        `Configured graceful shutdown for event flushing`,
-        `Added example code for events, feature flags, and error capture`,
+        `Installed the @amplitude/analytics-node package`,
+        `Created Amplitude initialization with proper configuration`,
+        `Added example code for events and user identification`,
       ],
       getOutroNextSteps: () => [
-        'Use the PostHog client instance for all tracking calls',
-        'Call posthog.shutdown() on application exit to flush pending events',
+        'Use the Amplitude client instance for all tracking calls',
         'NEVER send PII in event properties (no emails, names, or user content)',
-        'Use posthog.capture() for events and posthog.identify() for users',
-        'Visit your PostHog dashboard to see incoming events',
+        'Use amplitude.track() for events and amplitude.identify() for users',
+        'Visit your Amplitude dashboard to see incoming events',
       ],
     },
   };

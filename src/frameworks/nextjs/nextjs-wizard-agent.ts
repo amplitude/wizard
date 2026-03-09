@@ -1,4 +1,4 @@
-/* Simplified Next.js wizard using posthog-agent with PostHog MCP */
+/* Next.js wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { detectNodePackageManagers } from '../../lib/package-manager-detection';
@@ -25,8 +25,8 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
   metadata: {
     name: 'Next.js',
     integration: Integration.nextjs,
-    docsUrl: 'https://posthog.com/docs/libraries/next-js',
-    unsupportedVersionDocsUrl: 'https://posthog.com/docs/libraries/next-js',
+    docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
+    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: async (options: WizardOptions) => {
       const router = await getNextJsRouter(options);
       if (router) {
@@ -77,9 +77,8 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
 
   environment: {
     uploadToHosting: true,
-    getEnvVars: (apiKey: string, host: string) => ({
-      NEXT_PUBLIC_POSTHOG_KEY: apiKey,
-      NEXT_PUBLIC_POSTHOG_HOST: host,
+    getEnvVars: (apiKey: string, _host: string) => ({
+      NEXT_PUBLIC_AMPLITUDE_API_KEY: apiKey,
     }),
   },
 
@@ -100,21 +99,21 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
   },
 
   ui: {
-    successMessage: 'PostHog integration complete',
+    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const router = context.router ?? NextJsRouter.APP_ROUTER;
       const routerName = getNextJsRouterName(router);
       return [
         `Analyzed your Next.js project structure (${routerName})`,
-        `Created and configured PostHog initializers`,
-        `Integrated PostHog into your application`,
+        `Created and configured Amplitude initializers`,
+        `Integrated Amplitude into your application`,
       ];
     },
     getOutroNextSteps: () => {
       return [
-        'Start your development server to see PostHog in action',
-        'Visit your PostHog dashboard to see incoming events',
+        'Start your development server to see Amplitude in action',
+        'Visit your Amplitude dashboard to see incoming events',
       ];
     },
   },

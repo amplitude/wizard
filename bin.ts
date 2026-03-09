@@ -29,7 +29,7 @@ const NODE_VERSION_RANGE = '>=18.17.0';
 // has the problematic imports.
 if (!satisfies(process.version, NODE_VERSION_RANGE)) {
   red(
-    `PostHog wizard requires Node.js ${NODE_VERSION_RANGE}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
+    `Amplitude wizard requires Node.js ${NODE_VERSION_RANGE}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
   );
   process.exit(1);
 }
@@ -70,7 +70,7 @@ yargs(hideBin(process.argv))
     signup: {
       default: false,
       describe:
-        'Create a new PostHog account during setup\nenv: POSTHOG_WIZARD_SIGNUP',
+        'Create a new Amplitude account during setup\nenv: POSTHOG_WIZARD_SIGNUP',
       type: 'boolean',
     },
     'local-mcp': {
@@ -87,18 +87,18 @@ yargs(hideBin(process.argv))
     },
     'api-key': {
       describe:
-        'PostHog personal API key (phx_xxx) for authentication\nenv: POSTHOG_WIZARD_API_KEY',
+        'Amplitude API key for authentication\nenv: POSTHOG_WIZARD_API_KEY',
       type: 'string',
     },
     'project-id': {
       describe:
-        'PostHog project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: POSTHOG_WIZARD_PROJECT_ID',
+        'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: POSTHOG_WIZARD_PROJECT_ID',
       type: 'string',
     },
   })
   .command(
     ['$0'],
-    'Run the PostHog setup wizard',
+    'Run the Amplitude setup wizard',
     (yargs) => {
       return yargs.options({
         'force-install': {
@@ -109,7 +109,7 @@ yargs(hideBin(process.argv))
         },
         'install-dir': {
           describe:
-            'Directory to install PostHog in\nenv: POSTHOG_WIZARD_INSTALL_DIR',
+            'Directory to install Amplitude in\nenv: POSTHOG_WIZARD_INSTALL_DIR',
           type: 'string',
         },
         playground: {
@@ -121,12 +121,14 @@ yargs(hideBin(process.argv))
           describe: 'Integration to set up',
           choices: [
             'nextjs',
-            'astro',
-            'react',
-            'svelte',
-            'react-native',
-            'tanstack-router',
-            'tanstack-start',
+            'vue',
+            'react-router',
+            'django',
+            'flask',
+            'fastapi',
+            'javascript_web',
+            'javascript_node',
+            'python',
           ],
           type: 'string',
         },
@@ -152,16 +154,16 @@ yargs(hideBin(process.argv))
         // Use LoggingUI for CI mode (no dependencies, no prompts)
         setUI(new LoggingUI());
         if (!options.apiKey) {
-          getUI().intro(chalk.inverse(`PostHog Wizard`));
+          getUI().intro(chalk.inverse(`Amplitude Wizard`));
           getUI().log.error(
             'CI mode requires --api-key (personal API key phx_xxx)',
           );
           process.exit(1);
         }
         if (!options.installDir) {
-          getUI().intro(chalk.inverse(`PostHog Wizard`));
+          getUI().intro(chalk.inverse(`Amplitude Wizard`));
           getUI().log.error(
-            'CI mode requires --install-dir (directory to install PostHog in)',
+            'CI mode requires --install-dir (directory to install Amplitude in)',
           );
           process.exit(1);
         }
@@ -169,13 +171,13 @@ yargs(hideBin(process.argv))
         void runWizard(options as Parameters<typeof runWizard>[0]);
       } else if (isNonInteractiveEnvironment()) {
         // Non-interactive non-CI: error out
-        getUI().intro(chalk.inverse(`PostHog Wizard`));
+        getUI().intro(chalk.inverse(`Amplitude Wizard`));
         getUI().log.error(
           'This installer requires an interactive terminal (TTY) to run.\n' +
             'It appears you are running in a non-interactive environment.\n' +
             'Please run the wizard in an interactive terminal.\n\n' +
             'For CI/CD environments, use --ci mode:\n' +
-            '  npx @posthog/wizard --ci --api-key phx_xxx --install-dir .',
+            '  npx @amplitude/wizard --ci --api-key <your-key> --install-dir .',
         );
         process.exit(1);
       } else if (options.playground) {
@@ -344,7 +346,7 @@ yargs(hideBin(process.argv))
     return yargs
       .command(
         'add',
-        'Install PostHog MCP server to supported clients',
+        'Install Amplitude MCP server to supported clients',
         (yargs) => {
           return yargs.options({
             local: {
@@ -386,7 +388,7 @@ yargs(hideBin(process.argv))
       )
       .command(
         'remove',
-        'Remove PostHog MCP server from supported clients',
+        'Remove Amplitude MCP server from supported clients',
         (yargs) => {
           return yargs.options({
             local: {

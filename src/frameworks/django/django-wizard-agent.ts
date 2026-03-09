@@ -1,4 +1,4 @@
-/* Django wizard using posthog-agent with PostHog MCP */
+/* Django wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { PYTHON_PACKAGE_INSTALLATION } from '../../lib/framework-config';
@@ -26,8 +26,8 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     name: 'Django',
     integration: Integration.django,
     beta: true,
-    docsUrl: 'https://posthog.com/docs/libraries/django',
-    unsupportedVersionDocsUrl: 'https://posthog.com/docs/libraries/python',
+    docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
+    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const projectType = await getDjangoProjectType(options);
       const settingsFile = await findDjangoSettingsFile(options);
@@ -107,9 +107,8 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, host: string) => ({
-      POSTHOG_API_KEY: apiKey,
-      POSTHOG_HOST: host,
+    getEnvVars: (apiKey: string, _host: string) => ({
+      AMPLITUDE_API_KEY: apiKey,
     }),
   },
 
@@ -142,7 +141,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
 
       const lines = [
         `Project type: ${projectTypeName}`,
-        `Framework docs ID: ${frameworkId} (use posthog://docs/frameworks/${frameworkId} for documentation)`,
+        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
       ];
 
       if (context.settingsFile) {
@@ -154,7 +153,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
   },
 
   ui: {
-    successMessage: 'PostHog integration complete',
+    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const projectTypeName = context.projectType
@@ -162,15 +161,15 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
         : 'Django';
       return [
         `Analyzed your ${projectTypeName} project structure`,
-        `Installed the PostHog Python package`,
-        `Configured PostHog in your Django settings`,
-        `Added PostHog middleware for automatic event tracking`,
+        `Installed the Amplitude Python package`,
+        `Configured Amplitude in your Django settings`,
+        `Added Amplitude middleware for event tracking`,
       ];
     },
     getOutroNextSteps: () => [
-      'Start your Django development server to see PostHog in action',
-      'Visit your PostHog dashboard to see incoming events',
-      'Use identify_context() within new_context() to associate events with users',
+      'Start your Django development server to see Amplitude in action',
+      'Visit your Amplitude dashboard to see incoming events',
+      'Use amplitude.track() to capture events and amplitude.identify() for users',
     ],
   },
 };

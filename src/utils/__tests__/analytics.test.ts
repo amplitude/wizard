@@ -1,204 +1,75 @@
+// TODO: Update analytics tests when Amplitude analytics is implemented.
+// The PostHog-based analytics has been replaced with a stub.
 import { Analytics } from '../analytics';
-import { PostHog } from 'posthog-node';
 import { v4 as uuidv4 } from 'uuid';
-import { ANALYTICS_TEAM_TAG } from '../../lib/constants';
 
-jest.mock('posthog-node');
 jest.mock('uuid');
 
 const mockUuidv4 = uuidv4 as jest.MockedFunction<typeof uuidv4>;
-const MockedPostHog = PostHog as jest.MockedClass<typeof PostHog>;
 
 describe('Analytics', () => {
   let analytics: Analytics;
-  let mockPostHogInstance: jest.Mocked<PostHog>;
 
   beforeEach(() => {
     jest.clearAllMocks();
     mockUuidv4.mockReturnValue('test-uuid' as any);
-
-    mockPostHogInstance = {
-      capture: jest.fn(),
-      captureException: jest.fn(),
-      alias: jest.fn(),
-      shutdown: jest.fn().mockResolvedValue(undefined),
-    } as any;
-
-    MockedPostHog.mockImplementation(() => mockPostHogInstance);
-
     analytics = new Analytics();
   });
 
   describe('captureException', () => {
-    it('should capture exception with error object and properties', () => {
+    it('should not throw when capturing exception', () => {
+      const error = new Error('Test error');
+      expect(() => analytics.captureException(error)).not.toThrow();
+    });
+
+    it('should not throw when capturing exception with properties', () => {
       const error = new Error('Test error');
       const properties = { integration: 'nextjs' };
-
-      analytics.captureException(error, properties);
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        'test-uuid',
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-          ...properties,
-        },
-      );
-    });
-
-    it('should capture exception with tags included in properties', () => {
-      const error = new Error('Test error');
-      const properties = { integration: 'nextjs' };
-
-      analytics.setTag('testTag', 'testValue');
-      analytics.captureException(error, properties);
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        'test-uuid',
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-          testTag: 'testValue',
-          ...properties,
-        },
-      );
-    });
-
-    it('should capture exception with distinct ID when set', () => {
-      const error = new Error('Test error');
-      const distinctId = 'user-123';
-
-      analytics.setDistinctId(distinctId);
-      analytics.captureException(error);
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        distinctId,
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-        },
-      );
-    });
-
-    it('should capture exception without properties when not provided', () => {
-      const error = new Error('Test error');
-
-      analytics.captureException(error);
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        'test-uuid',
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-        },
-      );
-    });
-
-    it('should merge tags with provided properties', () => {
-      const error = new Error('Test error');
-      const properties = { integration: 'nextjs', step: 'installation' };
-
-      analytics.setTag('environment', 'test');
-      analytics.setTag('version', '1.0.0');
-      analytics.captureException(error, properties);
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        'test-uuid',
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-          environment: 'test',
-          version: '1.0.0',
-          integration: 'nextjs',
-          step: 'installation',
-        },
-      );
-    });
-
-    it('should override tags with properties when keys conflict', () => {
-      const error = new Error('Test error');
-      const properties = { integration: 'react' };
-
-      analytics.setTag('integration', 'nextjs');
-      analytics.captureException(error, properties);
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        'test-uuid',
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-          integration: 'react',
-        },
-      );
-    });
-
-    it('should always include team property in exceptions', () => {
-      const error = new Error('Test error');
-
-      analytics.captureException(error);
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        'test-uuid',
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-        },
-      );
+      expect(() => analytics.captureException(error, properties)).not.toThrow();
     });
   });
 
-  describe('integration with other methods', () => {
-    it('should work correctly with setTag and captureException', () => {
-      const error = new Error('Test error');
-
-      analytics.setTag('integration', 'nextjs');
-      analytics.setTag('forceInstall', true);
-      analytics.setTag('debug', false);
-
-      analytics.captureException(error, {
-        arguments: JSON.stringify({ installDir: '/test' }),
-        step: 'wizard-execution',
-      });
-
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        'test-uuid',
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-          integration: 'nextjs',
-          forceInstall: true,
-          debug: false,
-          arguments: JSON.stringify({ installDir: '/test' }),
-          step: 'wizard-execution',
-        },
-      );
+  describe('capture', () => {
+    it('should not throw when capturing events', () => {
+      expect(() => analytics.capture('test event', { foo: 'bar' })).not.toThrow();
     });
+  });
 
-    it('should work correctly with setDistinctId and captureException', () => {
-      const error = new Error('Test error');
-      const distinctId = 'user-456';
+  describe('setDistinctId', () => {
+    it('should not throw when setting distinct id', () => {
+      expect(() => analytics.setDistinctId('user-123')).not.toThrow();
+    });
+  });
 
-      analytics.setDistinctId(distinctId);
-      analytics.setTag('integration', 'svelte');
-      analytics.captureException(error);
+  describe('setTag', () => {
+    it('should not throw when setting tags', () => {
+      expect(() => analytics.setTag('integration', 'nextjs')).not.toThrow();
+    });
+  });
 
-      expect(mockPostHogInstance.captureException).toHaveBeenCalledWith(
-        error,
-        distinctId,
-        {
-          team: ANALYTICS_TEAM_TAG,
-          $app_name: 'wizard',
-          integration: 'svelte',
-        },
-      );
+  describe('getFeatureFlag', () => {
+    it('should return undefined (stub)', async () => {
+      const result = await analytics.getFeatureFlag('some-flag');
+      expect(result).toBeUndefined();
+    });
+  });
+
+  describe('getAllFlagsForWizard', () => {
+    it('should return empty object (stub)', async () => {
+      const result = await analytics.getAllFlagsForWizard();
+      expect(result).toEqual({});
+    });
+  });
+
+  describe('shutdown', () => {
+    it('should not throw on shutdown', async () => {
+      await expect(analytics.shutdown('success')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('wizardCapture', () => {
+    it('should not throw when capturing wizard events', () => {
+      expect(() => analytics.wizardCapture('test event')).not.toThrow();
     });
   });
 });

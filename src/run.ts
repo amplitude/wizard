@@ -65,7 +65,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
 
   session.installDir = resolvedInstallDir;
 
-  getUI().intro(`Welcome to the PostHog setup wizard`);
+  getUI().intro(`Welcome to the Amplitude setup wizard`);
 
   if (session.ci) {
     getUI().log.info(chalk.dim('Running in CI mode'));
@@ -122,7 +122,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
     const debugInfo = session.debug && errorStack ? `\n\n${errorStack}` : '';
 
     await wizardAbort({
-      message: `Something went wrong: ${errorMessage}\n\nYou can read the documentation at ${config.metadata.docsUrl} to set up PostHog manually.${debugInfo}`,
+      message: `Something went wrong: ${errorMessage}\n\nYou can read the documentation at ${config.metadata.docsUrl} to set up Amplitude manually.${debugInfo}`,
       error: error as Error,
     });
   }

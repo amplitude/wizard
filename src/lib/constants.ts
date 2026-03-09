@@ -1,5 +1,5 @@
 /**
- * Shared constants for the PostHog wizard.
+ * Shared constants for the Amplitude wizard.
  */
 
 import { VERSION } from './version';
@@ -12,27 +12,15 @@ import { VERSION } from './version';
 export enum Integration {
   // Frameworks
   nextjs = 'nextjs',
-  nuxt = 'nuxt',
   vue = 'vue',
   reactRouter = 'react-router',
-  tanstackStart = 'tanstack-start',
-  tanstackRouter = 'tanstack-router',
-  reactNative = 'react-native',
-  angular = 'angular',
-  astro = 'astro',
   django = 'django',
   flask = 'flask',
   fastapi = 'fastapi',
-  laravel = 'laravel',
-  sveltekit = 'sveltekit',
-  swift = 'swift',
-  android = 'android',
-  rails = 'rails',
 
   // Language fallbacks
   javascript_web = 'javascript_web',
   python = 'python',
-  ruby = 'ruby',
   javascriptNode = 'javascript_node',
 }
 
@@ -52,29 +40,31 @@ export const DEBUG = false;
 
 export const DEFAULT_URL = IS_DEV
   ? 'http://localhost:8010'
-  : 'https://us.posthog.com';
+  : 'https://amplitude.com';
 export const DEFAULT_HOST_URL = IS_DEV
   ? 'http://localhost:8010'
-  : 'https://us.i.posthog.com';
-export const ISSUES_URL = 'https://github.com/posthog/wizard/issues';
+  : 'https://api2.amplitude.com';
+export const ISSUES_URL = 'https://github.com/amplitude/wizard/issues';
 
 // ── Analytics (internal) ──────────────────────────────────────────────
 
-export const ANALYTICS_POSTHOG_PUBLIC_PROJECT_WRITE_KEY = 'sTMFPsFhdP1Ssg';
-export const ANALYTICS_HOST_URL = 'https://internal-j.posthog.com';
-export const ANALYTICS_TEAM_TAG = 'docs-and-wizard';
+// TODO: Replace with Amplitude analytics keys
+export const ANALYTICS_POSTHOG_PUBLIC_PROJECT_WRITE_KEY = '';
+export const ANALYTICS_HOST_URL = '';
+export const ANALYTICS_TEAM_TAG = 'amplitude-wizard';
 
 // ── OAuth / Auth ────────────────────────────────────────────────────
 
+// TODO: Replace with Amplitude OAuth endpoints
 export const POSTHOG_OAUTH_URL = IS_DEV
   ? 'http://localhost:8010'
-  : 'https://oauth.posthog.com';
+  : 'https://amplitude.com';
 export const OAUTH_PORT = 8239;
-export const POSTHOG_US_CLIENT_ID = 'c4Rdw8DIxgtQfA80IiSnGKlNX8QN00cFWF00QQhM';
-export const POSTHOG_EU_CLIENT_ID = 'bx2C5sZRN03TkdjraCcetvQFPGH6N2Y9vRLkcKEy';
-export const POSTHOG_DEV_CLIENT_ID = 'DC5uRLVbGI02YQ82grxgnK6Qn12SXWpCqdPb60oZ';
+export const POSTHOG_US_CLIENT_ID = '';
+export const POSTHOG_EU_CLIENT_ID = '';
+export const POSTHOG_DEV_CLIENT_ID = '';
 export const POSTHOG_PROXY_CLIENT_ID = POSTHOG_US_CLIENT_ID;
-export const DUMMY_PROJECT_API_KEY = '_YOUR_POSTHOG_PROJECT_API_KEY_';
+export const DUMMY_PROJECT_API_KEY = '_YOUR_AMPLITUDE_API_KEY_';
 
 // ── Wizard run / variants ───────────────────────────────────────────
 
@@ -87,14 +77,14 @@ export const WIZARD_VARIANTS: Record<string, Record<string, string>> = {
   subagents: { VARIANT: 'subagents' },
 };
 /** User-Agent for wizard HTTP requests and MCP server identification. */
-export const WIZARD_USER_AGENT = `posthog/wizard; version: ${VERSION}`;
+export const WIZARD_USER_AGENT = `amplitude/wizard; version: ${VERSION}`;
 
 // ── HTTP headers ─────────────────────────────────────────────────────
 
-/** Header prefix for PostHog properties (e.g. X-POSTHOG-PROPERTY-VARIANT). */
-export const POSTHOG_PROPERTY_HEADER_PREFIX = 'X-POSTHOG-PROPERTY-';
-/** Header prefix for PostHog feature flags. */
-export const POSTHOG_FLAG_HEADER_PREFIX = 'X-POSTHOG-FLAG-';
+/** Header prefix for Amplitude properties. */
+export const POSTHOG_PROPERTY_HEADER_PREFIX = 'X-AMPLITUDE-PROPERTY-';
+/** Header prefix for Amplitude feature flags. */
+export const POSTHOG_FLAG_HEADER_PREFIX = 'X-AMPLITUDE-FLAG-';
 
 // ── Timeouts ─────────────────────────────────────────────────────────
 

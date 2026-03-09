@@ -1,4 +1,4 @@
-/* Generic JavaScript Web (client-side) wizard using posthog-agent with PostHog MCP */
+/* Generic JavaScript Web (client-side) wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
@@ -20,7 +20,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
     name: 'JavaScript (Web)',
     integration: Integration.javascript_web,
     beta: true,
-    docsUrl: 'https://posthog.com/docs/libraries/js',
+    docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: (options: WizardOptions) => {
       const packageManagerName = detectJsPackageManager(options);
       const hasTypeScript = fs.existsSync(
@@ -32,7 +32,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   },
 
   detection: {
-    packageName: 'posthog-js',
+    packageName: '@amplitude/analytics-browser',
     packageDisplayName: 'JavaScript (Web)',
     usesPackageJson: false,
     getVersion: () => undefined,
@@ -81,9 +81,8 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, host: string) => ({
-      POSTHOG_API_KEY: apiKey,
-      POSTHOG_HOST: host,
+    getEnvVars: (apiKey: string, _host: string) => ({
+      AMPLITUDE_API_KEY: apiKey,
     }),
   },
 
@@ -108,7 +107,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
       const lines = [
         `Package manager: ${context.packageManagerName ?? 'unknown'}`,
         `Has TypeScript: ${context.hasTypeScript ? 'yes' : 'no'}`,
-        `Framework docs ID: js (use posthog://docs/frameworks/js for documentation if available)`,
+        `Framework docs ID: js (use amplitude://docs/frameworks/js for documentation if available)`,
         `Project type: Generic JavaScript/TypeScript application (no specific framework detected)`,
       ];
 
@@ -121,24 +120,24 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   },
 
   ui: {
-    successMessage: 'PostHog integration complete',
+    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const packageManagerName =
         context.packageManagerName ?? 'package manager';
       return [
         `Analyzed your JavaScript project structure`,
-        `Installed the posthog-js package using ${packageManagerName}`,
-        `Created PostHog initialization code`,
-        `Configured autocapture, error tracking, and event capture`,
+        `Installed the @amplitude/analytics-browser package using ${packageManagerName}`,
+        `Created Amplitude initialization code`,
+        `Configured autocapture and event tracking`,
       ];
     },
     getOutroNextSteps: () => [
-      'Ensure posthog.init() is called before any capture calls',
+      'Ensure amplitude.init() is called before any track calls',
       'Autocapture tracks clicks, form submissions, and pageviews automatically',
-      'Use posthog.capture() for custom events and posthog.identify() for users',
+      'Use amplitude.track() for custom events and amplitude.setUserId() for users',
       'NEVER send PII in event properties (no emails, names, or user content)',
-      'Visit your PostHog dashboard to see incoming events',
+      'Visit your Amplitude dashboard to see incoming events',
     ],
   },
 };

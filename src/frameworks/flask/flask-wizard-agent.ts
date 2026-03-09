@@ -1,4 +1,4 @@
-/* Flask wizard using posthog-agent with PostHog MCP */
+/* Flask wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { PYTHON_PACKAGE_INSTALLATION } from '../../lib/framework-config';
@@ -26,8 +26,8 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     name: 'Flask',
     integration: Integration.flask,
     beta: true,
-    docsUrl: 'https://posthog.com/docs/libraries/python',
-    unsupportedVersionDocsUrl: 'https://posthog.com/docs/libraries/python',
+    docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
+    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const projectType = await getFlaskProjectType(options);
       const appFile = await findFlaskAppFile(options);
@@ -115,9 +115,8 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, host: string) => ({
-      POSTHOG_API_KEY: apiKey,
-      POSTHOG_HOST: host,
+    getEnvVars: (apiKey: string, _host: string) => ({
+      AMPLITUDE_API_KEY: apiKey,
     }),
   },
 
@@ -151,7 +150,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
 
       const lines = [
         `Project type: ${projectTypeName}`,
-        `Framework docs ID: ${frameworkId} (use posthog://docs/frameworks/${frameworkId} for documentation)`,
+        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
       ];
 
       if (context.appFile) {
@@ -163,7 +162,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   },
 
   ui: {
-    successMessage: 'PostHog integration complete',
+    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const projectTypeName = context.projectType
@@ -171,15 +170,15 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
         : 'Flask';
       return [
         `Analyzed your ${projectTypeName} project structure`,
-        `Installed the PostHog Python package`,
-        `Configured PostHog in your Flask application`,
-        `Added PostHog initialization with automatic event tracking`,
+        `Installed the Amplitude Python package`,
+        `Configured Amplitude in your Flask application`,
+        `Added Amplitude initialization with automatic event tracking`,
       ];
     },
     getOutroNextSteps: () => [
-      'Start your Flask development server to see PostHog in action',
-      'Visit your PostHog dashboard to see incoming events',
-      'Use posthog.identify() to associate events with users',
+      'Start your Flask development server to see Amplitude in action',
+      'Visit your Amplitude dashboard to see incoming events',
+      'Use amplitude.identify() to associate events with users',
     ],
   },
 };
