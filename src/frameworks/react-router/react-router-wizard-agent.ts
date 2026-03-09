@@ -26,7 +26,8 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     name: 'React Router',
     integration: Integration.reactRouter,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
-    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
+    unsupportedVersionDocsUrl:
+      'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: async (options: WizardOptions) => {
       const routerMode = await getReactRouterMode(options);
       if (routerMode) {

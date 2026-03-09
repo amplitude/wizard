@@ -26,7 +26,8 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
     name: 'Next.js',
     integration: Integration.nextjs,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
-    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
+    unsupportedVersionDocsUrl:
+      'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: async (options: WizardOptions) => {
       const router = await getNextJsRouter(options);
       if (router) {

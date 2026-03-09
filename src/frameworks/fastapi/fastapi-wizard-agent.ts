@@ -25,7 +25,8 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
     name: 'FastAPI',
     integration: Integration.fastapi,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
-    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
+    unsupportedVersionDocsUrl:
+      'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const projectType = await getFastAPIProjectType(options);
       const appFile = await findFastAPIAppFile(options);

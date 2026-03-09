@@ -27,7 +27,8 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     integration: Integration.flask,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
-    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
+    unsupportedVersionDocsUrl:
+      'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const projectType = await getFlaskProjectType(options);
       const appFile = await findFlaskAppFile(options);

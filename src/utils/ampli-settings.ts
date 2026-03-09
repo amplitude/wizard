@@ -1,0 +1,130 @@
+/**
+ * Reads and writes OAuth tokens from/to ~/.ampli.json, the same file used by
+ * the ampli CLI. This lets users who are already logged in via `ampli login`
+ * skip re-authenticating in the wizard.
+ *
+ * The ampli CLI stores tokens using the `conf` package (v6) with
+ * accessPropertiesByDotNotation:true, which nests keys by dot segments:
+ *   "User-{userId}.OAuthAccessToken" → { "User-{userId}": { "OAuthAccessToken": "..." } }
+ */
+
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  type AmplitudeZone,
+  DEFAULT_AMPLITUDE_ZONE,
+} from '../lib/constants.js';
+
+const AMPLI_CONFIG_PATH = path.join(os.homedir(), 'ampli.json');
+
+export interface StoredOAuthToken {
+  accessToken: string;
+  idToken: string;
+  refreshToken: string;
+  expiresAt: string; // ISO date string
+}
+
+export interface StoredUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  zone: AmplitudeZone;
+}
+
+function readConfig(): Record<string, unknown> {
+  try {
+    const raw = fs.readFileSync(AMPLI_CONFIG_PATH, 'utf-8');
+    return JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+function writeConfig(data: Record<string, unknown>): void {
+  fs.writeFileSync(AMPLI_CONFIG_PATH, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+function userKey(userId: string, zone: AmplitudeZone): string {
+  const safeId = userId.replace(/\./g, '-');
+  return zone !== DEFAULT_AMPLITUDE_ZONE
+    ? `User[${zone}]-${safeId}`
+    : `User-${safeId}`;
+}
+
+/** Returns the first stored user, or undefined if none. */
+export function getStoredUser(): StoredUser | undefined {
+  const config = readConfig();
+  for (const [key, value] of Object.entries(config)) {
+    if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
+    const entry = value as Record<string, unknown>;
+    if (entry.User) return entry.User as StoredUser;
+  }
+  return undefined;
+}
+
+/** Returns a valid (non-expired) stored token, or undefined. */
+export function getStoredToken(
+  userId?: string,
+  zone: AmplitudeZone = DEFAULT_AMPLITUDE_ZONE,
+): StoredOAuthToken | undefined {
+  const config = readConfig();
+
+  const findToken = (key: string): StoredOAuthToken | undefined => {
+    const entry = config[key] as Record<string, string> | undefined;
+    if (!entry) return undefined;
+    const {
+      OAuthAccessToken,
+      OAuthIdToken,
+      OAuthRefreshToken,
+      OAuthExpiresAt,
+    } = entry;
+    if (
+      !OAuthAccessToken ||
+      !OAuthIdToken ||
+      !OAuthRefreshToken ||
+      !OAuthExpiresAt
+    )
+      return undefined;
+    // Check if refresh token is still valid (refresh TTL = 365 days from access expiry)
+    const expiresAt = new Date(OAuthExpiresAt);
+    const refreshExpiry = new Date(
+      expiresAt.getTime() + 364 * 24 * 60 * 60 * 1000,
+    );
+    if (new Date() > refreshExpiry) return undefined;
+    return {
+      accessToken: OAuthAccessToken,
+      idToken: OAuthIdToken,
+      refreshToken: OAuthRefreshToken,
+      expiresAt: OAuthExpiresAt,
+    };
+  };
+
+  if (userId) {
+    return findToken(userKey(userId, zone));
+  }
+
+  // Try all stored users
+  for (const key of Object.keys(config)) {
+    if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
+    const token = findToken(key);
+    if (token) return token;
+  }
+  return undefined;
+}
+
+/** Persists an OAuth token to ~/.ampli.json in the same format as the ampli CLI. */
+export function storeToken(user: StoredUser, token: StoredOAuthToken): void {
+  const config = readConfig();
+  const key = userKey(user.id, user.zone);
+  config[key] = {
+    ...((config[key] as object | undefined) ?? {}),
+    User: user,
+    OAuthAccessToken: token.accessToken,
+    OAuthIdToken: token.idToken,
+    OAuthRefreshToken: token.refreshToken,
+    OAuthExpiresAt: token.expiresAt,
+  };
+  writeConfig(config);
+}

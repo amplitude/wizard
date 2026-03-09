@@ -61,6 +61,7 @@ export class Analytics {
     this.capture(`wizard: ${eventName}`, properties);
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getFeatureFlag(flagKey: string): Promise<string | boolean | undefined> {
     // TODO: Replace with Amplitude feature flag evaluation
     debug('getFeatureFlag (noop):', flagKey);
@@ -72,6 +73,7 @@ export class Analytics {
    * Result is cached; subsequent calls in the same run return the same map.
    * Returns flag key -> string value (booleans become 'true'/'false').
    */
+  // eslint-disable-next-line @typescript-eslint/require-await
   async getAllFlagsForWizard(): Promise<Record<string, string>> {
     // TODO: Replace with Amplitude feature flags
     if (this.activeFlags !== null) {
@@ -81,6 +83,7 @@ export class Analytics {
     return this.activeFlags;
   }
 
+  // eslint-disable-next-line @typescript-eslint/require-await
   async shutdown(status: 'success' | 'error' | 'cancelled') {
     // TODO: Replace with Amplitude shutdown/flush
     debug('shutdown (noop):', status);

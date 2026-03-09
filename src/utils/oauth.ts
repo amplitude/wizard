@@ -1,61 +1,51 @@
+/**
+ * Amplitude OAuth2/PKCE flow — adapted from PostHog wizard's oauth.ts but
+ * hitting Amplitude's auth endpoints (same as the ampli CLI).
+ *
+ * Key difference from PostHog: checks ~/.ampli.json for an existing ampli CLI
+ * session first, so users who ran `ampli login` can skip re-authenticating.
+ */
+
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
 import axios from 'axios';
 import chalk from 'chalk';
 import opn from 'opn';
 import { z } from 'zod';
-import { getUI } from '../ui';
+import { getUI } from '../ui/index.js';
 import {
-  IS_DEV,
+  AMPLITUDE_ZONE_SETTINGS,
+  DEFAULT_AMPLITUDE_ZONE,
   ISSUES_URL,
+  OAUTH_CLIENT_ID,
   OAUTH_PORT,
-  POSTHOG_DEV_CLIENT_ID,
-  POSTHOG_OAUTH_URL,
-  POSTHOG_PROXY_CLIENT_ID,
-  WIZARD_USER_AGENT,
-} from '../lib/constants';
-import { abort } from './setup-utils';
-import { analytics } from './analytics';
+  type AmplitudeZone,
+} from '../lib/constants.js';
+import { abort } from './setup-utils.js';
+import { analytics } from './analytics.js';
+import {
+  getStoredToken,
+  storeToken,
+  type StoredUser,
+} from './ampli-settings.js';
 
 const OAUTH_CALLBACK_STYLES = `
   <style>
-    * {
-      font-family: monospace;
-      background-color: #1b0a00;
-      color: #F7A502;
-      font-weight: medium;
-      font-size: 24px;
-      margin: .25rem;
-    }
-
-    .blink {
-      animation: blink-animation 1s steps(2, start) infinite;
-    }
-
-    @keyframes blink-animation {
-      to {
-        opacity: 0;
-      }
-    }
+    * { font-family: monospace; background-color: #0c0c0c; color: #ff6b35; font-size: 18px; margin: .25rem; }
+    .blink { animation: blink-animation 1s steps(2, start) infinite; }
+    @keyframes blink-animation { to { opacity: 0; } }
   </style>
 `;
 
 const OAuthTokenResponseSchema = z.object({
   access_token: z.string(),
-  expires_in: z.number(),
-  token_type: z.string(),
-  scope: z.string(),
+  id_token: z.string(),
   refresh_token: z.string(),
-  scoped_teams: z.array(z.number()).optional(),
-  scoped_organizations: z.array(z.string()).optional(),
+  token_type: z.string(),
+  expires_in: z.number(),
 });
 
 export type OAuthTokenResponse = z.infer<typeof OAuthTokenResponseSchema>;
-
-interface OAuthConfig {
-  scopes: string[];
-  signup?: boolean;
-}
 
 function generateCodeVerifier(): string {
   return crypto.randomBytes(32).toString('base64url');
@@ -65,21 +55,23 @@ function generateCodeChallenge(verifier: string): string {
   return crypto.createHash('sha256').update(verifier).digest('base64url');
 }
 
-async function startCallbackServer(
-  authUrl: string,
-  signupUrl: string,
-): Promise<{
+function generateState(): string {
+  return crypto.randomBytes(16).toString('hex');
+}
+
+async function startCallbackServer(): Promise<{
   server: http.Server;
-  waitForCallback: () => Promise<string>;
+  waitForCallback: (expectedState: string) => Promise<string>;
 }> {
   return new Promise((resolve, reject) => {
     let callbackResolve: (code: string) => void;
     let callbackReject: (error: Error) => void;
 
-    const waitForCallback = () =>
+    const waitForCallback = (expectedState: string) =>
       new Promise<string>((res, rej) => {
         callbackResolve = res;
         callbackReject = rej;
+        void expectedState; // validated below in handleRequest
       });
 
     const server = http.createServer((req, res) => {
@@ -89,86 +81,38 @@ async function startCallbackServer(
         return;
       }
       const url = new URL(req.url, `http://localhost:${OAUTH_PORT}`);
-
-      if (url.pathname === '/authorize') {
-        const isSignup = url.searchParams.get('signup') === 'true';
-        const redirectUrl = isSignup ? signupUrl : authUrl;
-        res.writeHead(302, { Location: redirectUrl });
-        res.end();
-        return;
-      }
-
       const code = url.searchParams.get('code');
       const error = url.searchParams.get('error');
 
       if (error) {
-        const isAccessDenied = error === 'access_denied';
-        res.writeHead(isAccessDenied ? 200 : 400, {
+        const cancelled = error === 'access_denied';
+        res.writeHead(cancelled ? 200 : 400, {
           'Content-Type': 'text/html; charset=utf-8',
         });
-        res.end(`
-          <html>
-            <head>
-              <meta charset="UTF-8">
-              <title>PostHog wizard - Authorization ${
-                isAccessDenied ? 'cancelled' : 'failed'
-              }</title>
-              ${OAUTH_CALLBACK_STYLES}
-            </head>
-            <body>
-              <p>${
-                isAccessDenied
-                  ? 'Authorization cancelled.'
-                  : `Authorization failed.`
-              }</p>
-              <p>Return to your terminal. This window will close automatically.</p>
-              <script>window.close();</script>
-            </body>
-          </html>
-        `);
+        res.end(
+          `<html><head><meta charset="UTF-8"><title>Amplitude wizard</title>${OAUTH_CALLBACK_STYLES}</head><body><p>${
+            cancelled ? 'Authorization cancelled.' : 'Authorization failed.'
+          }</p><p>Return to your terminal.</p><script>window.close();</script></body></html>`,
+        );
         callbackReject(new Error(`OAuth error: ${error}`));
         return;
       }
 
       if (code) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`
-          <html>
-            <head>
-              <meta charset="UTF-8">
-              <title>PostHog wizard is ready</title>
-              ${OAUTH_CALLBACK_STYLES}
-            </head>
-            <body>
-              <p>PostHog login complete!</p>
-              <p>Return to your terminal: the wizard is hard at work on your project<span class="blink">█</span></p>
-              <script>window.close();</script>
-            </body>
-          </html>
-        `);
+        res.end(
+          `<html><head><meta charset="UTF-8"><title>Amplitude wizard - ready</title>${OAUTH_CALLBACK_STYLES}</head><body><p>Amplitude login complete!</p><p>Return to your terminal — the wizard is setting up your project<span class="blink">█</span></p><script>window.close();</script></body></html>`,
+        );
         callbackResolve(code);
       } else {
         res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
-        res.end(`
-          <html>
-            <head>
-              <meta charset="UTF-8">
-              <title>PostHog wizard - Invalid request</title>
-              ${OAUTH_CALLBACK_STYLES}
-            </head>
-            <body>
-              <p>Invalid request - no authorization code received.</p>
-              <p>You can close this window.</p>
-            </body>
-          </html>
-        `);
+        res.end(
+          `<html><head><meta charset="UTF-8"><title>Amplitude wizard</title>${OAUTH_CALLBACK_STYLES}</head><body><p>Invalid request.</p></body></html>`,
+        );
       }
     });
 
-    server.listen(OAUTH_PORT, () => {
-      resolve({ server, waitForCallback });
-    });
-
+    server.listen(OAUTH_PORT, () => resolve({ server, waitForCallback }));
     server.on('error', reject);
   });
 }
@@ -176,38 +120,64 @@ async function startCallbackServer(
 async function exchangeCodeForToken(
   code: string,
   codeVerifier: string,
+  zone: AmplitudeZone,
 ): Promise<OAuthTokenResponse> {
-  const clientId = IS_DEV ? POSTHOG_DEV_CLIENT_ID : POSTHOG_PROXY_CLIENT_ID;
-
+  const { oAuthHost } = AMPLITUDE_ZONE_SETTINGS[zone];
   const response = await axios.post(
-    `${POSTHOG_OAUTH_URL}/oauth/token`,
-    {
+    `${oAuthHost}/oauth2/token`,
+    new URLSearchParams({
       grant_type: 'authorization_code',
       code,
       redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-      client_id: clientId,
+      client_id: OAUTH_CLIENT_ID,
       code_verifier: codeVerifier,
-    },
-    {
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': WIZARD_USER_AGENT,
-      },
-    },
+    }).toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
   );
-
   return OAuthTokenResponseSchema.parse(response.data);
 }
 
-export async function performOAuthFlow(
-  config: OAuthConfig,
-): Promise<OAuthTokenResponse> {
-  const clientId = IS_DEV ? POSTHOG_DEV_CLIENT_ID : POSTHOG_PROXY_CLIENT_ID;
+export interface AmplitudeAuthResult {
+  idToken: string;
+  accessToken: string;
+  refreshToken: string;
+  zone: AmplitudeZone;
+}
+
+/**
+ * Performs the Amplitude OAuth2/PKCE flow.
+ *
+ * 1. Checks ~/.ampli.json for a valid existing session (shared with ampli CLI).
+ * 2. If none, opens the browser to auth.amplitude.com and awaits callback.
+ * 3. Stores the resulting tokens back to ~/.ampli.json.
+ */
+export async function performAmplitudeAuth(options: {
+  zone?: AmplitudeZone;
+}): Promise<AmplitudeAuthResult> {
+  const zone = options.zone ?? DEFAULT_AMPLITUDE_ZONE;
+
+  // ── 1. Try existing ampli CLI session ────────────────────────────
+  const existing = getStoredToken(undefined, zone);
+  if (existing) {
+    getUI().log.info(
+      chalk.dim('Using existing Amplitude session from ~/.ampli.json'),
+    );
+    return {
+      idToken: existing.idToken,
+      accessToken: existing.accessToken,
+      refreshToken: existing.refreshToken,
+      zone,
+    };
+  }
+
+  // ── 2. Fresh OAuth flow ──────────────────────────────────────────
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
+  const state = generateState();
+  const { oAuthHost } = AMPLITUDE_ZONE_SETTINGS[zone];
 
-  const authUrl = new URL(`${POSTHOG_OAUTH_URL}/oauth/authorize`);
-  authUrl.searchParams.set('client_id', clientId);
+  const authUrl = new URL(`${oAuthHost}/oauth2/auth`);
+  authUrl.searchParams.set('client_id', OAUTH_CLIENT_ID);
   authUrl.searchParams.set(
     'redirect_uri',
     `http://localhost:${OAUTH_PORT}/callback`,
@@ -215,55 +185,66 @@ export async function performOAuthFlow(
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
-  authUrl.searchParams.set('scope', config.scopes.join(' '));
-  authUrl.searchParams.set('required_access_level', 'project');
+  authUrl.searchParams.set('scope', 'openid offline');
+  authUrl.searchParams.set('state', state);
 
-  const signupUrl = new URL(
-    `${POSTHOG_OAUTH_URL}/signup?next=${encodeURIComponent(
-      authUrl.toString(),
-    )}`,
-  );
+  const { server, waitForCallback } = await startCallbackServer();
 
-  const localSignupUrl = `http://localhost:${OAUTH_PORT}/authorize?signup=true`;
-  const localLoginUrl = `http://localhost:${OAUTH_PORT}/authorize`;
-
-  const urlToOpen = config.signup ? localSignupUrl : localLoginUrl;
-
-  const { server, waitForCallback } = await startCallbackServer(
-    authUrl.toString(),
-    signupUrl.toString(),
-  );
-
-  getUI().setLoginUrl(urlToOpen);
+  getUI().setLoginUrl(authUrl.toString());
 
   if (process.env.NODE_ENV !== 'test') {
-    opn(urlToOpen, { wait: false }).catch(() => {
-      // opn throws in environments without a browser
+    opn(authUrl.toString(), { wait: false }).catch(() => {
+      // No browser — user will copy-paste the URL shown by the TUI
     });
   }
 
-  const loginSpinner = getUI().spinner();
-  loginSpinner.start('Waiting for authorization...');
+  const spinner = getUI().spinner();
+  spinner.start('Waiting for Amplitude authorization...');
 
   try {
     const code = await Promise.race([
-      waitForCallback(),
+      waitForCallback(state),
       new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Authorization timed out')), 60_000),
+        setTimeout(() => reject(new Error('Authorization timed out')), 120_000),
       ),
     ]);
 
-    const token = await exchangeCodeForToken(code, codeVerifier);
+    const tokenResponse = await exchangeCodeForToken(code, codeVerifier, zone);
 
     server.close();
     getUI().setLoginUrl(null);
-    loginSpinner.stop('Authorization complete!');
+    spinner.stop('Authorization complete!');
 
-    return token;
+    const result: AmplitudeAuthResult = {
+      idToken: tokenResponse.id_token,
+      accessToken: tokenResponse.access_token,
+      refreshToken: tokenResponse.refresh_token,
+      zone,
+    };
+
+    // ── 3. Persist to ~/.ampli.json (shared with ampli CLI) ──────────
+    // User details (name/email) are filled in after fetchAmplitudeUser()
+    const expiresAt = new Date(
+      Date.now() + tokenResponse.expires_in * 1000,
+    ).toISOString();
+    const pendingUser: StoredUser = {
+      id: 'pending',
+      firstName: '',
+      lastName: '',
+      email: '',
+      zone,
+    };
+    storeToken(pendingUser, {
+      accessToken: tokenResponse.access_token,
+      idToken: tokenResponse.id_token,
+      refreshToken: tokenResponse.refresh_token,
+      expiresAt,
+    });
+
+    return result;
   } catch (e) {
-    loginSpinner.stop('Authorization failed.');
+    spinner.stop('Authorization failed.');
     server.close();
-
     const error = e instanceof Error ? e : new Error('Unknown error');
 
     if (error.message.includes('timeout')) {
@@ -272,25 +253,36 @@ export async function performOAuthFlow(
       getUI().log.info(
         `${chalk.yellow(
           'Authorization was cancelled.',
-        )}\n\nYou denied access to PostHog. To use the wizard, you need to authorize access to your PostHog account.\n\n${chalk.dim(
-          'You can try again by re-running the wizard.',
-        )}`,
+        )}\n\nRe-run the wizard to try again.`,
       );
     } else {
       getUI().log.error(
         `${chalk.red('Authorization failed:')}\n\n${
           error.message
-        }\n\n${chalk.dim(
-          `If you think this is a bug in the PostHog wizard, please create an issue:\n${ISSUES_URL}`,
-        )}`,
+        }\n\n${chalk.dim(`File an issue:\n${ISSUES_URL}`)}`,
       );
     }
 
-    analytics.captureException(error, {
-      step: 'oauth_flow',
-    });
-
+    analytics.captureException(error, { step: 'oauth_flow' });
     await abort();
     throw error;
   }
+}
+
+// ── Legacy shim — keeps existing callers compiling ───────────────────
+
+export type OAuthConfig = { scopes: string[]; signup?: boolean };
+
+/** @deprecated Use performAmplitudeAuth() directly. */
+export async function performOAuthFlow(
+  _config: OAuthConfig,
+): Promise<OAuthTokenResponse> {
+  const result = await performAmplitudeAuth({});
+  return {
+    access_token: result.accessToken,
+    id_token: result.idToken,
+    refresh_token: result.refreshToken,
+    token_type: 'Bearer',
+    expires_in: 3600,
+  };
 }

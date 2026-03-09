@@ -27,7 +27,8 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     integration: Integration.django,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
-    unsupportedVersionDocsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
+    unsupportedVersionDocsUrl:
+      'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const projectType = await getDjangoProjectType(options);
       const settingsFile = await findDjangoSettingsFile(options);

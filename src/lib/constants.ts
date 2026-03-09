@@ -55,15 +55,27 @@ export const ANALYTICS_TEAM_TAG = 'amplitude-wizard';
 
 // ── OAuth / Auth ────────────────────────────────────────────────────
 
-// TODO: Replace with Amplitude OAuth endpoints
-export const POSTHOG_OAUTH_URL = IS_DEV
-  ? 'http://localhost:8010'
-  : 'https://amplitude.com';
-export const OAUTH_PORT = 8239;
-export const POSTHOG_US_CLIENT_ID = '';
-export const POSTHOG_EU_CLIENT_ID = '';
-export const POSTHOG_DEV_CLIENT_ID = '';
-export const POSTHOG_PROXY_CLIENT_ID = POSTHOG_US_CLIENT_ID;
+/** Matches the port used by the ampli CLI so sessions are interoperable. */
+export const OAUTH_PORT = 13222;
+export const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID ?? 'cli-client-pkce';
+
+export const AMPLITUDE_ZONE_SETTINGS = {
+  us: {
+    oAuthHost: process.env.OAUTH_HOST ?? 'https://auth.amplitude.com',
+    dataApiUrl: 'https://data-api.amplitude.com/graphql',
+    webUrl: 'https://data.amplitude.com',
+  },
+  eu: {
+    oAuthHost: 'https://auth.eu.amplitude.com',
+    dataApiUrl: 'https://data-api.eu.amplitude.com/graphql',
+    webUrl: 'https://data.eu.amplitude.com',
+  },
+} as const;
+
+export type AmplitudeZone = keyof typeof AMPLITUDE_ZONE_SETTINGS;
+export const DEFAULT_AMPLITUDE_ZONE: AmplitudeZone = 'us';
+
+/** Placeholder embedded in generated code when the user skips key entry. */
 export const DUMMY_PROJECT_API_KEY = '_YOUR_AMPLITUDE_API_KEY_';
 
 // ── Wizard run / variants ───────────────────────────────────────────

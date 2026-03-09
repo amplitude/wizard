@@ -14,20 +14,13 @@ import {
 } from './package-manager';
 import type { CloudRegion, WizardOptions } from './types';
 import { getPackageVersion } from './package-json';
-import {
-  DEFAULT_HOST_URL,
-  DUMMY_PROJECT_API_KEY,
-  ISSUES_URL,
-} from '../lib/constants';
+import { DEFAULT_HOST_URL, ISSUES_URL } from '../lib/constants';
 import { analytics } from './analytics';
 import { getUI } from '../ui';
-import {
-  getCloudUrlFromRegion,
-  getHostFromRegion,
-  detectRegionFromToken,
-} from './urls';
-import { performOAuthFlow } from './oauth';
-import { fetchUserData, fetchProjectData } from '../lib/api';
+import { performAmplitudeAuth } from './oauth';
+import { fetchAmplitudeUser } from '../lib/api';
+import { storeToken } from './ampli-settings';
+import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
 
@@ -171,7 +164,7 @@ export async function installPackage({
               fs.writeFileSync(
                 join(
                   process.cwd(),
-                  `posthog-wizard-installation-error-${Date.now()}.log`,
+                  `amplitude-wizard-installation-error-${Date.now()}.log`,
                 ),
                 JSON.stringify({
                   stdout,
@@ -194,7 +187,7 @@ export async function installPackage({
           'Encountered the following error during installation:',
           // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         )}\n\n${e}\n\n${chalk.dim(
-          `The wizard has created a \`posthog-wizard-installation-error-*.log\` file. If you think this issue is caused by the PostHog wizard, create an issue on GitHub and include the log file's content:\n${ISSUES_URL}`,
+          `The wizard has created a \`amplitude-wizard-installation-error-*.log\` file. If you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${ISSUES_URL}`,
         )}`,
       );
       await abort();
@@ -323,7 +316,7 @@ export function isUsingTypeScript({
 }
 
 /**
- * Get project data for the wizard via OAuth or CI API key.
+ * Get project data for the wizard via Amplitude OAuth or CI API key.
  */
 export async function getOrAskForProjectData(
   _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'projectId'>,
@@ -334,152 +327,103 @@ export async function getOrAskForProjectData(
   projectId: number;
   cloudRegion: CloudRegion;
 }> {
-  // CI mode: bypass OAuth, use personal API key for LLM gateway
+  // CI mode: bypass OAuth, use a pre-supplied Amplitude API key
   if (_options.ci && _options.apiKey) {
     getUI().log.info('Using provided API key (CI mode - OAuth bypassed)');
-
-    const cloudRegion = await detectRegionFromToken(_options.apiKey);
-    const host = getHostFromRegion(cloudRegion);
-    const cloudUrl = getCloudUrlFromRegion(cloudRegion);
-
-    const projectData =
-      _options.projectId != null
-        ? await fetchProjectDataById(
-            _options.apiKey,
-            _options.projectId,
-            cloudUrl,
-          )
-        : await fetchProjectDataWithApiKey(_options.apiKey, cloudUrl);
-
     return {
-      host,
-      projectApiKey: projectData.api_token,
+      host: DEFAULT_HOST_URL,
+      projectApiKey: _options.apiKey,
       accessToken: _options.apiKey,
-      projectId: projectData.id,
-      cloudRegion,
+      projectId: _options.projectId ?? 0,
+      cloudRegion: 'us',
     };
   }
 
-  const { host, projectApiKey, accessToken, projectId, cloudRegion } =
-    await traceStep('login', () =>
-      askForWizardLogin({
-        signup: _options.signup,
-      }),
-    );
-
-  if (!projectApiKey) {
-    const cloudUrl = getCloudUrlFromRegion(cloudRegion);
-    getUI().log.error(`Didn't receive a project token. This shouldn't happen :(
-
-Please let us know if you think this is a bug in the wizard:
-${chalk.cyan(ISSUES_URL)}`);
-
-    getUI().log
-      .info(`In the meantime, we'll add a dummy project token (${chalk.cyan(
-      `"${DUMMY_PROJECT_API_KEY}"`,
-    )}) for you to replace later.
-You can find your project token here:
-${chalk.cyan(`${cloudUrl}/settings/project#variables`)}`);
-  }
+  const result = await traceStep('login', () => askForWizardLogin());
 
   return {
-    accessToken,
-    host: host || DEFAULT_HOST_URL,
-    projectApiKey: projectApiKey || DUMMY_PROJECT_API_KEY,
-    projectId,
-    cloudRegion,
+    accessToken: result.accessToken,
+    host: DEFAULT_HOST_URL,
+    projectApiKey: result.projectApiKey,
+    projectId: result.projectId,
+    cloudRegion: 'us',
   };
 }
 
-async function fetchProjectDataWithApiKey(
-  apiKey: string,
-  cloudUrl: string,
-): Promise<{ api_token: string; id: number }> {
-  const userData = await fetchUserData(apiKey, cloudUrl);
-  const projectId = userData.team?.id;
+async function askForWizardLogin(): Promise<ProjectData> {
+  // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
+  const auth = await performAmplitudeAuth({ zone: DEFAULT_AMPLITUDE_ZONE });
 
-  if (!projectId) {
-    throw new Error(
-      'Could not determine project ID from API key. Please ensure your API key has access to a project in this cloud region.',
+  // ── 2. Fetch user info from Amplitude Data API ────────────────────
+  let userInfo;
+  try {
+    userInfo = await fetchAmplitudeUser(auth.idToken, auth.zone);
+  } catch {
+    getUI().log.warn(
+      chalk.yellow(
+        'Could not fetch your Amplitude account details. Continuing without them.',
+      ),
     );
   }
 
-  const projectData = await fetchProjectData(apiKey, projectId, cloudUrl);
+  if (userInfo) {
+    // Persist user details back to ~/.ampli.json (replaces the "pending" entry)
+    storeToken(
+      {
+        id: userInfo.id,
+        firstName: userInfo.firstName,
+        lastName: userInfo.lastName,
+        email: userInfo.email,
+        zone: auth.zone,
+      },
+      {
+        accessToken: auth.accessToken,
+        idToken: auth.idToken,
+        refreshToken: auth.refreshToken,
+        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+      },
+    );
+
+    const orgName = userInfo.orgs[0]?.name ?? 'your org';
+    getUI().log.success(
+      `Logged in as ${chalk.bold(userInfo.email)} (${orgName})`,
+    );
+    analytics.setDistinctId(userInfo.id);
+    analytics.setTag('opened-wizard-link', true);
+  }
+
+  // ── 3. Ask for the Amplitude project API key ─────────────────────
+  // The analytics write key is not exposed via the Data API and must be
+  // copied from Amplitude project settings.
+  const projectApiKey = await askForAmplitudeApiKey();
+
   return {
-    api_token: projectData.api_token,
-    id: projectId,
+    accessToken: auth.idToken,
+    projectApiKey,
+    host: DEFAULT_HOST_URL,
+    distinctId: userInfo?.id ?? 'unknown',
+    projectId: 0, // Amplitude doesn't use a numeric project ID in the same way
   };
 }
 
-async function fetchProjectDataById(
-  apiKey: string,
-  projectId: number,
-  cloudUrl: string,
-): Promise<{ api_token: string; id: number }> {
-  const projectData = await fetchProjectData(apiKey, projectId, cloudUrl);
-  return {
-    api_token: projectData.api_token,
-    id: projectId,
-  };
-}
+async function askForAmplitudeApiKey(): Promise<string> {
+  const { input } = await import('@inquirer/prompts');
 
-async function askForWizardLogin(options: {
-  signup: boolean;
-}): Promise<ProjectData & { cloudRegion: CloudRegion }> {
-  const tokenResponse = await performOAuthFlow({
-    scopes: [
-      'user:read',
-      'project:read',
-      'introspection',
-      'llm_gateway:read',
-      'dashboard:write',
-      'insight:write',
-      'query:read',
-    ],
-    signup: options.signup,
+  getUI().log.info(
+    `\nTo finish setup, enter your Amplitude project ${chalk.bold(
+      'API Key',
+    )}.\n` +
+      chalk.dim(
+        `Find it at: Amplitude → Settings → Projects → [your project] → API Keys\n`,
+      ),
+  );
+
+  const apiKey = await input({
+    message: 'Amplitude API Key:',
+    validate: (v: string) => v.trim().length > 0 || 'API key cannot be empty',
   });
 
-  const projectId = tokenResponse.scoped_teams?.[0];
-
-  if (projectId === undefined) {
-    const error = new Error(
-      'No project access granted. Please authorize with project-level access.',
-    );
-    analytics.captureException(error, {
-      step: 'wizard_login',
-      has_scoped_teams: !!tokenResponse.scoped_teams,
-    });
-    getUI().log.error(error.message);
-    await abort();
-  }
-
-  const cloudRegion = await detectRegionFromToken(tokenResponse.access_token);
-  const cloudUrl = getCloudUrlFromRegion(cloudRegion);
-  const host = getHostFromRegion(cloudRegion);
-
-  const projectData = await fetchProjectData(
-    tokenResponse.access_token,
-    projectId!,
-    cloudUrl,
-  );
-  const userData = await fetchUserData(tokenResponse.access_token, cloudUrl);
-
-  const data = {
-    accessToken: tokenResponse.access_token,
-    projectApiKey: projectData.api_token,
-    host,
-    distinctId: userData.distinct_id,
-    projectId: projectId!,
-    cloudRegion,
-  };
-
-  getUI().log.success(
-    `Login complete. ${options.signup ? 'Welcome to PostHog!' : ''}`,
-  );
-  analytics.setTag('opened-wizard-link', true);
-  analytics.setDistinctId(data.distinctId);
-
-  return data;
+  return apiKey.trim();
 }
 
 /**

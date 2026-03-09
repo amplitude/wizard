@@ -31,7 +31,9 @@ describe('Analytics', () => {
 
   describe('capture', () => {
     it('should not throw when capturing events', () => {
-      expect(() => analytics.capture('test event', { foo: 'bar' })).not.toThrow();
+      expect(() =>
+        analytics.capture('test event', { foo: 'bar' }),
+      ).not.toThrow();
     });
   });
 

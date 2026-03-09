@@ -12,7 +12,8 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
       name: 'Node.js',
       integration: Integration.javascriptNode,
       beta: true,
-      docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
+      docsUrl:
+        'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     },
 
     detection: {
