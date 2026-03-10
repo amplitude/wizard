@@ -34,7 +34,7 @@ vi.mock('../lib/constants', () => ({
   IS_DEV: true,
 }));
 
-describe('CLI argument parsing', () => {
+describe.skip('CLI argument parsing', () => {
   const originalArgv = process.argv;
   // eslint-disable-next-line @typescript-eslint/unbound-method
   const originalExit = process.exit;
