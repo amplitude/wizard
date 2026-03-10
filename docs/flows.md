@@ -137,10 +137,10 @@ title: SUSI flow
 flowchart TD
     EMAIL["Enter email"] --> USER_TYPE{Existing user?}
     USER_TYPE -->|existing| ORG_PICKER["Picker: existing orgs + 'Create new'"]
-    USER_TYPE -->|new| SIGNUP["Sign up"] --> ORG_NAME["Text input: name your org"]
+    USER_TYPE -->|new| SIGNUP["Sign up"] --> ORG_PICKER
 
     ORG_PICKER -->|existing org selected| PROJ_PICKER
-    ORG_PICKER -->|create new| ORG_NAME --> PROJ_PICKER
+    ORG_PICKER -->|create new| ORG_NAME["Text input: name your org"] --> PROJ_PICKER
 
     PROJ_PICKER["Picker: existing projects + 'Create new'"]
     PROJ_PICKER -->|existing project selected| DONE["→ Data Setup flow"]

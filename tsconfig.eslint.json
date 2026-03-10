@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "__tests__",
+    "__mocks__/**/*",
+    "index.ts",
+    "bin.ts",
+    "src/**/*",
+    "spec/**/*",
+    "test/**/*",
+    "e2e-tests/**/*",
+    "features/**/*",
+    "types/**/*"
+  ],
+  "exclude": [
+    "e2e-tests/test-applications/**/*"
+  ]
+}

@@ -68,6 +68,7 @@
     "@babel/plugin-transform-modules-commonjs": "^7.28.6",
     "@babel/preset-env": "^7.29.0",
     "@babel/types": "~7.21.4",
+    "@cucumber/cucumber": "^12.7.0",
     "@types/chai": "^4.3.17",
     "@types/glob": "^7.2.0",
     "@types/inquirer": "^0.0.43",
@@ -122,7 +123,9 @@
     "dev": "pnpm build && pnpm link --global && pnpm build:watch",
     "test:watch": "jest --watch",
     "prepare": "husky",
-    "flows": "node scripts/render-flows.mjs"
+    "flows": "node scripts/render-flows.mjs",
+    "test:bdd": "cucumber-js",
+    "test:bdd:watch": "cucumber-js --retry 0 2>&1 | npx nodemon --watch features --exec cucumber-js"
   },
   "jest": {
     "collectCoverage": true,

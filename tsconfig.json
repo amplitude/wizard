@@ -11,19 +11,18 @@
     "outDir": "dist"
   },
   "include": [
-    "__tests__",
     "__mocks__/**/*",
     "index.ts",
     "bin.ts",
-    "src/lib/**/*",
-    "spec/**/*",
     "src/**/*",
-    "test/**/*",
-    "e2e-tests/**/*",
     "types/**/*"
   ],
   "exclude": [
-    "e2e-tests/test-applications/**/*"
+    "e2e-tests/**/*",
+    "features/**/*",
+    "src/**/__tests__/**/*",
+    "src/**/*.test.ts",
+    "src/**/*.spec.ts"
   ],
   "ts-node": {
     "files": true
