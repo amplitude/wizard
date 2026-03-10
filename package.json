@@ -37,7 +37,7 @@
     "@inkjs/ui": "^2.0.0",
     "@inquirer/prompts": "^8.3.0",
     "@langchain/core": "^0.3.40",
-    "axios": "1.7.4",
+    "axios": "1.13.5",
     "chalk": "^2.4.1",
     "client-oauth2": "^4.3.3",
     "conf": "^15.1.0",
