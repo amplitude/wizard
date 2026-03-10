@@ -1,0 +1,8 @@
+flowchart TD
+    EMAIL["Enter email"] --> USER_TYPE{Existing user?}
+    USER_TYPE -->|existing| ORG{Org?}
+    USER_TYPE -->|new| SIGNUP["Sign up"] --> ORG
+    ORG -->|new org| PROJECT{Project?}
+    ORG -->|existing org| PROJECT
+    PROJECT -->|new project| DONE["→ Data Setup flow"]
+    PROJECT -->|existing project| DONE

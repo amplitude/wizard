@@ -1,0 +1,8 @@
+flowchart TD
+    OUTRO["OutroScreen"] --> OUTCOME{Outcome?}
+    OUTCOME -->|success| SUCCESS["Show changes, events, docs/continue URLs"]
+    OUTCOME -->|error| ERR["Show error message"]
+    OUTCOME -->|cancel| CANCEL["Show cancel message"]
+    SUCCESS --> EXIT["Press key to exit"]
+    ERR --> EXIT
+    CANCEL --> EXIT

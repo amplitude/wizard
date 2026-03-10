@@ -1,0 +1,42 @@
+flowchart TD
+    START["IntroScreen"] --> AUTH_CHECK
+
+    subgraph AUTH ["Auth / Account Setup"]
+        AUTH_CHECK{~/.ampli.json present?}
+        AUTH_CHECK -->|yes| ACTIVATION["Evaluate activation status for project"]
+        AUTH_CHECK -->|no| SUSI["See: SUSI flow"]
+        SUSI --> DATA_SETUP["See: Data Setup flow"]
+        DATA_SETUP --> DATA_CHECK
+        ACTIVATION --> DATA_CHECK
+    end
+
+    DATA_CHECK{Project has data?}
+    DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
+    DATA_CHECK -->|yes| NEW_PROJECT{Setting up\na new project?}
+    NEW_PROJECT -->|yes| ORG_PROJECT["See: Org / Project Selection flow"]
+    NEW_PROJECT -->|no| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch org or project"]
+    ORG_PROJECT --> DATA_CHECK
+
+    OPTIONS -->|switch org or project| ORG_PROJECT
+    OPTIONS -->|other option| RUN
+    FRAMEWORK --> RUN
+
+    SLASH_CMD["/org · /project slash commands"] -. available any time .-> ORG_PROJECT
+
+    subgraph AGENT_RUN ["Agent Run"]
+        RUN["RunScreen"] --> AGENT["Claude agent runs"]
+        AGENT --> FEATURES{Features discovered?}
+        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"]
+        FEATURES -->|LLM| LLM_TIP["Show LLM tip"]
+        AGENT --> OUTCOME{Outcome?}
+        OUTCOME -->|success| POST["Upload env vars to hosting"]
+        OUTCOME -->|error| ERR["Set error state"]
+    end
+
+    POST --> MCP["See: MCP flow"]
+    ERR --> MCP
+
+    MCP --> OUTRO["See: Outro flow"]
+
+    TUI -. overlay .-> OUTAGE["OutageScreen"]
+    TUI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]

@@ -1,0 +1,8 @@
+flowchart TD
+    ORG_EXISTS["Org exists"] --> PROJ_EXISTS["Project exists"]
+    PROJ_EXISTS --> CONFIGURE["Data Setup (configure)"]
+    CONFIGURE --> TAXONOMY["Taxonomy Agent"]
+    TAXONOMY --> FIRST_CHART["First Chart"]
+    TAXONOMY --> FIRST_DASH["First Dash"]
+    FIRST_CHART --> DONE["→ Wizard flow: data check"]
+    FIRST_DASH --> DONE

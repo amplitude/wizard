@@ -121,7 +121,8 @@
     "try": "tsx bin.ts",
     "dev": "pnpm build && pnpm link --global && pnpm build:watch",
     "test:watch": "jest --watch",
-    "prepare": "husky"
+    "prepare": "husky",
+    "flows": "node scripts/render-flows.mjs"
   },
   "jest": {
     "collectCoverage": true,

@@ -1,0 +1,11 @@
+flowchart TD
+    ORG{Org?}
+    ORG -->|one org| AUTO_ORG["Auto-select org"]
+    ORG -->|multiple orgs| ORG_PICKER["Org picker menu"]
+    AUTO_ORG --> PROJECT
+    ORG_PICKER --> PROJECT
+
+    PROJECT{Project?}
+    PROJECT -->|new project| NEW_PROJ["Create new project"] --> DONE
+    PROJECT -->|existing project| PROJ_PICKER["Project picker menu"] --> DONE
+    DONE["→ continue"]

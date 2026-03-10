@@ -1,0 +1,25 @@
+flowchart TD
+    CLI["amplitude-wizard CLI"] --> CMD{Command?}
+
+    CMD --> LOGIN["login"]
+    CMD --> LOGOUT["logout"]
+    CMD --> WHOAMI["whoami"]
+    CMD --> MCP_CMD["mcp add / mcp remove"]
+    CMD --> WIZARD["wizard (default)"]
+
+    LOGIN --> LOGIN_CHECK{~/.ampli.json\nvalid?}
+    LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
+    LOGIN_CHECK -->|no| OAUTH["OAuth flow"] --> STORE["Store token"] --> LOGIN_DONE
+
+    LOGOUT --> CLEAR["Clear ~/.ampli.json"]
+
+    WHOAMI --> CHECK_TOKEN{Token exists?}
+    CHECK_TOKEN -->|yes| SHOW_USER["Show name, email, zone"]
+    CHECK_TOKEN -->|no| NOT_LOGGED_IN["Not logged in"]
+
+    MCP_CMD --> MCP_FLOW["See: MCP flow"]
+
+    WIZARD --> MODE{Mode?}
+    MODE -->|--playground| PLAYGROUND["Playground TUI"]
+    MODE -->|--ci| CI["CI mode (--org, --project, --api-key, --install-dir)"]
+    MODE -->|default| W["See: Wizard flow"]

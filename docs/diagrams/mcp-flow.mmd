@@ -1,0 +1,6 @@
+flowchart TD
+    DETECT{MCP clients detected?}
+    DETECT -->|none| SKIP["Skip"] --> OUTRO["→ Outro"]
+    DETECT -->|one| AUTO["Auto-select client"] --> INSTALL
+    DETECT -->|multiple| PICKER["Client picker menu"] --> INSTALL
+    INSTALL["Install / confirm MCP server"] --> OUTRO
