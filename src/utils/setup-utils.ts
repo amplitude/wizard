@@ -18,9 +18,10 @@ import { DEFAULT_HOST_URL, ISSUES_URL } from '../lib/constants';
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
-import { fetchAmplitudeUser } from '../lib/api';
+import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
 import { storeToken } from './ampli-settings';
 import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
+import { detectRegionFromToken } from './urls';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
 
@@ -30,6 +31,7 @@ interface ProjectData {
   host: string;
   distinctId: string;
   projectId: number;
+  cloudRegion: CloudRegion;
 }
 
 export interface CliSetupConfig {
@@ -346,7 +348,7 @@ export async function getOrAskForProjectData(
     host: DEFAULT_HOST_URL,
     projectApiKey: result.projectApiKey,
     projectId: result.projectId,
-    cloudRegion: 'us',
+    cloudRegion: result.cloudRegion,
   };
 }
 
@@ -354,10 +356,22 @@ async function askForWizardLogin(): Promise<ProjectData> {
   // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
   const auth = await performAmplitudeAuth({ zone: DEFAULT_AMPLITUDE_ZONE });
 
-  // ── 2. Fetch user info from Amplitude Data API ────────────────────
-  let userInfo;
+  // ── 2. Detect actual cloud region (EU users auth via US endpoint but
+  //       their data lives on EU servers — detectRegionFromToken probes both) ──
+  let cloudRegion: CloudRegion = 'us';
   try {
-    userInfo = await fetchAmplitudeUser(auth.idToken, auth.zone);
+    cloudRegion = await detectRegionFromToken(auth.accessToken);
+  } catch {
+    // Fall back to 'us' if region detection fails
+  }
+
+  // ── 3. Fetch user info from Amplitude Data API ────────────────────
+  let userInfo: Awaited<ReturnType<typeof fetchAmplitudeUser>> | undefined;
+  try {
+    userInfo = await fetchAmplitudeUser(
+      auth.idToken,
+      cloudRegion as typeof auth.zone,
+    );
   } catch {
     getUI().log.warn(
       chalk.yellow(
@@ -365,6 +379,8 @@ async function askForWizardLogin(): Promise<ProjectData> {
       ),
     );
   }
+
+  let selectedOrg: AmplitudeOrg | undefined;
 
   if (userInfo) {
     // Persist user details back to ~/.ampli.json (replaces the "pending" entry)
@@ -384,15 +400,39 @@ async function askForWizardLogin(): Promise<ProjectData> {
       },
     );
 
-    const orgName = userInfo.orgs[0]?.name ?? 'your org';
+    // ── 4. Org resolution (flowchart: sign-in → determine destination org) ──
+    if (userInfo.orgs.length === 0) {
+      // New user who hasn't created an org yet — direct them to the browser
+      getUI().log.error(
+        `${chalk.red('No Amplitude organization found.')}\n\n` +
+          chalk.dim(
+            'Your account has no organizations. Please complete signup at ' +
+              chalk.cyan('https://app.amplitude.com') +
+              ' and create an organization, then re-run the wizard.',
+          ),
+      );
+      await abort();
+    } else if (userInfo.orgs.length === 1) {
+      selectedOrg = userInfo.orgs[0];
+    } else {
+      // Multiple orgs — prompt the user to pick one
+      const { select } = await import('@inquirer/prompts');
+      selectedOrg = await select<AmplitudeOrg>({
+        message: 'Select an Amplitude organization:',
+        choices: userInfo.orgs.map((org) => ({ name: org.name, value: org })),
+      });
+    }
+
     getUI().log.success(
-      `Logged in as ${chalk.bold(userInfo.email)} (${orgName})`,
+      `Logged in as ${chalk.bold(userInfo.email)}${
+        selectedOrg ? ` (${selectedOrg.name})` : ''
+      }`,
     );
     analytics.setDistinctId(userInfo.id);
     analytics.setTag('opened-wizard-link', true);
   }
 
-  // ── 3. Ask for the Amplitude project API key ─────────────────────
+  // ── 5. Ask for the Amplitude project API key ─────────────────────
   // The analytics write key is not exposed via the Data API and must be
   // copied from Amplitude project settings.
   const projectApiKey = await askForAmplitudeApiKey();
@@ -402,7 +442,8 @@ async function askForWizardLogin(): Promise<ProjectData> {
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',
-    projectId: 0, // Amplitude doesn't use a numeric project ID in the same way
+    projectId: 0,
+    cloudRegion,
   };
 }
 
