@@ -1,3 +1,6 @@
+---
+title: Framework Detection flow
+---
 flowchart TD
     DETECT{Auto-detect framework?}
     DETECT -->|success| RESULT["Show detection result"]
@@ -7,6 +10,6 @@ flowchart TD
     CONFIRM -->|continue| SETUP_Q{Unresolved setup questions?}
     SETUP_Q -->|no| RUN["→ Agent Run"]
     SETUP_Q -->|yes| SETUP["SetupScreen"]
-    SETUP --> AUTO{Auto-detect answers?}
-    AUTO -->|detected| RUN
-    AUTO -->|undetected| PICKER_Q["PickerMenu for question"] --> RUN
+    SETUP --> ANSWER{Answer auto-detectable?}
+    ANSWER -->|yes| RUN
+    ANSWER -->|no| PICKER_Q["PickerMenu for question"] --> RUN

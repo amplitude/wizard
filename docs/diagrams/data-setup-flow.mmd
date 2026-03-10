@@ -1,8 +1,13 @@
+---
+title: Data Setup flow
+---
 flowchart TD
-    ORG_EXISTS["Org exists"] --> PROJ_EXISTS["Project exists"]
-    PROJ_EXISTS --> CONFIGURE["Data Setup (configure)"]
-    CONFIGURE --> TAXONOMY["Taxonomy Agent"]
-    TAXONOMY --> FIRST_CHART["First Chart"]
-    TAXONOMY --> FIRST_DASH["First Dash"]
-    FIRST_CHART --> DONE["→ Wizard flow: data check"]
-    FIRST_DASH --> DONE
+    START["Project created"] --> CHOICE{How do you want<br/>to get started?}
+    CHOICE -->|data onboarding wizard| CONFIGURE["Data Setup (configure)"]
+    CHOICE -->|taxonomy agent| TAXONOMY["Taxonomy Agent"]
+
+    CONFIGURE --> INGESTED{Events successfully<br/>ingested?}
+    INGESTED -->|yes| POST_INGEST["Options: taxonomy agent / first chart / first dash"]
+    INGESTED -->|no| DONE["→ Wizard flow: data check"]
+    POST_INGEST --> DONE
+    TAXONOMY --> DONE

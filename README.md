@@ -1,13 +1,23 @@
 # Amplitude Wizard
 
-The Amplitude wizard helps you quickly add Amplitude analytics to your project
-using AI.
+An interactive CLI that guides developers through instrumenting their app with Amplitude analytics. It detects your framework, authenticates with your Amplitude account, runs a Claude-powered agent to set up the SDK and events, and walks you through your first chart and dashboard.
 
-> **Note:** This is a fork of the
-> [Amplitude wizard](https://github.com/Amplitude/wizard), adapted for
-> Amplitude.
+## How it works
 
-## Supported Frameworks
+The wizard keeps a persistent prompt open throughout the session — like Claude Code — so slash commands can be run at any time to switch org, switch project, re-authenticate, or trigger actions like opening a chart or interacting with the taxonomy agent.
+
+On first run, the wizard:
+
+1. Checks for existing Amplitude credentials (`~/.ampli.json`)
+2. If not authenticated, walks through sign up or sign in (SUSI), org and project selection
+3. Evaluates activation status — whether events are being ingested and the SDK is configured
+4. If the project has no data yet, detects your framework and runs the agent to instrument your app
+5. If the project already has data, offers options to explore your analytics or set up a new project
+6. After instrumentation, guides you through the taxonomy agent, first chart, and first dashboard
+
+See [`docs/flows.md`](./docs/flows.md) for detailed flow diagrams.
+
+## Supported frameworks
 
 - Next.js
 - Vue
@@ -25,6 +35,29 @@ using AI.
 npx @amplitude/wizard
 ```
 
+### CI mode
+
+```bash
+npx @amplitude/wizard --ci --org <org> --project <project> --api-key <key> --install-dir <dir>
+```
+
+### Slash commands
+
+Available at any time during the wizard session:
+
+| Command | Description |
+|---|---|
+| `/org` | Switch the active org |
+| `/project` | Switch the active project |
+| `/login` | Re-authenticate |
+| `/logout` | Clear credentials |
+| `/whoami` | Show current user, org, and project |
+| `/overview` | Open the project overview in the browser |
+| `/chart` | Set up a new chart |
+| `/dashboard` | Create a new dashboard |
+| `/taxonomy` | Interact with the taxonomy agent |
+| `/help` | List available slash commands |
+
 ## Development
 
 ```bash
@@ -32,3 +65,11 @@ pnpm install
 pnpm build
 pnpm try
 ```
+
+### Render flow diagrams
+
+```bash
+pnpm flows
+```
+
+Renders all diagrams from `docs/flows.md` to PNGs in `docs/diagrams/`.

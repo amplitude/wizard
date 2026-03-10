@@ -1,3 +1,6 @@
+---
+title: Wizard flow
+---
 flowchart TD
     START["IntroScreen"] --> AUTH_CHECK
 
@@ -12,7 +15,7 @@ flowchart TD
 
     DATA_CHECK{Project has data?}
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
-    DATA_CHECK -->|yes| NEW_PROJECT{Setting up\na new project?}
+    DATA_CHECK -->|yes| NEW_PROJECT{Setting up<br/>a new project?}
     NEW_PROJECT -->|yes| ORG_PROJECT["See: Org / Project Selection flow"]
     NEW_PROJECT -->|no| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch org or project"]
     ORG_PROJECT --> DATA_CHECK
@@ -26,17 +29,16 @@ flowchart TD
     subgraph AGENT_RUN ["Agent Run"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
         AGENT --> FEATURES{Features discovered?}
-        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"]
-        FEATURES -->|LLM| LLM_TIP["Show LLM tip"]
+        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
+        FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
+        FEATURES -->|none| OUTCOME
         AGENT --> OUTCOME{Outcome?}
         OUTCOME -->|success| POST["Upload env vars to hosting"]
         OUTCOME -->|error| ERR["Set error state"]
     end
 
-    POST --> MCP["See: MCP flow"]
-    ERR --> MCP
+    POST --> OUTRO["See: Outro flow"]
+    ERR --> OUTRO
 
-    MCP --> OUTRO["See: Outro flow"]
-
-    TUI -. overlay .-> OUTAGE["OutageScreen"]
-    TUI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]
+    START -. overlay .-> OUTAGE["OutageScreen"]
+    START -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]

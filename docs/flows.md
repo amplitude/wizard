@@ -15,7 +15,6 @@ The CLI keeps a persistent prompt open at all times (like Claude). Slash command
 | `/chart` | Set up a new chart |
 | `/dashboard` | Create a new dashboard |
 | `/taxonomy` | Interact with the taxonomy agent |
-| `/mcp` | Manage MCP server installation |
 | `/help` | List available slash commands |
 
 ---
@@ -23,16 +22,18 @@ The CLI keeps a persistent prompt open at all times (like Claude). Slash command
 ## Top-level commands
 
 ```mermaid
+---
+title: Top-level commands
+---
 flowchart TD
     CLI["amplitude-wizard CLI"] --> CMD{Command?}
 
     CMD --> LOGIN["login"]
     CMD --> LOGOUT["logout"]
     CMD --> WHOAMI["whoami"]
-    CMD --> MCP_CMD["mcp add / mcp remove"]
     CMD --> WIZARD["wizard (default)"]
 
-    LOGIN --> LOGIN_CHECK{~/.ampli.json\nvalid?}
+    LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
     LOGIN_CHECK -->|no| OAUTH["OAuth flow"] --> STORE["Store token"] --> LOGIN_DONE
 
@@ -42,10 +43,7 @@ flowchart TD
     CHECK_TOKEN -->|yes| SHOW_USER["Show name, email, zone"]
     CHECK_TOKEN -->|no| NOT_LOGGED_IN["Not logged in"]
 
-    MCP_CMD --> MCP_FLOW["See: MCP flow"]
-
     WIZARD --> MODE{Mode?}
-    MODE -->|--playground| PLAYGROUND["Playground TUI"]
     MODE -->|--ci| CI["CI mode (--org, --project, --api-key, --install-dir)"]
     MODE -->|default| W["See: Wizard flow"]
 ```
@@ -55,21 +53,24 @@ flowchart TD
 ## Wizard flow
 
 ```mermaid
+---
+title: Wizard flow
+---
 flowchart TD
     START["IntroScreen"] --> AUTH_CHECK
 
     subgraph AUTH ["Auth / Account Setup"]
         AUTH_CHECK{~/.ampli.json present?}
-        AUTH_CHECK -->|yes| ACTIVATION["Evaluate activation status for project"]
+        AUTH_CHECK -->|yes| ACTIVATION["See: Activation Check flow"]
         AUTH_CHECK -->|no| SUSI["See: SUSI flow"]
         SUSI --> DATA_SETUP["See: Data Setup flow"]
         DATA_SETUP --> DATA_CHECK
         ACTIVATION --> DATA_CHECK
+        DATA_CHECK{Project has data?}
     end
 
-    DATA_CHECK{Project has data?}
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
-    DATA_CHECK -->|yes| NEW_PROJECT{Setting up\na new project?}
+    DATA_CHECK -->|yes| NEW_PROJECT{Setting up<br/>a new project?}
     NEW_PROJECT -->|yes| ORG_PROJECT["See: Org / Project Selection flow"]
     NEW_PROJECT -->|no| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch org or project"]
     ORG_PROJECT --> DATA_CHECK
@@ -83,20 +84,46 @@ flowchart TD
     subgraph AGENT_RUN ["Agent Run"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
         AGENT --> FEATURES{Features discovered?}
-        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"]
-        FEATURES -->|LLM| LLM_TIP["Show LLM tip"]
+        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
+        FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
+        FEATURES -->|none| OUTCOME
         AGENT --> OUTCOME{Outcome?}
         OUTCOME -->|success| POST["Upload env vars to hosting"]
         OUTCOME -->|error| ERR["Set error state"]
     end
 
-    POST --> MCP["See: MCP flow"]
-    ERR --> MCP
+    POST --> OUTRO["See: Outro flow"]
+    ERR --> OUTRO
 
-    MCP --> OUTRO["See: Outro flow"]
+    START -. overlay .-> OUTAGE["OutageScreen"]
+    START -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]
+```
 
-    TUI -. overlay .-> OUTAGE["OutageScreen"]
-    TUI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]
+---
+
+## Activation Check flow
+
+```mermaid
+---
+title: Activation Check flow
+---
+flowchart TD
+    EVENTS{Events ingested?}
+    EVENTS -->|50+| ACTIVATED["Activated → proceed to data check"]
+    EVENTS -->|1–49| ONBOARDED["Onboarded, not yet activated"]
+    EVENTS -->|0| SNIPPET
+
+    ONBOARDED --> SNIPPET{Snippet configured?}
+    SNIPPET -->|no| SETUP_SNIPPET["See: Framework Detection flow<br/>(set up snippet)"] --> UNBLOCKED
+    SNIPPET -->|yes| DEPLOYED{App deployed?}
+    DEPLOYED -->|yes| UNBLOCKED
+    DEPLOYED -->|no| UNBLOCKED
+
+    UNBLOCKED{"What would you like to do?"}
+    UNBLOCKED -->|help me test locally| FRAMEWORK["See: Framework Detection flow"]
+    UNBLOCKED -->|I'm done for now| EXIT["Exit — resume when data arrives"]
+    UNBLOCKED -->|I'm blocked| AGENT["See: Agent Run<br/>(debug mode)"]
+    UNBLOCKED -->|take me to the docs| DOCS["Open docs in browser"] --> UNBLOCKED
 ```
 
 ---
@@ -104,14 +131,20 @@ flowchart TD
 ## SUSI flow
 
 ```mermaid
+---
+title: SUSI flow
+---
 flowchart TD
     EMAIL["Enter email"] --> USER_TYPE{Existing user?}
-    USER_TYPE -->|existing| ORG{Org?}
-    USER_TYPE -->|new| SIGNUP["Sign up"] --> ORG
-    ORG -->|new org| PROJECT{Project?}
-    ORG -->|existing org| PROJECT
-    PROJECT -->|new project| DONE["→ Data Setup flow"]
-    PROJECT -->|existing project| DONE
+    USER_TYPE -->|existing| ORG_PICKER["Picker: existing orgs + 'Create new'"]
+    USER_TYPE -->|new| SIGNUP["Sign up"] --> ORG_NAME["Text input: name your org"]
+
+    ORG_PICKER -->|existing org selected| PROJ_PICKER
+    ORG_PICKER -->|create new| ORG_NAME --> PROJ_PICKER
+
+    PROJ_PICKER["Picker: existing projects + 'Create new'"]
+    PROJ_PICKER -->|existing project selected| DONE["→ Data Setup flow"]
+    PROJ_PICKER -->|create new| PROJ_NAME["Text input: name your project"] --> DONE
 ```
 
 ---
@@ -119,14 +152,26 @@ flowchart TD
 ## Data Setup flow
 
 ```mermaid
+---
+title: Data Setup flow
+---
 flowchart TD
-    ORG_EXISTS["Org exists"] --> PROJ_EXISTS["Project exists"]
-    PROJ_EXISTS --> CONFIGURE["Data Setup (configure)"]
-    CONFIGURE --> TAXONOMY["Taxonomy Agent"]
-    TAXONOMY --> FIRST_CHART["First Chart"]
-    TAXONOMY --> FIRST_DASH["First Dash"]
-    FIRST_CHART --> DONE["→ Wizard flow: data check"]
-    FIRST_DASH --> DONE
+    START["Project created"] --> CHOICE{How do you want<br/>to get started?}
+    CHOICE -->|data onboarding wizard| CONFIGURE["Data Setup (configure)"]
+    CHOICE -->|taxonomy agent| TAXONOMY["Taxonomy Agent"]
+
+    CONFIGURE --> INGESTED{Events successfully<br/>ingested?}
+    INGESTED -->|no| DONE["→ Wizard flow: data check"]
+    INGESTED -->|yes| CHECKLIST
+
+    TAXONOMY --> CHECKLIST
+
+    CHECKLIST["Checklist: taxonomy / first chart / first dash<br/>(show completed items, offer remaining)"]
+    CHECKLIST -->|run taxonomy agent| TAXONOMY_RUN["Taxonomy Agent"] --> CHECKLIST
+    CHECKLIST -->|create first chart| CHART_RUN["First Chart"] --> CHECKLIST
+    CHECKLIST -->|create first dash — unlocked after chart| DASH_RUN["First Dash"] --> CHECKLIST
+    CHECKLIST -->|all three complete| OPEN_SITE["Open dashboard in browser"]
+    OPEN_SITE --> DONE
 ```
 
 ---
@@ -136,16 +181,17 @@ flowchart TD
 > Available as `--org` and `--project` CLI args in CI mode. In the wizard, `/org` and `/project` slash commands can invoke this at any time.
 
 ```mermaid
+---
+title: Org / Project Selection flow
+---
 flowchart TD
-    ORG{Org?}
-    ORG -->|one org| AUTO_ORG["Auto-select org"]
-    ORG -->|multiple orgs| ORG_PICKER["Org picker menu"]
-    AUTO_ORG --> PROJECT
-    ORG_PICKER --> PROJECT
+    ORG_PICKER["Picker: existing orgs + 'Create new'"]
+    ORG_PICKER -->|existing org selected| PROJ_PICKER
+    ORG_PICKER -->|create new| ORG_NAME["Text input: name your org"] --> PROJ_PICKER
 
-    PROJECT{Project?}
-    PROJECT -->|new project| NEW_PROJ["Create new project"] --> DONE
-    PROJECT -->|existing project| PROJ_PICKER["Project picker menu"] --> DONE
+    PROJ_PICKER["Picker: existing projects + 'Create new'"]
+    PROJ_PICKER -->|existing project selected| DONE
+    PROJ_PICKER -->|create new| PROJ_NAME["Text input: name your project"] --> DONE
     DONE["→ continue"]
 ```
 
@@ -154,6 +200,9 @@ flowchart TD
 ## Framework Detection flow
 
 ```mermaid
+---
+title: Framework Detection flow
+---
 flowchart TD
     DETECT{Auto-detect framework?}
     DETECT -->|success| RESULT["Show detection result"]
@@ -163,22 +212,9 @@ flowchart TD
     CONFIRM -->|continue| SETUP_Q{Unresolved setup questions?}
     SETUP_Q -->|no| RUN["→ Agent Run"]
     SETUP_Q -->|yes| SETUP["SetupScreen"]
-    SETUP --> AUTO{Auto-detect answers?}
-    AUTO -->|detected| RUN
-    AUTO -->|undetected| PICKER_Q["PickerMenu for question"] --> RUN
-```
-
----
-
-## MCP flow
-
-```mermaid
-flowchart TD
-    DETECT{MCP clients detected?}
-    DETECT -->|none| SKIP["Skip"] --> OUTRO["→ Outro"]
-    DETECT -->|one| AUTO["Auto-select client"] --> INSTALL
-    DETECT -->|multiple| PICKER["Client picker menu"] --> INSTALL
-    INSTALL["Install / confirm MCP server"] --> OUTRO
+    SETUP --> ANSWER{Answer auto-detectable?}
+    ANSWER -->|yes| RUN
+    ANSWER -->|no| PICKER_Q["PickerMenu for question"] --> RUN
 ```
 
 ---
@@ -186,6 +222,9 @@ flowchart TD
 ## Outro flow
 
 ```mermaid
+---
+title: Outro flow
+---
 flowchart TD
     OUTRO["OutroScreen"] --> OUTCOME{Outcome?}
     OUTCOME -->|success| SUCCESS["Show changes, events, docs/continue URLs"]
