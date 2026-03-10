@@ -156,7 +156,7 @@ function handleApiError(error: unknown, operation: string): ApiError {
   );
 }
 
-// ── Legacy stubs — kept so files referencing the old PostHog types compile ──
+// ── Legacy stubs — kept so files referencing the old Amplitude types compile ──
 
 export const ApiUserSchema = z.object({ distinct_id: z.string() });
 export const ApiProjectSchema = z.object({
@@ -169,18 +169,18 @@ export const ApiProjectSchema = z.object({
 export type ApiUser = z.infer<typeof ApiUserSchema>;
 export type ApiProject = z.infer<typeof ApiProjectSchema>;
 
-/** @deprecated PostHog stub. Use fetchAmplitudeUser instead. */
+/** @deprecated Amplitude stub. Use fetchAmplitudeUser instead. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function fetchUserData(
   _accessToken: string,
   _baseUrl: string,
 ): Promise<ApiUser> {
   throw new Error(
-    'fetchUserData is a PostHog stub — use fetchAmplitudeUser instead',
+    'fetchUserData is a Amplitude stub — use fetchAmplitudeUser instead',
   );
 }
 
-/** @deprecated PostHog stub. Use fetchAmplitudeUser instead. */
+/** @deprecated Amplitude stub. Use fetchAmplitudeUser instead. */
 // eslint-disable-next-line @typescript-eslint/require-await
 export async function fetchProjectData(
   _accessToken: string,
@@ -188,6 +188,6 @@ export async function fetchProjectData(
   _baseUrl: string,
 ): Promise<ApiProject> {
   throw new Error(
-    'fetchProjectData is a PostHog stub — use fetchAmplitudeUser instead',
+    'fetchProjectData is a Amplitude stub — use fetchAmplitudeUser instead',
   );
 }

@@ -1,7 +1,7 @@
 # @inkjs/ui Component Reference
 
-Official component library for Ink. Provides themeable, production-ready UI widgets.
-Source: https://github.com/vadimdemedes/ink-ui
+Official component library for Ink. Provides themeable, production-ready UI
+widgets. Source: https://github.com/vadimdemedes/ink-ui
 
 Install: `npm install @inkjs/ui`
 
@@ -19,8 +19,10 @@ import { TextInput } from '@inkjs/ui';
 
 <TextInput
   placeholder="Enter your API key..."
-  onSubmit={(value) => { /* value is the entered string */ }}
-/>
+  onSubmit={(value) => {
+    /* value is the entered string */
+  }}
+/>;
 ```
 
 ### EmailInput
@@ -32,8 +34,10 @@ import { EmailInput } from '@inkjs/ui';
 
 <EmailInput
   placeholder="you@example.com"
-  onSubmit={(value) => { /* validated email string */ }}
-/>
+  onSubmit={(value) => {
+    /* validated email string */
+  }}
+/>;
 ```
 
 ### PasswordInput
@@ -45,8 +49,10 @@ import { PasswordInput } from '@inkjs/ui';
 
 <PasswordInput
   placeholder="Enter password..."
-  onSubmit={(value) => { /* password string */ }}
-/>
+  onSubmit={(value) => {
+    /* password string */
+  }}
+/>;
 ```
 
 ### ConfirmInput
@@ -57,9 +63,13 @@ Yes/No confirmation prompt.
 import { ConfirmInput } from '@inkjs/ui';
 
 <ConfirmInput
-  onConfirm={() => { /* user confirmed */ }}
-  onCancel={() => { /* user cancelled */ }}
-/>
+  onConfirm={() => {
+    /* user confirmed */
+  }}
+  onCancel={() => {
+    /* user cancelled */
+  }}
+/>;
 ```
 
 ### Select
@@ -80,7 +90,7 @@ import { Select } from '@inkjs/ui';
     // newValue equals the `value` field of the selected option
     // e.g. "nextjs"
   }}
-/>
+/>;
 ```
 
 ### MultiSelect
@@ -101,7 +111,7 @@ import { MultiSelect } from '@inkjs/ui';
     // newValues is an array of selected value fields
     // e.g. ["session-recording", "feature-flags"]
   }}
-/>
+/>;
 ```
 
 ## Feedback Components
@@ -113,7 +123,7 @@ Animated loading indicator.
 ```tsx
 import { Spinner } from '@inkjs/ui';
 
-<Spinner label="Installing dependencies..." />
+<Spinner label="Installing dependencies..." />;
 ```
 
 ### ProgressBar
@@ -126,16 +136,17 @@ import { ProgressBar } from '@inkjs/ui';
 // progress must be a number between 0 and 100
 <Box width={30}>
   <ProgressBar value={progress} />
-</Box>
+</Box>;
 ```
 
 Full example with state:
+
 ```tsx
 const [progress, setProgress] = useState(0);
 
 useEffect(() => {
   if (progress === 100) return;
-  const timer = setTimeout(() => setProgress(p => p + 1), 50);
+  const timer = setTimeout(() => setProgress((p) => p + 1), 50);
   return () => clearTimeout(timer);
 }, [progress]);
 
@@ -167,11 +178,11 @@ Status indicator with icon and longer explanation text.
 import { StatusMessage } from '@inkjs/ui';
 
 <StatusMessage variant="success">
-  PostHog snippet added to your app
+  Amplitude snippet added to your app
 </StatusMessage>
 
 <StatusMessage variant="error">
-  Failed to install posthog-js
+  Failed to install amplitude-js
 </StatusMessage>
 
 <StatusMessage variant="warning">
@@ -190,9 +201,7 @@ Boxed alert message for important information.
 ```tsx
 import { Alert } from '@inkjs/ui';
 
-<Alert variant="info">
-  Your PostHog project key was found in .env
-</Alert>
+<Alert variant="info">Your Amplitude project key was found in .env</Alert>;
 ```
 
 ## List Components
@@ -206,23 +215,23 @@ import { OrderedList } from '@inkjs/ui';
 
 <OrderedList>
   <OrderedList.Item>
-    <Text>Install posthog-js</Text>
+    <Text>Install amplitude-js</Text>
   </OrderedList.Item>
   <OrderedList.Item>
     <Text>Add initialization code</Text>
     <OrderedList>
       <OrderedList.Item>
-        <Text>Import PostHog</Text>
+        <Text>Import Amplitude</Text>
       </OrderedList.Item>
       <OrderedList.Item>
-        <Text>Call posthog.init()</Text>
+        <Text>Call amplitude.init()</Text>
       </OrderedList.Item>
     </OrderedList>
   </OrderedList.Item>
   <OrderedList.Item>
     <Text>Verify events</Text>
   </OrderedList.Item>
-</OrderedList>
+</OrderedList>;
 ```
 
 ### UnorderedList
@@ -231,8 +240,8 @@ Bulleted list with nesting support. Same API pattern as OrderedList.
 
 ## Theming
 
-All @inkjs/ui components are styled via a theme system using React context.
-You can customize any component's appearance.
+All @inkjs/ui components are styled via a theme system using React context. You
+can customize any component's appearance.
 
 ### Using the default theme
 
@@ -244,7 +253,7 @@ Components work out of the box with the default theme.
 import { render, type TextProps } from 'ink';
 import { Spinner, ThemeProvider, extendTheme, defaultTheme } from '@inkjs/ui';
 
-const posthogTheme = extendTheme(defaultTheme, {
+const amplitudeTheme = extendTheme(defaultTheme, {
   components: {
     Spinner: {
       styles: {
@@ -260,7 +269,7 @@ const posthogTheme = extendTheme(defaultTheme, {
             success: 'green',
             error: 'red',
             warning: 'yellow',
-            info: '#1d4aff',  // PostHog blue
+            info: '#1d4aff', // Amplitude blue
           }[variant],
         }),
       },
@@ -270,7 +279,7 @@ const posthogTheme = extendTheme(defaultTheme, {
 
 function App() {
   return (
-    <ThemeProvider theme={posthogTheme}>
+    <ThemeProvider theme={amplitudeTheme}>
       <Spinner label="Loading..." />
     </ThemeProvider>
   );
@@ -282,10 +291,13 @@ render(<App />);
 ### Theme structure
 
 Each component's theme has:
-- `styles` — Functions that return TextProps or BoxProps based on component state
+
+- `styles` — Functions that return TextProps or BoxProps based on component
+  state
 - `config` — Non-visual configuration (like list markers, default values)
 
 Access a component's theme in custom components:
+
 ```tsx
 import { useComponentTheme } from '@inkjs/ui';
 
@@ -298,12 +310,9 @@ These components compose naturally with core Ink layout:
 
 ```tsx
 <Box flexDirection="column" gap={1}>
-  <Text bold>Configure PostHog features:</Text>
+  <Text bold>Configure Amplitude features:</Text>
 
-  <MultiSelect
-    options={featureOptions}
-    onChange={setSelectedFeatures}
-  />
+  <MultiSelect options={featureOptions} onChange={setSelectedFeatures} />
 
   {selectedFeatures.length > 0 && (
     <StatusMessage variant="success">

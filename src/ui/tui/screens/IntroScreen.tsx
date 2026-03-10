@@ -52,13 +52,13 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           <Text color="#1D4AFF">{'\u2588'}</Text>
           <Text color="#F54E00">{'\u2588'}</Text>
           <Text color="#F9BD2B">{'\u2588'}</Text>
-          {detecting ? ' PostHog Wizard starting up' : ' PostHog Wizard 🦔'}
+          {detecting ? ' Amplitude Wizard starting up' : ' Amplitude Wizard 🦔'}
         </Text>
 
         {showDescription && (
           <Box flexDirection="column" alignItems="center" marginTop={1}>
             <Text dimColor>
-              We'll use AI to analyze your project and integrate PostHog.
+              We'll use AI to analyze your project and integrate Amplitude.
             </Text>
             <Text dimColor>
               .env* file contents will not leave your machine.

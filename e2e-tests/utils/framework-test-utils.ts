@@ -12,13 +12,13 @@ export const DEFAULT_WIZARD_STEPS: WizardStep[] = [
   {
     name: 'mcp',
     waitFor:
-      'Would you like to install the PostHog MCP server to use PostHog in your editor?',
+      'Would you like to install the Amplitude MCP server to use Amplitude in your editor?',
     response: [KEYS.DOWN, KEYS.ENTER],
     responseWaitFor: 'No',
   },
   {
     name: 'completion',
-    waitFor: 'Successfully installed PostHog!',
+    waitFor: 'Successfully installed Amplitude!',
     timeout: 2000,
   },
 ];

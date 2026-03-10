@@ -4,7 +4,7 @@
 # wizard-workbench, and run in CI mode.
 #
 # Prerequisites:
-#   - POSTHOG_PERSONAL_API_KEY env var (or in .env)
+#   - AMPLITUDE_PERSONAL_API_KEY env var (or in .env)
 #   - A wizard-workbench repo checked out (for the test app), pointed to by:
 #       - WIZARD_WORKBENCH_ROOT=/path/to/wizard-workbench
 #         or
@@ -16,15 +16,15 @@
 #
 # Examples:
 #   # With API key inline:
-#   POSTHOG_PERSONAL_API_KEY=phx_your_key_here ./scripts/smoke-test-ci.sh
+#   AMPLITUDE_PERSONAL_API_KEY=phx_your_key_here ./scripts/smoke-test-ci.sh
 #
 #   # With project ID override:
-#   POSTHOG_PERSONAL_API_KEY=phx_your_key_here POSTHOG_PROJECT_ID=12345 ./scripts/smoke-test-ci.sh
+#   AMPLITUDE_PERSONAL_API_KEY=phx_your_key_here AMPLITUDE_PROJECT_ID=12345 ./scripts/smoke-test-ci.sh
 #
 #   # Specific app:
-#   POSTHOG_PERSONAL_API_KEY=phx_your_key_here ./scripts/smoke-test-ci.sh next-js/15-pages-router-saas
+#   AMPLITUDE_PERSONAL_API_KEY=phx_your_key_here ./scripts/smoke-test-ci.sh next-js/15-pages-router-saas
 #
-#   # If ../wizard-workbench/.env has POSTHOG_PERSONAL_API_KEY, just:
+#   # If ../wizard-workbench/.env has AMPLITUDE_PERSONAL_API_KEY, just:
 #   ./scripts/smoke-test-ci.sh
 #
 set -euo pipefail
@@ -44,7 +44,7 @@ else
     echo "ERROR: wizard-workbench not found."
     echo "Either set WIZARD_WORKBENCH_ROOT=/absolute/path/to/wizard-workbench"
     echo "or clone it next to this repo:"
-    echo "  git clone https://github.com/PostHog/wizard-workbench.git ../wizard-workbench"
+    echo "  git clone https://github.com/Amplitude/wizard-workbench.git ../wizard-workbench"
     exit 1
   }
 fi
@@ -59,21 +59,21 @@ if [ ! -d "$APP_SRC" ]; then
   exit 1
 fi
 
-# Load .env from workbench if it exists (for POSTHOG_PERSONAL_API_KEY)
+# Load .env from workbench if it exists (for AMPLITUDE_PERSONAL_API_KEY)
 if [ -f "$WORKBENCH_ROOT/.env" ]; then
   set -a
   source "$WORKBENCH_ROOT/.env"
   set +a
 fi
 
-API_KEY="${POSTHOG_PERSONAL_API_KEY:-}"
+API_KEY="${AMPLITUDE_PERSONAL_API_KEY:-}"
 if [ -z "$API_KEY" ]; then
-  echo "ERROR: POSTHOG_PERSONAL_API_KEY not set"
+  echo "ERROR: AMPLITUDE_PERSONAL_API_KEY not set"
   echo "Set it in your environment or in $WORKBENCH_ROOT/.env"
   exit 1
 fi
 
-PROJECT_ID="${POSTHOG_PROJECT_ID:-}"
+PROJECT_ID="${AMPLITUDE_PROJECT_ID:-}"
 
 # ── Build & Pack ────────────────────────────────────────────────────────────
 echo "==> Building wizard..."
@@ -152,10 +152,10 @@ if [ $EXIT_CODE -eq 0 ]; then
 
   # Quick sanity checks
   echo "==> Post-install checks:"
-  if grep -q "posthog" "$WORK_DIR/package.json"; then
-    echo "    [PASS] posthog found in package.json"
+  if grep -q "amplitude" "$WORK_DIR/package.json"; then
+    echo "    [PASS] amplitude found in package.json"
   else
-    echo "    [FAIL] posthog NOT found in package.json"
+    echo "    [FAIL] amplitude NOT found in package.json"
     EXIT_CODE=1
   fi
 else

@@ -99,7 +99,7 @@ export class LoggingUI implements WizardUI {
       console.log(`│    • ${key}`);
     }
     console.log(
-      `│  These overrides prevent the Wizard from accessing the PostHog LLM Gateway.`,
+      `│  These overrides prevent the Wizard from accessing the Amplitude LLM Gateway.`,
     );
     return Promise.resolve();
   }

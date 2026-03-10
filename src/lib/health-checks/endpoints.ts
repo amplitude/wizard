@@ -3,15 +3,15 @@ import { ServiceHealthStatus, type BaseHealthResult } from './types';
 // ---------------------------------------------------------------------------
 // Direct endpoint health checks
 //
-// These ping PostHog-owned services directly (no Statuspage intermediary).
+// These ping Amplitude-owned services directly (no Statuspage intermediary).
 // A non-expected HTTP status or any network error is treated as Down.
 //
 // LLM Gateway – FastAPI service
-//   Source: posthog/services/llm-gateway/src/llm_gateway/api/health.py
+//   Source: amplitude/services/llm-gateway/src/llm_gateway/api/health.py
 //   GET /_liveness → 200 {"status":"alive"}
 //
 // MCP – Cloudflare Worker
-//   Source: posthog/services/mcp/src/index.ts
+//   Source: amplitude/services/mcp/src/index.ts
 //   GET / → 200 (HTML landing page)
 // ---------------------------------------------------------------------------
 
@@ -45,7 +45,7 @@ async function fetchEndpointHealth(
 }
 
 export const checkLlmGatewayHealth = (): Promise<BaseHealthResult> =>
-  fetchEndpointHealth('https://gateway.us.posthog.com/_liveness');
+  fetchEndpointHealth('https://gateway.us.amplitude.com/_liveness');
 
 export const checkMcpHealth = (): Promise<BaseHealthResult> =>
-  fetchEndpointHealth('https://mcp.posthog.com/');
+  fetchEndpointHealth('https://mcp.amplitude.com/');

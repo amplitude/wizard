@@ -11,10 +11,10 @@ const STATUS_PHRASES_BY_PHASE: Record<(typeof PHASES_ORDER)[number], string[]> =
   {
     '1.0-begin': [
       'Checking project structure',
-      'Verifying PostHog dependencies',
+      'Verifying Amplitude dependencies',
       'Generating events based on project',
     ],
-    '1.1-edit': ['Inserting PostHog capture code'],
+    '1.1-edit': ['Inserting Amplitude capture code'],
     '1.2-revise': [
       'Finding and correcting errors',
       'Report details of any errors you fix',

@@ -8,7 +8,7 @@ createFrameworkTest({
     prod: 'Local:',
   },
   tests: {
-    packageJson: ['posthog-js'],
+    packageJson: ['amplitude-js'],
     devMode: true,
     build: true,
     prodMode: 'preview',

@@ -123,11 +123,16 @@ async function fetchStatuspageSummary(
 export const checkAnthropicHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator('https://status.claude.com/api/v2/status.json');
 
-export const checkPosthogOverallHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator('https://www.posthogstatus.com/api/v2/status.json');
+export const checkAmplitudeOverallHealth = (): Promise<BaseHealthResult> =>
+  fetchStatuspageIndicator(
+    'https://www.amplitudestatus.com/api/v2/status.json',
+  );
 
-export const checkPosthogComponentHealth = (): Promise<ComponentHealthResult> =>
-  fetchStatuspageSummary('https://www.posthogstatus.com/api/v2/summary.json');
+export const checkAmplitudeComponentHealth =
+  (): Promise<ComponentHealthResult> =>
+    fetchStatuspageSummary(
+      'https://www.amplitudestatus.com/api/v2/summary.json',
+    );
 
 export const checkGithubHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator('https://www.githubstatus.com/api/v2/status.json');

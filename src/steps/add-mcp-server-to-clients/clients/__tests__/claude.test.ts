@@ -32,7 +32,7 @@ describe('ClaudeMCPClient', () => {
   const mockServerConfig = {
     command: 'npx',
     args: ['-y', 'mcp-remote@latest'],
-    env: { POSTHOG_AUTH_HEADER: `Bearer ${mockApiKey}` },
+    env: { AMPLITUDE_AUTH_HEADER: `Bearer ${mockApiKey}` },
   };
 
   const mkdirMock = fs.promises.mkdir as jest.Mock;
@@ -163,7 +163,7 @@ describe('ClaudeMCPClient', () => {
       expect(result).toBe(false);
     });
 
-    it('should return false when config file exists but posthog server is not configured', async () => {
+    it('should return false when config file exists but amplitude server is not configured', async () => {
       existsSyncMock.mockReturnValue(true);
       const configData = {
         mcpServers: {
@@ -176,11 +176,11 @@ describe('ClaudeMCPClient', () => {
       expect(result).toBe(false);
     });
 
-    it('should return true when posthog server is configured', async () => {
+    it('should return true when amplitude server is configured', async () => {
       existsSyncMock.mockReturnValue(true);
       const configData = {
         mcpServers: {
-          posthog: mockServerConfig,
+          amplitude: mockServerConfig,
           otherServer: mockServerConfig,
         },
       };
@@ -238,7 +238,7 @@ describe('ClaudeMCPClient', () => {
         JSON.stringify(
           {
             mcpServers: {
-              posthog: mockServerConfig,
+              amplitude: mockServerConfig,
             },
           },
           null,
@@ -269,7 +269,7 @@ describe('ClaudeMCPClient', () => {
           {
             mcpServers: {
               existingServer: existingConfig.mcpServers.existingServer,
-              posthog: mockServerConfig,
+              amplitude: mockServerConfig,
             },
           },
           null,
@@ -309,7 +309,7 @@ describe('ClaudeMCPClient', () => {
             },
             x: 'y',
             mcpServers: {
-              posthog: mockServerConfig,
+              amplitude: mockServerConfig,
             },
           },
           null,
@@ -363,11 +363,11 @@ describe('ClaudeMCPClient', () => {
       expect(writeFileMock).not.toHaveBeenCalled();
     });
 
-    it('should remove posthog server from config', async () => {
+    it('should remove amplitude server from config', async () => {
       existsSyncMock.mockReturnValue(true);
-      const configWithPosthog = {
+      const configWithAmplitude = {
         mcpServers: {
-          posthog: mockServerConfig,
+          amplitude: mockServerConfig,
           otherServer: {
             command: 'other',
             args: [],
@@ -375,7 +375,7 @@ describe('ClaudeMCPClient', () => {
           },
         },
       };
-      readFileMock.mockResolvedValue(JSON.stringify(configWithPosthog));
+      readFileMock.mockResolvedValue(JSON.stringify(configWithAmplitude));
 
       await client.removeServer();
 
@@ -384,7 +384,7 @@ describe('ClaudeMCPClient', () => {
         JSON.stringify(
           {
             mcpServers: {
-              otherServer: configWithPosthog.mcpServers.otherServer,
+              otherServer: configWithAmplitude.mcpServers.otherServer,
             },
           },
           null,
@@ -394,9 +394,9 @@ describe('ClaudeMCPClient', () => {
       );
     });
 
-    it('should do nothing when posthog server is not in config', async () => {
+    it('should do nothing when amplitude server is not in config', async () => {
       existsSyncMock.mockReturnValue(true);
-      const configWithoutPosthog = {
+      const configWithoutAmplitude = {
         mcpServers: {
           otherServer: {
             command: 'other',
@@ -405,7 +405,7 @@ describe('ClaudeMCPClient', () => {
           },
         },
       };
-      readFileMock.mockResolvedValue(JSON.stringify(configWithoutPosthog));
+      readFileMock.mockResolvedValue(JSON.stringify(configWithoutAmplitude));
 
       await client.removeServer();
 

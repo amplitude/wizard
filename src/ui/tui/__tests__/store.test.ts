@@ -153,7 +153,7 @@ describe('WizardStore', () => {
       const creds = {
         accessToken: 'tok',
         projectApiKey: 'pk',
-        host: 'https://app.posthog.com',
+        host: 'https://app.amplitude.com',
         projectId: 42,
       };
       store.setCredentials(creds);
@@ -199,7 +199,7 @@ describe('WizardStore', () => {
       const store = createStore();
       const status = {
         description: 'Major outage',
-        statusPageUrl: 'https://status.posthog.com',
+        statusPageUrl: 'https://status.amplitude.com',
       };
       store.setServiceStatus(status);
       expect(store.session.serviceStatus).toEqual(status);
@@ -848,7 +848,7 @@ describe('WizardStore', () => {
       store.setCredentials({
         accessToken: 'tok',
         projectApiKey: 'pk',
-        host: 'https://app.posthog.com',
+        host: 'https://app.amplitude.com',
         projectId: 1,
       });
       expect(store.currentScreen).toBe(Screen.Run);

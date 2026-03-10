@@ -21,8 +21,8 @@ const INITIAL_ITEMS: ProgressItem[] = [
     status: 'pending',
   },
   {
-    label: 'Configure PostHog',
-    activeForm: 'Configuring PostHog',
+    label: 'Configure Amplitude',
+    activeForm: 'Configuring Amplitude',
     status: 'pending',
   },
   {

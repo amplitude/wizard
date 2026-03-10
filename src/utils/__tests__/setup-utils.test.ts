@@ -67,15 +67,15 @@ describe.skip('installPackage', () => {
 
     await installPackage({
       alreadyInstalled: false,
-      packageName: 'posthog-js',
-      packageNameDisplayLabel: 'posthog-js',
+      packageName: 'amplitude-js',
+      packageNameDisplayLabel: 'amplitude-js',
       forceInstall: true,
       packageManager: packageManagerMock,
       installDir: process.cwd(),
     });
 
     expect(execSpy).toHaveBeenCalledWith(
-      'npm install posthog-js  --force',
+      'npm install amplitude-js  --force',
       expect.any(Function),
     );
   });
@@ -107,15 +107,15 @@ describe.skip('installPackage', () => {
 
       await installPackage({
         alreadyInstalled: false,
-        packageName: 'posthog-js',
-        packageNameDisplayLabel: 'posthog-js',
+        packageName: 'amplitude-js',
+        packageNameDisplayLabel: 'amplitude-js',
         forceInstall: flag,
         packageManager: packageManagerMock,
         installDir: process.cwd(),
       });
 
       expect(execSpy).toHaveBeenCalledWith(
-        'npm install posthog-js  ',
+        'npm install amplitude-js  ',
         expect.any(Function),
       );
     },

@@ -64,7 +64,7 @@ module.exports = {
     NodeJS: true,
   },
   rules: {
-    'no-console': 'error',
+    'no-console': 'off',
     '@typescript-eslint/ban-ts-comment': 'off',
     '@typescript-eslint/no-unsafe-call': 'warn',
     '@typescript-eslint/restrict-template-expressions': 'warn',

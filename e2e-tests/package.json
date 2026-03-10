@@ -1,5 +1,5 @@
 {
-  "name": "posthog-wizard-e2e-tests",
+  "name": "amplitude-wizard-e2e-tests",
   "version": "0.0.1",
   "directories": {
     "test": "tests"

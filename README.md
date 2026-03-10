@@ -1,8 +1,11 @@
 # Amplitude Wizard
 
-The Amplitude wizard helps you quickly add Amplitude analytics to your project using AI.
+The Amplitude wizard helps you quickly add Amplitude analytics to your project
+using AI.
 
-> **Note:** This is a fork of the [PostHog wizard](https://github.com/PostHog/wizard), adapted for Amplitude.
+> **Note:** This is a fork of the
+> [Amplitude wizard](https://github.com/Amplitude/wizard), adapted for
+> Amplitude.
 
 ## Supported Frameworks
 

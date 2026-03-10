@@ -24,7 +24,7 @@ jobs:
 
       - name: Check package version and detect an update
         id: check-package-version
-        uses: PostHog/check-package-version@97f76f610f6c3d259e2eac4f2783adbb84ac8493 # v2
+        uses: Amplitude/check-package-version@97f76f610f6c3d259e2eac4f2783adbb84ac8493 # v2
 
   release:
     name: Publish release if new version

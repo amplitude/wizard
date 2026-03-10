@@ -31,7 +31,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.accent}>
-          PostHog Setup Wizard
+          Amplitude Setup Wizard
         </Text>
 
         {frameworkLabel && (
@@ -44,7 +44,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         {config?.metadata.beta && (
           <Text color="yellow">
             [BETA] The {config.metadata.name} wizard is in beta. Questions or
-            feedback? Email wizard@posthog.com
+            feedback? Email wizard@amplitude.com
           </Text>
         )}
 

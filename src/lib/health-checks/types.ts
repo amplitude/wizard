@@ -22,8 +22,8 @@ export interface ComponentHealthResult extends BaseHealthResult {
 
 export interface AllServicesHealth {
   anthropic: BaseHealthResult;
-  posthogOverall: BaseHealthResult;
-  posthogComponents: ComponentHealthResult;
+  amplitudeOverall: BaseHealthResult;
+  amplitudeComponents: ComponentHealthResult;
   github: BaseHealthResult;
   npmOverall: BaseHealthResult;
   npmComponents: ComponentHealthResult;

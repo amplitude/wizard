@@ -94,7 +94,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
       });
 
       const outputStr = output.toString();
-      const serverName = local ? 'posthog-local' : 'posthog';
+      const serverName = local ? 'amplitude-local' : 'amplitude';
 
       if (outputStr.includes(serverName)) {
         return Promise.resolve(true);
@@ -120,7 +120,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
       return Promise.resolve({ success: false });
     }
 
-    const serverName = local ? 'posthog-local' : 'posthog';
+    const serverName = local ? 'amplitude-local' : 'amplitude';
     const url = buildMCPUrl('streamable-http', selectedFeatures, local);
 
     // OAuth mode: no auth header
@@ -150,7 +150,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
       return Promise.resolve({ success: false });
     }
 
-    const serverName = local ? 'posthog-local' : 'posthog';
+    const serverName = local ? 'amplitude-local' : 'amplitude';
     const command = `${claudeBinary} mcp remove --scope user ${serverName}`;
 
     try {

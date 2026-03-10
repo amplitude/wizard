@@ -1,7 +1,7 @@
 {
   "files": [
-    "src/components/PostHogProvider.tsx",
-    "src/lib/posthog.ts",
+    "src/components/AmplitudeProvider.tsx",
+    "src/lib/amplitude.ts",
     "next.config.mjs",
     "src/app/layout.tsx"
   ]

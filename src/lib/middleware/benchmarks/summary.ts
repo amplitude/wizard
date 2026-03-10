@@ -121,7 +121,7 @@ export class SummaryPlugin implements Middleware {
         toPhase,
       )}`,
     );
-    this.spinner.start(`Integrating PostHog (${toPhase})...`);
+    this.spinner.start(`Integrating Amplitude (${toPhase})...`);
   }
 
   onFinalize(

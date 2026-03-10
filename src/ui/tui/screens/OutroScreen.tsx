@@ -39,12 +39,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
           <Text color="green" bold>
-            {'\u2714'} Successfully installed PostHog!
+            {'\u2714'} Successfully installed Amplitude!
           </Text>
 
           <Box marginTop={1}>
             <Text>
-              Check <Text bold>./posthog-setup-report.md</Text> for details
+              Check <Text bold>./amplitude-setup-report.md</Text> for details
               about your integration
             </Text>
           </Box>
@@ -101,7 +101,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           </Box>
           <Box>
             <Text dimColor>
-              How did this work for you? Drop us a line: wizard@posthog.com
+              How did this work for you? Drop us a line: wizard@amplitude.com
             </Text>
           </Box>
         </Box>

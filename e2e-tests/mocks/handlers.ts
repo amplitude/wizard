@@ -13,7 +13,7 @@ export const handlers = [
   }),
 
   http.get(`${getCloudUrlFromRegion('us')}/api/wizard/data`, ({ request }) => {
-    const accessToken = request.headers.get('X-PostHog-Wizard-Hash');
+    const accessToken = request.headers.get('X-Amplitude-Wizard-Hash');
     if (accessToken === 'mock-wizard-hash-123') {
       return HttpResponse.json({
         project_api_key: 'mock-project-api-key',

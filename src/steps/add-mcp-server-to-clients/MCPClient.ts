@@ -50,7 +50,7 @@ export abstract class DefaultMCPClient extends MCPClient {
       const configContent = await fs.promises.readFile(configPath, 'utf8');
       const config = jsonc.parse(configContent) as Record<string, any>;
       const serverPropertyName = this.getServerPropertyName();
-      const serverName = local ? 'posthog-local' : 'posthog';
+      const serverName = local ? 'amplitude-local' : 'amplitude';
 
       return (
         serverPropertyName in config && serverName in config[serverPropertyName]
@@ -99,7 +99,7 @@ export abstract class DefaultMCPClient extends MCPClient {
       if (!typedConfig[serverPropertyName]) {
         typedConfig[serverPropertyName] = {};
       }
-      const serverName = local ? 'posthog-local' : 'posthog';
+      const serverName = local ? 'amplitude-local' : 'amplitude';
       typedConfig[serverPropertyName][serverName] = newServerConfig;
 
       const edits = jsonc.modify(
@@ -136,7 +136,7 @@ export abstract class DefaultMCPClient extends MCPClient {
       const config = jsonc.parse(configContent) as Record<string, any>;
       const serverPropertyName = this.getServerPropertyName();
 
-      const serverName = local ? 'posthog-local' : 'posthog';
+      const serverName = local ? 'amplitude-local' : 'amplitude';
 
       if (
         serverPropertyName in config &&

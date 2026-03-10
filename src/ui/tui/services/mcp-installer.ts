@@ -21,10 +21,10 @@ export interface McpInstaller {
   /** Detect which MCP-capable editors are available on this machine. */
   detectClients(): Promise<McpClientInfo[]>;
 
-  /** Install the PostHog MCP server to the given clients. Returns names of successfully installed clients. */
+  /** Install the Amplitude MCP server to the given clients. Returns names of successfully installed clients. */
   install(clientNames: string[]): Promise<string[]>;
 
-  /** Remove the PostHog MCP server from all installed clients. Returns names of removed clients. */
+  /** Remove the Amplitude MCP server from all installed clients. Returns names of removed clients. */
   remove(): Promise<string[]>;
 }
 

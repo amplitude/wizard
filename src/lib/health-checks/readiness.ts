@@ -7,8 +7,8 @@ import {
 } from './types';
 import {
   checkAnthropicHealth,
-  checkPosthogOverallHealth,
-  checkPosthogComponentHealth,
+  checkAmplitudeOverallHealth,
+  checkAmplitudeComponentHealth,
   checkGithubHealth,
   checkNpmOverallHealth,
   checkNpmComponentHealth,
@@ -23,8 +23,8 @@ import { checkLlmGatewayHealth, checkMcpHealth } from './endpoints';
 
 const SERVICE_LABELS: Record<HealthCheckKey, string> = {
   anthropic: 'Anthropic',
-  posthogOverall: 'PostHog',
-  posthogComponents: 'PostHog (components)',
+  amplitudeOverall: 'Amplitude',
+  amplitudeComponents: 'Amplitude (components)',
   github: 'GitHub',
   npmOverall: 'npm',
   npmComponents: 'npm (components)',
@@ -52,7 +52,7 @@ export interface WizardReadinessConfig {
 export const DEFAULT_WIZARD_READINESS_CONFIG: WizardReadinessConfig = {
   downBlocksRun: [
     'anthropic',
-    'posthogOverall',
+    'amplitudeOverall',
     'npmOverall',
     'llmGateway',
     'mcp',
@@ -67,8 +67,8 @@ export const DEFAULT_WIZARD_READINESS_CONFIG: WizardReadinessConfig = {
 export async function checkAllExternalServices(): Promise<AllServicesHealth> {
   const [
     anthropic,
-    posthogOverall,
-    posthogComponents,
+    amplitudeOverall,
+    amplitudeComponents,
     github,
     npmOverall,
     npmComponents,
@@ -78,8 +78,8 @@ export async function checkAllExternalServices(): Promise<AllServicesHealth> {
     mcp,
   ] = await Promise.all([
     checkAnthropicHealth(),
-    checkPosthogOverallHealth(),
-    checkPosthogComponentHealth(),
+    checkAmplitudeOverallHealth(),
+    checkAmplitudeComponentHealth(),
     checkGithubHealth(),
     checkNpmOverallHealth(),
     checkNpmComponentHealth(),
@@ -90,8 +90,8 @@ export async function checkAllExternalServices(): Promise<AllServicesHealth> {
   ]);
   return {
     anthropic,
-    posthogOverall,
-    posthogComponents,
+    amplitudeOverall,
+    amplitudeComponents,
     github,
     npmOverall,
     npmComponents,

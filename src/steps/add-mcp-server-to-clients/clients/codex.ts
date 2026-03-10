@@ -31,7 +31,7 @@ export class CodexMCPClient extends DefaultMCPClient {
   }
 
   isServerInstalled(local?: boolean): Promise<boolean> {
-    const serverName = local ? 'posthog-local' : 'posthog';
+    const serverName = local ? 'amplitude-local' : 'amplitude';
 
     try {
       const result = spawnSync('codex', ['mcp', 'list', '--json'], {
@@ -61,15 +61,15 @@ export class CodexMCPClient extends DefaultMCPClient {
     selectedFeatures?: string[],
     local?: boolean,
   ): Promise<{ success: boolean }> {
-    const serverName = local ? 'posthog-local' : 'posthog';
+    const serverName = local ? 'amplitude-local' : 'amplitude';
     const url = buildMCPUrl('streamable-http', selectedFeatures, local);
 
     const args = ['mcp', 'add', serverName, '--url', url];
 
     const env = { ...process.env };
     if (apiKey) {
-      env.POSTHOG_API_KEY = apiKey;
-      args.push('--bearer-token-env-var', 'POSTHOG_API_KEY');
+      env.AMPLITUDE_API_KEY = apiKey;
+      args.push('--bearer-token-env-var', 'AMPLITUDE_API_KEY');
     }
 
     const result = spawnSync('codex', args, { stdio: 'ignore', env });
@@ -85,7 +85,7 @@ export class CodexMCPClient extends DefaultMCPClient {
   }
 
   removeServer(local?: boolean): Promise<{ success: boolean }> {
-    const serverName = local ? 'posthog-local' : 'posthog';
+    const serverName = local ? 'amplitude-local' : 'amplitude';
     const result = spawnSync('codex', ['mcp', 'remove', serverName], {
       stdio: 'ignore',
     });

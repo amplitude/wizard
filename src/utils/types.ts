@@ -1,8 +1,5 @@
 export type AmplitudeProjectData = Record<string, unknown>;
 
-/** @deprecated Use AmplitudeProjectData */
-export type PostHogProjectData = AmplitudeProjectData;
-
 export type PreselectedProject = {
   project: AmplitudeProjectData;
   authToken: string;

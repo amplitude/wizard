@@ -171,7 +171,7 @@ export function initGit(projectDir: string): void {
     // Add all files to the git repo
     execSync('git add -A', { cwd: projectDir });
     // Add author info to avoid git commit error
-    execSync('git config user.email test@test.posthog.com', {
+    execSync('git config user.email test@test.amplitude.com', {
       cwd: projectDir,
     });
     execSync('git config user.name Test', { cwd: projectDir });

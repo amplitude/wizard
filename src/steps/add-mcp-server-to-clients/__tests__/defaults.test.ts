@@ -8,12 +8,12 @@ describe('defaults', () => {
   describe('buildMCPUrl', () => {
     it('should build base URL for streamable-http type', () => {
       const url = buildMCPUrl('streamable-http');
-      expect(url).toBe('https://mcp.posthog.com/mcp');
+      expect(url).toBe('https://mcp.amplitude.com/mcp');
     });
 
     it('should build base URL for sse type', () => {
       const url = buildMCPUrl('sse');
-      expect(url).toBe('https://mcp.posthog.com/sse');
+      expect(url).toBe('https://mcp.amplitude.com/sse');
     });
 
     it('should use localhost for local mode', () => {
@@ -24,7 +24,7 @@ describe('defaults', () => {
     it('should add features param when not all features selected', () => {
       const url = buildMCPUrl('streamable-http', ['dashboards', 'insights']);
       expect(url).toBe(
-        'https://mcp.posthog.com/mcp?features=dashboards,insights',
+        'https://mcp.amplitude.com/mcp?features=dashboards,insights',
       );
     });
 
@@ -42,12 +42,12 @@ describe('defaults', () => {
         args: [
           '-y',
           'mcp-remote@latest',
-          'https://mcp.posthog.com/sse',
+          'https://mcp.amplitude.com/sse',
           '--header',
-          'Authorization:${POSTHOG_AUTH_HEADER}',
+          'Authorization:${AMPLITUDE_AUTH_HEADER}',
         ],
         env: {
-          POSTHOG_AUTH_HEADER: 'Bearer phx_test123',
+          AMPLITUDE_AUTH_HEADER: 'Bearer phx_test123',
         },
       });
     });
@@ -56,7 +56,7 @@ describe('defaults', () => {
       const config = getDefaultServerConfig(undefined, 'sse');
       expect(config).toEqual({
         command: 'npx',
-        args: ['-y', 'mcp-remote@latest', 'https://mcp.posthog.com/sse'],
+        args: ['-y', 'mcp-remote@latest', 'https://mcp.amplitude.com/sse'],
       });
       expect(config).not.toHaveProperty('env');
     });
@@ -69,7 +69,7 @@ describe('defaults', () => {
         'streamable-http',
       );
       expect(config).toEqual({
-        url: 'https://mcp.posthog.com/mcp',
+        url: 'https://mcp.amplitude.com/mcp',
         headers: {
           Authorization: 'Bearer phx_test123',
         },
@@ -79,7 +79,7 @@ describe('defaults', () => {
     it('should return config without headers for OAuth mode (no API key)', () => {
       const config = getNativeHTTPServerConfig(undefined, 'streamable-http');
       expect(config).toEqual({
-        url: 'https://mcp.posthog.com/mcp',
+        url: 'https://mcp.amplitude.com/mcp',
       });
       expect(config).not.toHaveProperty('headers');
     });

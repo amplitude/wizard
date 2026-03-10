@@ -52,7 +52,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
 
 /**
  * Universal agent-powered wizard runner.
- * Handles the complete flow for any framework using PostHog MCP integration.
+ * Handles the complete flow for any framework using Amplitude MCP integration.
  *
  * All user decisions come from the session — no UI prompts.
  */
@@ -80,7 +80,7 @@ export async function runAgentWizard(
         getUI().log.info(
           `Setup ${config.metadata.name} manually: ${chalk.cyan(docsUrl)}`,
         );
-        getUI().outro('PostHog wizard will see you next time!');
+        getUI().outro('Amplitude wizard will see you next time!');
         return;
       }
     }
@@ -100,7 +100,7 @@ export async function runAgentWizard(
   }
 
   // Check for blocking env overrides in .claude/settings.json before login.
-  // These keys block the Wizard from accessing the PostHog LLM Gateway.
+  // These keys block the Wizard from accessing the Amplitude LLM Gateway.
   const blockingOverrideKeys = checkClaudeSettingsOverrides(session.installDir);
   if (blockingOverrideKeys.length > 0) {
     await getUI().showSettingsOverride(blockingOverrideKeys, () =>
@@ -150,7 +150,7 @@ export async function runAgentWizard(
     integration: config.metadata.integration,
   });
 
-  // Get PostHog credentials (region auto-detected from token)
+  // Get Amplitude credentials (region auto-detected from token)
   const { projectApiKey, host, accessToken, projectId, cloudRegion } =
     await getOrAskForProjectData({
       signup: session.signup,
@@ -195,7 +195,7 @@ export async function runAgentWizard(
   // Determine MCP URL: CLI flag > env var > production default
   const mcpUrl = session.localMcp
     ? 'http://localhost:8787/mcp'
-    : process.env.MCP_URL || 'https://mcp.posthog.com/mcp';
+    : process.env.MCP_URL || 'https://mcp.amplitude.com/mcp';
 
   const restoreSettings = () => restoreClaudeSettings(session.installDir);
   getUI().onEnterScreen('outro', restoreSettings);
@@ -204,9 +204,9 @@ export async function runAgentWizard(
   const agent = await initializeAgent(
     {
       workingDirectory: session.installDir,
-      posthogMcpUrl: mcpUrl,
-      posthogApiKey: accessToken,
-      posthogApiHost: host,
+      amplitudeMcpUrl: mcpUrl,
+      amplitudeApiKey: accessToken,
+      amplitudeApiHost: host,
       additionalMcpServers: config.metadata.additionalMcpServers,
       detectPackageManager: config.detection.detectPackageManager,
       wizardFlags,
@@ -237,8 +237,8 @@ export async function runAgentWizard(
   // Handle error cases detected in agent output
   if (agentResult.error === AgentErrorType.MCP_MISSING) {
     await wizardAbort({
-      message: `Could not access the PostHog MCP server\n\nThe wizard was unable to connect to the PostHog MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
-      error: new WizardError('Agent could not access PostHog MCP server', {
+      message: `Could not access the Amplitude MCP server\n\nThe wizard was unable to connect to the Amplitude MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
+      error: new WizardError('Agent could not access Amplitude MCP server', {
         integration: config.metadata.integration,
         error_type: AgentErrorType.MCP_MISSING,
         signal: AgentSignals.ERROR_MCP_MISSING,
@@ -270,7 +270,7 @@ export async function runAgentWizard(
     await wizardAbort({
       message: `API Error\n\n${
         agentResult.message || 'Unknown error'
-      }\n\nPlease report this error to: wizard@posthog.com`,
+      }\n\nPlease report this error to: wizard@amplitude.com`,
       error: new WizardError(`API error: ${agentResult.message}`, {
         integration: config.metadata.integration,
         error_type: agentResult.error,
@@ -317,7 +317,7 @@ export async function runAgentWizard(
     continueUrl,
   };
 
-  getUI().outro(`Successfully installed PostHog!`);
+  getUI().outro(`Successfully installed Amplitude!`);
 
   await analytics.shutdown('success');
 }
@@ -345,16 +345,16 @@ function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
-  return `You have access to the PostHog MCP server which provides skills to integrate PostHog into this ${
+  return `You have access to the Amplitude MCP server which provides skills to integrate Amplitude into this ${
     config.metadata.name
   } project.
 
 Project context:
-- PostHog Project ID: ${context.projectId}
+- Amplitude Project ID: ${context.projectId}
 - Framework: ${config.metadata.name} ${context.frameworkVersion}
 - TypeScript: ${context.typescript ? 'Yes' : 'No'}
-- PostHog public token: ${context.projectApiKey}
-- PostHog Host: ${context.host}
+- Amplitude public token: ${context.projectApiKey}
+- Amplitude Host: ${context.host}
 - Project type: ${config.prompts.projectTypeDetection}
 - Package installation: ${
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
@@ -362,16 +362,16 @@ Project context:
 
 Instructions (follow these steps IN ORDER - do not skip or reorder):
 
-STEP 1: List available skills from the PostHog MCP server using ListMcpResourcesTool. If this tool is not available or you cannot access the MCP server, you must emit: ${
+STEP 1: List available skills from the Amplitude MCP server using ListMcpResourcesTool. If this tool is not available or you cannot access the MCP server, you must emit: ${
     AgentSignals.ERROR_MCP_MISSING
-  } Could not access the PostHog MCP server and halt.
+  } Could not access the Amplitude MCP server and halt.
 
    Review the skill descriptions and choose the one that best matches this project's framework and configuration.
    If no suitable skill is found, or you cannot access the MCP server, you emit: ${
      AgentSignals.ERROR_RESOURCE_MISSING
    } Could not find a suitable skill for this project.
 
-STEP 2: Fetch the chosen skill resource (e.g., posthog://skills/{skill-id}).
+STEP 2: Fetch the chosen skill resource (e.g., amplitude://skills/{skill-id}).
    The resource returns a shell command to install the skill.
 
 STEP 3: Run the installation command using Bash:
@@ -380,11 +380,11 @@ STEP 3: Run the installation command using Bash:
 
 STEP 4: Load the installed skill's SKILL.md file to understand what references are available.
 
-STEP 5: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write PostHog tokens directly to code files; always use environment variables.
+STEP 5: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
 
-STEP 6: Set up environment variables for PostHog using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
+STEP 6: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
    - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
-   - Use set_env_values to create or update the PostHog public token and host, using the appropriate environment variable naming convention for ${
+   - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
      config.metadata.name
    }, which you'll find in example code. The tool will also ensure .gitignore coverage. Don't assume the presence of keys means the value is up to date. Write the correct value each time.
    - Reference these environment variables in the code files you create instead of hardcoding the public token and host.

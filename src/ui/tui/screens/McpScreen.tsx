@@ -162,8 +162,8 @@ export const McpScreen = ({
               <ConfirmationInput
                 message={
                   isRemove
-                    ? 'Remove the PostHog MCP server from your editor?'
-                    : 'Install the PostHog MCP server to your editor?'
+                    ? 'Remove the Amplitude MCP server from your editor?'
+                    : 'Install the Amplitude MCP server to your editor?'
                 }
                 confirmLabel={isRemove ? 'Remove MCP' : 'Install MCP'}
                 cancelLabel="No thanks"

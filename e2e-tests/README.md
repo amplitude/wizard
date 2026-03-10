@@ -1,4 +1,4 @@
-# End-to-end tests for PostHog wizard
+# End-to-end tests for Amplitude wizard
 
 ## Running Tests Locally
 
@@ -30,7 +30,7 @@ To adjust the default behaviour of the framework, also take a look at
 ## Fixture Generation
 
 To be able to mock our LLM calls in the E2E tests, we need to have a realistic
-fixture. To generate them, we a call to the `/query` endpoint in PostHog. We
+fixture. To generate them, we a call to the `/query` endpoint in Amplitude. We
 save this response as a fixture in `e2e-tests/fixtures`. The filename represents
 the hashed request body to the endpoint. When we run the tests again, we reuse
 those fixtures.
@@ -87,6 +87,6 @@ modifiers that can be used in (`*.test.ts`).
 
 #### `WizardTestEnv`
 
-`WizardTestEnv` is a class that can be used to run the PostHog wizard in a test
-environment. It provides methods to run the wizard with specific arguments and
-stdio.
+`WizardTestEnv` is a class that can be used to run the Amplitude wizard in a
+test environment. It provides methods to run the wizard with specific arguments
+and stdio.

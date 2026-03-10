@@ -44,10 +44,10 @@ describe('CodexMCPClient', () => {
   });
 
   describe('isServerInstalled', () => {
-    it('returns true when posthog server exists', async () => {
+    it('returns true when amplitude server exists', async () => {
       spawnSyncMock.mockReturnValue({
         status: 0,
-        stdout: JSON.stringify([{ name: 'posthog' }, { name: 'other' }]),
+        stdout: JSON.stringify([{ name: 'amplitude' }, { name: 'other' }]),
       });
 
       const client = new CodexMCPClient();
@@ -75,16 +75,16 @@ describe('CodexMCPClient', () => {
         [
           'mcp',
           'add',
-          'posthog',
+          'amplitude',
           '--url',
-          'https://mcp.posthog.com/mcp',
+          'https://mcp.amplitude.com/mcp',
           '--bearer-token-env-var',
-          'POSTHOG_API_KEY',
+          'AMPLITUDE_API_KEY',
         ],
         expect.objectContaining({
           stdio: 'ignore',
           env: expect.objectContaining({
-            POSTHOG_API_KEY: 'phx_example',
+            AMPLITUDE_API_KEY: 'phx_example',
           }),
         }),
       );
@@ -99,7 +99,7 @@ describe('CodexMCPClient', () => {
       expect(result).toEqual({ success: true });
       expect(spawnSyncMock).toHaveBeenCalledWith(
         'codex',
-        ['mcp', 'add', 'posthog', '--url', 'https://mcp.posthog.com/mcp'],
+        ['mcp', 'add', 'amplitude', '--url', 'https://mcp.amplitude.com/mcp'],
         expect.objectContaining({ stdio: 'ignore' }),
       );
     });
@@ -125,7 +125,7 @@ describe('CodexMCPClient', () => {
       expect(result).toEqual({ success: true });
       expect(spawnSyncMock).toHaveBeenCalledWith(
         'codex',
-        ['mcp', 'remove', 'posthog'],
+        ['mcp', 'remove', 'amplitude'],
         {
           stdio: 'ignore',
         },

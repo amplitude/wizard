@@ -40,9 +40,9 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
     jsonWriter: true,
   },
   output: {
-    benchmarkPath: '/tmp/posthog-wizard-benchmark.json',
+    benchmarkPath: '/tmp/amplitude-wizard-benchmark.json',
     benchmarkEnabled: true,
-    logPath: '/tmp/posthog-wizard.log',
+    logPath: '/tmp/amplitude-wizard.log',
     logEnabled: true,
     suppressWizardLogs: false,
   },
@@ -50,7 +50,7 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
 
 export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
   const configPath =
-    process.env.POSTHOG_WIZARD_BENCHMARK_CONFIG ??
+    process.env.AMPLITUDE_WIZARD_BENCHMARK_CONFIG ??
     path.join(installDir, '.benchmark-config.json');
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
@@ -61,11 +61,11 @@ export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
     };
 
     // Env var overrides for parallel runs
-    if (process.env.POSTHOG_WIZARD_BENCHMARK_FILE) {
-      config.output.benchmarkPath = process.env.POSTHOG_WIZARD_BENCHMARK_FILE;
+    if (process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE) {
+      config.output.benchmarkPath = process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
     }
-    if (process.env.POSTHOG_WIZARD_LOG_FILE) {
-      config.output.logPath = process.env.POSTHOG_WIZARD_LOG_FILE;
+    if (process.env.AMPLITUDE_WIZARD_LOG_FILE) {
+      config.output.logPath = process.env.AMPLITUDE_WIZARD_LOG_FILE;
     }
 
     // If benchmark output is disabled, disable the jsonWriter plugin
@@ -80,11 +80,11 @@ export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
     const config = structuredClone(DEFAULT_CONFIG);
 
     // Env var overrides
-    if (process.env.POSTHOG_WIZARD_BENCHMARK_FILE) {
-      config.output.benchmarkPath = process.env.POSTHOG_WIZARD_BENCHMARK_FILE;
+    if (process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE) {
+      config.output.benchmarkPath = process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
     }
-    if (process.env.POSTHOG_WIZARD_LOG_FILE) {
-      config.output.logPath = process.env.POSTHOG_WIZARD_LOG_FILE;
+    if (process.env.AMPLITUDE_WIZARD_LOG_FILE) {
+      config.output.logPath = process.env.AMPLITUDE_WIZARD_LOG_FILE;
     }
 
     return config;

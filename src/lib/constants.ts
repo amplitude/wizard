@@ -49,7 +49,7 @@ export const ISSUES_URL = 'https://github.com/amplitude/wizard/issues';
 // ── Analytics (internal) ──────────────────────────────────────────────
 
 // TODO: Replace with Amplitude analytics keys
-export const ANALYTICS_POSTHOG_PUBLIC_PROJECT_WRITE_KEY = '';
+export const ANALYTICS_AMPLITUDE_PUBLIC_PROJECT_WRITE_KEY = '';
 export const ANALYTICS_HOST_URL = '';
 export const ANALYTICS_TEAM_TAG = 'amplitude-wizard';
 
@@ -94,9 +94,9 @@ export const WIZARD_USER_AGENT = `amplitude/wizard; version: ${VERSION}`;
 // ── HTTP headers ─────────────────────────────────────────────────────
 
 /** Header prefix for Amplitude properties. */
-export const POSTHOG_PROPERTY_HEADER_PREFIX = 'X-AMPLITUDE-PROPERTY-';
+export const AMPLITUDE_PROPERTY_HEADER_PREFIX = 'X-AMPLITUDE-PROPERTY-';
 /** Header prefix for Amplitude feature flags. */
-export const POSTHOG_FLAG_HEADER_PREFIX = 'X-AMPLITUDE-FLAG-';
+export const AMPLITUDE_FLAG_HEADER_PREFIX = 'X-AMPLITUDE-FLAG-';
 
 // ── Timeouts ─────────────────────────────────────────────────────────
 

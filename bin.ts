@@ -53,46 +53,46 @@ if (process.env.NODE_ENV === 'test') {
 }
 
 yargs(hideBin(process.argv))
-  .env('POSTHOG_WIZARD')
+  .env('AMPLITUDE_WIZARD')
   // global options
   .options({
     debug: {
       default: false,
-      describe: 'Enable verbose logging\nenv: POSTHOG_WIZARD_DEBUG',
+      describe: 'Enable verbose logging\nenv: AMPLITUDE_WIZARD_DEBUG',
       type: 'boolean',
     },
     default: {
       default: true,
       describe:
-        'Use default options for all prompts\nenv: POSTHOG_WIZARD_DEFAULT',
+        'Use default options for all prompts\nenv: AMPLITUDE_WIZARD_DEFAULT',
       type: 'boolean',
     },
     signup: {
       default: false,
       describe:
-        'Create a new Amplitude account during setup\nenv: POSTHOG_WIZARD_SIGNUP',
+        'Create a new Amplitude account during setup\nenv: AMPLITUDE_WIZARD_SIGNUP',
       type: 'boolean',
     },
     'local-mcp': {
       default: false,
       describe:
-        'Use local MCP server at http://localhost:8787/mcp\nenv: POSTHOG_WIZARD_LOCAL_MCP',
+        'Use local MCP server at http://localhost:8787/mcp\nenv: AMPLITUDE_WIZARD_LOCAL_MCP',
       type: 'boolean',
     },
     ci: {
       default: false,
       describe:
-        'Enable CI mode for non-interactive execution\nenv: POSTHOG_WIZARD_CI',
+        'Enable CI mode for non-interactive execution\nenv: AMPLITUDE_WIZARD_CI',
       type: 'boolean',
     },
     'api-key': {
       describe:
-        'Amplitude API key for authentication\nenv: POSTHOG_WIZARD_API_KEY',
+        'Amplitude API key for authentication\nenv: AMPLITUDE_WIZARD_API_KEY',
       type: 'string',
     },
     'project-id': {
       describe:
-        'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: POSTHOG_WIZARD_PROJECT_ID',
+        'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: AMPLITUDE_WIZARD_PROJECT_ID',
       type: 'string',
     },
   })
@@ -104,12 +104,12 @@ yargs(hideBin(process.argv))
         'force-install': {
           default: false,
           describe:
-            'Force install packages even if peer dependency checks fail\nenv: POSTHOG_WIZARD_FORCE_INSTALL',
+            'Force install packages even if peer dependency checks fail\nenv: AMPLITUDE_WIZARD_FORCE_INSTALL',
           type: 'boolean',
         },
         'install-dir': {
           describe:
-            'Directory to install Amplitude in\nenv: POSTHOG_WIZARD_INSTALL_DIR',
+            'Directory to install Amplitude in\nenv: AMPLITUDE_WIZARD_INSTALL_DIR',
           type: 'string',
         },
         playground: {
@@ -135,13 +135,13 @@ yargs(hideBin(process.argv))
         menu: {
           default: false,
           describe:
-            'Show menu for manual integration selection instead of auto-detecting\nenv: POSTHOG_WIZARD_MENU',
+            'Show menu for manual integration selection instead of auto-detecting\nenv: AMPLITUDE_WIZARD_MENU',
           type: 'boolean',
         },
         benchmark: {
           default: false,
           describe:
-            'Run in benchmark mode with per-phase token tracking\nenv: POSTHOG_WIZARD_BENCHMARK',
+            'Run in benchmark mode with per-phase token tracking\nenv: AMPLITUDE_WIZARD_BENCHMARK',
           type: 'boolean',
         },
       });
@@ -297,7 +297,7 @@ yargs(hideBin(process.argv))
                 tui.store.addDiscoveredFeature(DiscoveredFeature.Stripe);
               }
 
-              // LLM SDK detection — sourced from PostHog LLM analytics skill
+              // LLM SDK detection — sourced from Amplitude LLM analytics skill
               const LLM_PACKAGES = [
                 'openai',
                 '@anthropic-ai/sdk',
@@ -333,7 +333,7 @@ yargs(hideBin(process.argv))
             // Keep the outro screen visible — let process.exit() handle cleanup
           } catch (err) {
             // TUI unavailable (e.g., in test environment) — continue with default UI
-            if (process.env.DEBUG || process.env.POSTHOG_WIZARD_DEBUG) {
+            if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
               console.error('TUI init failed:', err); // eslint-disable-line no-console
             }
             await runWizard(options as Parameters<typeof runWizard>[0]);

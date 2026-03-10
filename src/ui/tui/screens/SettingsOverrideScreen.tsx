@@ -1,6 +1,6 @@
 /**
  * SettingsOverrideScreen — Modal when .claude/settings.json contains env overrides
- * that block the Wizard from reaching the PostHog LLM Gateway.
+ * that block the Wizard from reaching the Amplitude LLM Gateway.
  */
 
 import { Box, Text } from 'ink';
@@ -63,7 +63,7 @@ export const SettingsOverrideScreen = ({
           ))}
         </Box>
         <Text dimColor>
-          These overrides prevent the Wizard from reaching the PostHog LLM
+          These overrides prevent the Wizard from reaching the Amplitude LLM
           Gateway. We can back up the file and continue.
         </Text>
 

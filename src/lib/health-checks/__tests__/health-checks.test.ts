@@ -10,10 +10,10 @@
  *   https://support.atlassian.com/statuspage/docs/show-service-status-with-components
  *
  * LLM Gateway – FastAPI service, GET /_liveness returns {"status":"alive"} (200)
- *   Source: posthog/services/llm-gateway/src/llm_gateway/api/health.py
+ *   Source: amplitude/services/llm-gateway/src/llm_gateway/api/health.py
  *
  * MCP – Cloudflare Worker, GET / returns an HTML landing page (200)
- *   Source: posthog/services/mcp/src/index.ts
+ *   Source: amplitude/services/mcp/src/index.ts
  */
 
 import {
@@ -26,8 +26,8 @@ import {
   checkMcpHealth,
   checkNpmComponentHealth,
   checkNpmOverallHealth,
-  checkPosthogComponentHealth,
-  checkPosthogOverallHealth,
+  checkAmplitudeComponentHealth,
+  checkAmplitudeOverallHealth,
   DEFAULT_WIZARD_READINESS_CONFIG,
   evaluateWizardReadiness,
   ServiceHealthStatus,
@@ -180,18 +180,18 @@ const CLOUDFLARE_SUMMARY_HEALTHY = makeStatuspageSummary({
   ],
 });
 
-const POSTHOG_STATUS_HEALTHY = makeStatuspageStatus({
+const AMPLITUDE_STATUS_HEALTHY = makeStatuspageStatus({
   pageId: 'qf5jlnph3bcy',
-  pageName: 'PostHog',
-  pageUrl: 'https://status.posthog.com',
+  pageName: 'Amplitude',
+  pageUrl: 'https://status.amplitude.com',
   indicator: 'none',
   description: 'All Systems Operational',
 });
 
-const POSTHOG_SUMMARY_HEALTHY = makeStatuspageSummary({
+const AMPLITUDE_SUMMARY_HEALTHY = makeStatuspageSummary({
   pageId: 'qf5jlnph3bcy',
-  pageName: 'PostHog',
-  pageUrl: 'https://status.posthog.com',
+  pageName: 'Amplitude',
+  pageUrl: 'https://status.amplitude.com',
   indicator: 'none',
   description: 'All Systems Operational',
   components: [
@@ -210,8 +210,8 @@ const POSTHOG_SUMMARY_HEALTHY = makeStatuspageSummary({
       description: null,
     },
     {
-      id: 'posthog-com',
-      name: 'PostHog.com',
+      id: 'amplitude-com',
+      name: 'Amplitude.com',
       status: 'operational',
       position: 3,
       description: null,
@@ -219,12 +219,12 @@ const POSTHOG_SUMMARY_HEALTHY = makeStatuspageSummary({
   ],
 });
 
-// LLM Gateway /_liveness response (from posthog/services/llm-gateway/src/llm_gateway/api/health.py)
+// LLM Gateway /_liveness response (from amplitude/services/llm-gateway/src/llm_gateway/api/health.py)
 const LLM_GATEWAY_LIVENESS_BODY = JSON.stringify({ status: 'alive' });
 
-// MCP / landing page (from posthog/services/mcp/src/index.ts + src/static/landing.html)
+// MCP / landing page (from amplitude/services/mcp/src/index.ts + src/static/landing.html)
 const MCP_LANDING_HTML =
-  '<!doctype html><html lang="en"><head><title>PostHog MCP Server</title></head><body></body></html>';
+  '<!doctype html><html lang="en"><head><title>Amplitude MCP Server</title></head><body></body></html>';
 
 // ---------------------------------------------------------------------------
 // URL constants (must match health-checks.ts)
@@ -232,15 +232,15 @@ const MCP_LANDING_HTML =
 
 const URLS = {
   anthropicStatus: 'https://status.claude.com/api/v2/status.json',
-  posthogStatus: 'https://www.posthogstatus.com/api/v2/status.json',
-  posthogSummary: 'https://www.posthogstatus.com/api/v2/summary.json',
+  amplitudeStatus: 'https://www.amplitudestatus.com/api/v2/status.json',
+  amplitudeSummary: 'https://www.amplitudestatus.com/api/v2/summary.json',
   githubStatus: 'https://www.githubstatus.com/api/v2/status.json',
   npmStatus: 'https://status.npmjs.org/api/v2/status.json',
   npmSummary: 'https://status.npmjs.org/api/v2/summary.json',
   cloudflareStatus: 'https://www.cloudflarestatus.com/api/v2/status.json',
   cloudflareSummary: 'https://www.cloudflarestatus.com/api/v2/summary.json',
-  llmGatewayLiveness: 'https://gateway.us.posthog.com/_liveness',
-  mcpLanding: 'https://mcp.posthog.com/',
+  llmGatewayLiveness: 'https://gateway.us.amplitude.com/_liveness',
+  mcpLanding: 'https://mcp.amplitude.com/',
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -253,12 +253,12 @@ const HEALTHY_RESPONSES: Record<string, { body: string; contentType: string }> =
       body: JSON.stringify(ANTHROPIC_STATUS_HEALTHY),
       contentType: 'application/json',
     },
-    [URLS.posthogStatus]: {
-      body: JSON.stringify(POSTHOG_STATUS_HEALTHY),
+    [URLS.amplitudeStatus]: {
+      body: JSON.stringify(AMPLITUDE_STATUS_HEALTHY),
       contentType: 'application/json',
     },
-    [URLS.posthogSummary]: {
-      body: JSON.stringify(POSTHOG_SUMMARY_HEALTHY),
+    [URLS.amplitudeSummary]: {
+      body: JSON.stringify(AMPLITUDE_SUMMARY_HEALTHY),
       contentType: 'application/json',
     },
     [URLS.githubStatus]: {
@@ -440,9 +440,9 @@ describe('health-checks', () => {
     });
   });
 
-  describe('checkPosthogOverallHealth', () => {
+  describe('checkAmplitudeOverallHealth', () => {
     it('returns healthy for indicator=none', async () => {
-      const result = await checkPosthogOverallHealth();
+      const result = await checkAmplitudeOverallHealth();
       expect(result.status).toBe(ServiceHealthStatus.Healthy);
       expect(result.rawIndicator).toBe('none');
     });
@@ -493,9 +493,9 @@ describe('health-checks', () => {
   // Statuspage summary.json checks (component-based)
   // -----------------------------------------------------------------------
 
-  describe('checkPosthogComponentHealth', () => {
+  describe('checkAmplitudeComponentHealth', () => {
     it('reports all operational when every component is operational', async () => {
-      const result = await checkPosthogComponentHealth();
+      const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Healthy);
       expect(result.degradedOrDownComponents).toBeUndefined();
     });
@@ -503,8 +503,8 @@ describe('health-checks', () => {
     it('reports degraded when a component has partial_outage', async () => {
       const body = makeStatuspageSummary({
         pageId: 'qf5jlnph3bcy',
-        pageName: 'PostHog',
-        pageUrl: 'https://status.posthog.com',
+        pageName: 'Amplitude',
+        pageUrl: 'https://status.amplitude.com',
         indicator: 'major',
         description: 'Partial System Outage',
         components: [
@@ -526,13 +526,13 @@ describe('health-checks', () => {
       });
       (global.fetch as jest.Mock).mockImplementation(
         overrideFetch({
-          [URLS.posthogSummary]: () =>
+          [URLS.amplitudeSummary]: () =>
             Promise.resolve(
               new Response(JSON.stringify(body), { status: 200 }),
             ),
         }),
       );
-      const result = await checkPosthogComponentHealth();
+      const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
       expect(result.degradedOrDownComponents).toHaveLength(1);
       expect(result.degradedOrDownComponents![0].name).toBe('US Cloud');
@@ -547,8 +547,8 @@ describe('health-checks', () => {
     it('reports degraded when a component has degraded_performance', async () => {
       const body = makeStatuspageSummary({
         pageId: 'qf5jlnph3bcy',
-        pageName: 'PostHog',
-        pageUrl: 'https://status.posthog.com',
+        pageName: 'Amplitude',
+        pageUrl: 'https://status.amplitude.com',
         indicator: 'minor',
         description: 'Degraded System Performance',
         components: [
@@ -570,13 +570,13 @@ describe('health-checks', () => {
       });
       (global.fetch as jest.Mock).mockImplementation(
         overrideFetch({
-          [URLS.posthogSummary]: () =>
+          [URLS.amplitudeSummary]: () =>
             Promise.resolve(
               new Response(JSON.stringify(body), { status: 200 }),
             ),
         }),
       );
-      const result = await checkPosthogComponentHealth();
+      const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
       expect(result.degradedOrDownComponents![0].rawStatus).toBe(
         'degraded_performance',
@@ -589,8 +589,8 @@ describe('health-checks', () => {
     it('reports degraded when a component has major_outage', async () => {
       const body = makeStatuspageSummary({
         pageId: 'qf5jlnph3bcy',
-        pageName: 'PostHog',
-        pageUrl: 'https://status.posthog.com',
+        pageName: 'Amplitude',
+        pageUrl: 'https://status.amplitude.com',
         indicator: 'critical',
         description: 'Major Service Outage',
         components: [
@@ -612,13 +612,13 @@ describe('health-checks', () => {
       });
       (global.fetch as jest.Mock).mockImplementation(
         overrideFetch({
-          [URLS.posthogSummary]: () =>
+          [URLS.amplitudeSummary]: () =>
             Promise.resolve(
               new Response(JSON.stringify(body), { status: 200 }),
             ),
         }),
       );
-      const result = await checkPosthogComponentHealth();
+      const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
       expect(result.degradedOrDownComponents).toHaveLength(2);
       expect(result.degradedOrDownComponents![0].status).toBe(
@@ -629,8 +629,8 @@ describe('health-checks', () => {
     it('handles under_maintenance as degraded', async () => {
       const body = makeStatuspageSummary({
         pageId: 'qf5jlnph3bcy',
-        pageName: 'PostHog',
-        pageUrl: 'https://status.posthog.com',
+        pageName: 'Amplitude',
+        pageUrl: 'https://status.amplitude.com',
         indicator: 'minor',
         description: 'Scheduled Maintenance',
         components: [
@@ -645,13 +645,13 @@ describe('health-checks', () => {
       });
       (global.fetch as jest.Mock).mockImplementation(
         overrideFetch({
-          [URLS.posthogSummary]: () =>
+          [URLS.amplitudeSummary]: () =>
             Promise.resolve(
               new Response(JSON.stringify(body), { status: 200 }),
             ),
         }),
       );
-      const result = await checkPosthogComponentHealth();
+      const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
       expect(result.degradedOrDownComponents![0].status).toBe(
         ServiceHealthStatus.Degraded,
@@ -758,13 +758,15 @@ describe('health-checks', () => {
         overrideFetch({
           [URLS.llmGatewayLiveness]: () =>
             Promise.reject(
-              new Error('getaddrinfo ENOTFOUND gateway.us.posthog.com'),
+              new Error('getaddrinfo ENOTFOUND gateway.us.amplitude.com'),
             ),
         }),
       );
       const result = await checkLlmGatewayHealth();
       expect(result.status).toBe(ServiceHealthStatus.Down);
-      expect(result.error).toBe('getaddrinfo ENOTFOUND gateway.us.posthog.com');
+      expect(result.error).toBe(
+        'getaddrinfo ENOTFOUND gateway.us.amplitude.com',
+      );
     });
 
     it('returns down on timeout (AbortError)', async () => {
@@ -845,8 +847,8 @@ describe('health-checks', () => {
       expect(keys).toEqual(
         expect.arrayContaining([
           'anthropic',
-          'posthogOverall',
-          'posthogComponents',
+          'amplitudeOverall',
+          'amplitudeComponents',
           'github',
           'npmOverall',
           'npmComponents',
@@ -990,7 +992,7 @@ describe('health-checks', () => {
       );
       expect(result.reasons.length).toBeGreaterThan(0);
       expect(result.reasons.some((r) => r.includes('Anthropic'))).toBe(true);
-      expect(result.reasons.some((r) => r.includes('PostHog'))).toBe(true);
+      expect(result.reasons.some((r) => r.includes('Amplitude'))).toBe(true);
       expect(result.reasons.some((r) => r.includes('GitHub'))).toBe(true);
       expect(result.reasons.some((r) => r.includes('npm'))).toBe(true);
       expect(result.reasons.some((r) => r.includes('Cloudflare'))).toBe(true);

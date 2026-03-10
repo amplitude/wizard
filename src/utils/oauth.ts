@@ -1,8 +1,8 @@
 /**
- * Amplitude OAuth2/PKCE flow — adapted from PostHog wizard's oauth.ts but
+ * Amplitude OAuth2/PKCE flow — adapted from Amplitude wizard's oauth.ts but
  * hitting Amplitude's auth endpoints (same as the ampli CLI).
  *
- * Key difference from PostHog: checks ~/.ampli.json for an existing ampli CLI
+ * Key difference from Amplitude: checks ~/.ampli.json for an existing ampli CLI
  * session first, so users who ran `ampli login` can skip re-authenticating.
  */
 

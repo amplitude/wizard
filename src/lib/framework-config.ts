@@ -50,7 +50,7 @@ export interface FrameworkMetadata<
   /** Integration type from constants */
   integration: Integration;
 
-  /** URL to framework-specific PostHog docs */
+  /** URL to framework-specific Amplitude docs */
   docsUrl: string;
 
   /**
@@ -211,11 +211,11 @@ export interface UIConfig<
  * Generate welcome message from framework name
  */
 export function getWelcomeMessage(frameworkName: string): string {
-  return `PostHog ${frameworkName} wizard (agent-powered)`;
+  return `Amplitude ${frameworkName} wizard (agent-powered)`;
 }
 
 /**
  * Shared spinner message for all frameworks
  */
 export const SPINNER_MESSAGE =
-  'Writing your PostHog setup with events, error capture and more...';
+  'Writing your Amplitude setup with events, error capture and more...';

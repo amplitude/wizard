@@ -28,7 +28,7 @@ import {
   ADDITIONAL_FEATURE_LABELS,
 } from '../../../lib/wizard-session.js';
 
-const LOG_FILE = '/tmp/posthog-wizard.log';
+const LOG_FILE = '/tmp/amplitude-wizard.log';
 
 /** A discrete tip shown in the TipsCard during the agent run. */
 interface Tip {
@@ -60,13 +60,13 @@ interface Tip {
 const TIPS: Tip[] = [
   {
     id: 'events',
-    title: 'Events are the bedrock of your PostHog data',
+    title: 'Events are the bedrock of your Amplitude data',
     description:
       'As people use your product, events build a picture of their behavior and satisfaction. Good events make great data.',
   },
   {
     id: 'persons',
-    title: 'You can also track people and groups with PostHog',
+    title: 'You can also track people and groups with Amplitude',
     description:
       'Events can be associated with the humans who generate them, letting you understand a specific customer problem if they email about it.',
   },
@@ -78,15 +78,15 @@ const TIPS: Tip[] = [
   },
   {
     id: 'stripe',
-    title: 'You can track Stripe revenue with PostHog',
+    title: 'You can track Stripe revenue with Amplitude',
     description: 'Add Stripe as a data source while you wait:',
-    url: 'https://app.posthog.com/project/data-warehouse/new-source?kind=Stripe',
+    url: 'https://app.amplitude.com/project/data-warehouse/new-source?kind=Stripe',
     visible: (store) =>
       store.session.discoveredFeatures.includes(DiscoveredFeature.Stripe),
   },
   {
     id: 'llm',
-    title: 'PostHog can also help you track your LLM costs',
+    title: 'Amplitude can also help you track your LLM costs',
     description: '',
     visible: (store) =>
       store.session.discoveredFeatures.includes(DiscoveredFeature.LLM),
@@ -121,7 +121,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
   return (
     <Box flexDirection="column" paddingX={1}>
       <Text bold color={Colors.accent}>
-        Learn about PostHog
+        Learn about Amplitude
       </Text>
       <Box height={1} />
 

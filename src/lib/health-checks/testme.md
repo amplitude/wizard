@@ -33,15 +33,15 @@ responses captured from production endpoints on 2026-03-05.
 | Service                 | URL                                                    | Healthy response                      |
 | ----------------------- | ------------------------------------------------------ | ------------------------------------- |
 | Anthropic               | `https://status.claude.com/api/v2/status.json`         | `{"status":{"indicator":"none",...}}` |
-| PostHog                 | `https://www.posthogstatus.com/api/v2/status.json`     | Same shape                            |
-| PostHog (components)    | `https://www.posthogstatus.com/api/v2/summary.json`    | Adds `components[]` array             |
+| Amplitude               | `https://www.amplitudestatus.com/api/v2/status.json`   | Same shape                            |
+| Amplitude (components)  | `https://www.amplitudestatus.com/api/v2/summary.json`  | Adds `components[]` array             |
 | GitHub                  | `https://www.githubstatus.com/api/v2/status.json`      | Same shape                            |
 | npm                     | `https://status.npmjs.org/api/v2/status.json`          | Same shape                            |
 | npm (components)        | `https://status.npmjs.org/api/v2/summary.json`         | Adds `components[]` array             |
 | Cloudflare              | `https://www.cloudflarestatus.com/api/v2/status.json`  | Same shape                            |
 | Cloudflare (components) | `https://www.cloudflarestatus.com/api/v2/summary.json` | Adds `components[]` array             |
-| LLM Gateway             | `https://gateway.us.posthog.com/_liveness`             | `{"status":"alive"}` (HTTP 200)       |
-| MCP                     | `https://mcp.posthog.com/`                             | HTML landing page (HTTP 200)          |
+| LLM Gateway             | `https://gateway.us.amplitude.com/_liveness`           | `{"status":"alive"}` (HTTP 200)       |
+| MCP                     | `https://mcp.amplitude.com/`                           | HTML landing page (HTTP 200)          |
 
 ### Statuspage.io API v2 reference
 
@@ -56,14 +56,14 @@ responses captured from production endpoints on 2026-03-05.
 
 ### LLM Gateway
 
-- Source: `posthog/services/llm-gateway/src/llm_gateway/api/health.py`
+- Source: `amplitude/services/llm-gateway/src/llm_gateway/api/health.py`
 - `GET /` → `{"service":"llm-gateway","status":"running"}`
 - `GET /_liveness` → `{"status":"alive"}` (no DB dependency)
 - `GET /_readiness` → `{"status":"ready"}` (checks Postgres with `SELECT 1`)
 
 ### MCP
 
-- Source: `posthog/services/mcp/src/index.ts`
+- Source: `amplitude/services/mcp/src/index.ts`
 - `GET /` → HTML landing page (200)
 - No dedicated `/health` endpoint; 200 on `/` confirms the Cloudflare Worker is
   running.

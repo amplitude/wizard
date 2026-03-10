@@ -8,7 +8,7 @@ createFrameworkTest({
     prod: 'Ready in',
   },
   tests: {
-    packageJson: ['posthog-js', 'posthog-node'],
+    packageJson: ['amplitude-js', 'amplitude-node'],
     devMode: true,
     build: true,
     prodMode: 'start',

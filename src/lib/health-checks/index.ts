@@ -9,8 +9,8 @@ export {
 
 export {
   checkAnthropicHealth,
-  checkPosthogOverallHealth,
-  checkPosthogComponentHealth,
+  checkAmplitudeOverallHealth,
+  checkAmplitudeComponentHealth,
   checkGithubHealth,
   checkNpmOverallHealth,
   checkNpmComponentHealth,

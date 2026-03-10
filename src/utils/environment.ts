@@ -17,7 +17,7 @@ export function isNonInteractiveEnvironment(): boolean {
 }
 
 export function readEnvironment(): Record<string, unknown> {
-  const result = readEnv('POSTHOG_WIZARD');
+  const result = readEnv('AMPLITUDE_WIZARD');
 
   return result;
 }

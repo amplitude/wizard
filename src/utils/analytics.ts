@@ -1,4 +1,4 @@
-// TODO: Replace with Amplitude analytics. PostHog telemetry has been stubbed out.
+// TODO: Replace with Amplitude analytics. Amplitude telemetry has been stubbed out.
 import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';

@@ -1,5 +1,5 @@
 // TODO: Update analytics tests when Amplitude analytics is implemented.
-// The PostHog-based analytics has been replaced with a stub.
+// The Amplitude-based analytics has been replaced with a stub.
 import { Analytics } from '../analytics';
 import { v4 as uuidv4 } from 'uuid';
 

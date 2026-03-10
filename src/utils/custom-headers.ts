@@ -1,11 +1,11 @@
-import { POSTHOG_FLAG_HEADER_PREFIX } from '../lib/constants';
+import { AMPLITUDE_FLAG_HEADER_PREFIX } from '../lib/constants';
 
 /**
  * Builds a list of custom headers for ANTHROPIC_CUSTOM_HEADERS.
  */
 export function createCustomHeaders(): {
   add(key: string, value: string): void;
-  /** Add a feature flag for PostHog ($feature/<flagKey>: variant). */
+  /** Add a feature flag for Amplitude ($feature/<flagKey>: variant). */
   addFlag(flagKey: string, variant: string): void;
   encode(): string;
 } {
@@ -19,7 +19,7 @@ export function createCustomHeaders(): {
     },
 
     addFlag(flagKey: string, variant: string): void {
-      const headerName = POSTHOG_FLAG_HEADER_PREFIX + flagKey.toUpperCase();
+      const headerName = AMPLITUDE_FLAG_HEADER_PREFIX + flagKey.toUpperCase();
       entries.push({ key: headerName, value: variant });
     },
 

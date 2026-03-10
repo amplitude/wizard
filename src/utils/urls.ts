@@ -3,24 +3,24 @@ import { IS_DEV, WIZARD_USER_AGENT } from '../lib/constants';
 import type { CloudRegion } from './types';
 
 export const getAssetHostFromHost = (host: string) => {
-  if (host.includes('us.i.posthog.com')) {
-    return 'https://us-assets.i.posthog.com';
+  if (host.includes('us.i.amplitude.com')) {
+    return 'https://us-assets.i.amplitude.com';
   }
 
-  if (host.includes('eu.i.posthog.com')) {
-    return 'https://eu-assets.i.posthog.com';
+  if (host.includes('eu.i.amplitude.com')) {
+    return 'https://eu-assets.i.amplitude.com';
   }
 
   return host;
 };
 
 export const getUiHostFromHost = (host: string) => {
-  if (host.includes('us.i.posthog.com')) {
-    return 'https://us.posthog.com';
+  if (host.includes('us.i.amplitude.com')) {
+    return 'https://us.amplitude.com';
   }
 
-  if (host.includes('eu.i.posthog.com')) {
-    return 'https://eu.posthog.com';
+  if (host.includes('eu.i.amplitude.com')) {
+    return 'https://eu.amplitude.com';
   }
 
   return host;
@@ -32,10 +32,10 @@ export const getHostFromRegion = (region: CloudRegion) => {
   }
 
   if (region === 'eu') {
-    return 'https://eu.i.posthog.com';
+    return 'https://eu.i.amplitude.com';
   }
 
-  return 'https://us.i.posthog.com';
+  return 'https://us.i.amplitude.com';
 };
 
 export const getCloudUrlFromRegion = (region: CloudRegion) => {
@@ -44,10 +44,10 @@ export const getCloudUrlFromRegion = (region: CloudRegion) => {
   }
 
   if (region === 'eu') {
-    return 'https://eu.posthog.com';
+    return 'https://eu.amplitude.com';
   }
 
-  return 'https://us.posthog.com';
+  return 'https://us.amplitude.com';
 };
 
 export async function detectRegionFromToken(
@@ -63,15 +63,15 @@ export async function detectRegionFromToken(
   };
 
   const [usResult, euResult] = await Promise.allSettled([
-    axios.get('https://us.posthog.com/api/users/@me/', { headers }),
-    axios.get('https://eu.posthog.com/api/users/@me/', { headers }),
+    axios.get('https://us.amplitude.com/api/users/@me/', { headers }),
+    axios.get('https://eu.amplitude.com/api/users/@me/', { headers }),
   ]);
 
   if (usResult.status === 'fulfilled') return 'us';
   if (euResult.status === 'fulfilled') return 'eu';
 
   throw new Error(
-    'Could not determine cloud region from access token. Please check your PostHog account.',
+    'Could not determine cloud region from access token. Please check your Amplitude account.',
   );
 }
 
@@ -80,9 +80,12 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
     return 'http://localhost:3308/wizard';
   }
 
-  if (host.includes('eu.posthog.com') || host.includes('eu.i.posthog.com')) {
-    return 'https://gateway.eu.posthog.com/wizard';
+  if (
+    host.includes('eu.amplitude.com') ||
+    host.includes('eu.i.amplitude.com')
+  ) {
+    return 'https://gateway.eu.amplitude.com/wizard';
   }
 
-  return 'https://gateway.us.posthog.com/wizard';
+  return 'https://gateway.us.amplitude.com/wizard';
 };

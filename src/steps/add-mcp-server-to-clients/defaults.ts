@@ -59,7 +59,7 @@ export const AVAILABLE_FEATURES = {
     {
       value: 'docs',
       label: 'Documentation',
-      hint: 'PostHog documentation search',
+      hint: 'Amplitude documentation search',
     },
   ],
 };
@@ -75,7 +75,7 @@ export const buildMCPUrl = (
   selectedFeatures?: string[],
   local?: boolean,
 ) => {
-  const host = local ? 'http://localhost:8787' : 'https://mcp.posthog.com';
+  const host = local ? 'http://localhost:8787' : 'https://mcp.amplitude.com';
   const baseUrl = `${host}/${type === 'sse' ? 'sse' : 'mcp'}`;
 
   const isAllFeaturesSelected =
@@ -141,10 +141,10 @@ export const getDefaultServerConfig = (
       'mcp-remote@latest',
       urlWithFeatures,
       '--header',
-      `Authorization:\${POSTHOG_AUTH_HEADER}`,
+      `Authorization:\${AMPLITUDE_AUTH_HEADER}`,
     ],
     env: {
-      POSTHOG_AUTH_HEADER: `Bearer ${apiKey}`,
+      AMPLITUDE_AUTH_HEADER: `Bearer ${apiKey}`,
     },
   };
 };

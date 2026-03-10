@@ -21,10 +21,10 @@ describe('CLI argument parsing', () => {
 
     // Reset environment
     process.env = { ...originalEnv };
-    delete process.env.POSTHOG_WIZARD_DEFAULT;
-    delete process.env.POSTHOG_WIZARD_CI;
-    delete process.env.POSTHOG_WIZARD_API_KEY;
-    delete process.env.POSTHOG_WIZARD_INSTALL_DIR;
+    delete process.env.AMPLITUDE_WIZARD_DEFAULT;
+    delete process.env.AMPLITUDE_WIZARD_CI;
+    delete process.env.AMPLITUDE_WIZARD_API_KEY;
+    delete process.env.AMPLITUDE_WIZARD_INSTALL_DIR;
 
     // Mock process.exit to prevent test runner from exiting
     process.exit = jest.fn() as any;
@@ -83,8 +83,8 @@ describe('CLI argument parsing', () => {
   });
 
   describe('environment variables', () => {
-    test('respects POSTHOG_WIZARD_DEFAULT', async () => {
-      process.env.POSTHOG_WIZARD_DEFAULT = 'false';
+    test('respects AMPLITUDE_WIZARD_DEFAULT', async () => {
+      process.env.AMPLITUDE_WIZARD_DEFAULT = 'false';
 
       await runCLI([]);
 
@@ -93,7 +93,7 @@ describe('CLI argument parsing', () => {
     });
 
     test('CLI args override environment variables', async () => {
-      process.env.POSTHOG_WIZARD_DEFAULT = 'false';
+      process.env.AMPLITUDE_WIZARD_DEFAULT = 'false';
 
       await runCLI(['--default']);
 
@@ -178,10 +178,10 @@ describe('CLI argument parsing', () => {
   });
 
   describe('CI environment variables', () => {
-    test('respects POSTHOG_WIZARD_CI', async () => {
-      process.env.POSTHOG_WIZARD_CI = 'true';
-      process.env.POSTHOG_WIZARD_API_KEY = 'phx_env_key';
-      process.env.POSTHOG_WIZARD_INSTALL_DIR = '/tmp/test';
+    test('respects AMPLITUDE_WIZARD_CI', async () => {
+      process.env.AMPLITUDE_WIZARD_CI = 'true';
+      process.env.AMPLITUDE_WIZARD_API_KEY = 'phx_env_key';
+      process.env.AMPLITUDE_WIZARD_INSTALL_DIR = '/tmp/test';
 
       await runCLI([]);
 
@@ -189,10 +189,10 @@ describe('CLI argument parsing', () => {
       expect(args.ci).toBe(true);
     });
 
-    test('respects POSTHOG_WIZARD_API_KEY', async () => {
-      process.env.POSTHOG_WIZARD_CI = 'true';
-      process.env.POSTHOG_WIZARD_API_KEY = 'phx_env_key';
-      process.env.POSTHOG_WIZARD_INSTALL_DIR = '/tmp/test';
+    test('respects AMPLITUDE_WIZARD_API_KEY', async () => {
+      process.env.AMPLITUDE_WIZARD_CI = 'true';
+      process.env.AMPLITUDE_WIZARD_API_KEY = 'phx_env_key';
+      process.env.AMPLITUDE_WIZARD_INSTALL_DIR = '/tmp/test';
 
       await runCLI([]);
 
@@ -201,9 +201,9 @@ describe('CLI argument parsing', () => {
     });
 
     test('CLI args override CI environment variables', async () => {
-      process.env.POSTHOG_WIZARD_CI = 'true';
-      process.env.POSTHOG_WIZARD_API_KEY = 'phx_env_key';
-      process.env.POSTHOG_WIZARD_INSTALL_DIR = '/tmp/test';
+      process.env.AMPLITUDE_WIZARD_CI = 'true';
+      process.env.AMPLITUDE_WIZARD_API_KEY = 'phx_env_key';
+      process.env.AMPLITUDE_WIZARD_INSTALL_DIR = '/tmp/test';
 
       await runCLI([
         '--api-key',

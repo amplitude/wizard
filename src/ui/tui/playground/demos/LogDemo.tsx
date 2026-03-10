@@ -11,7 +11,7 @@ import * as os from 'os';
 import { LogViewer } from '../../primitives/index.js';
 import { Colors } from '../../styles.js';
 
-const DEMO_LOG_PATH = path.join(os.tmpdir(), 'posthog-playground.log');
+const DEMO_LOG_PATH = path.join(os.tmpdir(), 'amplitude-playground.log');
 
 const LOG_MESSAGES = [
   '[info] Playground started',
