@@ -1,11 +1,12 @@
+import { type MockedFunction } from 'vitest';
 import { runWizard } from '../run';
 import { runAgentWizard } from '../lib/agent-runner';
 import { analytics } from '../utils/analytics';
 import { Integration } from '../lib/constants';
 
-jest.mock('../lib/agent-runner');
-jest.mock('../utils/analytics');
-jest.mock('../lib/wizard-session', () => ({
+vi.mock('../lib/agent-runner');
+vi.mock('../utils/analytics');
+vi.mock('../lib/wizard-session', () => ({
   buildSession: (args: Record<string, unknown>) => ({
     debug: false,
     forceInstall: false,
@@ -25,56 +26,56 @@ jest.mock('../lib/wizard-session', () => ({
     ...args,
   }),
 }));
-jest.mock('../ui', () => ({
-  getUI: jest.fn().mockReturnValue({
+vi.mock('../ui', () => ({
+  getUI: vi.fn().mockReturnValue({
     log: {
-      info: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-      success: jest.fn(),
-      step: jest.fn(),
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      success: vi.fn(),
+      step: vi.fn(),
     },
-    intro: jest.fn(),
-    outro: jest.fn(),
-    cancel: jest.fn(),
-    note: jest.fn(),
-    spinner: jest.fn().mockReturnValue({
-      start: jest.fn(),
-      stop: jest.fn(),
-      message: jest.fn(),
+    intro: vi.fn(),
+    outro: vi.fn(),
+    cancel: vi.fn(),
+    note: vi.fn(),
+    spinner: vi.fn().mockReturnValue({
+      start: vi.fn(),
+      stop: vi.fn(),
+      message: vi.fn(),
     }),
-    setDetectedFramework: jest.fn(),
-    setCredentials: jest.fn(),
-    pushStatus: jest.fn(),
-    syncTodos: jest.fn(),
-    setLoginUrl: jest.fn(),
-    showServiceStatus: jest.fn(),
-    showSettingsOverride: jest.fn(),
-    startRun: jest.fn(),
+    setDetectedFramework: vi.fn(),
+    setCredentials: vi.fn(),
+    pushStatus: vi.fn(),
+    syncTodos: vi.fn(),
+    setLoginUrl: vi.fn(),
+    showServiceStatus: vi.fn(),
+    showSettingsOverride: vi.fn(),
+    startRun: vi.fn(),
   }),
-  setUI: jest.fn(),
+  setUI: vi.fn(),
 }));
 
-const mockRunAgentWizard = runAgentWizard as jest.MockedFunction<
+const mockRunAgentWizard = runAgentWizard as MockedFunction<
   typeof runAgentWizard
 >;
 const mockAnalytics = analytics as jest.Mocked<typeof analytics>;
 
 describe('runWizard error handling', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
 
-    mockAnalytics.setTag = jest.fn();
-    mockAnalytics.captureException = jest.fn();
-    mockAnalytics.shutdown = jest.fn().mockResolvedValue(undefined);
+    mockAnalytics.setTag = vi.fn();
+    mockAnalytics.captureException = vi.fn();
+    mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);
 
-    jest.spyOn(process, 'exit').mockImplementation(() => {
+    vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit called');
     });
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('should capture exception and shutdown analytics on wizard error', async () => {

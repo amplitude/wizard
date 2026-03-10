@@ -1,11 +1,15 @@
 {
   "extends": "./tsconfig.build.json",
-
   "compilerOptions": {
     "moduleResolution": "node16",
     "module": "node16",
-    "types": ["node", "jest"],
-    "typeRoots": ["./node_modules/@types", "./types"],
+    "types": [
+      "node"
+    ],
+    "typeRoots": [
+      "./node_modules/@types",
+      "./types"
+    ],
     "declaration": true,
     "resolveJsonModule": true,
     "outDir": "dist"

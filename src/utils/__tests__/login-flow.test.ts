@@ -1,3 +1,4 @@
+import { type MockedFunction } from 'vitest';
 /**
  * Tests for the login flow org-resolution logic added in askForWizardLogin:
  *
@@ -12,50 +13,50 @@ import { getOrAskForProjectData } from '../setup-utils';
 
 // ── Mock all external dependencies ───────────────────────────────────────────
 
-jest.mock('../../ui', () => ({
-  getUI: jest.fn().mockReturnValue({
+vi.mock('../../ui', () => ({
+  getUI: vi.fn().mockReturnValue({
     log: {
-      info: jest.fn(),
-      success: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-      step: jest.fn(),
+      info: vi.fn(),
+      success: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      step: vi.fn(),
     },
-    spinner: jest.fn().mockReturnValue({ start: jest.fn(), stop: jest.fn() }),
-    setLoginUrl: jest.fn(),
-    setCredentials: jest.fn(),
-    cancel: jest.fn(),
+    spinner: vi.fn().mockReturnValue({ start: vi.fn(), stop: vi.fn() }),
+    setLoginUrl: vi.fn(),
+    setCredentials: vi.fn(),
+    cancel: vi.fn(),
   }),
 }));
 
-jest.mock('../oauth', () => ({
-  performAmplitudeAuth: jest.fn(),
+vi.mock('../oauth', () => ({
+  performAmplitudeAuth: vi.fn(),
 }));
 
-jest.mock('../../lib/api', () => ({
-  fetchAmplitudeUser: jest.fn(),
+vi.mock('../../lib/api', () => ({
+  fetchAmplitudeUser: vi.fn(),
 }));
 
-jest.mock('../ampli-settings', () => ({
-  storeToken: jest.fn(),
+vi.mock('../ampli-settings', () => ({
+  storeToken: vi.fn(),
 }));
 
-jest.mock('../urls', () => ({
-  detectRegionFromToken: jest.fn(),
+vi.mock('../urls', () => ({
+  detectRegionFromToken: vi.fn(),
 }));
 
-jest.mock('../../telemetry', () => ({
-  traceStep: jest.fn((_step: string, fn: () => unknown) => fn()),
+vi.mock('../../telemetry', () => ({
+  traceStep: vi.fn((_step: string, fn: () => unknown) => fn()),
 }));
 
-jest.mock('../../utils/wizard-abort', () => ({
-  wizardAbort: jest.fn().mockRejectedValue(new Error('wizard aborted')),
+vi.mock('../../utils/wizard-abort', () => ({
+  wizardAbort: vi.fn().mockRejectedValue(new Error('wizard aborted')),
 }));
 
 // @inquirer/prompts is dynamically imported inside the function
-jest.mock('@inquirer/prompts', () => ({
-  select: jest.fn(),
-  input: jest.fn(),
+vi.mock('@inquirer/prompts', () => ({
+  select: vi.fn(),
+  input: vi.fn(),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -68,20 +69,20 @@ import { getUI } from '../../ui';
 import type { AmplitudeUserInfo } from '../../lib/api';
 import * as inquirer from '@inquirer/prompts';
 
-const mockPerformAmplitudeAuth = performAmplitudeAuth as jest.MockedFunction<
+const mockPerformAmplitudeAuth = performAmplitudeAuth as MockedFunction<
   typeof performAmplitudeAuth
 >;
-const mockFetchAmplitudeUser = fetchAmplitudeUser as jest.MockedFunction<
+const mockFetchAmplitudeUser = fetchAmplitudeUser as MockedFunction<
   typeof fetchAmplitudeUser
 >;
-const mockDetectRegion = detectRegionFromToken as jest.MockedFunction<
+const mockDetectRegion = detectRegionFromToken as MockedFunction<
   typeof detectRegionFromToken
 >;
-const mockStoreToken = storeToken as jest.MockedFunction<typeof storeToken>;
-const mockSelect = inquirer.select as jest.MockedFunction<
+const mockStoreToken = storeToken as MockedFunction<typeof storeToken>;
+const mockSelect = inquirer.select as MockedFunction<
   typeof inquirer.select
 >;
-const mockInput = inquirer.input as jest.MockedFunction<typeof inquirer.input>;
+const mockInput = inquirer.input as MockedFunction<typeof inquirer.input>;
 
 const AUTH_RESULT = {
   idToken: 'id-token',
@@ -106,7 +107,7 @@ const ORG_B = { id: 'org-b', name: 'Globex', workspaces: [] };
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 });
 
 describe('login flow — org resolution', () => {
@@ -139,7 +140,7 @@ describe('login flow — org resolution', () => {
       ).rejects.toThrow();
 
       const ui = getUI();
-      const errorCall = (ui.log.error as jest.Mock).mock.calls[0][0] as string;
+      const errorCall = (ui.log.error as Mock).mock.calls[0][0] as string;
       expect(errorCall).toContain('app.amplitude.com');
     });
   });

@@ -1,11 +1,8 @@
-const jestPackageJson = require('jest/package.json');
-
 module.exports = {
   root: true,
   env: {
     es6: true,
     node: true,
-    jest: true,
   },
   parser: '@typescript-eslint/parser',
   plugins: ['@typescript-eslint'],
@@ -39,11 +36,6 @@ module.exports = {
         '**/__tests__/**/*.ts',
         '**/__tests__/**/*.js',
       ],
-      plugins: ['jest'],
-      extends: ['plugin:jest/recommended', 'plugin:jest/style'],
-      env: {
-        'jest/globals': true,
-      },
       rules: {
         '@typescript-eslint/unbound-method': 'off',
         '@typescript-eslint/no-unsafe-argument': 'off',
@@ -55,11 +47,7 @@ module.exports = {
       },
     },
   ],
-  settings: {
-    jest: {
-      version: jestPackageJson.version,
-    },
-  },
+  settings: {},
   globals: {
     NodeJS: true,
   },

@@ -1,17 +1,18 @@
+import { type MockedFunction } from 'vitest';
 // TODO: Update analytics tests when Amplitude analytics is implemented.
 // The Amplitude-based analytics has been replaced with a stub.
 import { Analytics } from '../analytics';
 import { v4 as uuidv4 } from 'uuid';
 
-jest.mock('uuid');
+vi.mock('uuid');
 
-const mockUuidv4 = uuidv4 as jest.MockedFunction<typeof uuidv4>;
+const mockUuidv4 = uuidv4 as MockedFunction<typeof uuidv4>;
 
 describe('Analytics', () => {
   let analytics: Analytics;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     mockUuidv4.mockReturnValue('test-uuid' as any);
     analytics = new Analytics();
   });

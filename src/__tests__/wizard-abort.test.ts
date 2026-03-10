@@ -6,32 +6,34 @@ import {
   clearCleanup,
 } from '../utils/wizard-abort';
 import { analytics } from '../utils/analytics';
+import { type Mocked } from 'vitest';
+import * as uiModule from '../ui';
 
-jest.mock('../utils/analytics');
-jest.mock('../ui', () => ({
-  getUI: jest.fn().mockReturnValue({
-    outro: jest.fn(),
+vi.mock('../utils/analytics');
+vi.mock('../ui', () => ({
+  getUI: vi.fn().mockReturnValue({
+    outro: vi.fn(),
   }),
 }));
 
-const mockAnalytics = analytics as jest.Mocked<typeof analytics>;
-const { getUI } = jest.requireMock('../ui');
+const mockAnalytics = analytics as Mocked<typeof analytics>;
+const { getUI } = uiModule as unknown as { getUI: ReturnType<typeof vi.fn> };
 
 describe('wizardAbort', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     clearCleanup();
 
-    mockAnalytics.captureException = jest.fn();
-    mockAnalytics.shutdown = jest.fn().mockResolvedValue(undefined);
+    mockAnalytics.captureException = vi.fn();
+    mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);
 
-    jest.spyOn(process, 'exit').mockImplementation(() => {
+    vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit called');
     });
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('calls analytics.shutdown, getUI().outro, and process.exit in order', async () => {
@@ -138,19 +140,19 @@ describe('wizardAbort', () => {
 
 describe('abort() delegates to wizardAbort()', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
     clearCleanup();
 
-    mockAnalytics.captureException = jest.fn();
-    mockAnalytics.shutdown = jest.fn().mockResolvedValue(undefined);
+    mockAnalytics.captureException = vi.fn();
+    mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);
 
-    jest.spyOn(process, 'exit').mockImplementation(() => {
+    vi.spyOn(process, 'exit').mockImplementation(() => {
       throw new Error('process.exit called');
     });
   });
 
   afterEach(() => {
-    jest.restoreAllMocks();
+    vi.restoreAllMocks();
   });
 
   it('abort() calls wizardAbort with message and exitCode', async () => {

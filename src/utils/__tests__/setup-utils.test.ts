@@ -3,43 +3,43 @@ import { installPackage } from '../setup-utils';
 import * as ChildProcess from 'node:child_process';
 import type { PackageManager } from '../package-manager';
 
-jest.mock('node:child_process', () => ({
-  __esModule: true,
-  ...jest.requireActual('node:child_process'),
-}));
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return { __esModule: true, ...actual };
+});
 
-jest.mock('../../ui', () => ({
-  getUI: jest.fn().mockReturnValue({
+vi.mock('../../ui', () => ({
+  getUI: vi.fn().mockReturnValue({
     log: {
-      info: jest.fn(),
-      success: jest.fn(),
-      warn: jest.fn(),
-      error: jest.fn(),
-      step: jest.fn(),
+      info: vi.fn(),
+      success: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      step: vi.fn(),
     },
-    cancel: jest.fn(),
-    outro: jest.fn(),
-    intro: jest.fn(),
-    spinner: jest.fn().mockImplementation(() => ({
-      start: jest.fn(),
-      stop: jest.fn(),
-      message: jest.fn(),
+    cancel: vi.fn(),
+    outro: vi.fn(),
+    intro: vi.fn(),
+    spinner: vi.fn().mockImplementation(() => ({
+      start: vi.fn(),
+      stop: vi.fn(),
+      message: vi.fn(),
     })),
-    setDetectedFramework: jest.fn(),
-    setCredentials: jest.fn(),
-    pushStatus: jest.fn(),
-    syncTodos: jest.fn(),
-    setLoginUrl: jest.fn(),
-    showServiceStatus: jest.fn(),
-    showSettingsOverride: jest.fn(),
-    startRun: jest.fn(),
-    note: jest.fn(),
+    setDetectedFramework: vi.fn(),
+    setCredentials: vi.fn(),
+    pushStatus: vi.fn(),
+    syncTodos: vi.fn(),
+    setLoginUrl: vi.fn(),
+    showServiceStatus: vi.fn(),
+    showSettingsOverride: vi.fn(),
+    startRun: vi.fn(),
+    note: vi.fn(),
   }),
 }));
 
 describe.skip('installPackage', () => {
   afterEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   it('force-installs a package if the forceInstall flag is set', async () => {
@@ -51,8 +51,8 @@ describe.skip('installPackage', () => {
       runScriptCommand: 'npm run',
       flags: '',
       forceInstallFlag: '--force',
-      detect: jest.fn(),
-      addOverride: jest.fn(),
+      detect: vi.fn(),
+      addOverride: vi.fn(),
     };
 
     const execSpy = jest
@@ -91,8 +91,8 @@ describe.skip('installPackage', () => {
         runScriptCommand: 'npm run',
         flags: '',
         forceInstallFlag: '--force',
-        detect: jest.fn(),
-        addOverride: jest.fn(),
+        detect: vi.fn(),
+        addOverride: vi.fn(),
       };
 
       const execSpy = jest

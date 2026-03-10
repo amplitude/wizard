@@ -1,25 +1,25 @@
 import { CodexMCPClient } from '../codex';
+import { execSync, spawnSync } from 'node:child_process';
+import { analytics } from '../../../../utils/analytics';
 
-jest.mock('node:child_process', () => ({
-  execSync: jest.fn(),
-  spawnSync: jest.fn(),
+vi.mock('node:child_process', () => ({
+  execSync: vi.fn(),
+  spawnSync: vi.fn(),
 }));
 
-jest.mock('../../../../utils/analytics', () => ({
+vi.mock('../../../../utils/analytics', () => ({
   analytics: {
-    captureException: jest.fn(),
+    captureException: vi.fn(),
   },
 }));
 
 describe('CodexMCPClient', () => {
-  const { execSync, spawnSync } = require('node:child_process');
-  const analytics = require('../../../../utils/analytics').analytics;
 
-  const spawnSyncMock = spawnSync as jest.Mock;
-  const execSyncMock = execSync as jest.Mock;
+  const spawnSyncMock = spawnSync as Mock;
+  const execSyncMock = execSync as Mock;
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    vi.clearAllMocks();
   });
 
   describe('isClientSupported', () => {
