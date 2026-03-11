@@ -1,4 +1,10 @@
 {
+    "cucumber.features": [
+        "features/**/*.feature"
+    ],
+    "cucumber.glue": [
+        "features/step-definitions/**/*.steps.ts"
+    ],
     "[typescript]": {
         "editor.formatOnSave": true
     },

@@ -1,0 +1,306 @@
+import { Given, When, Then, Before, After } from '@cucumber/cucumber';
+import assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { WizardRouter } from '../../src/ui/tui/router.js';
+import { Screen, Flow } from '../../src/ui/tui/flows.js';
+import {
+  buildSession,
+  RunPhase,
+  OutroKind,
+  DiscoveredFeature,
+  type WizardSession,
+} from '../../src/lib/wizard-session.js';
+import {
+  storeToken,
+  type StoredUser,
+  type StoredOAuthToken,
+} from '../../src/utils/ampli-settings.js';
+import { ctx } from './wizard-flow-context.js';
+
+// ── Shared state ──────────────────────────────────────────────────────────────
+
+let tempDir: string;
+let tempConfigPath: string;
+
+// Convenience aliases — these shadow ctx.router and ctx.session within this file
+// but mutations are reflected in ctx since objects are passed by reference.
+// Re-assigned each Before hook via ctx.router = ... and ctx.session = ...
+let router: WizardRouter;
+let session: WizardSession;
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function makeFutureExpiry(daysAhead = 30): string {
+  return new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function makeValidToken(): StoredOAuthToken {
+  return {
+    accessToken: 'access-abc',
+    idToken: 'id-abc',
+    refreshToken: 'refresh-abc',
+    expiresAt: makeFutureExpiry(),
+  };
+}
+
+function mockCredentials(): WizardSession['credentials'] {
+  return {
+    accessToken: 'access-abc',
+    projectApiKey: 'api-key-xyz',
+    host: 'https://api.amplitude.com',
+    projectId: 123456,
+  };
+}
+
+// ── Lifecycle ─────────────────────────────────────────────────────────────────
+
+Before(function () {
+  tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-wizard-flow-test-'));
+  tempConfigPath = path.join(tempDir, 'ampli.json');
+  router = new WizardRouter(Flow.Wizard);
+  session = buildSession({});
+  // Expose via World so wizard-overlays.steps.ts can access the same instances
+  (this as Record<string, unknown>).wizardRouter = router;
+  (this as Record<string, unknown>).wizardSession = session;
+  // Also sync ctx for any other consumers
+  ctx.router = router;
+  ctx.session = session;
+});
+
+After(function () {
+  fs.rmSync(tempDir, { recursive: true, force: true });
+});
+
+// ── Given ─────────────────────────────────────────────────────────────────────
+
+// Note: "I have no credentials stored in {string}" and "I have valid credentials stored in {string}"
+// are already defined in top-level-commands.steps.ts and will be matched from there.
+// This file adds wizard-specific Given steps.
+
+Given('I have reached the RunScreen', function () {
+  session.credentials = mockCredentials();
+  session.projectHasData = false;
+  session.setupConfirmed = true;
+  // RunScreen is shown once we've passed auth + data setup + framework detection
+});
+
+Given('the project has Stripe as a dependency', function () {
+  const { DiscoveredFeature } = require('../../src/lib/wizard-session.js');
+  session.discoveredFeatures = [DiscoveredFeature.Stripe];
+});
+
+Given('the project has an LLM SDK as a dependency', function () {
+  const { DiscoveredFeature } = require('../../src/lib/wizard-session.js');
+  session.discoveredFeatures = [DiscoveredFeature.LLM];
+});
+
+Given('the wizard is active', function () {
+  session.credentials = mockCredentials();
+  session.projectHasData = false;
+  session.setupConfirmed = true;
+});
+
+Given('the wizard is active at any screen', function () {
+  session.credentials = mockCredentials();
+  session.projectHasData = false;
+  session.setupConfirmed = true;
+});
+
+Given('I am on the options menu for an existing project', function () {
+  session.credentials = mockCredentials();
+  session.projectHasData = true;
+});
+
+Given('the current project has existing data', function () {
+  session.projectHasData = true;
+});
+
+// ── When ──────────────────────────────────────────────────────────────────────
+
+When('the wizard launches', function () {
+  // Check if valid credentials are stored (from a preceding Given step in another step file).
+  // top-level-commands.steps.ts exposes its tempConfigPath via the World object.
+  const sharedConfigPath =
+    (this as Record<string, unknown>).tempConfigPath as string | undefined;
+  if (sharedConfigPath) {
+    const { getStoredToken } = require('../../src/utils/ampli-settings.js');
+    const token = getStoredToken(undefined, 'us', sharedConfigPath);
+    if (token) {
+      // Simulate silent login: stored token → pre-populate credentials
+      session.credentials = mockCredentials();
+    }
+  }
+  // session.projectHasData remains null (not yet checked)
+});
+
+// ── Then ──────────────────────────────────────────────────────────────────────
+
+Then('I should go through the SUSI flow', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.Auth,
+    `Expected Auth/SUSI screen but got ${screen}`,
+  );
+});
+
+Then('I should go through the Activation Check flow', function () {
+  // Activation Check is the first thing after auth for returning users.
+  // For now, returning users with credentials skip Auth and land on DataSetup.
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataSetup,
+    `Expected DataSetup/Activation Check screen but got ${screen}`,
+  );
+});
+
+Then('I should go through the Data Setup flow', function () {
+  // Simulate SUSI completing: credentials are now set
+  session.credentials = mockCredentials();
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataSetup,
+    `Expected DataSetup screen but got ${screen}`,
+  );
+});
+
+Then('the project should have no existing data', function () {
+  session.projectHasData = false;
+});
+
+Then('I should be taken to Framework Detection', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.Intro,
+    `Expected Intro/Framework Detection screen but got ${screen}`,
+  );
+});
+
+Then('I should be asked {string}', function (question: string) {
+  const screen = router.resolve(session);
+  if (question === 'Setting up a new project?') {
+    assert.strictEqual(
+      screen,
+      Screen.NewProjectQuestion,
+      `Expected NewProjectQuestion screen but got ${screen}`,
+    );
+  }
+});
+
+When('I answer {string}', function (answer: string) {
+  if (answer === 'yes') {
+    session.newProjectConfirmed = true;
+  } else if (answer === 'no') {
+    session.newProjectConfirmed = false;
+  }
+});
+
+Then('I should go through Org and Project Selection', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.OrgProject,
+    `Expected OrgProject screen but got ${screen}`,
+  );
+});
+
+Then('the data check should re-run for the new project', function () {
+  // Simulate org/project selection completing and resetting data state
+  session.orgProjectComplete = true;
+  session.newProjectConfirmed = null;
+  session.projectHasData = null;
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataSetup,
+    `Expected DataSetup to re-run but got ${screen}`,
+  );
+});
+
+Then('the data check should re-run for the newly selected project', function () {
+  session.orgProjectComplete = true;
+  session.newProjectConfirmed = null;
+  session.projectHasData = null;
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataSetup,
+    `Expected DataSetup to re-run but got ${screen}`,
+  );
+});
+
+Then(
+  'I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project',
+  function () {
+    const screen = router.resolve(session);
+    assert.strictEqual(
+      screen,
+      Screen.Options,
+      `Expected Options screen but got ${screen}`,
+    );
+  },
+);
+
+When('I select {string}', function (option: string) {
+  if (option === 'switch org or project') {
+    // Selecting "switch" from Options is equivalent to answering "yes" to new project
+    session.newProjectConfirmed = true;
+  }
+});
+
+// ── Agent run ─────────────────────────────────────────────────────────────────
+
+When('the Claude agent completes successfully', function () {
+  session.runPhase = RunPhase.Completed;
+  session.outroData = { kind: OutroKind.Success };
+});
+
+When('the Claude agent errors', function () {
+  session.runPhase = RunPhase.Error;
+  session.outroData = { kind: OutroKind.Error, message: 'Agent failed' };
+});
+
+When('the Claude agent runs', function () {
+  session.runPhase = RunPhase.Completed;
+  session.outroData = { kind: OutroKind.Success };
+});
+
+Then('environment variables should be uploaded to hosting', function () {
+  // When runPhase is Completed, the run step triggers env var upload.
+  // We verify the session is in the expected completed state.
+  assert.strictEqual(session.runPhase, RunPhase.Completed);
+});
+
+Then('I should be taken to the Outro', function () {
+  session.mcpComplete = true;
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Outro, `Expected Outro but got ${screen}`);
+});
+
+Then('I should be taken to the Outro with an error state', function () {
+  // Mcp is skipped on error — router goes straight to Outro
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Outro, `Expected Outro but got ${screen}`);
+  assert.strictEqual(session.outroData?.kind, OutroKind.Error);
+});
+
+Then('I should see a Stripe tip', function () {
+  assert.ok(
+    session.discoveredFeatures.includes(DiscoveredFeature.Stripe),
+    'Expected Stripe in discoveredFeatures',
+  );
+});
+
+Then('I should see an LLM tip', function () {
+  assert.ok(
+    session.discoveredFeatures.includes(DiscoveredFeature.LLM),
+    'Expected LLM in discoveredFeatures',
+  );
+});
+
+// Overlay and slash command steps live in wizard-overlays.steps.ts

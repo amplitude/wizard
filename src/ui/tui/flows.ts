@@ -18,6 +18,10 @@ export enum Screen {
   Intro = 'intro',
   Setup = 'setup',
   Auth = 'auth',
+  DataSetup = 'data-setup',
+  NewProjectQuestion = 'new-project-question',
+  OrgProject = 'org-project',
+  Options = 'options',
   Run = 'run',
   Mcp = 'mcp',
   Outro = 'outro',
@@ -58,26 +62,58 @@ function needsSetup(session: WizardSession): boolean {
 /** All flow pipelines. Add new screens by appending entries. */
 export const FLOWS: Record<Flow, FlowEntry[]> = {
   [Flow.Wizard]: [
+    // 1. Authenticate (SUSI for new users, silent login check for returning users)
+    {
+      screen: Screen.Auth,
+      isComplete: (s) => s.credentials !== null,
+    },
+    // 2. Data check — is the project already ingesting events?
+    {
+      screen: Screen.DataSetup,
+      isComplete: (s) => s.projectHasData !== null,
+    },
+    // 3a. "Setting up a new project?" (only shown when project has data)
+    {
+      screen: Screen.NewProjectQuestion,
+      show: (s) => s.projectHasData === true,
+      isComplete: (s) => s.newProjectConfirmed !== null,
+    },
+    // 3b. Org/Project Selection (when user wants a new project, or forced by /org or /project)
+    {
+      screen: Screen.OrgProject,
+      show: (s) =>
+        s.orgProjectForced ||
+        (s.projectHasData === true && s.newProjectConfirmed === true),
+      isComplete: (s) => s.orgProjectComplete,
+    },
+    // 3c. Options menu (when user continues with the current project)
+    {
+      screen: Screen.Options,
+      show: (s) => s.projectHasData === true && s.newProjectConfirmed === false,
+      isComplete: (_s) => false, // terminal: user picks an action from here
+    },
+    // 4. Framework detection + confirmation (only if no existing data)
     {
       screen: Screen.Intro,
+      show: (s) => s.projectHasData === false,
       isComplete: (s) => s.setupConfirmed,
     },
+    // 4. Framework setup questions (if any unresolved)
     {
       screen: Screen.Setup,
       show: needsSetup,
       isComplete: (s) => !needsSetup(s),
     },
-    {
-      screen: Screen.Auth,
-      isComplete: (s) => s.credentials !== null,
-    },
+    // 5. Agent run
     {
       screen: Screen.Run,
       isComplete: (s) =>
         s.runPhase === RunPhase.Completed || s.runPhase === RunPhase.Error,
     },
+    // 6. MCP server setup (skipped on error)
     {
       screen: Screen.Mcp,
+      show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) => s.mcpComplete,
     },
     { screen: Screen.Outro },

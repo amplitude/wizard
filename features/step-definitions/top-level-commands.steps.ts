@@ -55,6 +55,8 @@ function makeValidToken(): StoredOAuthToken {
 Before(function () {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-wizard-cmd-test-'));
   tempConfigPath = path.join(tempDir, 'ampli.json');
+  // Expose via World so other step files can read credentials stored by these Given steps
+  (this as Record<string, unknown>).tempConfigPath = tempConfigPath;
 
   scenarioUser = undefined;
   commandOutput = { oauthTriggered: false, cleared: false };

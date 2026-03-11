@@ -102,6 +102,32 @@ export interface WizardSession {
   /** True once framework detection has run (whether it found something or not) */
   detectionComplete: boolean;
 
+  /**
+   * Whether the currently selected project has existing event data.
+   * null = not yet checked (shown as DataSetup screen)
+   * false = no data → route to Framework Detection
+   * true = has data → route to "Setting up a new project?" prompt
+   */
+  projectHasData: boolean | null;
+
+  /**
+   * Answer to the "Setting up a new project?" question shown when the
+   * current project already has data.
+   * null = question not yet shown
+   * true = user said yes → go to Org/Project Selection
+   * false = user said no → show Options menu
+   */
+  newProjectConfirmed: boolean | null;
+
+  /** True once Org/Project Selection has been completed. */
+  orgProjectComplete: boolean;
+
+  /**
+   * True when a slash command (/org or /project) forces Org/Project Selection
+   * regardless of the current projectHasData state.
+   */
+  orgProjectForced: boolean;
+
   // From OAuth
   credentials: {
     accessToken: string;
@@ -169,6 +195,10 @@ export function buildSession(args: {
     typescript: false,
     detectedFrameworkLabel: null,
     detectionComplete: false,
+    projectHasData: null,
+    newProjectConfirmed: null,
+    orgProjectComplete: false,
+    orgProjectForced: false,
 
     runPhase: RunPhase.Idle,
     discoveredFeatures: [],
