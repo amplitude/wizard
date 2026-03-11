@@ -16,7 +16,7 @@ import {
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
 
-const AMPLI_CONFIG_PATH = path.join(os.homedir(), 'ampli.json');
+export const AMPLI_CONFIG_PATH = path.join(os.homedir(), 'ampli.json');
 
 export interface StoredOAuthToken {
   accessToken: string;
@@ -33,17 +33,20 @@ export interface StoredUser {
   zone: AmplitudeZone;
 }
 
-function readConfig(): Record<string, unknown> {
+function readConfig(configPath = AMPLI_CONFIG_PATH): Record<string, unknown> {
   try {
-    const raw = fs.readFileSync(AMPLI_CONFIG_PATH, 'utf-8');
+    const raw = fs.readFileSync(configPath, 'utf-8');
     return JSON.parse(raw) as Record<string, unknown>;
   } catch {
     return {};
   }
 }
 
-function writeConfig(data: Record<string, unknown>): void {
-  fs.writeFileSync(AMPLI_CONFIG_PATH, JSON.stringify(data, null, 2), 'utf-8');
+function writeConfig(
+  data: Record<string, unknown>,
+  configPath = AMPLI_CONFIG_PATH,
+): void {
+  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
 }
 
 function userKey(userId: string, zone: AmplitudeZone): string {
@@ -54,8 +57,8 @@ function userKey(userId: string, zone: AmplitudeZone): string {
 }
 
 /** Returns the first stored user, or undefined if none. */
-export function getStoredUser(): StoredUser | undefined {
-  const config = readConfig();
+export function getStoredUser(configPath?: string): StoredUser | undefined {
+  const config = readConfig(configPath);
   for (const [key, value] of Object.entries(config)) {
     if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
     const entry = value as Record<string, unknown>;
@@ -68,8 +71,9 @@ export function getStoredUser(): StoredUser | undefined {
 export function getStoredToken(
   userId?: string,
   zone: AmplitudeZone = DEFAULT_AMPLITUDE_ZONE,
+  configPath?: string,
 ): StoredOAuthToken | undefined {
-  const config = readConfig();
+  const config = readConfig(configPath);
 
   const findToken = (key: string): StoredOAuthToken | undefined => {
     const entry = config[key] as Record<string, string> | undefined;
@@ -115,8 +119,12 @@ export function getStoredToken(
 }
 
 /** Persists an OAuth token to ~/.ampli.json in the same format as the ampli CLI. */
-export function storeToken(user: StoredUser, token: StoredOAuthToken): void {
-  const config = readConfig();
+export function storeToken(
+  user: StoredUser,
+  token: StoredOAuthToken,
+  configPath?: string,
+): void {
+  const config = readConfig(configPath);
   const key = userKey(user.id, user.zone);
   config[key] = {
     ...((config[key] as object | undefined) ?? {}),
@@ -126,5 +134,10 @@ export function storeToken(user: StoredUser, token: StoredOAuthToken): void {
     OAuthRefreshToken: token.refreshToken,
     OAuthExpiresAt: token.expiresAt,
   };
-  writeConfig(config);
+  writeConfig(config, configPath);
+}
+
+/** Clears all stored credentials by writing an empty config. */
+export function clearStoredCredentials(configPath?: string): void {
+  writeConfig({}, configPath);
 }

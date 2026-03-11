@@ -364,6 +364,25 @@ yargs(hideBin(process.argv))
         const zone = argv.zone as 'us' | 'eu';
 
         try {
+          const { getStoredUser, getStoredToken } = await import(
+            './src/utils/ampli-settings.js'
+          );
+          // If a valid cached session exists, display the stored user without
+          // re-fetching from the API (the cached idToken may be expired).
+          const cachedToken = getStoredToken(undefined, zone);
+          const cachedUser = cachedToken ? getStoredUser() : undefined;
+          if (cachedUser && cachedUser.id !== 'pending') {
+            console.log(
+              chalk.green(
+                `✔ Already logged in as ${cachedUser.firstName} ${cachedUser.lastName} <${cachedUser.email}>`,
+              ),
+            ); // eslint-disable-line no-console
+            if (cachedUser.zone !== 'us') {
+              console.log(chalk.dim(`  Zone: ${cachedUser.zone}`)); // eslint-disable-line no-console
+            }
+            process.exit(0);
+          }
+
           const auth = await performAmplitudeAuth({ zone });
           const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
           storeToken(
@@ -391,6 +410,7 @@ yargs(hideBin(process.argv))
               chalk.dim(`  Org: ${user.orgs.map((o) => o.name).join(', ')}`),
             ); // eslint-disable-line no-console
           }
+          process.exit(0);
         } catch (e) {
           console.error(
             chalk.red(
@@ -425,6 +445,7 @@ yargs(hideBin(process.argv))
         } catch {
           console.log(chalk.dim('No active session found.')); // eslint-disable-line no-console
         }
+        process.exit(0);
       })();
     },
   )
@@ -454,6 +475,7 @@ yargs(hideBin(process.argv))
             ),
           ); // eslint-disable-line no-console
         }
+        process.exit(0);
       })();
     },
   )
