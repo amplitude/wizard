@@ -1,0 +1,55 @@
+---
+description: Gherkin/Cucumber BDD syntax and step organization conventions
+globs: **/*.feature
+alwaysApply: false
+---
+
+# Gherkin & Cucumber Conventions
+
+## File Structure
+
+Every `.feature` file starts with `Feature:`, followed by optional free-form description, then scenarios.
+
+```gherkin
+Feature: Short feature name
+  Optional multi-line description of the feature.
+
+  Scenario: Concrete example name
+    Given <precondition>
+    When <action>
+    Then <expected outcome>
+```
+
+## Keywords
+
+- **Feature** — one per file, groups related scenarios
+- **Rule** (Gherkin 6+) — groups scenarios under a single business rule within a feature
+- **Scenario** / **Example** — synonyms; a concrete example with 3-5 steps
+- **Background** — shared `Given` steps run before each scenario in a Feature or Rule (keep short, max ~4 lines)
+- **Scenario Outline** / **Scenario Template** — parameterised template with `<placeholders>` and an `Examples:` table
+
+## Steps
+
+- **Given** — initial context / preconditions (past tense, system state setup)
+- **When** — the action or event under test (single user action)
+- **Then** — expected observable outcome (use assertions, verify outputs not DB internals)
+- **And** / **But** — continuation of the preceding step type
+- **\*** — bullet-style alternative to And/But for list-like steps
+
+Step text is matched to step definitions regardless of keyword — avoid duplicating step text across Given/When/Then.
+
+## Data Passing
+
+- **Data Tables** — `| col1 | col2 |` rows passed as last arg to step def; escape `\|`, `\n`, `\\`
+- **Doc Strings** — `"""` or `` ``` `` delimited blocks for multi-line text; indentation relative to opening delimiter is preserved
+
+## Tags
+
+`@tagname` above Feature, Rule, or Scenario for filtering and hooks.
+
+## Step Organization
+
+- One step-definition file per major domain concept (e.g. `AuthenticationSteps`, `CheckoutSteps`), not per feature file
+- Only implement step definitions for steps that exist in scenarios
+- Use parameterised steps (`{string}`, `{int}`) and helper methods to avoid near-duplicate definitions
+- Keep step definitions thin — delegate to helper/page-object methods
