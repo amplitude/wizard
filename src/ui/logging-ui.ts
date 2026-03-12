@@ -117,6 +117,14 @@ export class LoggingUI implements WizardUI {
     // No-op in CI mode — credentials are handled directly
   }
 
+  setRegion(_region: string): void {
+    // No-op in CI mode
+  }
+
+  setProjectHasData(_value: boolean): void {
+    // No-op in CI mode
+  }
+
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {

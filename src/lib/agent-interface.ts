@@ -171,6 +171,8 @@ export type AgentConfig = {
   /** Feature flag key -> variant (evaluated at start of run). */
   wizardFlags?: Record<string, string>;
   wizardMetadata?: Record<string, string>;
+  /** When true, omit the amplitude-wizard MCP server (e.g. for generic/quickstart path). */
+  skipAmplitudeMcp?: boolean;
 };
 
 /**
@@ -236,6 +238,8 @@ type AgentRunConfig = {
   model: string;
   wizardFlags?: Record<string, string>;
   wizardMetadata?: Record<string, string>;
+  /** When true, bypass the Amplitude gateway and run via the local `claude` CLI. */
+  useLocalClaude?: boolean;
 };
 
 /**
@@ -522,33 +526,41 @@ export async function initializeAgent(
   getUI().log.step('Initializing Claude agent...');
 
   try {
-    // Configure LLM gateway environment variables (inherited by SDK subprocess)
-    const gatewayUrl = getLlmGatewayUrlFromHost(config.amplitudeApiHost);
-    process.env.ANTHROPIC_BASE_URL = gatewayUrl;
-    process.env.ANTHROPIC_AUTH_TOKEN = config.amplitudeApiKey;
-    // Use CLAUDE_CODE_OAUTH_TOKEN to override any stored /login credentials
-    process.env.CLAUDE_CODE_OAUTH_TOKEN = config.amplitudeApiKey;
-    // Disable experimental betas (like input_examples) that the LLM gateway doesn't support
-    process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = 'true';
+    const useLocalClaude = !config.amplitudeApiKey;
 
-    logToFile('Configured LLM gateway:', gatewayUrl);
+    if (useLocalClaude) {
+      logToFile('No Amplitude API key — using local claude CLI');
+    } else {
+      // Configure LLM gateway environment variables (inherited by SDK subprocess)
+      const gatewayUrl = getLlmGatewayUrlFromHost(config.amplitudeApiHost);
+      process.env.ANTHROPIC_BASE_URL = gatewayUrl;
+      process.env.ANTHROPIC_AUTH_TOKEN = config.amplitudeApiKey;
+      // Use CLAUDE_CODE_OAUTH_TOKEN to override any stored /login credentials
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = config.amplitudeApiKey;
+      // Disable experimental betas (like input_examples) that the LLM gateway doesn't support
+      process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = 'true';
+      logToFile('Configured LLM gateway:', gatewayUrl);
+    }
 
-    // Configure MCP server with Amplitude authentication
-    const mcpServers: McpServersConfig = {
-      'amplitude-wizard': {
+    // Configure MCP servers
+    const mcpServers: McpServersConfig = {};
+
+    if (!config.skipAmplitudeMcp) {
+      mcpServers['amplitude-wizard'] = {
         type: 'http',
         url: config.amplitudeMcpUrl,
         headers: {
           Authorization: `Bearer ${config.amplitudeApiKey}`,
           'User-Agent': WIZARD_USER_AGENT,
         },
-      },
-      ...Object.fromEntries(
-        Object.entries(config.additionalMcpServers ?? {}).map(
-          ([name, { url }]) => [name, { type: 'http', url }],
-        ),
-      ),
-    };
+      };
+    }
+
+    for (const [name, { url }] of Object.entries(
+      config.additionalMcpServers ?? {},
+    )) {
+      mcpServers[name] = { type: 'http', url };
+    }
 
     // Add in-process wizard tools (env files, package manager detection)
     const wizardToolsServer = await createWizardToolsServer({
@@ -563,12 +575,13 @@ export async function initializeAgent(
       model: 'anthropic/claude-sonnet-4-6',
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
+      useLocalClaude,
     };
 
     logToFile('Agent config:', {
       workingDirectory: agentRunConfig.workingDirectory,
       amplitudeMcpUrl: config.amplitudeMcpUrl,
-      gatewayUrl,
+      useLocalClaude,
       apiKeyPresent: !!config.amplitudeApiKey,
     });
 
@@ -576,7 +589,7 @@ export async function initializeAgent(
       debug('Agent config:', {
         workingDirectory: agentRunConfig.workingDirectory,
         amplitudeMcpUrl: config.amplitudeMcpUrl,
-        gatewayUrl,
+        useLocalClaude,
         apiKeyPresent: !!config.amplitudeApiKey,
       });
     }
@@ -592,6 +605,62 @@ export async function initializeAgent(
     debug('Agent initialization error:', error);
     throw error;
   }
+}
+
+/**
+ * Run the agent by spawning the user's local `claude` CLI with --continue.
+ * Used when no Amplitude API key is present (local development).
+ * Streams stdout line-by-line and forwards text to the spinner.
+ */
+async function runAgentLocally(
+  prompt: string,
+  workingDirectory: string,
+  spinner: SpinnerHandle,
+  successMessage: string,
+  errorMessage: string,
+): Promise<{ error?: AgentErrorType; message?: string }> {
+  const { spawn } = await import('child_process');
+
+  logToFile('Running agent via local claude CLI');
+
+  return new Promise((resolve, reject) => {
+    const proc = spawn('claude', ['--continue', prompt], {
+      cwd: workingDirectory,
+      env: process.env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    proc.stdout.setEncoding('utf8');
+    proc.stderr.setEncoding('utf8');
+
+    proc.stdout.on('data', (chunk: string) => {
+      const lines = chunk.split('\n').filter((l) => l.trim());
+      for (const line of lines) {
+        logToFile('claude stdout:', line);
+        spinner.message(line.slice(0, 80));
+        getUI().pushStatus(line.slice(0, 80));
+      }
+    });
+
+    proc.stderr.on('data', (chunk: string) => {
+      logToFile('claude stderr:', chunk);
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        spinner.stop(successMessage);
+        resolve({});
+      } else {
+        spinner.stop(errorMessage);
+        reject(new Error(`claude exited with code ${code ?? 'unknown'}`));
+      }
+    });
+
+    proc.on('error', (err) => {
+      spinner.stop(errorMessage);
+      reject(err);
+    });
+  });
 }
 
 /**
@@ -623,9 +692,19 @@ export async function runAgent(
     errorMessage = 'Integration failed',
   } = config ?? {};
 
-  const { query } = await getSDKModule();
-
   spinner.start(spinnerMessage);
+
+  if (agentConfig.useLocalClaude) {
+    return runAgentLocally(
+      prompt,
+      agentConfig.workingDirectory,
+      spinner,
+      successMessage,
+      errorMessage,
+    );
+  }
+
+  const { query } = await getSDKModule();
 
   const cliPath = getClaudeCodeExecutablePath();
   logToFile('Starting agent run');

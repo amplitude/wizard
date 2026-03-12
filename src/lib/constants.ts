@@ -22,6 +22,9 @@ export enum Integration {
   javascript_web = 'javascript_web',
   python = 'python',
   javascriptNode = 'javascript_node',
+
+  // Unknown / fallback (framework not detected)
+  generic = 'generic',
 }
 
 export interface Args {

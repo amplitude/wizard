@@ -166,6 +166,20 @@ export interface PromptConfig<
   TContext extends Record<string, unknown> = Record<string, unknown>,
 > {
   /**
+   * Optional: Completely replace the default MCP-skills prompt.
+   * When provided, none of the other PromptConfig fields are used for the prompt.
+   * Receives the same context that buildIntegrationPrompt receives.
+   */
+  buildPrompt?: (context: {
+    projectApiKey: string;
+    host: string;
+    projectId: number;
+    typescript: boolean;
+    frameworkVersion: string;
+    frameworkContext: TContext;
+  }) => string;
+
+  /**
    * Optional: Additional context lines to append to base prompt
    * For Next.js: "- Router: app"
    * For React Native: "- Platform: Expo"

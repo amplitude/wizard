@@ -9,6 +9,7 @@ import { FASTAPI_AGENT_CONFIG } from '../frameworks/fastapi/fastapi-wizard-agent
 import { PYTHON_AGENT_CONFIG } from '../frameworks/python/python-wizard-agent';
 import { JAVASCRIPT_NODE_AGENT_CONFIG } from '../frameworks/javascript-node/javascript-node-wizard-agent';
 import { JAVASCRIPT_WEB_AGENT_CONFIG } from '../frameworks/javascript-web/javascript-web-wizard-agent';
+import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
 export const FRAMEWORK_REGISTRY: Record<Integration, FrameworkConfig> = {
   [Integration.nextjs]: NEXTJS_AGENT_CONFIG,
@@ -20,4 +21,5 @@ export const FRAMEWORK_REGISTRY: Record<Integration, FrameworkConfig> = {
   [Integration.python]: PYTHON_AGENT_CONFIG,
   [Integration.javascriptNode]: JAVASCRIPT_NODE_AGENT_CONFIG,
   [Integration.javascript_web]: JAVASCRIPT_WEB_AGENT_CONFIG,
+  [Integration.generic]: GENERIC_AGENT_CONFIG,
 };

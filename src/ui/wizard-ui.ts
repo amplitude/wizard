@@ -71,6 +71,19 @@ export interface WizardUI {
 
   setLoginUrl(url: string | null): void;
 
+  /**
+   * Record the user's data-center region after OAuth. Advances past RegionSelect in TUI.
+   * Called by agent-runner after credentials are obtained.
+   */
+  setRegion(region: string): void;
+
+  /**
+   * Record whether the current project already has Amplitude event data.
+   * false = fresh project → proceed to framework setup.
+   * Advances past DataSetup in TUI.
+   */
+  setProjectHasData(value: boolean): void;
+
   // ── Todo tracking from SDK TodoWrite events ───────────────────────
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,

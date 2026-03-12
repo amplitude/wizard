@@ -164,6 +164,12 @@ export async function runAgentWizard(
   // Notify TUI that credentials are available (resolves past AuthScreen)
   getUI().setCredentials(session.credentials);
 
+  // Advance TUI past the region and data-setup screens so RunScreen is shown.
+  // Region is derived from the OAuth region detection; data setup is not
+  // applicable here — we're doing a fresh SDK installation, not an activation check.
+  getUI().setRegion(cloudRegion);
+  getUI().setProjectHasData(false);
+
   // Framework context was already gathered by SetupScreen + detection
   const frameworkContext = session.frameworkContext;
 
@@ -211,6 +217,7 @@ export async function runAgentWizard(
       detectPackageManager: config.detection.detectPackageManager,
       wizardFlags,
       wizardMetadata,
+      skipAmplitudeMcp: config.prompts.buildPrompt !== undefined,
     },
     sessionToOptions(session),
   );
@@ -336,6 +343,13 @@ function buildIntegrationPrompt(
   },
   frameworkContext: Record<string, unknown>,
 ): string {
+  if (config.prompts.buildPrompt) {
+    return config.prompts.buildPrompt({
+      ...context,
+      frameworkContext,
+    });
+  }
+
   const additionalLines = config.prompts.getAdditionalContextLines
     ? config.prompts.getAdditionalContextLines(frameworkContext)
     : [];

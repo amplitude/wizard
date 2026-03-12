@@ -65,6 +65,14 @@ export class InkUI implements WizardUI {
     this.store.setLoginUrl(url);
   }
 
+  setRegion(region: string): void {
+    this.store.setRegion(region);
+  }
+
+  setProjectHasData(value: boolean): void {
+    this.store.setProjectHasData(value);
+  }
+
   showServiceStatus(data: {
     description: string;
     statusPageUrl: string;

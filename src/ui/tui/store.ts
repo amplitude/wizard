@@ -153,6 +153,17 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setRegion(region: string): void {
+    this.$session.setKey('region', region as WizardSession['region']);
+    this.$session.setKey('regionForced', false);
+    this.emitChange();
+  }
+
+  setProjectHasData(value: boolean): void {
+    this.$session.setKey('projectHasData', value);
+    this.emitChange();
+  }
+
   setServiceStatus(
     status: { description: string; statusPageUrl: string } | null,
   ): void {

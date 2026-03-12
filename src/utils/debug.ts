@@ -1,11 +1,15 @@
 import chalk from 'chalk';
-import { appendFileSync } from 'fs';
+import { appendFileSync, statSync, truncateSync } from 'fs';
 import { prepareMessage } from './logging';
 import { getUI } from '../ui';
 
 let debugEnabled = false;
 let logFilePath = '/tmp/amplitude-wizard.log';
-let logEnabled = true;
+// Disable file logging in test environments — tests write via Vitest and
+// pollute the shared log with hundreds of synthetic "Wizard failed" entries.
+let logEnabled = process.env.NODE_ENV !== 'test';
+
+const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export function getLogFilePath(): string {
   return logFilePath;
@@ -31,6 +35,14 @@ export function configureLogFile(opts: {
 export function initLogFile() {
   if (!logEnabled) return;
   try {
+    // Truncate the log if it has grown too large, keeping it manageable.
+    try {
+      if (statSync(logFilePath).size > LOG_MAX_BYTES) {
+        truncateSync(logFilePath, 0);
+      }
+    } catch {
+      // File doesn't exist yet — that's fine
+    }
     const header = `\n${'='.repeat(
       60,
     )}\nAmplitude Wizard Run: ${new Date().toISOString()}\n${'='.repeat(60)}\n`;
