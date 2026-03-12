@@ -63,7 +63,6 @@ Feature: SUSI flow (Sign Up / Sign In)
     Then the user should see an error message
     And should be offered a way to retry
 
-  @todo
   Scenario: User belongs to no orgs — wizard shows guidance
     Given the OAuth flow has completed
     And the user has no Amplitude organizations

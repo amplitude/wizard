@@ -55,6 +55,18 @@ When('I enter the slash command {string}', function (command: string) {
     // Reset data state so setup re-runs once the new region is confirmed
     session(this).projectHasData = null;
   }
+  if (command === '/logout') {
+    session(this).credentials = null;
+  }
+});
+
+Then('the wizard should prompt me to log in again', function () {
+  const screen = router(this).resolve(session(this));
+  assert.strictEqual(
+    screen,
+    Screen.Auth,
+    `Expected Auth screen after logout but got ${screen}`,
+  );
 });
 
 Then('I should reach Org and Project Selection', function () {

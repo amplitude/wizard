@@ -6,20 +6,17 @@ Feature: Org / Project Selection
   Background:
     Given I am in the Org / Project Selection flow
 
-  @todo
   Scenario: Select an existing org and existing project
     When I select an existing org from the org picker
     And I select an existing project from the project picker
     Then I should continue with the selected org and project
 
-  @todo
   Scenario: Create a new org
     When I select "Create new" from the org picker
     And I enter a name for the new org
     Then the new org should be created
     And I should see the project picker
 
-  @todo
   Scenario: Select existing org and create a new project
     When I select an existing org from the org picker
     And I select "Create new" from the project picker
@@ -27,7 +24,6 @@ Feature: Org / Project Selection
     Then the new project should be created
     And I should continue with the selected org and new project
 
-  @todo
   Scenario: Create a new org and a new project
     When I select "Create new" from the org picker
     And I enter a name for the new org
@@ -36,16 +32,14 @@ Feature: Org / Project Selection
     Then both the new org and project should be created
     And I should continue with the new org and project
 
-  @todo
   Scenario: Invoked via /org slash command
     Given the wizard is active at any screen
-    When I run "/org"
+    When I enter the slash command "/org"
     Then I should see the org picker
     And after selecting, the data check should re-run for the new context
 
-  @todo
   Scenario: Invoked via /project slash command
     Given the wizard is active at any screen
-    When I run "/project"
+    When I enter the slash command "/project"
     Then I should see the project picker for the current org
     And after selecting, the data check should re-run for the new context

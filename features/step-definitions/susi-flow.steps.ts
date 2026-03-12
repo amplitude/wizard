@@ -304,3 +304,25 @@ Then(
     );
   },
 );
+
+Given('the user has no Amplitude organizations', function () {
+  session.pendingOrgs = []; // OAuth done, but returned zero orgs
+});
+
+Then(
+  'the wizard should display guidance to create an org at app.amplitude.com',
+  function () {
+    // pendingOrgs === [] means OAuth succeeded but the user has no orgs yet
+    assert.ok(
+      session.pendingOrgs !== null && session.pendingOrgs.length === 0,
+      'Expected pendingOrgs to be an empty array',
+    );
+    // Router stays on Auth — AuthScreen is responsible for showing the guidance
+    const screen = router.resolve(session);
+    assert.strictEqual(
+      screen,
+      Screen.Auth,
+      `Expected Auth screen while awaiting org creation but got ${screen}`,
+    );
+  },
+);

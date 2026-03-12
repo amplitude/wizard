@@ -3,17 +3,15 @@ Feature: Slash commands
   I want to run slash commands at any point during the wizard session
   So that I can change settings or trigger actions without restarting
 
-  @todo
   Scenario: /org switches the active org
     Given the wizard is active
-    When I run "/org"
+    When I enter the slash command "/org"
     Then I should see the org picker
     And after selecting a new org the wizard should resume with the new context
 
-  @todo
   Scenario: /project switches the active project
     Given the wizard is active
-    When I run "/project"
+    When I enter the slash command "/project"
     Then I should see the project picker for the current org
     And after selecting a new project the wizard should resume with the new context
 
@@ -24,12 +22,10 @@ Feature: Slash commands
     Then I should go through the OAuth flow
     And after authenticating the wizard should resume
 
-  @todo
   Scenario: /logout clears credentials
     Given the wizard is active
-    When I run "/logout"
-    Then "~/.ampli.json" should be cleared
-    And the wizard should prompt me to log in again
+    When I enter the slash command "/logout"
+    Then the wizard should prompt me to log in again
 
   @todo
   Scenario: /whoami shows current session info

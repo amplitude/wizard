@@ -3,7 +3,6 @@ Feature: Framework Detection
   I want the wizard to detect or let me choose my framework
   So that the agent can instrument my app correctly
 
-  @todo
   Scenario: Framework is auto-detected and user confirms
     Given I am in the Framework Detection flow
     When the wizard successfully auto-detects my framework
@@ -20,7 +19,6 @@ Feature: Framework Detection
     When I cancel
     Then the wizard should exit
 
-  @todo
   Scenario: Framework detection fails and user selects from picker
     Given I am in the Framework Detection flow
     When the wizard cannot auto-detect my framework
@@ -31,12 +29,10 @@ Feature: Framework Detection
     And there are no unresolved setup questions
     Then I should proceed to the Agent Run
 
-  @todo
   Scenario: Framework selected via --menu flag
     Given I run the wizard with the "--menu" flag
     Then I should see the framework picker menu without attempting auto-detection
 
-  @todo
   Scenario: Setup questions are all auto-detectable
     Given I am in the Framework Detection flow
     And my framework has setup questions
@@ -45,7 +41,6 @@ Feature: Framework Detection
     Then the answers should be filled in automatically
     And I should proceed to the Agent Run without being prompted
 
-  @todo
   Scenario: Setup questions require user input
     Given I am in the Framework Detection flow
     And my framework has setup questions
