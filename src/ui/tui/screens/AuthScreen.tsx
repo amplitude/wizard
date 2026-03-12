@@ -12,7 +12,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useSyncExternalStore } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { LoadingBox, PickerMenu } from '../primitives/index.js';
@@ -40,6 +40,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // Local step state — which org the user has selected in this render session
   const [selectedOrg, setSelectedOrg] = useState<OrgEntry | null>(null);
   const [apiKeyError, setApiKeyError] = useState('');
+  const [savedKeySource, setSavedKeySource] = useState<
+    'keychain' | 'env' | null
+  >(null);
 
   const pendingOrgs = session.pendingOrgs;
 
@@ -51,13 +54,36 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // Auto-select workspace when org has only one
   const singleWorkspace =
     effectiveOrg?.workspaces.length === 1 ? effectiveOrg.workspaces[0] : null;
-  if (effectiveOrg && singleWorkspace && !session.selectedWorkspaceId) {
-    store.setOrgAndWorkspace(effectiveOrg, singleWorkspace, session.installDir);
-  }
+
+  useEffect(() => {
+    if (effectiveOrg && singleWorkspace && !session.selectedWorkspaceId) {
+      store.setOrgAndWorkspace(effectiveOrg, singleWorkspace, session.installDir);
+    }
+  }, [effectiveOrg?.id, singleWorkspace?.id, session.selectedWorkspaceId]);
 
   const workspaceChosen =
     session.selectedWorkspaceId !== null ||
     (effectiveOrg !== null && effectiveOrg.workspaces.length === 1);
+
+  // Auto-advance past API key step if a saved key exists for this project
+  useEffect(() => {
+    if (!workspaceChosen || session.credentials !== null) return;
+    void import('../../../utils/api-key-store.js').then(
+      ({ readApiKeyWithSource }) => {
+        const result = readApiKeyWithSource(session.installDir);
+        if (result) {
+          setSavedKeySource(result.source);
+          store.setCredentials({
+            accessToken: session.pendingAuthIdToken ?? '',
+            projectApiKey: result.key,
+            host: DEFAULT_HOST_URL,
+            projectId: 0,
+          });
+          store.setProjectHasData(false);
+        }
+      },
+    );
+  }, [workspaceChosen, session.credentials]);
 
   const needsOrgPick =
     pendingOrgs !== null && pendingOrgs.length > 1 && effectiveOrg === null;
@@ -83,6 +109,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     });
     // Fresh project: no existing event data — advance past DataSetup
     store.setProjectHasData(false);
+    // Persist so the user doesn't have to enter it again
+    void import('../../../utils/api-key-store.js').then(({ persistApiKey }) => {
+      const source = persistApiKey(trimmed, session.installDir);
+      setSavedKeySource(source);
+    });
   };
 
   return (
@@ -167,6 +198,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             onSubmit={handleApiKeySubmit}
           />
           {apiKeyError && <Text color="red">{apiKeyError}</Text>}
+          {savedKeySource && (
+            <Text color="green">
+              {'✔ '}
+              {savedKeySource === 'keychain'
+                ? 'API key saved to system keychain'
+                : 'API key saved to .env.local'}
+            </Text>
+          )}
         </Box>
       )}
     </Box>

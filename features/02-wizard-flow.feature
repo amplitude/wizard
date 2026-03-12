@@ -22,18 +22,23 @@ Feature: Wizard flow
     When I select the "EU" region
     Then the data check should re-run for the new region
 
-  Scenario: New user with no credentials and no data
+  Scenario: New user — wizard starts at AuthScreen
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches
     Then I should go through the SUSI flow
-    And I should go through the Data Setup flow
-    And the project should have no existing data
+
+  Scenario: After SUSI completes — wizard advances to Data Setup
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches
+    Then I should go through the SUSI flow
+    When I should go through the Data Setup flow
+    Then the project should have no existing data
     And I should be taken to Framework Detection
 
-  Scenario: Returning user with credentials and no data
+  Scenario: Returning user — AuthScreen auto-advances when credentials already set
     Given I have valid credentials stored in "~/.ampli.json"
     When the wizard launches
-    Then I should go through the Activation Check flow
+    Then I should go through the Data Setup flow
     And the project should have no existing data
     And I should be taken to Framework Detection
 

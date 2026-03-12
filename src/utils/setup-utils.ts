@@ -363,7 +363,7 @@ export async function getOrAskForProjectData(
   }
 
   const result = await traceStep('login', () =>
-    askForWizardLogin({ forceFresh }),
+    askForWizardLogin({ forceFresh, installDir: _options.installDir }),
   );
 
   return {
@@ -377,6 +377,7 @@ export async function getOrAskForProjectData(
 
 async function askForWizardLogin(opts: {
   forceFresh?: boolean;
+  installDir?: string;
 } = {}): Promise<ProjectData> {
   // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
   const auth = await performAmplitudeAuth({
@@ -460,10 +461,37 @@ async function askForWizardLogin(opts: {
     analytics.setTag('opened-wizard-link', true);
   }
 
+  // ── 4b. Workspace selection ───────────────────────────────────────
+  let selectedWorkspace: { id: string; name: string } | undefined;
+  if (selectedOrg) {
+    if (selectedOrg.workspaces.length === 1) {
+      selectedWorkspace = selectedOrg.workspaces[0];
+    } else if (selectedOrg.workspaces.length > 1) {
+      const { select } = await import('@inquirer/prompts');
+      selectedWorkspace = await select<{ id: string; name: string }>({
+        message: `Select a workspace in ${selectedOrg.name}:`,
+        choices: selectedOrg.workspaces.map((ws) => ({
+          name: ws.name,
+          value: ws,
+        })),
+      });
+    }
+
+    // Write ./ampli.json so future runs recognise this project
+    if (opts.installDir && selectedWorkspace) {
+      const { writeAmpliConfig } = await import('../lib/ampli-config.js');
+      writeAmpliConfig(opts.installDir, {
+        OrgId: selectedOrg.id,
+        WorkspaceId: selectedWorkspace.id,
+        Zone: cloudRegion as import('../lib/constants.js').AmplitudeZone,
+      });
+    }
+  }
+
   // ── 5. Ask for the Amplitude project API key ─────────────────────
   // The analytics write key is not exposed via the Data API and must be
   // copied from Amplitude project settings.
-  const projectApiKey = await askForAmplitudeApiKey();
+  const projectApiKey = await askForAmplitudeApiKey(opts.installDir);
 
   return {
     accessToken: auth.idToken,
@@ -475,7 +503,28 @@ async function askForWizardLogin(opts: {
   };
 }
 
-async function askForAmplitudeApiKey(): Promise<string> {
+async function askForAmplitudeApiKey(
+  installDir?: string,
+): Promise<string> {
+  const { readApiKeyWithSource, persistApiKey } = await import(
+    './api-key-store.js'
+  );
+
+  // Return saved key if available
+  if (installDir) {
+    const result = readApiKeyWithSource(installDir);
+    if (result) {
+      getUI().log.success(
+        chalk.dim(
+          result.source === 'keychain'
+            ? 'Using saved Amplitude API key from system keychain'
+            : 'Using saved Amplitude API key from .env.local',
+        ),
+      );
+      return result.key;
+    }
+  }
+
   const { input } = await import('@inquirer/prompts');
 
   getUI().log.info(
@@ -492,7 +541,21 @@ async function askForAmplitudeApiKey(): Promise<string> {
     validate: (v: string) => v.trim().length > 0 || 'API key cannot be empty',
   });
 
-  return apiKey.trim();
+  const trimmed = apiKey.trim();
+
+  // Persist so the user doesn't have to enter it again
+  if (installDir) {
+    const source = persistApiKey(trimmed, installDir);
+    getUI().log.success(
+      chalk.dim(
+        source === 'keychain'
+          ? 'API key saved to system keychain'
+          : 'API key saved to .env.local (added to .gitignore)',
+      ),
+    );
+  }
+
+  return trimmed;
 }
 
 /**

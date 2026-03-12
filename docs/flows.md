@@ -58,17 +58,13 @@ flowchart TD
 title: Wizard flow
 ---
 flowchart TD
-    START["IntroScreen"] --> AUTH_CHECK
-
-    subgraph AUTH ["Auth / Account Setup"]
-        AUTH_CHECK{~/.ampli.json present?}
-        AUTH_CHECK -->|yes| ACTIVATION["See: Activation Check flow"]
-        AUTH_CHECK -->|no| SUSI["See: SUSI flow"]
-        SUSI --> REGION_SELECT["RegionSelect: US or EU?"]
-        REGION_SELECT --> DATA_SETUP["See: Data Setup flow"]
-        DATA_SETUP --> DATA_CHECK
-        ACTIVATION --> DATA_CHECK
-        DATA_CHECK{Project has data?}
+    subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
+        SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
+        SUSI --> REGION_CHECK{Region auto-detected?}
+        REGION_CHECK -->|yes| DATA_SETUP
+        REGION_CHECK -->|no| REGION_SELECT["RegionSelect: US or EU?"]
+        REGION_SELECT --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
+        DATA_SETUP --> DATA_CHECK{Project has data?}
     end
 
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
@@ -82,8 +78,8 @@ flowchart TD
     FRAMEWORK --> RUN
 
     SLASH_CMD["/org · /project slash commands"] -. available any time .-> ORG_PROJECT
-    SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT["RegionSelect: US or EU?"]
-    REGION_SELECT --> DATA_CHECK
+    SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
+    REGION_SELECT_2["RegionSelect"] --> DATA_CHECK2["data check re-runs"]
 
     subgraph AGENT_RUN ["Agent Run"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
@@ -99,8 +95,8 @@ flowchart TD
     POST --> OUTRO["See: Outro flow"]
     ERR --> OUTRO
 
-    START -. overlay .-> OUTAGE["OutageScreen"]
-    START -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]
+    SUSI -. overlay .-> OUTAGE["OutageScreen"]
+    SUSI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]
 ```
 
 ---
@@ -134,22 +130,34 @@ flowchart TD
 
 ## SUSI flow
 
+The SUSI flow runs inside `AuthScreen`. Authentication happens via Amplitude OAuth
+(browser redirect). No email is entered in the wizard itself.
+
 ```mermaid
 ---
 title: SUSI flow
 ---
 flowchart TD
-    EMAIL["Enter email"] --> REGION["Select region: US or EU"]
-    REGION --> USER_TYPE{Existing user?}
-    USER_TYPE -->|existing| ORG_PICKER["Picker: existing orgs + 'Create new'"]
-    USER_TYPE -->|new| SIGNUP["Sign up"] --> ORG_PICKER
+    OAUTH_WAIT["Show OAuth spinner + login URL<br/>(bin.ts opens browser, AuthScreen waits)"]
+    OAUTH_WAIT --> OAUTH_DONE["OAuth completes — region auto-detected from token"]
 
-    ORG_PICKER -->|existing org selected| PROJ_PICKER
-    ORG_PICKER -->|create new| ORG_NAME["Text input: name your org"] --> PROJ_PICKER
+    OAUTH_DONE --> ORG_COUNT{How many orgs?}
+    ORG_COUNT -->|1| WORKSPACE_COUNT
+    ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> WORKSPACE_COUNT
 
-    PROJ_PICKER["Picker: existing projects + 'Create new'"]
-    PROJ_PICKER -->|existing project selected| DONE["→ Data Setup flow"]
-    PROJ_PICKER -->|create new| PROJ_NAME["Text input: name your project"] --> DONE
+    WORKSPACE_COUNT{How many workspaces?}
+    WORKSPACE_COUNT -->|1| WRITE_AMPLI
+    WORKSPACE_COUNT -->|many| WS_PICKER["Picker: select workspace"] --> WRITE_AMPLI
+
+    WRITE_AMPLI["Write ./ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
+
+    WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>keychain or .env.local}
+    KEY_CHECK -->|yes| AUTO_KEY["Auto-advance — no prompt"]
+    KEY_CHECK -->|no| KEY_INPUT["Text input: paste Amplitude API key"]
+    KEY_INPUT --> PERSIST["Persist key to system keychain<br/>or .env.local (gitignored)"]
+
+    AUTO_KEY --> DONE["Credentials set → DataSetup"]
+    PERSIST --> DONE
 ```
 
 ---

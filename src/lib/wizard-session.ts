@@ -80,6 +80,7 @@ export interface OutroData {
 export interface WizardSession {
   // From CLI args
   debug: boolean;
+  verbose: boolean;
   forceInstall: boolean;
   installDir: string;
   ci: boolean;
@@ -206,6 +207,7 @@ export interface WizardSession {
  */
 export function buildSession(args: {
   debug?: boolean;
+  verbose?: boolean;
   forceInstall?: boolean;
   installDir?: string;
   ci?: boolean;
@@ -219,6 +221,7 @@ export function buildSession(args: {
 }): WizardSession {
   return {
     debug: args.debug ?? false,
+    verbose: args.verbose ?? false,
     forceInstall: args.forceInstall ?? false,
     installDir: args.installDir ?? process.cwd(),
     ci: args.ci ?? false,

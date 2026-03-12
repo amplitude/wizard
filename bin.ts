@@ -63,6 +63,12 @@ yargs(hideBin(process.argv))
       describe: 'Enable verbose logging\nenv: AMPLITUDE_WIZARD_DEBUG',
       type: 'boolean',
     },
+    verbose: {
+      default: false,
+      describe:
+        'Print diagnostic info (working dir, config, etc.) to the log\nenv: AMPLITUDE_WIZARD_VERBOSE',
+      type: 'boolean',
+    },
     default: {
       default: true,
       describe:
@@ -204,6 +210,7 @@ yargs(hideBin(process.argv))
             // Build session from CLI args and attach to store
             const session = buildSession({
               debug: options.debug as boolean | undefined,
+              verbose: options.verbose as boolean | undefined,
               forceInstall: options.forceInstall as boolean | undefined,
               installDir: options.installDir as string | undefined,
               ci: false,
@@ -224,6 +231,21 @@ yargs(hideBin(process.argv))
             );
             const { detectIntegration } = await import('./src/run.js');
             const installDir = session.installDir ?? process.cwd();
+
+            // Verbose startup diagnostics — always written to the log file;
+            // visible in the RunScreen "Logs" tab.
+            if (session.verbose || session.debug) {
+              const { enableDebugLogs, logToFile } = await import(
+                './src/utils/debug.js'
+              );
+              enableDebugLogs();
+              logToFile('[verbose] Amplitude Wizard starting');
+              logToFile(`[verbose] node          : ${process.version}`);
+              logToFile(`[verbose] process.cwd() : ${process.cwd()}`);
+              logToFile(`[verbose] installDir    : ${installDir}`);
+              logToFile(`[verbose] platform      : ${process.platform}`);
+              logToFile(`[verbose] argv          : ${process.argv.join(' ')}`);
+            }
 
             const { DETECTION_TIMEOUT_MS } = await import(
               './src/lib/constants.js'
@@ -415,6 +437,20 @@ yargs(hideBin(process.argv))
             // complete account setup (credentials set by AuthScreen), then
             // for IntroScreen confirmation.
             await Promise.all([authTask, detectionTask]);
+
+            if (session.verbose || session.debug) {
+              const { logToFile } = await import('./src/utils/debug.js');
+              logToFile(
+                `[verbose] detection    : ${tui.store.session.integration ?? 'none'}`,
+              );
+              logToFile(
+                `[verbose] framework    : ${tui.store.session.detectedFrameworkLabel ?? 'unknown'}`,
+              );
+              logToFile(
+                `[verbose] region       : ${tui.store.session.region ?? 'not set'}`,
+              );
+            }
+
             await tui.waitForSetup();
 
             await runWizard(
