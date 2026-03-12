@@ -2,18 +2,15 @@
 title: Wizard flow
 ---
 flowchart TD
-    START["IntroScreen"] --> AUTH_CHECK
-
-    subgraph AUTH ["Auth / Account Setup"]
-        AUTH_CHECK{~/.ampli.json present?}
-        AUTH_CHECK -->|yes| ACTIVATION["Evaluate activation status for project"]
-        AUTH_CHECK -->|no| SUSI["See: SUSI flow"]
-        SUSI --> DATA_SETUP["See: Data Setup flow"]
-        DATA_SETUP --> DATA_CHECK
-        ACTIVATION --> DATA_CHECK
+    subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
+        SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
+        SUSI --> REGION_CHECK{Region auto-detected?}
+        REGION_CHECK -->|yes| DATA_SETUP
+        REGION_CHECK -->|no| REGION_SELECT["RegionSelect: US or EU?"]
+        REGION_SELECT --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
+        DATA_SETUP --> DATA_CHECK{Project has data?}
     end
 
-    DATA_CHECK{Project has data?}
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
     DATA_CHECK -->|yes| NEW_PROJECT{Setting up<br/>a new project?}
     NEW_PROJECT -->|yes| ORG_PROJECT["See: Org / Project Selection flow"]
@@ -25,6 +22,8 @@ flowchart TD
     FRAMEWORK --> RUN
 
     SLASH_CMD["/org · /project slash commands"] -. available any time .-> ORG_PROJECT
+    SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
+    REGION_SELECT_2["RegionSelect"] --> DATA_CHECK2["data check re-runs"]
 
     subgraph AGENT_RUN ["Agent Run"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
@@ -40,5 +39,5 @@ flowchart TD
     POST --> OUTRO["See: Outro flow"]
     ERR --> OUTRO
 
-    START -. overlay .-> OUTAGE["OutageScreen"]
-    START -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]
+    SUSI -. overlay .-> OUTAGE["OutageScreen"]
+    SUSI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]

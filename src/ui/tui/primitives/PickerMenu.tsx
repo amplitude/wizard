@@ -4,10 +4,11 @@
  * Multi mode: checkbox glyphs with space to toggle.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { useState } from 'react';
 import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 
 interface PickerOption<T> {
   label: string;
@@ -72,7 +73,7 @@ const SinglePickerMenu = <T,>({
   const [focused, setFocused] = useState(0);
   const rows = Math.ceil(options.length / columns);
 
-  useInput((_input, key) => {
+  useScreenInput((_input, key) => {
     const col = Math.floor(focused / rows);
     const row = focused % rows;
 
@@ -168,7 +169,7 @@ const MultiPickerMenu = <T,>({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const rows = Math.ceil(options.length / columns);
 
-  useInput((_input, key) => {
+  useScreenInput((_input, key) => {
     const col = Math.floor(focused / rows);
     const row = focused % rows;
 

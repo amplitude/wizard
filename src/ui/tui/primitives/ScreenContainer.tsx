@@ -13,10 +13,13 @@ import { TitleBar } from '../components/TitleBar.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DissolveTransition } from './DissolveTransition.js';
 import { ScreenErrorBoundary } from './ScreenErrorBoundary.js';
+import { SlashCommandBar } from '../components/SlashCommandBar.js';
 import type { WizardStore } from '../store.js';
 
 const MIN_WIDTH = 80;
 const MAX_WIDTH = 120;
+/** Height of the persistent slash command bar (separator line + input line). */
+const CMD_BAR_HEIGHT = 2;
 
 /** Use terminal width when small so we don't overflow; otherwise clamp to [MIN_WIDTH, MAX_WIDTH]. */
 function getContentWidth(terminalColumns: number): number {
@@ -38,7 +41,7 @@ export const ScreenContainer = ({ store, screens }: ScreenContainerProps) => {
 
   const terminalWidth = columns;
   const width = getContentWidth(terminalWidth);
-  const contentHeight = Math.max(5, rows - 3);
+  const contentHeight = Math.max(5, rows - 3 - CMD_BAR_HEIGHT);
   const contentAreaWidth = Math.max(10, width - 2);
   const direction = store.lastNavDirection === 'pop' ? 'right' : 'left';
   const activeScreen = screens[store.currentScreen] ?? null;
@@ -59,6 +62,7 @@ export const ScreenContainer = ({ store, screens }: ScreenContainerProps) => {
           </ScreenErrorBoundary>
         </DissolveTransition>
       </Box>
+      <SlashCommandBar store={store} width={width} />
     </Box>
   );
 

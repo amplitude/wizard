@@ -1,0 +1,20 @@
+---
+title: Activation Check flow
+---
+flowchart TD
+    EVENTS{Events ingested?}
+    EVENTS -->|50+| ACTIVATED["Activated → proceed to data check"]
+    EVENTS -->|1–49| ONBOARDED["Onboarded, not yet activated"]
+    EVENTS -->|0| SNIPPET
+
+    ONBOARDED --> SNIPPET{Snippet configured?}
+    SNIPPET -->|no| SETUP_SNIPPET["See: Framework Detection flow<br/>(set up snippet)"] --> UNBLOCKED
+    SNIPPET -->|yes| DEPLOYED{App deployed?}
+    DEPLOYED -->|yes| UNBLOCKED
+    DEPLOYED -->|no| UNBLOCKED
+
+    UNBLOCKED{"What would you like to do?"}
+    UNBLOCKED -->|help me test locally| FRAMEWORK["See: Framework Detection flow"]
+    UNBLOCKED -->|I'm done for now| EXIT["Exit — resume when data arrives"]
+    UNBLOCKED -->|I'm blocked| AGENT["See: Agent Run<br/>(debug mode)"]
+    UNBLOCKED -->|take me to the docs| DOCS["Open docs in browser"] --> UNBLOCKED

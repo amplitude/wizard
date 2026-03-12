@@ -2,19 +2,11 @@
 title: Org / Project Selection flow
 ---
 flowchart TD
-    ORG{One org or many?}
-    ORG -->|one| ORG_CONFIRM{"Use this org?"}
-    ORG -->|many| ORG_PICKER["Picker: existing orgs + 'Create new'"]
-    ORG_CONFIRM -->|yes| PROJECT
-    ORG_CONFIRM -->|no, create new| ORG_NAME["Text input: name your org"] --> PROJECT
-    ORG_PICKER -->|existing org selected| PROJECT
-    ORG_PICKER -->|create new| ORG_NAME
+    ORG_PICKER["Picker: existing orgs + 'Create new'"]
+    ORG_PICKER -->|existing org selected| PROJ_PICKER
+    ORG_PICKER -->|create new| ORG_NAME["Text input: name your org"] --> PROJ_PICKER
 
-    PROJECT{One project or many?}
-    PROJECT -->|one| PROJ_CONFIRM{"Use this project?"}
-    PROJECT -->|many| PROJ_PICKER["Picker: existing projects + 'Create new'"]
-    PROJ_CONFIRM -->|yes| DONE
-    PROJ_CONFIRM -->|no, create new| PROJ_NAME["Text input: name your project"] --> DONE
+    PROJ_PICKER["Picker: existing projects + 'Create new'"]
     PROJ_PICKER -->|existing project selected| DONE
-    PROJ_PICKER -->|create new| PROJ_NAME
+    PROJ_PICKER -->|create new| PROJ_NAME["Text input: name your project"] --> DONE
     DONE["→ continue"]

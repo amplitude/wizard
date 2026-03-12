@@ -3,7 +3,8 @@
  * Enter confirms, escape cancels. Arrow keys toggle focus.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useState } from 'react';
 import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
@@ -30,7 +31,7 @@ export const ConfirmationInput = ({
 }: ConfirmationInputProps) => {
   const [focused, setFocused] = useState<FocusTarget>(FocusTarget.Continue);
 
-  useInput((_input, key) => {
+  useScreenInput((_input, key) => {
     if (key.leftArrow || key.rightArrow) {
       setFocused((f) =>
         f === FocusTarget.Continue ? FocusTarget.Cancel : FocusTarget.Continue,

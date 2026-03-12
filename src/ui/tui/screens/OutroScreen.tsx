@@ -4,7 +4,8 @@
  * Keeps the process alive until the user presses a key to exit.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
@@ -20,7 +21,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     () => store.getSnapshot(),
   );
 
-  useInput(() => {
+  useScreenInput(() => {
     process.exit(0);
   });
 

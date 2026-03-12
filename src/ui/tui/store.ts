@@ -54,6 +54,12 @@ export class WizardStore {
   private $eventPlan = atom<PlannedEvent[]>([]);
   private $version = atom(0);
 
+  /** True while the user is typing a slash command in the command bar. */
+  private $commandMode = atom(false);
+
+  /** Transient feedback message shown in the command bar after a command runs. */
+  private $commandFeedback = atom<string | null>(null);
+
   /** Last screen seen — used to detect screen transitions for analytics. */
   private _lastScreen: ScreenName | null = null;
 
@@ -90,6 +96,14 @@ export class WizardStore {
 
   set session(value: WizardSession) {
     this.$session.set(value);
+  }
+
+  get commandMode(): boolean {
+    return this.$commandMode.get();
+  }
+
+  get commandFeedback(): string | null {
+    return this.$commandFeedback.get();
   }
 
   get statusMessages(): string[] {
@@ -159,8 +173,51 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /** Force the RegionSelect screen to re-appear (/region command). */
+  setRegionForced(): void {
+    this.$session.setKey('regionForced', true);
+    // Reset data check so it re-runs after region changes
+    this.$session.setKey('projectHasData', null);
+    this.emitChange();
+  }
+
+  /** Enter or exit slash command mode. */
+  setCommandMode(active: boolean): void {
+    this.$commandMode.set(active);
+    this.$version.set(this.$version.get() + 1);
+  }
+
+  /** Show a transient feedback message in the command bar. Clears after ms. */
+  setCommandFeedback(message: string, ms = 3000): void {
+    this.$commandFeedback.set(message);
+    this.$version.set(this.$version.get() + 1);
+    setTimeout(() => {
+      this.$commandFeedback.set(null);
+      this.$version.set(this.$version.get() + 1);
+    }, ms);
+  }
+
   setProjectHasData(value: boolean): void {
     this.$session.setKey('projectHasData', value);
+    this.emitChange();
+  }
+
+  setNewProjectConfirmed(value: boolean): void {
+    this.$session.setKey('newProjectConfirmed', value);
+    this.emitChange();
+  }
+
+  setOrgProjectComplete(): void {
+    this.$session.setKey('orgProjectComplete', true);
+    this.emitChange();
+  }
+
+  /** Force the OrgProject screen to appear (/org or /project command). */
+  setOrgProjectForced(forced: boolean): void {
+    this.$session.setKey('orgProjectForced', forced);
+    if (forced) {
+      this.$session.setKey('orgProjectComplete', false);
+    }
     this.emitChange();
   }
 

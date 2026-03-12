@@ -7,7 +7,14 @@ flowchart TD
     CHOICE -->|taxonomy agent| TAXONOMY["Taxonomy Agent"]
 
     CONFIGURE --> INGESTED{Events successfully<br/>ingested?}
-    INGESTED -->|yes| POST_INGEST["Options: taxonomy agent / first chart / first dash"]
     INGESTED -->|no| DONE["→ Wizard flow: data check"]
-    POST_INGEST --> DONE
-    TAXONOMY --> DONE
+    INGESTED -->|yes| CHECKLIST
+
+    TAXONOMY --> CHECKLIST
+
+    CHECKLIST["Checklist: taxonomy / first chart / first dash<br/>(show completed items, offer remaining)"]
+    CHECKLIST -->|run taxonomy agent| TAXONOMY_RUN["Taxonomy Agent"] --> CHECKLIST
+    CHECKLIST -->|create first chart| CHART_RUN["First Chart"] --> CHECKLIST
+    CHECKLIST -->|create first dash — unlocked after chart| DASH_RUN["First Dash"] --> CHECKLIST
+    CHECKLIST -->|all three complete| OPEN_SITE["Open dashboard in browser"]
+    OPEN_SITE --> DONE

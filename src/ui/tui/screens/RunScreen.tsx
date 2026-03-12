@@ -9,7 +9,8 @@
  * TipsCard reactively shows tips based on discovered features.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import {
@@ -105,7 +106,7 @@ interface RunScreenProps {
 }
 
 const TipsCard = ({ store }: { store: WizardStore }) => {
-  useInput((input) => {
+  useScreenInput((input) => {
     for (const tip of TIPS) {
       if (
         tip.toggle &&

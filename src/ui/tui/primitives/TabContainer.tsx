@@ -3,7 +3,8 @@
  * Absorbs BottomTabBar + StatusPanel functionality.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useState, type ReactNode } from 'react';
 import { Colors, Icons } from '../styles.js';
 
@@ -21,7 +22,7 @@ interface TabContainerProps {
 export const TabContainer = ({ tabs, statusMessage }: TabContainerProps) => {
   const [activeTab, setActiveTab] = useState(0);
 
-  useInput((_input, key) => {
+  useScreenInput((_input, key) => {
     if (key.leftArrow) {
       setActiveTab((prev) => Math.max(0, prev - 1));
     }

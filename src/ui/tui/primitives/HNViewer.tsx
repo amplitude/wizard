@@ -5,8 +5,9 @@
  * Each story has a [1]–[0] numeral; typing it opens the HN comments page.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors } from '../styles.js';
 
 const HN_API = 'https://hacker-news.firebaseio.com/v0';
@@ -45,7 +46,7 @@ export const HNViewer = () => {
     })();
   }, []);
 
-  useInput((input) => {
+  useScreenInput((input) => {
     // Map keys 1–9 → index 0–8, key 0 → index 9
     const num = parseInt(input, 10);
     if (isNaN(num)) return;
