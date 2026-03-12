@@ -265,9 +265,7 @@ yargs(hideBin(process.argv))
                 const { performAmplitudeAuth } = await import(
                   './src/utils/oauth.js'
                 );
-                const { fetchAmplitudeUser } = await import(
-                  './src/lib/api.js'
-                );
+                const { fetchAmplitudeUser } = await import('./src/lib/api.js');
                 const { detectRegionFromToken } = await import(
                   './src/utils/urls.js'
                 );
@@ -299,7 +297,7 @@ yargs(hideBin(process.argv))
                   cloudRegion,
                 );
 
-                // Persist to ~/.ampli.json (same format as ampli CLI)
+                // Persist to ./ampli.json
                 storeToken(
                   {
                     id: userInfo.id,
@@ -312,9 +310,7 @@ yargs(hideBin(process.argv))
                     accessToken: auth.accessToken,
                     idToken: auth.idToken,
                     refreshToken: auth.refreshToken,
-                    expiresAt: new Date(
-                      Date.now() + 3600 * 1000,
-                    ).toISOString(),
+                    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
                   },
                 );
 
@@ -384,7 +380,10 @@ yargs(hideBin(process.argv))
               // Feature discovery — deterministic scan of package.json deps
               try {
                 const { readFileSync } = await import('fs');
-                const pkgPath = require('path').join(installDir, 'package.json');
+                const pkgPath = require('path').join(
+                  installDir,
+                  'package.json',
+                );
                 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
                   dependencies?: Record<string, string>;
                   devDependencies?: Record<string, string>;
@@ -441,13 +440,19 @@ yargs(hideBin(process.argv))
             if (session.verbose || session.debug) {
               const { logToFile } = await import('./src/utils/debug.js');
               logToFile(
-                `[verbose] detection    : ${tui.store.session.integration ?? 'none'}`,
+                `[verbose] detection    : ${
+                  tui.store.session.integration ?? 'none'
+                }`,
               );
               logToFile(
-                `[verbose] framework    : ${tui.store.session.detectedFrameworkLabel ?? 'unknown'}`,
+                `[verbose] framework    : ${
+                  tui.store.session.detectedFrameworkLabel ?? 'unknown'
+                }`,
               );
               logToFile(
-                `[verbose] region       : ${tui.store.session.region ?? 'not set'}`,
+                `[verbose] region       : ${
+                  tui.store.session.region ?? 'not set'
+                }`,
               );
             }
 

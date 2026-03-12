@@ -321,7 +321,7 @@ export function isUsingTypeScript({
  * Get project data for the wizard via Amplitude OAuth or CI API key.
  *
  * Pass installDir to enable fresh-auth detection: when no local ampli.json
- * exists, the cached ~/.ampli.json token is bypassed so the user explicitly
+ * exists, the cached ./ampli.json token is bypassed so the user explicitly
  * authenticates and picks the right Amplitude account for this project.
  */
 export async function getOrAskForProjectData(
@@ -375,10 +375,12 @@ export async function getOrAskForProjectData(
   };
 }
 
-async function askForWizardLogin(opts: {
-  forceFresh?: boolean;
-  installDir?: string;
-} = {}): Promise<ProjectData> {
+async function askForWizardLogin(
+  opts: {
+    forceFresh?: boolean;
+    installDir?: string;
+  } = {},
+): Promise<ProjectData> {
   // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
   const auth = await performAmplitudeAuth({
     zone: DEFAULT_AMPLITUDE_ZONE,
@@ -412,7 +414,7 @@ async function askForWizardLogin(opts: {
   let selectedOrg: AmplitudeOrg | undefined;
 
   if (userInfo) {
-    // Persist user details back to ~/.ampli.json (replaces the "pending" entry)
+    // Persist user details back to ./ampli.json (replaces the "pending" entry)
     storeToken(
       {
         id: userInfo.id,
@@ -503,9 +505,7 @@ async function askForWizardLogin(opts: {
   };
 }
 
-async function askForAmplitudeApiKey(
-  installDir?: string,
-): Promise<string> {
+async function askForAmplitudeApiKey(installDir?: string): Promise<string> {
   const { readApiKeyWithSource, persistApiKey } = await import(
     './api-key-store.js'
   );

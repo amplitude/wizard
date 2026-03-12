@@ -5,14 +5,14 @@ Feature: Activation Check
 
   @todo
   Scenario: Project is fully activated (50+ events)
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And the project has 50 or more ingested events
     When the activation check runs
     Then I should proceed to the data check
 
   @todo
   Scenario: Project is onboarded but not activated (1–49 events) with snippet configured and app deployed
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And the project has between 1 and 49 ingested events
     And the Amplitude snippet is configured
     And the app has been deployed
@@ -21,7 +21,7 @@ Feature: Activation Check
 
   @todo
   Scenario: Project is onboarded but not activated (1–49 events) with snippet configured and app not deployed
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And the project has between 1 and 49 ingested events
     And the Amplitude snippet is configured
     And the app has not been deployed
@@ -30,7 +30,7 @@ Feature: Activation Check
 
   @todo
   Scenario: Project has no events and snippet is not configured
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And the project has 0 ingested events
     And the Amplitude snippet is not configured
     When the activation check runs

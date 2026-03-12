@@ -2,21 +2,23 @@
 
 ## Slash commands
 
-The CLI keeps a persistent prompt open at all times (like Claude). Slash commands can be run at any point during the wizard to change settings or trigger actions.
+The CLI keeps a persistent prompt open at all times (like Claude). Slash
+commands can be run at any point during the wizard to change settings or trigger
+actions.
 
-| Command | Description |
-|---|---|
-| `/org` | Switch the active org |
-| `/project` | Switch the active project |
-| `/region` | Switch the data-center region (US or EU) — re-triggers data setup |
-| `/login` | Re-authenticate |
-| `/logout` | Clear credentials |
-| `/whoami` | Show current user, org, and project |
-| `/overview` | Open the project overview in the browser |
-| `/chart` | Set up a new chart |
-| `/dashboard` | Create a new dashboard |
-| `/taxonomy` | Interact with the taxonomy agent |
-| `/help` | List available slash commands |
+| Command      | Description                                                       |
+| ------------ | ----------------------------------------------------------------- |
+| `/org`       | Switch the active org                                             |
+| `/project`   | Switch the active project                                         |
+| `/region`    | Switch the data-center region (US or EU) — re-triggers data setup |
+| `/login`     | Re-authenticate                                                   |
+| `/logout`    | Clear credentials                                                 |
+| `/whoami`    | Show current user, org, and project                               |
+| `/overview`  | Open the project overview in the browser                          |
+| `/chart`     | Set up a new chart                                                |
+| `/dashboard` | Create a new dashboard                                            |
+| `/taxonomy`  | Interact with the taxonomy agent                                  |
+| `/help`      | List available slash commands                                     |
 
 ---
 
@@ -34,11 +36,11 @@ flowchart TD
     CMD --> WHOAMI["whoami"]
     CMD --> WIZARD["wizard (default)"]
 
-    LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
+    LOGIN --> LOGIN_CHECK{./ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
     LOGIN_CHECK -->|no| OAUTH["OAuth flow"] --> STORE["Store token"] --> LOGIN_DONE
 
-    LOGOUT --> CLEAR["Clear ~/.ampli.json"]
+    LOGOUT --> CLEAR["Clear ./ampli.json"]
 
     WHOAMI --> CHECK_TOKEN{Token exists?}
     CHECK_TOKEN -->|yes| SHOW_USER["Show name, email, zone"]
@@ -130,8 +132,8 @@ flowchart TD
 
 ## SUSI flow
 
-The SUSI flow runs inside `AuthScreen`. Authentication happens via Amplitude OAuth
-(browser redirect). No email is entered in the wizard itself.
+The SUSI flow runs inside `AuthScreen`. Authentication happens via Amplitude
+OAuth (browser redirect). No email is entered in the wizard itself.
 
 ```mermaid
 ---
@@ -191,7 +193,8 @@ flowchart TD
 
 ## Org / Project Selection flow
 
-> Available as `--org` and `--project` CLI args in CI mode. In the wizard, `/org` and `/project` slash commands can invoke this at any time.
+> Available as `--org` and `--project` CLI args in CI mode. In the wizard,
+> `/org` and `/project` slash commands can invoke this at any time.
 
 ```mermaid
 ---

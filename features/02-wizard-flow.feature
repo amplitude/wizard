@@ -23,12 +23,12 @@ Feature: Wizard flow
     Then the data check should re-run for the new region
 
   Scenario: New user — wizard starts at AuthScreen
-    Given I have no credentials stored in "~/.ampli.json"
+    Given I have no credentials stored in "./ampli.json"
     When the wizard launches
     Then I should go through the SUSI flow
 
   Scenario: After SUSI completes — wizard advances to Data Setup
-    Given I have no credentials stored in "~/.ampli.json"
+    Given I have no credentials stored in "./ampli.json"
     When the wizard launches
     Then I should go through the SUSI flow
     When I should go through the Data Setup flow
@@ -36,14 +36,14 @@ Feature: Wizard flow
     And I should be taken to Framework Detection
 
   Scenario: Returning user — AuthScreen auto-advances when credentials already set
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     When the wizard launches
     Then I should go through the Data Setup flow
     And the project should have no existing data
     And I should be taken to Framework Detection
 
   Scenario: Returning user with credentials and existing data — setting up new project
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And the current project has existing data
     When the wizard launches
     Then I should be asked "Setting up a new project?"
@@ -52,7 +52,7 @@ Feature: Wizard flow
     And the data check should re-run for the new project
 
   Scenario: Returning user with credentials and existing data — continuing with current project
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And the current project has existing data
     When the wizard launches
     Then I should be asked "Setting up a new project?"

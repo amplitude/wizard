@@ -14,7 +14,7 @@ import {
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
-/** Temp config file used in place of ~/.ampli.json for isolation. */
+/** Temp config file used in place of ./ampli.json for isolation. */
 let tempConfigPath: string;
 let tempDir: string;
 
@@ -97,25 +97,28 @@ Given('I have credentials stored in {string}', function (_path: string) {
   storeToken(scenarioUser, makeValidToken(), tempConfigPath);
 });
 
-Given('I have expired credentials stored in {string}', function (_path: string) {
-  scenarioUser = {
-    id: 'user-3',
-    firstName: 'Margaret',
-    lastName: 'Hamilton',
-    email: 'margaret@example.com',
-    zone: 'us',
-  };
-  storeToken(
-    scenarioUser,
-    {
-      accessToken: 'old-access',
-      idToken: 'old-id',
-      refreshToken: 'old-refresh',
-      expiresAt: makePastExpiry(),
-    },
-    tempConfigPath,
-  );
-});
+Given(
+  'I have expired credentials stored in {string}',
+  function (_path: string) {
+    scenarioUser = {
+      id: 'user-3',
+      firstName: 'Margaret',
+      lastName: 'Hamilton',
+      email: 'margaret@example.com',
+      zone: 'us',
+    };
+    storeToken(
+      scenarioUser,
+      {
+        accessToken: 'old-access',
+        idToken: 'old-id',
+        refreshToken: 'old-refresh',
+        expiresAt: makePastExpiry(),
+      },
+      tempConfigPath,
+    );
+  },
+);
 
 // ── When ──────────────────────────────────────────────────────────────────────
 
@@ -168,7 +171,9 @@ When('I run {string}', function (command: string) {
     for (let i = 0; i < args.length; i++) {
       const arg = args[i];
       if (arg.startsWith('--')) {
-        const key = arg.slice(2).replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
+        const key = arg
+          .slice(2)
+          .replace(/-([a-z])/g, (_, c: string) => c.toUpperCase());
         const next = args[i + 1];
         if (next && !next.startsWith('--')) {
           parsed[key] = next;
@@ -215,12 +220,18 @@ Then('I should be redirected through the OAuth flow', function () {
   );
 });
 
-Then('my token should be refreshed in {string}', function (_configPathLabel: string) {
-  const token = getStoredToken(undefined, 'us', tempConfigPath);
-  assert.ok(token, 'Expected a refreshed token to be stored but got none');
-  const expiresAt = new Date(token.expiresAt);
-  assert.ok(expiresAt > new Date(), 'Expected the refreshed token to not be expired');
-});
+Then(
+  'my token should be refreshed in {string}',
+  function (_configPathLabel: string) {
+    const token = getStoredToken(undefined, 'us', tempConfigPath);
+    assert.ok(token, 'Expected a refreshed token to be stored but got none');
+    const expiresAt = new Date(token.expiresAt);
+    assert.ok(
+      expiresAt > new Date(),
+      'Expected the refreshed token to not be expired',
+    );
+  },
+);
 
 Then('the OAuth flow should not be triggered', function () {
   assert.strictEqual(
@@ -262,7 +273,7 @@ Then('{string} should be cleared', function (_configPathLabel: string) {
   assert.deepStrictEqual(
     parsed,
     {},
-    'Expected ~/.ampli.json to be cleared to {}',
+    'Expected ./ampli.json to be cleared to {}',
   );
   // Also verify that getStoredUser returns nothing
   assert.strictEqual(

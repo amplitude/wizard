@@ -5,7 +5,6 @@ Feature: ampli.json project configuration
 
   Background:
     Given I am working in a project directory
-
   # ── Reading ampli.json ─────────────────────────────────────────────────────
 
   Scenario: No ampli.json present
@@ -70,13 +69,12 @@ Feature: ampli.json project configuration
     When the wizard reads ampli.json
     Then the result should be "merge_conflicts"
     And the user should be warned about merge conflicts
-
   # ── Writing ampli.json ────────────────────────────────────────────────────
 
   Scenario: Wizard writes ampli.json after project setup
     Given there is no "ampli.json" in the project directory
     When the wizard writes ampli.json with:
-      | OrgId       | 36958                                |
+      | OrgId       |                                36958 |
       | WorkspaceId | 0adfd673-c53b-462c-bf88-84c7605286a4 |
       | SourceId    | 478440ff-666e-4998-8278-84ff7488dfa1 |
       | Branch      | main                                 |
@@ -99,24 +97,23 @@ Feature: ampli.json project configuration
     When the wizard merges ampli.json with:
       | SourceId  | 478440ff-666e-4998-8278-84ff7488dfa1 |
       | VersionId | 8ec607b1-0b09-4251-af84-95914f8e57e8 |
-      | Version   | 42.0.0                               |
+      | Version   |                               42.0.0 |
     Then "ampli.json" should contain OrgId "36958"
     And "ampli.json" should contain SourceId "478440ff-666e-4998-8278-84ff7488dfa1"
     And "ampli.json" should contain Version "42.0.0"
     And "ampli.json" should contain Path "./src/ampli"
-
   # ── Wizard flow integration ───────────────────────────────────────────────
 
   @todo
   Scenario: Wizard checks ampli.json before running the activation check
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And "ampli.json" is fully configured in the project directory
     When the wizard launches
     Then the activation check should use the SourceId from ampli.json
 
   @todo
   Scenario: Wizard skips to SUSI when ampli.json has no SourceId
-    Given I have valid credentials stored in "~/.ampli.json"
+    Given I have valid credentials stored in "./ampli.json"
     And there is no "ampli.json" in the project directory
     When the wizard launches
     Then I should go through the Data Setup flow to create a new source

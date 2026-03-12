@@ -2,7 +2,7 @@
  * Amplitude OAuth2/PKCE flow — adapted from Amplitude wizard's oauth.ts but
  * hitting Amplitude's auth endpoints (same as the ampli CLI).
  *
- * Key difference from Amplitude: checks ~/.ampli.json for an existing ampli CLI
+ * Key difference from Amplitude: checks ./ampli.json for an existing ampli CLI
  * session first, so users who ran `ampli login` can skip re-authenticating.
  */
 
@@ -13,6 +13,7 @@ import chalk from 'chalk';
 import opn from 'opn';
 import { z } from 'zod';
 import { getUI } from '../ui/index.js';
+import { logToFile } from './debug.js';
 import {
   AMPLITUDE_ZONE_SETTINGS,
   DEFAULT_AMPLITUDE_ZONE,
@@ -147,10 +148,10 @@ export interface AmplitudeAuthResult {
 /**
  * Performs the Amplitude OAuth2/PKCE flow.
  *
- * 1. Checks ~/.ampli.json for a valid existing session (shared with ampli CLI),
+ * 1. Checks ./ampli.json for a valid existing session (shared with ampli CLI),
  *    unless forceFresh is true (used for new projects with no local ampli.json).
  * 2. If none, opens the browser to auth.amplitude.com and awaits callback.
- * 3. Stores the resulting tokens back to ~/.ampli.json.
+ * 3. Stores the resulting tokens back to ./ampli.json.
  */
 export async function performAmplitudeAuth(options: {
   zone?: AmplitudeZone;
@@ -162,11 +163,26 @@ export async function performAmplitudeAuth(options: {
   // ── 1. Try existing ampli CLI session ────────────────────────────
   // Skip when forceFresh — used for new projects where we don't know
   // which org applies, so the user must explicitly authenticate.
+  logToFile('[oauth] performAmplitudeAuth called', {
+    zone,
+    forceFresh: options.forceFresh,
+  });
+
   if (!options.forceFresh) {
     const existing = getStoredToken(undefined, zone);
+    logToFile(
+      '[oauth] getStoredToken result',
+      existing
+        ? {
+            idToken: existing.idToken?.slice(0, 20) + '…',
+            hasAccess: !!existing.accessToken,
+            hasRefresh: !!existing.refreshToken,
+          }
+        : null,
+    );
     if (existing) {
       getUI().log.info(
-        chalk.dim('Using existing Amplitude session from ~/.ampli.json'),
+        chalk.dim('Using existing Amplitude session from ./ampli.json'),
       );
       return {
         idToken: existing.idToken,
@@ -216,7 +232,17 @@ export async function performAmplitudeAuth(options: {
       ),
     ]);
 
+    logToFile('[oauth] auth code received, exchanging for token');
     const tokenResponse = await exchangeCodeForToken(code, codeVerifier, zone);
+    logToFile('[oauth] token exchange response', {
+      token_type: tokenResponse.token_type,
+      expires_in: tokenResponse.expires_in,
+      has_access_token: !!tokenResponse.access_token,
+      has_id_token: !!tokenResponse.id_token,
+      has_refresh_token: !!tokenResponse.refresh_token,
+      access_token_prefix: tokenResponse.access_token?.slice(0, 20) + '…',
+      id_token_prefix: tokenResponse.id_token?.slice(0, 20) + '…',
+    });
 
     server.close();
     getUI().setLoginUrl(null);
@@ -229,7 +255,7 @@ export async function performAmplitudeAuth(options: {
       zone,
     };
 
-    // ── 3. Persist to ~/.ampli.json (shared with ampli CLI) ──────────
+    // ── 3. Persist to ./ampli.json (shared with ampli CLI) ──────────
     // User details (name/email) are filled in after fetchAmplitudeUser()
     const expiresAt = new Date(
       Date.now() + tokenResponse.expires_in * 1000,
@@ -247,12 +273,17 @@ export async function performAmplitudeAuth(options: {
       refreshToken: tokenResponse.refresh_token,
       expiresAt,
     });
+    logToFile('[oauth] token stored to ./ampli.json, returning result', {
+      zone,
+      expiresAt,
+    });
 
     return result;
   } catch (e) {
     spinner.stop('Authorization failed.');
     server.close();
     const error = e instanceof Error ? e : new Error('Unknown error');
+    logToFile('[oauth] error during auth flow', error);
 
     if (error.message.includes('timeout')) {
       getUI().log.error('Authorization timed out. Please try again.');

@@ -9,11 +9,11 @@ flowchart TD
     CMD --> WHOAMI["whoami"]
     CMD --> WIZARD["wizard (default)"]
 
-    LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
+    LOGIN --> LOGIN_CHECK{./ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
     LOGIN_CHECK -->|no| OAUTH["OAuth flow"] --> STORE["Store token"] --> LOGIN_DONE
 
-    LOGOUT --> CLEAR["Clear ~/.ampli.json"]
+    LOGOUT --> CLEAR["Clear ./ampli.json"]
 
     WHOAMI --> CHECK_TOKEN{Token exists?}
     CHECK_TOKEN -->|yes| SHOW_USER["Show name, email, zone"]
