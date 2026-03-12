@@ -128,6 +128,21 @@ export interface WizardSession {
    */
   orgProjectForced: boolean;
 
+  /**
+   * Amplitude data-center region chosen by the user.
+   * null = not yet selected (shown as RegionSelect screen)
+   * 'us' = US region (api.amplitude.com)
+   * 'eu' = EU region (api.eu.amplitude.com)
+   */
+  region: CloudRegion | null;
+
+  /**
+   * True when the /region slash command forces RegionSelect to re-appear.
+   * Cleared once the user picks a region. After re-selection, projectHasData
+   * is reset to null so the data setup step re-runs for the new region.
+   */
+  regionForced: boolean;
+
   // From OAuth
   credentials: {
     accessToken: string;
@@ -199,6 +214,8 @@ export function buildSession(args: {
     newProjectConfirmed: null,
     orgProjectComplete: false,
     orgProjectForced: false,
+    region: null,
+    regionForced: false,
 
     runPhase: RunPhase.Idle,
     discoveredFeatures: [],

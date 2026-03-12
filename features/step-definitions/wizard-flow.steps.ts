@@ -10,6 +10,7 @@ import {
   RunPhase,
   OutroKind,
   DiscoveredFeature,
+  type CloudRegion,
   type WizardSession,
 } from '../../src/lib/wizard-session.js';
 import {
@@ -81,9 +82,10 @@ After(function () {
 
 Given('I have reached the RunScreen', function () {
   session.credentials = mockCredentials();
+  session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
-  // RunScreen is shown once we've passed auth + data setup + framework detection
+  // RunScreen is shown once we've passed auth + region selection + data setup + framework detection
 });
 
 Given('the project has Stripe as a dependency', function () {
@@ -96,20 +98,63 @@ Given('the project has an LLM SDK as a dependency', function () {
   session.discoveredFeatures = [DiscoveredFeature.LLM];
 });
 
+// ── Region selection ──────────────────────────────────────────────────────────
+
+Given('I have just authenticated', function () {
+  session.credentials = mockCredentials();
+  // region not yet set — RegionSelect screen should appear
+});
+
+Given('my region is already set to {string}', function (region: string) {
+  session.region = region.toLowerCase() as CloudRegion;
+});
+
+Then('I should be asked to select a region', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.RegionSelect,
+    `Expected RegionSelect but got ${screen}`,
+  );
+});
+
+When('I select the {string} region', function (region: string) {
+  session.region = region.toLowerCase() as CloudRegion;
+  session.regionForced = false;
+});
+
+Then('the US region should be stored in my session', function () {
+  assert.strictEqual(session.region, 'us');
+});
+
+Then('I should proceed to the Data Setup flow', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataSetup,
+    `Expected DataSetup but got ${screen}`,
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 Given('the wizard is active', function () {
   session.credentials = mockCredentials();
+  session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
 });
 
 Given('the wizard is active at any screen', function () {
   session.credentials = mockCredentials();
+  session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
 });
 
 Given('I am on the options menu for an existing project', function () {
   session.credentials = mockCredentials();
+  session.region = 'us';
   session.projectHasData = true;
 });
 
@@ -128,8 +173,9 @@ When('the wizard launches', function () {
     const { getStoredToken } = require('../../src/utils/ampli-settings.js');
     const token = getStoredToken(undefined, 'us', sharedConfigPath);
     if (token) {
-      // Simulate silent login: stored token → pre-populate credentials
+      // Simulate silent login: stored token → pre-populate credentials + region
       session.credentials = mockCredentials();
+      session.region = 'us';
     }
   }
   // session.projectHasData remains null (not yet checked)
@@ -147,8 +193,9 @@ Then('I should go through the SUSI flow', function () {
 });
 
 Then('I should go through the Activation Check flow', function () {
-  // Activation Check is the first thing after auth for returning users.
-  // For now, returning users with credentials skip Auth and land on DataSetup.
+  // Returning users with credentials have already selected a region.
+  // Activation Check routes to DataSetup.
+  session.region = 'us';
   const screen = router.resolve(session);
   assert.strictEqual(
     screen,
@@ -158,8 +205,9 @@ Then('I should go through the Activation Check flow', function () {
 });
 
 Then('I should go through the Data Setup flow', function () {
-  // Simulate SUSI completing: credentials are now set
+  // Simulate SUSI + region selection completing
   session.credentials = mockCredentials();
+  session.region = 'us';
   const screen = router.resolve(session);
   assert.strictEqual(
     screen,

@@ -8,6 +8,7 @@ The CLI keeps a persistent prompt open at all times (like Claude). Slash command
 |---|---|
 | `/org` | Switch the active org |
 | `/project` | Switch the active project |
+| `/region` | Switch the data-center region (US or EU) — re-triggers data setup |
 | `/login` | Re-authenticate |
 | `/logout` | Clear credentials |
 | `/whoami` | Show current user, org, and project |
@@ -63,7 +64,8 @@ flowchart TD
         AUTH_CHECK{~/.ampli.json present?}
         AUTH_CHECK -->|yes| ACTIVATION["See: Activation Check flow"]
         AUTH_CHECK -->|no| SUSI["See: SUSI flow"]
-        SUSI --> DATA_SETUP["See: Data Setup flow"]
+        SUSI --> REGION_SELECT["RegionSelect: US or EU?"]
+        REGION_SELECT --> DATA_SETUP["See: Data Setup flow"]
         DATA_SETUP --> DATA_CHECK
         ACTIVATION --> DATA_CHECK
         DATA_CHECK{Project has data?}
@@ -80,6 +82,8 @@ flowchart TD
     FRAMEWORK --> RUN
 
     SLASH_CMD["/org · /project slash commands"] -. available any time .-> ORG_PROJECT
+    SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT["RegionSelect: US or EU?"]
+    REGION_SELECT --> DATA_CHECK
 
     subgraph AGENT_RUN ["Agent Run"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
@@ -135,7 +139,8 @@ flowchart TD
 title: SUSI flow
 ---
 flowchart TD
-    EMAIL["Enter email"] --> USER_TYPE{Existing user?}
+    EMAIL["Enter email"] --> REGION["Select region: US or EU"]
+    REGION --> USER_TYPE{Existing user?}
     USER_TYPE -->|existing| ORG_PICKER["Picker: existing orgs + 'Create new'"]
     USER_TYPE -->|new| SIGNUP["Sign up"] --> ORG_PICKER
 

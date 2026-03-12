@@ -2,7 +2,7 @@ import { Given, When, Then } from '@cucumber/cucumber';
 import assert from 'node:assert';
 import { Overlay, type WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen } from '../../src/ui/tui/flows.js';
-import type { WizardSession } from '../../src/lib/wizard-session.js';
+import type { CloudRegion, WizardSession } from '../../src/lib/wizard-session.js';
 
 // State is shared via the Cucumber World object, populated by wizard-flow.steps.ts Before hook.
 function router(world: object): WizardRouter {
@@ -50,6 +50,11 @@ When('I enter the slash command {string}', function (command: string) {
     session(this).orgProjectForced = true;
     session(this).orgProjectComplete = false;
   }
+  if (command === '/region') {
+    session(this).regionForced = true;
+    // Reset data state so setup re-runs once the new region is confirmed
+    session(this).projectHasData = null;
+  }
 });
 
 Then('I should reach Org and Project Selection', function () {
@@ -58,5 +63,24 @@ Then('I should reach Org and Project Selection', function () {
     screen,
     Screen.OrgProject,
     `Expected OrgProject but got ${screen}`,
+  );
+});
+
+Then('I should be taken back to region selection', function () {
+  const screen = router(this).resolve(session(this));
+  assert.strictEqual(
+    screen,
+    Screen.RegionSelect,
+    `Expected RegionSelect but got ${screen}`,
+  );
+});
+
+Then('the data check should re-run for the new region', function () {
+  // regionForced cleared + region set → DataSetup should be next (projectHasData is null)
+  const screen = router(this).resolve(session(this));
+  assert.strictEqual(
+    screen,
+    Screen.DataSetup,
+    `Expected DataSetup to re-run but got ${screen}`,
   );
 });

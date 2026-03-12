@@ -18,6 +18,7 @@ export enum Screen {
   Intro = 'intro',
   Setup = 'setup',
   Auth = 'auth',
+  RegionSelect = 'region-select',
   DataSetup = 'data-setup',
   NewProjectQuestion = 'new-project-question',
   OrgProject = 'org-project',
@@ -66,6 +67,13 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     {
       screen: Screen.Auth,
       isComplete: (s) => s.credentials !== null,
+    },
+    // 1b. Region selection — US or EU data center (skipped if already known;
+    //     re-shown when /region slash command sets regionForced)
+    {
+      screen: Screen.RegionSelect,
+      show: (s) => s.region === null || s.regionForced,
+      isComplete: (s) => s.region !== null && !s.regionForced,
     },
     // 2. Data check — is the project already ingesting events?
     {

@@ -3,6 +3,25 @@ Feature: Wizard flow
   I want the wizard to guide me from authentication through instrumentation
   So that I can get Amplitude set up without manual configuration
 
+  Scenario: Region selection after authentication
+    Given I have just authenticated
+    Then I should be asked to select a region
+    When I select the "US" region
+    Then the US region should be stored in my session
+    And I should proceed to the Data Setup flow
+
+  Scenario: Region selection is skipped when region is already known
+    Given I have just authenticated
+    And my region is already set to "US"
+    Then I should proceed to the Data Setup flow
+
+  Scenario: /region slash command re-triggers region selection and data setup
+    Given the wizard is active
+    When I enter the slash command "/region"
+    Then I should be taken back to region selection
+    When I select the "EU" region
+    Then the data check should re-run for the new region
+
   Scenario: New user with no credentials and no data
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches
