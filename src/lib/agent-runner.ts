@@ -157,6 +157,7 @@ export async function runAgentWizard(
       ci: session.ci,
       apiKey: session.apiKey,
       projectId: session.projectId,
+      installDir: session.installDir,
     });
 
   session.credentials = { accessToken, projectApiKey, host, projectId };

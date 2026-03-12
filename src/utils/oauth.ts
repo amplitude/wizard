@@ -147,27 +147,34 @@ export interface AmplitudeAuthResult {
 /**
  * Performs the Amplitude OAuth2/PKCE flow.
  *
- * 1. Checks ~/.ampli.json for a valid existing session (shared with ampli CLI).
+ * 1. Checks ~/.ampli.json for a valid existing session (shared with ampli CLI),
+ *    unless forceFresh is true (used for new projects with no local ampli.json).
  * 2. If none, opens the browser to auth.amplitude.com and awaits callback.
  * 3. Stores the resulting tokens back to ~/.ampli.json.
  */
 export async function performAmplitudeAuth(options: {
   zone?: AmplitudeZone;
+  /** Skip cached credentials and require fresh browser auth. */
+  forceFresh?: boolean;
 }): Promise<AmplitudeAuthResult> {
   const zone = options.zone ?? DEFAULT_AMPLITUDE_ZONE;
 
   // ── 1. Try existing ampli CLI session ────────────────────────────
-  const existing = getStoredToken(undefined, zone);
-  if (existing) {
-    getUI().log.info(
-      chalk.dim('Using existing Amplitude session from ~/.ampli.json'),
-    );
-    return {
-      idToken: existing.idToken,
-      accessToken: existing.accessToken,
-      refreshToken: existing.refreshToken,
-      zone,
-    };
+  // Skip when forceFresh — used for new projects where we don't know
+  // which org applies, so the user must explicitly authenticate.
+  if (!options.forceFresh) {
+    const existing = getStoredToken(undefined, zone);
+    if (existing) {
+      getUI().log.info(
+        chalk.dim('Using existing Amplitude session from ~/.ampli.json'),
+      );
+      return {
+        idToken: existing.idToken,
+        accessToken: existing.accessToken,
+        refreshToken: existing.refreshToken,
+        zone,
+      };
+    }
   }
 
   // ── 2. Fresh OAuth flow ──────────────────────────────────────────

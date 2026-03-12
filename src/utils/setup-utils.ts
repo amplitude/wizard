@@ -319,9 +319,15 @@ export function isUsingTypeScript({
 
 /**
  * Get project data for the wizard via Amplitude OAuth or CI API key.
+ *
+ * Pass installDir to enable fresh-auth detection: when no local ampli.json
+ * exists, the cached ~/.ampli.json token is bypassed so the user explicitly
+ * authenticates and picks the right Amplitude account for this project.
  */
 export async function getOrAskForProjectData(
-  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'projectId'>,
+  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'projectId'> & {
+    installDir?: string;
+  },
 ): Promise<{
   host: string;
   projectApiKey: string;
@@ -341,7 +347,24 @@ export async function getOrAskForProjectData(
     };
   }
 
-  const result = await traceStep('login', () => askForWizardLogin());
+  // Force fresh OAuth for projects that haven't been set up yet — no local
+  // ampli.json means we don't know which Amplitude org this project belongs to.
+  let forceFresh = false;
+  if (_options.installDir) {
+    const { ampliConfigExists } = await import('../lib/ampli-config.js');
+    forceFresh = !ampliConfigExists(_options.installDir);
+    if (forceFresh) {
+      getUI().log.info(
+        chalk.dim(
+          'No ampli.json found — starting fresh Amplitude authentication for this project.',
+        ),
+      );
+    }
+  }
+
+  const result = await traceStep('login', () =>
+    askForWizardLogin({ forceFresh }),
+  );
 
   return {
     accessToken: result.accessToken,
@@ -352,9 +375,14 @@ export async function getOrAskForProjectData(
   };
 }
 
-async function askForWizardLogin(): Promise<ProjectData> {
+async function askForWizardLogin(opts: {
+  forceFresh?: boolean;
+} = {}): Promise<ProjectData> {
   // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
-  const auth = await performAmplitudeAuth({ zone: DEFAULT_AMPLITUDE_ZONE });
+  const auth = await performAmplitudeAuth({
+    zone: DEFAULT_AMPLITUDE_ZONE,
+    forceFresh: opts.forceFresh,
+  });
 
   // ── 2. Detect actual cloud region (EU users auth via US endpoint but
   //       their data lives on EU servers — detectRegionFromToken probes both) ──
