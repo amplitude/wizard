@@ -18,6 +18,8 @@ import { SettingsOverrideScreen } from './screens/SettingsOverrideScreen.js';
 import { IntroScreen } from './screens/IntroScreen.js';
 import { SetupScreen } from './screens/SetupScreen.js';
 import { AuthScreen } from './screens/AuthScreen.js';
+import { RegionSelectScreen } from './screens/RegionSelectScreen.js';
+import { DataSetupScreen } from './screens/DataSetupScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
 import { OutroScreen } from './screens/OutroScreen.js';
@@ -47,8 +49,8 @@ export function createScreens(
     [Screen.Intro]: <IntroScreen store={store} />,
     [Screen.Setup]: <SetupScreen store={store} />,
     [Screen.Auth]: <AuthScreen store={store} />,
-    [Screen.RegionSelect]: null,
-    [Screen.DataSetup]: null,
+    [Screen.RegionSelect]: <RegionSelectScreen store={store} />,
+    [Screen.DataSetup]: <DataSetupScreen store={store} />,
     [Screen.NewProjectQuestion]: null,
     [Screen.OrgProject]: null,
     [Screen.Options]: null,

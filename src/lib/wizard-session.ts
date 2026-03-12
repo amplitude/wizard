@@ -143,6 +143,31 @@ export interface WizardSession {
    */
   regionForced: boolean;
 
+  /**
+   * Orgs available after OAuth completes, before the user selects one.
+   * null = OAuth not yet done (AuthScreen shows spinner)
+   * [...] = OAuth done, AuthScreen showing org/workspace/key selection
+   */
+  pendingOrgs: Array<{
+    id: string;
+    name: string;
+    workspaces: Array<{ id: string; name: string }>;
+  }> | null;
+
+  /** OAuth id_token held during SUSI account-setup steps. */
+  pendingAuthIdToken: string | null;
+
+  /** Cloud region detected from the OAuth token. Drives RegionSelect auto-skip. */
+  pendingAuthCloudRegion: CloudRegion | null;
+
+  /** Org selected during SUSI (written to ampli.json). */
+  selectedOrgId: string | null;
+  selectedOrgName: string | null;
+
+  /** Workspace selected during SUSI (written to ampli.json). */
+  selectedWorkspaceId: string | null;
+  selectedWorkspaceName: string | null;
+
   // From OAuth
   credentials: {
     accessToken: string;
@@ -223,6 +248,13 @@ export function buildSession(args: {
     mcpComplete: false,
     mcpOutcome: null,
     mcpInstalledClients: [],
+    pendingOrgs: null,
+    pendingAuthIdToken: null,
+    pendingAuthCloudRegion: null,
+    selectedOrgId: null,
+    selectedOrgName: null,
+    selectedWorkspaceId: null,
+    selectedWorkspaceName: null,
     loginUrl: null,
     credentials: null,
     serviceStatus: null,

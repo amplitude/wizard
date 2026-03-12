@@ -150,9 +150,10 @@ export async function runAgentWizard(
     integration: config.metadata.integration,
   });
 
-  // Get Amplitude credentials (region auto-detected from token)
-  const { projectApiKey, host, accessToken, projectId, cloudRegion } =
-    await getOrAskForProjectData({
+  // Credentials are pre-set by bin.ts (TUI mode) via the AuthScreen SUSI flow.
+  // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
+  if (!session.credentials) {
+    const authResult = await getOrAskForProjectData({
       signup: session.signup,
       ci: session.ci,
       apiKey: session.apiKey,
@@ -160,16 +161,21 @@ export async function runAgentWizard(
       installDir: session.installDir,
     });
 
-  session.credentials = { accessToken, projectApiKey, host, projectId };
+    session.credentials = {
+      accessToken: authResult.accessToken,
+      projectApiKey: authResult.projectApiKey,
+      host: authResult.host,
+      projectId: authResult.projectId,
+    };
+    getUI().setCredentials(session.credentials);
+    getUI().setRegion(authResult.cloudRegion);
+    getUI().setProjectHasData(false);
+  }
 
-  // Notify TUI that credentials are available (resolves past AuthScreen)
-  getUI().setCredentials(session.credentials);
-
-  // Advance TUI past the region and data-setup screens so RunScreen is shown.
-  // Region is derived from the OAuth region detection; data setup is not
-  // applicable here — we're doing a fresh SDK installation, not an activation check.
-  getUI().setRegion(cloudRegion);
-  getUI().setProjectHasData(false);
+  const { accessToken, projectApiKey, host, projectId } = session.credentials;
+  // Derive cloudRegion from session (set during auth or defaulting to 'us')
+  const cloudRegion: import('../utils/types.js').CloudRegion =
+    (session.pendingAuthCloudRegion as import('../utils/types.js').CloudRegion | null) ?? 'us';
 
   // Framework context was already gathered by SetupScreen + detection
   const frameworkContext = session.frameworkContext;

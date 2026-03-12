@@ -163,38 +163,9 @@ async function detectAndResolveIntegration(
     }
 
     // Framework not detected — fall back to generic Amplitude quickstart.
-    // Open the browser so the user can grab their project API key.
     getUI().log.warn(
       "Couldn't detect your framework. Falling back to the Amplitude quickstart guide.",
     );
-    getUI().log.info(
-      'To find your project API key: Settings → Personal Settings → Connections → API Keys',
-    );
-
-    try {
-      const { confirm } = await import('@inquirer/prompts');
-      const shouldOpen = await confirm({
-        message:
-          'Open app.amplitude.com in your browser to get your API key?',
-        default: true,
-      });
-      if (shouldOpen) {
-        const { spawn } = await import('child_process');
-        const cmd =
-          process.platform === 'win32'
-            ? 'cmd'
-            : process.platform === 'darwin'
-              ? 'open'
-              : 'xdg-open';
-        const args =
-          process.platform === 'win32'
-            ? ['/c', 'start', 'https://app.amplitude.com']
-            : ['https://app.amplitude.com'];
-        spawn(cmd, args, { detached: true, stdio: 'ignore' }).unref();
-      }
-    } catch {
-      // Non-fatal: browser open is best-effort
-    }
 
     return Integration.generic;
   }

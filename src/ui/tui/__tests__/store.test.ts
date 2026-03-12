@@ -302,52 +302,58 @@ describe('WizardStore', () => {
 
   // ── Screen resolution (derived state) ────────────────────────────
 
-  describe('currentScreen', () => {
-    it('starts at intro for Wizard flow', () => {
-      const store = createStore();
-      expect(store.currentScreen).toBe(Screen.Intro);
+  // Helper: advance store to RunScreen (past Auth → RegionSelect → DataSetup → Intro)
+  function advanceToRun(store: ReturnType<typeof createStore>) {
+    // Auth: set credentials (Auth screen isComplete)
+    store.setCredentials({
+      accessToken: 'tok',
+      projectApiKey: 'pk',
+      host: 'h',
+      projectId: 1,
     });
+    // RegionSelect: set region (skips it)
+    store.setRegion('us');
+    // DataSetup: set projectHasData (DataSetup screen isComplete)
+    store.setProjectHasData(false);
+    // Intro: confirm setup (Intro screen isComplete)
+    store.completeSetup();
+  }
 
-    it('advances to auth after region is set', () => {
+  describe('currentScreen', () => {
+    it('starts at auth for Wizard flow', () => {
       const store = createStore();
-      store.completeSetup();
       expect(store.currentScreen).toBe(Screen.Auth);
     });
 
-    it('advances to run after credentials are set', () => {
+    it('advances to intro after credentials, region, and projectHasData are set', () => {
       const store = createStore();
-      store.completeSetup();
       store.setCredentials({
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
         projectId: 1,
       });
+      store.setRegion('us');
+      store.setProjectHasData(false);
+      expect(store.currentScreen).toBe(Screen.Intro);
+    });
+
+    it('advances to run after completing the intro screen', () => {
+      const store = createStore();
+      advanceToRun(store);
       expect(store.currentScreen).toBe(Screen.Run);
     });
 
     it('advances to mcp after run completes', () => {
       const store = createStore();
-      store.completeSetup();
-      store.setCredentials({
-        accessToken: 'tok',
-        projectApiKey: 'pk',
-        host: 'h',
-        projectId: 1,
-      });
+      advanceToRun(store);
       store.setRunPhase(RunPhase.Completed);
       expect(store.currentScreen).toBe(Screen.Mcp);
     });
 
     it('advances to outro after mcp completes', () => {
       const store = createStore();
-      store.completeSetup();
-      store.setCredentials({
-        accessToken: 'tok',
-        projectApiKey: 'pk',
-        host: 'h',
-        projectId: 1,
-      });
+      advanceToRun(store);
       store.setRunPhase(RunPhase.Completed);
       store.setMcpComplete();
       expect(store.currentScreen).toBe(Screen.Outro);
@@ -377,7 +383,7 @@ describe('WizardStore', () => {
       const store = createStore();
       store.pushOverlay(Overlay.Outage);
       store.popOverlay();
-      expect(store.currentScreen).toBe(Screen.Intro);
+      expect(store.currentScreen).toBe(Screen.Auth);
     });
 
     it('pushOverlay emits change and increments version', () => {
@@ -655,7 +661,6 @@ describe('WizardStore', () => {
         screens.push(store.currentScreen);
       });
 
-      store.completeSetup(); // -> auth
       store.pushOverlay(Overlay.Outage); // -> outage
       store.setCredentials({
         // -> outage (overlay still on top)
@@ -664,13 +669,14 @@ describe('WizardStore', () => {
         host: 'h',
         projectId: 1,
       });
-      store.popOverlay(); // -> run
+      store.setRegion('us'); // -> outage (overlay still on top)
+      store.popOverlay(); // -> data-setup (next incomplete screen after credentials+region)
 
       expect(screens).toEqual([
-        Screen.Auth,
         Overlay.Outage,
         Overlay.Outage,
-        Screen.Run,
+        Overlay.Outage,
+        Screen.DataSetup,
       ]);
     });
 
@@ -792,21 +798,16 @@ describe('WizardStore', () => {
     it('popOverlay on empty stack does not crash', () => {
       const store = createStore();
       expect(() => store.popOverlay()).not.toThrow();
-      expect(store.currentScreen).toBe(Screen.Intro);
+      expect(store.currentScreen).toBe(Screen.Auth);
     });
 
-    it('screen advances to outro on RunPhase.Error too', () => {
+    it('screen advances to mcp on RunPhase.Error (Mcp screen is shown; skipped on error would show outro)', () => {
       const store = createStore();
-      store.completeSetup();
-      store.setCredentials({
-        accessToken: 'tok',
-        projectApiKey: 'pk',
-        host: 'h',
-        projectId: 1,
-      });
+      advanceToRun(store);
       store.setRunPhase(RunPhase.Error);
-      // Run is "complete" (either Completed or Error), so we advance past it
-      expect(store.currentScreen).toBe(Screen.Mcp);
+      // Run is "complete" (either Completed or Error), so we advance to Mcp.
+      // Mcp's show predicate: runPhase !== Error → false, so Mcp is hidden → Outro
+      expect(store.currentScreen).toBe(Screen.Outro);
     });
 
     it('completeSetup can only resolve the promise once', async () => {
@@ -838,34 +839,41 @@ describe('WizardStore', () => {
       const screenHistory: string[] = [];
       store.subscribe(() => screenHistory.push(store.currentScreen));
 
-      expect(store.currentScreen).toBe(Screen.Intro);
-
-      // Step 1: Confirm setup
-      store.completeSetup();
+      // Flow starts at Auth
       expect(store.currentScreen).toBe(Screen.Auth);
 
-      // Step 2: Authenticate
+      // Step 1: Authenticate (credentials set by AuthScreen SUSI flow)
       store.setCredentials({
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
         projectId: 1,
       });
+      // Region was auto-detected by OAuth → RegionSelect skipped
+      store.setRegion('us');
+      expect(store.currentScreen).toBe(Screen.DataSetup);
+
+      // Step 2: DataSetup auto-advances
+      store.setProjectHasData(false);
+      expect(store.currentScreen).toBe(Screen.Intro);
+
+      // Step 3: Confirm framework in IntroScreen
+      store.completeSetup();
       expect(store.currentScreen).toBe(Screen.Run);
 
-      // Step 3: Start and complete run
+      // Step 4: Start and complete run
       store.setRunPhase(RunPhase.Running);
       expect(store.currentScreen).toBe(Screen.Run);
 
       store.setRunPhase(RunPhase.Completed);
       expect(store.currentScreen).toBe(Screen.Mcp);
 
-      // Step 4: Complete MCP
+      // Step 5: Complete MCP
       store.setMcpComplete();
       expect(store.currentScreen).toBe(Screen.Outro);
 
-      // Verify version was bumped for each setter call
-      expect(store.getVersion()).toBe(5);
+      // Verify version was bumped for each setter call (7 setters above)
+      expect(store.getVersion()).toBe(7);
     });
   });
 

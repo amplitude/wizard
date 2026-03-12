@@ -164,6 +164,53 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Called from bin.ts when OAuth completes (browser redirect done).
+   * Stores auth tokens + org list so AuthScreen can show the SUSI pickers.
+   * Also sets region from the detected cloud zone.
+   */
+  setOAuthComplete(data: {
+    idToken: string;
+    cloudRegion: WizardSession['pendingAuthCloudRegion'];
+    orgs: WizardSession['pendingOrgs'];
+  }): void {
+    this.$session.setKey('pendingAuthIdToken', data.idToken);
+    this.$session.setKey('pendingAuthCloudRegion', data.cloudRegion);
+    this.$session.setKey('pendingOrgs', data.orgs);
+    // Auto-set region — skips RegionSelect for users whose zone is detected.
+    if (data.cloudRegion) {
+      this.$session.setKey('region', data.cloudRegion);
+    }
+    this.emitChange();
+  }
+
+  /**
+   * Called from AuthScreen when the user finishes org + workspace selection.
+   * Writes ampli.json and records org/workspace on the session.
+   */
+  setOrgAndWorkspace(
+    org: { id: string; name: string },
+    workspace: { id: string; name: string },
+    installDir: string,
+  ): void {
+    this.$session.setKey('selectedOrgId', org.id);
+    this.$session.setKey('selectedOrgName', org.name);
+    this.$session.setKey('selectedWorkspaceId', workspace.id);
+    this.$session.setKey('selectedWorkspaceName', workspace.name);
+
+    // Write ampli.json to the project directory
+    void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
+      const zone = this.$session.get().pendingAuthCloudRegion ?? 'us';
+      writeAmpliConfig(installDir, {
+        OrgId: org.id,
+        WorkspaceId: workspace.id,
+        Zone: zone,
+      });
+    });
+
+    this.emitChange();
+  }
+
   setServiceStatus(
     status: { description: string; statusPageUrl: string } | null,
   ): void {

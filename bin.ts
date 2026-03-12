@@ -219,8 +219,6 @@ yargs(hideBin(process.argv))
             });
             tui.store.session = session;
 
-            // Detect framework while IntroScreen shows its spinner.
-            // Runs concurrently — IntroScreen reacts when detection completes.
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );
@@ -230,101 +228,193 @@ yargs(hideBin(process.argv))
             const { DETECTION_TIMEOUT_MS } = await import(
               './src/lib/constants.js'
             );
-            const detectedIntegration = await Promise.race([
-              detectIntegration(installDir),
-              new Promise<undefined>((resolve) =>
-                setTimeout(() => resolve(undefined), DETECTION_TIMEOUT_MS),
-              ),
-            ]);
 
-            if (detectedIntegration) {
-              const config = FRAMEWORK_REGISTRY[detectedIntegration];
+            // ── OAuth + account setup ──────────────────────────────
+            // Runs concurrently with framework detection while AuthScreen shows.
+            // When OAuth completes, store.setOAuthComplete() triggers the
+            // AuthScreen SUSI pickers (org → workspace → API key).
+            // AuthScreen calls store.setCredentials() when done, advancing the
+            // router past Auth → RegionSelect → DataSetup → to IntroScreen.
+            const authTask = (async () => {
+              try {
+                const { ampliConfigExists } = await import(
+                  './src/lib/ampli-config.js'
+                );
+                const { performAmplitudeAuth } = await import(
+                  './src/utils/oauth.js'
+                );
+                const { fetchAmplitudeUser } = await import(
+                  './src/lib/api.js'
+                );
+                const { detectRegionFromToken } = await import(
+                  './src/utils/urls.js'
+                );
+                const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                  './src/lib/constants.js'
+                );
+                const { storeToken } = await import(
+                  './src/utils/ampli-settings.js'
+                );
 
-              // Run gatherContext for the friendly variant label
-              if (config.metadata.gatherContext) {
+                const forceFresh = !ampliConfigExists(installDir);
+                const auth = await performAmplitudeAuth({
+                  zone: DEFAULT_AMPLITUDE_ZONE,
+                  forceFresh,
+                });
+
+                // Update login URL (clears the "copy this URL" hint)
+                tui.store.setLoginUrl(null);
+
+                let cloudRegion: 'us' | 'eu' = 'us';
                 try {
-                  const context = await Promise.race([
-                    config.metadata.gatherContext({
-                      installDir,
-                      debug: session.debug,
-                      forceInstall: session.forceInstall,
-                      default: false,
-                      signup: session.signup,
-                      localMcp: session.localMcp,
-                      ci: session.ci,
-                      menu: session.menu,
-                      benchmark: session.benchmark,
-                    }),
-                    new Promise<Record<string, never>>((resolve) =>
-                      setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
-                    ),
-                  ]);
-                  for (const [key, value] of Object.entries(context)) {
-                    if (!(key in session.frameworkContext)) {
-                      tui.store.setFrameworkContext(key, value);
-                    }
-                  }
+                  cloudRegion = await detectRegionFromToken(auth.accessToken);
                 } catch {
-                  // Detection failed — will show generic name
+                  // Fall back to 'us'
+                }
+
+                const userInfo = await fetchAmplitudeUser(
+                  auth.idToken,
+                  cloudRegion,
+                );
+
+                // Persist to ~/.ampli.json (same format as ampli CLI)
+                storeToken(
+                  {
+                    id: userInfo.id,
+                    firstName: userInfo.firstName,
+                    lastName: userInfo.lastName,
+                    email: userInfo.email,
+                    zone: auth.zone,
+                  },
+                  {
+                    accessToken: auth.accessToken,
+                    idToken: auth.idToken,
+                    refreshToken: auth.refreshToken,
+                    expiresAt: new Date(
+                      Date.now() + 3600 * 1000,
+                    ).toISOString(),
+                  },
+                );
+
+                // Signal AuthScreen — triggers org/workspace/API key pickers
+                tui.store.setOAuthComplete({
+                  idToken: auth.idToken,
+                  cloudRegion,
+                  orgs: userInfo.orgs,
+                });
+              } catch (err) {
+                // Auth failure is non-fatal here — agent-runner will retry/handle it
+                if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                  console.error('OAuth setup error:', err); // eslint-disable-line no-console
+                }
+              }
+            })();
+
+            // ── Framework detection ────────────────────────────────
+            // Runs concurrently with auth while AuthScreen shows.
+            const detectionTask = (async () => {
+              const detectedIntegration = await Promise.race([
+                detectIntegration(installDir),
+                new Promise<undefined>((resolve) =>
+                  setTimeout(() => resolve(undefined), DETECTION_TIMEOUT_MS),
+                ),
+              ]);
+
+              if (detectedIntegration) {
+                const config = FRAMEWORK_REGISTRY[detectedIntegration];
+
+                // Run gatherContext for the friendly variant label
+                if (config.metadata.gatherContext) {
+                  try {
+                    const context = await Promise.race([
+                      config.metadata.gatherContext({
+                        installDir,
+                        debug: session.debug,
+                        forceInstall: session.forceInstall,
+                        default: false,
+                        signup: session.signup,
+                        localMcp: session.localMcp,
+                        ci: session.ci,
+                        menu: session.menu,
+                        benchmark: session.benchmark,
+                      }),
+                      new Promise<Record<string, never>>((resolve) =>
+                        setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
+                      ),
+                    ]);
+                    for (const [key, value] of Object.entries(context)) {
+                      if (!(key in session.frameworkContext)) {
+                        tui.store.setFrameworkContext(key, value);
+                      }
+                    }
+                  } catch {
+                    // Detection failed — will show generic name
+                  }
+                }
+
+                tui.store.setFrameworkConfig(detectedIntegration, config);
+
+                if (!session.detectedFrameworkLabel) {
+                  tui.store.setDetectedFramework(config.metadata.name);
                 }
               }
 
-              tui.store.setFrameworkConfig(detectedIntegration, config);
+              // Feature discovery — deterministic scan of package.json deps
+              try {
+                const { readFileSync } = await import('fs');
+                const pkgPath = require('path').join(installDir, 'package.json');
+                const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
+                  dependencies?: Record<string, string>;
+                  devDependencies?: Record<string, string>;
+                };
+                const allDeps = {
+                  ...pkg.dependencies,
+                  ...pkg.devDependencies,
+                };
+                const depNames = Object.keys(allDeps);
 
-              if (!session.detectedFrameworkLabel) {
-                tui.store.setDetectedFramework(config.metadata.name);
+                const { DiscoveredFeature } = await import(
+                  './src/lib/wizard-session.js'
+                );
+
+                if (
+                  depNames.some((d) =>
+                    ['stripe', '@stripe/stripe-js'].includes(d),
+                  )
+                ) {
+                  tui.store.addDiscoveredFeature(DiscoveredFeature.Stripe);
+                }
+
+                // LLM SDK detection — sourced from Amplitude LLM analytics skill
+                const LLM_PACKAGES = [
+                  'openai',
+                  '@anthropic-ai/sdk',
+                  'ai',
+                  '@ai-sdk/openai',
+                  'langchain',
+                  '@langchain/openai',
+                  '@langchain/langgraph',
+                  '@google/generative-ai',
+                  '@google/genai',
+                  '@instructor-ai/instructor',
+                  '@mastra/core',
+                  'portkey-ai',
+                ];
+                if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
+                  tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
+                }
+              } catch {
+                // No package.json or parse error — skip feature discovery
               }
-            }
 
-            // Feature discovery — deterministic scan of package.json deps
-            try {
-              const { readFileSync } = await import('fs');
-              const pkgPath = require('path').join(installDir, 'package.json');
-              const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-              const allDeps = {
-                ...pkg.dependencies,
-                ...pkg.devDependencies,
-              };
-              const depNames = Object.keys(allDeps);
+              // Signal detection is done — IntroScreen shows picker or results
+              tui.store.setDetectionComplete();
+            })();
 
-              const { DiscoveredFeature } = await import(
-                './src/lib/wizard-session.js'
-              );
-
-              if (
-                depNames.some((d) =>
-                  ['stripe', '@stripe/stripe-js'].includes(d),
-                )
-              ) {
-                tui.store.addDiscoveredFeature(DiscoveredFeature.Stripe);
-              }
-
-              // LLM SDK detection — sourced from Amplitude LLM analytics skill
-              const LLM_PACKAGES = [
-                'openai',
-                '@anthropic-ai/sdk',
-                'ai',
-                '@ai-sdk/openai',
-                'langchain',
-                '@langchain/openai',
-                '@langchain/langgraph',
-                '@google/generative-ai',
-                '@google/genai',
-                '@instructor-ai/instructor',
-                '@mastra/core',
-                'portkey-ai',
-              ];
-              if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
-                tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
-              }
-            } catch {
-              // No package.json or parse error — skip feature discovery
-            }
-
-            // Signal detection is done — IntroScreen shows picker or results
-            tui.store.setDetectionComplete();
-
-            // Wait for IntroScreen confirmation
+            // Wait for auth to expose org pickers, then for the user to
+            // complete account setup (credentials set by AuthScreen), then
+            // for IntroScreen confirmation.
+            await Promise.all([authTask, detectionTask]);
             await tui.waitForSetup();
 
             await runWizard(
