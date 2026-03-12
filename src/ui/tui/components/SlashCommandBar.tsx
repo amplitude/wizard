@@ -14,8 +14,6 @@ import type { WizardStore } from '../store.js';
 import { Colors } from '../styles.js';
 
 const COMMANDS = [
-  { cmd: '/org', desc: 'Switch the active org' },
-  { cmd: '/project', desc: 'Switch the active project' },
   { cmd: '/region', desc: 'Switch data-center region (US or EU)' },
   { cmd: '/login', desc: 'Re-authenticate' },
   { cmd: '/logout', desc: 'Clear credentials' },
@@ -28,11 +26,6 @@ function executeCommand(raw: string, store: WizardStore): void {
   const _args = argParts.join(' ');
 
   switch (cmd) {
-    case '/org':
-    case '/project':
-      store.setOrgProjectForced(true);
-      break;
-
     case '/region':
       store.setRegionForced();
       break;

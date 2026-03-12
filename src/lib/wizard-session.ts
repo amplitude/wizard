@@ -107,27 +107,9 @@ export interface WizardSession {
    * Whether the currently selected project has existing event data.
    * null = not yet checked (shown as DataSetup screen)
    * false = no data → route to Framework Detection
-   * true = has data → route to "Setting up a new project?" prompt
+   * true = has data → route to Options menu
    */
   projectHasData: boolean | null;
-
-  /**
-   * Answer to the "Setting up a new project?" question shown when the
-   * current project already has data.
-   * null = question not yet shown
-   * true = user said yes → go to Org/Project Selection
-   * false = user said no → show Options menu
-   */
-  newProjectConfirmed: boolean | null;
-
-  /** True once Org/Project Selection has been completed. */
-  orgProjectComplete: boolean;
-
-  /**
-   * True when a slash command (/org or /project) forces Org/Project Selection
-   * regardless of the current projectHasData state.
-   */
-  orgProjectForced: boolean;
 
   /**
    * Amplitude data-center region chosen by the user.
@@ -239,9 +221,6 @@ export function buildSession(args: {
     detectedFrameworkLabel: null,
     detectionComplete: false,
     projectHasData: null,
-    newProjectConfirmed: null,
-    orgProjectComplete: false,
-    orgProjectForced: false,
     region: null,
     regionForced: false,
 

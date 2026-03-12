@@ -51,8 +51,6 @@ export function createScreens(
     [Screen.Auth]: <AuthScreen store={store} />,
     [Screen.RegionSelect]: <RegionSelectScreen store={store} />,
     [Screen.DataSetup]: <DataSetupScreen store={store} />,
-    [Screen.NewProjectQuestion]: null,
-    [Screen.OrgProject]: null,
     [Screen.Options]: null,
     [Screen.Run]: <RunScreen store={store} />,
     [Screen.Mcp]: <McpScreen store={store} installer={services.mcpInstaller} />,

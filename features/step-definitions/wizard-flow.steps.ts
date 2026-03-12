@@ -229,59 +229,6 @@ Then('I should be taken to Framework Detection', function () {
   );
 });
 
-Then('I should be asked {string}', function (question: string) {
-  const screen = router.resolve(session);
-  if (question === 'Setting up a new project?') {
-    assert.strictEqual(
-      screen,
-      Screen.NewProjectQuestion,
-      `Expected NewProjectQuestion screen but got ${screen}`,
-    );
-  }
-});
-
-When('I answer {string}', function (answer: string) {
-  if (answer === 'yes') {
-    session.newProjectConfirmed = true;
-  } else if (answer === 'no') {
-    session.newProjectConfirmed = false;
-  }
-});
-
-Then('I should go through Org and Project Selection', function () {
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.OrgProject,
-    `Expected OrgProject screen but got ${screen}`,
-  );
-});
-
-Then('the data check should re-run for the new project', function () {
-  // Simulate org/project selection completing and resetting data state
-  session.orgProjectComplete = true;
-  session.newProjectConfirmed = null;
-  session.projectHasData = null;
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.DataSetup,
-    `Expected DataSetup to re-run but got ${screen}`,
-  );
-});
-
-Then('the data check should re-run for the newly selected project', function () {
-  session.orgProjectComplete = true;
-  session.newProjectConfirmed = null;
-  session.projectHasData = null;
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.DataSetup,
-    `Expected DataSetup to re-run but got ${screen}`,
-  );
-});
-
 Then(
   'I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project',
   function () {
@@ -293,13 +240,6 @@ Then(
     );
   },
 );
-
-When('I select {string}', function (option: string) {
-  if (option === 'switch org or project') {
-    // Selecting "switch" from Options is equivalent to answering "yes" to new project
-    session.newProjectConfirmed = true;
-  }
-});
 
 // ── Agent run ─────────────────────────────────────────────────────────────────
 

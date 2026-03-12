@@ -202,25 +202,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setNewProjectConfirmed(value: boolean): void {
-    this.$session.setKey('newProjectConfirmed', value);
-    this.emitChange();
-  }
-
-  setOrgProjectComplete(): void {
-    this.$session.setKey('orgProjectComplete', true);
-    this.emitChange();
-  }
-
-  /** Force the OrgProject screen to appear (/org or /project command). */
-  setOrgProjectForced(forced: boolean): void {
-    this.$session.setKey('orgProjectForced', forced);
-    if (forced) {
-      this.$session.setKey('orgProjectComplete', false);
-    }
-    this.emitChange();
-  }
-
   /**
    * Called from bin.ts when OAuth completes (browser redirect done).
    * Stores auth tokens + org list so AuthScreen can show the SUSI pickers.

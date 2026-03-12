@@ -3,18 +3,6 @@ Feature: Slash commands
   I want to run slash commands at any point during the wizard session
   So that I can change settings or trigger actions without restarting
 
-  Scenario: /org switches the active org
-    Given the wizard is active
-    When I enter the slash command "/org"
-    Then I should see the org picker
-    And after selecting a new org the wizard should resume with the new context
-
-  Scenario: /project switches the active project
-    Given the wizard is active
-    When I enter the slash command "/project"
-    Then I should see the project picker for the current org
-    And after selecting a new project the wizard should resume with the new context
-
   @todo
   Scenario: /login re-authenticates
     Given the wizard is active

@@ -42,28 +42,11 @@ Feature: Wizard flow
     And the project should have no existing data
     And I should be taken to Framework Detection
 
-  Scenario: Returning user with credentials and existing data — setting up new project
+  Scenario: Returning user with credentials and existing data — options menu
     Given I have valid credentials stored in "~/.ampli.json"
     And the current project has existing data
     When the wizard launches
-    Then I should be asked "Setting up a new project?"
-    When I answer "yes"
-    Then I should go through Org and Project Selection
-    And the data check should re-run for the new project
-
-  Scenario: Returning user with credentials and existing data — continuing with current project
-    Given I have valid credentials stored in "~/.ampli.json"
-    And the current project has existing data
-    When the wizard launches
-    Then I should be asked "Setting up a new project?"
-    When I answer "no"
     Then I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project
-
-  Scenario: Switching org or project from the options menu
-    Given I am on the options menu for an existing project
-    When I select "switch org or project"
-    Then I should go through Org and Project Selection
-    And the data check should re-run for the newly selected project
 
   Scenario: Agent run completes successfully
     Given I have reached the RunScreen
@@ -100,12 +83,3 @@ Feature: Wizard flow
     Then the SettingsOverrideScreen overlay should appear
     And I should be able to back up and patch the settings to continue
 
-  Scenario: /org slash command during wizard
-    Given the wizard is active at any screen
-    When I enter the slash command "/org"
-    Then I should reach Org and Project Selection
-
-  Scenario: /project slash command during wizard
-    Given the wizard is active at any screen
-    When I enter the slash command "/project"
-    Then I should reach Org and Project Selection

@@ -8,8 +8,6 @@ actions.
 
 | Command      | Description                                                       |
 | ------------ | ----------------------------------------------------------------- |
-| `/org`       | Switch the active org                                             |
-| `/project`   | Switch the active project                                         |
 | `/region`    | Switch the data-center region (US or EU) — re-triggers data setup |
 | `/login`     | Re-authenticate                                                   |
 | `/logout`    | Clear credentials                                                 |
@@ -70,18 +68,12 @@ flowchart TD
     end
 
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
-    DATA_CHECK -->|yes| NEW_PROJECT{Setting up<br/>a new project?}
-    NEW_PROJECT -->|yes| ORG_PROJECT["See: Org / Project Selection flow"]
-    NEW_PROJECT -->|no| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch org or project"]
-    ORG_PROJECT --> DATA_CHECK
+    DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent"]
 
-    OPTIONS -->|switch org or project| ORG_PROJECT
-    OPTIONS -->|other option| RUN
+    OPTIONS --> RUN
     FRAMEWORK --> RUN
 
-    SLASH_CMD["/org · /project slash commands"] -. available any time .-> ORG_PROJECT
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
-    REGION_SELECT_2["RegionSelect"] --> DATA_CHECK2["data check re-runs"]
 
     subgraph AGENT_RUN ["Agent Run"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
@@ -187,28 +179,6 @@ flowchart TD
     CHECKLIST -->|create first dash — unlocked after chart| DASH_RUN["First Dash"] --> CHECKLIST
     CHECKLIST -->|all three complete| OPEN_SITE["Open dashboard in browser"]
     OPEN_SITE --> DONE
-```
-
----
-
-## Org / Project Selection flow
-
-> Available as `--org` and `--project` CLI args in CI mode. In the wizard,
-> `/org` and `/project` slash commands can invoke this at any time.
-
-```mermaid
----
-title: Org / Project Selection flow
----
-flowchart TD
-    ORG_PICKER["Picker: existing orgs + 'Create new'"]
-    ORG_PICKER -->|existing org selected| PROJ_PICKER
-    ORG_PICKER -->|create new| ORG_NAME["Text input: name your org"] --> PROJ_PICKER
-
-    PROJ_PICKER["Picker: existing projects + 'Create new'"]
-    PROJ_PICKER -->|existing project selected| DONE
-    PROJ_PICKER -->|create new| PROJ_NAME["Text input: name your project"] --> DONE
-    DONE["→ continue"]
 ```
 
 ---

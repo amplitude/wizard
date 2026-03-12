@@ -20,8 +20,6 @@ export enum Screen {
   Auth = 'auth',
   RegionSelect = 'region-select',
   DataSetup = 'data-setup',
-  NewProjectQuestion = 'new-project-question',
-  OrgProject = 'org-project',
   Options = 'options',
   Run = 'run',
   Mcp = 'mcp',
@@ -80,24 +78,10 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.DataSetup,
       isComplete: (s) => s.projectHasData !== null,
     },
-    // 3a. "Setting up a new project?" (only shown when project has data)
-    {
-      screen: Screen.NewProjectQuestion,
-      show: (s) => s.projectHasData === true,
-      isComplete: (s) => s.newProjectConfirmed !== null,
-    },
-    // 3b. Org/Project Selection (when user wants a new project, or forced by /org or /project)
-    {
-      screen: Screen.OrgProject,
-      show: (s) =>
-        s.orgProjectForced ||
-        (s.projectHasData === true && s.newProjectConfirmed === true),
-      isComplete: (s) => s.orgProjectComplete,
-    },
-    // 3c. Options menu (when user continues with the current project)
+    // 3. Options menu (when project already has data)
     {
       screen: Screen.Options,
-      show: (s) => s.projectHasData === true && s.newProjectConfirmed === false,
+      show: (s) => s.projectHasData === true,
       isComplete: (_s) => false, // terminal: user picks an action from here
     },
     // 4. Framework detection + confirmation (only if no existing data)

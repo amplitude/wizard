@@ -12,18 +12,12 @@ flowchart TD
     end
 
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
-    DATA_CHECK -->|yes| NEW_PROJECT{Setting up<br/>a new project?}
-    NEW_PROJECT -->|yes| ORG_PROJECT["See: Org / Project Selection flow"]
-    NEW_PROJECT -->|no| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch org or project"]
-    ORG_PROJECT --> DATA_CHECK
+    DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent"]
 
-    OPTIONS -->|switch org or project| ORG_PROJECT
-    OPTIONS -->|other option| RUN
+    OPTIONS --> RUN
     FRAMEWORK --> RUN
 
-    SLASH_CMD["/org · /project slash commands"] -. available any time .-> ORG_PROJECT
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
-    REGION_SELECT_2["RegionSelect"] --> DATA_CHECK2["data check re-runs"]
 
     subgraph AGENT_RUN ["Agent Run"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]

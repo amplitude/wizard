@@ -46,10 +46,6 @@ Then('I should be able to back up and patch the settings to continue', function 
 // ── Slash commands ────────────────────────────────────────────────────────────
 
 When('I enter the slash command {string}', function (command: string) {
-  if (command === '/org' || command === '/project') {
-    session(this).orgProjectForced = true;
-    session(this).orgProjectComplete = false;
-  }
   if (command === '/region') {
     session(this).regionForced = true;
     // Reset data state so setup re-runs once the new region is confirmed
@@ -66,15 +62,6 @@ Then('the wizard should prompt me to log in again', function () {
     screen,
     Screen.Auth,
     `Expected Auth screen after logout but got ${screen}`,
-  );
-});
-
-Then('I should reach Org and Project Selection', function () {
-  const screen = router(this).resolve(session(this));
-  assert.strictEqual(
-    screen,
-    Screen.OrgProject,
-    `Expected OrgProject but got ${screen}`,
   );
 });
 
