@@ -13,7 +13,7 @@ flowchart TD
     WORKSPACE_COUNT -->|1| WRITE_AMPLI
     WORKSPACE_COUNT -->|many| WS_PICKER["Picker: select workspace"] --> WRITE_AMPLI
 
-    WRITE_AMPLI["Write ./ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
+    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
 
     WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>keychain or .env.local}
     KEY_CHECK -->|yes| AUTO_KEY["Auto-advance — no prompt"]

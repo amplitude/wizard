@@ -36,11 +36,11 @@ flowchart TD
     CMD --> WHOAMI["whoami"]
     CMD --> WIZARD["wizard (default)"]
 
-    LOGIN --> LOGIN_CHECK{./ampli.json valid?}
+    LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
     LOGIN_CHECK -->|no| OAUTH["OAuth flow"] --> STORE["Store token"] --> LOGIN_DONE
 
-    LOGOUT --> CLEAR["Clear ./ampli.json"]
+    LOGOUT --> CLEAR["Clear ~/.ampli.json"]
 
     WHOAMI --> CHECK_TOKEN{Token exists?}
     CHECK_TOKEN -->|yes| SHOW_USER["Show name, email, zone"]
@@ -151,7 +151,7 @@ flowchart TD
     WORKSPACE_COUNT -->|1| WRITE_AMPLI
     WORKSPACE_COUNT -->|many| WS_PICKER["Picker: select workspace"] --> WRITE_AMPLI
 
-    WRITE_AMPLI["Write ./ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
+    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
 
     WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>keychain or .env.local}
     KEY_CHECK -->|yes| AUTO_KEY["Auto-advance — no prompt"]

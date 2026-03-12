@@ -2,7 +2,7 @@
  * Amplitude OAuth2/PKCE flow — adapted from Amplitude wizard's oauth.ts but
  * hitting Amplitude's auth endpoints (same as the ampli CLI).
  *
- * Key difference from Amplitude: checks ./ampli.json for an existing ampli CLI
+ * Key difference from Amplitude: checks ~/.ampli.json for an existing ampli CLI
  * session first, so users who ran `ampli login` can skip re-authenticating.
  */
 
@@ -148,10 +148,10 @@ export interface AmplitudeAuthResult {
 /**
  * Performs the Amplitude OAuth2/PKCE flow.
  *
- * 1. Checks ./ampli.json for a valid existing session (shared with ampli CLI),
+ * 1. Checks ~/.ampli.json for a valid existing session (shared with ampli CLI),
  *    unless forceFresh is true (used for new projects with no local ampli.json).
  * 2. If none, opens the browser to auth.amplitude.com and awaits callback.
- * 3. Stores the resulting tokens back to ./ampli.json.
+ * 3. Stores the resulting tokens back to ~/.ampli.json.
  */
 export async function performAmplitudeAuth(options: {
   zone?: AmplitudeZone;
@@ -182,7 +182,7 @@ export async function performAmplitudeAuth(options: {
     );
     if (existing) {
       getUI().log.info(
-        chalk.dim('Using existing Amplitude session from ./ampli.json'),
+        chalk.dim('Using existing Amplitude session from ~/.ampli.json'),
       );
       return {
         idToken: existing.idToken,
@@ -255,7 +255,7 @@ export async function performAmplitudeAuth(options: {
       zone,
     };
 
-    // ── 3. Persist to ./ampli.json (shared with ampli CLI) ──────────
+    // ── 3. Persist to ~/.ampli.json (shared with ampli CLI) ──────────
     // User details (name/email) are filled in after fetchAmplitudeUser()
     const expiresAt = new Date(
       Date.now() + tokenResponse.expires_in * 1000,
@@ -273,7 +273,7 @@ export async function performAmplitudeAuth(options: {
       refreshToken: tokenResponse.refresh_token,
       expiresAt,
     });
-    logToFile('[oauth] token stored to ./ampli.json, returning result', {
+    logToFile('[oauth] token stored to ~/.ampli.json, returning result', {
       zone,
       expiresAt,
     });

@@ -321,7 +321,7 @@ export function isUsingTypeScript({
  * Get project data for the wizard via Amplitude OAuth or CI API key.
  *
  * Pass installDir to enable fresh-auth detection: when no local ampli.json
- * exists, the cached ./ampli.json token is bypassed so the user explicitly
+ * exists, the cached ~/.ampli.json token is bypassed so the user explicitly
  * authenticates and picks the right Amplitude account for this project.
  */
 export async function getOrAskForProjectData(
@@ -414,7 +414,7 @@ async function askForWizardLogin(
   let selectedOrg: AmplitudeOrg | undefined;
 
   if (userInfo) {
-    // Persist user details back to ./ampli.json (replaces the "pending" entry)
+    // Persist user details back to ~/.ampli.json (replaces the "pending" entry)
     storeToken(
       {
         id: userInfo.id,
@@ -479,7 +479,7 @@ async function askForWizardLogin(
       });
     }
 
-    // Write ./ampli.json so future runs recognise this project
+    // Write ~/.ampli.json so future runs recognise this project
     if (opts.installDir && selectedWorkspace) {
       const { writeAmpliConfig } = await import('../lib/ampli-config.js');
       writeAmpliConfig(opts.installDir, {

@@ -1,5 +1,5 @@
 /**
- * Types and logic for the project-level ./ampli.json configuration file.
+ * Types and logic for the project-level ~/.ampli.json configuration file.
  *
  * The ampli CLI reads and writes this file (named "ampli.json") in the project
  * directory to track which Amplitude workspace, source, and branch a project is
@@ -77,7 +77,11 @@ export function parseAmpliConfig(raw: string): AmpliConfigParseResult {
   }
   try {
     const parsed = JSON.parse(raw) as unknown;
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return { ok: false, error: 'invalid_json' };
     }
     return { ok: true, config: parsed as AmpliConfig };

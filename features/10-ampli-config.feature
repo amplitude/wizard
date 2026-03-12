@@ -106,14 +106,14 @@ Feature: ampli.json project configuration
 
   @todo
   Scenario: Wizard checks ampli.json before running the activation check
-    Given I have valid credentials stored in "./ampli.json"
+    Given I have valid credentials stored in "~/.ampli.json"
     And "ampli.json" is fully configured in the project directory
     When the wizard launches
     Then the activation check should use the SourceId from ampli.json
 
   @todo
   Scenario: Wizard skips to SUSI when ampli.json has no SourceId
-    Given I have valid credentials stored in "./ampli.json"
+    Given I have valid credentials stored in "~/.ampli.json"
     And there is no "ampli.json" in the project directory
     When the wizard launches
     Then I should go through the Data Setup flow to create a new source

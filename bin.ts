@@ -297,7 +297,7 @@ yargs(hideBin(process.argv))
                   cloudRegion,
                 );
 
-                // Persist to ./ampli.json
+                // Persist to ~/.ampli.json
                 storeToken(
                   {
                     id: userInfo.id,

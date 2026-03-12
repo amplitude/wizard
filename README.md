@@ -14,7 +14,7 @@ taxonomy agent.
 
 On first run, the wizard:
 
-1. Checks for existing Amplitude credentials (`./ampli.json`)
+1. Checks for existing Amplitude credentials (`~/.ampli.json`)
 2. If not authenticated, walks through sign up or sign in (SUSI), org and
    project selection
 3. Evaluates activation status — whether events are being ingested and the SDK

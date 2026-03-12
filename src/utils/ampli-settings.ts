@@ -1,5 +1,6 @@
 /**
- * Reads and writes OAuth tokens from/to ./ampli.json, locally committed to the project. This lets users who are already logged in via `ampli login`
+ * Reads and writes OAuth tokens from/to ~/.ampli.json, the same file used by
+ * the ampli CLI. This lets users who are already logged in via `ampli login`
  * skip re-authenticating in the wizard.
  *
  * The ampli CLI stores tokens using the `conf` package (v6) with
@@ -8,13 +9,14 @@
  */
 
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   type AmplitudeZone,
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
 
-export const AMPLI_CONFIG_PATH = path.join(process.cwd(), 'ampli.json');
+export const AMPLI_CONFIG_PATH = path.join(os.homedir(), 'ampli.json');
 
 export interface StoredOAuthToken {
   accessToken: string;
@@ -116,7 +118,7 @@ export function getStoredToken(
   return undefined;
 }
 
-/** Persists an OAuth token to ./ampli.json in the same format as the ampli CLI. */
+/** Persists an OAuth token to ~/.ampli.json in the same format as the ampli CLI. */
 export function storeToken(
   user: StoredUser,
   token: StoredOAuthToken,

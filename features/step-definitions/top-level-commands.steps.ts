@@ -14,7 +14,7 @@ import {
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
-/** Temp config file used in place of ./ampli.json for isolation. */
+/** Temp config file used in place of ~/.ampli.json for isolation. */
 let tempConfigPath: string;
 let tempDir: string;
 
@@ -273,7 +273,7 @@ Then('{string} should be cleared', function (_configPathLabel: string) {
   assert.deepStrictEqual(
     parsed,
     {},
-    'Expected ./ampli.json to be cleared to {}',
+    'Expected ~/.ampli.json to be cleared to {}',
   );
   // Also verify that getStoredUser returns nothing
   assert.strictEqual(
