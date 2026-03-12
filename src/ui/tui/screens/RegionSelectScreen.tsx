@@ -1,14 +1,13 @@
 /**
  * RegionSelectScreen — Choose Amplitude data-center region (US or EU).
  *
- * Normal flow: region is auto-detected from the OAuth token by bin.ts and set
- * via store.setOAuthComplete(), so this screen is skipped entirely.
+ * Appears as the very first screen so the correct OAuth URL is known
+ * before the browser is opened. Skipped for returning users whose
+ * region is pre-populated from ~/.ampli.json.
  *
- * This screen only appears when:
- *   - Region detection failed (session.region === null after auth), OR
- *   - The user issues the /region slash command (session.regionForced === true)
+ * Also re-shown when the /region slash command sets regionForced.
  *
- * On selection the router advances automatically (isComplete returns true).
+ * US is focused by default — pressing Enter selects it without navigating.
  */
 
 import { Box, Text } from 'ink';
@@ -25,12 +24,12 @@ interface RegionSelectScreenProps {
 const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
   {
     label: 'United States',
-    hint: 'api.amplitude.com',
+    hint: 'app.amplitude.com · default',
     value: 'us',
   },
   {
     label: 'Europe',
-    hint: 'api.eu.amplitude.com',
+    hint: 'app.eu.amplitude.com',
     value: 'eu',
   },
 ];
@@ -47,14 +46,13 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.accent}>
-          Select your Amplitude data-center region
+          {session.regionForced ? 'Switch data-center region' : 'Where is your Amplitude organization?'}
         </Text>
         <Text dimColor>
-          Choose the region where your Amplitude organization stores data.
+          {session.regionForced
+            ? `Current: ${session.region?.toUpperCase() ?? 'US'} — pick a new region below`
+            : 'Press Enter to use US (default), or select EU if your org is on the EU data center.'}
         </Text>
-        {session.regionForced && session.region && (
-          <Text dimColor>Current: {session.region.toUpperCase()}</Text>
-        )}
       </Box>
 
       <PickerMenu<CloudRegion>

@@ -226,6 +226,18 @@ yargs(hideBin(process.argv))
             });
             tui.store.session = session;
 
+            // Pre-populate region from ~/.ampli.json so returning users skip RegionSelect.
+            // New users will see RegionSelect as the first screen.
+            {
+              const { getStoredUser } = await import(
+                './src/utils/ampli-settings.js'
+              );
+              const storedUser = getStoredUser();
+              if (storedUser?.zone) {
+                tui.store.setRegion(storedUser.zone);
+              }
+            }
+
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );
@@ -266,9 +278,6 @@ yargs(hideBin(process.argv))
                   './src/utils/oauth.js'
                 );
                 const { fetchAmplitudeUser } = await import('./src/lib/api.js');
-                const { detectRegionFromToken } = await import(
-                  './src/utils/urls.js'
-                );
                 const { DEFAULT_AMPLITUDE_ZONE } = await import(
                   './src/lib/constants.js'
                 );
@@ -277,20 +286,34 @@ yargs(hideBin(process.argv))
                 );
 
                 const forceFresh = !ampliConfigExists(installDir);
+
+                // Wait for the user to pick a region (or for it to be pre-populated
+                // from ~/.ampli.json for returning users) before opening the OAuth URL,
+                // since the auth endpoint differs between US and EU.
+                await new Promise<void>((resolve) => {
+                  if (tui.store.session.region !== null) {
+                    resolve();
+                    return;
+                  }
+                  const unsub = tui.store.subscribe(() => {
+                    if (tui.store.session.region !== null) {
+                      unsub();
+                      resolve();
+                    }
+                  });
+                });
+                const zone = tui.store.session.region === 'eu' ? 'eu' : DEFAULT_AMPLITUDE_ZONE;
+
                 const auth = await performAmplitudeAuth({
-                  zone: DEFAULT_AMPLITUDE_ZONE,
+                  zone,
                   forceFresh,
                 });
 
                 // Update login URL (clears the "copy this URL" hint)
                 tui.store.setLoginUrl(null);
 
-                let cloudRegion: 'us' | 'eu' = 'us';
-                try {
-                  cloudRegion = await detectRegionFromToken(auth.accessToken);
-                } catch {
-                  // Fall back to 'us'
-                }
+                // Zone was already selected by the user before OAuth started.
+                const cloudRegion = zone;
 
                 const userInfo = await fetchAmplitudeUser(
                   auth.idToken,

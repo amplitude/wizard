@@ -320,9 +320,9 @@ describe('WizardStore', () => {
   }
 
   describe('currentScreen', () => {
-    it('starts at auth for Wizard flow', () => {
+    it('starts at region-select for Wizard flow', () => {
       const store = createStore();
-      expect(store.currentScreen).toBe(Screen.Auth);
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
     });
 
     it('advances to intro after credentials, region, and projectHasData are set', () => {
@@ -383,7 +383,7 @@ describe('WizardStore', () => {
       const store = createStore();
       store.pushOverlay(Overlay.Outage);
       store.popOverlay();
-      expect(store.currentScreen).toBe(Screen.Auth);
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
     });
 
     it('pushOverlay emits change and increments version', () => {
@@ -798,7 +798,7 @@ describe('WizardStore', () => {
     it('popOverlay on empty stack does not crash', () => {
       const store = createStore();
       expect(() => store.popOverlay()).not.toThrow();
-      expect(store.currentScreen).toBe(Screen.Auth);
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
     });
 
     it('screen advances to mcp on RunPhase.Error (Mcp screen is shown; skipped on error would show outro)', () => {
@@ -839,18 +839,20 @@ describe('WizardStore', () => {
       const screenHistory: string[] = [];
       store.subscribe(() => screenHistory.push(store.currentScreen));
 
-      // Flow starts at Auth
+      // Flow starts at RegionSelect
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
+
+      // Step 1: Select region (before OAuth)
+      store.setRegion('us');
       expect(store.currentScreen).toBe(Screen.Auth);
 
-      // Step 1: Authenticate (credentials set by AuthScreen SUSI flow)
+      // Step 2: Authenticate (credentials set by AuthScreen SUSI flow)
       store.setCredentials({
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
         projectId: 1,
       });
-      // Region was auto-detected by OAuth → RegionSelect skipped
-      store.setRegion('us');
       expect(store.currentScreen).toBe(Screen.DataSetup);
 
       // Step 2: DataSetup auto-advances

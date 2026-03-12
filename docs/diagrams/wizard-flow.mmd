@@ -2,14 +2,15 @@
 title: Wizard flow
 ---
 flowchart TD
+    REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
+    REGION_SELECT --> AUTH
+
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
         SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
-        SUSI --> REGION_CHECK{Region auto-detected?}
-        REGION_CHECK -->|yes| DATA_SETUP
-        REGION_CHECK -->|no| REGION_SELECT["RegionSelect: US or EU?"]
-        REGION_SELECT --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
-        DATA_SETUP --> DATA_CHECK{Project has data?}
     end
+
+    AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
+    DATA_SETUP --> DATA_CHECK{Project has data?}
 
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
     DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent"]

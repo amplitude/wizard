@@ -61,17 +61,18 @@ function needsSetup(session: WizardSession): boolean {
 /** All flow pipelines. Add new screens by appending entries. */
 export const FLOWS: Record<Flow, FlowEntry[]> = {
   [Flow.Wizard]: [
-    // 1. Authenticate (SUSI for new users, silent login check for returning users)
-    {
-      screen: Screen.Auth,
-      isComplete: (s) => s.credentials !== null,
-    },
-    // 1b. Region selection — US or EU data center (skipped if already known;
-    //     re-shown when /region slash command sets regionForced)
+    // 1. Region selection — must know US vs EU before opening OAuth URL.
+    //    Skipped for returning users (region pre-populated from ~/.ampli.json).
+    //    Re-shown when /region slash command sets regionForced.
     {
       screen: Screen.RegionSelect,
       show: (s) => s.region === null || s.regionForced,
       isComplete: (s) => s.region !== null && !s.regionForced,
+    },
+    // 2. Authenticate (SUSI for new users, silent login check for returning users)
+    {
+      screen: Screen.Auth,
+      isComplete: (s) => s.credentials !== null,
     },
     // 2. Data check — is the project already ingesting events?
     {

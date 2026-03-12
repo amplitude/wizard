@@ -101,8 +101,10 @@ Given('the project has an LLM SDK as a dependency', function () {
 // ── Region selection ──────────────────────────────────────────────────────────
 
 Given('I have just authenticated', function () {
+  // Region is selected before auth in the current flow.
+  // This step represents a user who has completed both steps.
+  session.region = 'us';
   session.credentials = mockCredentials();
-  // region not yet set — RegionSelect screen should appear
 });
 
 Given('my region is already set to {string}', function (region: string) {
@@ -184,6 +186,7 @@ When('the wizard launches', function () {
 // ── Then ──────────────────────────────────────────────────────────────────────
 
 Then('I should go through the SUSI flow', function () {
+  // After region is selected (pre-auth), credentials are still null → Auth shows.
   const screen = router.resolve(session);
   assert.strictEqual(
     screen,

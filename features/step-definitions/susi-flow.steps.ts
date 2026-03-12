@@ -44,10 +44,11 @@ Before(function () {
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-susi-test-'));
   router = new WizardRouter(Flow.Wizard);
   session = buildSession({ installDir: projectDir });
+  // Region is selected before OAuth in the real flow; pre-populate here.
+  session.region = 'us';
   // Simulate OAuth completing — pendingAuthIdToken set
   session.pendingAuthIdToken = 'id-token-abc';
   session.pendingAuthCloudRegion = 'us';
-  session.region = 'us'; // region auto-detected from token
 });
 
 After(function () {
