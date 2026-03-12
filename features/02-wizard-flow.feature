@@ -24,9 +24,15 @@ Feature: Wizard flow
     Then the project should have no existing data
     And I should be taken to Framework Detection
 
-  Scenario: Region selection is skipped for returning users
+  Scenario: Returning user also sees region selection first
     Given I have valid credentials stored in "~/.ampli.json"
     When the wizard launches
+    Then I should be asked to select a region
+
+  Scenario: Returning user confirms region and proceeds to Data Setup
+    Given I have valid credentials stored in "~/.ampli.json"
+    When the wizard launches
+    And I select the "US" region
     Then I should proceed to the Data Setup flow
 
   Scenario: /region slash command re-triggers region selection and data setup
@@ -39,6 +45,7 @@ Feature: Wizard flow
   Scenario: Returning user with credentials and existing data — options menu
     Given I have valid credentials stored in "~/.ampli.json"
     And the current project has existing data
+    And my region is already set to "us"
     When the wizard launches
     Then I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project
 

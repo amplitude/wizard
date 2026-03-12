@@ -226,18 +226,6 @@ yargs(hideBin(process.argv))
             });
             tui.store.session = session;
 
-            // Pre-populate region from ~/.ampli.json so returning users skip RegionSelect.
-            // New users will see RegionSelect as the first screen.
-            {
-              const { getStoredUser } = await import(
-                './src/utils/ampli-settings.js'
-              );
-              const storedUser = getStoredUser();
-              if (storedUser?.zone) {
-                tui.store.setRegion(storedUser.zone);
-              }
-            }
-
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );

@@ -175,11 +175,12 @@ When('the wizard launches', function () {
     const { getStoredToken } = require('../../src/utils/ampli-settings.js');
     const token = getStoredToken(undefined, 'us', sharedConfigPath);
     if (token) {
-      // Simulate silent login: stored token → pre-populate credentials + region
+      // Returning user: credentials are available but region is NOT pre-populated.
+      // Region selection always appears first — the user must confirm their region.
       session.credentials = mockCredentials();
-      session.region = 'us';
     }
   }
+  // session.region remains null — RegionSelect is always shown first
   // session.projectHasData remains null (not yet checked)
 });
 
