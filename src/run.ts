@@ -71,26 +71,6 @@ export async function runWizard(argv: Args, session?: WizardSession) {
     getUI().log.info(chalk.dim('Running in CI mode'));
   }
 
-  // Prompt for region
-  if (!session.region) {
-    getUI().log.info(
-      'First, which Amplitude server do you want to connect to?\n' +
-        chalk.dim(
-          'If you work with EU data, select the EU server for better performance.',
-        ),
-    );
-    const region = await getUI().prompt({
-      type: 'select',
-      name: 'region',
-      message: 'Select your Amplitude server region:',
-      choices: [
-        { name: 'US (global)', value: 'us' },
-        { name: 'EU', value: 'eu' },
-      ],
-    });
-    session.region = region;
-  }
-
   const integration =
     session.integration ?? (await detectAndResolveIntegration(session));
 
