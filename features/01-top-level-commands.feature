@@ -13,7 +13,7 @@ Feature: Top-level CLI commands
     Then I should be redirected through the OAuth flow
     And I should be prompted to select an org
     And my token should be stored in "~/.ampli.json"
-    And I should see my logged-in user detailsy
+    And I should see my logged-in user details
 
   Scenario: Login with valid stored credentials
     Given I have valid credentials stored in "~/.ampli.json"

@@ -120,11 +120,6 @@ yargs(hideBin(process.argv))
             'Directory to install Amplitude in\nenv: AMPLITUDE_WIZARD_INSTALL_DIR',
           type: 'string',
         },
-        playground: {
-          default: false,
-          describe: 'Launch the TUI primitives playground',
-          type: 'boolean',
-        },
         integration: {
           describe: 'Integration to set up',
           choices: [
@@ -188,14 +183,6 @@ yargs(hideBin(process.argv))
             '  npx @amplitude/wizard --ci --api-key <your-key> --install-dir .',
         );
         process.exit(1);
-      } else if (options.playground) {
-        // Playground mode: launch the TUI primitives playground
-        void (async () => {
-          const { startPlayground } = await import(
-            './src/ui/tui/playground/start-playground.js'
-          );
-          startPlayground(WIZARD_VERSION);
-        })();
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
@@ -290,7 +277,10 @@ yargs(hideBin(process.argv))
                     }
                   });
                 });
-                const zone = tui.store.session.region === 'eu' ? 'eu' : DEFAULT_AMPLITUDE_ZONE;
+                const zone =
+                  tui.store.session.region === 'eu'
+                    ? 'eu'
+                    : DEFAULT_AMPLITUDE_ZONE;
 
                 const auth = await performAmplitudeAuth({
                   zone,
