@@ -59,15 +59,25 @@ export const PickerMenu = <T,>({
   );
 };
 
+/** Returns the number key label for an option index (1-based, 0 = tenth). */
+function numKey(index: number): string | null {
+  if (index === 9) return '0';
+  if (index < 9) return String(index + 1);
+  return null;
+}
+
 /** Render a single picker item row. */
 const PickerItem = <T,>({
   opt,
   isFocused,
+  index,
 }: {
   opt: PickerOption<T>;
   isFocused: boolean;
+  index: number;
 }) => {
   const label = opt.hint ? `${opt.label} (${opt.hint})` : opt.label;
+  const key = numKey(index);
   return (
     <Box gap={1}>
       <Text
@@ -76,6 +86,11 @@ const PickerItem = <T,>({
       >
         {isFocused ? Icons.triangleSmallRight : ' '}
       </Text>
+      {key !== null && (
+        <Text dimColor color={isFocused ? Colors.accent : undefined}>
+          [{key}]
+        </Text>
+      )}
       <Text
         color={isFocused ? Colors.accent : undefined}
         bold={isFocused}
@@ -123,9 +138,17 @@ const SinglePickerMenu = <T,>({
   }
   const scrollOffset = scrollRef.current;
 
-  useScreenInput((_input, key) => {
+  useScreenInput((input, key) => {
     const col = Math.floor(focused / rowsPerCol);
     const row = focused % rowsPerCol;
+
+    // Number keys 1–9 select options 0–8; 0 selects option 9
+    const digit = parseInt(input, 10);
+    if (!isNaN(digit) && !key.ctrl && !key.meta) {
+      const idx = digit === 0 ? 9 : digit - 1;
+      const opt = options[idx];
+      if (opt) { onSelect(opt.value); return; }
+    }
 
     if (key.upArrow) {
       if (row > 0) {
@@ -175,6 +198,7 @@ const SinglePickerMenu = <T,>({
           <PickerItem
             key={scrollOffset + i}
             opt={opt}
+            index={scrollOffset + i}
             isFocused={scrollOffset + i === focused}
           />
         ))}
@@ -201,6 +225,7 @@ const SinglePickerMenu = <T,>({
               <PickerItem
                 key={colIdx * rowsPerCol + rowIdx}
                 opt={opt}
+                index={colIdx * rowsPerCol + rowIdx}
                 isFocused={colIdx * rowsPerCol + rowIdx === focused}
               />
             ))}
@@ -229,9 +254,24 @@ const MultiPickerMenu = <T,>({
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const rows = Math.ceil(options.length / columns);
 
-  useScreenInput((_input, key) => {
+  useScreenInput((input, key) => {
     const col = Math.floor(focused / rows);
     const row = focused % rows;
+
+    // Number keys 1–9 toggle options 0–8; 0 toggles option 9
+    const digit = parseInt(input, 10);
+    if (!isNaN(digit) && !key.ctrl && !key.meta) {
+      const idx = digit === 0 ? 9 : digit - 1;
+      if (idx < options.length) {
+        setFocused(idx);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          if (next.has(idx)) { next.delete(idx); } else { next.add(idx); }
+          return next;
+        });
+      }
+      return;
+    }
 
     if (key.upArrow) {
       if (row > 0) {
@@ -256,7 +296,7 @@ const MultiPickerMenu = <T,>({
       const nextCol = col < columns - 1 ? col + 1 : 0;
       setFocused(Math.min(nextCol * rows + row, options.length - 1));
     }
-    if (_input === ' ') {
+    if (input === ' ') {
       setSelected((prev) => {
         const next = new Set(prev);
         if (next.has(focused)) {
@@ -295,9 +335,8 @@ const MultiPickerMenu = <T,>({
               const isFocused = flatIdx === focused;
               const isSelected = selected.has(flatIdx);
               const label = opt.hint ? `${opt.label} (${opt.hint})` : opt.label;
-              const checkbox = isSelected
-                ? Icons.squareFilled
-                : Icons.squareOpen;
+              const checkbox = isSelected ? Icons.squareFilled : Icons.squareOpen;
+              const key = numKey(flatIdx);
               return (
                 <Box key={flatIdx} gap={1}>
                   <Text
@@ -306,6 +345,11 @@ const MultiPickerMenu = <T,>({
                   >
                     {checkbox}
                   </Text>
+                  {key !== null && (
+                    <Text dimColor color={isFocused ? Colors.accent : undefined}>
+                      [{key}]
+                    </Text>
+                  )}
                   <Text
                     color={isFocused ? Colors.accent : undefined}
                     bold={isFocused}
