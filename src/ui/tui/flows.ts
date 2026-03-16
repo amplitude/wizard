@@ -23,9 +23,11 @@ export enum Screen {
   Options = 'options',
   Run = 'run',
   Mcp = 'mcp',
+  Slack = 'slack',
   Outro = 'outro',
   McpAdd = 'mcp-add',
   McpRemove = 'mcp-remove',
+  SlackSetup = 'slack-setup',
 }
 
 /** Named flows the router can run */
@@ -33,6 +35,7 @@ export enum Flow {
   Wizard = 'wizard',
   McpAdd = 'mcp-add',
   McpRemove = 'mcp-remove',
+  SlackSetup = 'slack-setup',
 }
 
 // ── Flow definitions ─────────────────────────────────────────────────
@@ -109,6 +112,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) => s.mcpComplete,
     },
+    // 7. Slack integration setup (skipped on error)
+    {
+      screen: Screen.Slack,
+      show: (s) => s.runPhase !== RunPhase.Error,
+      isComplete: (s) => s.slackComplete,
+    },
     { screen: Screen.Outro },
   ],
 
@@ -124,6 +133,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     {
       screen: Screen.McpRemove,
       isComplete: (s) => s.mcpComplete,
+    },
+    { screen: Screen.Outro },
+  ],
+
+  [Flow.SlackSetup]: [
+    {
+      screen: Screen.SlackSetup,
+      isComplete: (s) => s.slackComplete,
     },
     { screen: Screen.Outro },
   ],

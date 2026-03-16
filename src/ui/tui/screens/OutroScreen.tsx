@@ -10,6 +10,9 @@ import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Colors } from '../styles.js';
+import { PickerMenu } from '../primitives/index.js';
+import { getCloudUrlFromRegion } from '../../../utils/urls.js';
+import opn from 'opn';
 
 interface OutroScreenProps {
   store: WizardStore;
@@ -21,8 +24,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     () => store.getSnapshot(),
   );
 
+  const isSuccess = store.session.outroData?.kind === OutroKind.Success;
+
+  // Any-key-to-exit only for non-success states; success uses a picker.
   useScreenInput(() => {
-    process.exit(0);
+    if (!isSuccess) process.exit(0);
   });
 
   const outroData = store.session.outroData;
@@ -125,7 +131,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       )}
 
       <Box marginTop={1}>
-        <Text color={Colors.muted}>Press any key to exit</Text>
+        {isSuccess ? (
+          <PickerMenu
+            options={[
+              { label: 'Open Amplitude dashboard', value: 'dashboard' },
+              { label: 'Exit', value: 'exit' },
+            ]}
+            onSelect={(value) => {
+              const choice = Array.isArray(value) ? value[0] : value;
+              if (choice === 'dashboard') {
+                const region = store.session.region ?? 'us';
+                const url = getCloudUrlFromRegion(region);
+                opn(url, { wait: false }).catch(() => {});
+              }
+              process.exit(0);
+            }}
+          />
+        ) : (
+          <Text color={Colors.muted}>Press any key to exit</Text>
+        )}
       </Box>
     </Box>
   );

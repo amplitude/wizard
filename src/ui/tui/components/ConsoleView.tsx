@@ -18,6 +18,11 @@ import { useState, useSyncExternalStore } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
+import opn from 'opn';
+import { getCloudUrlFromRegion } from '../../../utils/urls.js';
+import { slackSettingsUrl } from '../screens/SlackScreen.js';
+import { fetchAmplitudeUser } from '../../../lib/api.js';
+import type { AmplitudeZone } from '../../../lib/constants.js';
 import { SlashCommandInput } from '../primitives/SlashCommandInput.js';
 import { Colors } from '../styles.js';
 import {
@@ -31,6 +36,7 @@ const COMMANDS = [
   { cmd: '/login', desc: 'Re-authenticate' },
   { cmd: '/logout', desc: 'Clear credentials' },
   { cmd: '/whoami', desc: 'Show current user, org, and project' },
+  { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
   { cmd: '/exit', desc: 'Exit the wizard' },
   { cmd: '/help', desc: 'List available slash commands' },
 ];
@@ -53,6 +59,31 @@ function executeCommand(raw: string, store: WizardStore): void {
       store.setCommandFeedback(
         `org: ${s.selectedOrgName ?? '(none)'}  workspace: ${s.selectedWorkspaceName ?? '(none)'}  region: ${s.region ?? '(none)'}`,
       );
+      break;
+    }
+    case '/slack': {
+      const region = store.session.region ?? 'us';
+      const base = getCloudUrlFromRegion(region);
+      const appName = region === 'eu' ? 'Amplitude - EU' : 'Amplitude';
+      const open = (orgName: string | null) => {
+        const url = slackSettingsUrl(base, orgName);
+        opn(url, { wait: false }).catch(() => {});
+        store.setCommandFeedback(
+          `Opening Amplitude Settings → connect the "${appName}" Slack app.`,
+        );
+      };
+      if (store.session.selectedOrgName) {
+        open(store.session.selectedOrgName);
+      } else if (store.session.credentials) {
+        void fetchAmplitudeUser(
+          store.session.credentials.accessToken,
+          region as AmplitudeZone,
+        )
+          .then((info) => open(info.orgs[0]?.name ?? null))
+          .catch(() => open(null));
+      } else {
+        open(null);
+      }
       break;
     }
     case '/exit':

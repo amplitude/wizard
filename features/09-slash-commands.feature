@@ -15,6 +15,11 @@ Feature: Slash commands
     When I enter the slash command "/logout"
     Then the wizard should prompt me to log in again
 
+  Scenario: /slack opens Amplitude settings to connect Slack
+    Given the wizard is active
+    When I enter the slash command "/slack"
+    Then I should see feedback about opening Amplitude settings for Slack
+
   @todo
   Scenario: /whoami shows current session info
     Given the wizard is active

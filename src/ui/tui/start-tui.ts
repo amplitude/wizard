@@ -5,6 +5,7 @@
 import { render } from 'ink';
 import { createElement } from 'react';
 import { WizardStore, Flow } from './store.js';
+import type { WizardSession } from '../../lib/wizard-session.js';
 import { InkUI } from './ink-ui.js';
 import { setUI } from '../index.js';
 import { App } from './App.js';
@@ -21,6 +22,7 @@ const FORCE_DARK = BG_BLACK + CLEAR_SCREEN + CURSOR_HOME;
 export function startTUI(
   version: string,
   flow: Flow = Flow.Wizard,
+  initialSession?: WizardSession,
 ): {
   unmount: () => void;
   store: WizardStore;
@@ -31,6 +33,9 @@ export function startTUI(
 
   const store = new WizardStore(flow);
   store.version = version;
+  if (initialSession) {
+    store.session = initialSession;
+  }
 
   // Swap in the InkUI
   const inkUI = new InkUI(store);

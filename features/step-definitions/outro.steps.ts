@@ -30,6 +30,7 @@ Before(function () {
   session.projectHasData = false;
   session.setupConfirmed = true;
   session.mcpComplete = true;
+  session.slackComplete = true;
 });
 
 // ── Given ─────────────────────────────────────────────────────────────────────

@@ -18,6 +18,7 @@ import {
   type DiscoveredFeature,
   AdditionalFeature,
   McpOutcome,
+  SlackOutcome,
   RunPhase,
   buildSession,
 } from '../../lib/wizard-session.js';
@@ -30,7 +31,7 @@ import {
 } from './router.js';
 import { analytics, sessionProperties } from '../../utils/analytics.js';
 
-export { TaskStatus, Screen, Overlay, Flow, RunPhase, McpOutcome };
+export { TaskStatus, Screen, Overlay, Flow, RunPhase, McpOutcome, SlackOutcome };
 export type { ScreenName, OutroData, WizardSession };
 
 export interface TaskItem {
@@ -320,6 +321,16 @@ export class WizardStore {
     analytics.wizardCapture('mcp complete', {
       mcp_outcome: outcome,
       mcp_installed_clients: installedClients,
+      ...sessionProperties(this.session),
+    });
+    this.emitChange();
+  }
+
+  setSlackComplete(outcome: SlackOutcome = SlackOutcome.Skipped): void {
+    this.$session.setKey('slackComplete', true);
+    this.$session.setKey('slackOutcome', outcome);
+    analytics.wizardCapture('slack complete', {
+      slack_outcome: outcome,
       ...sessionProperties(this.session),
     });
     this.emitChange();

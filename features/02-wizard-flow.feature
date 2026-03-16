@@ -58,6 +58,12 @@ Feature: Wizard flow
     When the Claude agent completes successfully
     Then I should be on the MCP screen
 
+  Scenario: Slack setup screen appears after MCP
+    Given I have reached the RunScreen
+    When the Claude agent completes successfully
+    And MCP setup is complete
+    Then I should be on the Slack screen
+
   Scenario: Agent run completes successfully
     Given I have reached the RunScreen
     When the Claude agent completes successfully

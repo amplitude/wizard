@@ -22,6 +22,7 @@ import { RegionSelectScreen } from './screens/RegionSelectScreen.js';
 import { DataSetupScreen } from './screens/DataSetupScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
+import { SlackScreen } from './screens/SlackScreen.js';
 import { OutroScreen } from './screens/OutroScreen.js';
 import { createMcpInstaller } from './services/mcp-installer.js';
 import type { McpInstaller } from './services/mcp-installer.js';
@@ -68,5 +69,9 @@ export function createScreens(
         standalone
       />
     ),
+
+    // Slack integration (in-wizard step and standalone flow)
+    [Screen.Slack]: <SlackScreen store={store} />,
+    [Screen.SlackSetup]: <SlackScreen store={store} standalone />,
   };
 }

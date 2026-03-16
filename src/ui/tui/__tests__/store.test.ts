@@ -351,11 +351,20 @@ describe('WizardStore', () => {
       expect(store.currentScreen).toBe(Screen.Mcp);
     });
 
-    it('advances to outro after mcp completes', () => {
+    it('advances to slack after mcp completes', () => {
       const store = createStore();
       advanceToRun(store);
       store.setRunPhase(RunPhase.Completed);
       store.setMcpComplete();
+      expect(store.currentScreen).toBe(Screen.Slack);
+    });
+
+    it('advances to outro after slack completes', () => {
+      const store = createStore();
+      advanceToRun(store);
+      store.setRunPhase(RunPhase.Completed);
+      store.setMcpComplete();
+      store.setSlackComplete();
       expect(store.currentScreen).toBe(Screen.Outro);
     });
 
@@ -872,10 +881,14 @@ describe('WizardStore', () => {
 
       // Step 5: Complete MCP
       store.setMcpComplete();
+      expect(store.currentScreen).toBe(Screen.Slack);
+
+      // Step 6: Complete Slack
+      store.setSlackComplete();
       expect(store.currentScreen).toBe(Screen.Outro);
 
-      // Verify version was bumped for each setter call (7 setters above)
-      expect(store.getVersion()).toBe(7);
+      // Verify version was bumped for each setter call (8 setters above)
+      expect(store.getVersion()).toBe(8);
     });
   });
 

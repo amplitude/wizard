@@ -39,15 +39,11 @@ export const getHostFromRegion = (region: CloudRegion) => {
 };
 
 export const getCloudUrlFromRegion = (region: CloudRegion) => {
-  if (IS_DEV) {
-    return 'http://localhost:8010';
-  }
-
   if (region === 'eu') {
     return 'https://eu.amplitude.com';
   }
 
-  return 'https://us.amplitude.com';
+  return 'https://app.amplitude.com';
 };
 
 export async function detectRegionFromToken(

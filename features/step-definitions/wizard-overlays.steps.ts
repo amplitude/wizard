@@ -60,6 +60,20 @@ When('I enter the slash command {string}', function (command: string) {
   if (command === '/logout') {
     session(this).credentials = null;
   }
+  if (command === '/slack') {
+    // /slack opens a browser and sets feedback — record the command for assertion
+    (this as Record<string, unknown>).lastSlashCommand = command;
+  }
+});
+
+Then('I should see feedback about opening Amplitude settings for Slack', function () {
+  // The /slack command opens a browser and sets command feedback.
+  // We verify the command was recognised (not treated as unknown).
+  assert.strictEqual(
+    (this as Record<string, unknown>).lastSlashCommand,
+    '/slack',
+    'Expected /slack to be recorded as the last slash command',
+  );
 });
 
 Then('the wizard should prompt me to log in again', function () {

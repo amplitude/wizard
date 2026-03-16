@@ -632,6 +632,53 @@ yargs(hideBin(process.argv))
       })();
     },
   )
+  .command(
+    'slack',
+    'Set up Amplitude Slack integration',
+    (y) => y,
+    (argv) => {
+      void (async () => {
+        try {
+          const { startTUI } = await import('./src/ui/tui/start-tui.js');
+          const { buildSession } = await import('./src/lib/wizard-session.js');
+          const { Flow } = await import('./src/ui/tui/router.js');
+          const { getStoredUser, getStoredToken } = await import('./src/utils/ampli-settings.js');
+          const { getHostFromRegion } = await import('./src/utils/urls.js');
+
+          const session = buildSession({
+            debug: typeof argv['debug'] === 'boolean' ? argv['debug'] : undefined,
+          });
+
+          // Pre-populate credentials from ~/.ampli.json so SlackScreen can
+          // resolve the org name via fetchAmplitudeUser.
+          const storedUser = getStoredUser();
+          const zone = storedUser?.zone ?? 'us';
+          const storedToken = getStoredToken(storedUser?.id, zone);
+          if (storedToken) {
+            session.region = zone;
+            session.credentials = {
+              accessToken: storedToken.idToken,
+              projectApiKey: '',
+              host: getHostFromRegion(zone),
+              projectId: 0,
+            };
+          }
+
+          // Pass the pre-populated session so it's available before the first render.
+          startTUI(WIZARD_VERSION as string, Flow.SlackSetup, session);
+        } catch {
+          setUI(new LoggingUI());
+          const { getCloudUrlFromRegion } = await import('./src/utils/urls.js');
+          const opn = (await import('opn')).default;
+          const url = `${getCloudUrlFromRegion('us')}/settings/profile`;
+          getUI().log.info(
+            `Opening Amplitude Settings to connect Slack: ${url}`,
+          );
+          await opn(url, { wait: false });
+        }
+      })();
+    },
+  )
   .command('mcp <command>', 'MCP server management commands', (yargs) => {
     return yargs
       .command(

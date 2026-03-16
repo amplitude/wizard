@@ -275,8 +275,14 @@ Then('environment variables should be uploaded to hosting', function () {
 
 Then('I should be taken to the Outro', function () {
   session.mcpComplete = true;
+  session.slackComplete = true;
   const screen = router.resolve(session);
   assert.strictEqual(screen, Screen.Outro, `Expected Outro but got ${screen}`);
+});
+
+Then('I should be on the Slack screen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Slack, `Expected Slack but got ${screen}`);
 });
 
 Then('I should be taken to the Outro with an error state', function () {
@@ -308,6 +314,10 @@ Then('I should be on the RunScreen', function () {
 Then('I should be on the MCP screen', function () {
   const screen = router.resolve(session);
   assert.strictEqual(screen, Screen.Mcp, `Expected Mcp but got ${screen}`);
+});
+
+When('MCP setup is complete', function () {
+  session.mcpComplete = true;
 });
 
 // Overlay and slash command steps live in wizard-overlays.steps.ts

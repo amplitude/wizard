@@ -66,6 +66,13 @@ export const McpOutcome = {
 } as const;
 export type McpOutcome = (typeof McpOutcome)[keyof typeof McpOutcome];
 
+/** Outcome of the Slack integration setup step */
+export const SlackOutcome = {
+  Skipped: 'skipped',
+  Configured: 'configured',
+} as const;
+export type SlackOutcome = (typeof SlackOutcome)[keyof typeof SlackOutcome];
+
 /** Outcome kind for the outro screen */
 export const OutroKind = {
   Success: 'success',
@@ -176,6 +183,8 @@ export interface WizardSession {
   mcpComplete: boolean;
   mcpOutcome: McpOutcome | null;
   mcpInstalledClients: string[];
+  slackComplete: boolean;
+  slackOutcome: SlackOutcome | null;
 
   // Runtime
   serviceStatus: { description: string; statusPageUrl: string } | null;
@@ -235,6 +244,8 @@ export function buildSession(args: {
     mcpComplete: false,
     mcpOutcome: null,
     mcpInstalledClients: [],
+    slackComplete: false,
+    slackOutcome: null,
     pendingOrgs: null,
     pendingAuthIdToken: null,
     pendingAuthCloudRegion: null,
