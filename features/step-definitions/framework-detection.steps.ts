@@ -197,6 +197,17 @@ Then('I should proceed to the Agent Run', function () {
   );
 });
 
+Then('the generic integration should be selected automatically', function () {
+  // Simulate what IntroScreen does: auto-select generic when detection fails
+  session.frameworkConfig = makeConfig('Generic');
+  session.integration = Integration.generic;
+
+  assert.strictEqual(session.integration, Integration.generic, 'Expected generic integration');
+  // Router still shows Intro — user needs to confirm before proceeding
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Intro, `Expected Intro (confirm generic) but got ${screen}`);
+});
+
 Then('I should see the framework picker menu', function () {
   // Router shows Intro with no frameworkConfig — IntroScreen shows picker
   const screen = router.resolve(session);

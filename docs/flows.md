@@ -194,7 +194,8 @@ title: Framework Detection flow
 flowchart TD
     DETECT{Auto-detect framework?}
     DETECT -->|success| RESULT["Show detection result"]
-    DETECT -->|failed or --menu| PICKER["Framework picker menu"] --> RESULT
+    DETECT -->|failed| GENERIC["Auto-select Generic integration"] --> RESULT
+    DETECT -->|--menu flag| PICKER["Framework picker menu"] --> RESULT
     RESULT --> CONFIRM{User confirms?}
     CONFIRM -->|cancel| EXIT["Exit"]
     CONFIRM -->|continue| SETUP_Q{Unresolved setup questions?}

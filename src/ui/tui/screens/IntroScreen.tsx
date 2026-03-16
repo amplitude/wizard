@@ -3,7 +3,7 @@
  *
  * Three states:
  *   1. Detecting: spinner while bin.ts runs detection
- *   2. Detection failed: framework picker, then continue/cancel
+ *   2. Detection failed: auto-selects Generic, then continue/cancel
  *   3. Detection succeeded: show result, then continue/cancel
  *
  * Calls store.completeSetup() which unblocks bin.ts to start runWizard.
@@ -11,7 +11,7 @@
 
 import path from 'path';
 import { Box, Text } from 'ink';
-import { useState, useSyncExternalStore } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
@@ -36,6 +36,18 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const detecting = !session.detectionComplete;
   const needsFrameworkPick =
     session.detectionComplete && !session.frameworkConfig;
+
+  // When detection fails and the user hasn't explicitly opened the picker,
+  // auto-select the generic integration so the wizard can proceed.
+  useEffect(() => {
+    if (needsFrameworkPick && !session.menu) {
+      void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
+        const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
+        store.setFrameworkConfig(Integration.generic, genericConfig);
+        store.setDetectedFramework(genericConfig.metadata.name);
+      });
+    }
+  }, [needsFrameworkPick, session.menu]);
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
   const showDescription = showContinue;
@@ -76,17 +88,11 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         </Box>
       )}
 
-      {needsFrameworkPick && (
-        <Box marginY={1}>
-          <Text dimColor>Could not auto-detect your framework.</Text>
-        </Box>
-      )}
-
       {config?.metadata.preRunNotice && (
         <Text color="yellow">{config.metadata.preRunNotice}</Text>
       )}
 
-      {(needsFrameworkPick || pickingFramework) && (
+      {(pickingFramework || (session.menu && needsFrameworkPick)) && (
         <FrameworkPicker
           store={store}
           onComplete={() => setPickingFramework(false)}

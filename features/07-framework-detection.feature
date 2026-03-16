@@ -19,13 +19,11 @@ Feature: Framework Detection
     When I cancel
     Then the wizard should exit
 
-  Scenario: Framework detection fails and user selects from picker
+  Scenario: Framework detection fails — generic wizard runs automatically
     Given I am in the Framework Detection flow
     When the wizard cannot auto-detect my framework
-    Then I should see the framework picker menu
-    When I select a framework from the picker
-    Then I should see the selected framework displayed
-    When I confirm
+    Then the generic integration should be selected automatically
+    When I confirm the detected framework
     And there are no unresolved setup questions
     Then I should proceed to the Agent Run
 
