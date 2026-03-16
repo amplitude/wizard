@@ -38,6 +38,13 @@ export interface WizardUI {
   note(message: string): void;
   pushStatus(message: string): void;
 
+  /**
+   * Print a periodic "still running" summary of the last N status messages.
+   * Called by the agent runner every ~10 seconds while the agent is active.
+   * LoggingUI prints to stdout; InkUI is a no-op (TUI already shows live updates).
+   */
+  heartbeat(statuses: string[]): void;
+
   // ── Spinner ───────────────────────────────────────────────────────
   spinner(): SpinnerHandle;
 

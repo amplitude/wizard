@@ -240,7 +240,29 @@ type AgentRunConfig = {
   wizardMetadata?: Record<string, string>;
   /** When true, bypass the Amplitude gateway and run via the local `claude` CLI. */
   useLocalClaude?: boolean;
+  /** When true, ANTHROPIC_API_KEY is passed through to the SDK instead of the gateway. */
+  useDirectApiKey?: boolean;
 };
+
+const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
+
+/**
+ * Ping the gateway URL with a short timeout.
+ * Any HTTP response (even 4xx/5xx) means the gateway is reachable.
+ * A timeout or connection error means it's down.
+ */
+async function checkGatewayLiveness(gatewayUrl: string): Promise<boolean> {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), GATEWAY_LIVENESS_TIMEOUT_MS);
+  try {
+    await fetch(gatewayUrl, { method: 'HEAD', signal: controller.signal });
+    return true;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(id);
+  }
+}
 
 /**
  * Select wizard metadata from WIZARD_VARIANTS using the variant feature flag.
@@ -281,41 +303,107 @@ function buildAgentEnv(
 }
 
 /**
- * Package managers that can be used to run commands.
+ * Executables that can be used to run build commands.
+ * Includes package managers, language build tools, and static site generators.
  */
 const PACKAGE_MANAGERS = [
-  // JavaScript
+  // JavaScript / Node
   'npm',
   'pnpm',
   'yarn',
   'bun',
   'npx',
+  'deno',
   // Python
   'pip',
   'pip3',
   'poetry',
   'pipenv',
   'uv',
+  // Ruby
+  'gem',
+  'bundle',
+  'bundler',
+  'rake',
+  // PHP
+  'composer',
+  // Go
+  'go',
+  // Rust
+  'cargo',
+  // Java / Kotlin / Android
+  'gradle',
+  './gradlew',
+  'mvn',
+  './mvnw',
+  // .NET
+  'dotnet',
+  // Swift
+  'swift',
+  // Haskell
+  'stack',
+  'cabal',
+  // Elixir
+  'mix',
+  // Flutter / Dart
+  'flutter',
+  'dart',
+  // Make
+  'make',
+  // Static site generators
+  'zola',
+  'hugo',
+  'jekyll',
+  'eleventy',
+  'hexo',
+  'pelican',
+  'mkdocs',
 ];
 
 /**
- * Safe scripts/commands that can be run with any package manager.
+ * Commands that are safe to run with no sub-command (the executable alone builds the project).
+ */
+const STANDALONE_BUILD_COMMANDS = ['hugo', 'make', 'eleventy'];
+
+/**
+ * Safe sub-commands/scripts that can be run with any executable in PACKAGE_MANAGERS.
  * Uses startsWith matching, so 'build' matches 'build', 'build:prod', etc.
  * Note: Linting tools are in LINTING_TOOLS and checked separately.
  */
 const SAFE_SCRIPTS = [
-  // Package installation
+  // Package / dependency installation
   'install',
   'add',
   'ci',
-  // Build
+  'get',
+  'restore',
+  'fetch',
+  'deps',
+  'update',
+  // Build / compile / generate
   'build',
+  'compile',
+  'assemble',
+  'package',
+  'generate',
+  'bundle',
   // Type checking (various naming conventions)
   'tsc',
   'typecheck',
   'type-check',
   'check-types',
   'types',
+  // Check / verify
+  'check',
+  // Test
+  'test',
+  // Serve (for build verification with static site tools)
+  'serve',
+  // Module / dependency management sub-commands
+  'mod',
+  'pub',
+  // Make targets
+  'all',
   // Linting/formatting script names (actual tools are in LINTING_TOOLS)
   'lint',
   'format',
@@ -355,6 +443,11 @@ function matchesAllowedPrefix(command: string): boolean {
   const parts = command.split(/\s+/);
   if (parts.length === 0 || !PACKAGE_MANAGERS.includes(parts[0])) {
     return false;
+  }
+
+  // Allow tools that are safe to invoke with no sub-command (e.g. `hugo`, `make`)
+  if (parts.length === 1 && STANDALONE_BUILD_COMMANDS.includes(parts[0])) {
+    return true;
   }
 
   // Skip 'run' or 'exec' if present
@@ -526,13 +619,26 @@ export async function initializeAgent(
   getUI().log.step('Initializing Claude agent...');
 
   try {
-    const useLocalClaude = !config.amplitudeApiKey;
+    const useDirectApiKey = !!process.env.ANTHROPIC_API_KEY;
+    const useLocalClaude = !config.amplitudeApiKey && !useDirectApiKey;
 
-    if (useLocalClaude) {
+    if (useDirectApiKey) {
+      logToFile('ANTHROPIC_API_KEY found — bypassing Amplitude gateway');
+    } else if (useLocalClaude) {
       logToFile('No Amplitude API key — using local claude CLI');
     } else {
       // Configure LLM gateway environment variables (inherited by SDK subprocess)
       const gatewayUrl = getLlmGatewayUrlFromHost(config.amplitudeApiHost);
+
+      // Fail fast if the gateway isn't responding rather than hanging indefinitely
+      const alive = await checkGatewayLiveness(gatewayUrl);
+      if (!alive) {
+        throw new Error(
+          `Could not reach the Amplitude LLM gateway (${gatewayUrl}). ` +
+            `Check your network connection, or set ANTHROPIC_API_KEY to use the Anthropic API directly.`,
+        );
+      }
+
       process.env.ANTHROPIC_BASE_URL = gatewayUrl;
       process.env.ANTHROPIC_AUTH_TOKEN = config.amplitudeApiKey;
       // Use CLAUDE_CODE_OAUTH_TOKEN to override any stored /login credentials
@@ -572,16 +678,19 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
-      model: 'anthropic/claude-sonnet-4-6',
+      // Gateway expects 'anthropic/claude-sonnet-4-6'; direct Anthropic API expects 'claude-sonnet-4-6'
+      model: useDirectApiKey ? 'claude-sonnet-4-6' : 'anthropic/claude-sonnet-4-6',
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,
+      useDirectApiKey,
     };
 
     logToFile('Agent config:', {
       workingDirectory: agentRunConfig.workingDirectory,
       amplitudeMcpUrl: config.amplitudeMcpUrl,
       useLocalClaude,
+      useDirectApiKey,
       apiKeyPresent: !!config.amplitudeApiKey,
     });
 
@@ -590,6 +699,7 @@ export async function initializeAgent(
         workingDirectory: agentRunConfig.workingDirectory,
         amplitudeMcpUrl: config.amplitudeMcpUrl,
         useLocalClaude,
+        useDirectApiKey,
         apiKeyPresent: !!config.amplitudeApiKey,
       });
     }
@@ -713,6 +823,7 @@ export async function runAgent(
 
   const startTime = Date.now();
   const collectedText: string[] = [];
+  const recentStatuses: string[] = []; // rolling last-3 STATUS messages for heartbeat
   // Track if we received a successful result (before any cleanup errors)
   let receivedSuccessResult = false;
   let lastResultMessage: any = null;
@@ -783,6 +894,14 @@ export async function runAgent(
     return {};
   };
 
+  // Heartbeat interval — every 10s print the last 3 STATUS messages so the
+  // user can see progress in the CLI without waiting for the next update.
+  const heartbeatInterval = setInterval(() => {
+    if (recentStatuses.length > 0) {
+      getUI().heartbeat([...recentStatuses]);
+    }
+  }, 10_000);
+
   // Event plan file watcher — cleaned up in finally block
   let eventPlanWatcher: fs.FSWatcher | undefined;
   let eventPlanInterval: ReturnType<typeof setInterval> | undefined;
@@ -827,8 +946,9 @@ export async function runAgent(
         },
         env: {
           ...process.env,
-          // Prevent user's Anthropic API key from overriding the wizard's OAuth token
-          ANTHROPIC_API_KEY: undefined,
+          // When using the Amplitude gateway, block ANTHROPIC_API_KEY so it doesn't
+          // override the gateway's OAuth token. When using a direct API key, pass it through.
+          ...(agentConfig.useDirectApiKey ? {} : { ANTHROPIC_API_KEY: undefined }),
           ANTHROPIC_CUSTOM_HEADERS: buildAgentEnv(
             agentConfig.wizardMetadata ?? {},
             agentConfig.wizardFlags ?? {},
@@ -913,6 +1033,7 @@ export async function runAgent(
         spinner,
         collectedText,
         receivedSuccessResult,
+        recentStatuses,
       );
 
       try {
@@ -1008,6 +1129,7 @@ export async function runAgent(
     debug('Full error:', error);
     throw error;
   } finally {
+    clearInterval(heartbeatInterval);
     eventPlanWatcher?.close();
     if (eventPlanInterval) clearInterval(eventPlanInterval);
   }
@@ -1026,6 +1148,7 @@ function handleSDKMessage(
   spinner: SpinnerHandle,
   collectedText: string[],
   receivedSuccessResult = false,
+  recentStatuses?: string[],
 ): void {
   logToFile(`SDK Message: ${message.type}`, JSON.stringify(message, null, 2));
 
@@ -1053,8 +1176,11 @@ function handleSDKMessage(
             const statusMatch = block.text.match(statusRegex);
             if (statusMatch) {
               const statusText = statusMatch[1].trim();
-              getUI().pushStatus(statusText);
               spinner.message(statusText);
+              if (recentStatuses) {
+                recentStatuses.push(statusText);
+                if (recentStatuses.length > 3) recentStatuses.shift();
+              }
             }
           }
 

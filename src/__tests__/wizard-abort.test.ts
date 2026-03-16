@@ -13,6 +13,7 @@ vi.mock('../utils/analytics');
 vi.mock('../ui', () => ({
   getUI: vi.fn().mockReturnValue({
     outro: vi.fn(),
+    cancel: vi.fn(),
   }),
 }));
 
@@ -36,25 +37,25 @@ describe('wizardAbort', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls analytics.shutdown, getUI().outro, and process.exit in order', async () => {
+  it('calls analytics.shutdown, getUI().cancel, and process.exit in order', async () => {
     const callOrder: string[] = [];
     mockAnalytics.shutdown.mockImplementation(async () => {
       callOrder.push('shutdown');
     });
-    getUI().outro.mockImplementation(() => {
-      callOrder.push('outro');
+    getUI().cancel.mockImplementation(() => {
+      callOrder.push('cancel');
     });
 
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(callOrder).toEqual(['shutdown', 'outro']);
+    expect(callOrder).toEqual(['shutdown', 'cancel']);
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
   it('uses default message and exit code when called with no options', async () => {
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(getUI().outro).toHaveBeenCalledWith('Wizard setup cancelled.');
+    expect(getUI().cancel).toHaveBeenCalledWith('Wizard setup cancelled.');
     expect(mockAnalytics.shutdown).toHaveBeenCalledWith('cancelled');
     expect(process.exit).toHaveBeenCalledWith(1);
   });
@@ -64,7 +65,7 @@ describe('wizardAbort', () => {
       wizardAbort({ message: 'Custom failure', exitCode: 2 }),
     ).rejects.toThrow('process.exit called');
 
-    expect(getUI().outro).toHaveBeenCalledWith('Custom failure');
+    expect(getUI().cancel).toHaveBeenCalledWith('Custom failure');
     expect(process.exit).toHaveBeenCalledWith(2);
   });
 
@@ -105,13 +106,13 @@ describe('wizardAbort', () => {
     mockAnalytics.shutdown.mockImplementation(async () => {
       callOrder.push('shutdown');
     });
-    getUI().outro.mockImplementation(() => {
-      callOrder.push('outro');
+    getUI().cancel.mockImplementation(() => {
+      callOrder.push('cancel');
     });
 
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(callOrder).toEqual(['cleanup1', 'cleanup2', 'shutdown', 'outro']);
+    expect(callOrder).toEqual(['cleanup1', 'cleanup2', 'shutdown', 'cancel']);
   });
 
   it('does not block exit when a cleanup function throws', async () => {
@@ -125,7 +126,7 @@ describe('wizardAbort', () => {
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
     expect(mockAnalytics.shutdown).toHaveBeenCalled();
-    expect(getUI().outro).toHaveBeenCalled();
+    expect(getUI().cancel).toHaveBeenCalled();
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
@@ -160,7 +161,7 @@ describe('abort() delegates to wizardAbort()', () => {
 
     await expect(abort('Test abort', 3)).rejects.toThrow('process.exit called');
 
-    expect(getUI().outro).toHaveBeenCalledWith('Test abort');
+    expect(getUI().cancel).toHaveBeenCalledWith('Test abort');
     expect(process.exit).toHaveBeenCalledWith(3);
   });
 
@@ -169,7 +170,7 @@ describe('abort() delegates to wizardAbort()', () => {
 
     await expect(abort()).rejects.toThrow('process.exit called');
 
-    expect(getUI().outro).toHaveBeenCalledWith('Wizard setup cancelled.');
+    expect(getUI().cancel).toHaveBeenCalledWith('Wizard setup cancelled.');
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 });

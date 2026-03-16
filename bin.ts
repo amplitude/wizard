@@ -213,6 +213,20 @@ yargs(hideBin(process.argv))
             });
             tui.store.session = session;
 
+            // If --api-key was provided, skip the OAuth/TUI auth flow entirely.
+            if (session.apiKey) {
+              const { DEFAULT_HOST_URL } = await import(
+                './src/lib/constants.js'
+              );
+              tui.store.setCredentials({
+                accessToken: session.apiKey,
+                projectApiKey: session.apiKey,
+                host: DEFAULT_HOST_URL,
+                projectId: session.projectId ?? 0,
+              });
+              tui.store.setProjectHasData(false);
+            }
+
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );
@@ -282,7 +296,7 @@ yargs(hideBin(process.argv))
                     ? 'eu'
                     : DEFAULT_AMPLITUDE_ZONE;
 
-                const auth = await performAmplitudeAuth({
+                let auth = await performAmplitudeAuth({
                   zone,
                   forceFresh,
                 });
@@ -293,10 +307,15 @@ yargs(hideBin(process.argv))
                 // Zone was already selected by the user before OAuth started.
                 const cloudRegion = zone;
 
-                const userInfo = await fetchAmplitudeUser(
-                  auth.idToken,
-                  cloudRegion,
-                );
+                let userInfo;
+                try {
+                  userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+                } catch {
+                  // Token may be expired — re-open the browser for a fresh login
+                  tui.store.setLoginUrl(null);
+                  auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                  userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+                }
 
                 // Persist to ~/.ampli.json
                 storeToken(

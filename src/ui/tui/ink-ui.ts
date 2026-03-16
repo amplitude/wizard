@@ -93,7 +93,22 @@ export class InkUI implements WizardUI {
   }
 
   cancel(message: string): void {
-    this.store.pushStatus(message);
+    this.store.pushStatus(stripAnsi(message));
+
+    if (!this.store.session.outroData) {
+      this.store.setOutroData({
+        kind: OutroKind.Cancel,
+        message: stripAnsi(message),
+      });
+    }
+
+    // Advance past Run screen (RunPhase.Error also skips MCP screen)
+    if (
+      this.store.session.runPhase === RunPhase.Running ||
+      this.store.session.runPhase === RunPhase.Idle
+    ) {
+      this.store.setRunPhase(RunPhase.Error);
+    }
   }
 
   log = {
@@ -134,6 +149,10 @@ export class InkUI implements WizardUI {
 
   pushStatus(message: string): void {
     this.store.pushStatus(message);
+  }
+
+  heartbeat(_statuses: string[]): void {
+    // TUI already shows live status updates reactively via pushStatus — no-op
   }
 
   syncTodos(

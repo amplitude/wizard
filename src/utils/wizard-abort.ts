@@ -64,7 +64,7 @@ export async function wizardAbort(
   await analytics.shutdown(error ? 'error' : 'cancelled');
 
   // 4. Display message to user
-  getUI().outro(message);
+  getUI().cancel(message);
 
   // 5. Exit (fires 'exit' event so TUI cleanup runs)
   return process.exit(exitCode);

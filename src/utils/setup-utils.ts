@@ -335,9 +335,11 @@ export async function getOrAskForProjectData(
   projectId: number;
   cloudRegion: CloudRegion;
 }> {
-  // CI mode: bypass OAuth, use a pre-supplied Amplitude API key
-  if (_options.ci && _options.apiKey) {
-    getUI().log.info('Using provided API key (CI mode - OAuth bypassed)');
+  // If an API key is provided (via --api-key flag, any mode), bypass OAuth entirely.
+  if (_options.apiKey) {
+    if (_options.ci) {
+      getUI().log.info('Using provided API key (CI mode - OAuth bypassed)');
+    }
     return {
       host: DEFAULT_HOST_URL,
       projectApiKey: _options.apiKey,
@@ -382,7 +384,7 @@ async function askForWizardLogin(
   } = {},
 ): Promise<ProjectData> {
   // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
-  const auth = await performAmplitudeAuth({
+  let auth = await performAmplitudeAuth({
     zone: DEFAULT_AMPLITUDE_ZONE,
     forceFresh: opts.forceFresh,
   });
@@ -404,10 +406,19 @@ async function askForWizardLogin(
       cloudRegion as typeof auth.zone,
     );
   } catch {
+    // Token may be expired — prompt the user to log in again with a fresh session
     getUI().log.warn(
       chalk.yellow(
-        'Could not fetch your Amplitude account details. Continuing without them.',
+        'Session expired or could not reach Amplitude. Please log in again.',
       ),
+    );
+    auth = await performAmplitudeAuth({
+      zone: DEFAULT_AMPLITUDE_ZONE,
+      forceFresh: true,
+    });
+    userInfo = await fetchAmplitudeUser(
+      auth.idToken,
+      cloudRegion as typeof auth.zone,
     );
   }
 

@@ -30,6 +30,7 @@ import { checkAnthropicStatus } from '../utils/anthropic-status';
 import { enableDebugLogs } from '../utils/debug';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
+import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
 /**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
@@ -186,6 +187,11 @@ export async function runAgentWizard(
     analytics.setTag(key, value);
   });
 
+  // Skip the Amplitude MCP when the framework provides its own prompt (no MCP needed)
+  // OR when there is no valid access token (MCP would fail auth and the agent would get stuck).
+  const skipAmplitudeMcp =
+    config.prompts.buildPrompt !== undefined || !accessToken;
+
   const integrationPrompt = buildIntegrationPrompt(
     config,
     {
@@ -196,6 +202,7 @@ export async function runAgentWizard(
       projectId,
     },
     frameworkContext,
+    skipAmplitudeMcp,
   );
 
   // Initialize and run agent
@@ -224,7 +231,7 @@ export async function runAgentWizard(
       detectPackageManager: config.detection.detectPackageManager,
       wizardFlags,
       wizardMetadata,
-      skipAmplitudeMcp: config.prompts.buildPrompt !== undefined,
+      skipAmplitudeMcp,
     },
     sessionToOptions(session),
   );
@@ -349,12 +356,20 @@ function buildIntegrationPrompt(
     projectId: number;
   },
   frameworkContext: Record<string, unknown>,
+  skipAmplitudeMcp: boolean,
 ): string {
   if (config.prompts.buildPrompt) {
     return config.prompts.buildPrompt({
       ...context,
       frameworkContext,
     });
+  }
+
+  // No valid auth token → MCP will be skipped. Fall back to the generic direct prompt
+  // so the agent has actionable instructions instead of getting stuck on ListMcpResourcesTool.
+  if (skipAmplitudeMcp) {
+    const genericBuildPrompt = GENERIC_AGENT_CONFIG.prompts.buildPrompt!;
+    return genericBuildPrompt({ ...context, frameworkContext });
   }
 
   const additionalLines = config.prompts.getAdditionalContextLines

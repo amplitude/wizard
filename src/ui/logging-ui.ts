@@ -42,21 +42,48 @@ export class LoggingUI implements WizardUI {
   }
 
   spinner(): SpinnerHandle {
+    let activeMessage: string | undefined;
     return {
       start(message?: string) {
-        if (message) console.log(`◌  ${message}`);
+        if (message) {
+          activeMessage = message;
+          // Write without newline so stop() can overwrite in-place
+          process.stdout.write(`◌  ${message}`);
+        }
       },
       stop(message?: string) {
-        if (message) console.log(`●  ${message}`);
+        if (activeMessage !== undefined) {
+          // Overwrite the current spinner line: carriage-return → solid dot → newline
+          process.stdout.write(`\r●  ${message ?? activeMessage}\n`);
+          activeMessage = undefined;
+        } else if (message) {
+          console.log(`●  ${message}`);
+        }
       },
       message(msg?: string) {
-        if (msg) console.log(`◌  ${msg}`);
+        if (!msg) return;
+        if (activeMessage !== undefined) {
+          // Overwrite the current spinner line with the new task
+          process.stdout.write(`\r◌  ${msg}`);
+        } else {
+          process.stdout.write(`◌  ${msg}`);
+        }
+        activeMessage = msg;
       },
     };
   }
 
   pushStatus(message: string): void {
     console.log(`◇  ${message}`);
+  }
+
+  heartbeat(statuses: string[]): void {
+    if (statuses.length === 0) return;
+    // End the current in-progress spinner line before printing
+    process.stdout.write('\n');
+    for (const s of statuses) {
+      console.log(`│  ${s}`);
+    }
   }
 
   setDetectedFramework(label: string): void {
