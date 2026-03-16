@@ -8,7 +8,7 @@ import { useState, useEffect } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 
-/** Rows consumed by TitleBar + spacer + ScreenContainer padding + status bar + tab bar */
+/** Rows consumed by ConsoleView border + TitleBar + spacer + separator + input + tab bar chrome */
 const CHROME_ROWS = 8;
 
 interface LogViewerProps {

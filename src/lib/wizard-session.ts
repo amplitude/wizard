@@ -22,27 +22,30 @@ function parseProjectIdArg(value: string | undefined): number | undefined {
 export type CloudRegion = 'us' | 'eu';
 
 /** Lifecycle phase of the main work (agent run, MCP install, etc.) */
-export enum RunPhase {
+export const RunPhase = {
   /** Still gathering input (intro, setup screens) */
-  Idle = 'idle',
+  Idle: 'idle',
   /** Main work is in progress */
-  Running = 'running',
+  Running: 'running',
   /** Main work finished successfully */
-  Completed = 'completed',
+  Completed: 'completed',
   /** Main work finished with an error */
-  Error = 'error',
-}
+  Error: 'error',
+} as const;
+export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 
 /** Features discovered by the feature-discovery subagent */
-export enum DiscoveredFeature {
-  Stripe = 'stripe',
-  LLM = 'llm',
-}
+export const DiscoveredFeature = {
+  Stripe: 'stripe',
+  LLM: 'llm',
+} as const;
+export type DiscoveredFeature = (typeof DiscoveredFeature)[keyof typeof DiscoveredFeature];
 
 /** Additional features the agent can integrate after the main setup */
-export enum AdditionalFeature {
-  LLM = 'llm',
-}
+export const AdditionalFeature = {
+  LLM: 'llm',
+} as const;
+export type AdditionalFeature = (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
 
 /** Human-readable labels for additional features (used in TUI progress) */
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
@@ -55,19 +58,21 @@ export const ADDITIONAL_FEATURE_PROMPTS: Record<AdditionalFeature, string> = {
 };
 
 /** Outcome of the MCP server installation step */
-export enum McpOutcome {
-  NoClients = 'no_clients',
-  Skipped = 'skipped',
-  Installed = 'installed',
-  Failed = 'failed',
-}
+export const McpOutcome = {
+  NoClients: 'no_clients',
+  Skipped: 'skipped',
+  Installed: 'installed',
+  Failed: 'failed',
+} as const;
+export type McpOutcome = (typeof McpOutcome)[keyof typeof McpOutcome];
 
 /** Outcome kind for the outro screen */
-export enum OutroKind {
-  Success = 'success',
-  Error = 'error',
-  Cancel = 'cancel',
-}
+export const OutroKind = {
+  Success: 'success',
+  Error: 'error',
+  Cancel: 'cancel',
+} as const;
+export type OutroKind = (typeof OutroKind)[keyof typeof OutroKind];
 
 export interface OutroData {
   kind: OutroKind;

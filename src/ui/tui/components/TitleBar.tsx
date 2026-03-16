@@ -22,7 +22,7 @@ export const TitleBar = ({ version, width }: TitleBarProps) => {
 
   return (
     <Box width={width} overflow="hidden">
-      <Text backgroundColor={Colors.accent} color="black" bold>
+      <Text backgroundColor={Colors.accent} color="white" bold>
         {title}
         {padding}
         {feedback}

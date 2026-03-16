@@ -5,10 +5,13 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
+
+const PICKER_CHROME_ROWS = 16;
 
 interface PickerOption<T> {
   label: string;
@@ -56,7 +59,36 @@ export const PickerMenu = <T,>({
   );
 };
 
-/** Custom single-select with triangle indicator and accent highlight. */
+/** Render a single picker item row. */
+const PickerItem = <T,>({
+  opt,
+  isFocused,
+}: {
+  opt: PickerOption<T>;
+  isFocused: boolean;
+}) => {
+  const label = opt.hint ? `${opt.label} (${opt.hint})` : opt.label;
+  return (
+    <Box gap={1}>
+      <Text
+        color={isFocused ? Colors.accent : undefined}
+        dimColor={!isFocused}
+      >
+        {isFocused ? Icons.triangleSmallRight : ' '}
+      </Text>
+      <Text
+        color={isFocused ? Colors.accent : undefined}
+        bold={isFocused}
+        dimColor={!isFocused}
+      >
+        {label}
+      </Text>
+    </Box>
+  );
+};
+
+/** Custom single-select with triangle indicator and accent highlight.
+ *  Single-column lists that exceed the terminal height scroll automatically. */
 const SinglePickerMenu = <T,>({
   message,
   options,
@@ -71,34 +103,52 @@ const SinglePickerMenu = <T,>({
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
-  const rows = Math.ceil(options.length / columns);
+  const [, termRows] = useStdoutDimensions();
+  const scrollRef = useRef(0);
+  const rowsPerCol = Math.ceil(options.length / columns);
+
+  const maxVisible = columns === 1
+    ? Math.min(rowsPerCol, Math.max(5, termRows - PICKER_CHROME_ROWS))
+    : rowsPerCol;
+  const needsScroll = rowsPerCol > maxVisible;
+
+  if (needsScroll) {
+    if (focused < scrollRef.current) {
+      scrollRef.current = focused;
+    } else if (focused >= scrollRef.current + maxVisible) {
+      scrollRef.current = focused - maxVisible + 1;
+    }
+  } else {
+    scrollRef.current = 0;
+  }
+  const scrollOffset = scrollRef.current;
 
   useScreenInput((_input, key) => {
-    const col = Math.floor(focused / rows);
-    const row = focused % rows;
+    const col = Math.floor(focused / rowsPerCol);
+    const row = focused % rowsPerCol;
 
     if (key.upArrow) {
       if (row > 0) {
-        setFocused(col * rows + row - 1);
+        setFocused(col * rowsPerCol + row - 1);
       } else {
-        setFocused(Math.min(col * rows + rows - 1, options.length - 1));
+        setFocused(Math.min(col * rowsPerCol + rowsPerCol - 1, options.length - 1));
       }
     }
     if (key.downArrow) {
-      const next = col * rows + row + 1;
-      if (next < options.length && row + 1 < rows) {
+      const next = col * rowsPerCol + row + 1;
+      if (next < options.length && row + 1 < rowsPerCol) {
         setFocused(next);
       } else {
-        setFocused(col * rows);
+        setFocused(col * rowsPerCol);
       }
     }
     if (key.leftArrow && columns > 1) {
       const prevCol = col > 0 ? col - 1 : columns - 1;
-      setFocused(Math.min(prevCol * rows + row, options.length - 1));
+      setFocused(Math.min(prevCol * rowsPerCol + row, options.length - 1));
     }
     if (key.rightArrow && columns > 1) {
       const nextCol = col < columns - 1 ? col + 1 : 0;
-      setFocused(Math.min(nextCol * rows + row, options.length - 1));
+      setFocused(Math.min(nextCol * rowsPerCol + row, options.length - 1));
     }
     if (key.return) {
       const selected = options[focused];
@@ -108,13 +158,38 @@ const SinglePickerMenu = <T,>({
     }
   });
 
-  // Chunk options into columns (column-first ordering)
-  const columnArrays: PickerOption<T>[][] = [];
-  for (let c = 0; c < columns; c++) {
-    columnArrays.push(options.slice(c * rows, c * rows + rows));
+  const align = centered ? 'center' : undefined;
+
+  if (needsScroll) {
+    const hasAbove = scrollOffset > 0;
+    const hasBelow = scrollOffset + maxVisible < options.length;
+    const visible = options.slice(scrollOffset, scrollOffset + maxVisible);
+
+    return (
+      <Box flexDirection="column" alignItems={align}>
+        <PromptLabel message={message} />
+        {hasAbove && (
+          <Text dimColor>{'  \u2191 '}{scrollOffset} more</Text>
+        )}
+        {visible.map((opt, i) => (
+          <PickerItem
+            key={scrollOffset + i}
+            opt={opt}
+            isFocused={scrollOffset + i === focused}
+          />
+        ))}
+        {hasBelow && (
+          <Text dimColor>{'  \u2193 '}{options.length - scrollOffset - maxVisible} more</Text>
+        )}
+      </Box>
+    );
   }
 
-  const align = centered ? 'center' : undefined;
+  // Multi-column / short-list: render all items in column-first grid
+  const columnArrays: PickerOption<T>[][] = [];
+  for (let c = 0; c < columns; c++) {
+    columnArrays.push(options.slice(c * rowsPerCol, c * rowsPerCol + rowsPerCol));
+  }
 
   return (
     <Box flexDirection="column" alignItems={align}>
@@ -122,28 +197,13 @@ const SinglePickerMenu = <T,>({
       <Box flexDirection="row" gap={4}>
         {columnArrays.map((colOpts, colIdx) => (
           <Box key={colIdx} flexDirection="column">
-            {colOpts.map((opt, rowIdx) => {
-              const flatIdx = colIdx * rows + rowIdx;
-              const isFocused = flatIdx === focused;
-              const label = opt.hint ? `${opt.label} (${opt.hint})` : opt.label;
-              return (
-                <Box key={flatIdx} gap={1}>
-                  <Text
-                    color={isFocused ? Colors.accent : undefined}
-                    dimColor={!isFocused}
-                  >
-                    {isFocused ? Icons.triangleSmallRight : ' '}
-                  </Text>
-                  <Text
-                    color={isFocused ? Colors.accent : undefined}
-                    bold={isFocused}
-                    dimColor={!isFocused}
-                  >
-                    {label}
-                  </Text>
-                </Box>
-              );
-            })}
+            {colOpts.map((opt, rowIdx) => (
+              <PickerItem
+                key={colIdx * rowsPerCol + rowIdx}
+                opt={opt}
+                isFocused={colIdx * rowsPerCol + rowIdx === focused}
+              />
+            ))}
           </Box>
         ))}
       </Box>

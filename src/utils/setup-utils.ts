@@ -406,19 +406,11 @@ async function askForWizardLogin(
       cloudRegion as typeof auth.zone,
     );
   } catch {
-    // Token may be expired — prompt the user to log in again with a fresh session
+    // Could not fetch user info — warn and continue without it
     getUI().log.warn(
       chalk.yellow(
-        'Session expired or could not reach Amplitude. Please log in again.',
+        'Could not fetch user info from Amplitude. Continuing without it.',
       ),
-    );
-    auth = await performAmplitudeAuth({
-      zone: DEFAULT_AMPLITUDE_ZONE,
-      forceFresh: true,
-    });
-    userInfo = await fetchAmplitudeUser(
-      auth.idToken,
-      cloudRegion as typeof auth.zone,
     );
   }
 
