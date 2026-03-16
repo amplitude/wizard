@@ -87,11 +87,12 @@ flowchart TD
         OUTCOME -->|error| ERR["Set error state"]
     end
 
-    POST --> OUTRO["See: Outro flow"]
-    ERR --> OUTRO
+    POST --> MCP_SCREEN["McpScreen<br/>(install MCP server — skipped on error)"]
+    ERR --> OUTRO["See: Outro flow"]
+    MCP_SCREEN --> OUTRO
 
     SUSI -. overlay .-> OUTAGE["OutageScreen"]
-    SUSI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]
+    RUN -. overlay, before agent starts .-> SETTINGS_OVR["SettingsOverrideScreen"]
 ```
 
 ---

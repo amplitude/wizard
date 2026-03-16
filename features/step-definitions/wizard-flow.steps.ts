@@ -220,6 +220,11 @@ Then('I should go through the Data Setup flow', function () {
   );
 });
 
+When('the Data Setup check runs', function () {
+  // Simulate SUSI completing so the router advances to DataSetup
+  session.credentials = mockCredentials();
+});
+
 Then('the project should have no existing data', function () {
   session.projectHasData = false;
 });
@@ -293,6 +298,16 @@ Then('I should see an LLM tip', function () {
     session.discoveredFeatures.includes(DiscoveredFeature.LLM),
     'Expected LLM in discoveredFeatures',
   );
+});
+
+Then('I should be on the RunScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Run, `Expected Run but got ${screen}`);
+});
+
+Then('I should be on the MCP screen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Mcp, `Expected Mcp but got ${screen}`);
 });
 
 // Overlay and slash command steps live in wizard-overlays.steps.ts

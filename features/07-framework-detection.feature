@@ -41,6 +41,12 @@ Feature: Framework Detection
     Then the answers should be filled in automatically
     And I should proceed to the Agent Run without being prompted
 
+  Scenario: Setup screen is skipped when framework has empty setup questions
+    Given I am in the Framework Detection flow
+    And my framework has an empty setup questions list
+    When I confirm the detected framework
+    Then I should proceed to the Agent Run without being prompted
+
   Scenario: Setup questions require user input
     Given I am in the Framework Detection flow
     And my framework has setup questions

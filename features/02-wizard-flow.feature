@@ -49,6 +49,15 @@ Feature: Wizard flow
     When the wizard launches
     Then I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project
 
+  Scenario: Run screen is shown before the agent starts
+    Given I have reached the RunScreen
+    Then I should be on the RunScreen
+
+  Scenario: MCP setup screen appears after a successful agent run
+    Given I have reached the RunScreen
+    When the Claude agent completes successfully
+    Then I should be on the MCP screen
+
   Scenario: Agent run completes successfully
     Given I have reached the RunScreen
     When the Claude agent completes successfully
@@ -84,4 +93,15 @@ Feature: Wizard flow
     When the agent is about to start
     Then the SettingsOverrideScreen overlay should appear
     And I should be able to back up and patch the settings to continue
+
+  Scenario: Two overlays stack and dismiss in order
+    Given the wizard is active
+    When an Anthropic service outage is detected
+    And the settings file blocks the agent
+    And the agent is about to start
+    Then the SettingsOverrideScreen overlay should appear
+    When the overlay is dismissed
+    Then the OutageScreen overlay should appear
+    When the overlay is dismissed
+    Then I should be on the RunScreen
 

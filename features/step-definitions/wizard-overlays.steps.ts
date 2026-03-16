@@ -32,8 +32,14 @@ Given('the settings file blocks the agent', function () {
   session(this).settingsOverrideKeys = ['permissions.allow'];
 });
 
+When('the agent is about to start', function () {
+  // Simulate agent-runner.ts detecting blocking settings overrides and pushing the overlay
+  if (session(this).settingsOverrideKeys?.length) {
+    router(this).pushOverlay(Overlay.SettingsOverride);
+  }
+});
+
 Then('the SettingsOverrideScreen overlay should appear', function () {
-  router(this).pushOverlay(Overlay.SettingsOverride);
   assert.strictEqual(router(this).resolve(session(this)), Overlay.SettingsOverride);
 });
 
@@ -72,6 +78,10 @@ Then('I should be taken back to region selection', function () {
     Screen.RegionSelect,
     `Expected RegionSelect but got ${screen}`,
   );
+});
+
+When('the overlay is dismissed', function () {
+  router(this).popOverlay();
 });
 
 Then('the data check should re-run for the new region', function () {

@@ -87,6 +87,16 @@ Given('I am in the Framework Detection flow', function () {
   assert.strictEqual(screen, Screen.Intro, `Expected Intro but got ${screen}`);
 });
 
+Given('my framework has an empty setup questions list', function () {
+  const base = makeConfig('Next.js');
+  session.frameworkConfig = {
+    ...base,
+    metadata: { ...base.metadata, setup: { questions: [] } },
+  };
+  session.integration = Integration.nextjs;
+  session.detectionComplete = true;
+});
+
 Given('my framework has setup questions', function () {
   const config = makeConfigWithQuestion('router');
   session.frameworkConfig = config;
