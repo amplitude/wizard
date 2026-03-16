@@ -203,6 +203,23 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setActivationLevel(level: 'none' | 'partial' | 'full'): void {
+    this.$session.setKey('activationLevel', level);
+    // Keep projectHasData in sync so existing routing still works
+    this.$session.setKey('projectHasData', level === 'full' ? true : false);
+    this.emitChange();
+  }
+
+  setSnippetConfigured(value: boolean): void {
+    this.$session.setKey('snippetConfigured', value);
+    this.emitChange();
+  }
+
+  setActivationOptionsComplete(): void {
+    this.$session.setKey('activationOptionsComplete', true);
+    this.emitChange();
+  }
+
   /**
    * Called from bin.ts when OAuth completes (browser redirect done).
    * Stores auth tokens + org list so AuthScreen can show the SUSI pickers.

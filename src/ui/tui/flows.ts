@@ -21,6 +21,7 @@ export enum Screen {
   RegionSelect = 'region-select',
   DataSetup = 'data-setup',
   Options = 'options',
+  ActivationOptions = 'activation-options',
   Run = 'run',
   Mcp = 'mcp',
   Slack = 'slack',
@@ -82,7 +83,13 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.DataSetup,
       isComplete: (s) => s.projectHasData !== null,
     },
-    // 3. Options menu (when project already has data)
+    // 3a. Activation options (SDK installed but few events — partial activation)
+    {
+      screen: Screen.ActivationOptions,
+      show: (s) => s.activationLevel === 'partial',
+      isComplete: (s) => s.activationOptionsComplete,
+    },
+    // 3b. Options menu (when project already has significant data)
     {
       screen: Screen.Options,
       show: (s) => s.projectHasData === true,

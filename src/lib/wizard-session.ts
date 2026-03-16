@@ -124,6 +124,21 @@ export interface WizardSession {
   projectHasData: boolean | null;
 
   /**
+   * Activation level determined by the API check.
+   * null  = not yet checked
+   * 'none'    = 0 events, snippet not configured → Framework Detection
+   * 'partial' = 1–49 events or snippet installed but limited events → ActivationOptions
+   * 'full'    = well-established data (50+ events) → Options
+   */
+  activationLevel: 'none' | 'partial' | 'full' | null;
+
+  /** True once the user has responded to the ActivationOptions screen. */
+  activationOptionsComplete: boolean;
+
+  /** Whether the SDK snippet is installed in the project (set by DataSetupScreen). */
+  snippetConfigured: boolean;
+
+  /**
    * Amplitude data-center region chosen by the user.
    * null = not yet selected (shown as RegionSelect screen)
    * 'us' = US region (api.amplitude.com)
@@ -235,6 +250,9 @@ export function buildSession(args: {
     detectedFrameworkLabel: null,
     detectionComplete: false,
     projectHasData: null,
+    activationLevel: null,
+    activationOptionsComplete: false,
+    snippetConfigured: false,
     region: null,
     regionForced: false,
 

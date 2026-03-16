@@ -308,6 +308,75 @@ export async function fetchSources(
   }
 }
 
+// ── Project activation status ──────────────────────────────────────────────
+
+const ActivationStatusSchema = z.object({
+  data: z.object({
+    hasAnyDefaultEventTrackingSourceAndEvents: z.object({
+      hasDetSource: z.boolean(),
+      hasPageViewedEvent: z.boolean(),
+      hasSessionStartEvent: z.boolean(),
+      hasSessionEndEvent: z.boolean(),
+    }),
+  }),
+});
+
+export type ProjectActivationStatus = {
+  /** SDK/snippet has been installed (default event tracking source detected) */
+  hasDetSource: boolean;
+  hasPageViewedEvent: boolean;
+  hasSessionStartEvent: boolean;
+  hasSessionEndEvent: boolean;
+  /** True if at least one event type has been ingested */
+  hasAnyEvents: boolean;
+};
+
+const ACTIVATION_STATUS_QUERY = `
+query hasAnyDefaultEventTrackingSourceAndEvents($appId: ID!) {
+  hasAnyDefaultEventTrackingSourceAndEvents(appId: $appId) {
+    hasDetSource
+    hasPageViewedEvent
+    hasSessionStartEvent
+    hasSessionEndEvent
+  }
+}`;
+
+/**
+ * Checks whether an Amplitude project has ingested any events and whether
+ * the SDK snippet is configured.  Uses the same Data API endpoint as the
+ * other queries.
+ */
+export async function fetchProjectActivationStatus(
+  idToken: string,
+  zone: AmplitudeZone,
+  appId: number | string,
+): Promise<ProjectActivationStatus> {
+  const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
+  try {
+    const response = await axios.post(
+      dataApiUrl,
+      { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
+      {
+        headers: {
+          Authorization: idToken,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+      },
+    );
+    const parsed = ActivationStatusSchema.parse(response.data);
+    const s = parsed.data.hasAnyDefaultEventTrackingSourceAndEvents;
+    return {
+      ...s,
+      hasAnyEvents: s.hasPageViewedEvent || s.hasSessionStartEvent || s.hasSessionEndEvent,
+    };
+  } catch (error) {
+    const apiError = handleApiError(error, 'fetch project activation status');
+    analytics.captureException(apiError, { endpoint: dataApiUrl });
+    throw apiError;
+  }
+}
+
 function handleApiError(error: unknown, operation: string): ApiError {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError<{
