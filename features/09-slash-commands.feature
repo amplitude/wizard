@@ -6,7 +6,7 @@ Feature: Slash commands
   @todo
   Scenario: /login re-authenticates
     Given the wizard is active
-    When I run "/login"
+    When I enter the slash command "/login"
     Then I should go through the OAuth flow
     And after authenticating the wizard should resume
 
@@ -19,35 +19,35 @@ Feature: Slash commands
   Scenario: /whoami shows current session info
     Given the wizard is active
     And I am logged in as "user@example.com"
-    When I run "/whoami"
+    When I enter the slash command "/whoami"
     Then I should see my name, email, org, and project
 
   @todo
   Scenario: /overview opens the project in the browser
     Given the wizard is active
-    When I run "/overview"
+    When I enter the slash command "/overview"
     Then the Amplitude project overview should open in my browser
 
   @todo
   Scenario: /chart sets up a new chart
     Given the wizard is active
-    When I run "/chart"
+    When I enter the slash command "/chart"
     Then the chart creation flow should start
 
   @todo
   Scenario: /dashboard creates a new dashboard
     Given the wizard is active
-    When I run "/dashboard"
+    When I enter the slash command "/dashboard"
     Then the dashboard creation flow should start
 
   @todo
   Scenario: /taxonomy interacts with the taxonomy agent
     Given the wizard is active
-    When I run "/taxonomy"
+    When I enter the slash command "/taxonomy"
     Then the taxonomy agent should start
 
   @todo
   Scenario: /help lists available commands
     Given the wizard is active
-    When I run "/help"
+    When I enter the slash command "/help"
     Then I should see a list of all available slash commands with descriptions
