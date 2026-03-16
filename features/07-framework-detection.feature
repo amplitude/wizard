@@ -11,7 +11,6 @@ Feature: Framework Detection
     And there are no unresolved setup questions
     Then I should proceed to the Agent Run
 
-  @todo
   Scenario: Framework is auto-detected and user cancels
     Given I am in the Framework Detection flow
     When the wizard successfully auto-detects my framework

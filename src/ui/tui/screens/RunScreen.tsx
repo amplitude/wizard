@@ -19,7 +19,7 @@ import {
   ProgressList,
   LogViewer,
   EventPlanViewer,
-  HNViewer,
+  KagiSmallWebViewer,
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
@@ -221,9 +221,9 @@ export const RunScreen = ({ store }: RunScreenProps) => {
       component: <LogViewer filePath={LOG_FILE} />,
     },
     {
-      id: 'hn',
-      label: 'HN',
-      component: <HNViewer />,
+      id: 'smallweb',
+      label: 'Small Web',
+      component: <KagiSmallWebViewer />,
     },
   ];
 

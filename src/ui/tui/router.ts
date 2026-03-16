@@ -13,6 +13,7 @@
  */
 
 import type { WizardSession } from '../../lib/wizard-session.js';
+import { OutroKind } from '../../lib/wizard-session.js';
 import { FLOWS, Screen, Flow, type FlowEntry } from './flows.js';
 
 // Re-export so existing imports from './router.js' keep working
@@ -50,6 +51,12 @@ export class WizardRouter {
   resolve(session: WizardSession): ScreenName {
     if (this.overlays.length > 0) {
       return this.overlays[this.overlays.length - 1];
+    }
+
+    // If the user cancelled before the run completed, jump directly to Outro.
+    // Success/Error are handled by the normal flow (MCP + Slack still need to show).
+    if (session.outroData?.kind === OutroKind.Cancel) {
+      return Screen.Outro;
     }
 
     for (const entry of this.flow) {

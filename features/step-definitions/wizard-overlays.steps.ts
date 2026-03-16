@@ -2,7 +2,8 @@ import { Given, When, Then } from '@cucumber/cucumber';
 import assert from 'node:assert';
 import { Overlay, type WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen } from '../../src/ui/tui/flows.js';
-import type { CloudRegion, WizardSession } from '../../src/lib/wizard-session.js';
+import type { WizardSession } from '../../src/lib/wizard-session.js';
+import { COMMANDS, getWhoamiText, getHelpText } from '../../src/ui/tui/console-commands.js';
 
 // State is shared via the Cucumber World object, populated by wizard-flow.steps.ts Before hook.
 function router(world: object): WizardRouter {
@@ -106,4 +107,30 @@ Then('the data check should re-run for the new region', function () {
     Screen.DataSetup,
     `Expected DataSetup to re-run but got ${screen}`,
   );
+});
+
+// ── /whoami ───────────────────────────────────────────────────────────────────
+
+Given('my org is {string} and my workspace is {string} and my region is {string}', function (org: string, workspace: string, region: string) {
+  session(this).selectedOrgName = org;
+  session(this).selectedWorkspaceName = workspace;
+  session(this).region = region as 'us' | 'eu';
+});
+
+Then('I should see my org, workspace, and region', function () {
+  const text = getWhoamiText(session(this));
+  assert.ok(text.includes(session(this).selectedOrgName ?? ''), `Expected org in: ${text}`);
+  assert.ok(text.includes(session(this).selectedWorkspaceName ?? ''), `Expected workspace in: ${text}`);
+  assert.ok(text.includes(session(this).region ?? ''), `Expected region in: ${text}`);
+});
+
+// ── /help ─────────────────────────────────────────────────────────────────────
+
+Then('I should see a list of all available slash commands with descriptions', function () {
+  const text = getHelpText();
+  assert.ok(text.length > 0, 'Expected non-empty help text');
+  for (const { cmd, desc } of COMMANDS) {
+    assert.ok(text.includes(cmd), `Expected ${cmd} in help text`);
+    assert.ok(text.includes(desc), `Expected description for ${cmd} in help text`);
+  }
 });

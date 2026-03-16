@@ -20,12 +20,11 @@ Feature: Slash commands
     When I enter the slash command "/slack"
     Then I should see feedback about opening Amplitude settings for Slack
 
-  @todo
   Scenario: /whoami shows current session info
     Given the wizard is active
-    And I am logged in as "user@example.com"
+    And my org is "acme" and my workspace is "prod" and my region is "us"
     When I enter the slash command "/whoami"
-    Then I should see my name, email, org, and project
+    Then I should see my org, workspace, and region
 
   @todo
   Scenario: /overview opens the project in the browser
@@ -51,7 +50,6 @@ Feature: Slash commands
     When I enter the slash command "/taxonomy"
     Then the taxonomy agent should start
 
-  @todo
   Scenario: /help lists available commands
     Given the wizard is active
     When I enter the slash command "/help"

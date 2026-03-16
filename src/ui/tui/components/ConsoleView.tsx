@@ -30,16 +30,7 @@ import {
   resolveConsoleCredentials,
   buildSessionContext,
 } from '../../../lib/console-query.js';
-
-const COMMANDS = [
-  { cmd: '/region', desc: 'Switch data-center region (US or EU)' },
-  { cmd: '/login', desc: 'Re-authenticate' },
-  { cmd: '/logout', desc: 'Clear credentials' },
-  { cmd: '/whoami', desc: 'Show current user, org, and project' },
-  { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
-  { cmd: '/exit', desc: 'Exit the wizard' },
-  { cmd: '/help', desc: 'List available slash commands' },
-];
+import { COMMANDS, getWhoamiText, getHelpText } from '../console-commands.js';
 
 function executeCommand(raw: string, store: WizardStore): void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -54,13 +45,9 @@ function executeCommand(raw: string, store: WizardStore): void {
     case '/logout':
       store.setCommandFeedback('Use `amplitude-wizard logout` from a new terminal to log out.');
       break;
-    case '/whoami': {
-      const s = store.session;
-      store.setCommandFeedback(
-        `org: ${s.selectedOrgName ?? '(none)'}  workspace: ${s.selectedWorkspaceName ?? '(none)'}  region: ${s.region ?? '(none)'}`,
-      );
+    case '/whoami':
+      store.setCommandFeedback(getWhoamiText(store.session));
       break;
-    }
     case '/slack': {
       const region = store.session.region ?? 'us';
       const base = getCloudUrlFromRegion(region);
@@ -89,11 +76,9 @@ function executeCommand(raw: string, store: WizardStore): void {
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;
-    case '/help': {
-      const lines = COMMANDS.map((c) => `${c.cmd}  ${c.desc}`).join('  ·  ');
-      store.setCommandFeedback(lines);
+    case '/help':
+      store.setCommandFeedback(getHelpText());
       break;
-    }
     default:
       if (cmd) store.setCommandFeedback(`Unknown command: ${cmd}. Type /help.`);
   }

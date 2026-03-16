@@ -13,6 +13,7 @@ import path from 'path';
 import { Box, Text } from 'ink';
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
 
@@ -132,7 +133,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               onSelect={(value) => {
                 const choice = Array.isArray(value) ? value[0] : value;
                 if (choice === 'cancel') {
-                  process.exit(0);
+                  store.setOutroData({ kind: OutroKind.Cancel, message: 'Setup cancelled.' });
                 } else if (choice === 'framework') {
                   setPickingFramework(true);
                   setManuallySelected(true);

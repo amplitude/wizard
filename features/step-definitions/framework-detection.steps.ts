@@ -282,3 +282,13 @@ Then('I should see the selected framework displayed', function () {
 When('I confirm the detected framework', function () {
   session.setupConfirmed = true;
 });
+
+When('I cancel', function () {
+  const { OutroKind } = require('../../src/lib/wizard-session.js');
+  session.outroData = { kind: OutroKind.Cancel, message: 'Setup cancelled.' };
+});
+
+Then('the wizard should exit', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Outro, `Expected Outro after cancel but got ${screen}`);
+});
