@@ -20,7 +20,7 @@ Feature: Wizard flow
     When the wizard launches
     And I select the "US" region
     Then I should go through the SUSI flow
-    When I should go through the Data Setup flow
+    When the Data Setup check runs
     Then the project should have no existing data
     And I should be taken to Framework Detection
 
@@ -74,6 +74,7 @@ Feature: Wizard flow
   Scenario: Settings override overlay appears
     Given the wizard is active
     And the settings file blocks the agent
+    When the agent is about to start
     Then the SettingsOverrideScreen overlay should appear
     And I should be able to back up and patch the settings to continue
 
