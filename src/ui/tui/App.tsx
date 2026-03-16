@@ -25,7 +25,7 @@ interface AppProps {
 
 export const App = ({ store }: AppProps) => {
   const [columns, rows] = useStdoutDimensions();
-  const services = useMemo(() => createServices(), []);
+  const services = useMemo(() => createServices(store.session.localMcp), []);
   const screens = useMemo(
     () => createScreens(store, services),
     [store, services],

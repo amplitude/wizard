@@ -30,8 +30,12 @@ export interface McpInstaller {
 
 /**
  * Production McpInstaller backed by real MCP client detection and installation.
+ *
+ * @param local - When true, installs/removes the local development server
+ *   (http://localhost:8787) instead of the production server. Mirrors the
+ *   --local-mcp CLI flag and session.localMcp.
  */
-export function createMcpInstaller(): McpInstaller {
+export function createMcpInstaller(local = false): McpInstaller {
   // Cache the raw MCPClient objects so install() can reference them by name
   let cachedClients: Array<{ name: string; raw: unknown }> = [];
 
@@ -61,7 +65,7 @@ export function createMcpInstaller(): McpInstaller {
       const installed: string[] = [];
       for (const client of toInstall) {
         try {
-          const result = await client.addServer(undefined, features, false);
+          const result = await client.addServer(undefined, features, local);
           if (result?.success) {
             installed.push(client.name as string);
           } else {
@@ -81,9 +85,9 @@ export function createMcpInstaller(): McpInstaller {
     },
 
     async remove(): Promise<string[]> {
-      const installed = await getInstalledClients();
+      const installed = await getInstalledClients(local);
       if (installed.length === 0) return [];
-      await removeMCPServer(installed);
+      await removeMCPServer(installed, local);
       return installed.map((c) => c.name);
     },
   };

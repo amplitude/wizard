@@ -30,9 +30,9 @@ export interface ScreenServices {
   mcpInstaller: McpInstaller;
 }
 
-export function createServices(): ScreenServices {
+export function createServices(localMcp = false): ScreenServices {
   return {
-    mcpInstaller: createMcpInstaller(),
+    mcpInstaller: createMcpInstaller(localMcp),
   };
 }
 
