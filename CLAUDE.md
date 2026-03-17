@@ -44,8 +44,37 @@ The flows cover:
 ## Development commands
 
 ```bash
-pnpm try       # run the wizard locally
+pnpm try       # run the wizard locally (from source, no build needed)
 pnpm build     # compile TypeScript
-pnpm test      # build + jest
+pnpm test      # run unit tests
 pnpm flows     # render docs/flows.md diagrams to docs/diagrams/
+pnpm proxy     # start the Langley wizard LLM proxy (requires aws-vault, see below)
+pnpm dev       # build once, link globally, then watch + proxy in parallel
+```
+
+### Local LLM proxy
+
+The wizard routes Claude API calls through a Langley proxy service instead of
+hitting Anthropic directly. For local development, start the proxy before running
+the wizard:
+
+```bash
+# Terminal 1 — start the proxy (in amplitude/wizard repo)
+pnpm proxy
+
+# Terminal 2 — run the wizard
+WIZARD_PROXY_DEV_TOKEN=dev-token pnpm try
+```
+
+Or use `pnpm dev` to run both in one terminal.
+
+`pnpm proxy` expects the `amplitude/amplitude` repo to be a sibling directory
+(`../amplitude`). Override with `AMPLITUDE_REPO=/path/to/amplitude pnpm proxy`.
+
+It requires `aws-vault` with the `us-prod-engineer` profile for GCP credentials.
+The proxy runs with `WIZARD_PROXY_DEV_BYPASS=1` which skips Amplitude OAuth — any
+token value works locally (e.g. `WIZARD_PROXY_DEV_TOKEN=dev-token`).
+
+```bash
+pnpm test:proxy  # validate proxy health, models, streaming, and SDK integration
 ```

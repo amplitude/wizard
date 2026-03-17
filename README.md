@@ -77,6 +77,29 @@ pnpm build
 pnpm try
 ```
 
+### Local LLM proxy
+
+The wizard routes Claude API calls through a Langley proxy instead of hitting
+Anthropic directly. For local development you need to run it alongside the wizard.
+
+**Prerequisites:** `aws-vault` with the `us-prod-engineer` profile, and the
+`amplitude/amplitude` repo checked out as a sibling directory (`../amplitude`).
+
+```bash
+# Terminal 1 — start the proxy
+pnpm proxy
+
+# Terminal 2 — run the wizard with dev bypass token
+WIZARD_PROXY_DEV_TOKEN=dev-token pnpm try
+```
+
+Or use `pnpm dev` to start both in one terminal (builds first, then runs
+`build:watch` and the proxy in parallel).
+
+Override the amplitude repo location: `AMPLITUDE_REPO=/path/to/amplitude pnpm proxy`
+
+Validate the proxy is working: `pnpm test:proxy`
+
 ### Render flow diagrams
 
 ```bash
