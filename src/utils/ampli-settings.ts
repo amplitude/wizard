@@ -160,9 +160,9 @@ function clampVol(v: unknown, def: number): number {
   return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : def;
 }
 
-/** Returns the stored snake music (BGM) volume (0–1), defaulting to 0.4. */
+/** Returns the stored snake music (BGM) volume (0–1), defaulting to 0.8. */
 export function getSnakeMusicVolume(configPath?: string): number {
-  return clampVol(readConfig(configPath)['snake_music_volume'], 0.4);
+  return clampVol(readConfig(configPath)['snake_music_volume'], 0.8);
 }
 /** Persists the snake music (BGM) volume to ~/.ampli.json. */
 export function setSnakeMusicVolume(volume: number, configPath?: string): void {
@@ -182,9 +182,9 @@ export function setSnakeTinkVolume(volume: number, configPath?: string): void {
   writeConfig(config, configPath);
 }
 
-/** Returns the stored snake SFX (eat/die) volume (0–1), defaulting to 1.0. */
+/** Returns the stored snake SFX (eat/die) volume (0–1), defaulting to 0.8. */
 export function getSnakeSfxVolume(configPath?: string): number {
-  return clampVol(readConfig(configPath)['snake_sfx_volume'], 1.0);
+  return clampVol(readConfig(configPath)['snake_sfx_volume'], 0.8);
 }
 /** Persists the snake SFX volume to ~/.ampli.json. */
 export function setSnakeSfxVolume(volume: number, configPath?: string): void {

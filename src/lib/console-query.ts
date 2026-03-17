@@ -9,7 +9,8 @@ import type { WizardSession } from './wizard-session.js';
 import { getLlmGatewayUrlFromHost } from '../utils/urls.js';
 import { RunPhase } from './wizard-session.js';
 
-const MODEL = 'claude-haiku-4-5-20251001';
+const MODEL_DIRECT  = 'claude-haiku-4-5-20251001';
+const MODEL_GATEWAY = 'anthropic/claude-haiku-4-5-20251001';
 const MAX_TOKENS = 512;
 
 export type ConsoleCredentials =
@@ -32,10 +33,11 @@ export function resolveConsoleCredentials(
 
   // Session credentials: available after auth screen
   if (session.credentials?.projectApiKey && session.credentials?.host) {
+    const devToken = process.env.WIZARD_PROXY_DEV_TOKEN;
     return {
       kind: 'gateway',
       baseUrl: getLlmGatewayUrlFromHost(session.credentials.host),
-      apiKey: session.credentials.projectApiKey,
+      apiKey: devToken ?? session.credentials.projectApiKey,
     };
   }
 
@@ -112,7 +114,7 @@ export async function queryConsole(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model: MODEL,
+      model: creds.kind === 'gateway' ? MODEL_GATEWAY : MODEL_DIRECT,
       max_tokens: MAX_TOKENS,
       system: sessionContext,
       messages: [{ role: 'user', content: userMessage }],
