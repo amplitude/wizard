@@ -646,6 +646,18 @@ export async function initializeAgent(
       // Disable experimental betas (like input_examples) that the LLM gateway doesn't support
       process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = 'true';
       logToFile('Configured LLM gateway:', gatewayUrl);
+
+      // Local dev: when WIZARD_PROXY_DEV_TOKEN is set, use it instead of Amplitude OAuth.
+      // This lets developers skip login when the proxy has WIZARD_PROXY_DEV_BYPASS=1.
+      // TODO: Remove before production release.
+      const devToken = process.env.WIZARD_PROXY_DEV_TOKEN;
+      if (devToken) {
+        process.env.ANTHROPIC_AUTH_TOKEN = devToken;
+        process.env.CLAUDE_CODE_OAUTH_TOKEN = devToken;
+        logToFile(
+          'Using WIZARD_PROXY_DEV_TOKEN for local proxy dev (auth bypass)',
+        );
+      }
     }
 
     // Configure MCP servers
