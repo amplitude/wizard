@@ -54,15 +54,20 @@ interface MidiTrackBrowserProps {
 export const MidiTrackBrowser = ({ onSelect, onCancel }: MidiTrackBrowserProps) => {
   const [query, setQuery] = useState('');
   const scrollRef = useRef(0);
+  const sorted = useMemo(
+    () => [...MIDI_CATALOG].sort((a, b) => a.title.localeCompare(b.title)),
+    [],
+  );
+
   const [focused, setFocused] = useState(() => {
-    const defaultIdx = MIDI_CATALOG.findIndex((t) => t.id === DEFAULT_TRACK_ID);
+    const defaultIdx = sorted.findIndex((t) => t.id === DEFAULT_TRACK_ID);
     return defaultIdx >= 0 ? defaultIdx : 0;
   });
 
   const filtered = useMemo(() => {
-    if (!query) return MIDI_CATALOG;
+    if (!query) return sorted;
     const q = query.toLowerCase();
-    return MIDI_CATALOG.filter(
+    return sorted.filter(
       (t) => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q),
     );
   }, [query]);

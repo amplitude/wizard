@@ -155,3 +155,40 @@ export function setSnakeHighScore(score: number, configPath?: string): void {
   config['snake_high_score'] = score;
   writeConfig(config, configPath);
 }
+
+function clampVol(v: unknown, def: number): number {
+  return typeof v === 'number' ? Math.max(0, Math.min(1, v)) : def;
+}
+
+/** Returns the stored snake music (BGM) volume (0–1), defaulting to 0.4. */
+export function getSnakeMusicVolume(configPath?: string): number {
+  return clampVol(readConfig(configPath)['snake_music_volume'], 0.4);
+}
+/** Persists the snake music (BGM) volume to ~/.ampli.json. */
+export function setSnakeMusicVolume(volume: number, configPath?: string): void {
+  const config = readConfig(configPath);
+  config['snake_music_volume'] = Math.max(0, Math.min(1, volume));
+  writeConfig(config, configPath);
+}
+
+/** Returns the stored snake tink (per-frame) volume (0–1), defaulting to 0.05. */
+export function getSnakeTinkVolume(configPath?: string): number {
+  return clampVol(readConfig(configPath)['snake_tink_volume'], 0.05);
+}
+/** Persists the snake tink volume to ~/.ampli.json. */
+export function setSnakeTinkVolume(volume: number, configPath?: string): void {
+  const config = readConfig(configPath);
+  config['snake_tink_volume'] = Math.max(0, Math.min(1, volume));
+  writeConfig(config, configPath);
+}
+
+/** Returns the stored snake SFX (eat/die) volume (0–1), defaulting to 1.0. */
+export function getSnakeSfxVolume(configPath?: string): number {
+  return clampVol(readConfig(configPath)['snake_sfx_volume'], 1.0);
+}
+/** Persists the snake SFX volume to ~/.ampli.json. */
+export function setSnakeSfxVolume(volume: number, configPath?: string): void {
+  const config = readConfig(configPath);
+  config['snake_sfx_volume'] = Math.max(0, Math.min(1, volume));
+  writeConfig(config, configPath);
+}

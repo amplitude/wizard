@@ -14,12 +14,18 @@ import { Colors } from '../styles.js';
 import {
   getSnakeHighScore,
   setSnakeHighScore,
+  getSnakeMusicVolume,
+  setSnakeMusicVolume,
+  getSnakeTinkVolume,
+  setSnakeTinkVolume,
+  getSnakeSfxVolume,
+  setSnakeSfxVolume,
 } from '../../../utils/ampli-settings.js';
 import {
   warmNotes, playNote, playSystemSound, SYSTEM_SOUNDS,
-  startBgMusic, stopBgMusic, type BgMusicHandle,
+  startBgMusic, stopBgMusic, setMusicVolume, type BgMusicHandle,
 } from './snake-audio.js';
-import { MidiTrackBrowser, type SelectedTrack } from './MidiTrackBrowser.js';
+import { MusicSettings, type MusicConfig, type SelectedTrack } from './MusicSettings.js';
 import { MIDI_CATALOG, DEFAULT_TRACK_ID, freemidiUrls } from './freemidi-catalog.js';
 
 const _defaultTrack = MIDI_CATALOG.find((t) => t.id === DEFAULT_TRACK_ID)!;
@@ -34,6 +40,27 @@ const DEFAULT_TRACK: SelectedTrack = {
 const W = 20;
 const H = 10;
 const DEFAULT_BPM = 120;
+
+// ── Music visualizer ──────────────────────────────────────────────────
+
+const BEAT_COLORS = ['#55cdfc', '#ffffff', '#f7a8b8', '#ffffff'] as const;
+
+function MusicVisualizer({ beatPhase, active }: { beatPhase: number; active: boolean }) {
+  const beat = Math.floor(beatPhase / 4) % 4;
+
+  return (
+    <Box>
+      {([0, 1, 2, 3] as const).map((b) => {
+        const isCurrent = active && b === beat;
+        return (
+          <Text key={b} color={isCurrent ? BEAT_COLORS[b] : undefined} dimColor={!isCurrent}>
+            {isCurrent ? '●' : '○'}{' '}
+          </Text>
+        );
+      })}
+    </Box>
+  );
+}
 
 
 type Point = { x: number; y: number };
@@ -100,19 +127,23 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
   const bgMusic = useRef<BgMusicHandle | null>(null);
   const [bpm, setBpm] = useState(DEFAULT_BPM);
   const [track, setTrack] = useState<SelectedTrack>(DEFAULT_TRACK);
-  const [showBrowser, setShowBrowser] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [beatPhase, setBeatPhase] = useState(0);
+  const [musicVolume, setMusicVolumeState] = useState(() => getSnakeMusicVolume());
+  const [tinkVolume,  setTinkVolumeState]  = useState(() => getSnakeTinkVolume());
+  const [sfxVolume,   setSfxVolumeState]   = useState(() => getSnakeSfxVolume());
 
   useEffect(() => {
     warmNotes([69]);
     stopBgMusic(bgMusic.current);
     bgMusic.current = null;
     setBpm(DEFAULT_BPM);
-    void startBgMusic(track.url, track.downloadPage).then((handle) => {
+    void startBgMusic(track.url, track.downloadPage, musicVolume).then((handle) => {
       bgMusic.current = handle;
       if (handle) setBpm(handle.bpm);
     });
     return () => { stopBgMusic(bgMusic.current); };
-  }, [track]);
+  }, [track]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const saved = getSnakeHighScore();
@@ -124,6 +155,13 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
     stateRef.current = { ...makeInitial(), started: true };
     forceUpdate();
   };
+
+  // Beat phase for music visualizer — runs independently of game state
+  useEffect(() => {
+    const tickMs = Math.round((60_000 / bpm) / 4);
+    const id = setInterval(() => setBeatPhase((p) => (p + 1) % 16), tickMs);
+    return () => clearInterval(id);
+  }, [bpm]);
 
   // Interval recreates when bpm changes (i.e. once synthesis completes)
   useEffect(() => {
@@ -146,7 +184,7 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
         g.snake.some((s) => s.x === head.x && s.y === head.y)
       ) {
         stateRef.current = { ...g, dir, dirQueue: restQueue, gameOver: true };
-        playSystemSound(SYSTEM_SOUNDS.die);
+        playSystemSound(SYSTEM_SOUNDS.die, sfxVolume);
         forceUpdate();
         return;
       }
@@ -161,9 +199,9 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
           setSnakeHighScore(newScore);
           setHighScore(newScore);
         }
-        playSystemSound(SYSTEM_SOUNDS.eat);
+        playSystemSound(SYSTEM_SOUNDS.eat, sfxVolume);
       } else {
-        playNote(69, 0.05); // tink on every frame
+        playNote(69, tinkVolume);
       }
 
       stateRef.current = {
@@ -181,7 +219,7 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
   }, [bpm]);
 
   useScreenInput((input) => {
-    if (showBrowser) return; // browser handles its own input
+    if (showSettings) return; // settings panel handles its own input
 
     const g = stateRef.current;
 
@@ -191,12 +229,12 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
     }
 
     if (input === 'm') {
-      // Pause while browsing
+      // Pause while in settings
       if (g.started && !g.gameOver && !g.paused) {
         stateRef.current = { ...g, paused: true };
         forceUpdate();
       }
-      setShowBrowser(true);
+      setShowSettings(true);
       return;
     }
 
@@ -229,19 +267,37 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
     }
   });
 
-  if (showBrowser) {
+  if (showSettings) {
     return (
-      <MidiTrackBrowser
-        onSelect={(selected) => {
-          setTrack(selected);
-          setShowBrowser(false);
+      <MusicSettings
+        initial={{ track, musicVolume, tinkVolume, sfxVolume }}
+        onApply={(cfg: MusicConfig) => {
+          // Apply volume changes — restart afplay if music volume changed
+          if (cfg.musicVolume !== musicVolume && bgMusic.current) {
+            bgMusic.current = setMusicVolume(bgMusic.current, cfg.musicVolume);
+          }
+          if (cfg.musicVolume !== musicVolume) {
+            setSnakeMusicVolume(cfg.musicVolume);
+            setMusicVolumeState(cfg.musicVolume);
+          }
+          if (cfg.tinkVolume !== tinkVolume) {
+            setSnakeTinkVolume(cfg.tinkVolume);
+            setTinkVolumeState(cfg.tinkVolume);
+          }
+          if (cfg.sfxVolume !== sfxVolume) {
+            setSnakeSfxVolume(cfg.sfxVolume);
+            setSfxVolumeState(cfg.sfxVolume);
+          }
+          if (cfg.track.url !== track.url) setTrack(cfg.track);
+          setShowSettings(false);
         }}
-        onCancel={() => setShowBrowser(false)}
+        onCancel={() => setShowSettings(false)}
       />
     );
   }
 
   const { snake, food, score, gameOver, paused, started } = stateRef.current;
+
 
   const cells = Array.from({ length: H }, (_, y) =>
     Array.from({ length: W }, (_, x) => {
@@ -274,6 +330,7 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
         <Text dimColor>—</Text>
         <Text dimColor>{track.artist}</Text>
       </Box>
+      <MusicVisualizer beatPhase={beatPhase} active={started && !paused && !gameOver} />
       <Box height={1} />
       <Box flexDirection="column">
         <Text dimColor>{'┌' + '──'.repeat(W) + '┐'}</Text>
@@ -281,7 +338,7 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
           <Box key={y}>
             <Text dimColor>│</Text>
             {row.map((cell, x) => {
-              if (cell === 'head') return <Text key={x} color="#f7a8b8" bold>{'◉ '}</Text>;
+              if (cell === 'head') return <Text key={x} color="#f7a8b8" bold>{'● '}</Text>;
               if (cell === 'body') return <Text key={x} color="#ffffff">{'● '}</Text>;
               if (cell === 'food') return <Text key={x} color="#55cdfc">{'◆ '}</Text>;
               return <Text key={x} dimColor>{'· '}</Text>;

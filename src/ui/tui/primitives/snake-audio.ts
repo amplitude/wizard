@@ -71,6 +71,7 @@ async function fetchMidiBytes(midiUrl: string, downloadPage?: string): Promise<B
 export interface BgMusicHandle {
   proc: ChildProcess;
   bpm: number;
+  wavPath: string;
 }
 
 /**
@@ -84,6 +85,7 @@ export interface BgMusicHandle {
 export async function startBgMusic(
   midiUrl: string,
   downloadPage?: string,
+  volume = 0.4,
 ): Promise<BgMusicHandle | null> {
   if (process.platform !== 'darwin') return null;
 
@@ -109,8 +111,8 @@ export async function startBgMusic(
       });
       bpm = meta.bpm;
     }
-    const proc = spawn('afplay', [wavPath, '-v', '0.4'], { stdio: 'ignore' });
-    return { proc, bpm };
+    const proc = spawn('afplay', [wavPath, '-v', String(volume)], { stdio: 'ignore' });
+    return { proc, bpm, wavPath };
   } catch {
     return null;
   }
@@ -118,6 +120,16 @@ export async function startBgMusic(
 
 export function stopBgMusic(handle: BgMusicHandle | null): void {
   handle?.proc.kill();
+}
+
+/**
+ * Change playback volume without re-synthesizing.
+ * Kills the current afplay process and restarts it at the new volume.
+ */
+export function setMusicVolume(handle: BgMusicHandle, volume: number): BgMusicHandle {
+  handle.proc.kill();
+  const proc = spawn('afplay', [handle.wavPath, '-v', String(volume)], { stdio: 'ignore' });
+  return { ...handle, proc };
 }
 
 // ── Per-note fallback (sine-wave WAVs via afplay) ─────────────────────
