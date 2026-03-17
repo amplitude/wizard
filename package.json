@@ -118,7 +118,8 @@
     "prepare": "husky",
     "flows": "node scripts/render-flows.mjs",
     "test:bdd": "cucumber-js",
-    "test:bdd:watch": "cucumber-js --retry 0 2>&1 | npx nodemon --watch features --exec cucumber-js"
+    "test:bdd:watch": "cucumber-js --retry 0 2>&1 | npx nodemon --watch features --exec cucumber-js",
+    "test:proxy": "tsx scripts/test-proxy.ts"
   },
   "lint-staged": {
     "*.{js,ts,tsx,jsx}": "pnpm fix"
