@@ -83,6 +83,7 @@
     "eslint-config-prettier": "^8.3.0",
     "husky": "^9.1.7",
     "lint-staged": "^15.5.1",
+    "midi-file": "^1.2.4",
     "msw": "^2.10.4",
     "prettier": "^2.8.7",
     "rimraf": "^3.0.2",

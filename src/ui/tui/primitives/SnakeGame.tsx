@@ -1,7 +1,7 @@
 /**
  * SnakeGame — Playable Snake in the terminal.
  *
- * Controls: WASD to move · Space to pause · R to restart
+ * Controls: WASD to move · Space to pause · R to restart · M to change music
  *
  * Uses a ref-backed game state with a single persistent interval so
  * the game loop never captures stale closure values.
@@ -15,10 +15,25 @@ import {
   getSnakeHighScore,
   setSnakeHighScore,
 } from '../../../utils/ampli-settings.js';
+import {
+  warmNotes, playNote, playSystemSound, SYSTEM_SOUNDS,
+  startBgMusic, stopBgMusic, type BgMusicHandle,
+} from './snake-audio.js';
+import { MidiTrackBrowser, type SelectedTrack } from './MidiTrackBrowser.js';
+import { MIDI_CATALOG, DEFAULT_TRACK_ID, freemidiUrls } from './freemidi-catalog.js';
+
+const _defaultTrack = MIDI_CATALOG.find((t) => t.id === DEFAULT_TRACK_ID)!;
+const _defaultUrls = freemidiUrls(_defaultTrack);
+const DEFAULT_TRACK: SelectedTrack = {
+  title: _defaultTrack.title,
+  artist: _defaultTrack.artist,
+  url: _defaultUrls.getter,
+  downloadPage: _defaultUrls.downloadPage,
+};
 
 const W = 20;
 const H = 10;
-const TICK_MS = 150;
+const DEFAULT_BPM = 120;
 
 
 type Point = { x: number; y: number };
@@ -82,6 +97,22 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
 
   const highScoreRef = useRef(0);
   const [highScore, setHighScore] = useState(0);
+  const bgMusic = useRef<BgMusicHandle | null>(null);
+  const [bpm, setBpm] = useState(DEFAULT_BPM);
+  const [track, setTrack] = useState<SelectedTrack>(DEFAULT_TRACK);
+  const [showBrowser, setShowBrowser] = useState(false);
+
+  useEffect(() => {
+    warmNotes([69]);
+    stopBgMusic(bgMusic.current);
+    bgMusic.current = null;
+    setBpm(DEFAULT_BPM);
+    void startBgMusic(track.url, track.downloadPage).then((handle) => {
+      bgMusic.current = handle;
+      if (handle) setBpm(handle.bpm);
+    });
+    return () => { stopBgMusic(bgMusic.current); };
+  }, [track]);
 
   useEffect(() => {
     const saved = getSnakeHighScore();
@@ -94,8 +125,9 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
     forceUpdate();
   };
 
-  // Single persistent interval — reads from ref to avoid stale closures
+  // Interval recreates when bpm changes (i.e. once synthesis completes)
   useEffect(() => {
+    const tickMs = Math.round((60_000 / bpm) / 4); // one 16th note
     const id = setInterval(() => {
       const g = stateRef.current;
       if (!g.started || g.gameOver || g.paused) return;
@@ -114,6 +146,7 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
         g.snake.some((s) => s.x === head.x && s.y === head.y)
       ) {
         stateRef.current = { ...g, dir, dirQueue: restQueue, gameOver: true };
+        playSystemSound(SYSTEM_SOUNDS.die);
         forceUpdate();
         return;
       }
@@ -122,10 +155,15 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
       const snake = ate ? [head, ...g.snake] : [head, ...g.snake.slice(0, -1)];
       const newScore = ate ? g.score + 1 : g.score;
 
-      if (ate && newScore > highScoreRef.current) {
-        highScoreRef.current = newScore;
-        setSnakeHighScore(newScore);
-        setHighScore(newScore);
+      if (ate) {
+        if (newScore > highScoreRef.current) {
+          highScoreRef.current = newScore;
+          setSnakeHighScore(newScore);
+          setHighScore(newScore);
+        }
+        playSystemSound(SYSTEM_SOUNDS.eat);
+      } else {
+        playNote(69, 0.05); // tink on every frame
       }
 
       stateRef.current = {
@@ -137,16 +175,28 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
         score: newScore,
       };
       forceUpdate();
-    }, TICK_MS);
+    }, tickMs);
 
     return () => clearInterval(id);
-  }, []);
+  }, [bpm]);
 
   useScreenInput((input) => {
+    if (showBrowser) return; // browser handles its own input
+
     const g = stateRef.current;
 
     if (input === 'q' && onExit) {
       onExit();
+      return;
+    }
+
+    if (input === 'm') {
+      // Pause while browsing
+      if (g.started && !g.gameOver && !g.paused) {
+        stateRef.current = { ...g, paused: true };
+        forceUpdate();
+      }
+      setShowBrowser(true);
       return;
     }
 
@@ -179,6 +229,18 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
     }
   });
 
+  if (showBrowser) {
+    return (
+      <MidiTrackBrowser
+        onSelect={(selected) => {
+          setTrack(selected);
+          setShowBrowser(false);
+        }}
+        onCancel={() => setShowBrowser(false)}
+      />
+    );
+  }
+
   const { snake, food, score, gameOver, paused, started } = stateRef.current;
 
   const cells = Array.from({ length: H }, (_, y) =>
@@ -205,6 +267,12 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
           </Text>
         )}
         {paused && <Text color="yellow"> PAUSED</Text>}
+      </Box>
+      <Box gap={1}>
+        <Text dimColor>♪</Text>
+        <Text dimColor>{track.title}</Text>
+        <Text dimColor>—</Text>
+        <Text dimColor>{track.artist}</Text>
       </Box>
       <Box height={1} />
       <Box flexDirection="column">
@@ -239,7 +307,10 @@ export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
         </Text>
       )}
       {started && !gameOver && (
-        <Text dimColor>WASD to move · Space to pause · R to restart</Text>
+        <Text dimColor>WASD to move · Space to pause · R to restart · M for music</Text>
+      )}
+      {!started && (
+        <Text dimColor>M to change music</Text>
       )}
       {onExit && (
         <Text dimColor>
