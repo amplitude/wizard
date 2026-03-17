@@ -20,6 +20,7 @@ import {
   LogViewer,
   EventPlanViewer,
   KagiSmallWebViewer,
+  SnakeGame,
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
@@ -225,7 +226,19 @@ export const RunScreen = ({ store }: RunScreenProps) => {
       label: 'Small Web',
       component: <KagiSmallWebViewer />,
     },
+    {
+      id: 'snake',
+      label: 'Snake',
+      component: <SnakeGame />,
+    },
   ];
 
-  return <TabContainer tabs={tabs} statusMessage={lastStatus} />;
+  return (
+    <TabContainer
+      tabs={tabs}
+      statusMessage={lastStatus}
+      requestedTab={store.requestedTab}
+      onTabConsumed={() => store.clearRequestedTab()}
+    />
+  );
 };

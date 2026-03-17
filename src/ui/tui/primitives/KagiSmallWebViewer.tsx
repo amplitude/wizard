@@ -11,7 +11,7 @@ import { xml2js } from 'xml-js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors } from '../styles.js';
 
-const FEED_URL = 'https://kagi.com/api/v1/smallweb/feed/?limit=10';
+const FEED_URL = 'https://kagi.com/api/v1/smallweb/feed/?limit=100';
 
 interface SmallWebEntry {
   title: string;
@@ -65,7 +65,9 @@ export const KagiSmallWebViewer = () => {
       try {
         const res = await fetch(FEED_URL);
         const xml = await res.text();
-        setEntries(parseAtom(xml));
+        const all = parseAtom(xml);
+        const shuffled = all.sort(() => Math.random() - 0.5).slice(0, 10);
+        setEntries(shuffled);
       } catch {
         // Silently fail — tab stays empty
       }

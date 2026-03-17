@@ -5,7 +5,7 @@
 
 import { Box, Text } from 'ink';
 import { useScreenInput } from '../hooks/useScreenInput.js';
-import { useState, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { Colors, Icons } from '../styles.js';
 
 export interface TabDefinition {
@@ -17,10 +17,19 @@ export interface TabDefinition {
 interface TabContainerProps {
   tabs: TabDefinition[];
   statusMessage?: string;
+  requestedTab?: string | null;
+  onTabConsumed?: () => void;
 }
 
-export const TabContainer = ({ tabs, statusMessage }: TabContainerProps) => {
+export const TabContainer = ({ tabs, statusMessage, requestedTab, onTabConsumed }: TabContainerProps) => {
   const [activeTab, setActiveTab] = useState(0);
+
+  useEffect(() => {
+    if (!requestedTab) return;
+    const idx = tabs.findIndex((t) => t.id === requestedTab);
+    if (idx !== -1) setActiveTab(idx);
+    onTabConsumed?.();
+  }, [requestedTab]);
 
   useScreenInput((_input, key) => {
     if (key.leftArrow) {
@@ -60,17 +69,20 @@ export const TabContainer = ({ tabs, statusMessage }: TabContainerProps) => {
 
       {/* Tab bar */}
       <Box height={1} />
-      <Box gap={1} paddingX={1}>
-        {tabs.map((tab, i) => (
-          <Text
-            key={tab.id}
-            inverse={i === activeTab}
-            color={i === activeTab ? Colors.accent : Colors.muted}
-            bold={i === activeTab}
-          >
-            {` ${tab.label} `}
-          </Text>
-        ))}
+      <Box gap={1} paddingX={1} justifyContent="space-between">
+        <Box gap={1}>
+          {tabs.map((tab, i) => (
+            <Text
+              key={tab.id}
+              inverse={i === activeTab}
+              color={i === activeTab ? Colors.accent : Colors.muted}
+              bold={i === activeTab}
+            >
+              {` ${tab.label} `}
+            </Text>
+          ))}
+        </Box>
+        <Text dimColor>← → to browse tabs while the wizard runs</Text>
       </Box>
     </Box>
   );

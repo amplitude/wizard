@@ -141,3 +141,17 @@ export function storeToken(
 export function clearStoredCredentials(configPath?: string): void {
   writeConfig({}, configPath);
 }
+
+/** Returns the stored snake high score, or 0 if none. */
+export function getSnakeHighScore(configPath?: string): number {
+  const config = readConfig(configPath);
+  const score = config['snake_high_score'];
+  return typeof score === 'number' ? score : 0;
+}
+
+/** Persists the snake high score to ~/.ampli.json. */
+export function setSnakeHighScore(score: number, configPath?: string): void {
+  const config = readConfig(configPath);
+  config['snake_high_score'] = score;
+  writeConfig(config, configPath);
+}

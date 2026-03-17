@@ -61,6 +61,9 @@ export class WizardStore {
   /** Transient feedback message shown in the command bar after a command runs. */
   private $commandFeedback = atom<string | null>(null);
 
+  /** Tab id to switch to imperatively (e.g. from a slash command). */
+  private $requestedTab = atom<string | null>(null);
+
   /** Last screen seen — used to detect screen transitions for analytics. */
   private _lastScreen: ScreenName | null = null;
 
@@ -105,6 +108,10 @@ export class WizardStore {
 
   get commandFeedback(): string | null {
     return this.$commandFeedback.get();
+  }
+
+  get requestedTab(): string | null {
+    return this.$requestedTab.get();
   }
 
   get statusMessages(): string[] {
@@ -186,6 +193,16 @@ export class WizardStore {
   setCommandMode(active: boolean): void {
     this.$commandMode.set(active);
     this.$version.set(this.$version.get() + 1);
+  }
+
+  /** Request the TabContainer to switch to a tab by id. Clears after consumption. */
+  setRequestedTab(id: string): void {
+    this.$requestedTab.set(id);
+    this.$version.set(this.$version.get() + 1);
+  }
+
+  clearRequestedTab(): void {
+    this.$requestedTab.set(null);
   }
 
   /** Show a transient feedback message in the command bar. Clears after ms. */

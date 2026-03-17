@@ -13,6 +13,7 @@ export const COMMANDS = [
   { cmd: '/logout', desc: 'Clear credentials' },
   { cmd: '/whoami', desc: 'Show current user, org, and project' },
   { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
+  { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
   { cmd: '/help', desc: 'List available slash commands' },
 ];
