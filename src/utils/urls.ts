@@ -86,6 +86,11 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
     return proxyOverride;
   }
 
+  // When dev bypass token is set, always use the local proxy regardless of host
+  if (process.env.WIZARD_PROXY_DEV_TOKEN) {
+    return 'http://localhost:9810';
+  }
+
   if (host.includes('localhost')) {
     // Local dev: point at the Langley wizard proxy service
     // Start it with: cd langley && LOCAL_LANGLEY=true ENVIRONMENT=production aws-vault exec us-prod-engineer -- make wizard-proxy-server
