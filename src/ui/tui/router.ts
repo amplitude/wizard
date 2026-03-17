@@ -26,6 +26,7 @@ export type { FlowEntry };
 export enum Overlay {
   Outage = 'outage',
   SettingsOverride = 'settings-override',
+  Snake = 'snake',
 }
 
 /** Union of all screen names */

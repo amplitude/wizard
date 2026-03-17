@@ -27,6 +27,7 @@ import { SlackScreen } from './screens/SlackScreen.js';
 import { OutroScreen } from './screens/OutroScreen.js';
 import { createMcpInstaller } from './services/mcp-installer.js';
 import type { McpInstaller } from './services/mcp-installer.js';
+import { SnakeGame } from './primitives/SnakeGame.js';
 
 export interface ScreenServices {
   mcpInstaller: McpInstaller;
@@ -46,6 +47,7 @@ export function createScreens(
     // Overlays
     [Overlay.Outage]: <OutageScreen store={store} />,
     [Overlay.SettingsOverride]: <SettingsOverrideScreen store={store} />,
+    [Overlay.Snake]: <SnakeGame onExit={() => store.hideSnakeOverlay()} />,
 
     // Wizard flow
     [Screen.Intro]: <IntroScreen store={store} />,

@@ -20,12 +20,6 @@ const W = 20;
 const H = 10;
 const TICK_MS = 150;
 
-// Trans pride flag stripes (5 equal bands across H rows)
-// #55cdfc = light blue, #f7a8b8 = pink, #ffffff = white
-const STRIPE_COLORS = ['#55cdfc', '#f7a8b8', '#ffffff', '#f7a8b8', '#55cdfc'];
-function getBgColor(y: number): string {
-  return STRIPE_COLORS[Math.floor((y / H) * STRIPE_COLORS.length)] ?? '#ffffff';
-}
 
 type Point = { x: number; y: number };
 type Dir = { dx: number; dy: number };
@@ -78,7 +72,11 @@ function makeInitial(): GameState {
   };
 }
 
-export const SnakeGame = () => {
+interface SnakeGameProps {
+  onExit?: () => void;
+}
+
+export const SnakeGame = ({ onExit }: SnakeGameProps = {}) => {
   const stateRef = useRef<GameState>(makeInitial());
   const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
 
@@ -147,6 +145,11 @@ export const SnakeGame = () => {
   useScreenInput((input) => {
     const g = stateRef.current;
 
+    if (input === 'q' && onExit) {
+      onExit();
+      return;
+    }
+
     if (!g.started || g.gameOver) {
       if (input === 'r' || input === ' ') reset();
       return;
@@ -206,24 +209,18 @@ export const SnakeGame = () => {
       <Box height={1} />
       <Box flexDirection="column">
         <Text dimColor>{'┌' + '──'.repeat(W) + '┐'}</Text>
-        {cells.map((row, y) => {
-          const bg = getBgColor(y);
-          return (
-            <Box key={y}>
-              <Text dimColor>│</Text>
-              {row.map((cell, x) => {
-                if (cell === 'head')
-                  return <Text key={x} backgroundColor={bg} color="#00e676" bold>{'◉ '}</Text>;
-                if (cell === 'body')
-                  return <Text key={x} backgroundColor={bg} color="#388e3c">{'● '}</Text>;
-                if (cell === 'food')
-                  return <Text key={x} backgroundColor={bg} color="#b57bee">{'◆ '}</Text>;
-                return <Text key={x} backgroundColor={bg}>{'  '}</Text>;
-              })}
-              <Text dimColor>│</Text>
-            </Box>
-          );
-        })}
+        {cells.map((row, y) => (
+          <Box key={y}>
+            <Text dimColor>│</Text>
+            {row.map((cell, x) => {
+              if (cell === 'head') return <Text key={x} color="#f7a8b8" bold>{'◉ '}</Text>;
+              if (cell === 'body') return <Text key={x} color="#ffffff">{'● '}</Text>;
+              if (cell === 'food') return <Text key={x} color="#55cdfc">{'◆ '}</Text>;
+              return <Text key={x} dimColor>{'· '}</Text>;
+            })}
+            <Text dimColor>│</Text>
+          </Box>
+        ))}
         <Text dimColor>{'└' + '──'.repeat(W) + '┘'}</Text>
       </Box>
       <Box height={1} />
@@ -243,6 +240,11 @@ export const SnakeGame = () => {
       )}
       {started && !gameOver && (
         <Text dimColor>WASD to move · Space to pause · R to restart</Text>
+      )}
+      {onExit && (
+        <Text dimColor>
+          Press <Text bold>Q</Text> to return to the wizard
+        </Text>
       )}
     </Box>
   );

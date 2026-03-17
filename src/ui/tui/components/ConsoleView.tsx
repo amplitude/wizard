@@ -74,7 +74,7 @@ function executeCommand(raw: string, store: WizardStore): void {
       break;
     }
     case '/snake':
-      store.setRequestedTab('snake');
+      store.showSnakeOverlay();
       break;
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });

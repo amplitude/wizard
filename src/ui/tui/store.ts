@@ -195,6 +195,14 @@ export class WizardStore {
     this.$version.set(this.$version.get() + 1);
   }
 
+  showSnakeOverlay(): void {
+    this.pushOverlay(Overlay.Snake);
+  }
+
+  hideSnakeOverlay(): void {
+    this.popOverlay();
+  }
+
   /** Request the TabContainer to switch to a tab by id. Clears after consumption. */
   setRequestedTab(id: string): void {
     this.$requestedTab.set(id);
