@@ -75,9 +75,25 @@ export async function detectRegionFromToken(
   );
 }
 
+/**
+ * Get the LLM gateway URL for the Claude Agent SDK.
+ *
+ * Override with WIZARD_LLM_PROXY_URL env var for local dev against the
+ * Langley wizard proxy (default: http://localhost:9810).
+ *
+ * The Claude Agent SDK sets this as ANTHROPIC_BASE_URL and appends /v1/messages.
+ */
 export const getLlmGatewayUrlFromHost = (host: string) => {
+  // Allow explicit override for local proxy development
+  const proxyOverride = process.env.WIZARD_LLM_PROXY_URL;
+  if (proxyOverride) {
+    return proxyOverride;
+  }
+
   if (host.includes('localhost')) {
-    return 'http://localhost:3308/wizard';
+    // Local dev: point at the Langley wizard proxy service
+    // Start it with: cd langley && LOCAL_LANGLEY=true ENVIRONMENT=production aws-vault exec us-prod-engineer -- make wizard-proxy-server
+    return 'http://localhost:9810';
   }
 
   if (
