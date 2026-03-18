@@ -115,7 +115,7 @@ echo "==> Installing wizard from tarball..."
 WIZARD_DIR=$(mktemp -d /tmp/wizard-bin.XXXXXX)
 (cd "$WIZARD_DIR" && npm init -y --silent >/dev/null 2>&1 && npm install "$PACK_PATH" 2>&1 | tail -3)
 
-WIZARD_BIN="$WIZARD_DIR/node_modules/.bin/wizard"
+WIZARD_BIN="$WIZARD_DIR/node_modules/.bin/amplitude-wizard"
 if [ ! -f "$WIZARD_BIN" ]; then
   echo "ERROR: wizard binary not found at $WIZARD_BIN after install"
   exit 1
