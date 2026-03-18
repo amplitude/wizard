@@ -25,7 +25,7 @@ jobs:
       - name: Checkout wizard-workbench
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          repository: Amplitude/wizard-workbench
+          repository: amplitude/wizard-workbench
           ref: main
           path: wizard-workbench
 
@@ -46,7 +46,7 @@ jobs:
 
       - name: Run smoke test
         env:
-          AMPLITUDE_PERSONAL_API_KEY: ${{ secrets.GH_APP_AMPLITUDE_WIZARD_CI_BOT_AMPLITUDE_PERSONAL_KEY }}
+          AMPLITUDE_PROJECT_API_KEY: ${{ secrets.AMPLITUDE_PROJECT_API_KEY }}
           WIZARD_WORKBENCH_ROOT: ${{ github.workspace }}/wizard-workbench
           SMOKE_TEST_APP: ${{ inputs.app || 'next-js/15-app-router-todo' }}
         run: ./scripts/smoke-test-ci.sh "$SMOKE_TEST_APP"

@@ -4,7 +4,7 @@
 # wizard-workbench, and run in CI mode.
 #
 # Prerequisites:
-#   - AMPLITUDE_PERSONAL_API_KEY env var (or in .env)
+#   - AMPLITUDE_PROJECT_API_KEY env var (or in .env)
 #   - A wizard-workbench repo checked out (for the test app), pointed to by:
 #       - WIZARD_WORKBENCH_ROOT=/path/to/wizard-workbench
 #         or
@@ -16,15 +16,15 @@
 #
 # Examples:
 #   # With API key inline:
-#   AMPLITUDE_PERSONAL_API_KEY=phx_your_key_here ./scripts/smoke-test-ci.sh
+#   AMPLITUDE_PROJECT_API_KEY=your_key_here ./scripts/smoke-test-ci.sh
 #
 #   # With project ID override:
-#   AMPLITUDE_PERSONAL_API_KEY=phx_your_key_here AMPLITUDE_PROJECT_ID=12345 ./scripts/smoke-test-ci.sh
+#   AMPLITUDE_PROJECT_API_KEY=your_key_here AMPLITUDE_PROJECT_ID=12345 ./scripts/smoke-test-ci.sh
 #
 #   # Specific app:
-#   AMPLITUDE_PERSONAL_API_KEY=phx_your_key_here ./scripts/smoke-test-ci.sh next-js/15-pages-router-saas
+#   AMPLITUDE_PROJECT_API_KEY=your_key_here ./scripts/smoke-test-ci.sh next-js/15-pages-router-saas
 #
-#   # If ../wizard-workbench/.env has AMPLITUDE_PERSONAL_API_KEY, just:
+#   # If ../wizard-workbench/.env has AMPLITUDE_PROJECT_API_KEY, just:
 #   ./scripts/smoke-test-ci.sh
 #
 set -euo pipefail
@@ -59,16 +59,16 @@ if [ ! -d "$APP_SRC" ]; then
   exit 1
 fi
 
-# Load .env from workbench if it exists (for AMPLITUDE_PERSONAL_API_KEY)
+# Load .env from workbench if it exists (for AMPLITUDE_PROJECT_API_KEY)
 if [ -f "$WORKBENCH_ROOT/.env" ]; then
   set -a
   source "$WORKBENCH_ROOT/.env"
   set +a
 fi
 
-API_KEY="${AMPLITUDE_PERSONAL_API_KEY:-}"
+API_KEY="${AMPLITUDE_PROJECT_API_KEY:-}"
 if [ -z "$API_KEY" ]; then
-  echo "ERROR: AMPLITUDE_PERSONAL_API_KEY not set"
+  echo "ERROR: AMPLITUDE_PROJECT_API_KEY not set"
   echo "Set it in your environment or in $WORKBENCH_ROOT/.env"
   exit 1
 fi

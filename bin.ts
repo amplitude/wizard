@@ -168,7 +168,7 @@ yargs(hideBin(process.argv))
         if (!options.apiKey) {
           getUI().intro(chalk.inverse(`Amplitude Wizard`));
           getUI().log.error(
-            'CI mode requires --api-key (personal API key phx_xxx)',
+            'CI mode requires --api-key (Amplitude project API key)',
           );
           process.exit(1);
         }

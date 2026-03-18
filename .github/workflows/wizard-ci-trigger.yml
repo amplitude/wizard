@@ -29,7 +29,7 @@ jobs:
         id: fetch-apps
         run: |
           # Fetch app categories from wizard-workbench repo
-          CATEGORIES=$(curl -s "https://api.github.com/repos/Amplitude/wizard-workbench/contents/apps" \
+          CATEGORIES=$(curl -s "https://api.github.com/repos/amplitude/wizard-workbench/contents/apps" \
             -H "Accept: application/vnd.github.v3+json" \
             | jq -r '[.[] | select(.type == "dir") | .name] | sort | .[]')
 
@@ -42,7 +42,7 @@ jobs:
 
           for category in $CATEGORIES; do
             # Fetch apps in this category
-            APPS=$(curl -s "https://api.github.com/repos/Amplitude/wizard-workbench/contents/apps/$category" \
+            APPS=$(curl -s "https://api.github.com/repos/amplitude/wizard-workbench/contents/apps/$category" \
               -H "Accept: application/vnd.github.v3+json" \
               | jq -r '[.[] | select(.type == "dir") | .name] | sort | .[]' 2>/dev/null || echo "")
 
@@ -98,7 +98,7 @@ jobs:
             const bodyParts = [
               '## 🧙 Wizard CI',
               '',
-              'Run the Wizard CI and test your changes against [wizard-workbench](https://github.com/Amplitude/wizard-workbench) example apps by replying with a GitHub comment using one of the following commands:',
+              'Run the Wizard CI and test your changes against [wizard-workbench](https://github.com/amplitude/wizard-workbench) example apps by replying with a GitHub comment using one of the following commands:',
               '',
               '**Test all apps:**',
               '- `/wizard-ci all`',
