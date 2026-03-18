@@ -121,6 +121,10 @@ export const ConsoleView = ({ store, width, height, children }: ConsoleViewProps
   // Watch for activation keys while the input is dormant
   useInput(
     (char, key) => {
+      if (screenError && (char === 'r' || char === 'R')) {
+        store.clearScreenError();
+        return;
+      }
       if (char === '/') {
         activate('/');
       } else if (key.tab) {
@@ -152,6 +156,7 @@ export const ConsoleView = ({ store, width, height, children }: ConsoleViewProps
   };
 
   const feedback = store.commandFeedback;
+  const screenError = store.screenError;
   const showResponse = loading || !!response;
   const showFeedback = !showResponse && !!feedback;
   const innerWidth = width - 2;
@@ -169,6 +174,15 @@ export const ConsoleView = ({ store, width, height, children }: ConsoleViewProps
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {children}
       </Box>
+
+      {/* Error banner — shown when a screen crashes */}
+      {screenError && (
+        <Box paddingX={1} gap={1}>
+          <Text color={Colors.error} bold>⚠</Text>
+          <Text color={Colors.error} wrap="truncate-end">{screenError.message}</Text>
+          <Text dimColor>[R] retry</Text>
+        </Box>
+      )}
 
       {/* Console input area */}
       <Text dimColor>{separator}</Text>

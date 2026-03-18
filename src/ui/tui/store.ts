@@ -61,6 +61,10 @@ export class WizardStore {
   /** Transient feedback message shown in the command bar after a command runs. */
   private $commandFeedback = atom<string | null>(null);
 
+  /** Error caught by the app error boundary — shown in ConsoleView. */
+  private $screenError = atom<Error | null>(null);
+  private $screenErrorRetry = atom(0);
+
   /** Tab id to switch to imperatively (e.g. from a slash command). */
   private $requestedTab = atom<string | null>(null);
 
@@ -108,6 +112,14 @@ export class WizardStore {
 
   get commandFeedback(): string | null {
     return this.$commandFeedback.get();
+  }
+
+  get screenError(): Error | null {
+    return this.$screenError.get();
+  }
+
+  get screenErrorRetry(): number {
+    return this.$screenErrorRetry.get() as number;
   }
 
   get requestedTab(): string | null {
@@ -187,6 +199,17 @@ export class WizardStore {
     // Reset data check so it re-runs after region changes
     this.$session.setKey('projectHasData', null);
     this.emitChange();
+  }
+
+  setScreenError(error: Error): void {
+    this.$screenError.set(error);
+    this.$version.set(this.$version.get() + 1);
+  }
+
+  clearScreenError(): void {
+    this.$screenError.set(null);
+    this.$screenErrorRetry.set(this.$screenErrorRetry.get() + 1);
+    this.$version.set(this.$version.get() + 1);
   }
 
   /** Enter or exit slash command mode. */

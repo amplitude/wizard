@@ -1,17 +1,18 @@
 /**
  * ScreenErrorBoundary — catches React render errors in screens
- * and routes to the outro screen with an error message.
+ * and surfaces them in ConsoleView via store.screenError.
  *
- * Without this, a screen crash silently hangs the TUI.
+ * The error is displayed between the content area and the text input.
+ * Pressing R in ConsoleView increments store.screenErrorRetry, which
+ * causes this boundary to reset and re-render the screen.
  */
 
-import { Box, Text } from 'ink';
 import { Component, type ReactNode } from 'react';
 import type { WizardStore } from '../store.js';
-import { OutroKind, RunPhase } from '../../../lib/wizard-session.js';
 
 interface Props {
   store: WizardStore;
+  retryToken: number;
   children: ReactNode;
 }
 
@@ -27,29 +28,18 @@ export class ScreenErrorBoundary extends Component<Props, State> {
   }
 
   componentDidCatch(error: Error): void {
-    const { store } = this.props;
+    this.props.store.setScreenError(error);
+  }
 
-    // Set error state — the router will resolve to outro
-    store.setOutroData({
-      kind: OutroKind.Error,
-      message: `A screen crashed: ${error.message}`,
-    });
-    store.setRunPhase(RunPhase.Error);
+  componentDidUpdate(prevProps: Props): void {
+    if (prevProps.retryToken !== this.props.retryToken && this.state.error) {
+      this.setState({ error: null });
+    }
   }
 
   render(): ReactNode {
-    if (this.state.error) {
-      // Fallback while the store transition fires
-      return (
-        <Box flexDirection="column">
-          <Text color="red" bold>
-            Something went wrong.
-          </Text>
-          <Text dimColor>{this.state.error.message}</Text>
-        </Box>
-      );
-    }
-
+    // When errored, render nothing — ConsoleView shows the banner.
+    if (this.state.error) return null;
     return this.props.children;
   }
 }

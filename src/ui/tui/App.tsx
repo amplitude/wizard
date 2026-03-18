@@ -64,7 +64,7 @@ export const App = ({ store }: AppProps) => {
               height={contentHeight}
               direction={direction}
             >
-              <ScreenErrorBoundary store={store}>
+              <ScreenErrorBoundary store={store} retryToken={store.screenErrorRetry}>
                 {activeScreen}
               </ScreenErrorBoundary>
             </DissolveTransition>
