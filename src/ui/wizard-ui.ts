@@ -52,6 +52,13 @@ export interface WizardUI {
   /** Signal that the main work (agent run) has started. */
   startRun(): void;
 
+  /**
+   * Show an error that occurred outside React (e.g. agent init failure).
+   * In TUI mode: displays the error banner and blocks until the user presses R to retry.
+   * Returns true if the caller should retry, false if it should abort normally.
+   */
+  setRunError(error: Error): Promise<boolean>;
+
   /** Store OAuth/API credentials. Resolves past AuthScreen in TUI. */
   setCredentials(credentials: {
     accessToken: string;

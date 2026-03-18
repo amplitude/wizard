@@ -92,6 +92,12 @@ export class InkUI implements WizardUI {
     this.store.setRunPhase(RunPhase.Running);
   }
 
+  async setRunError(error: Error): Promise<boolean> {
+    this.store.setScreenError(error);
+    await this.store.waitForRetry();
+    return true;
+  }
+
   cancel(message: string): void {
     this.store.pushStatus(stripAnsi(message));
 

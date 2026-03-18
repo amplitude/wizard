@@ -720,9 +720,6 @@ export async function initializeAgent(
     getUI().log.success("Agent initialized. Let's get cooking!");
     return agentRunConfig;
   } catch (error) {
-    getUI().log.error(
-      `Failed to initialize agent: ${(error as Error).message}`,
-    );
     logToFile('Agent initialization error:', error);
     debug('Agent initialization error:', error);
     throw error;

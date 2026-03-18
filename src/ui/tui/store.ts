@@ -201,6 +201,8 @@ export class WizardStore {
     this.emitChange();
   }
 
+  private _retryResolve: (() => void) | null = null;
+
   setScreenError(error: Error): void {
     this.$screenError.set(error);
     this.$version.set(this.$version.get() + 1);
@@ -210,6 +212,18 @@ export class WizardStore {
     this.$screenError.set(null);
     this.$screenErrorRetry.set(this.$screenErrorRetry.get() + 1);
     this.$version.set(this.$version.get() + 1);
+    this._retryResolve?.();
+    this._retryResolve = null;
+  }
+
+  /**
+   * Returns a Promise that resolves the next time clearScreenError() is called
+   * (i.e. the user presses R). Used by InkUI.setRunError to block until retry.
+   */
+  waitForRetry(): Promise<void> {
+    return new Promise((resolve) => {
+      this._retryResolve = resolve;
+    });
   }
 
   /** Enter or exit slash command mode. */

@@ -107,24 +107,31 @@ export async function runWizard(argv: Args, session?: WizardSession) {
     }
   }
 
-  try {
-    await runAgentWizard(config, session);
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack =
-      error instanceof Error && error.stack ? error.stack : undefined;
+  let retry = true;
+  while (retry) {
+    try {
+      await runAgentWizard(config, session);
+      retry = false;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack =
+        error instanceof Error && error.stack ? error.stack : undefined;
 
-    logToFile(`[Wizard run.ts] ERROR MESSAGE: ${errorMessage} `);
-    if (errorStack) {
-      logToFile(`[Wizard run.ts] ERROR STACK: ${errorStack}`);
+      logToFile(`[Wizard run.ts] ERROR MESSAGE: ${errorMessage} `);
+      if (errorStack) {
+        logToFile(`[Wizard run.ts] ERROR STACK: ${errorStack}`);
+      }
+
+      const debugInfo = session.debug && errorStack ? `\n\n${errorStack}` : '';
+
+      retry = await getUI().setRunError(error as Error);
+      if (!retry) {
+        await wizardAbort({
+          message: `Something went wrong: ${errorMessage}\n\nYou can read the documentation at ${config.metadata.docsUrl} to set up Amplitude manually.${debugInfo}`,
+          error: error as Error,
+        });
+      }
     }
-
-    const debugInfo = session.debug && errorStack ? `\n\n${errorStack}` : '';
-
-    await wizardAbort({
-      message: `Something went wrong: ${errorMessage}\n\nYou can read the documentation at ${config.metadata.docsUrl} to set up Amplitude manually.${debugInfo}`,
-      error: error as Error,
-    });
   }
 }
 

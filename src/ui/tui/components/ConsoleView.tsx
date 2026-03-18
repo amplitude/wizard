@@ -24,7 +24,8 @@ import { slackSettingsUrl } from '../screens/SlackScreen.js';
 import { fetchAmplitudeUser } from '../../../lib/api.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import { SlashCommandInput } from '../primitives/SlashCommandInput.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
+import { Overlay } from '../router.js';
 import {
   queryConsole,
   resolveConsoleCredentials,
@@ -162,6 +163,15 @@ export const ConsoleView = ({ store, width, height, children }: ConsoleViewProps
   const innerWidth = width - 2;
   const separator = '─'.repeat(Math.max(0, innerWidth));
 
+  // Show the latest status message when an overlay is active — RunScreen's
+  // own TabContainer handles this for the non-overlay case.
+  const overlayValues: string[] = Object.values(Overlay);
+  const isOverlay = overlayValues.includes(store.currentScreen);
+  const lastStatus =
+    isOverlay && store.statusMessages.length > 0
+      ? store.statusMessages[store.statusMessages.length - 1]
+      : null;
+
   return (
     <Box
       width={width}
@@ -175,11 +185,21 @@ export const ConsoleView = ({ store, width, height, children }: ConsoleViewProps
         {children}
       </Box>
 
-      {/* Error banner — shown when a screen crashes */}
+      {/* Status ticker — shown when an overlay is active (RunScreen handles its own) */}
+      {lastStatus && (
+        <Box paddingX={1} overflow="hidden">
+          <Text color={Colors.muted}>{Icons.diamondOpen} </Text>
+          <Text dimColor wrap="truncate-end">{lastStatus}</Text>
+        </Box>
+      )}
+
+      {/* Error banner — shown when a screen crashes or the agent fails to start */}
       {screenError && (
         <Box paddingX={1} gap={1}>
           <Text color={Colors.error} bold>⚠</Text>
-          <Text color={Colors.error} wrap="truncate-end">{screenError.message}</Text>
+          <Box flexGrow={1} overflow="hidden">
+            <Text color={Colors.error} wrap="truncate-end">{screenError.message}</Text>
+          </Box>
           <Text dimColor>[R] retry</Text>
         </Box>
       )}

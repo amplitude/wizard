@@ -135,6 +135,11 @@ export class LoggingUI implements WizardUI {
     // No-op in CI mode
   }
 
+  setRunError(_error: Error): Promise<boolean> {
+    // No retry in CI — let the caller fall through to wizardAbort
+    return Promise.resolve(false);
+  }
+
   setCredentials(_credentials: {
     accessToken: string;
     projectApiKey: string;
