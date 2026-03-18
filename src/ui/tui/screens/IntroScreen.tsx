@@ -105,7 +105,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           <Text color="#1D4AFF">{'\u2588'}</Text>
           <Text color="#F54E00">{'\u2588'}</Text>
           <Text color="#F9BD2B">{'\u2588'}</Text>
-          {detecting ? ' Amplitude Wizard starting up' : ' Amplitude Wizard 🦔'}
+          {detecting ? ' Amplitude Wizard starting up' : ' Amplitude Wizard'}
         </Text>
 
         {showDescription && (
@@ -117,7 +117,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               .env* file contents will not leave your machine.
             </Text>
             <Box marginTop={1}>
-              <Text>Let's do two hours of work in eight minutes.</Text>
+              <Text>From zero to first tracked event in 5 minutes.</Text>
             </Box>
           </Box>
         )}
