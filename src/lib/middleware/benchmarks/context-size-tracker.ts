@@ -6,7 +6,13 @@
  * Context tokens in = previous phase's context tokens out.
  */
 
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+  SDKUsage,
+} from '../types';
 import type { TokenData } from './token-tracker';
 
 export interface ContextSizeData {
@@ -53,7 +59,7 @@ export class ContextSizeTrackerPlugin implements Middleware {
   }
 
   onFinalize(
-    _resultMessage: any,
+    _resultMessage: SDKMessage,
     _totalDurationMs: number,
     ctx: MiddlewareContext,
     store: MiddlewareStore,
@@ -73,7 +79,7 @@ export class ContextSizeTrackerPlugin implements Middleware {
     store.set('contextSize', this.getData());
   }
 
-  private computeContextTokensOut(usage: any): number | undefined {
+  private computeContextTokensOut(usage: SDKUsage | null | undefined): number | undefined {
     if (!usage) return undefined;
     return (
       Number(usage.input_tokens ?? 0) +

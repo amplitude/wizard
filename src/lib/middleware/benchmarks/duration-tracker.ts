@@ -2,7 +2,12 @@
  * Duration tracking plugin (per-phase and total).
  */
 
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+} from '../types';
 
 export interface DurationData {
   phaseSnapshots: Array<{
@@ -46,7 +51,7 @@ export class DurationTrackerPlugin implements Middleware {
   }
 
   onFinalize(
-    _resultMessage: any,
+    _resultMessage: SDKMessage,
     totalDurationMs: number,
     ctx: MiddlewareContext,
     store: MiddlewareStore,

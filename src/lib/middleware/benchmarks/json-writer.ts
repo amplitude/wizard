@@ -10,7 +10,13 @@ import { getUI } from '../../../ui';
 import chalk from 'chalk';
 import { logToFile } from '../../../utils/debug';
 import { AgentSignals } from '../../agent-interface';
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+  SDKModelUsageEntry,
+} from '../types';
 import type { TokenData } from './token-tracker';
 import type { CacheData } from './cache-tracker';
 import type { TurnData } from './turn-counter';
@@ -23,7 +29,7 @@ import type { BenchmarkData, StepUsage } from '../benchmark';
 /**
  * Sum token usage across all models from the SDK's modelUsage field.
  */
-function sumModelUsage(modelUsage: Record<string, any>): {
+function sumModelUsage(modelUsage: Record<string, SDKModelUsageEntry>): {
   input_tokens: number;
   output_tokens: number;
   cache_creation_input_tokens: number;
@@ -59,7 +65,7 @@ export class JsonWriterPlugin implements Middleware {
   }
 
   onFinalize(
-    resultMessage: any,
+    resultMessage: SDKMessage,
     totalDurationMs: number,
     ctx: MiddlewareContext,
     _store: MiddlewareStore,
@@ -72,14 +78,15 @@ export class JsonWriterPlugin implements Middleware {
     const compactions = ctx.get<CompactionData>('compactions');
     const contextSize = ctx.get<ContextSizeData>('contextSize');
 
-    const modelUsage = resultMessage?.modelUsage ?? {};
+    const modelUsage: Record<string, SDKModelUsageEntry> =
+      resultMessage?.modelUsage ?? {};
     const aggregateUsage = sumModelUsage(modelUsage);
 
-    const phaseCount = duration?.phaseSnapshots.length ?? 0;
+    const phaseSnapshots = duration?.phaseSnapshots ?? [];
     const steps: StepUsage[] = [];
 
-    for (let i = 0; i < phaseCount; i++) {
-      const dur = duration!.phaseSnapshots[i];
+    for (let i = 0; i < phaseSnapshots.length; i++) {
+      const dur = phaseSnapshots[i];
       const tokenSnap = tokens?.phaseSnapshots[i];
       const cacheSnap = cache?.phaseSnapshots[i];
       const turnSnap = turns?.phaseSnapshots[i];

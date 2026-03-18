@@ -6,7 +6,12 @@
  * counts + a duplicate flag for downstream plugins.
  */
 
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+} from '../types';
 
 export interface TurnData {
   /** Whether the current message is a duplicate of the last processed turn */
@@ -30,7 +35,7 @@ export class TurnCounterPlugin implements Middleware {
   private currentPhase = 'setup';
 
   onMessage(
-    message: any,
+    message: SDKMessage,
     _ctx: MiddlewareContext,
     store: MiddlewareStore,
   ): void {
@@ -66,7 +71,7 @@ export class TurnCounterPlugin implements Middleware {
   }
 
   onFinalize(
-    _resultMessage: any,
+    _resultMessage: SDKMessage,
     _totalDurationMs: number,
     _ctx: MiddlewareContext,
     store: MiddlewareStore,

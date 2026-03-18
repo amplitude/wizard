@@ -7,7 +7,13 @@
  * is tracked by CacheTrackerPlugin for reporting and pricing.
  */
 
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+  SDKUsage,
+} from '../types';
 import type { TurnData } from './turn-counter';
 
 export interface TokenData {
@@ -16,7 +22,7 @@ export interface TokenData {
   totalInput: number;
   totalOutput: number;
   /** The raw usage object from the last non-duplicate assistant message */
-  lastUsage: any;
+  lastUsage: SDKUsage | null;
   /** Per-phase token snapshots */
   phaseSnapshots: Array<{
     phase: string;
@@ -34,7 +40,7 @@ export class TokenTrackerPlugin implements Middleware {
   private phaseOutput = 0;
   private totalInput = 0;
   private totalOutput = 0;
-  private lastUsage: any = null;
+  private lastUsage: SDKUsage | null = null;
   private phaseSnapshots: Array<{
     phase: string;
     inputTokens: number;
@@ -45,7 +51,7 @@ export class TokenTrackerPlugin implements Middleware {
   private phaseMessagesWithUsage = 0;
 
   onMessage(
-    message: any,
+    message: SDKMessage,
     ctx: MiddlewareContext,
     store: MiddlewareStore,
   ): void {
@@ -92,7 +98,7 @@ export class TokenTrackerPlugin implements Middleware {
   }
 
   onFinalize(
-    _resultMessage: any,
+    _resultMessage: SDKMessage,
     _totalDurationMs: number,
     _ctx: MiddlewareContext,
     store: MiddlewareStore,

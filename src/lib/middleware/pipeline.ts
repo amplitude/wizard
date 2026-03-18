@@ -53,10 +53,10 @@ export class MiddlewarePipeline {
   }
 
   /** Finalize the run (satisfies tracker.finalize) */
-  finalize(resultMessage: any, totalDurationMs: number): any {
+  finalize(resultMessage: SDKMessage, totalDurationMs: number): unknown {
     const ctx = this.createContext();
     const storeHandle = this.createStore();
-    let result: any;
+    let result: unknown;
     for (const mw of this.middlewares) {
       const r = mw.onFinalize?.(
         resultMessage,

@@ -1,4 +1,9 @@
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+} from '../types';
 import type { TokenData } from './token-tracker';
 import type { CacheData } from './cache-tracker';
 
@@ -75,7 +80,7 @@ export class CostTrackerPlugin implements Middleware {
   }
 
   onFinalize(
-    resultMessage: any,
+    resultMessage: SDKMessage,
     _totalDurationMs: number,
     ctx: MiddlewareContext,
     store: MiddlewareStore,

@@ -7,6 +7,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { z } from 'zod';
 import { logToFile } from '../../utils/debug';
 import { AgentSignals } from '../agent-interface';
 
@@ -48,13 +49,31 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
   },
 };
 
+const BenchmarkConfigFileSchema = z
+  .object({
+    plugins: z.record(z.boolean()).optional(),
+    output: z
+      .object({
+        benchmarkPath: z.string(),
+        benchmarkEnabled: z.boolean(),
+        logPath: z.string(),
+        logEnabled: z.boolean(),
+        suppressWizardLogs: z.boolean(),
+      })
+      .partial()
+      .optional(),
+  })
+  .passthrough();
+
 export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
   const configPath =
     process.env.AMPLITUDE_WIZARD_BENCHMARK_CONFIG ??
     path.join(installDir, '.benchmark-config.json');
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
-    const parsed = JSON.parse(raw);
+    const result = BenchmarkConfigFileSchema.safeParse(JSON.parse(raw));
+    if (!result.success) throw result.error;
+    const parsed = result.data;
     const config: BenchmarkConfig = {
       plugins: { ...DEFAULT_CONFIG.plugins, ...parsed.plugins },
       output: { ...DEFAULT_CONFIG.output, ...parsed.output },

@@ -4,7 +4,12 @@
  * Respects the dedup flag from TurnCounterPlugin.
  */
 
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+} from '../types';
 import type { TurnData } from './turn-counter';
 
 /** Matches SDK usage.cache_creation (ephemeral 5m vs 1h for pricing). */
@@ -51,7 +56,7 @@ export class CacheTrackerPlugin implements Middleware {
   private currentPhase = 'setup';
 
   onMessage(
-    message: any,
+    message: SDKMessage,
     ctx: MiddlewareContext,
     store: MiddlewareStore,
   ): void {
@@ -100,7 +105,7 @@ export class CacheTrackerPlugin implements Middleware {
   }
 
   onFinalize(
-    _resultMessage: any,
+    _resultMessage: SDKMessage,
     _totalDurationMs: number,
     _ctx: MiddlewareContext,
     store: MiddlewareStore,

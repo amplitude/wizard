@@ -1,5 +1,7 @@
 /** Phase transitions from [STATUS] in assistant text. Keep in sync with workflow "Status to report" bullets. */
 
+import type { SDKMessage } from './types';
+
 const PHASES_ORDER = [
   '1.0-begin',
   '1.1-edit',
@@ -26,7 +28,7 @@ const STATUS_PHRASES_BY_PHASE: Record<(typeof PHASES_ORDER)[number], string[]> =
 export class PhaseDetector {
   private currentPhase: 'setup' | (typeof PHASES_ORDER)[number] = 'setup';
 
-  detect(message: any): string | null {
+  detect(message: SDKMessage): string | null {
     if (message.type !== 'assistant') return null;
 
     const nextPhase = this.getNextPhase();

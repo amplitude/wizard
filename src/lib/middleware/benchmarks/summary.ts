@@ -1,7 +1,12 @@
 import chalk from 'chalk';
 import { getUI, type SpinnerHandle } from '../../../ui';
 import { AgentSignals } from '../../agent-interface';
-import type { Middleware, MiddlewareContext, MiddlewareStore } from '../types';
+import type {
+  Middleware,
+  MiddlewareContext,
+  MiddlewareStore,
+  SDKMessage,
+} from '../types';
 import type { TokenData } from './token-tracker';
 import type { TurnData } from './turn-counter';
 import type { CostData } from './cost-tracker';
@@ -125,7 +130,7 @@ export class SummaryPlugin implements Middleware {
   }
 
   onFinalize(
-    _resultMessage: any,
+    _resultMessage: SDKMessage,
     totalDurationMs: number,
     ctx: MiddlewareContext,
     _store: MiddlewareStore,

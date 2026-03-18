@@ -27,8 +27,14 @@ const PLUGIN_REGISTRY: Record<string, PluginFactory> = {
   contextSize: () => new ContextSizeTrackerPlugin(),
   cost: () => new CostTrackerPlugin(),
   duration: () => new DurationTrackerPlugin(),
-  summary: (opts) => new SummaryPlugin(opts.spinner!),
-  jsonWriter: (opts) => new JsonWriterPlugin(opts.outputPath!),
+  summary: (opts) => {
+    if (!opts.spinner) throw new Error('SummaryPlugin requires a spinner');
+    return new SummaryPlugin(opts.spinner);
+  },
+  jsonWriter: (opts) => {
+    if (!opts.outputPath) throw new Error('JsonWriterPlugin requires outputPath');
+    return new JsonWriterPlugin(opts.outputPath);
+  },
 };
 
 /**
