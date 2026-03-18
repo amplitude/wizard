@@ -31,7 +31,15 @@ import {
 } from './router.js';
 import { analytics, sessionProperties } from '../../utils/analytics.js';
 
-export { TaskStatus, Screen, Overlay, Flow, RunPhase, McpOutcome, SlackOutcome };
+export {
+  TaskStatus,
+  Screen,
+  Overlay,
+  Flow,
+  RunPhase,
+  McpOutcome,
+  SlackOutcome,
+};
 export type { ScreenName, OutroData, WizardSession };
 
 export interface TaskItem {
@@ -119,7 +127,7 @@ export class WizardStore {
   }
 
   get screenErrorRetry(): number {
-    return this.$screenErrorRetry.get() as number;
+    return this.$screenErrorRetry.get();
   }
 
   get requestedTab(): string | null {

@@ -49,7 +49,7 @@ function parseAtom(xml: string): SmallWebEntry[] {
     return {
       title: text((e['title'] as Record<string, unknown> | undefined)),
       url: attr((e['link'] as Record<string, unknown> | undefined), 'href'),
-      author: text((e['author'] as Record<string, unknown> | undefined)?.['name'] as unknown),
+      author: text((e['author'] as Record<string, unknown> | undefined)?.['name']),
       published: text((e['published'] as Record<string, unknown> | undefined)),
       summary: text((e['summary'] as Record<string, unknown> | undefined)),
     };

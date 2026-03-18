@@ -5,6 +5,7 @@
  * no dynamic imports in React components.
  */
 
+import { z } from 'zod';
 import {
   getSupportedClients,
   removeMCPServer,
@@ -12,6 +13,23 @@ import {
 } from '../../../steps/add-mcp-server-to-clients/index.js';
 import { ALL_FEATURE_VALUES } from '../../../steps/add-mcp-server-to-clients/defaults.js';
 import { logToFile } from '../../../utils/debug.js';
+
+const RawMCPClientSchema = z.object({
+  name: z.string(),
+  addServer: z.unknown(),
+}).refine(
+  (obj) => typeof obj.addServer === 'function',
+  { message: 'addServer must be a function' },
+);
+
+interface RawMCPClient {
+  name: string;
+  addServer(
+    apiKey: string | undefined,
+    features: string[],
+    local: boolean,
+  ): Promise<{ success: boolean } | undefined>;
+}
 
 export interface McpClientInfo {
   name: string;
@@ -48,10 +66,18 @@ export function createMcpInstaller(local = false): McpInstaller {
 
     async install(clientNames: string[]): Promise<string[]> {
       const features = [...ALL_FEATURE_VALUES];
-      const toInstall = cachedClients
-        .filter((c) => clientNames.includes(c.name))
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((c) => c.raw as any);
+      const toInstall: RawMCPClient[] = [];
+      for (const c of cachedClients) {
+        if (!clientNames.includes(c.name)) continue;
+        const parsed = RawMCPClientSchema.safeParse(c.raw);
+        if (!parsed.success) {
+          logToFile(
+            `[McpInstaller] Skipping invalid client ${c.name}: ${parsed.error.message}`,
+          );
+          continue;
+        }
+        toInstall.push(parsed.data as RawMCPClient);
+      }
 
       if (toInstall.length === 0) {
         logToFile(
@@ -67,7 +93,7 @@ export function createMcpInstaller(local = false): McpInstaller {
         try {
           const result = await client.addServer(undefined, features, local);
           if (result?.success) {
-            installed.push(client.name as string);
+            installed.push(client.name);
           } else {
             logToFile(
               `[McpInstaller] addServer returned success=false for ${client.name}`,

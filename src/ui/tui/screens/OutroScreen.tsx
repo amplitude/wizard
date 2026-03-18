@@ -142,7 +142,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               if (choice === 'dashboard') {
                 const region = store.session.region ?? 'us';
                 const url = getCloudUrlFromRegion(region);
-                opn(url, { wait: false }).catch(() => {});
+                opn(url, { wait: false }).catch(() => { /* fire-and-forget */ });
               }
               process.exit(0);
             }}

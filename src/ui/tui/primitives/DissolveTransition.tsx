@@ -67,7 +67,7 @@ export const DissolveTransition = ({
       setActiveDir(direction);
       setPhase(TransitionPhase.Out);
       setTick(0);
-      columnActivationTick.current = new Array(width).fill(-1);
+      columnActivationTick.current = new Array<number>(width).fill(-1);
     } else if (phase === TransitionPhase.Idle) {
       setDisplayChildren(children);
     }
@@ -97,7 +97,7 @@ export const DissolveTransition = ({
         setDisplayChildren(pendingChildren.current);
         setPhase(TransitionPhase.In);
         setTick(0);
-        columnActivationTick.current = new Array(width).fill(-1);
+        columnActivationTick.current = new Array<number>(width).fill(-1);
       } else {
         setPhase(TransitionPhase.Idle);
       }

@@ -55,7 +55,7 @@ function executeCommand(raw: string, store: WizardStore): void {
       const appName = region === 'eu' ? 'Amplitude - EU' : 'Amplitude';
       const open = (orgName: string | null) => {
         const url = slackSettingsUrl(base, orgName);
-        opn(url, { wait: false }).catch(() => {});
+        opn(url, { wait: false }).catch(() => { /* fire-and-forget */ });
         store.setCommandFeedback(
           `Opening Amplitude Settings → connect the "${appName}" Slack app.`,
         );

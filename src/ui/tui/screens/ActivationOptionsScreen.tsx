@@ -11,7 +11,6 @@ import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
-import { getCloudUrlFromRegion } from '../../../utils/urls.js';
 import opn from 'opn';
 
 interface ActivationOptionsScreenProps {
@@ -26,7 +25,7 @@ export const ActivationOptionsScreen = ({ store }: ActivationOptionsScreenProps)
     () => store.getSnapshot(),
   );
 
-  const { snippetConfigured, region } = store.session;
+  const { snippetConfigured } = store.session;
 
   const handleSelect = (value: string) => {
     switch (value) {
@@ -39,7 +38,7 @@ export const ActivationOptionsScreen = ({ store }: ActivationOptionsScreenProps)
         store.setActivationOptionsComplete();
         break;
       case 'docs':
-        opn(DOCS_URL, { wait: false }).catch(() => {});
+        opn(DOCS_URL, { wait: false }).catch(() => { /* fire-and-forget */ });
         // Stay on screen — don't advance
         break;
       case 'exit':

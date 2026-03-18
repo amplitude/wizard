@@ -19,8 +19,15 @@ export const COMMANDS = [
 ];
 
 /** Returns the feedback text for the /whoami command. */
-export function getWhoamiText(session: Pick<WizardSession, 'selectedOrgName' | 'selectedWorkspaceName' | 'region'>): string {
-  return `org: ${session.selectedOrgName ?? '(none)'}  workspace: ${session.selectedWorkspaceName ?? '(none)'}  region: ${session.region ?? '(none)'}`;
+export function getWhoamiText(
+  session: Pick<
+    WizardSession,
+    'selectedOrgName' | 'selectedWorkspaceName' | 'region'
+  >,
+): string {
+  return `org: ${session.selectedOrgName ?? '(none)'}  workspace: ${
+    session.selectedWorkspaceName ?? '(none)'
+  }  region: ${session.region ?? '(none)'}`;
 }
 
 /** Returns the feedback text for the /help command. */

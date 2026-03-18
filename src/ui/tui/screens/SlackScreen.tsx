@@ -77,7 +77,7 @@ export const SlackScreen = ({
   // Fetch org name from the API if it wasn't populated during the SUSI flow
   // (e.g. returning users, or the standalone `slack` command).
   useEffect(() => {
-    logToFile(`[SlackScreen] selectedOrgName=${store.session.selectedOrgName} credentials=${store.session.credentials ? 'present' : 'null'} region=${region}`);
+    logToFile(`[SlackScreen] selectedOrgName=${store.session.selectedOrgName ?? ''} credentials=${store.session.credentials ? 'present' : 'null'} region=${region}`);
     if (resolvedOrgName) {
       logToFile(`[SlackScreen] using existing orgName=${resolvedOrgName}`);
       return;
@@ -106,7 +106,7 @@ export const SlackScreen = ({
 
   const handleConnect = () => {
     setPhase(Phase.Opening);
-    opn(settingsUrl, { wait: false }).catch(() => {});
+    opn(settingsUrl, { wait: false }).catch(() => { /* fire-and-forget */ });
     setTimeout(() => setPhase(Phase.Waiting), 800);
   };
 
