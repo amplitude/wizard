@@ -79,9 +79,7 @@ const mockDetectRegion = detectRegionFromToken as MockedFunction<
   typeof detectRegionFromToken
 >;
 const mockStoreToken = storeToken as MockedFunction<typeof storeToken>;
-const mockSelect = inquirer.select as MockedFunction<
-  typeof inquirer.select
->;
+const mockSelect = inquirer.select as MockedFunction<typeof inquirer.select>;
 const mockInput = inquirer.input as MockedFunction<typeof inquirer.input>;
 
 const AUTH_RESULT = {

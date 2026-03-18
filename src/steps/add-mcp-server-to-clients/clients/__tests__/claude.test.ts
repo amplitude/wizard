@@ -51,7 +51,9 @@ describe('ClaudeMCPClient', () => {
     getDefaultServerConfigMock.mockReturnValue(mockServerConfig);
 
     // Mock the Zod schema parse method
-    vi.mocked(DefaultMCPClientConfig.parse).mockImplementation((data) => data as ReturnType<typeof DefaultMCPClientConfig.parse>);
+    vi.mocked(DefaultMCPClientConfig.parse).mockImplementation(
+      (data) => data as ReturnType<typeof DefaultMCPClientConfig.parse>,
+    );
   });
 
   afterEach(() => {

@@ -535,13 +535,11 @@ describe('health-checks', () => {
       const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
       expect(result.degradedOrDownComponents).toHaveLength(1);
-      expect(result.degradedOrDownComponents![0].name).toBe('US Cloud');
-      expect(result.degradedOrDownComponents![0].rawStatus).toBe(
-        'partial_outage',
-      );
-      expect(result.degradedOrDownComponents![0].status).toBe(
-        ServiceHealthStatus.Down,
-      );
+      const comp = result.degradedOrDownComponents?.[0];
+      expect(comp).toBeDefined();
+      expect(comp?.name).toBe('US Cloud');
+      expect(comp?.rawStatus).toBe('partial_outage');
+      expect(comp?.status).toBe(ServiceHealthStatus.Down);
     });
 
     it('reports degraded when a component has degraded_performance', async () => {
@@ -578,12 +576,10 @@ describe('health-checks', () => {
       );
       const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
-      expect(result.degradedOrDownComponents![0].rawStatus).toBe(
-        'degraded_performance',
-      );
-      expect(result.degradedOrDownComponents![0].status).toBe(
-        ServiceHealthStatus.Degraded,
-      );
+      const comp = result.degradedOrDownComponents?.[0];
+      expect(comp).toBeDefined();
+      expect(comp?.rawStatus).toBe('degraded_performance');
+      expect(comp?.status).toBe(ServiceHealthStatus.Degraded);
     });
 
     it('reports degraded when a component has major_outage', async () => {
@@ -621,9 +617,9 @@ describe('health-checks', () => {
       const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
       expect(result.degradedOrDownComponents).toHaveLength(2);
-      expect(result.degradedOrDownComponents![0].status).toBe(
-        ServiceHealthStatus.Down,
-      );
+      const comp = result.degradedOrDownComponents?.[0];
+      expect(comp).toBeDefined();
+      expect(comp?.status).toBe(ServiceHealthStatus.Down);
     });
 
     it('handles under_maintenance as degraded', async () => {
@@ -653,9 +649,9 @@ describe('health-checks', () => {
       );
       const result = await checkAmplitudeComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
-      expect(result.degradedOrDownComponents![0].status).toBe(
-        ServiceHealthStatus.Degraded,
-      );
+      const comp = result.degradedOrDownComponents?.[0];
+      expect(comp).toBeDefined();
+      expect(comp?.status).toBe(ServiceHealthStatus.Degraded);
     });
   });
 
@@ -699,9 +695,9 @@ describe('health-checks', () => {
       );
       const result = await checkNpmComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
-      expect(result.degradedOrDownComponents![0].name).toBe(
-        'Package installation',
-      );
+      const comp = result.degradedOrDownComponents?.[0];
+      expect(comp).toBeDefined();
+      expect(comp?.name).toBe('Package installation');
     });
   });
 
@@ -866,9 +862,8 @@ describe('health-checks', () => {
 
     it('fires all 10 fetch calls in parallel', async () => {
       await checkAllExternalServices();
-      const calledUrls = (global.fetch as Mock).mock.calls.map(
-        (c: unknown[]) =>
-          typeof c[0] === 'string' ? c[0] : (c[0] as URL).toString(),
+      const calledUrls = (global.fetch as Mock).mock.calls.map((c: unknown[]) =>
+        typeof c[0] === 'string' ? c[0] : (c[0] as URL).toString(),
       );
       expect(calledUrls).toHaveLength(10);
       expect(calledUrls).toContain(URLS.llmGatewayLiveness);

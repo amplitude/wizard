@@ -29,15 +29,6 @@ const MOCK_ORG_MULTI_WS = {
 };
 const MOCK_ORG_2 = { id: 'org-2', name: 'Beta Corp', workspaces: [{ id: 'ws-3', name: 'Main' }] };
 
-function mockCredentials(): WizardSession['credentials'] {
-  return {
-    accessToken: 'id-token-abc',
-    projectApiKey: 'api-key-xyz',
-    host: 'https://api.amplitude.com',
-    projectId: 0,
-  };
-}
-
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Before(function () {

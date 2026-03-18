@@ -13,17 +13,11 @@ import {
   type CloudRegion,
   type WizardSession,
 } from '../../src/lib/wizard-session.js';
-import {
-  storeToken,
-  type StoredUser,
-  type StoredOAuthToken,
-} from '../../src/utils/ampli-settings.js';
 import { ctx } from './wizard-flow-context.js';
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
 let tempDir: string;
-let tempConfigPath: string;
 
 // Convenience aliases — these shadow ctx.router and ctx.session within this file
 // but mutations are reflected in ctx since objects are passed by reference.
@@ -32,19 +26,6 @@ let router: WizardRouter;
 let session: WizardSession;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
-function makeFutureExpiry(daysAhead = 30): string {
-  return new Date(Date.now() + daysAhead * 24 * 60 * 60 * 1000).toISOString();
-}
-
-function makeValidToken(): StoredOAuthToken {
-  return {
-    accessToken: 'access-abc',
-    idToken: 'id-abc',
-    refreshToken: 'refresh-abc',
-    expiresAt: makeFutureExpiry(),
-  };
-}
 
 function mockCredentials(): WizardSession['credentials'] {
   return {
@@ -59,7 +40,6 @@ function mockCredentials(): WizardSession['credentials'] {
 
 Before(function () {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-wizard-flow-test-'));
-  tempConfigPath = path.join(tempDir, 'ampli.json');
   router = new WizardRouter(Flow.Wizard);
   session = buildSession({});
   // Expose via World so wizard-overlays.steps.ts can access the same instances

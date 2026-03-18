@@ -14,7 +14,6 @@ vi.mock('../../../../utils/analytics', () => ({
 }));
 
 describe('CodexMCPClient', () => {
-
   const spawnSyncMock = spawnSync as Mock;
   const execSyncMock = execSync as Mock;
 

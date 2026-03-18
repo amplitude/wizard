@@ -4,13 +4,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
-  parseAmpliConfig,
   readAmpliConfig,
   writeAmpliConfig,
   isConfigured,
   isMinimallyConfigured,
   mergeAmpliConfig,
-  ampliConfigExists,
   type AmpliConfig,
   type AmpliConfigParseResult,
 } from '../../src/lib/ampli-config.js';
@@ -20,7 +18,6 @@ import {
 let projectDir: string;
 let lastResult: AmpliConfigParseResult | null;
 let currentConfig: AmpliConfig | null;
-let warnings: string[];
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -28,7 +25,6 @@ Before(function () {
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-wizard-test-'));
   lastResult = null;
   currentConfig = null;
-  warnings = [];
 });
 
 After(function () {

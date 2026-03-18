@@ -4,7 +4,9 @@ import * as ChildProcess from 'node:child_process';
 import type { PackageManager } from '../package-manager';
 
 vi.mock('node:child_process', async () => {
-  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  const actual = await vi.importActual<typeof import('node:child_process')>(
+    'node:child_process',
+  );
   return { __esModule: true, ...actual };
 });
 
@@ -55,7 +57,7 @@ describe.skip('installPackage', () => {
       addOverride: vi.fn(),
     };
 
-    const execSpy = jest
+    const execSpy = vi
       .spyOn(ChildProcess, 'exec')
       // @ts-expect-error - don't care about the return value
       .mockImplementationOnce((cmd, cb) => {
@@ -95,7 +97,7 @@ describe.skip('installPackage', () => {
         addOverride: vi.fn(),
       };
 
-      const execSpy = jest
+      const execSpy = vi
         .spyOn(ChildProcess, 'exec')
         // @ts-expect-error - don't care about the return value
         .mockImplementationOnce((cmd, cb) => {

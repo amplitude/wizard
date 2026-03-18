@@ -52,6 +52,7 @@ vi.mock('../ui', () => ({
     showServiceStatus: vi.fn(),
     showSettingsOverride: vi.fn(),
     startRun: vi.fn(),
+    setRunError: vi.fn(),
   }),
   setUI: vi.fn(),
 }));
@@ -59,7 +60,7 @@ vi.mock('../ui', () => ({
 const mockRunAgentWizard = runAgentWizard as MockedFunction<
   typeof runAgentWizard
 >;
-const mockAnalytics = analytics as jest.Mocked<typeof analytics>;
+const mockAnalytics = analytics as vi.Mocked<typeof analytics>;
 
 describe('runWizard error handling', () => {
   beforeEach(() => {

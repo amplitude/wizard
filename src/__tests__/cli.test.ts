@@ -171,7 +171,13 @@ describe('CI mode validation', () => {
   });
 
   test('passes --api-key to runWizard in CI mode', async () => {
-    await runCLI(['--ci', '--api-key', 'phx_test_key', '--install-dir', '/tmp/test']);
+    await runCLI([
+      '--ci',
+      '--api-key',
+      'phx_test_key',
+      '--install-dir',
+      '/tmp/test',
+    ]);
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ apiKey: 'phx_test_key' }),
     );
@@ -318,7 +324,10 @@ describe('Feature discovery', () => {
     vi.resetModules();
   });
 
-  function writePkgJson(deps: Record<string, string>, devDeps?: Record<string, string>) {
+  function writePkgJson(
+    deps: Record<string, string>,
+    devDeps?: Record<string, string>,
+  ) {
     fs.writeFileSync(
       path.join(tmpDir, 'package.json'),
       JSON.stringify({ dependencies: deps, devDependencies: devDeps ?? {} }),
@@ -396,7 +405,9 @@ describe('Feature discovery', () => {
 describe('login command', () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
-  const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  const consoleSpy = vi
+    .spyOn(console, 'log')
+    .mockImplementation(() => undefined);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -434,7 +445,9 @@ describe('login command', () => {
     });
 
     await runCLI(['login']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     // "Already logged in" should be the first console.log call
     expect(consoleSpy.mock.calls[0]?.[0]).toMatch(/Already logged in/);
@@ -446,7 +459,9 @@ describe('login command', () => {
     mockGetStoredUser.mockReturnValue(undefined);
 
     await runCLI(['login']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     expect(mockPerformAmplitudeAuth).toHaveBeenCalled();
     expect(process.exit).toHaveBeenCalledWith(0);
@@ -456,7 +471,9 @@ describe('login command', () => {
     mockGetStoredToken.mockReturnValue(null);
 
     await runCLI(['login']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/Logged in as/);
@@ -464,12 +481,16 @@ describe('login command', () => {
   });
 
   test('exits with code 1 when OAuth fails', async () => {
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const errorSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     mockGetStoredToken.mockReturnValue(null);
     mockPerformAmplitudeAuth.mockRejectedValue(new Error('network error'));
 
     await runCLI(['login']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     expect(process.exit).toHaveBeenCalledWith(1);
     errorSpy.mockRestore();
@@ -481,7 +502,9 @@ describe('login command', () => {
 describe('logout command', () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
-  const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  const consoleSpy = vi
+    .spyOn(console, 'log')
+    .mockImplementation(() => undefined);
   let tmpHome: string;
 
   beforeEach(() => {
@@ -503,20 +526,28 @@ describe('logout command', () => {
     mockGetStoredUser.mockReturnValue({ email: 'jane@example.com' });
 
     await runCLI(['logout']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     expect(process.exit).toHaveBeenCalledWith(0);
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('jane@example.com'));
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('jane@example.com'),
+    );
   });
 
   test('prints no-session message when not logged in', async () => {
     mockGetStoredUser.mockReturnValue(null);
 
     await runCLI(['logout']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     expect(process.exit).toHaveBeenCalledWith(0);
-    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('No active session'));
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('No active session'),
+    );
   });
 });
 
@@ -525,7 +556,9 @@ describe('logout command', () => {
 describe('whoami command', () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
-  const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+  const consoleSpy = vi
+    .spyOn(console, 'log')
+    .mockImplementation(() => undefined);
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -550,7 +583,9 @@ describe('whoami command', () => {
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
     await runCLI(['whoami']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/Jane Doe/);
@@ -563,7 +598,9 @@ describe('whoami command', () => {
     mockGetStoredToken.mockReturnValue(null);
 
     await runCLI(['whoami']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/Not logged in/);
@@ -581,7 +618,9 @@ describe('whoami command', () => {
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
     await runCLI(['whoami']);
-    await waitFor(() => (process.exit as unknown as Mock).mock.calls.length > 0);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/eu/);

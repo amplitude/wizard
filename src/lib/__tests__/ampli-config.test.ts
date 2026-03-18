@@ -99,7 +99,9 @@ describe('isMinimallyConfigured', () => {
   });
 
   it('returns false when SourceId is absent', () => {
-    expect(isMinimallyConfigured({ OrgId: '123', WorkspaceId: 'xyz' })).toBe(false);
+    expect(isMinimallyConfigured({ OrgId: '123', WorkspaceId: 'xyz' })).toBe(
+      false,
+    );
   });
 
   it('returns false for empty config', () => {
@@ -145,7 +147,10 @@ describe('mergeAmpliConfig', () => {
       WorkspaceId: '2',
       Branch: 'main',
     };
-    const result = mergeAmpliConfig(existing, { SourceId: 'new-source', Branch: 'develop' });
+    const result = mergeAmpliConfig(existing, {
+      SourceId: 'new-source',
+      Branch: 'develop',
+    });
     expect(result).toEqual({
       OrgId: '1',
       WorkspaceId: '2',
@@ -162,7 +167,10 @@ describe('mergeAmpliConfig', () => {
 
   it('ignores undefined values in updates', () => {
     const existing: AmpliConfig = { OrgId: '1', Branch: 'main' };
-    const result = mergeAmpliConfig(existing, { OrgId: undefined, Branch: 'develop' });
+    const result = mergeAmpliConfig(existing, {
+      OrgId: undefined,
+      Branch: 'develop',
+    });
     expect(result.OrgId).toBe('1');
     expect(result.Branch).toBe('develop');
   });

@@ -70,7 +70,6 @@ function makeUserEntry(
   };
 }
 
-
 // ── getStoredUser ──────────────────────────────────────────────────────────
 
 describe('getStoredUser', () => {
