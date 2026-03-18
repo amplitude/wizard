@@ -11,6 +11,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { z } from 'zod';
 import {
   type AmplitudeZone,
   DEFAULT_AMPLITUDE_ZONE,
@@ -33,10 +34,13 @@ export interface StoredUser {
   zone: AmplitudeZone;
 }
 
+const AmpliSettingsFileSchema = z.record(z.unknown());
+
 function readConfig(configPath = AMPLI_CONFIG_PATH): Record<string, unknown> {
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
-    return JSON.parse(raw) as Record<string, unknown>;
+    const result = AmpliSettingsFileSchema.safeParse(JSON.parse(raw));
+    return result.success ? result.data : {};
   } catch {
     return {};
   }
@@ -56,13 +60,28 @@ function userKey(userId: string, zone: AmplitudeZone): string {
     : `User-${safeId}`;
 }
 
+const StoredUserSchema = z.object({
+  id: z.string(),
+  firstName: z.string(),
+  lastName: z.string(),
+  email: z.string(),
+  zone: z.string(),
+});
+
+const UserEntrySchema = z
+  .object({
+    User: StoredUserSchema.optional(),
+  })
+  .passthrough();
+
 /** Returns the first stored user, or undefined if none. */
 export function getStoredUser(configPath?: string): StoredUser | undefined {
   const config = readConfig(configPath);
   for (const [key, value] of Object.entries(config)) {
     if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
-    const entry = value as Record<string, unknown>;
-    if (entry.User) return entry.User as StoredUser;
+    const entry = UserEntrySchema.safeParse(value);
+    if (entry.success && entry.data.User)
+      return entry.data.User as StoredUser;
   }
   return undefined;
 }
@@ -75,33 +94,29 @@ export function getStoredToken(
 ): StoredOAuthToken | undefined {
   const config = readConfig(configPath);
 
+  const OAuthEntrySchema = z
+    .object({
+      OAuthAccessToken: z.string(),
+      OAuthIdToken: z.string(),
+      OAuthRefreshToken: z.string(),
+      OAuthExpiresAt: z.string(),
+    })
+    .passthrough();
+
   const findToken = (key: string): StoredOAuthToken | undefined => {
-    const entry = config[key] as Record<string, string> | undefined;
-    if (!entry) return undefined;
-    const {
-      OAuthAccessToken,
-      OAuthIdToken,
-      OAuthRefreshToken,
-      OAuthExpiresAt,
-    } = entry;
-    if (
-      !OAuthAccessToken ||
-      !OAuthIdToken ||
-      !OAuthRefreshToken ||
-      !OAuthExpiresAt
-    )
-      return undefined;
-    // Check if refresh token is still valid (refresh TTL = 365 days from access expiry)
-    const expiresAt = new Date(OAuthExpiresAt);
+    const parsed = OAuthEntrySchema.safeParse(config[key]);
+    if (!parsed.success) return undefined;
+    const entry = parsed.data;
+    const expiresAt = new Date(entry.OAuthExpiresAt);
     const refreshExpiry = new Date(
       expiresAt.getTime() + 364 * 24 * 60 * 60 * 1000,
     );
     if (new Date() > refreshExpiry) return undefined;
     return {
-      accessToken: OAuthAccessToken,
-      idToken: OAuthIdToken,
-      refreshToken: OAuthRefreshToken,
-      expiresAt: OAuthExpiresAt,
+      accessToken: entry.OAuthAccessToken,
+      idToken: entry.OAuthIdToken,
+      refreshToken: entry.OAuthRefreshToken,
+      expiresAt: entry.OAuthExpiresAt,
     };
   };
 
@@ -141,4 +156,3 @@ export function storeToken(
 export function clearStoredCredentials(configPath?: string): void {
   writeConfig({}, configPath);
 }
-

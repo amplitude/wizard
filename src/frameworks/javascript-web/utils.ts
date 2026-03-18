@@ -1,5 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { z } from 'zod';
 import { detectAllPackageManagers } from '../../utils/package-manager';
 import type { WizardOptions } from '../../utils/types';
 
@@ -65,7 +66,13 @@ export function detectBundler(
       path.join(options.installDir, 'package.json'),
       'utf-8',
     );
-    const pkg = JSON.parse(content);
+    const pkg = z
+      .object({
+        dependencies: z.record(z.string()).optional(),
+        devDependencies: z.record(z.string()).optional(),
+      })
+      .passthrough()
+      .parse(JSON.parse(content));
     const allDeps: Record<string, string> = {
       ...pkg.dependencies,
       ...pkg.devDependencies,

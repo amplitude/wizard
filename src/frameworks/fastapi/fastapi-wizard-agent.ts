@@ -12,6 +12,11 @@ import {
   FastAPIProjectType,
   findFastAPIAppFile,
 } from './utils';
+
+interface FastAPIContext extends Record<string, unknown> {
+  projectType?: FastAPIProjectType;
+  appFile?: string;
+}
 import fg from 'fast-glob';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -20,7 +25,7 @@ import * as path from 'node:path';
  * FastAPI framework configuration for the universal agent runner
  */
 
-export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
+export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   metadata: {
     name: 'FastAPI',
     integration: Integration.fastapi,
@@ -38,7 +43,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
     packageName: 'fastapi',
     packageDisplayName: 'FastAPI',
     usesPackageJson: false,
-    getVersion: (_packageJson: any) => {
+    getVersion: (_packageJson: unknown) => {
       // For FastAPI, we don't use package.json. Version is extracted separately
       // from requirements.txt or pyproject.toml in the wizard entry point
       return undefined;
@@ -130,8 +135,8 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
   },
 
   analytics: {
-    getTags: (context: any) => {
-      const projectType = context.projectType as FastAPIProjectType;
+    getTags: (context: FastAPIContext) => {
+      const projectType = context.projectType;
       return {
         projectType: projectType || 'unknown',
       };
@@ -142,8 +147,8 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
     packageInstallation: PYTHON_PACKAGE_INSTALLATION,
     projectTypeDetection:
       'This is a Python/FastAPI project. Look for requirements.txt, pyproject.toml, setup.py, Pipfile, or main.py/app.py to confirm.',
-    getAdditionalContextLines: (context: any) => {
-      const projectType = context.projectType as FastAPIProjectType;
+    getAdditionalContextLines: (context: FastAPIContext) => {
+      const projectType = context.projectType;
       const projectTypeName = projectType
         ? getFastAPIProjectTypeName(projectType)
         : 'unknown';
@@ -163,7 +168,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
       ];
 
       if (context.appFile) {
-        lines.push(`App file: ${context.appFile}`);
+        lines.push(`App file: ${String(context.appFile)}`);
       }
 
       return lines;
@@ -173,8 +178,8 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig = {
   ui: {
     successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
-    getOutroChanges: (context: any) => {
-      const projectType = context.projectType as FastAPIProjectType;
+    getOutroChanges: (context: FastAPIContext) => {
+      const projectType = context.projectType;
       const projectTypeName = projectType
         ? getFastAPIProjectTypeName(projectType)
         : 'FastAPI';

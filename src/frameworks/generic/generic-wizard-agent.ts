@@ -16,7 +16,7 @@ export const GENERIC_AGENT_CONFIG: FrameworkConfig = {
     usesPackageJson: false,
     getVersion: () => undefined,
     detectPackageManager: detectNodePackageManagers,
-    detect: async () => false,
+    detect: () => Promise.resolve(false),
   },
 
   environment: {
@@ -117,7 +117,11 @@ When using the Amplitude Browser SDK (whether via CDN <script> tag or npm packag
    In netlify.toml:
      [[redirects]]
        from = "/amplitude-api/*"
-       to = "${host.includes('eu.') ? 'https://api.eu.amplitude.com' : 'https://api2.amplitude.com'}/:splat"
+       to = "${
+         host.includes('eu.')
+           ? 'https://api.eu.amplitude.com'
+           : 'https://api2.amplitude.com'
+       }/:splat"
        status = 200
        force = true
      [[headers]]

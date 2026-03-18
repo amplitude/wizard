@@ -113,7 +113,8 @@ export async function runWizard(argv: Args, session?: WizardSession) {
       await runAgentWizard(config, session);
       retry = false;
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       const errorStack =
         error instanceof Error && error.stack ? error.stack : undefined;
 

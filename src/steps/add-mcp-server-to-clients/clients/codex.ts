@@ -47,7 +47,10 @@ export class CodexMCPClient extends DefaultMCPClient {
         return Promise.resolve(false);
       }
 
-      const servers = JSON.parse(stdout) as Array<{ name: string }>;
+      const CodexServerListSchema = z.array(
+        z.object({ name: z.string() }).passthrough(),
+      );
+      const servers = CodexServerListSchema.parse(JSON.parse(stdout));
       return Promise.resolve(
         servers.some((server) => server.name === serverName),
       );

@@ -1,7 +1,10 @@
-// TODO: Replace with Amplitude analytics. Amplitude telemetry has been stubbed out.
 import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
+
+const AMPLITUDE_API_KEY = process.env.AMPLITUDE_API_KEY ?? '';
+const AMPLITUDE_SERVER_URL =
+  process.env.AMPLITUDE_SERVER_URL ?? 'https://api2.amplitude.com';
 
 /**
  * Extract a standard property bag from the current session.
@@ -21,6 +24,15 @@ export function sessionProperties(
   };
 }
 
+interface AmplitudeEvent {
+  event_type: string;
+  user_id?: string;
+  device_id: string;
+  event_properties?: Record<string, unknown>;
+  user_properties?: Record<string, unknown>;
+  time: number;
+}
+
 export class Analytics {
   private tags: Record<string, string | boolean | number | null | undefined> =
     {};
@@ -28,6 +40,8 @@ export class Analytics {
   private anonymousId: string;
   private appName = 'wizard';
   private activeFlags: Record<string, string> | null = null;
+  private pendingEvents: AmplitudeEvent[] = [];
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     this.tags = { $app_name: this.appName };
@@ -44,13 +58,43 @@ export class Analytics {
   }
 
   captureException(error: Error, properties: Record<string, unknown> = {}) {
-    // TODO: Replace with Amplitude error tracking
-    debug('captureException (noop):', error.message, properties);
+    this.capture('$error', {
+      ...properties,
+      error_message: error.message,
+      error_name: error.name,
+    });
   }
 
   capture(eventName: string, properties?: Record<string, unknown>) {
-    // TODO: Replace with Amplitude event tracking
-    debug('capture (noop):', eventName, properties);
+    if (!AMPLITUDE_API_KEY) {
+      debug('capture (no API key):', eventName, properties);
+      return;
+    }
+
+    const event: AmplitudeEvent = {
+      event_type: eventName,
+      device_id: this.anonymousId,
+      time: Date.now(),
+      event_properties: {
+        ...this.tags,
+        ...properties,
+      },
+    };
+
+    if (this.distinctId) {
+      event.user_id = this.distinctId;
+    }
+
+    this.pendingEvents.push(event);
+    debug('capture:', eventName, properties);
+
+    // Debounce flush to batch events
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+    }
+    this.flushTimer = setTimeout(() => {
+      void this.flush();
+    }, 500);
   }
 
   /**
@@ -61,9 +105,33 @@ export class Analytics {
     this.capture(`wizard: ${eventName}`, properties);
   }
 
+  private async flush(): Promise<void> {
+    if (this.pendingEvents.length === 0) return;
+    if (!AMPLITUDE_API_KEY) return;
+
+    const events = [...this.pendingEvents];
+    this.pendingEvents = [];
+
+    try {
+      const response = await fetch(`${AMPLITUDE_SERVER_URL}/2/httpapi`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: AMPLITUDE_API_KEY, events }),
+      });
+      if (!response.ok) {
+        debug(
+          'Amplitude upload failed:',
+          response.status,
+          await response.text(),
+        );
+      }
+    } catch (err) {
+      debug('Amplitude upload error:', err);
+    }
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await
   async getFeatureFlag(flagKey: string): Promise<string | boolean | undefined> {
-    // TODO: Replace with Amplitude feature flag evaluation
     debug('getFeatureFlag (noop):', flagKey);
     return undefined;
   }
@@ -75,7 +143,6 @@ export class Analytics {
    */
   // eslint-disable-next-line @typescript-eslint/require-await
   async getAllFlagsForWizard(): Promise<Record<string, string>> {
-    // TODO: Replace with Amplitude feature flags
     if (this.activeFlags !== null) {
       return this.activeFlags;
     }
@@ -83,10 +150,13 @@ export class Analytics {
     return this.activeFlags;
   }
 
-  // eslint-disable-next-line @typescript-eslint/require-await
   async shutdown(status: 'success' | 'error' | 'cancelled') {
-    // TODO: Replace with Amplitude shutdown/flush
-    debug('shutdown (noop):', status);
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+    this.capture('wizard: session ended', { status });
+    await this.flush();
   }
 }
 

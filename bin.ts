@@ -9,16 +9,25 @@ import { hideBin } from 'yargs/helpers';
 import chalk from 'chalk';
 
 import { readFileSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, join } from 'path';
+import { z } from 'zod';
 
-const WIZARD_VERSION = (() => {
+const WIZARD_VERSION: string = (() => {
   // npm/pnpm set this when running via package scripts
   if (process.env.npm_package_version) return process.env.npm_package_version;
   // Fallback: read package.json relative to this file
   try {
-    const pkg = JSON.parse(
-      readFileSync(resolve(dirname(__filename), '..', 'package.json'), 'utf-8'),
-    );
+    const pkg = z
+      .object({ version: z.string().optional() })
+      .passthrough()
+      .parse(
+        JSON.parse(
+          readFileSync(
+            resolve(dirname(__filename), '..', 'package.json'),
+            'utf-8',
+          ),
+        ),
+      );
     return pkg.version ?? 'unknown';
   } catch {
     return 'unknown';
@@ -400,10 +409,7 @@ yargs(hideBin(process.argv))
               // Feature discovery — deterministic scan of package.json deps
               try {
                 const { readFileSync } = await import('fs');
-                const pkgPath = require('path').join(
-                  installDir,
-                  'package.json',
-                );
+                const pkgPath = join(installDir, 'package.json');
                 const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
                   dependencies?: Record<string, string>;
                   devDependencies?: Record<string, string>;
@@ -665,7 +671,7 @@ yargs(hideBin(process.argv))
           }
 
           // Pass the pre-populated session so it's available before the first render.
-          startTUI(WIZARD_VERSION as string, Flow.SlackSetup, session);
+          startTUI(WIZARD_VERSION, Flow.SlackSetup, session);
         } catch {
           setUI(new LoggingUI());
           const { getCloudUrlFromRegion } = await import('./src/utils/urls.js');

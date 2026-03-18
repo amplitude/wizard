@@ -1,9 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as jsonc from 'jsonc-parser';
+import { z } from 'zod';
 import { getDefaultServerConfig } from './defaults';
 
 export type MCPServerConfig = Record<string, unknown>;
+
+const MCPConfigSchema = z.record(
+  z.string(),
+  z.record(z.string(), z.unknown()),
+);
 
 export abstract class MCPClient {
   name: string;
@@ -48,7 +54,8 @@ export abstract class DefaultMCPClient extends MCPClient {
       }
 
       const configContent = await fs.promises.readFile(configPath, 'utf8');
-      const config = jsonc.parse(configContent) as Record<string, any>;
+      const parsed = MCPConfigSchema.safeParse(jsonc.parse(configContent));
+      const config = parsed.success ? parsed.data : {};
       const serverPropertyName = this.getServerPropertyName();
       const serverName = local ? 'amplitude-local' : 'amplitude';
 
@@ -82,11 +89,12 @@ export abstract class DefaultMCPClient extends MCPClient {
 
       const serverPropertyName = this.getServerPropertyName();
       let configContent = '';
-      let existingConfig = {};
+      let existingConfig: Record<string, Record<string, unknown>> = {};
 
       if (fs.existsSync(configPath)) {
         configContent = await fs.promises.readFile(configPath, 'utf8');
-        existingConfig = jsonc.parse(configContent) || {};
+        const parsed = MCPConfigSchema.safeParse(jsonc.parse(configContent));
+        existingConfig = parsed.success ? parsed.data : {};
       }
 
       const newServerConfig = this.getServerConfig(
@@ -95,12 +103,11 @@ export abstract class DefaultMCPClient extends MCPClient {
         selectedFeatures,
         local,
       );
-      const typedConfig = existingConfig as Record<string, any>;
-      if (!typedConfig[serverPropertyName]) {
-        typedConfig[serverPropertyName] = {};
+      if (!existingConfig[serverPropertyName]) {
+        existingConfig[serverPropertyName] = {};
       }
       const serverName = local ? 'amplitude-local' : 'amplitude';
-      typedConfig[serverPropertyName][serverName] = newServerConfig;
+      existingConfig[serverPropertyName][serverName] = newServerConfig;
 
       const edits = jsonc.modify(
         configContent,
@@ -133,7 +140,8 @@ export abstract class DefaultMCPClient extends MCPClient {
       }
 
       const configContent = await fs.promises.readFile(configPath, 'utf8');
-      const config = jsonc.parse(configContent) as Record<string, any>;
+      const parsed = MCPConfigSchema.safeParse(jsonc.parse(configContent));
+      const config = parsed.success ? parsed.data : {};
       const serverPropertyName = this.getServerPropertyName();
 
       const serverName = local ? 'amplitude-local' : 'amplitude';

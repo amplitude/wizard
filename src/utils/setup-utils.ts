@@ -384,7 +384,7 @@ async function askForWizardLogin(
   } = {},
 ): Promise<ProjectData> {
   // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
-  let auth = await performAmplitudeAuth({
+  const auth = await performAmplitudeAuth({
     zone: DEFAULT_AMPLITUDE_ZONE,
     forceFresh: opts.forceFresh,
   });

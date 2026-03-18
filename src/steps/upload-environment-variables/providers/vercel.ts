@@ -90,7 +90,7 @@ export class VercelEnvironmentProvider extends EnvironmentProvider {
       });
 
       let stderr = '';
-      proc.stderr.on('data', (data) => {
+      proc.stderr.on('data', (data: Buffer) => {
         stderr += data.toString();
       });
 
