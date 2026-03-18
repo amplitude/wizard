@@ -19,7 +19,8 @@ let session: WizardSession;
 Before(function () {
   router = new WizardRouter(Flow.Wizard);
   session = buildSession({});
-  // Advance past auth, region, data setup, intro, setup, run, mcp
+  // Advance past intro, auth, region, data setup, setup, run, mcp
+  session.introConcluded = true;
   session.credentials = {
     accessToken: 'tok',
     projectApiKey: 'key',

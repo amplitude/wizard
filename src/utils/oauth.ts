@@ -138,7 +138,13 @@ async function startCallbackServer(): Promise<{
           'Content-Type': 'text/html; charset=utf-8',
         });
         res.end(
-          `<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Amplitude</title>${OAUTH_CALLBACK_STYLES}</head><body><div class="card"><div class="logo">${AMPLITUDE_WORDMARK_SVG}</div><div class="icon icon-error">✕</div><h1>${cancelled ? 'Sign-in cancelled' : 'Sign-in failed'}</h1><p>${cancelled ? 'You cancelled the sign-in.' : 'Something went wrong during sign-in.'} You can close this tab and return to your terminal.</p></div><script>window.close();</script></body></html>`,
+          `<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Amplitude</title>${OAUTH_CALLBACK_STYLES}</head><body><div class="card"><div class="logo">${AMPLITUDE_WORDMARK_SVG}</div><div class="icon icon-error">✕</div><h1>${
+            cancelled ? 'Sign-in cancelled' : 'Sign-in failed'
+          }</h1><p>${
+            cancelled
+              ? 'You cancelled the sign-in.'
+              : 'Something went wrong during sign-in.'
+          } You can close this tab and return to your terminal.</p></div><script>window.close();</script></body></html>`,
         );
         callbackReject(new Error(`OAuth error: ${error}`));
         return;

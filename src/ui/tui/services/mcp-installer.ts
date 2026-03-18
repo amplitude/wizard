@@ -14,13 +14,14 @@ import {
 import { ALL_FEATURE_VALUES } from '../../../steps/add-mcp-server-to-clients/defaults.js';
 import { logToFile } from '../../../utils/debug.js';
 
-const RawMCPClientSchema = z.object({
-  name: z.string(),
-  addServer: z.unknown(),
-}).refine(
-  (obj) => typeof obj.addServer === 'function',
-  { message: 'addServer must be a function' },
-);
+const RawMCPClientSchema = z
+  .object({
+    name: z.string(),
+    addServer: z.unknown(),
+  })
+  .refine((obj) => typeof obj.addServer === 'function', {
+    message: 'addServer must be a function',
+  });
 
 interface RawMCPClient {
   name: string;

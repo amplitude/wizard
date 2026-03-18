@@ -9,8 +9,8 @@ const LOGO_LINES = [
   '╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═════╝ ╚══════╝',
 ];
 
-const AMP_BLUE = '#1E61F0';
-const AMP_CYAN = '#00D4AA';
+export const AMP_BLUE = '#1E61F0';
+export const AMP_CYAN = '#00D4AA';
 
 function lerpColor(a: string, b: string, t: number): string {
   const ar = parseInt(a.slice(1, 3), 16),

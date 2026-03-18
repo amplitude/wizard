@@ -16,7 +16,7 @@ import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
-import { AmplitudeLogo } from '../components/AmplitudeLogo.js';
+import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 
 interface IntroScreenProps {
   store: WizardStore;
@@ -62,7 +62,9 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       justifyContent="center"
     >
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        <AmplitudeLogo />
+        <Box flexDirection="row" gap={2} alignItems="center">
+          <AmplitudeTextLogo />
+        </Box>
         <Box marginBottom={1}></Box>
         <Text bold>
           {detecting ? 'Amplitude Wizard starting up' : 'Amplitude Wizard'}
@@ -142,7 +144,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                   setPickingFramework(true);
                   setManuallySelected(true);
                 } else {
-                  store.completeSetup();
+                  store.concludeIntro();
                 }
               }}
             />

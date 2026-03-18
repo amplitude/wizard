@@ -22,8 +22,9 @@ function mockCredentials(): WizardSession['credentials'] {
   };
 }
 
-/** Advance past region + auth so the flow reaches DataSetup. */
+/** Advance past intro + region + auth so the flow reaches DataSetup. */
 function advancePastAuth(s: WizardSession): void {
+  s.introConcluded = true;
   s.credentials = mockCredentials();
   s.region = 'us';
   s.selectedOrgId = 'org-1';
@@ -139,13 +140,9 @@ Then('I should be shown the "What would you like to do?" prompt', function () {
   );
 });
 
-Then('I should be taken to Framework Detection to set up the snippet', function () {
+Then('I should proceed to the Agent Run to set up the snippet', function () {
   const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.Intro,
-    `Expected Intro (Framework Detection) but got ${screen}`,
-  );
+  assert.strictEqual(screen, Screen.Run, `Expected Run but got ${screen}`);
 });
 
 Then('I should see a message to resume when data arrives', function () {

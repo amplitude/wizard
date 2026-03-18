@@ -25,8 +25,9 @@ function mockCredentials(): WizardSession['credentials'] {
   };
 }
 
-/** Advance past auth, region, data setup, framework detection, run, mcp — lands on Slack. */
+/** Advance past intro, auth, region, data setup, framework detection, run, mcp — lands on Slack. */
 function advancePastMcp(s: WizardSession): void {
+  s.introConcluded = true;
   s.credentials = mockCredentials();
   s.region = 'us';
   s.projectHasData = false;

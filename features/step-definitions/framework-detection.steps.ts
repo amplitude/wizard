@@ -27,7 +27,8 @@ function makeConfig(name: string): FrameworkConfig {
       packageDisplayName: 'Next.js',
       getVersion: () => undefined,
       detect: () => Promise.resolve(true),
-      detectPackageManager: () => Promise.resolve({ detected: [], primary: null, recommendation: '' }),
+      detectPackageManager: () =>
+        Promise.resolve({ detected: [], primary: null, recommendation: '' }),
     },
     environment: {} as FrameworkConfig['environment'],
     analytics: {} as FrameworkConfig['analytics'],
@@ -122,18 +123,21 @@ When('the wizard successfully auto-detects my framework', function () {
 });
 
 When('I confirm the detection', function () {
+  session.introConcluded = true;
   session.setupConfirmed = true;
 });
 
 When('I confirm', function () {
+  session.introConcluded = true;
   session.setupConfirmed = true;
 });
 
 When('there are no unresolved setup questions', function () {
   // frameworkConfig has no setup questions — needsSetup returns false
   if (session.frameworkConfig) {
-    (session.frameworkConfig.metadata as unknown as Record<string, unknown>).setup =
-      undefined;
+    (
+      session.frameworkConfig.metadata as unknown as Record<string, unknown>
+    ).setup = undefined;
   }
 });
 
@@ -190,11 +194,7 @@ Then('I should see the detected framework displayed', function () {
 
 Then('I should proceed to the Agent Run', function () {
   const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.Run,
-    `Expected Run but got ${screen}`,
-  );
+  assert.strictEqual(screen, Screen.Run, `Expected Run but got ${screen}`);
 });
 
 Then('the generic integration should be selected automatically', function () {
@@ -202,10 +202,18 @@ Then('the generic integration should be selected automatically', function () {
   session.frameworkConfig = makeConfig('Generic');
   session.integration = Integration.generic;
 
-  assert.strictEqual(session.integration, Integration.generic, 'Expected generic integration');
+  assert.strictEqual(
+    session.integration,
+    Integration.generic,
+    'Expected generic integration',
+  );
   // Router still shows Intro — user needs to confirm before proceeding
   const screen = router.resolve(session);
-  assert.strictEqual(screen, Screen.Intro, `Expected Intro (confirm generic) but got ${screen}`);
+  assert.strictEqual(
+    screen,
+    Screen.Intro,
+    `Expected Intro (confirm generic) but got ${screen}`,
+  );
 });
 
 Then('I should see the framework picker menu', function () {
@@ -280,6 +288,7 @@ Then('I should see the selected framework displayed', function () {
 });
 
 When('I confirm the detected framework', function () {
+  session.introConcluded = true;
   session.setupConfirmed = true;
 });
 
@@ -290,5 +299,9 @@ When('I cancel', function () {
 
 Then('the wizard should exit', function () {
   const screen = router.resolve(session);
-  assert.strictEqual(screen, Screen.Outro, `Expected Outro after cancel but got ${screen}`);
+  assert.strictEqual(
+    screen,
+    Screen.Outro,
+    `Expected Outro after cancel but got ${screen}`,
+  );
 });

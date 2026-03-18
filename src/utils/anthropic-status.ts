@@ -59,7 +59,10 @@ export async function checkAnthropicStatus(): Promise<StatusCheckResult> {
       case 'critical':
         return { status: 'down', description };
       default:
-        return { status: 'unknown', error: `Unknown indicator: ${String(indicator)}` };
+        return {
+          status: 'unknown',
+          error: `Unknown indicator: ${String(indicator)}`,
+        };
     }
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {

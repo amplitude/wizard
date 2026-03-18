@@ -6,10 +6,7 @@ import { getDefaultServerConfig } from './defaults';
 
 export type MCPServerConfig = Record<string, unknown>;
 
-const MCPConfigSchema = z.record(
-  z.string(),
-  z.record(z.string(), z.unknown()),
-);
+const MCPConfigSchema = z.record(z.string(), z.record(z.string(), z.unknown()));
 
 export abstract class MCPClient {
   name: string;

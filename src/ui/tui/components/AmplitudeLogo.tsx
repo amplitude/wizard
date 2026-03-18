@@ -10,8 +10,8 @@ const TEXT = `     _.ΦΦ8$8ΦΦ..
   \`Φ8ΦΦ8ΦΦ#Φ\\_.ΦΦΦ  
     \`-ΦΦΦµµΦΦΦ'''    `;
 
-export const AmplitudeLogo = () => (
+export const AmplitudeLogo = ({ color = 'white' }: { color?: string }) => (
   <Box marginBottom={1}>
-    <Text color="white">{TEXT}</Text>
+    <Text color={color}>{TEXT}</Text>
   </Box>
 );

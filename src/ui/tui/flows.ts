@@ -65,7 +65,13 @@ function needsSetup(session: WizardSession): boolean {
 /** All flow pipelines. Add new screens by appending entries. */
 export const FLOWS: Record<Flow, FlowEntry[]> = {
   [Flow.Wizard]: [
-    // 1. Region selection — must know US vs EU before opening OAuth URL.
+    // 1. Welcome + framework detection — always shown first so the user
+    //    confirms before the wizard proceeds to region select and auth.
+    {
+      screen: Screen.Intro,
+      isComplete: (s) => s.introConcluded,
+    },
+    // 2. Region selection — must know US vs EU before opening OAuth URL.
     //    Skipped for returning users (region pre-populated from ~/.ampli.json).
     //    Re-shown when /region slash command sets regionForced.
     {
@@ -73,12 +79,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: (s) => s.region === null || s.regionForced,
       isComplete: (s) => s.region !== null && !s.regionForced,
     },
-    // 2. Authenticate (SUSI for new users, silent login check for returning users)
+    // 3. Authenticate (SUSI for new users, silent login check for returning users)
     {
       screen: Screen.Auth,
       isComplete: (s) => s.credentials !== null,
     },
-    // 2. Data check — is the project already ingesting events?
+    // 4. Data check — is the project already ingesting events?
     {
       screen: Screen.DataSetup,
       isComplete: (s) => s.projectHasData !== null,
@@ -94,12 +100,6 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.Options,
       show: (s) => s.projectHasData === true,
       isComplete: (_s) => false, // terminal: user picks an action from here
-    },
-    // 4. Framework detection + confirmation (only if no existing data)
-    {
-      screen: Screen.Intro,
-      show: (s) => s.projectHasData === false,
-      isComplete: (s) => s.setupConfirmed,
     },
     // 4. Framework setup questions (if any unresolved)
     {

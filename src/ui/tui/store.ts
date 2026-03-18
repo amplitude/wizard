@@ -150,7 +150,17 @@ export class WizardStore {
   // Every setter that affects screen resolution calls emitChange().
   // Business logic calls these instead of mutating session directly.
 
-  /** Unblocks bin.ts via the setupComplete promise. */
+  /** Advances the flow past IntroScreen. Does not start the agent. */
+  concludeIntro(): void {
+    this.$session.setKey('introConcluded', true);
+    this.emitChange();
+  }
+
+  /**
+   * Unblocks bin.ts via the setupComplete promise, signalling that the agent
+   * can start. Called by bin.ts via onEnterScreen(Screen.Run) so it fires at
+   * the right point in the flow — after auth, data check, and setup questions.
+   */
   completeSetup(): void {
     this.$session.setKey('setupConfirmed', true);
     analytics.wizardCapture('setup confirmed', sessionProperties(this.session));

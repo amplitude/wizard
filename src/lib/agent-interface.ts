@@ -1018,11 +1018,13 @@ export async function runAgent(
       '.amplitude-events.json',
     );
     const eventPlanSchema = z.array(
-      z.object({
-        name: z.string().optional(),
-        event: z.string().optional(),
-        description: z.string().optional(),
-      }).passthrough(),
+      z
+        .object({
+          name: z.string().optional(),
+          event: z.string().optional(),
+          description: z.string().optional(),
+        })
+        .passthrough(),
     );
     const readEventPlan = () => {
       try {

@@ -318,12 +318,18 @@ yargs(hideBin(process.argv))
 
                 let userInfo;
                 try {
-                  userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+                  userInfo = await fetchAmplitudeUser(
+                    auth.idToken,
+                    cloudRegion,
+                  );
                 } catch {
                   // Token may be expired — re-open the browser for a fresh login
                   tui.store.setLoginUrl(null);
                   auth = await performAmplitudeAuth({ zone, forceFresh: true });
-                  userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+                  userInfo = await fetchAmplitudeUser(
+                    auth.idToken,
+                    cloudRegion,
+                  );
                 }
 
                 // Persist to ~/.ampli.json
@@ -458,9 +464,14 @@ yargs(hideBin(process.argv))
               tui.store.setDetectionComplete();
             })();
 
-            // Wait for auth to expose org pickers, then for the user to
-            // complete account setup (credentials set by AuthScreen), then
-            // for IntroScreen confirmation.
+            // Gate runWizard on the user reaching RunScreen — at that point
+            // auth, data check, and any setup questions are all complete.
+            const { Screen } = await import('./src/ui/tui/router.js');
+            tui.store.onEnterScreen(Screen.Run, () =>
+              tui.store.completeSetup(),
+            );
+
+            // Wait for auth and framework detection to finish concurrently.
             await Promise.all([authTask, detectionTask]);
 
             if (session.verbose || session.debug) {
@@ -482,6 +493,7 @@ yargs(hideBin(process.argv))
               );
             }
 
+            // Blocks until onEnterScreen(Screen.Run) fires completeSetup().
             await tui.waitForSetup();
 
             await runWizard(
@@ -648,11 +660,14 @@ yargs(hideBin(process.argv))
           const { startTUI } = await import('./src/ui/tui/start-tui.js');
           const { buildSession } = await import('./src/lib/wizard-session.js');
           const { Flow } = await import('./src/ui/tui/router.js');
-          const { getStoredUser, getStoredToken } = await import('./src/utils/ampli-settings.js');
+          const { getStoredUser, getStoredToken } = await import(
+            './src/utils/ampli-settings.js'
+          );
           const { getHostFromRegion } = await import('./src/utils/urls.js');
 
           const session = buildSession({
-            debug: typeof argv['debug'] === 'boolean' ? argv['debug'] : undefined,
+            debug:
+              typeof argv['debug'] === 'boolean' ? argv['debug'] : undefined,
           });
 
           // Pre-populate credentials from ~/.ampli.json so SlackScreen can

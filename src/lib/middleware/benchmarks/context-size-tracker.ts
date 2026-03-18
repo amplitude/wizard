@@ -79,7 +79,9 @@ export class ContextSizeTrackerPlugin implements Middleware {
     store.set('contextSize', this.getData());
   }
 
-  private computeContextTokensOut(usage: SDKUsage | null | undefined): number | undefined {
+  private computeContextTokensOut(
+    usage: SDKUsage | null | undefined,
+  ): number | undefined {
     if (!usage) return undefined;
     return (
       Number(usage.input_tokens ?? 0) +

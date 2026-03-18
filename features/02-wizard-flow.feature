@@ -3,35 +3,50 @@ Feature: Wizard flow
   I want the wizard to guide me from authentication through instrumentation
   So that I can get Amplitude set up without manual configuration
 
-  Scenario: New user — wizard starts with region selection
+  Scenario: New user — wizard starts with the intro screen
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches
+    Then I should see the IntroScreen
+
+  Scenario: After continuing past intro, wizard proceeds to region selection
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches
+    And I continue past the intro
     Then I should be asked to select a region
 
   Scenario: After region selection, wizard proceeds to authentication
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches
+    And I continue past the intro
     And I select the "US" region
     Then the US region should be stored in my session
     And I should go through the SUSI flow
 
-  Scenario: After SUSI completes — wizard advances to Data Setup
+  Scenario: After SUSI completes — wizard advances to Data Setup then Agent Run
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches
+    And I continue past the intro
     And I select the "US" region
     Then I should go through the SUSI flow
     When the Data Setup check runs
     Then the project should have no existing data
-    And I should be taken to Framework Detection
+    And I should be on the RunScreen
 
-  Scenario: Returning user also sees region selection first
+  Scenario: Returning user also sees the intro screen first
     Given I have valid credentials stored in "~/.ampli.json"
     When the wizard launches
+    Then I should see the IntroScreen
+
+  Scenario: Returning user confirms intro and proceeds to region selection
+    Given I have valid credentials stored in "~/.ampli.json"
+    When the wizard launches
+    And I continue past the intro
     Then I should be asked to select a region
 
   Scenario: Returning user confirms region and proceeds to Data Setup
     Given I have valid credentials stored in "~/.ampli.json"
     When the wizard launches
+    And I continue past the intro
     And I select the "US" region
     Then I should proceed to the Data Setup flow
 
@@ -47,6 +62,7 @@ Feature: Wizard flow
     And the current project has existing data
     And my region is already set to "us"
     When the wizard launches
+    And I continue past the intro
     Then I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project
 
   Scenario: Run screen is shown before the agent starts
@@ -110,4 +126,3 @@ Feature: Wizard flow
     Then the OutageScreen overlay should appear
     When the overlay is dismissed
     Then I should be on the RunScreen
-

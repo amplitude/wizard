@@ -5,12 +5,18 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen, Flow } from '../../src/ui/tui/flows.js';
-import { buildSession, type WizardSession } from '../../src/lib/wizard-session.js';
+import {
+  buildSession,
+  type WizardSession,
+} from '../../src/lib/wizard-session.js';
 import {
   persistApiKey,
   readApiKeyWithSource,
 } from '../../src/utils/api-key-store.js';
-import { writeAmpliConfig, readAmpliConfig } from '../../src/lib/ampli-config.js';
+import {
+  writeAmpliConfig,
+  readAmpliConfig,
+} from '../../src/lib/ampli-config.js';
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -18,7 +24,11 @@ let projectDir: string;
 let router: WizardRouter;
 let session: WizardSession;
 
-const MOCK_ORG = { id: 'org-1', name: 'Acme', workspaces: [{ id: 'ws-1', name: 'Default' }] };
+const MOCK_ORG = {
+  id: 'org-1',
+  name: 'Acme',
+  workspaces: [{ id: 'ws-1', name: 'Default' }],
+};
 const MOCK_ORG_MULTI_WS = {
   id: 'org-1',
   name: 'Acme',
@@ -27,7 +37,11 @@ const MOCK_ORG_MULTI_WS = {
     { id: 'ws-2', name: 'Staging' },
   ],
 };
-const MOCK_ORG_2 = { id: 'org-2', name: 'Beta Corp', workspaces: [{ id: 'ws-3', name: 'Main' }] };
+const MOCK_ORG_2 = {
+  id: 'org-2',
+  name: 'Beta Corp',
+  workspaces: [{ id: 'ws-3', name: 'Main' }],
+};
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
@@ -35,7 +49,8 @@ Before(function () {
   projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-susi-test-'));
   router = new WizardRouter(Flow.Wizard);
   session = buildSession({ installDir: projectDir });
-  // Region is selected before OAuth in the real flow; pre-populate here.
+  // Intro is concluded and region selected before OAuth in the real flow.
+  session.introConcluded = true;
   session.region = 'us';
   // Simulate OAuth completing — pendingAuthIdToken set
   session.pendingAuthIdToken = 'id-token-abc';
@@ -70,13 +85,16 @@ Given('the OAuth flow has completed', function () {
   session.pendingOrgs = [MOCK_ORG];
 });
 
-Given('the OAuth flow has completed and org and workspace are selected', function () {
-  session.pendingOrgs = [MOCK_ORG];
-  session.selectedOrgId = MOCK_ORG.id;
-  session.selectedOrgName = MOCK_ORG.name;
-  session.selectedWorkspaceId = MOCK_ORG.workspaces[0].id;
-  session.selectedWorkspaceName = MOCK_ORG.workspaces[0].name;
-});
+Given(
+  'the OAuth flow has completed and org and workspace are selected',
+  function () {
+    session.pendingOrgs = [MOCK_ORG];
+    session.selectedOrgId = MOCK_ORG.id;
+    session.selectedOrgName = MOCK_ORG.name;
+    session.selectedWorkspaceId = MOCK_ORG.workspaces[0].id;
+    session.selectedWorkspaceName = MOCK_ORG.workspaces[0].name;
+  },
+);
 
 Given('there is no saved API key for this project', function () {
   // Ensure no .env.local key exists in the temp dir
@@ -218,11 +236,16 @@ Then(
     const result = readAmpliConfig(projectDir);
     assert.ok(
       result.ok === true,
-      `Expected ampli.json to be valid, got: ${result.ok ? 'ok' : (result as { ok: false; error: string }).error}`,
+      `Expected ampli.json to be valid, got: ${
+        result.ok ? 'ok' : (result as { ok: false; error: string }).error
+      }`,
     );
     if (result.ok) {
       assert.ok(result.config.OrgId, 'Expected OrgId in ampli.json');
-      assert.ok(result.config.WorkspaceId, 'Expected WorkspaceId in ampli.json');
+      assert.ok(
+        result.config.WorkspaceId,
+        'Expected WorkspaceId in ampli.json',
+      );
       assert.ok(result.config.Zone, 'Expected Zone in ampli.json');
     }
   },
@@ -237,7 +260,7 @@ Then(
   },
 );
 
-Then("I should proceed without being asked for the key again", function () {
+Then('I should proceed without being asked for the key again', function () {
   const result = readApiKeyWithSource(projectDir);
   assert.ok(
     result !== null,
@@ -290,10 +313,7 @@ Then('the AuthScreen should show a loading spinner', function () {
 Then(
   'the AuthScreen should display the login URL for manual copy-paste',
   function () {
-    assert.ok(
-      session.loginUrl,
-      'Expected loginUrl to be set in session',
-    );
+    assert.ok(session.loginUrl, 'Expected loginUrl to be set in session');
   },
 );
 

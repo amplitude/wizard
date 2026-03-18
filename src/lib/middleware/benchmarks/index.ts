@@ -32,7 +32,8 @@ const PLUGIN_REGISTRY: Record<string, PluginFactory> = {
     return new SummaryPlugin(opts.spinner);
   },
   jsonWriter: (opts) => {
-    if (!opts.outputPath) throw new Error('JsonWriterPlugin requires outputPath');
+    if (!opts.outputPath)
+      throw new Error('JsonWriterPlugin requires outputPath');
     return new JsonWriterPlugin(opts.outputPath);
   },
 };

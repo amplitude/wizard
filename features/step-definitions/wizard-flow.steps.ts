@@ -61,11 +61,11 @@ After(function () {
 // This file adds wizard-specific Given steps.
 
 Given('I have reached the RunScreen', function () {
+  session.introConcluded = true;
   session.credentials = mockCredentials();
   session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
-  // RunScreen is shown once we've passed auth + region selection + data setup + framework detection
 });
 
 Given('the project has Stripe as a dependency', function () {
@@ -81,8 +81,7 @@ Given('the project has an LLM SDK as a dependency', function () {
 // ── Region selection ──────────────────────────────────────────────────────────
 
 Given('I have just authenticated', function () {
-  // Region is selected before auth in the current flow.
-  // This step represents a user who has completed both steps.
+  session.introConcluded = true;
   session.region = 'us';
   session.credentials = mockCredentials();
 });
@@ -121,6 +120,7 @@ Then('I should proceed to the Data Setup flow', function () {
 // ─────────────────────────────────────────────────────────────────────────────
 
 Given('the wizard is active', function () {
+  session.introConcluded = true;
   session.credentials = mockCredentials();
   session.region = 'us';
   session.projectHasData = false;
@@ -128,6 +128,7 @@ Given('the wizard is active', function () {
 });
 
 Given('the wizard is active at any screen', function () {
+  session.introConcluded = true;
   session.credentials = mockCredentials();
   session.region = 'us';
   session.projectHasData = false;
@@ -135,6 +136,7 @@ Given('the wizard is active at any screen', function () {
 });
 
 Given('I am on the options menu for an existing project', function () {
+  session.introConcluded = true;
   session.credentials = mockCredentials();
   session.region = 'us';
   session.projectHasData = true;
@@ -149,19 +151,30 @@ Given('the current project has existing data', function () {
 When('the wizard launches', function () {
   // Check if valid credentials are stored (from a preceding Given step in another step file).
   // top-level-commands.steps.ts exposes its tempConfigPath via the World object.
-  const sharedConfigPath =
-    (this as Record<string, unknown>).tempConfigPath as string | undefined;
+  const sharedConfigPath = (this as Record<string, unknown>).tempConfigPath as
+    | string
+    | undefined;
   if (sharedConfigPath) {
     const { getStoredToken } = require('../../src/utils/ampli-settings.js');
     const token = getStoredToken(undefined, 'us', sharedConfigPath);
     if (token) {
-      // Returning user: credentials are available but region is NOT pre-populated.
-      // Region selection always appears first — the user must confirm their region.
       session.credentials = mockCredentials();
     }
   }
-  // session.region remains null — RegionSelect is always shown first
+  // session.introConcluded remains false — IntroScreen is always shown first
+  // session.region remains null — RegionSelect is shown after the user continues past intro
   // session.projectHasData remains null (not yet checked)
+});
+
+// ── Intro screen ───────────────────────────────────────────────────────────────
+
+Then('I should see the IntroScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Intro, `Expected Intro but got ${screen}`);
+});
+
+When('I continue past the intro', function () {
+  session.introConcluded = true;
 });
 
 // ── Then ──────────────────────────────────────────────────────────────────────
@@ -207,15 +220,6 @@ When('the Data Setup check runs', function () {
 
 Then('the project should have no existing data', function () {
   session.projectHasData = false;
-});
-
-Then('I should be taken to Framework Detection', function () {
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.Intro,
-    `Expected Intro/Framework Detection screen but got ${screen}`,
-  );
 });
 
 Then(

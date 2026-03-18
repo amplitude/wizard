@@ -80,8 +80,7 @@ export function getStoredUser(configPath?: string): StoredUser | undefined {
   for (const [key, value] of Object.entries(config)) {
     if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
     const entry = UserEntrySchema.safeParse(value);
-    if (entry.success && entry.data.User)
-      return entry.data.User as StoredUser;
+    if (entry.success && entry.data.User) return entry.data.User as StoredUser;
   }
   return undefined;
 }

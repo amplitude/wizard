@@ -196,6 +196,9 @@ export interface WizardSession {
   discoveredFeatures: DiscoveredFeature[];
   llmOptIn: boolean;
 
+  /** True once the user has clicked Continue on the IntroScreen. */
+  introConcluded: boolean;
+
   // Screen completion
   mcpComplete: boolean;
   mcpOutcome: McpOutcome | null;
@@ -278,6 +281,7 @@ export function buildSession(args: {
     serviceStatus: null,
     settingsOverrideKeys: null,
     outroData: null,
+    introConcluded: false,
     additionalFeatureQueue: [],
     frameworkConfig: null,
   };
