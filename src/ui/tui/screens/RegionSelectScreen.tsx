@@ -16,6 +16,7 @@ import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
+import { AmplitudeLogo } from './IntroScreen.js';
 
 interface RegionSelectScreenProps {
   store: WizardStore;
@@ -44,6 +45,7 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
+      <AmplitudeLogo />
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.accent}>
           {session.regionForced ? 'Switch data-center region' : 'Where is your Amplitude organization?'}

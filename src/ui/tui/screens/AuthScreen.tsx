@@ -18,6 +18,7 @@ import type { WizardStore } from '../store.js';
 import { LoadingBox, PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { DEFAULT_HOST_URL } from '../../../lib/constants.js';
+import { AmplitudeLogo } from './IntroScreen.js';
 
 interface AuthScreenProps {
   store: WizardStore;
@@ -118,6 +119,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
+      <AmplitudeLogo />
       {/* Header */}
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.accent}>
