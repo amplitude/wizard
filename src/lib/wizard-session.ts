@@ -39,13 +39,15 @@ export const DiscoveredFeature = {
   Stripe: 'stripe',
   LLM: 'llm',
 } as const;
-export type DiscoveredFeature = (typeof DiscoveredFeature)[keyof typeof DiscoveredFeature];
+export type DiscoveredFeature =
+  (typeof DiscoveredFeature)[keyof typeof DiscoveredFeature];
 
 /** Additional features the agent can integrate after the main setup */
 export const AdditionalFeature = {
   LLM: 'llm',
 } as const;
-export type AdditionalFeature = (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
+export type AdditionalFeature =
+  (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
 
 /** Human-readable labels for additional features (used in TUI progress) */
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {

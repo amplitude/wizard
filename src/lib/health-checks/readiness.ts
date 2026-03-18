@@ -170,7 +170,7 @@ export async function evaluateWizardReadiness(
     return { decision: WizardReadiness.No, health, reasons };
   }
 
-  const hasWarnings = Object.values(health).some(
+  const hasWarnings = (Object.values(health) as BaseHealthResult[]).some(
     (h) => h.status !== ServiceHealthStatus.Healthy,
   );
 

@@ -149,7 +149,9 @@ const PYTHON_PM_INFO: Record<PythonPackageManager, DetectedPackageManager> = {
 export async function detectPythonPackageManagers(
   installDir: string,
 ): Promise<PackageManagerInfo> {
-  const pm = await detectPythonPM({ installDir } as any);
+  const pm = await detectPythonPM({
+    installDir,
+  } as Parameters<typeof detectPythonPM>[0]);
   const info = PYTHON_PM_INFO[pm];
 
   return {

@@ -17,10 +17,21 @@ import type { PackageManagerDetector } from './package-manager-detection';
 // SDK dynamic import (ESM module loaded once, cached)
 // ---------------------------------------------------------------------------
 
-let _sdkModule: any = null;
-async function getSDKModule(): Promise<any> {
+interface ClaudeAgentSDK {
+  tool: (...args: unknown[]) => unknown;
+  createSdkMcpServer: (config: {
+    name: string;
+    version: string;
+    tools: unknown[];
+  }) => unknown;
+}
+
+let _sdkModule: ClaudeAgentSDK | null = null;
+async function getSDKModule(): Promise<ClaudeAgentSDK> {
   if (!_sdkModule) {
-    _sdkModule = await import('@anthropic-ai/claude-agent-sdk');
+    _sdkModule = (await import(
+      '@anthropic-ai/claude-agent-sdk'
+    )) as unknown as ClaudeAgentSDK;
   }
   return _sdkModule;
 }
@@ -145,8 +156,7 @@ const SERVER_NAME = 'wizard-tools';
  */
 export async function createWizardToolsServer(options: WizardToolsOptions) {
   const { workingDirectory, detectPackageManager } = options;
-  const sdk = await getSDKModule();
-  const { tool, createSdkMcpServer } = sdk;
+  const { tool, createSdkMcpServer } = await getSDKModule();
 
   // -- check_env_keys -------------------------------------------------------
 

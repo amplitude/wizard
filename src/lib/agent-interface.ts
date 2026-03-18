@@ -28,11 +28,21 @@ import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
 import type { PackageManagerDetector } from './package-manager-detection';
 
+import { z } from 'zod';
+import type { SDKMessage } from './middleware/types';
+import { safeParseSDKMessage } from './middleware/schemas';
+
+type SDKQueryFn = (params: {
+  prompt: string | AsyncIterable<unknown>;
+  options?: Record<string, unknown>;
+}) => AsyncIterable<unknown>;
+
 // Dynamic import cache for ESM module
-let _sdkModule: any = null;
-async function getSDKModule(): Promise<any> {
+let _sdkModule: { query: SDKQueryFn } | null = null;
+async function getSDKModule(): Promise<{ query: SDKQueryFn }> {
   if (!_sdkModule) {
-    _sdkModule = await import('@anthropic-ai/claude-agent-sdk');
+    const mod = await import('@anthropic-ai/claude-agent-sdk');
+    _sdkModule = { query: mod.query as SDKQueryFn };
   }
   return _sdkModule;
 }
@@ -47,10 +57,7 @@ function getClaudeCodeExecutablePath(): string {
   return path.join(path.dirname(sdkPackagePath), 'cli.js');
 }
 
-// Using `any` because typed imports from ESM modules require import attributes
-// syntax which prettier cannot parse. See PR discussion for details.
-type SDKMessage = any;
-type McpServersConfig = any;
+type McpServersConfig = Record<string, unknown>;
 
 export const AgentSignals = {
   /** Signal emitted when the agent reports progress to the user */
@@ -97,13 +104,16 @@ export function checkClaudeSettingsOverrides(
     path.join(workingDirectory, '.claude', 'settings'),
   ];
 
+  const claudeSettingsSchema = z.object({
+    env: z.record(z.unknown()),
+  });
+
   for (const filePath of candidates) {
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
-      const parsed = JSON.parse(raw);
-      const envBlock = parsed?.env;
-      if (envBlock && typeof envBlock === 'object') {
-        return BLOCKING_ENV_KEYS.filter((key) => key in envBlock);
+      const result = claudeSettingsSchema.safeParse(JSON.parse(raw));
+      if (result.success) {
+        return BLOCKING_ENV_KEYS.filter((key) => key in result.data.env);
       }
     } catch {
       // File doesn't exist or isn't valid JSON — skip
@@ -129,7 +139,9 @@ export function backupAndFixClaudeSettings(workingDirectory: string): boolean {
         try {
           restoreClaudeSettings(workingDirectory);
         } catch (error) {
-          analytics.captureException(error);
+          analytics.captureException(
+            error instanceof Error ? error : new Error(String(error)),
+          );
         }
       });
       return true;
@@ -156,7 +168,9 @@ export function restoreClaudeSettings(workingDirectory: string): void {
       analytics.wizardCapture('restored-claude-settings');
       return;
     } catch (error) {
-      analytics.captureException(error);
+      analytics.captureException(
+        error instanceof Error ? error : new Error(String(error)),
+      );
     }
   }
 }
@@ -691,7 +705,9 @@ export async function initializeAgent(
       workingDirectory: config.workingDirectory,
       mcpServers,
       // Gateway expects 'anthropic/claude-sonnet-4-6'; direct Anthropic API expects 'claude-sonnet-4-6'
-      model: useDirectApiKey ? 'claude-sonnet-4-6' : 'anthropic/claude-sonnet-4-6',
+      model: useDirectApiKey
+        ? 'claude-sonnet-4-6'
+        : 'anthropic/claude-sonnet-4-6',
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,
@@ -801,8 +817,8 @@ export async function runAgent(
     additionalFeatureQueue?: readonly AdditionalFeature[];
   },
   middleware?: {
-    onMessage(message: any): void;
-    finalize(resultMessage: any, totalDurationMs: number): any;
+    onMessage(message: SDKMessage): void;
+    finalize(resultMessage: SDKMessage, totalDurationMs: number): unknown;
   },
 ): Promise<{ error?: AgentErrorType; message?: string }> {
   const {
@@ -835,14 +851,14 @@ export async function runAgent(
   const recentStatuses: string[] = []; // rolling last-3 STATUS messages for heartbeat
   // Track if we received a successful result (before any cleanup errors)
   let receivedSuccessResult = false;
-  let lastResultMessage: any = null;
+  let lastResultMessage: SDKMessage | null = null;
 
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
   // the result is received, keeping the stdin stream alive for permission responses.
   // See: https://github.com/anthropics/claude-code/issues/4775
   // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/41
-  let signalDone: () => void;
+  let signalDone: () => void = Function.prototype as () => void;
   const resultReceived = new Promise<void>((resolve) => {
     signalDone = resolve;
   });
@@ -895,7 +911,9 @@ export async function runAgent(
       duration_seconds: durationSeconds,
     });
     try {
-      middleware?.finalize(lastResultMessage, durationMs);
+      if (lastResultMessage) {
+        middleware?.finalize(lastResultMessage, durationMs);
+      }
     } catch (e) {
       logToFile(`${AgentSignals.BENCHMARK} Middleware finalize error:`, e);
     }
@@ -957,7 +975,9 @@ export async function runAgent(
           ...process.env,
           // When using the Amplitude gateway, block ANTHROPIC_API_KEY so it doesn't
           // override the gateway's OAuth token. When using a direct API key, pass it through.
-          ...(agentConfig.useDirectApiKey ? {} : { ANTHROPIC_API_KEY: undefined }),
+          ...(agentConfig.useDirectApiKey
+            ? {}
+            : { ANTHROPIC_API_KEY: undefined }),
           ANTHROPIC_CUSTOM_HEADERS: buildAgentEnv(
             agentConfig.wizardMetadata ?? {},
             agentConfig.wizardFlags ?? {},
@@ -997,15 +1017,22 @@ export async function runAgent(
       agentConfig.workingDirectory,
       '.amplitude-events.json',
     );
+    const eventPlanSchema = z.array(
+      z.object({
+        name: z.string().optional(),
+        event: z.string().optional(),
+        description: z.string().optional(),
+      }).passthrough(),
+    );
     const readEventPlan = () => {
       try {
         const content = fs.readFileSync(eventPlanPath, 'utf-8');
-        const parsed = JSON.parse(content);
-        if (Array.isArray(parsed)) {
+        const result = eventPlanSchema.safeParse(JSON.parse(content));
+        if (result.success) {
           getUI().setEventPlan(
-            parsed.map((e: Record<string, unknown>) => ({
-              name: (e.name ?? e.event ?? '') as string,
-              description: (e.description ?? '') as string,
+            result.data.map((e) => ({
+              name: e.name ?? e.event ?? '',
+              description: e.description ?? '',
             })),
           );
         }
@@ -1032,8 +1059,18 @@ export async function runAgent(
       }, 1000);
     }
 
-    // Process the async generator
-    for await (const message of response) {
+    // Process the async generator — validate each message at the boundary
+    for await (const rawMessage of response) {
+      const parsed = safeParseSDKMessage(rawMessage);
+      if (!parsed.ok) {
+        logToFile(
+          'Skipping malformed SDK message:',
+          parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+        );
+        continue;
+      }
+      const message = parsed.message;
+
       // Pass receivedSuccessResult so handleSDKMessage can suppress user-facing error
       // output for post-success cleanup errors while still logging them to file
       handleSDKMessage(
@@ -1059,7 +1096,7 @@ export async function runAgent(
           receivedSuccessResult = true;
           lastResultMessage = message;
         }
-        signalDone!();
+        signalDone();
       }
     }
 
@@ -1100,7 +1137,7 @@ export async function runAgent(
     return completeWithSuccess();
   } catch (error) {
     // Signal done to unblock the async generator
-    signalDone!();
+    signalDone();
 
     // If we already received a successful result, the error is from SDK cleanup
     // This happens due to a race condition: the SDK tries to send a cleanup command
@@ -1197,10 +1234,16 @@ function handleSDKMessage(
           if (
             block.type === 'tool_use' &&
             block.name === 'TodoWrite' &&
-            block.input?.todos &&
+            block.input &&
             Array.isArray(block.input.todos)
           ) {
-            getUI().syncTodos(block.input.todos);
+            getUI().syncTodos(
+              block.input.todos as Array<{
+                content: string;
+                status: string;
+                activeForm?: string;
+              }>,
+            );
           }
         }
       }

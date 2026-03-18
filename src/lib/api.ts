@@ -210,13 +210,15 @@ const SourcesSchema = z.object({
                       z.object({
                         id: z.string(),
                         name: z.string(),
-                        runtime: z.object({
-                          id: z.string(),
-                          platformId: z.string(),
-                          platformName: z.string(),
-                          languageId: z.string(),
-                          languageName: z.string(),
-                        }).nullable(),
+                        runtime: z
+                          .object({
+                            id: z.string(),
+                            platformId: z.string(),
+                            platformName: z.string(),
+                            languageId: z.string(),
+                            languageName: z.string(),
+                          })
+                          .nullable(),
                         destinations: z.array(
                           z.object({ name: z.string(), serviceId: z.string() }),
                         ),
@@ -368,7 +370,8 @@ export async function fetchProjectActivationStatus(
     const s = parsed.data.hasAnyDefaultEventTrackingSourceAndEvents;
     return {
       ...s,
-      hasAnyEvents: s.hasPageViewedEvent || s.hasSessionStartEvent || s.hasSessionEndEvent,
+      hasAnyEvents:
+        s.hasPageViewedEvent || s.hasSessionStartEvent || s.hasSessionEndEvent,
     };
   } catch (error) {
     const apiError = handleApiError(error, 'fetch project activation status');

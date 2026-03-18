@@ -5,11 +5,12 @@
  * or falls back to ANTHROPIC_API_KEY for direct API access.
  */
 
+import { z } from 'zod';
 import type { WizardSession } from './wizard-session.js';
 import { getLlmGatewayUrlFromHost } from '../utils/urls.js';
 import { RunPhase } from './wizard-session.js';
 
-const MODEL_DIRECT  = 'claude-haiku-4-5-20251001';
+const MODEL_DIRECT = 'claude-haiku-4-5-20251001';
 const MODEL_GATEWAY = 'anthropic/claude-haiku-4-5-20251001';
 const MAX_TOKENS = 512;
 
@@ -53,18 +54,21 @@ export function resolveConsoleCredentials(
 export function buildSessionContext(session: WizardSession): string {
   const lines: string[] = [
     'You are a helpful assistant embedded in the Amplitude Wizard CLI.',
-    'Answer the user\'s questions concisely. Focus on the current wizard state below.',
+    "Answer the user's questions concisely. Focus on the current wizard state below.",
     '',
     '--- Current wizard state ---',
     `Phase: ${session.runPhase ?? RunPhase.Idle}`,
   ];
 
   if (session.region) lines.push(`Region: ${session.region}`);
-  if (session.detectedFrameworkLabel) lines.push(`Framework: ${session.detectedFrameworkLabel}`);
+  if (session.detectedFrameworkLabel)
+    lines.push(`Framework: ${session.detectedFrameworkLabel}`);
   if (session.integration) lines.push(`Integration: ${session.integration}`);
   if (session.selectedOrgName) lines.push(`Org: ${session.selectedOrgName}`);
-  if (session.selectedWorkspaceName) lines.push(`Workspace: ${session.selectedWorkspaceName}`);
-  if (session.credentials?.projectId) lines.push(`Project ID: ${session.credentials.projectId}`);
+  if (session.selectedWorkspaceName)
+    lines.push(`Workspace: ${session.selectedWorkspaceName}`);
+  if (session.credentials?.projectId)
+    lines.push(`Project ID: ${session.credentials.projectId}`);
 
   if (session.runPhase === RunPhase.Completed) {
     lines.push('Status: Wizard run completed successfully.');
@@ -126,6 +130,13 @@ export async function queryConsole(
     throw new Error(`Claude API error ${res.status}: ${body.slice(0, 120)}`);
   }
 
-  const data = await res.json() as { content?: Array<{ text?: string }> };
+  const ClaudeResponseSchema = z
+    .object({
+      content: z
+        .array(z.object({ text: z.string().optional() }).passthrough())
+        .optional(),
+    })
+    .passthrough();
+  const data = ClaudeResponseSchema.parse(await res.json());
   return data.content?.[0]?.text ?? '(empty response)';
 }

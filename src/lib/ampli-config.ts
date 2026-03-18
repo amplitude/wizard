@@ -18,6 +18,7 @@
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { z } from 'zod';
 import type { AmplitudeZone } from './constants.js';
 
 export const AMPLI_CONFIG_FILENAME = 'ampli.json';
@@ -67,6 +68,26 @@ export type AmpliConfigParseResult =
 
 // ── Pure logic (unit-testable) ────────────────────────────────────────────────
 
+const AmpliConfigSchema = z
+  .object({
+    OrgId: z.string().optional(),
+    WorkspaceId: z.string().optional(),
+    SourceId: z.string().optional(),
+    Branch: z.string().optional(),
+    Path: z.string().optional(),
+    Version: z.string().optional(),
+    VersionId: z.string().optional(),
+    Zone: z.string().optional(),
+    Runtime: z.string().optional(),
+    Platform: z.string().optional(),
+    Language: z.string().optional(),
+    SDK: z.string().optional(),
+    OmitApiKeys: z.boolean().optional(),
+    SourceDirs: z.array(z.string()).optional(),
+    InstanceNames: z.array(z.string()).optional(),
+  })
+  .passthrough();
+
 /**
  * Parse a raw JSON string into an AmpliConfig.
  * Returns a typed result rather than throwing.
@@ -76,15 +97,11 @@ export function parseAmpliConfig(raw: string): AmpliConfigParseResult {
     return { ok: false, error: 'merge_conflicts' };
   }
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      Array.isArray(parsed)
-    ) {
+    const result = AmpliConfigSchema.safeParse(JSON.parse(raw));
+    if (!result.success) {
       return { ok: false, error: 'invalid_json' };
     }
-    return { ok: true, config: parsed as AmpliConfig };
+    return { ok: true, config: result.data as AmpliConfig };
   } catch {
     return { ok: false, error: 'invalid_json' };
   }

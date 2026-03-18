@@ -176,7 +176,9 @@ export async function runAgentWizard(
   const { accessToken, projectApiKey, host, projectId } = session.credentials;
   // Derive cloudRegion from session (set during auth or defaulting to 'us')
   const cloudRegion: import('../utils/types.js').CloudRegion =
-    (session.pendingAuthCloudRegion as import('../utils/types.js').CloudRegion | null) ?? 'us';
+    (session.pendingAuthCloudRegion as
+      | import('../utils/types.js').CloudRegion
+      | null) ?? 'us';
 
   // Framework context was already gathered by SetupScreen + detection
   const frameworkContext = session.frameworkContext;
@@ -292,7 +294,7 @@ export async function runAgentWizard(
       message: `API Error\n\n${
         agentResult.message || 'Unknown error'
       }\n\nPlease report this error to: wizard@amplitude.com`,
-      error: new WizardError(`API error: ${agentResult.message}`, {
+      error: new WizardError(`API error: ${agentResult.message ?? 'unknown'}`, {
         integration: config.metadata.integration,
         error_type: agentResult.error,
       }),
@@ -368,7 +370,10 @@ function buildIntegrationPrompt(
   // No valid auth token → MCP will be skipped. Fall back to the generic direct prompt
   // so the agent has actionable instructions instead of getting stuck on ListMcpResourcesTool.
   if (skipAmplitudeMcp) {
-    const genericBuildPrompt = GENERIC_AGENT_CONFIG.prompts.buildPrompt!;
+    const genericBuildPrompt = GENERIC_AGENT_CONFIG.prompts.buildPrompt;
+    if (!genericBuildPrompt) {
+      throw new Error('Generic agent config is missing buildPrompt');
+    }
     return genericBuildPrompt({ ...context, frameworkContext });
   }
 
