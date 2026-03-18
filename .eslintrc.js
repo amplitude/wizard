@@ -13,6 +13,8 @@ module.exports = {
   ignorePatterns: [
     '.eslintrc.js',
     'babel.config.js',
+    'vitest.config.ts',
+    'experiment.mts',
     'build/**',
     'dist/**',
     'esm/**',
@@ -30,12 +32,25 @@ module.exports = {
   overrides: [
     {
       files: [
-        '**/e2e-tests/utils/**/*.ts',
+        'e2e-tests/**/*.ts',
         '*.test.js',
         '*.test.ts',
         '**/__tests__/**/*.ts',
         '**/__tests__/**/*.js',
+        'features/step-definitions/**/*.ts',
       ],
+      globals: {
+        expect: 'readonly',
+        test: 'readonly',
+        it: 'readonly',
+        describe: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        vi: 'readonly',
+        Mock: 'readonly',
+      },
       rules: {
         '@typescript-eslint/unbound-method': 'off',
         '@typescript-eslint/no-unsafe-argument': 'off',

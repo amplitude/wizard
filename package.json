@@ -110,6 +110,7 @@
     "fix": "pnpm fix:eslint && pnpm fix:prettier",
     "fix:prettier": "prettier --write \"{lib,src,test}/**/*.ts\"",
     "fix:eslint": "eslint . --format stylish --fix",
+    "pretest": "node scripts/generate-version.js",
     "test": "vitest run",
     "test:e2e": "pnpm build && ./e2e-tests/run.sh",
     "test:e2e-record": "export RECORD_FIXTURES=true && pnpm build && ./e2e-tests/run.sh",

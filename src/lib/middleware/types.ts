@@ -7,7 +7,62 @@
 
 import type { SpinnerHandle } from '../../ui';
 
-export type SDKMessage = any;
+/** Token usage reported by the SDK on assistant messages */
+export interface SDKUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_creation?: {
+    ephemeral_5m_input_tokens?: number;
+    ephemeral_1h_input_tokens?: number;
+  };
+  total_cost_usd?: number;
+}
+
+export interface SDKContentBlock {
+  type: string;
+  text?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface SDKModelUsageEntry {
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheReadInputTokens?: number;
+}
+
+export interface SDKCompactMetadata {
+  pre_tokens?: number;
+  trigger?: string;
+}
+
+/** SDK message received from the agent runner */
+export interface SDKMessage {
+  type: string;
+  subtype?: string;
+  message?: {
+    id?: string;
+    usage?: SDKUsage;
+    content?: SDKContentBlock[];
+    [key: string]: unknown;
+  };
+  compact_metadata?: SDKCompactMetadata;
+  is_error?: boolean;
+  result?: string;
+  errors?: string[];
+  model?: string;
+  tools?: unknown[];
+  mcp_servers?: unknown[];
+  usage?: SDKUsage;
+  total_cost_usd?: number;
+  num_turns?: number;
+  modelUsage?: Record<string, SDKModelUsageEntry>;
+  [key: string]: unknown;
+}
 
 /** Read-only shared state available to all middleware */
 export interface MiddlewareContext {
@@ -45,11 +100,11 @@ export interface Middleware {
   ): void;
   /** Called at the end of the agent run. Return value from last middleware is used. */
   onFinalize?(
-    resultMessage: any,
+    resultMessage: SDKMessage,
     totalDurationMs: number,
     ctx: MiddlewareContext,
     store: MiddlewareStore,
-  ): any;
+  ): unknown;
 }
 
 /** Options bag passed to middleware factories during construction */

@@ -9,8 +9,8 @@
  * Calls store.completeSetup() which unblocks bin.ts to start runWizard.
  */
 
-import path from 'path';
 import { readFileSync } from 'node:fs';
+import path from 'path';
 import { Box, Text } from 'ink';
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
@@ -56,7 +56,6 @@ export const AmplitudeLogo = () => (
     })}
   </Box>
 );
-
 const AMPLITUDE_LOGO = (() => {
   try {
     return readFileSync(
