@@ -32,12 +32,12 @@ function lerpColor(a: string, b: string, t: number): string {
 }
 
 export const AmplitudeTextLogo = () => (
-  <Box flexDirection="column" alignItems="center" marginBottom={1}>
+  <Box flexDirection="column" marginBottom={1}>
     {LOGO_LINES.map((line, i) => {
       const chars = line.split('');
       const last = chars.length - 1;
       return (
-        <Box key={i} flexDirection="row">
+        <Box key={i} flexDirection="row" alignItems="flex-start">
           {chars.map((char, j) => (
             <Text
               key={j}

@@ -44,30 +44,33 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
   const { session } = store;
 
   return (
-    <Box flexDirection="column" flexGrow={1} paddingTop={1}>
+    <>
+      <Box marginBottom={1}></Box>
       <AmplitudeTextLogo />
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.accent}>
-          {session.regionForced
-            ? 'Switch data-center region'
-            : 'Where is your Amplitude organization?'}
-        </Text>
-        <Text dimColor>
-          {session.regionForced
-            ? `Current: ${
-                session.region?.toUpperCase() ?? 'US'
-              } — pick a new region below`
-            : 'Press Enter to use US (default), or select EU if your org is on the EU data center.'}
-        </Text>
-      </Box>
+      <Box flexDirection="column" flexGrow={1} paddingTop={1}>
+        <Box flexDirection="column" marginBottom={1}>
+          <Text bold color={Colors.accent}>
+            {session.regionForced
+              ? 'Switch data-center region'
+              : 'Where is your Amplitude organization?'}
+          </Text>
+          <Text dimColor>
+            {session.regionForced
+              ? `Current: ${
+                  session.region?.toUpperCase() ?? 'US'
+                } — pick a new region below`
+              : 'Press Enter to use US (default), or select EU if your org is on the EU data center.'}
+          </Text>
+        </Box>
 
-      <PickerMenu<CloudRegion>
-        options={REGIONS}
-        onSelect={(value) => {
-          const region = Array.isArray(value) ? value[0] : value;
-          store.setRegion(region);
-        }}
-      />
-    </Box>
+        <PickerMenu<CloudRegion>
+          options={REGIONS}
+          onSelect={(value) => {
+            const region = Array.isArray(value) ? value[0] : value;
+            store.setRegion(region);
+          }}
+        />
+      </Box>
+    </>
   );
 };
