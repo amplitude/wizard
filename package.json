@@ -62,7 +62,8 @@
     "xml-js": "^1.6.11",
     "yargs": "^16.2.0",
     "zod": "^3.24.2",
-    "zod-to-json-schema": "^3.24.3"
+    "zod-to-json-schema": "^3.24.3",
+    "dotenv": "^16.4.7"
   },
   "devDependencies": {
     "@cucumber/cucumber": "^12.7.0",
@@ -79,7 +80,6 @@
     "@typescript-eslint/eslint-plugin": "^5.13.0",
     "@typescript-eslint/parser": "^5.13.0",
     "@vitest/coverage-v8": "^4.0.18",
-    "dotenv": "^16.4.7",
     "eslint": "^8.18.0",
     "eslint-config-prettier": "^8.3.0",
     "husky": "^9.1.7",
