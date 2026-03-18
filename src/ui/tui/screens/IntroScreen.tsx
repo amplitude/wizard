@@ -9,7 +9,6 @@
  * Calls store.completeSetup() which unblocks bin.ts to start runWizard.
  */
 
-import { readFileSync } from 'node:fs';
 import path from 'path';
 import { Box, Text } from 'ink';
 import { useState, useEffect, useSyncExternalStore } from 'react';
@@ -17,55 +16,7 @@ import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
-
-const LOGO_LINES = [
-  ' █████╗ ███╗   ███╗██████╗ ██╗     ██╗████████╗██╗   ██╗██████╗ ███████╗',
-  '██╔══██╗████╗ ████║██╔══██╗██║     ██║╚══██╔══╝██║   ██║██╔══██╗██╔════╝',
-  '███████║██╔████╔██║██████╔╝██║     ██║   ██║   ██║   ██║██║  ██║█████╗  ',
-  '██╔══██║██║╚██╔╝██║██╔═══╝ ██║     ██║   ██║   ██║   ██║██║  ██║██╔══╝  ',
-  '██║  ██║██║ ╚═╝ ██║██║     ███████╗██║   ██║   ╚██████╔╝██████╔╝███████╗',
-  '╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═════╝ ╚══════╝',
-];
-
-const AMP_BLUE = '#1E61F0';
-const AMP_CYAN = '#00D4AA';
-
-function lerpColor(a: string, b: string, t: number): string {
-  const ar = parseInt(a.slice(1, 3), 16), ag = parseInt(a.slice(3, 5), 16), ab = parseInt(a.slice(5, 7), 16);
-  const br = parseInt(b.slice(1, 3), 16), bg = parseInt(b.slice(3, 5), 16), bb = parseInt(b.slice(5, 7), 16);
-  const r = Math.round(ar + (br - ar) * t).toString(16).padStart(2, '0');
-  const g = Math.round(ag + (bg - ag) * t).toString(16).padStart(2, '0');
-  const bv = Math.round(ab + (bb - ab) * t).toString(16).padStart(2, '0');
-  return `#${r}${g}${bv}`;
-}
-
-export const AmplitudeLogo = () => (
-  <Box flexDirection="column" alignItems="center" marginBottom={1}>
-    {LOGO_LINES.map((line, i) => {
-      const chars = line.split('');
-      const last = chars.length - 1;
-      return (
-        <Box key={i} flexDirection="row">
-          {chars.map((char, j) => (
-            <Text key={j} color={lerpColor(AMP_BLUE, AMP_CYAN, last > 0 ? j / last : 0)}>
-              {char}
-            </Text>
-          ))}
-        </Box>
-      );
-    })}
-  </Box>
-);
-const AMPLITUDE_LOGO = (() => {
-  try {
-    return readFileSync(
-      new URL('../assets/amplilogo.txt', import.meta.url),
-      'utf-8',
-    ).trimEnd();
-  } catch {
-    return '';
-  }
-})();
+import { AmplitudeLogo } from '../components/AmplitudeLogo.js';
 
 interface IntroScreenProps {
   store: WizardStore;
@@ -110,19 +61,16 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       alignItems="center"
       justifyContent="center"
     >
-      <AmplitudeLogo />
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
+        <AmplitudeLogo />
+        <Box marginBottom={1}></Box>
         <Text bold>
           {detecting ? 'Amplitude Wizard starting up' : 'Amplitude Wizard'}
         </Text>
+        <Box marginBottom={1}></Box>
 
         {showDescription && (
           <Box flexDirection="column" alignItems="center" marginTop={1}>
-            {AMPLITUDE_LOGO && (
-              <Box marginBottom={1}>
-                <Text color="white">{AMPLITUDE_LOGO}</Text>
-              </Box>
-            )}
             <Text dimColor>
               We'll use AI to analyze your project and integrate Amplitude.
             </Text>
@@ -186,7 +134,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               onSelect={(value) => {
                 const choice = Array.isArray(value) ? value[0] : value;
                 if (choice === 'cancel') {
-                  store.setOutroData({ kind: OutroKind.Cancel, message: 'Setup cancelled.' });
+                  store.setOutroData({
+                    kind: OutroKind.Cancel,
+                    message: 'Setup cancelled.',
+                  });
                 } else if (choice === 'framework') {
                   setPickingFramework(true);
                   setManuallySelected(true);

@@ -16,6 +16,7 @@ import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
+import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 
 interface RegionSelectScreenProps {
   store: WizardStore;
@@ -43,14 +44,19 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
   const { session } = store;
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} paddingTop={1}>
+      <AmplitudeTextLogo />
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.accent}>
-          {session.regionForced ? 'Switch data-center region' : 'Where is your Amplitude organization?'}
+          {session.regionForced
+            ? 'Switch data-center region'
+            : 'Where is your Amplitude organization?'}
         </Text>
         <Text dimColor>
           {session.regionForced
-            ? `Current: ${session.region?.toUpperCase() ?? 'US'} — pick a new region below`
+            ? `Current: ${
+                session.region?.toUpperCase() ?? 'US'
+              } — pick a new region below`
             : 'Press Enter to use US (default), or select EU if your org is on the EU data center.'}
         </Text>
       </Box>
