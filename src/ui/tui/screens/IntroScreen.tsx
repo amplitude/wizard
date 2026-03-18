@@ -10,6 +10,7 @@
  */
 
 import path from 'path';
+import { readFileSync } from 'node:fs';
 import { Box, Text } from 'ink';
 import { useState, useEffect, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
@@ -55,6 +56,17 @@ export const AmplitudeLogo = () => (
     })}
   </Box>
 );
+
+const AMPLITUDE_LOGO = (() => {
+  try {
+    return readFileSync(
+      new URL('../assets/amplilogo.txt', import.meta.url),
+      'utf-8',
+    ).trimEnd();
+  } catch {
+    return '';
+  }
+})();
 
 interface IntroScreenProps {
   store: WizardStore;
@@ -102,14 +114,16 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       <AmplitudeLogo />
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
         <Text bold>
-          <Text color="#1D4AFF">{'\u2588'}</Text>
-          <Text color="#F54E00">{'\u2588'}</Text>
-          <Text color="#F9BD2B">{'\u2588'}</Text>
-          {detecting ? ' Amplitude Wizard starting up' : ' Amplitude Wizard'}
+          {detecting ? 'Amplitude Wizard starting up' : 'Amplitude Wizard'}
         </Text>
 
         {showDescription && (
           <Box flexDirection="column" alignItems="center" marginTop={1}>
+            {AMPLITUDE_LOGO && (
+              <Box marginBottom={1}>
+                <Text color="white">{AMPLITUDE_LOGO}</Text>
+              </Box>
+            )}
             <Text dimColor>
               We'll use AI to analyze your project and integrate Amplitude.
             </Text>
