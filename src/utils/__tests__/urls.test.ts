@@ -90,11 +90,11 @@ describe('getLlmGatewayUrlFromHost', () => {
     );
   });
 
-  it('returns localhost proxy when WIZARD_PROXY_DEV_TOKEN is set', () => {
+  it('ignores WIZARD_PROXY_DEV_TOKEN and returns prod URL', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
     process.env.WIZARD_PROXY_DEV_TOKEN = 'dev-token';
     expect(getLlmGatewayUrlFromHost('https://us.i.amplitude.com')).toBe(
-      'http://localhost:9810',
+      'https://core.amplitude.com/wizard',
     );
   });
 
@@ -102,7 +102,7 @@ describe('getLlmGatewayUrlFromHost', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
     delete process.env.WIZARD_PROXY_DEV_TOKEN;
     expect(getLlmGatewayUrlFromHost('http://localhost:8010')).toBe(
-      'http://localhost:9810',
+      'http://localhost:3030/wizard',
     );
   });
 
@@ -110,7 +110,7 @@ describe('getLlmGatewayUrlFromHost', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
     delete process.env.WIZARD_PROXY_DEV_TOKEN;
     expect(getLlmGatewayUrlFromHost('https://eu.amplitude.com')).toBe(
-      'https://gateway.eu.amplitude.com/wizard',
+      'https://core.eu.amplitude.com/wizard',
     );
   });
 
@@ -118,7 +118,7 @@ describe('getLlmGatewayUrlFromHost', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
     delete process.env.WIZARD_PROXY_DEV_TOKEN;
     expect(getLlmGatewayUrlFromHost('https://eu.i.amplitude.com')).toBe(
-      'https://gateway.eu.amplitude.com/wizard',
+      'https://core.eu.amplitude.com/wizard',
     );
   });
 
@@ -126,7 +126,7 @@ describe('getLlmGatewayUrlFromHost', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
     delete process.env.WIZARD_PROXY_DEV_TOKEN;
     expect(getLlmGatewayUrlFromHost('https://us.i.amplitude.com')).toBe(
-      'https://gateway.us.amplitude.com/wizard',
+      'https://core.amplitude.com/wizard',
     );
   });
 });

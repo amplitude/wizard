@@ -6,7 +6,7 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.spec.ts'],
-    exclude: ['dist/**', 'node_modules/**', 'e2e-tests/**'],
+    exclude: ['dist/**', 'node_modules/**', 'e2e-tests/**', '**/proxy.test.ts'],
     coverage: {
       provider: 'v8',
       exclude: ['dist/**'],

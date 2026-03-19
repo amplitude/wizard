@@ -5,6 +5,7 @@
     "__mocks__/**/*",
     "index.ts",
     "bin.ts",
+    "vitest.config*.ts",
     "src/**/*",
     "spec/**/*",
     "test/**/*",

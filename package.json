@@ -66,6 +66,7 @@
     "zod-to-json-schema": "^3.25.1"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.79.0",
     "@cucumber/cucumber": "^12.7.0",
     "@eslint/js": "^10.0.1",
     "@types/chai": "^4.3.17",
@@ -116,14 +117,16 @@
     "test:e2e": "pnpm build && ./e2e-tests/run.sh",
     "test:e2e-record": "export RECORD_FIXTURES=true && pnpm build && ./e2e-tests/run.sh",
     "try": "tsx bin.ts",
-    "proxy": "cd \"${AMPLITUDE_REPO:-../amplitude}/langley\" && LOCAL_LANGLEY=true ENVIRONMENT=production WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- ./scripts/wizard_proxy_server.sh",
+    "proxy": "cd \"${JS_REPO:-../javascript}\" && aws-vault exec us-prod-engineer -- npx tsx server/packages/thunder/src/wizard-proxy-standalone.ts",
+    "proxy:bypass": "cd \"${JS_REPO:-../javascript}\" && WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- npx tsx server/packages/thunder/src/wizard-proxy-standalone.ts",
     "dev": "pnpm build && pnpm link --global && (trap 'kill 0' EXIT; pnpm proxy & pnpm build:watch)",
     "test:watch": "vitest",
     "prepare": "husky",
     "flows": "node scripts/render-flows.mjs",
     "test:bdd": "cucumber-js",
     "test:bdd:watch": "cucumber-js --retry 0 2>&1 | npx nodemon --watch features --exec cucumber-js",
-    "test:proxy": "tsx scripts/test-proxy.ts"
+    "test:proxy": "vitest run --config vitest.config.proxy.ts",
+    "test:proxy:smoke": "vitest run --config vitest.config.proxy.ts -t 'proxy:smoke'"
   },
   "lint-staged": {
     "*.{js,ts,tsx,jsx}": "pnpm fix"
