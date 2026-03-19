@@ -216,6 +216,13 @@ export interface WizardSession {
 
   // Resolved framework config (set after integration is known)
   frameworkConfig: FrameworkConfig | null;
+
+  /**
+   * True when the agent run was skipped because Amplitude was already
+   * detected in the project via static analysis. Set in bin.ts before
+   * runPhase is set to Completed.
+   */
+  amplitudePreDetected: boolean;
 }
 
 /**
@@ -284,5 +291,6 @@ export function buildSession(args: {
     introConcluded: false,
     additionalFeatureQueue: [],
     frameworkConfig: null,
+    amplitudePreDetected: false,
   };
 }

@@ -14,7 +14,7 @@
 import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
 import { useSyncExternalStore } from 'react';
-import { type WizardStore, McpOutcome } from '../store.js';
+import { type WizardStore, McpOutcome, RunPhase } from '../store.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
@@ -62,6 +62,8 @@ export const McpScreen = ({
   );
 
   const isRemove = mode === 'remove';
+  const { runPhase, amplitudePreDetected } = store.session;
+  const dataSetupComplete = runPhase === RunPhase.Completed;
 
   const [phase, setPhase] = useState<Phase>(Phase.Detecting);
   const [clients, setClients] = useState<McpClientInfo[]>([]);
@@ -137,6 +139,15 @@ export const McpScreen = ({
 
   return (
     <Box flexDirection="column" flexGrow={1}>
+      {dataSetupComplete && (
+        <Box marginBottom={1}>
+          <Text color="green" bold>
+            {amplitudePreDetected
+              ? '\u2714 Amplitude is already configured in this project!'
+              : '\u2714 Data setup complete!'}
+          </Text>
+        </Box>
+      )}
       <Text bold color={Colors.accent}>
         MCP Server {isRemove ? 'Removal' : 'Setup'}
       </Text>

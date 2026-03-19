@@ -5,14 +5,18 @@
  */
 
 import { Box, Text } from 'ink';
+import { useState } from 'react';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Colors } from '../styles.js';
-import { PickerMenu } from '../primitives/index.js';
+import { PickerMenu, ReportViewer } from '../primitives/index.js';
 import { getCloudUrlFromRegion } from '../../../utils/urls.js';
 import opn from 'opn';
+import path from 'path';
+
+const REPORT_FILE = 'amplitude-setup-report.md';
 
 interface OutroScreenProps {
   store: WizardStore;
@@ -24,11 +28,14 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     () => store.getSnapshot(),
   );
 
+  const [showReport, setShowReport] = useState(false);
+
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
 
   // Any-key-to-exit only for non-success states; success uses a picker.
-  useScreenInput(() => {
+  useScreenInput((input, key) => {
     if (!isSuccess) process.exit(0);
+    if (showReport && key.escape) setShowReport(false);
   });
 
   const outroData = store.session.outroData;
@@ -37,6 +44,22 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     return (
       <Box flexDirection="column" flexGrow={1}>
         <Text dimColor>Finishing up...</Text>
+      </Box>
+    );
+  }
+
+  const reportPath = path.join(store.session.installDir, REPORT_FILE);
+
+  if (showReport) {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <Box marginBottom={1}>
+          <Text bold color={Colors.accent}>
+            Setup Report
+          </Text>
+          <Text dimColor> (Esc to go back)</Text>
+        </Box>
+        <ReportViewer filePath={reportPath} />
       </Box>
     );
   }
@@ -134,17 +157,24 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         {isSuccess ? (
           <PickerMenu
             options={[
+              { label: 'View setup report', value: 'report' },
               { label: 'Open Amplitude dashboard', value: 'dashboard' },
               { label: 'Exit', value: 'exit' },
             ]}
             onSelect={(value) => {
               const choice = Array.isArray(value) ? value[0] : value;
-              if (choice === 'dashboard') {
+              if (choice === 'report') {
+                setShowReport(true);
+              } else if (choice === 'dashboard') {
                 const region = store.session.region ?? 'us';
                 const url = getCloudUrlFromRegion(region);
-                opn(url, { wait: false }).catch(() => { /* fire-and-forget */ });
+                opn(url, { wait: false }).catch(() => {
+                  /* fire-and-forget */
+                });
+                process.exit(0);
+              } else {
+                process.exit(0);
               }
-              process.exit(0);
             }}
           />
         ) : (

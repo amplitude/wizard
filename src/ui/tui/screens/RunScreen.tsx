@@ -11,6 +11,7 @@
 
 import { Box, Text } from 'ink';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import {
@@ -24,6 +25,7 @@ import {
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
+import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import {
   DiscoveredFeature,
   AdditionalFeature,
@@ -106,7 +108,11 @@ interface RunScreenProps {
   store: WizardStore;
 }
 
+/** Min terminal width to show the logo in the TipsCard. */
+const LOGO_MIN_COLS = 100;
+
 const TipsCard = ({ store }: { store: WizardStore }) => {
+  const [columns] = useStdoutDimensions();
   useScreenInput((input) => {
     for (const tip of TIPS) {
       if (
@@ -122,6 +128,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
 
   return (
     <Box flexDirection="column" paddingX={1}>
+      {columns >= LOGO_MIN_COLS && <AnimatedAmplitudeLogo />}
       <Text bold color={Colors.accent}>
         Learn about Amplitude
       </Text>

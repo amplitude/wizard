@@ -35,7 +35,8 @@ export function startTUI(
   store: WizardStore;
   waitForSetup: () => Promise<void>;
 } {
-  // Force dark background regardless of terminal theme
+  // Force dark background regardless of terminal theme.
+  // The UI adapts to whatever size the terminal already is.
   process.stdout.write(FORCE_DARK);
 
   const store = new WizardStore(flow);
@@ -51,7 +52,7 @@ export function startTUI(
   // Render the Ink app
   const { unmount: inkUnmount } = render(createElement(App, { store }));
 
-  // Reset terminal on exit
+  // Reset terminal colors on exit
   const cleanup = () => {
     process.stdout.write(
       OSC_FG_RESET + OSC_BG_RESET + RESET_ATTRS + CLEAR_SCREEN + CURSOR_HOME,

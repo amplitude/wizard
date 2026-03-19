@@ -408,6 +408,11 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setAmplitudePreDetected(): void {
+    this.$session.setKey('amplitudePreDetected', true);
+    this.emitChange();
+  }
+
   setMcpComplete(
     outcome: McpOutcome = McpOutcome.Skipped,
     installedClients: string[] = [],
@@ -510,6 +515,10 @@ export class WizardStore {
   private _detectTransition(): void {
     const next = this.router.resolve(this.session);
     const prev = this._lastScreen;
+    // Update _lastScreen before invoking hooks so re-entrant emitChange calls
+    // (e.g. completeSetup inside an onEnterScreen hook) see prev === next and
+    // don't re-fire the same hooks, preventing infinite recursion.
+    this._lastScreen = next;
     if (prev !== null && next !== prev) {
       const hooks = this._enterScreenHooks.get(next);
       if (hooks) {
@@ -520,7 +529,6 @@ export class WizardStore {
         ...sessionProperties(this.session),
       });
     }
-    this._lastScreen = next;
   }
 
   // ── Agent observation state ─────────────────────────────────────

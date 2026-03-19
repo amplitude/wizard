@@ -220,21 +220,76 @@ yargs(hideBin(process.argv))
               benchmark: options.benchmark as boolean | undefined,
               projectId: options.projectId as string | undefined,
             });
-            tui.store.session = session;
 
             // If --api-key was provided, skip the OAuth/TUI auth flow entirely.
             if (session.apiKey) {
               const { DEFAULT_HOST_URL } = await import(
                 './src/lib/constants.js'
               );
-              tui.store.setCredentials({
+              session.credentials = {
                 accessToken: session.apiKey,
                 projectApiKey: session.apiKey,
                 host: DEFAULT_HOST_URL,
                 projectId: session.projectId ?? 0,
-              });
-              tui.store.setProjectHasData(false);
+              };
+              session.projectHasData = false;
+            } else {
+              // Pre-populate region + credentials from all available sources for
+              // returning users. This skips RegionSelect and Auth without requiring
+              // a persisted OAuth token.
+              const installDir = session.installDir;
+              const [
+                { getStoredUser, getStoredToken },
+                { readAmpliConfig },
+                { readApiKeyWithSource },
+                { getHostFromRegion },
+              ] = await Promise.all([
+                import('./src/utils/ampli-settings.js'),
+                import('./src/lib/ampli-config.js'),
+                import('./src/utils/api-key-store.js'),
+                import('./src/utils/urls.js'),
+              ]);
+
+              // Zone: prefer a real (non-pending) stored user, fall back to
+              // the Zone field in the project-level ampli.json.
+              const storedUser = getStoredUser();
+              const realUser =
+                storedUser && storedUser.id !== 'pending' ? storedUser : null;
+              const projectConfig = readAmpliConfig(installDir);
+              const projectZone = projectConfig.ok
+                ? projectConfig.config.Zone
+                : undefined;
+              const zone = realUser?.zone ?? projectZone ?? null;
+
+              if (zone) {
+                session.region = zone;
+              }
+
+              // Credentials: only skip Auth when we have a saved API key.
+              // Use stored OAuth id_token as the access token when available;
+              // fall back to the API key itself (matches the --api-key flow).
+              const apiKeyResult = readApiKeyWithSource(installDir);
+              if (apiKeyResult && zone) {
+                const storedToken = realUser
+                  ? getStoredToken(realUser.id, realUser.zone)
+                  : getStoredToken(undefined, zone);
+                const accessToken = storedToken?.idToken ?? apiKeyResult.key;
+                session.credentials = {
+                  accessToken,
+                  projectApiKey: apiKeyResult.key,
+                  host: getHostFromRegion(zone),
+                  projectId: 0,
+                };
+                // Pre-populate activationLevel so DataSetup is also skipped,
+                // giving a single wipe from Intro → Run/Setup.
+                // DataSetup would set 'none' anyway (projectId=0 prevents the
+                // real check), so this is equivalent — just earlier.
+                session.activationLevel = 'none';
+                session.projectHasData = false;
+              }
             }
+
+            tui.store.session = session;
 
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
@@ -268,6 +323,10 @@ yargs(hideBin(process.argv))
             // AuthScreen calls store.setCredentials() when done, advancing the
             // router past Auth → RegionSelect → DataSetup → to IntroScreen.
             const authTask = (async () => {
+              // Skip the full OAuth + SUSI flow when credentials were pre-populated
+              // from ~/.ampli.json + the saved API key (returning user).
+              if (tui.store.session.credentials !== null) return;
+
               try {
                 const { ampliConfigExists } = await import(
                   './src/lib/ampli-config.js'
@@ -496,10 +555,33 @@ yargs(hideBin(process.argv))
             // Blocks until onEnterScreen(Screen.Run) fires completeSetup().
             await tui.waitForSetup();
 
-            await runWizard(
-              options as Parameters<typeof runWizard>[0],
-              tui.store.session,
+            // Before calling the AI agent, do a quick static check to see if
+            // Amplitude is already installed in the project. If so, skip the
+            // agent entirely and advance directly to MCP setup.
+            const { detectAmplitudeInProject } = await import(
+              './src/lib/detect-amplitude.js'
             );
+            const localDetection = detectAmplitudeInProject(installDir);
+
+            if (localDetection.confidence !== 'none') {
+              const { logToFile: log } = await import('./src/utils/debug.js');
+              log(
+                `[bin] Amplitude already detected (${
+                  localDetection.reason ?? 'unknown'
+                }) — skipping agent`,
+              );
+              const { RunPhase, OutroKind } = await import(
+                './src/lib/wizard-session.js'
+              );
+              tui.store.setAmplitudePreDetected();
+              tui.store.setOutroData({ kind: OutroKind.Success });
+              tui.store.setRunPhase(RunPhase.Completed);
+            } else {
+              await runWizard(
+                options as Parameters<typeof runWizard>[0],
+                tui.store.session,
+              );
+            }
 
             // Keep the outro screen visible — let process.exit() handle cleanup
           } catch (err) {

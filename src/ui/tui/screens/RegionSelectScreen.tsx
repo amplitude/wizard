@@ -16,7 +16,6 @@ import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
-import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 
 interface RegionSelectScreenProps {
   store: WizardStore;
@@ -45,8 +44,6 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
 
   return (
     <>
-      <Box marginBottom={1}></Box>
-      <AmplitudeTextLogo />
       <Box flexDirection="column" flexGrow={1} paddingTop={1}>
         <Box flexDirection="column" marginBottom={1}>
           <Text bold color={Colors.accent}>
