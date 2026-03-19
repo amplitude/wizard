@@ -199,6 +199,136 @@ export function swiftPackageManager(): Promise<PackageManagerInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// Java (Maven / Gradle) helper
+// ---------------------------------------------------------------------------
+
+const MAVEN: DetectedPackageManager = {
+  name: 'maven',
+  label: 'Maven',
+  installCommand: 'mvn',
+  runCommand: 'mvn exec:java',
+};
+
+const GRADLE_JAVA: DetectedPackageManager = {
+  name: 'gradle',
+  label: 'Gradle',
+  installCommand: 'gradle',
+  runCommand: 'gradle run',
+};
+
+export async function detectJavaPackageManagers(
+  installDir: string,
+): Promise<PackageManagerInfo> {
+  const fs = await import('node:fs');
+  const nodePath = await import('node:path');
+
+  const hasMaven = fs.existsSync(nodePath.join(installDir, 'pom.xml'));
+  const hasGradle =
+    fs.existsSync(nodePath.join(installDir, 'build.gradle')) ||
+    fs.existsSync(nodePath.join(installDir, 'build.gradle.kts'));
+
+  if (hasMaven) {
+    return {
+      detected: [MAVEN],
+      primary: MAVEN,
+      recommendation:
+        'Use Maven: add the dependency to pom.xml and run mvn install.',
+    };
+  }
+  if (hasGradle) {
+    return {
+      detected: [GRADLE_JAVA],
+      primary: GRADLE_JAVA,
+      recommendation:
+        'Use Gradle: add the implementation dependency to build.gradle and sync.',
+    };
+  }
+  return {
+    detected: [MAVEN],
+    primary: MAVEN,
+    recommendation: 'No build file detected. Defaulting to Maven.',
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Flutter (pub) helper
+// ---------------------------------------------------------------------------
+
+const FLUTTER_PUB: DetectedPackageManager = {
+  name: 'flutter',
+  label: 'Flutter pub',
+  installCommand: 'flutter pub add',
+  runCommand: 'flutter pub run',
+};
+
+export function flutterPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [FLUTTER_PUB],
+    primary: FLUTTER_PUB,
+    recommendation: 'Use Flutter pub (flutter pub add).',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Go (modules) helper
+// ---------------------------------------------------------------------------
+
+const GO_MODULES: DetectedPackageManager = {
+  name: 'go',
+  label: 'Go modules',
+  installCommand: 'go get',
+  runCommand: 'go run',
+};
+
+export function goPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [GO_MODULES],
+    primary: GO_MODULES,
+    recommendation: 'Use Go modules (go get).',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Unity (UPM) helper
+// ---------------------------------------------------------------------------
+
+const UNITY_UPM: DetectedPackageManager = {
+  name: 'unity',
+  label: 'Unity Package Manager',
+  installCommand:
+    'Add to Packages/manifest.json dependencies: "com.amplitude.unity-plugin": "https://github.com/amplitude/unity-plugin.git?path=/Assets"',
+};
+
+export function unityPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [UNITY_UPM],
+    primary: UNITY_UPM,
+    recommendation:
+      'Use Unity Package Manager: add the git URL dependency to Packages/manifest.json.',
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Unreal Engine helper
+// ---------------------------------------------------------------------------
+
+const UNREAL_MANUAL: DetectedPackageManager = {
+  name: 'unreal',
+  label: 'Manual plugin install',
+  installCommand:
+    'Download AmplitudeUnreal.zip from https://github.com/amplitude/Amplitude-Unreal/releases/latest and extract into Plugins/AmplitudeUnreal/',
+};
+
+export function unrealPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [UNREAL_MANUAL],
+    primary: UNREAL_MANUAL,
+    recommendation:
+      'Unreal Engine uses manual plugin installation. Download the zip from GitHub releases and extract it into the project Plugins/ directory.',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Ruby (Bundler) helper
 // ---------------------------------------------------------------------------
 

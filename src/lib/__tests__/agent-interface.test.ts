@@ -1,3 +1,4 @@
+import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
 import { runAgent, createStopHook } from '../agent-interface';
 import type { WizardOptions } from '../../utils/types';
 import type { SpinnerHandle } from '../../ui';

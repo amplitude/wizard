@@ -57,6 +57,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
       const frameworkId = 'vue';
       return [
         `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
+        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
       ];
     },
   },

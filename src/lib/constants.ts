@@ -17,6 +17,14 @@ export enum Integration {
   django = 'django',
   flask = 'flask',
   fastapi = 'fastapi',
+  swift = 'swift',
+  reactNative = 'react-native',
+  android = 'android',
+  flutter = 'flutter',
+  go = 'go',
+  java = 'java',
+  unreal = 'unreal',
+  unity = 'unity',
 
   // Language fallbacks
   javascript_web = 'javascript_web',
@@ -60,16 +68,19 @@ export const ANALYTICS_TEAM_TAG = 'amplitude-wizard';
 
 /** Matches the port used by the ampli CLI so sessions are interoperable. */
 export const OAUTH_PORT = 13222;
-export const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID ?? 'cli-client-pkce';
 
 export const AMPLITUDE_ZONE_SETTINGS = {
   us: {
     oAuthHost: process.env.OAUTH_HOST ?? 'https://auth.amplitude.com',
+    oAuthClientId:
+      process.env.OAUTH_CLIENT_ID ?? '0ac84169-c41c-4222-885b-31469c761cb0',
     dataApiUrl: 'https://data-api.amplitude.com/graphql',
     webUrl: 'https://data.amplitude.com',
   },
   eu: {
     oAuthHost: 'https://auth.eu.amplitude.com',
+    oAuthClientId:
+      process.env.OAUTH_CLIENT_ID ?? '110d04a1-8e60-4157-9c43-fcbe4e014a85',
     dataApiUrl: 'https://data-api.eu.amplitude.com/graphql',
     webUrl: 'https://data.eu.amplitude.com',
   },

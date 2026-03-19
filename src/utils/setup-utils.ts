@@ -187,7 +187,6 @@ export async function installPackage({
       getUI().log.error(
         `${chalk.red(
           'Encountered the following error during installation:',
-          // eslint-disable-next-line @typescript-eslint/restrict-template-expressions
         )}\n\n${e}\n\n${chalk.dim(
           `The wizard has created a \`amplitude-wizard-installation-error-*.log\` file. If you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${ISSUES_URL}`,
         )}`,

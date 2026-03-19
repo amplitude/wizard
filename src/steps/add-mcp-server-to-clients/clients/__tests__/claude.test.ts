@@ -1,3 +1,12 @@
+import {
+  vi,
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from 'vitest';
 // We use the ClaudeMCPClient as a reference to test the DefaultMCPClient
 import * as fs from 'fs';
 import * as path from 'path';

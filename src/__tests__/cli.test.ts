@@ -152,7 +152,6 @@ function defaultAuthMocks() {
  * picking a region in the TUI.
  */
 function simulateRegionSelect(region: 'us' | 'eu') {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
     mockStore.session = { ...mockStore.session, region };
     setTimeout(cb, 0);
@@ -257,7 +256,7 @@ describe('TUI auth task: region determines OAuth zone', () => {
 
   test('waits for region before starting OAuth', async () => {
     let storedCallback: (() => void) | null = null;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
     (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
       storedCallback = cb; // capture but do NOT call yet
       return vi.fn();
@@ -648,7 +647,7 @@ describe('whoami command', () => {
 
 describe.skip('CLI argument parsing', () => {
   const originalArgv = process.argv;
-  // eslint-disable-next-line @typescript-eslint/unbound-method
+
   const originalExit = process.exit;
   const originalEnv = { ...process.env };
 

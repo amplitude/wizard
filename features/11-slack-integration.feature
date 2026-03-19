@@ -37,3 +37,22 @@ Feature: Slack Integration
   Scenario: Standalone slack command launches SlackSetup flow
     Given I run the standalone slack command
     Then I should be on the standalone Slack setup screen
+
+  @todo
+  Scenario: Returning user with existing data sees Slack setup after MCP
+    Given I have valid credentials stored in "~/.ampli.json"
+    And the current project has existing data
+    And MCP setup is complete
+    Then I should be on the Slack screen
+
+  @todo
+  Scenario: Returning user skips Slack setup — proceeds to Outro
+    Given I am a returning user on the Slack setup screen
+    When I skip the Slack setup
+    Then the Slack flow should advance to the Outro screen
+
+  @todo
+  Scenario: Returning user completes Slack setup — proceeds to Outro
+    Given I am a returning user on the Slack setup screen
+    When I complete the Slack setup
+    Then the Slack flow should advance to the Outro screen

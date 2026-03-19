@@ -82,7 +82,7 @@ class FixtureTracker {
         usedFixtures = JSON.parse(
           fs.readFileSync(this.usedFixturesFile, 'utf8'),
         ) as string[];
-      } catch (error) {
+      } catch {
         usedFixtures = [];
       }
     }
@@ -113,7 +113,6 @@ class FixtureTracker {
           fs.readFileSync(this.existingFixturesFile, 'utf8'),
         ) as string[];
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.warn('Error reading existing fixtures file:', error);
         return;
       }
@@ -126,7 +125,6 @@ class FixtureTracker {
           fs.readFileSync(this.usedFixturesFile, 'utf8'),
         ) as string[];
       } catch (error) {
-        // eslint-disable-next-line no-console
         console.warn('Error reading used fixtures file:', error);
         usedFixtures = [];
       }
@@ -141,7 +139,7 @@ class FixtureTracker {
     for (const fixturePath of unusedFixtures) {
       if (fs.existsSync(fixturePath)) {
         fs.unlinkSync(fixturePath);
-        // eslint-disable-next-line no-console
+
         console.log(`Deleted unused fixture: ${path.basename(fixturePath)}`);
       }
     }
@@ -183,7 +181,7 @@ class FixtureTracker {
         existingFixtures = JSON.parse(
           fs.readFileSync(this.existingFixturesFile, 'utf8'),
         ) as string[];
-      } catch (error) {
+      } catch {
         // Ignore errors
       }
     }
@@ -193,7 +191,7 @@ class FixtureTracker {
         usedFixtures = JSON.parse(
           fs.readFileSync(this.usedFixturesFile, 'utf8'),
         ) as string[];
-      } catch (error) {
+      } catch {
         // Ignore errors
       }
     }

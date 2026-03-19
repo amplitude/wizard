@@ -1,3 +1,4 @@
+import { vi, describe, it, expect, afterEach } from 'vitest';
 import { installPackage } from '../setup-utils';
 
 import * as ChildProcess from 'node:child_process';

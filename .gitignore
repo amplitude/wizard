@@ -21,6 +21,7 @@ yarn-error.log
 scratch/
 
 *.pyc
+__pycache__/
 
 .idea
 *.sublime-*

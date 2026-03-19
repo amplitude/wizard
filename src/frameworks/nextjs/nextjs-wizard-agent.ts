@@ -95,7 +95,10 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
     getAdditionalContextLines: (context) => {
       const routerType =
         context.router === NextJsRouter.APP_ROUTER ? 'app' : 'pages';
-      return [`Router: ${routerType}`];
+      return [
+        `Router: ${routerType}`,
+        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+      ];
     },
   },
 

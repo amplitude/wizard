@@ -16,6 +16,7 @@ actions.
 | `/chart`     | Set up a new chart                                                |
 | `/dashboard` | Create a new dashboard                                            |
 | `/taxonomy`  | Interact with the taxonomy agent                                  |
+| `/slack`     | Connect your Amplitude project to Slack                           |
 | `/help`      | List available slash commands                                     |
 
 ---
@@ -69,9 +70,9 @@ flowchart TD
     DATA_SETUP --> DATA_CHECK{Project has data?}
 
     DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
-    DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent"]
+    DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch project"]
 
-    OPTIONS --> RUN
+    OPTIONS --> MCP_SCREEN
     FRAMEWORK --> RUN
 
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
@@ -89,7 +90,8 @@ flowchart TD
 
     POST --> MCP_SCREEN["McpScreen<br/>(install MCP server — skipped on error)"]
     ERR --> OUTRO["See: Outro flow"]
-    MCP_SCREEN --> OUTRO
+    MCP_SCREEN --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
+    SLACK_SCREEN --> OUTRO
 
     SUSI -. overlay .-> OUTAGE["OutageScreen"]
     RUN -. overlay, before agent starts .-> SETTINGS_OVR["SettingsOverrideScreen"]

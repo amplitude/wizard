@@ -109,6 +109,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
         `Has TypeScript: ${context.hasTypeScript ? 'yes' : 'no'}`,
         `Framework docs ID: js (use amplitude://docs/frameworks/js for documentation if available)`,
         `Project type: Generic JavaScript/TypeScript application (no specific framework detected)`,
+        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
       ];
 
       if (context.hasBundler) {
@@ -127,7 +128,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
         context.packageManagerName ?? 'package manager';
       return [
         `Analyzed your JavaScript project structure`,
-        `Installed the @amplitude/analytics-browser package using ${packageManagerName}`,
+        `Installed the @amplitude/unified package using ${packageManagerName}`,
         `Created Amplitude initialization code`,
         `Configured autocapture and event tracking`,
       ];

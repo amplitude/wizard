@@ -118,7 +118,7 @@ export async function runAgentWizard(
 
   // Framework detection and version
   const usesPackageJson = config.detection.usesPackageJson !== false;
-  let packageJson: PackageDotJson | null = null;
+  let packageJson: PackageDotJson | null;
   let frameworkVersion: string | undefined;
 
   if (usesPackageJson) {
