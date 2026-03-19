@@ -63,7 +63,18 @@ Feature: Wizard flow
     And my region is already set to "us"
     When the wizard launches
     And I continue past the intro
-    Then I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project
+    Then I should see options to open overview, chart, dashboard, taxonomy agent, or switch project
+
+  @todo
+  Scenario: Returning user with existing data gets MCP setup then Slack setup after selecting an option
+    Given I have valid credentials stored in "~/.ampli.json"
+    And the current project has existing data
+    When I select an option from the options menu
+    Then I should be taken to MCP setup
+    When MCP setup is complete
+    Then I should be on the Slack screen
+    When Slack setup is complete
+    Then I should be taken to the Outro
 
   Scenario: Run screen is shown before the agent starts
     Given I have reached the RunScreen
