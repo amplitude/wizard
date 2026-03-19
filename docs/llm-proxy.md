@@ -40,13 +40,19 @@ wizard CLI  ─>  Thunder (wizard-proxy-router)  ─>  GCP Vertex AI  ─>  Clau
 
 ```bash
 # Terminal 1: Start the proxy (needs GCP credentials via aws-vault)
+# With auth bypass (no login needed):
 cd javascript
-ENVIRONMENT=local aws-vault exec us-prod-engineer -- \
+WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- \
+  npx tsx server/packages/thunder/src/wizard-proxy-standalone.ts
+
+# Or without bypass (test real OAuth token flow — requires `pnpm try login` first):
+cd javascript
+aws-vault exec us-prod-engineer -- \
   npx tsx server/packages/thunder/src/wizard-proxy-standalone.ts
 
 # Terminal 2: Run the wizard
 cd wizard
-WIZARD_PROXY_DEV_TOKEN=dev-token pnpm try
+pnpm try
 ```
 
 ### Option 2: Full Thunder server
