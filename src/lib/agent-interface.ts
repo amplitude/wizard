@@ -662,8 +662,8 @@ export async function initializeAgent(
       logToFile('Configured LLM gateway:', gatewayUrl);
 
       // Local dev: when WIZARD_PROXY_DEV_TOKEN is set, use it instead of Amplitude OAuth.
-      // This lets developers skip login when the proxy has WIZARD_PROXY_DEV_BYPASS=1.
-      // TODO: Remove before production release.
+      // This lets developers skip login when the proxy runs with ENVIRONMENT=local
+      // (which auto-bypasses auth in the proxy's auth middleware).
       const devToken = process.env.WIZARD_PROXY_DEV_TOKEN;
       if (devToken) {
         process.env.ANTHROPIC_AUTH_TOKEN = devToken;

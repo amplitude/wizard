@@ -116,7 +116,7 @@
     "test:e2e": "pnpm build && ./e2e-tests/run.sh",
     "test:e2e-record": "export RECORD_FIXTURES=true && pnpm build && ./e2e-tests/run.sh",
     "try": "tsx bin.ts",
-    "proxy": "cd \"${AMPLITUDE_REPO:-../amplitude}/langley\" && LOCAL_LANGLEY=true ENVIRONMENT=production WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- ./scripts/wizard_proxy_server.sh",
+    "proxy": "cd \"${JS_REPO:-../javascript}\" && ENVIRONMENT=local aws-vault exec us-prod-engineer -- npx tsx server/packages/thunder/src/wizard-proxy-standalone.ts",
     "dev": "pnpm build && pnpm link --global && (trap 'kill 0' EXIT; pnpm proxy & pnpm build:watch)",
     "test:watch": "vitest",
     "prepare": "husky",
