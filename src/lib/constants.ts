@@ -18,6 +18,7 @@ export enum Integration {
   flask = 'flask',
   fastapi = 'fastapi',
   swift = 'swift',
+  reactNative = 'react-native',
   android = 'android',
   flutter = 'flutter',
   go = 'go',
