@@ -9,7 +9,7 @@ function mockFetch(indicator: string, description = 'All good', ok = true) {
     vi.fn().mockResolvedValue({
       ok,
       status: ok ? 200 : 500,
-      // eslint-disable-next-line @typescript-eslint/require-await
+
       json: async () => ({
         page: {
           id: 'p',

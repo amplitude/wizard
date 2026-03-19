@@ -57,13 +57,13 @@ if (process.env.NODE_ENV === 'test') {
       server.listen({
         onUnhandledRequest: 'bypass',
       });
-    } catch (error) {
+    } catch {
       // Mock server import failed - this can happen during non-E2E tests
     }
   })();
 }
 
-yargs(hideBin(process.argv))
+void yargs(hideBin(process.argv))
   .env('AMPLITUDE_WIZARD')
   // global options
   .options({
@@ -417,7 +417,7 @@ yargs(hideBin(process.argv))
               } catch (err) {
                 // Auth failure is non-fatal here — agent-runner will retry/handle it
                 if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-                  console.error('OAuth setup error:', err); // eslint-disable-line no-console
+                  console.error('OAuth setup error:', err);
                 }
               }
             })();
@@ -587,7 +587,7 @@ yargs(hideBin(process.argv))
           } catch (err) {
             // TUI unavailable (e.g., in test environment) — continue with default UI
             if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-              console.error('TUI init failed:', err); // eslint-disable-line no-console
+              console.error('TUI init failed:', err);
             }
             await runWizard(options as Parameters<typeof runWizard>[0]);
           }
@@ -629,9 +629,9 @@ yargs(hideBin(process.argv))
               chalk.green(
                 `✔ Already logged in as ${cachedUser.firstName} ${cachedUser.lastName} <${cachedUser.email}>`,
               ),
-            ); // eslint-disable-line no-console
+            );
             if (cachedUser.zone !== 'us') {
-              console.log(chalk.dim(`  Zone: ${cachedUser.zone}`)); // eslint-disable-line no-console
+              console.log(chalk.dim(`  Zone: ${cachedUser.zone}`));
             }
             process.exit(0);
           }
@@ -657,11 +657,11 @@ yargs(hideBin(process.argv))
             chalk.green(
               `✔ Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
             ),
-          ); // eslint-disable-line no-console
+          );
           if (user.orgs.length > 0) {
             console.log(
               chalk.dim(`  Org: ${user.orgs.map((o) => o.name).join(', ')}`),
-            ); // eslint-disable-line no-console
+            );
           }
           process.exit(0);
         } catch (e) {
@@ -669,7 +669,7 @@ yargs(hideBin(process.argv))
             chalk.red(
               `Login failed: ${e instanceof Error ? e.message : String(e)}`,
             ),
-          ); // eslint-disable-line no-console
+          );
           process.exit(1);
         }
       })();
@@ -678,7 +678,7 @@ yargs(hideBin(process.argv))
   .command(
     'logout',
     'Log out of your Amplitude account',
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
+
     () => {},
     (_argv) => {
       void (async () => {
@@ -691,12 +691,12 @@ yargs(hideBin(process.argv))
         try {
           fs.writeFileSync(configPath, '{}', 'utf-8');
           if (user) {
-            console.log(chalk.green(`✔ Logged out ${user.email}`)); // eslint-disable-line no-console
+            console.log(chalk.green(`✔ Logged out ${user.email}`));
           } else {
-            console.log(chalk.dim('No active session found.')); // eslint-disable-line no-console
+            console.log(chalk.dim('No active session found.'));
           }
         } catch {
-          console.log(chalk.dim('No active session found.')); // eslint-disable-line no-console
+          console.log(chalk.dim('No active session found.'));
         }
         process.exit(0);
       })();
@@ -705,7 +705,7 @@ yargs(hideBin(process.argv))
   .command(
     'whoami',
     'Show the currently logged-in Amplitude account',
-    // eslint-disable-next-line @typescript-eslint/no-empty-function
+
     () => {},
     (_argv) => {
       void (async () => {
@@ -719,14 +719,14 @@ yargs(hideBin(process.argv))
             `Logged in as ${chalk.bold(
               user.firstName + ' ' + user.lastName,
             )} <${user.email}>`,
-          ); // eslint-disable-line no-console
-          if (user.zone !== 'us') console.log(chalk.dim(`Zone: ${user.zone}`)); // eslint-disable-line no-console
+          );
+          if (user.zone !== 'us') console.log(chalk.dim(`Zone: ${user.zone}`));
         } else {
           console.log(
             chalk.yellow(
               'Not logged in. Run `amplitude-wizard login` to authenticate.',
             ),
-          ); // eslint-disable-line no-console
+          );
         }
         process.exit(0);
       })();

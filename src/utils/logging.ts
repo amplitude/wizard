@@ -11,7 +11,6 @@ export function prepareMessage(msg: unknown): string {
 }
 
 export function l(msg: string): void {
-  // eslint-disable-next-line no-console
   console.log(msg);
 }
 

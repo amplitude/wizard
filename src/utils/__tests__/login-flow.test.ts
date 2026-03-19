@@ -1,4 +1,4 @@
-import { type MockedFunction } from 'vitest';
+import { type Mock, type MockedFunction } from 'vitest';
 /**
  * Tests for the login flow org-resolution logic added in askForWizardLogin:
  *

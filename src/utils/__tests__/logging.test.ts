@@ -49,7 +49,6 @@ describe('prepareMessage', () => {
 // ── console-forwarding helpers ────────────────────────────────────────────────
 
 describe('logging helpers', () => {
-  // eslint-disable-next-line @typescript-eslint/no-empty-function
   const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 
   afterEach(() => consoleSpy.mockClear());

@@ -1,3 +1,4 @@
+import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
 import { CodexMCPClient } from '../codex';
 import { execSync, spawnSync } from 'node:child_process';
 import { analytics } from '../../../../utils/analytics';

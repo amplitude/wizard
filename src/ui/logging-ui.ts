@@ -1,4 +1,3 @@
-/* eslint-disable no-console */
 /**
  * LoggingUI — Logging-only implementation for CI mode.
  * No prompts, no TUI, no interactivity. Just console output.
@@ -161,9 +160,11 @@ export class LoggingUI implements WizardUI {
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
     const completed = todos.filter(
-      (t) => t.status === TaskStatus.Completed,
+      (t) => (t.status as TaskStatus) === TaskStatus.Completed,
     ).length;
-    const inProgress = todos.find((t) => t.status === TaskStatus.InProgress);
+    const inProgress = todos.find(
+      (t) => (t.status as TaskStatus) === TaskStatus.InProgress,
+    );
     if (inProgress) {
       console.log(
         `◌  [${completed}/${todos.length}] ${

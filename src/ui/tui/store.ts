@@ -569,7 +569,7 @@ export class WizardStore {
       label: t.content,
       activeForm: t.activeForm,
       status: (t.status as TaskStatus) || TaskStatus.Pending,
-      done: t.status === TaskStatus.Completed,
+      done: (t.status as TaskStatus) === TaskStatus.Completed,
     }));
 
     const incomingLabels = new Set(incoming.map((t) => t.label));

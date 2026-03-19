@@ -74,7 +74,6 @@ describe('getPackageManagerName', () => {
 describe('detectPackageManager', () => {
   let tmpDir: string;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const options = (installDir: string) => ({ installDir } as any);
 
   beforeEach(() => {

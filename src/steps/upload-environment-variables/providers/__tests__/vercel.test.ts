@@ -1,9 +1,16 @@
+import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
 import { VercelEnvironmentProvider } from '../vercel';
 import * as fs from 'fs';
 import * as child_process from 'child_process';
 
 vi.mock('fs');
 vi.mock('child_process');
+const { mockSpinner } = vi.hoisted(() => ({
+  mockSpinner: { start: vi.fn(), stop: vi.fn() },
+}));
+vi.mock('../../../../ui', () => ({
+  getUI: () => ({ spinner: () => mockSpinner }),
+}));
 
 const mockOptions = { installDir: '/tmp/project' };
 
@@ -79,8 +86,8 @@ describe('VercelEnvironmentProvider', () => {
     const uploadPromise = provider.uploadEnvVars({ FOO: 'bar' });
 
     // Simulate "already exists" error on stderr, then process close
-    stderrListener && stderrListener('already exists');
-    closeCallback && closeCallback(1);
+    if (stderrListener) stderrListener('already exists');
+    if (closeCallback) closeCallback(1);
 
     await expect(uploadPromise).resolves.toEqual({ FOO: false });
   });

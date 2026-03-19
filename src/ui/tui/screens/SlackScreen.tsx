@@ -38,9 +38,14 @@ enum Phase {
  * Build the Amplitude settings URL for Slack connection.
  * Uses the org name from the API; falls back to base URL.
  */
-export function slackSettingsUrl(baseUrl: string, orgName: string | null): string {
+export function slackSettingsUrl(
+  baseUrl: string,
+  orgName: string | null,
+): string {
   if (orgName) {
-    return `${baseUrl}/analytics/${encodeURIComponent(orgName)}/settings/profile`;
+    return `${baseUrl}/analytics/${encodeURIComponent(
+      orgName,
+    )}/settings/profile`;
   }
   return `${baseUrl}/settings/profile`;
 }
@@ -77,7 +82,13 @@ export const SlackScreen = ({
   // Fetch org name from the API if it wasn't populated during the SUSI flow
   // (e.g. returning users, or the standalone `slack` command).
   useEffect(() => {
-    logToFile(`[SlackScreen] selectedOrgName=${store.session.selectedOrgName ?? ''} credentials=${store.session.credentials ? 'present' : 'null'} region=${region}`);
+    logToFile(
+      `[SlackScreen] selectedOrgName=${
+        store.session.selectedOrgName ?? ''
+      } credentials=${
+        store.session.credentials ? 'present' : 'null'
+      } region=${region}`,
+    );
     if (resolvedOrgName) {
       logToFile(`[SlackScreen] using existing orgName=${resolvedOrgName}`);
       return;
@@ -91,13 +102,21 @@ export const SlackScreen = ({
     void fetchAmplitudeUser(credentials.accessToken, region as AmplitudeZone)
       .then((info) => {
         const name = info.orgs[0]?.name ?? null;
-        logToFile(`[SlackScreen] API returned orgs=${JSON.stringify(info.orgs.map(o => o.name))} using=${name}`);
+        logToFile(
+          `[SlackScreen] API returned orgs=${JSON.stringify(
+            info.orgs.map((o) => o.name),
+          )} using=${name}`,
+        );
         setResolvedOrgName(name);
       })
       .catch((err: unknown) => {
-        logToFile(`[SlackScreen] API fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+        logToFile(
+          `[SlackScreen] API fetch failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       });
-  }, []); // eslint-disable-line
+  }, []);
 
   const settingsUrl = slackSettingsUrl(
     getCloudUrlFromRegion(region),
@@ -106,7 +125,9 @@ export const SlackScreen = ({
 
   const handleConnect = () => {
     setPhase(Phase.Opening);
-    opn(settingsUrl, { wait: false }).catch(() => { /* fire-and-forget */ });
+    opn(settingsUrl, { wait: false }).catch(() => {
+      /* fire-and-forget */
+    });
     setTimeout(() => setPhase(Phase.Waiting), 800);
   };
 
@@ -116,7 +137,10 @@ export const SlackScreen = ({
 
   const handleDone = () => {
     setPhase(Phase.Done);
-    setTimeout(() => markDone(store, SlackOutcome.Configured, standalone), 1500);
+    setTimeout(
+      () => markDone(store, SlackOutcome.Configured, standalone),
+      1500,
+    );
   };
 
   return (
@@ -152,15 +176,12 @@ export const SlackScreen = ({
           </Box>
         )}
 
-        {phase === Phase.Opening && (
-          <Text dimColor>Opening browser...</Text>
-        )}
+        {phase === Phase.Opening && <Text dimColor>Opening browser...</Text>}
 
         {phase === Phase.Waiting && (
           <Box flexDirection="column" marginTop={1}>
             <Text>
-              Browser opened to{' '}
-              <Text color="cyan">{settingsUrl}</Text>
+              Browser opened to <Text color="cyan">{settingsUrl}</Text>
             </Text>
             <Text dimColor>
               Go to Settings &gt; Personal Settings &gt; Profile and click

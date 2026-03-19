@@ -61,9 +61,11 @@ declare module 'xcode' {
     writeSync(): string;
     writeHeadComment(): void;
     writeProject(): void;
-    writeObject(object: Record<string, Array | object | string | number>): void;
+    writeObject(
+      object: Record<string, unknown[] | object | string | number>,
+    ): void;
     writeObjectsSections(
-      objects: Record<string, Array | object | string | number>,
+      objects: Record<string, unknown[] | object | string | number>,
     ): void;
     writeArray(
       arr: Array<
@@ -71,19 +73,19 @@ declare module 'xcode' {
             value?: string;
             comment?: string;
           }
-        | Record<string, Array | object | string | number>
+        | Record<string, unknown[] | object | string | number>
       >,
       name: string,
     ): void;
 
     writeSectionComment(name: string, begin: boolean): void;
     writeSection(
-      section: Record<string, Array | object | string | number>,
+      section: Record<string, unknown[] | object | string | number>,
     ): void;
     writeInlineObject(
       name: string,
       comment: string,
-      object: Record<string, Array | object | string | number>,
+      object: Record<string, unknown[] | object | string | number>,
     ): void;
   }
 

@@ -7,6 +7,7 @@ import {
   RunPhase,
   McpOutcome,
 } from '../store.js';
+import { vi, describe, it, expect, type Mock, beforeEach } from 'vitest';
 import { OutroKind, AdditionalFeature } from '../../../lib/wizard-session.js';
 import { buildSession } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';

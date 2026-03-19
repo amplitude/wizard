@@ -91,7 +91,7 @@ export const McpScreen = ({
         );
       }
     })();
-  }, [installer]); // eslint-disable-line
+  }, [installer]);
 
   const handleConfirm = () => {
     if (isRemove) {

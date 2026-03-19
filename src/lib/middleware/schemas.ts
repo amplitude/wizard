@@ -37,7 +37,7 @@ export const sdkContentBlockSchema: z.ZodType<SDKContentBlock> = z
     type: z.string(),
     text: z.string().optional(),
     name: z.string().optional(),
-    input: z.record(z.unknown()).optional(),
+    input: z.record(z.string(), z.unknown()).optional(),
   })
   .passthrough();
 
@@ -81,7 +81,7 @@ export const sdkMessageSchema: z.ZodType<SDKMessage> = z
     usage: sdkUsageSchema.optional(),
     total_cost_usd: z.number().optional(),
     num_turns: z.number().optional(),
-    modelUsage: z.record(sdkModelUsageEntrySchema).optional(),
+    modelUsage: z.record(z.string(), sdkModelUsageEntrySchema).optional(),
   })
   .passthrough();
 

@@ -1,3 +1,12 @@
+import {
+  vi,
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterAll,
+  type Mock,
+} from 'vitest';
 /**
  * Tests for health-checks.ts
  *
