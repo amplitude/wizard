@@ -86,13 +86,6 @@ The proxy accepts the OAuth access token in two ways (checked in order):
 
 The token is validated via OAuth introspection. When `WIZARD_PROXY_DEV_BYPASS=1` is set on the proxy, auth is skipped.
 
-## Rate limiting
-
-Per-user limits enforced via Redis:
-- 60 requests per minute (sliding window)
-- 5 concurrent in-flight requests
-- 1,000,000 tokens per day (input + output combined)
-
 ## Wizard-side code
 
 | Component | Location |
