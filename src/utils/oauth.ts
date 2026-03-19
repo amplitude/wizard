@@ -18,7 +18,6 @@ import {
   AMPLITUDE_ZONE_SETTINGS,
   DEFAULT_AMPLITUDE_ZONE,
   ISSUES_URL,
-  OAUTH_CLIENT_ID,
   OAUTH_PORT,
   type AmplitudeZone,
 } from '../lib/constants.js';
@@ -174,14 +173,14 @@ async function exchangeCodeForToken(
   codeVerifier: string,
   zone: AmplitudeZone,
 ): Promise<OAuthTokenResponse> {
-  const { oAuthHost } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
   const response = await axios.post(
     `${oAuthHost}/oauth2/token`,
     new URLSearchParams({
       grant_type: 'authorization_code',
       code,
       redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-      client_id: OAUTH_CLIENT_ID,
+      client_id: oAuthClientId,
       code_verifier: codeVerifier,
     }).toString(),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
@@ -248,10 +247,10 @@ export async function performAmplitudeAuth(options: {
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const state = generateState();
-  const { oAuthHost } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
 
   const authUrl = new URL(`${oAuthHost}/oauth2/auth`);
-  authUrl.searchParams.set('client_id', OAUTH_CLIENT_ID);
+  authUrl.searchParams.set('client_id', oAuthClientId);
   authUrl.searchParams.set(
     'redirect_uri',
     `http://localhost:${OAUTH_PORT}/callback`,
