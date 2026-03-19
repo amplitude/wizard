@@ -87,14 +87,8 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
     return proxyOverride;
   }
 
-  // When dev bypass token is set, always use the local proxy regardless of host
-  if (process.env.WIZARD_PROXY_DEV_TOKEN) {
-    return 'http://localhost:3030/wizard';
-  }
-
   if (host.includes('localhost')) {
-    // Local dev: point at the local Thunder server (wizard-proxy-router)
-    // Start it with: cd javascript && aws-vault exec us-prod-engineer -- pnpm --filter thunder start
+    // Local dev: point at the local proxy (start with `pnpm proxy` in the wizard repo)
     return 'http://localhost:3030/wizard';
   }
 

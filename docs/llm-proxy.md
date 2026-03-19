@@ -75,8 +75,7 @@ pnpm test:proxy
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `WIZARD_LLM_PROXY_URL` | Override the proxy URL entirely | (auto-detected from host) |
-| `WIZARD_PROXY_DEV_TOKEN` | Use this token instead of OAuth (for local dev) | - |
-| `WIZARD_PROXY_DEV_BYPASS` | Set to `1` on the proxy to skip auth validation | - |
+| `WIZARD_PROXY_DEV_BYPASS` | Set to `1` on the proxy to skip auth validation (local only) | - |
 | `ANTHROPIC_API_KEY` | Bypass the proxy entirely and use Anthropic API directly | - |
 
 ## Auth flow
