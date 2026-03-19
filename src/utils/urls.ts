@@ -94,7 +94,7 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
 
   if (host.includes('localhost')) {
     // Local dev: point at the local Thunder server (wizard-proxy-router)
-    // Start it with: cd javascript && aws-vault exec us-prod-engineer -- pnpm --filter thunder start:local
+    // Start it with: cd javascript && aws-vault exec us-prod-engineer -- pnpm --filter thunder start
     return 'http://localhost:3030/wizard';
   }
 
