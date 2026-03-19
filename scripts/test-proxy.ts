@@ -4,19 +4,24 @@
  * Uses the Anthropic SDK directly — same client the Claude Agent SDK uses under
  * the hood — so streaming, SSE parsing, and error handling are all battle-tested.
  *
+ * Auth: Reads the OAuth access token from ~/.ampli.json (stored by `pnpm try login`).
+ * Falls back to 'dev-token' for local dev when the proxy has auth bypass enabled.
+ *
  * Prerequisites:
- *   1. Start the standalone proxy (javascript repo):
+ *   1. Login: pnpm try login
+ *   2. Start the proxy (javascript repo):
  *      cd javascript && ENVIRONMENT=local aws-vault exec us-prod-engineer -- \
  *        npx tsx server/packages/thunder/src/wizard-proxy-standalone.ts
- *
- *   2. Run this test:
- *      pnpm test:proxy
+ *   3. Run this test: pnpm test:proxy
  *
  * Environment variables:
  *   WIZARD_PROXY_URL  — proxy base URL (default: http://localhost:3030/wizard)
+ *   WIZARD_PROXY_TEST_TOKEN — explicit token override (skips ~/.ampli.json lookup)
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+
+import { getStoredToken, getStoredUser } from '../src/utils/ampli-settings';
 
 const PROXY_URL =
   process.env.WIZARD_PROXY_URL || 'http://127.0.0.1:3030/wizard';
@@ -31,9 +36,38 @@ function timer(): () => string {
   return () => `${(performance.now() - start).toFixed(0)}ms`;
 }
 
-function createClient(): Anthropic {
+/**
+ * Resolve the auth token to use for proxy requests.
+ * Priority: env var override > stored OAuth token > fallback dev-token
+ */
+function resolveAuthToken(): { token: string; source: string } {
+  // 1. Explicit override
+  const envToken = process.env.WIZARD_PROXY_TEST_TOKEN;
+
+  if (envToken) {
+    return { token: envToken, source: 'WIZARD_PROXY_TEST_TOKEN env var' };
+  }
+
+  // 2. Stored OAuth token from `pnpm try login`
+  const storedUser = getStoredUser();
+  const storedToken = getStoredToken(storedUser?.id, storedUser?.zone);
+
+  if (storedToken?.accessToken) {
+    const email = storedUser?.email ?? 'unknown';
+
+    return {
+      token: storedToken.accessToken,
+      source: `~/.ampli.json (${email})`,
+    };
+  }
+
+  // 3. Fallback for local dev with auth bypass
+  return { token: 'dev-token', source: 'fallback dev-token (no login found)' };
+}
+
+function createClient(apiKey: string): Anthropic {
   return new Anthropic({
-    apiKey: 'dev-token',
+    apiKey,
     baseURL: PROXY_URL,
   });
 }
@@ -43,7 +77,10 @@ function createClient(): Anthropic {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  console.log(`\n🔍 Testing wizard proxy at ${PROXY_URL}\n`);
+  const { token, source } = resolveAuthToken();
+
+  console.log(`\n🔍 Testing wizard proxy at ${PROXY_URL}`);
+  console.log(`🔑 Auth: ${source}\n`);
 
   // 1. Health check
   {
@@ -73,7 +110,7 @@ async function main(): Promise<void> {
 
     try {
       const res = await fetch(`${PROXY_URL}/v1/models`, {
-        headers: { 'x-api-key': 'dev-token' },
+        headers: { 'x-api-key': token },
       });
       const models = (await res.json()) as {
         data: Array<{ id: string }>;
@@ -93,7 +130,7 @@ async function main(): Promise<void> {
       '3️⃣  POST /v1/messages (non-streaming) — Generate Amplitude SDK init code...',
     );
     const elapsed = timer();
-    const client = createClient();
+    const client = createClient(token);
 
     try {
       const response = await client.messages.create({
@@ -148,7 +185,7 @@ async function main(): Promise<void> {
       '4️⃣  POST /v1/messages (streaming) — Generate Amplitude track() call...',
     );
     const elapsed = timer();
-    const client = createClient();
+    const client = createClient(token);
 
     try {
       const stream = client.messages.stream({
@@ -214,7 +251,7 @@ async function main(): Promise<void> {
 
     try {
       process.env.ANTHROPIC_BASE_URL = PROXY_URL;
-      process.env.ANTHROPIC_API_KEY = 'dev-token';
+      process.env.ANTHROPIC_API_KEY = token;
 
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
 
