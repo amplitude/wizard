@@ -34,7 +34,7 @@ export interface StoredUser {
   zone: AmplitudeZone;
 }
 
-const AmpliSettingsFileSchema = z.record(z.unknown());
+const AmpliSettingsFileSchema = z.record(z.string(), z.unknown());
 
 function readConfig(configPath = AMPLI_CONFIG_PATH): Record<string, unknown> {
   try {

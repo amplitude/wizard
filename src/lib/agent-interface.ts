@@ -105,7 +105,7 @@ export function checkClaudeSettingsOverrides(
   ];
 
   const claudeSettingsSchema = z.object({
-    env: z.record(z.unknown()),
+    env: z.record(z.string(), z.unknown()),
   });
 
   for (const filePath of candidates) {

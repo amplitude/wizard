@@ -68,8 +68,8 @@ export function detectBundler(
     );
     const pkg = z
       .object({
-        dependencies: z.record(z.string()).optional(),
-        devDependencies: z.record(z.string()).optional(),
+        dependencies: z.record(z.string(), z.string()).optional(),
+        devDependencies: z.record(z.string(), z.string()).optional(),
       })
       .passthrough()
       .parse(JSON.parse(content));

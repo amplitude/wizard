@@ -51,7 +51,7 @@ const DEFAULT_CONFIG: BenchmarkConfig = {
 
 const BenchmarkConfigFileSchema = z
   .object({
-    plugins: z.record(z.boolean()).optional(),
+    plugins: z.record(z.string(), z.boolean()).optional(),
     output: z
       .object({
         benchmarkPath: z.string(),

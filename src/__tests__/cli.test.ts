@@ -28,6 +28,11 @@ const {
     setDetectionComplete: vi.fn(),
     setFrameworkContext: vi.fn(),
     addDiscoveredFeature: vi.fn(),
+    onEnterScreen: vi.fn(),
+    completeSetup: vi.fn(),
+    setAmplitudePreDetected: vi.fn(),
+    setOutroData: vi.fn(),
+    setRunPhase: vi.fn(),
   };
   return {
     mockStore,
@@ -60,9 +65,14 @@ vi.mock('../ui/tui/start-tui', () => ({
   }),
 }));
 vi.mock('../lib/wizard-session', () => ({
-  // Real buildSession includes region: null by default; mirror that so the
-  // auth-task region-wait logic sees null (not undefined) and subscribes.
-  buildSession: (args: Record<string, unknown>) => ({ region: null, ...args }),
+  // Real buildSession includes region: null and credentials: null by default;
+  // mirror that so the auth-task checks behave correctly in tests.
+  buildSession: (args: Record<string, unknown>) => ({
+    region: null,
+    credentials: null,
+    frameworkContext: {},
+    ...args,
+  }),
   DiscoveredFeature: { Stripe: 'stripe', LLM: 'llm' },
 }));
 vi.mock('../lib/registry', () => ({ FRAMEWORK_REGISTRY: {} }));
@@ -84,9 +94,16 @@ vi.mock('../utils/ampli-settings', () => ({
 }));
 vi.mock('../lib/ampli-config', () => ({
   ampliConfigExists: mockAmpliConfigExists,
+  readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
+}));
+vi.mock('../utils/api-key-store', () => ({
+  readApiKeyWithSource: vi.fn().mockReturnValue(null),
 }));
 vi.mock('../utils/environment', () => ({
   isNonInteractiveEnvironment: mockIsNonInteractiveEnvironment,
+}));
+vi.mock('../lib/detect-amplitude', () => ({
+  detectAmplitudeInProject: vi.fn().mockReturnValue({ confidence: 'none' }),
 }));
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');
