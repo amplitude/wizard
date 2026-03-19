@@ -199,6 +199,58 @@ export function swiftPackageManager(): Promise<PackageManagerInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// Java (Maven / Gradle) helper
+// ---------------------------------------------------------------------------
+
+const MAVEN: DetectedPackageManager = {
+  name: 'maven',
+  label: 'Maven',
+  installCommand: 'mvn',
+  runCommand: 'mvn exec:java',
+};
+
+const GRADLE_JAVA: DetectedPackageManager = {
+  name: 'gradle',
+  label: 'Gradle',
+  installCommand: 'gradle',
+  runCommand: 'gradle run',
+};
+
+export async function detectJavaPackageManagers(
+  installDir: string,
+): Promise<PackageManagerInfo> {
+  const fs = await import('node:fs');
+  const nodePath = await import('node:path');
+
+  const hasMaven = fs.existsSync(nodePath.join(installDir, 'pom.xml'));
+  const hasGradle =
+    fs.existsSync(nodePath.join(installDir, 'build.gradle')) ||
+    fs.existsSync(nodePath.join(installDir, 'build.gradle.kts'));
+
+  if (hasMaven) {
+    return {
+      detected: [MAVEN],
+      primary: MAVEN,
+      recommendation:
+        'Use Maven: add the dependency to pom.xml and run mvn install.',
+    };
+  }
+  if (hasGradle) {
+    return {
+      detected: [GRADLE_JAVA],
+      primary: GRADLE_JAVA,
+      recommendation:
+        'Use Gradle: add the implementation dependency to build.gradle and sync.',
+    };
+  }
+  return {
+    detected: [MAVEN],
+    primary: MAVEN,
+    recommendation: 'No build file detected. Defaulting to Maven.',
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Flutter (pub) helper
 // ---------------------------------------------------------------------------
 
