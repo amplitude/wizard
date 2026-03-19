@@ -72,12 +72,13 @@ export async function detectRegionFromToken(
 }
 
 /**
- * Get the LLM gateway URL for the Claude Agent SDK.
+ * Get the LLM proxy URL for the Claude Agent SDK.
  *
- * Override with WIZARD_LLM_PROXY_URL env var for local dev against the
- * Langley wizard proxy (default: http://localhost:9810).
+ * Routes through the wizard-proxy-router in Thunder (javascript repo), which
+ * validates Amplitude OAuth tokens and proxies to GCP Vertex AI.
  *
- * The Claude Agent SDK sets this as ANTHROPIC_BASE_URL and appends /v1/messages.
+ * Override with WIZARD_LLM_PROXY_URL env var for explicit URL override.
+ * The Claude Agent SDK uses this as ANTHROPIC_BASE_URL and appends /v1/messages.
  */
 export const getLlmGatewayUrlFromHost = (host: string) => {
   // Allow explicit override for local proxy development
@@ -88,21 +89,21 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
 
   // When dev bypass token is set, always use the local proxy regardless of host
   if (process.env.WIZARD_PROXY_DEV_TOKEN) {
-    return 'http://localhost:9810';
+    return 'http://localhost:3030/wizard';
   }
 
   if (host.includes('localhost')) {
-    // Local dev: point at the Langley wizard proxy service
-    // Start it with: cd langley && LOCAL_LANGLEY=true ENVIRONMENT=production aws-vault exec us-prod-engineer -- make wizard-proxy-server
-    return 'http://localhost:9810';
+    // Local dev: point at the local Thunder server (wizard-proxy-router)
+    // Start it with: cd javascript && aws-vault exec us-prod-engineer -- pnpm --filter thunder start:local
+    return 'http://localhost:3030/wizard';
   }
 
   if (
     host.includes('eu.amplitude.com') ||
     host.includes('eu.i.amplitude.com')
   ) {
-    return 'https://gateway.eu.amplitude.com/wizard';
+    return 'https://core.eu.amplitude.com/wizard';
   }
 
-  return 'https://gateway.us.amplitude.com/wizard';
+  return 'https://core.amplitude.com/wizard';
 };

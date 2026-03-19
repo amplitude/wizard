@@ -2,18 +2,19 @@
  * Test script: validates the wizard proxy works with the Claude Agent SDK.
  *
  * Prerequisites:
- *   1. Start the Langley wizard proxy:
- *      cd langley && LOCAL_LANGLEY=true ENVIRONMENT=production \
- *        WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- make wizard-proxy-server
+ *   1. Start Thunder locally (javascript repo):
+ *      cd javascript && WIZARD_PROXY_DEV_BYPASS=1 \
+ *        aws-vault exec us-prod-engineer -- pnpm --filter thunder start:local
  *
  *   2. Run this test:
  *      pnpm test:proxy
  *
  * Environment variables:
- *   WIZARD_PROXY_URL  — proxy base URL (default: http://localhost:9810)
+ *   WIZARD_PROXY_URL  — proxy base URL (default: http://localhost:3030/wizard)
  */
 
-const PROXY_URL = process.env.WIZARD_PROXY_URL || 'http://127.0.0.1:9810';
+const PROXY_URL =
+  process.env.WIZARD_PROXY_URL || 'http://127.0.0.1:3030/wizard';
 
 async function main() {
   console.log(`\n🔍 Testing wizard proxy at ${PROXY_URL}\n`);
@@ -27,7 +28,7 @@ async function main() {
   } catch (e: any) {
     console.error(`   ❌ Health check failed: ${e.message}`);
     console.error(
-      '   Make sure the proxy is running: cd langley && LOCAL_LANGLEY=true ENVIRONMENT=production WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- make wizard-proxy-server',
+      '   Make sure Thunder is running: cd javascript && WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- pnpm --filter thunder start:local',
     );
     process.exit(1);
   }
