@@ -9,9 +9,7 @@
  *
  * Prerequisites:
  *   1. Login: pnpm try login
- *   2. Start the proxy (javascript repo):
- *      cd javascript && ENVIRONMENT=local aws-vault exec us-prod-engineer -- \
- *        npx tsx server/packages/thunder/src/wizard-proxy-standalone.ts
+ *   2. Start the proxy: pnpm proxy (or pnpm proxy:bypass to skip auth)
  *   3. Run this test: pnpm test:proxy
  *
  * Environment variables:
