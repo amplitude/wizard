@@ -194,6 +194,199 @@ describe('detectAmplitudeInProject — source file grep', () => {
   });
 });
 
+// ── Swift checks ─────────────────────────────────────────────────────────────
+
+describe('detectAmplitudeInProject — Swift', () => {
+  it('returns high confidence when AmplitudeUnified is in Podfile', () => {
+    writeFile(
+      'Podfile',
+      `platform :ios, '13.0'\npod 'AmplitudeUnified', '~> 0.0.0'\n`,
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('Podfile');
+  });
+
+  it('returns high confidence when AmplitudeUnified-Swift is in Package.resolved', () => {
+    writeFile(
+      'Package.resolved',
+      JSON.stringify({
+        pins: [
+          {
+            identity: 'AmplitudeUnified-Swift',
+            location: 'https://github.com/amplitude/AmplitudeUnified-Swift',
+          },
+        ],
+      }),
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('Package.resolved');
+  });
+
+  it('returns low confidence when a .swift file imports AmplitudeUnified', () => {
+    writeFile(
+      'Sources/App.swift',
+      'import AmplitudeUnified\n\nlet amp = Amplitude(apiKey: "key")\n',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('low');
+    expect(result.reason).toContain('.swift');
+  });
+});
+
+// ── Android / Java (Gradle) checks ───────────────────────────────────────────
+
+describe('detectAmplitudeInProject — Android / Java Gradle', () => {
+  it('returns high confidence when analytics-android is in build.gradle', () => {
+    writeFile(
+      'app/build.gradle',
+      `dependencies {\n    implementation 'com.amplitude:analytics-android:1.+'\n}\n`,
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('build.gradle');
+  });
+
+  it('returns high confidence when java-sdk is in build.gradle.kts', () => {
+    writeFile(
+      'build.gradle.kts',
+      `dependencies {\n    implementation("com.amplitude:java-sdk:1.13.0")\n}\n`,
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('build.gradle.kts');
+  });
+
+  it('returns low confidence when a .kt file references com.amplitude', () => {
+    writeFile(
+      'app/src/main/java/App.kt',
+      'import com.amplitude.android.Amplitude\n\nval amplitude = Amplitude(config)\n',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('low');
+    expect(result.reason).toContain('.kt');
+  });
+
+  it('returns low confidence when a .java file references com.amplitude', () => {
+    writeFile(
+      'src/main/java/App.java',
+      'import com.amplitude.Amplitude;\n\nAmplitude client = Amplitude.getInstance();\n',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('low');
+    expect(result.reason).toContain('.java');
+  });
+});
+
+// ── Flutter checks ───────────────────────────────────────────────────────────
+
+describe('detectAmplitudeInProject — Flutter', () => {
+  it('returns high confidence when amplitude_flutter is in pubspec.yaml', () => {
+    writeFile(
+      'pubspec.yaml',
+      'dependencies:\n  flutter:\n    sdk: flutter\n  amplitude_flutter: ^3.0.0\n',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('pubspec.yaml');
+  });
+
+  it('returns low confidence when a .dart file uses amplitude_flutter', () => {
+    writeFile(
+      'lib/main.dart',
+      "import 'package:amplitude_flutter/amplitude.dart';\n\nfinal amplitude = Amplitude(Configuration(apiKey: 'key'));\n",
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('low');
+    expect(result.reason).toContain('.dart');
+  });
+});
+
+// ── Go checks ────────────────────────────────────────────────────────────────
+
+describe('detectAmplitudeInProject — Go', () => {
+  it('returns high confidence when analytics-go is in go.mod', () => {
+    writeFile(
+      'go.mod',
+      'module myapp\n\ngo 1.21\n\nrequire github.com/amplitude/analytics-go v1.0.0\n',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('go.mod');
+  });
+
+  it('returns low confidence when a .go file imports analytics-go', () => {
+    writeFile(
+      'main.go',
+      `import "github.com/amplitude/analytics-go/amplitude"\n\nclient := amplitude.NewClient(config)\n`,
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('low');
+    expect(result.reason).toContain('.go');
+  });
+});
+
+// ── Unreal Engine checks ─────────────────────────────────────────────────────
+
+describe('detectAmplitudeInProject — Unreal Engine', () => {
+  it('returns high confidence when AmplitudeApiKey is in DefaultEngine.ini', () => {
+    writeFile(
+      'Config/DefaultEngine.ini',
+      '[Analytics]\nProviderModuleName=Amplitude\nAmplitudeApiKey=abc123\n',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('DefaultEngine.ini');
+  });
+
+  it('returns high confidence when AmplitudeUnreal plugin is present', () => {
+    writeFile(
+      'Plugins/AmplitudeUnreal/Amplitude.uplugin',
+      '{"FileVersion": 3, "Version": 1}',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('Plugins/');
+  });
+});
+
+// ── Unity checks ─────────────────────────────────────────────────────────────
+
+describe('detectAmplitudeInProject — Unity', () => {
+  it('returns high confidence when amplitude/unity-plugin is in Packages/manifest.json', () => {
+    writeFile(
+      'Packages/manifest.json',
+      JSON.stringify({
+        dependencies: {
+          'com.amplitude.unity-plugin':
+            'https://github.com/amplitude/unity-plugin.git?path=/Assets',
+        },
+      }),
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('manifest.json');
+  });
+
+  it('returns high confidence when Assets/Amplitude directory exists', () => {
+    writeFile('Assets/Amplitude/Amplitude.cs', '// Amplitude Unity SDK\n');
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('high');
+    expect(result.reason).toContain('Assets/Amplitude/');
+  });
+
+  it('returns low confidence when a .cs file uses Amplitude.getInstance', () => {
+    writeFile(
+      'Assets/Scripts/Analytics.cs',
+      'Amplitude amplitude = Amplitude.getInstance();\namplitude.init("key");\n',
+    );
+    const result = detectAmplitudeInProject(tmpDir);
+    expect(result.confidence).toBe('low');
+    expect(result.reason).toContain('.cs');
+  });
+});
+
 // ── Priority ordering ─────────────────────────────────────────────────────────
 
 describe('detectAmplitudeInProject — priority', () => {
