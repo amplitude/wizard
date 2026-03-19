@@ -199,6 +199,25 @@ export function swiftPackageManager(): Promise<PackageManagerInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// Go (modules) helper
+// ---------------------------------------------------------------------------
+
+const GO_MODULES: DetectedPackageManager = {
+  name: 'go',
+  label: 'Go modules',
+  installCommand: 'go get',
+  runCommand: 'go run',
+};
+
+export function goPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [GO_MODULES],
+    primary: GO_MODULES,
+    recommendation: 'Use Go modules (go get).',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Ruby (Bundler) helper
 // ---------------------------------------------------------------------------
 

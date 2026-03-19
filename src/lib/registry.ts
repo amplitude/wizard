@@ -8,6 +8,7 @@ import { FLASK_AGENT_CONFIG } from '../frameworks/flask/flask-wizard-agent';
 import { FASTAPI_AGENT_CONFIG } from '../frameworks/fastapi/fastapi-wizard-agent';
 import { SWIFT_AGENT_CONFIG } from '../frameworks/swift/swift-wizard-agent';
 import { ANDROID_AGENT_CONFIG } from '../frameworks/android/android-wizard-agent';
+import { GO_AGENT_CONFIG } from '../frameworks/go/go-wizard-agent';
 import { PYTHON_AGENT_CONFIG } from '../frameworks/python/python-wizard-agent';
 import { JAVASCRIPT_NODE_AGENT_CONFIG } from '../frameworks/javascript-node/javascript-node-wizard-agent';
 import { JAVASCRIPT_WEB_AGENT_CONFIG } from '../frameworks/javascript-web/javascript-web-wizard-agent';
@@ -22,6 +23,7 @@ export const FRAMEWORK_REGISTRY: Record<Integration, FrameworkConfig> = {
   [Integration.fastapi]: FASTAPI_AGENT_CONFIG,
   [Integration.swift]: SWIFT_AGENT_CONFIG,
   [Integration.android]: ANDROID_AGENT_CONFIG,
+  [Integration.go]: GO_AGENT_CONFIG,
   [Integration.python]: PYTHON_AGENT_CONFIG,
   [Integration.javascriptNode]: JAVASCRIPT_NODE_AGENT_CONFIG,
   [Integration.javascript_web]: JAVASCRIPT_WEB_AGENT_CONFIG,
