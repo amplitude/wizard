@@ -1,14 +1,15 @@
 /**
- * Wizard Proxy — E2E tests via Vitest
+ * Wizard Proxy — Tests via Vitest
  *
- * These tests hit a running proxy and make real LLM calls through Vertex AI.
- * They are tagged with @proxy so they can be excluded from normal `pnpm test`.
+ * Smoke tests always run (no auth needed).
+ * E2E tests (real LLM calls) auto-skip if no valid OAuth token is available.
  *
  * Usage:
- *   pnpm test:proxy        — run only these proxy e2e tests
- *   pnpm test              — runs unit tests only (proxy tests excluded)
+ *   pnpm test:proxy              — all tests (smoke always, e2e if logged in)
+ *   pnpm test:proxy:smoke        — smoke only (no auth, no LLM calls)
+ *   pnpm test                    — unit tests only (proxy tests excluded)
  *
- * Prerequisites:
+ * Prerequisites for e2e:
  *   1. Login: pnpm try login
  *   2. Start the proxy: pnpm proxy
  */
@@ -26,26 +27,38 @@ const PROXY_URL =
 // ---------------------------------------------------------------------------
 
 function resolveAuthToken() {
+  // 1. Explicit override (CI or custom setups)
   const envToken = process.env.WIZARD_PROXY_TEST_TOKEN;
-  if (envToken) return { token: envToken, source: 'env' };
+  if (envToken) return { token: envToken, source: 'env', hasRealToken: true };
 
+  // 2. Stored OAuth from `pnpm try login`
   const user = getStoredUser();
   const stored = getStoredToken(user?.id, user?.zone);
   if (stored?.accessToken) {
-    return { token: stored.accessToken, source: `ampli (${user?.email})` };
+    return {
+      token: stored.accessToken,
+      source: `ampli (${user?.email})`,
+      hasRealToken: true,
+    };
   }
 
-  return { token: 'dev-token', source: 'fallback' };
+  // 3. No token — smoke tests only
+  return { token: 'no-token', source: 'none', hasRealToken: false };
 }
 
-const { token, source } = resolveAuthToken();
+const { token, source, hasRealToken } = resolveAuthToken();
 
 function createClient() {
   return new Anthropic({ apiKey: token, baseURL: PROXY_URL });
 }
 
+/** Use this for e2e tests — skips with a message if no real token */
+const e2eIt = hasRealToken
+  ? it
+  : it.skip;
+
 // ---------------------------------------------------------------------------
-// Smoke tests — no LLM calls, just proxy connectivity
+// Smoke tests — no LLM calls, no auth needed
 // ---------------------------------------------------------------------------
 
 describe('proxy:smoke', () => {
@@ -107,92 +120,104 @@ describe('proxy:smoke', () => {
 
 // ---------------------------------------------------------------------------
 // E2E tests — real LLM calls through Vertex AI
+// Auto-skipped if no OAuth token (run `pnpm try login` first)
 // ---------------------------------------------------------------------------
 
 describe('proxy:e2e', () => {
-  it('non-streaming: generates Amplitude Browser SDK init code', {
-    timeout: 60_000,
-  }, async () => {
-    const start = performance.now();
-    const client = createClient();
-
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 300,
-      messages: [
-        {
-          role: 'user',
-          content:
-            'Write a TypeScript code snippet that imports the Amplitude Browser SDK ' +
-            '(@amplitude/analytics-browser) and initializes it with an API key. ' +
-            'Include the import statement and the init() call. Only output the code, no explanation.',
-        },
-      ],
-    });
-    const elapsed = performance.now() - start;
-
-    const text = response.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
-
-    expect(text).toContain('@amplitude/analytics-browser');
-    expect(text).toContain('init(');
-    expect(response.usage.input_tokens).toBeGreaterThan(0);
-    expect(response.usage.output_tokens).toBeGreaterThan(0);
-
-    console.log(`  non-streaming: ${elapsed.toFixed(0)}ms`);
+  if (!hasRealToken) {
     console.log(
-      `  tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`,
+      '  ⏭  Skipping e2e tests — no OAuth token. Run `pnpm try login` first.',
     );
-    console.log(`  auth: ${source}`);
-  });
+  } else {
+    console.log(`  🔑 Auth: ${source}`);
+  }
 
-  it('streaming: generates Amplitude track() call', {
-    timeout: 60_000,
-  }, async () => {
-    const start = performance.now();
-    const client = createClient();
+  e2eIt(
+    'non-streaming: generates Amplitude Browser SDK init code',
+    { timeout: 60_000 },
+    async () => {
+      const start = performance.now();
+      const client = createClient();
 
-    const stream = client.messages.stream({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 300,
-      messages: [
-        {
-          role: 'user',
-          content:
-            'Write a TypeScript snippet that imports track from @amplitude/analytics-browser ' +
-            'and calls track("Button Clicked", { buttonId: "signup" }). Only output the code.',
-        },
-      ],
-    });
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 300,
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Write a TypeScript code snippet that imports the Amplitude Browser SDK ' +
+              '(@amplitude/analytics-browser) and initializes it with an API key. ' +
+              'Include the import statement and the init() call. Only output the code, no explanation.',
+          },
+        ],
+      });
+      const elapsed = performance.now() - start;
 
-    let firstTokenAt: number | undefined;
-    let tokenCount = 0;
+      const text = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
 
-    stream.on('text', () => {
-      tokenCount++;
-      if (tokenCount === 1) firstTokenAt = performance.now();
-    });
+      expect(text).toContain('@amplitude/analytics-browser');
+      expect(text).toContain('init(');
+      expect(response.usage.input_tokens).toBeGreaterThan(0);
+      expect(response.usage.output_tokens).toBeGreaterThan(0);
 
-    const final = await stream.finalMessage();
-    const elapsed = performance.now() - start;
-    const ttft = firstTokenAt ? firstTokenAt - start : -1;
+      console.log(`  non-streaming: ${elapsed.toFixed(0)}ms`);
+      console.log(
+        `  tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out`,
+      );
+    },
+  );
 
-    const text = final.content
-      .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-      .map((b) => b.text)
-      .join('');
+  e2eIt(
+    'streaming: generates Amplitude track() call',
+    { timeout: 60_000 },
+    async () => {
+      const start = performance.now();
+      const client = createClient();
 
-    expect(text).toContain('track(');
-    expect(text).toContain('@amplitude/analytics-browser');
-    expect(final.usage.input_tokens).toBeGreaterThan(0);
+      const stream = client.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 300,
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Write a TypeScript snippet that imports track from @amplitude/analytics-browser ' +
+              'and calls track("Button Clicked", { buttonId: "signup" }). Only output the code.',
+          },
+        ],
+      });
 
-    console.log(
-      `  streaming: ${elapsed.toFixed(0)}ms (TTFT: ${ttft.toFixed(0)}ms, ${tokenCount} chunks)`,
-    );
-    console.log(
-      `  tokens: ${final.usage.input_tokens} in / ${final.usage.output_tokens} out`,
-    );
-  });
+      let firstTokenAt: number | undefined;
+      let tokenCount = 0;
+
+      stream.on('text', () => {
+        tokenCount++;
+        if (tokenCount === 1) firstTokenAt = performance.now();
+      });
+
+      const final = await stream.finalMessage();
+      const elapsed = performance.now() - start;
+      const ttft = firstTokenAt ? firstTokenAt - start : -1;
+
+      const text = final.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+
+      expect(text).toContain('track(');
+      expect(text).toContain('@amplitude/analytics-browser');
+      expect(final.usage.input_tokens).toBeGreaterThan(0);
+
+      console.log(
+        `  streaming: ${elapsed.toFixed(0)}ms (TTFT: ${ttft.toFixed(0)}ms, ${tokenCount} chunks)`,
+      );
+      console.log(
+        `  tokens: ${final.usage.input_tokens} in / ${final.usage.output_tokens} out`,
+      );
+    },
+  );
 });
