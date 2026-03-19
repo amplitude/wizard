@@ -28,7 +28,7 @@ async function main() {
   } catch (e: any) {
     console.error(`   ❌ Health check failed: ${e.message}`);
     console.error(
-      '   Make sure Thunder is running: cd javascript && WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- pnpm --filter thunder start:local',
+      '   Make sure Thunder is running: cd javascript && WIZARD_PROXY_DEV_BYPASS=1 aws-vault exec us-prod-engineer -- pnpm --filter thunder start',
     );
     process.exit(1);
   }
