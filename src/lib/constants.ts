@@ -19,6 +19,7 @@ export enum Integration {
   fastapi = 'fastapi',
   swift = 'swift',
   android = 'android',
+  flutter = 'flutter',
   go = 'go',
 
   // Language fallbacks

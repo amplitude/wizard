@@ -199,6 +199,25 @@ export function swiftPackageManager(): Promise<PackageManagerInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// Flutter (pub) helper
+// ---------------------------------------------------------------------------
+
+const FLUTTER_PUB: DetectedPackageManager = {
+  name: 'flutter',
+  label: 'Flutter pub',
+  installCommand: 'flutter pub add',
+  runCommand: 'flutter pub run',
+};
+
+export function flutterPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [FLUTTER_PUB],
+    primary: FLUTTER_PUB,
+    recommendation: 'Use Flutter pub (flutter pub add).',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Go (modules) helper
 // ---------------------------------------------------------------------------
 
