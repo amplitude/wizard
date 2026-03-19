@@ -1,6 +1,9 @@
 /**
  * Test script: validates the wizard proxy works end-to-end with real LLM calls.
  *
+ * Uses the Anthropic SDK directly — same client the Claude Agent SDK uses under
+ * the hood — so streaming, SSE parsing, and error handling are all battle-tested.
+ *
  * Prerequisites:
  *   1. Start the standalone proxy (javascript repo):
  *      cd javascript && ENVIRONMENT=local aws-vault exec us-prod-engineer -- \
@@ -12,6 +15,8 @@
  * Environment variables:
  *   WIZARD_PROXY_URL  — proxy base URL (default: http://localhost:3030/wizard)
  */
+
+import Anthropic from '@anthropic-ai/sdk';
 
 const PROXY_URL =
   process.env.WIZARD_PROXY_URL || 'http://127.0.0.1:3030/wizard';
@@ -26,11 +31,11 @@ function timer(): () => string {
   return () => `${(performance.now() - start).toFixed(0)}ms`;
 }
 
-interface ApiResponse {
-  content?: Array<{ text?: string }>;
-  usage?: { input_tokens?: number; output_tokens?: number };
-  error?: { type?: string; message?: string };
-  model?: string;
+function createClient(): Anthropic {
+  return new Anthropic({
+    apiKey: 'dev-token',
+    baseURL: PROXY_URL,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -82,51 +87,37 @@ async function main(): Promise<void> {
     }
   }
 
-  // 3. Real LLM call — non-streaming: generate Amplitude Browser SDK init code
+  // 3. Non-streaming — generate Amplitude Browser SDK init code
   {
     console.log(
       '3️⃣  POST /v1/messages (non-streaming) — Generate Amplitude SDK init code...',
     );
     const elapsed = timer();
+    const client = createClient();
 
     try {
-      const res = await fetch(`${PROXY_URL}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'anthropic-version': '2023-06-01',
-          'x-api-key': 'dev-token',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 300,
-          messages: [
-            {
-              role: 'user',
-              content:
-                'Write a TypeScript code snippet that imports the Amplitude Browser SDK ' +
-                '(@amplitude/analytics-browser) and initializes it with an API key. ' +
-                'Include the import statement and the init() call. Only output the code, no explanation.',
-            },
-          ],
-        }),
+      const response = await client.messages.create({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 300,
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Write a TypeScript code snippet that imports the Amplitude Browser SDK ' +
+              '(@amplitude/analytics-browser) and initializes it with an API key. ' +
+              'Include the import statement and the init() call. Only output the code, no explanation.',
+          },
+        ],
       });
 
-      const data = (await res.json()) as ApiResponse;
+      const text =
+        response.content
+          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+          .map((b) => b.text)
+          .join('') || '';
 
-      if (!res.ok) {
-        throw new Error(
-          `status ${res.status}: ${JSON.stringify(data.error)}`,
-        );
-      }
-
-      const text = data.content?.[0]?.text ?? '';
-      const inputTokens = data.usage?.input_tokens ?? 0;
-      const outputTokens = data.usage?.output_tokens ?? 0;
-
-      // Validate the response contains expected code patterns
       const hasImport = text.includes('@amplitude/analytics-browser');
-      const hasInit = text.includes('init(') || text.includes('init (');
+      const hasInit = text.includes('init(');
 
       console.log(`   Response (${elapsed()}):`);
       console.log(`   ─────────────────────────────────────────`);
@@ -137,18 +128,12 @@ async function main(): Promise<void> {
 
       console.log(`   ─────────────────────────────────────────`);
       console.log(
-        `   Tokens: ${inputTokens} in / ${outputTokens} out | Model: ${data.model}`,
+        `   Tokens: ${response.usage.input_tokens} in / ${response.usage.output_tokens} out | Model: ${response.model}`,
       );
       console.log(
         `   ${hasImport ? '✅' : '❌'} Has @amplitude/analytics-browser import`,
       );
       console.log(`   ${hasInit ? '✅' : '❌'} Has init() call\n`);
-
-      if (!hasImport || !hasInit) {
-        console.warn(
-          '   ⚠️  Response may not contain expected code — check output above',
-        );
-      }
     } catch (e: any) {
       console.error(
         `   ❌ Non-streaming failed (${elapsed()}): ${e.message}\n`,
@@ -157,107 +142,62 @@ async function main(): Promise<void> {
     }
   }
 
-  // 4. Streaming — ask for a slightly different snippet
+  // 4. Streaming — generate Amplitude track() call
   {
     console.log(
       '4️⃣  POST /v1/messages (streaming) — Generate Amplitude track() call...',
     );
     const elapsed = timer();
+    const client = createClient();
 
     try {
-      const res = await fetch(`${PROXY_URL}/v1/messages`, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'anthropic-version': '2023-06-01',
-          'x-api-key': 'dev-token',
-        },
-        body: JSON.stringify({
-          model: 'claude-sonnet-4-6',
-          max_tokens: 300,
-          stream: true,
-          messages: [
-            {
-              role: 'user',
-              content:
-                'Write a TypeScript snippet that imports track from @amplitude/analytics-browser ' +
-                'and calls track("Button Clicked", { buttonId: "signup" }). Only output the code.',
-            },
-          ],
-        }),
+      const stream = client.messages.stream({
+        model: 'claude-sonnet-4-6',
+        max_tokens: 300,
+        messages: [
+          {
+            role: 'user',
+            content:
+              'Write a TypeScript snippet that imports track from @amplitude/analytics-browser ' +
+              'and calls track("Button Clicked", { buttonId: "signup" }). Only output the code.',
+          },
+        ],
       });
 
-      if (!res.ok) throw new Error(`status ${res.status}`);
+      let timeToFirstToken = '';
+      let tokenCount = 0;
 
-      const reader = res.body?.getReader();
+      stream.on('text', () => {
+        tokenCount++;
 
-      if (!reader) throw new Error('No body reader');
-
-      const decoder = new TextDecoder();
-      const textChunks: string[] = [];
-      let eventCount = 0;
-      let inputTokens = 0;
-      let outputTokens = 0;
-      let timeToFirstChunk = '';
-      let sseBuffer = '';
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) break;
-
-        // Buffer partial lines — SSE data can be split across TCP chunks
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split('\n');
-
-        // Keep the last (potentially incomplete) line in the buffer
-        sseBuffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-
-          try {
-            const evt = JSON.parse(line.slice(6));
-
-            eventCount++;
-
-            if (eventCount === 1) {
-              timeToFirstChunk = elapsed();
-            }
-
-            if (evt.delta?.text) {
-              textChunks.push(evt.delta.text);
-            }
-
-            // Extract usage from stream events
-            if (evt.type === 'message_start' && evt.message?.usage) {
-              inputTokens = evt.message.usage.input_tokens ?? 0;
-            }
-
-            if (evt.type === 'message_delta' && evt.usage) {
-              outputTokens = evt.usage.output_tokens ?? 0;
-            }
-          } catch {
-            // not JSON (e.g. [DONE])
-          }
+        if (tokenCount === 1) {
+          timeToFirstToken = elapsed();
         }
-      }
+      });
 
-      const fullText = textChunks.join('');
-      const hasTrack = fullText.includes('track(');
-      const hasAmplitude = fullText.includes('@amplitude/analytics-browser');
+      const finalMessage = await stream.finalMessage();
 
-      console.log(`   Response (${elapsed()}, first chunk: ${timeToFirstChunk}):`);
+      const text =
+        finalMessage.content
+          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+          .map((b) => b.text)
+          .join('') || '';
+
+      const hasTrack = text.includes('track(');
+      const hasAmplitude = text.includes('@amplitude/analytics-browser');
+
+      console.log(
+        `   Response (${elapsed()}, first token: ${timeToFirstToken}):`,
+      );
       console.log(`   ─────────────────────────────────────────`);
 
-      for (const line of fullText.split('\n')) {
+      for (const line of text.split('\n')) {
         console.log(`   ${line}`);
       }
 
       console.log(`   ─────────────────────────────────────────`);
       console.log(
-        `   Events: ${eventCount} | Tokens: ${inputTokens} in / ${outputTokens} out`,
+        `   Tokens: ${finalMessage.usage.input_tokens} in / ${finalMessage.usage.output_tokens} out`,
       );
       console.log(`   ${hasAmplitude ? '✅' : '❌'} Has amplitude import`);
       console.log(`   ${hasTrack ? '✅' : '❌'} Has track() call\n`);
@@ -273,7 +213,6 @@ async function main(): Promise<void> {
     const elapsed = timer();
 
     try {
-      // Set env vars the SDK expects
       process.env.ANTHROPIC_BASE_URL = PROXY_URL;
       process.env.ANTHROPIC_API_KEY = 'dev-token';
 
@@ -321,7 +260,9 @@ async function main(): Promise<void> {
         }
       }
 
-      const hasAmplitude = resultText.includes('@amplitude/analytics-browser');
+      const hasAmplitude = resultText.includes(
+        '@amplitude/analytics-browser',
+      );
 
       console.log(`   Response (${elapsed()}):`);
       console.log(`   ─────────────────────────────────────────`);
