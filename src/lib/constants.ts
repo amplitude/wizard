@@ -18,6 +18,7 @@ export enum Integration {
   flask = 'flask',
   fastapi = 'fastapi',
   swift = 'swift',
+  android = 'android',
 
   // Language fallbacks
   javascript_web = 'javascript_web',
