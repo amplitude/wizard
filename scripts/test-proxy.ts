@@ -198,8 +198,8 @@ async function main(): Promise<void> {
       let eventCount = 0;
       let inputTokens = 0;
       let outputTokens = 0;
-      const firstChunkTimer = timer();
       let timeToFirstChunk = '';
+      let sseBuffer = '';
 
       // eslint-disable-next-line no-constant-condition
       while (true) {
@@ -207,9 +207,14 @@ async function main(): Promise<void> {
 
         if (done) break;
 
-        const chunk = decoder.decode(value, { stream: true });
+        // Buffer partial lines — SSE data can be split across TCP chunks
+        sseBuffer += decoder.decode(value, { stream: true });
+        const lines = sseBuffer.split('\n');
 
-        for (const line of chunk.split('\n')) {
+        // Keep the last (potentially incomplete) line in the buffer
+        sseBuffer = lines.pop() ?? '';
+
+        for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
 
           try {
@@ -218,7 +223,7 @@ async function main(): Promise<void> {
             eventCount++;
 
             if (eventCount === 1) {
-              timeToFirstChunk = firstChunkTimer();
+              timeToFirstChunk = elapsed();
             }
 
             if (evt.delta?.text) {
@@ -234,7 +239,7 @@ async function main(): Promise<void> {
               outputTokens = evt.usage.output_tokens ?? 0;
             }
           } catch {
-            // not JSON
+            // not JSON (e.g. [DONE])
           }
         }
       }
