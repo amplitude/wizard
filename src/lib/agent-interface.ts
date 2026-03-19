@@ -660,7 +660,6 @@ export async function initializeAgent(
       // Disable experimental betas (like input_examples) that the LLM gateway doesn't support
       process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = 'true';
       logToFile('Configured LLM gateway:', gatewayUrl);
-
     }
 
     // Configure MCP servers

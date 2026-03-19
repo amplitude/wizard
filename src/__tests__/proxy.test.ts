@@ -53,9 +53,7 @@ function createClient() {
 }
 
 /** Use this for e2e tests — skips with a message if no real token */
-const e2eIt = hasRealToken
-  ? it
-  : it.skip;
+const e2eIt = hasRealToken ? it : it.skip;
 
 // ---------------------------------------------------------------------------
 // Smoke tests — no LLM calls, no auth needed
@@ -213,7 +211,9 @@ describe('proxy:e2e', () => {
       expect(final.usage.input_tokens).toBeGreaterThan(0);
 
       console.log(
-        `  streaming: ${elapsed.toFixed(0)}ms (TTFT: ${ttft.toFixed(0)}ms, ${tokenCount} chunks)`,
+        `  streaming: ${elapsed.toFixed(0)}ms (TTFT: ${ttft.toFixed(
+          0,
+        )}ms, ${tokenCount} chunks)`,
       );
       console.log(
         `  tokens: ${final.usage.input_tokens} in / ${final.usage.output_tokens} out`,
