@@ -84,8 +84,6 @@ The proxy accepts the OAuth access token in two ways (checked in order):
 1. `x-api-key` header (Anthropic SDK standard)
 2. `Authorization: Bearer` header (Claude CLI standard)
 
-The token is validated via OAuth introspection. When `WIZARD_PROXY_DEV_BYPASS=1` is set on the proxy, auth is skipped.
-
 ## Wizard-side code
 
 | Component | Location |
