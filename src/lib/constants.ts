@@ -23,6 +23,7 @@ export enum Integration {
   flutter = 'flutter',
   go = 'go',
   java = 'java',
+  unreal = 'unreal',
 
   // Language fallbacks
   javascript_web = 'javascript_web',

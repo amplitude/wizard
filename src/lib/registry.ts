@@ -12,6 +12,7 @@ import { ANDROID_AGENT_CONFIG } from '../frameworks/android/android-wizard-agent
 import { FLUTTER_AGENT_CONFIG } from '../frameworks/flutter/flutter-wizard-agent';
 import { GO_AGENT_CONFIG } from '../frameworks/go/go-wizard-agent';
 import { JAVA_AGENT_CONFIG } from '../frameworks/java/java-wizard-agent';
+import { UNREAL_AGENT_CONFIG } from '../frameworks/unreal/unreal-wizard-agent';
 import { PYTHON_AGENT_CONFIG } from '../frameworks/python/python-wizard-agent';
 import { JAVASCRIPT_NODE_AGENT_CONFIG } from '../frameworks/javascript-node/javascript-node-wizard-agent';
 import { JAVASCRIPT_WEB_AGENT_CONFIG } from '../frameworks/javascript-web/javascript-web-wizard-agent';
@@ -30,6 +31,7 @@ export const FRAMEWORK_REGISTRY: Record<Integration, FrameworkConfig> = {
   [Integration.flutter]: FLUTTER_AGENT_CONFIG,
   [Integration.go]: GO_AGENT_CONFIG,
   [Integration.java]: JAVA_AGENT_CONFIG,
+  [Integration.unreal]: UNREAL_AGENT_CONFIG,
   [Integration.python]: PYTHON_AGENT_CONFIG,
   [Integration.javascriptNode]: JAVASCRIPT_NODE_AGENT_CONFIG,
   [Integration.javascript_web]: JAVASCRIPT_WEB_AGENT_CONFIG,

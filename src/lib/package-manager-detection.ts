@@ -289,6 +289,26 @@ export function goPackageManager(): Promise<PackageManagerInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// Unreal Engine helper
+// ---------------------------------------------------------------------------
+
+const UNREAL_MANUAL: DetectedPackageManager = {
+  name: 'unreal',
+  label: 'Manual plugin install',
+  installCommand:
+    'Download AmplitudeUnreal.zip from https://github.com/amplitude/Amplitude-Unreal/releases/latest and extract into Plugins/AmplitudeUnreal/',
+};
+
+export function unrealPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [UNREAL_MANUAL],
+    primary: UNREAL_MANUAL,
+    recommendation:
+      'Unreal Engine uses manual plugin installation. Download the zip from GitHub releases and extract it into the project Plugins/ directory.',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Ruby (Bundler) helper
 // ---------------------------------------------------------------------------
 
