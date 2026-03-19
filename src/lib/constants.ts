@@ -24,6 +24,7 @@ export enum Integration {
   go = 'go',
   java = 'java',
   unreal = 'unreal',
+  unity = 'unity',
 
   // Language fallbacks
   javascript_web = 'javascript_web',

@@ -289,6 +289,26 @@ export function goPackageManager(): Promise<PackageManagerInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// Unity (UPM) helper
+// ---------------------------------------------------------------------------
+
+const UNITY_UPM: DetectedPackageManager = {
+  name: 'unity',
+  label: 'Unity Package Manager',
+  installCommand:
+    'Add to Packages/manifest.json dependencies: "com.amplitude.unity-plugin": "https://github.com/amplitude/unity-plugin.git?path=/Assets"',
+};
+
+export function unityPackageManager(): Promise<PackageManagerInfo> {
+  return Promise.resolve({
+    detected: [UNITY_UPM],
+    primary: UNITY_UPM,
+    recommendation:
+      'Use Unity Package Manager: add the git URL dependency to Packages/manifest.json.',
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Unreal Engine helper
 // ---------------------------------------------------------------------------
 
