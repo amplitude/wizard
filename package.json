@@ -124,7 +124,8 @@
     "flows": "node scripts/render-flows.mjs",
     "test:bdd": "cucumber-js",
     "test:bdd:watch": "cucumber-js --retry 0 2>&1 | npx nodemon --watch features --exec cucumber-js",
-    "test:proxy": "tsx scripts/test-proxy.ts"
+    "test:proxy": "vitest run --config vitest.config.proxy.ts",
+    "test:proxy:smoke": "vitest run --config vitest.config.proxy.ts -t 'proxy:smoke'"
   },
   "lint-staged": {
     "*.{js,ts,tsx,jsx}": "pnpm fix"
