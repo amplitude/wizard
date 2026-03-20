@@ -107,12 +107,7 @@ describe('buildIntegrationPrompt — user identification (MCP path)', () => {
   });
 
   it('applies the same logic on the generic fallback path (skipAmplitudeMcp)', () => {
-    const prompt = buildIntegrationPrompt(
-      minimalConfig,
-      baseContext,
-      {},
-      true,
-    );
+    const prompt = buildIntegrationPrompt(minimalConfig, baseContext, {}, true);
 
     expect(prompt).toContain('setUserId');
     expect(prompt).toContain('TODO');

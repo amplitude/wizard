@@ -122,7 +122,9 @@ export class LoggingUI implements WizardUI {
     context: string;
   }): Promise<boolean> {
     // Auto-confirm in CI — no interactivity available
-    console.log(`◇  Adding user identification in ${data.filePath}:${data.line}`);
+    console.log(
+      `◇  Adding user identification in ${data.filePath}:${data.line}`,
+    );
     console.log(`│    ${data.proposedCode}`);
     return Promise.resolve(true);
   }

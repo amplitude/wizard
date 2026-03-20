@@ -285,7 +285,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         .describe('Approximate line number where the call would be inserted'),
       proposedCode: z
         .string()
-        .describe('The exact code line that would be added, e.g. amplitude.setUserId(user.id);'),
+        .describe(
+          'The exact code line that would be added, e.g. amplitude.setUserId(user.id);',
+        ),
       context: z
         .string()
         .describe(

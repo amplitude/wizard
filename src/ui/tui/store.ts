@@ -101,7 +101,9 @@ export class WizardStore {
   private _backupAndFixSettings: (() => boolean) | null = null;
 
   /** Blocks agent execution until the user confirms or declines a setUserId placement. */
-  private _resolveUserIdentifyConfirmation: ((confirmed: boolean) => void) | null = null;
+  private _resolveUserIdentifyConfirmation:
+    | ((confirmed: boolean) => void)
+    | null = null;
 
   constructor(flow: Flow = Flow.Wizard) {
     this.router = new WizardRouter(flow);
