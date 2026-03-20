@@ -62,6 +62,15 @@ export interface FrameworkMetadata<
   /** If true, shows a beta notice before running the wizard. */
   beta?: boolean;
 
+  /**
+   * If true, this framework uses a server-side Amplitude SDK.
+   * Server-side SDKs do not have a setUserId() method — user identification
+   * is done by passing user_id on each event and using identify() for user properties.
+   * When true, the agent emits a TODO comment with the correct server-side API
+   * instead of attempting to auto-instrument a setUserId() call.
+   */
+  serverSide?: boolean;
+
   /** Optional notice shown before the agent runs (e.g., "Close Xcode before proceeding"). */
   preRunNotice?: string;
 

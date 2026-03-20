@@ -386,6 +386,42 @@ export function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
+  const step6 = config.metadata.serverSide
+    ? `STEP 6: Add user identification guidance.
+   The Python Amplitude SDK does not have a setUserId() method. Instead, user identification works in two ways:
+   - Pass user_id directly on each event when you create it
+   - Use identify() to set or update user properties
+
+   First, check whether user_id is already being passed on events or identify() is already being called anywhere in the codebase. If so, skip this step entirely.
+
+   Otherwise, read the file containing the Amplitude init() call, then add commented-out examples immediately after it:
+
+     # TODO: Identify users by passing user_id on each event:
+     # event = BaseEvent(event_type="my_event", user_id="user-id")
+     #
+     # TODO: Or use identify() to set user properties:
+     # identify_obj = Identify()
+     # amplitude_client.identify(identify_obj, EventOptions(user_id="USER_ID"))
+
+   Use the exact client variable name already present in the file.`
+    : `STEP 6: Wire up user identification.
+   First, check whether an uncommented setUserId() call already exists anywhere in the codebase. If one does, skip this step entirely.
+
+   Otherwise, search the codebase for the location where a user is first concretely identified after authentication — look for:
+   - A login callback, sign-in handler, or OAuth redirect where a user object or user ID is in scope
+   - Session restoration code where an authenticated user's ID is available
+
+   If you find a clear, unambiguous location where a real user ID is in scope:
+   - Write the setUserId() call there immediately, using the exact Amplitude client variable name from your init() work.
+
+   If you cannot find a clear auth location, fall back to adding a commented-out TODO immediately after the Amplitude init() call:
+
+   JavaScript/TypeScript:
+     // TODO: Call setUserId() after the user authenticates (e.g. login callback, session restore, OAuth redirect)
+     // amplitude.setUserId(user.id);
+
+   Use the exact client variable name already present in the file.`;
+
   return `You have access to the Amplitude MCP server which provides skills to integrate Amplitude into this ${
     config.metadata.name
   } project.
@@ -423,20 +459,7 @@ STEP 4: Load the installed skill's SKILL.md file to understand what references a
 
 STEP 5: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
 
-STEP 6: Add a user identification comment.
-   First, check whether an uncommented setUserId() or set_user_id() call already exists anywhere in the codebase. If one does, skip this step entirely.
-   Otherwise, read the file containing the Amplitude init() call, then add a commented-out example with a TODO immediately after it. The wizard cannot auto-instrument authentication because it happens at a project-specific location (login callback, session restore, OAuth redirect, etc.).
-   Use the comment style appropriate for the language:
-
-   JavaScript/TypeScript:
-     // TODO: Call setUserId() after the user authenticates (e.g. login callback, session restore, OAuth redirect)
-     // amplitude.setUserId(user.id);
-
-   Python:
-     # TODO: Call set_user_id() after the user authenticates (e.g. login handler, session middleware)
-     # amplitude_client.set_user_id('user-id')
-
-   Use the exact client variable name already present in the file.
+${step6}
 
 STEP 7: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
    - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).

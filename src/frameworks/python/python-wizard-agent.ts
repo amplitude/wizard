@@ -24,6 +24,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
     name: 'Python Language',
     integration: Integration.python,
     beta: true,
+    serverSide: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
       const packageManager = await detectPackageManager(options);
@@ -195,7 +196,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
       'Use the Amplitude client for all tracking calls',
       'Call amplitude_client.shutdown() on application exit (use atexit.register)',
       'NEVER send PII in event properties (no emails, names, or user content)',
-      'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
+      'Set user_id on each Amplitude event to identify users, or use identify() to set user properties — see the TODO comment in your code',
       'Visit your Amplitude dashboard to see incoming events',
     ],
   },

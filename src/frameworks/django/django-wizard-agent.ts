@@ -26,6 +26,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     name: 'Django',
     integration: Integration.django,
     beta: true,
+    serverSide: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/python',
@@ -170,7 +171,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     getOutroNextSteps: () => [
       'Start your Django development server to see Amplitude in action',
       'Visit your Amplitude dashboard to see incoming events',
-      'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
+      'Set user_id on each Amplitude event to identify users, or use identify() to set user properties — see the TODO comment in your code',
     ],
   },
 };

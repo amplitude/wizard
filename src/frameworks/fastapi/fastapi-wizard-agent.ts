@@ -29,6 +29,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   metadata: {
     name: 'FastAPI',
     integration: Integration.fastapi,
+    serverSide: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/python',
@@ -193,7 +194,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
     getOutroNextSteps: () => [
       'Start your FastAPI development server to see Amplitude in action',
       'Visit your Amplitude dashboard to see incoming events',
-      'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
+      'Set user_id on each Amplitude event to identify users, or use identify() to set user properties — see the TODO comment in your code',
     ],
   },
 };
