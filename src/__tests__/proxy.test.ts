@@ -99,7 +99,7 @@ describe('proxy:smoke', () => {
     expect(res.status).toBe(401);
   });
 
-  it('rejects unknown models', async () => {
+  e2eIt('rejects unknown models', async () => {
     const res = await fetch(`${PROXY_URL}/v1/messages`, {
       method: 'POST',
       headers: {
