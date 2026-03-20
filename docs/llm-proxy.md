@@ -1,6 +1,7 @@
 # LLM Proxy Architecture
 
-The wizard uses a proxy service to route Claude Agent SDK requests through GCP Vertex AI, avoiding a direct Anthropic dependency.
+The wizard uses a proxy service to route Claude Agent SDK requests through GCP
+Vertex AI, avoiding a direct Anthropic dependency.
 
 ## How it works
 
@@ -15,24 +16,25 @@ wizard CLI  ─>  Amplitude LLM Proxy  ─>  GCP Vertex AI  ─>  Claude
    - `ANTHROPIC_BASE_URL` → the proxy URL (e.g. `core.amplitude.com/wizard`)
    - `ANTHROPIC_AUTH_TOKEN` → the user's OAuth access token
 4. The Claude Agent SDK spawns a `claude` CLI subprocess with these env vars
-5. The CLI sends requests to `{ANTHROPIC_BASE_URL}/v1/messages` with the token as `Authorization: Bearer`
+5. The CLI sends requests to `{ANTHROPIC_BASE_URL}/v1/messages` with the token
+   as `Authorization: Bearer`
 6. The proxy validates the token via OAuth introspection
 7. The proxy forwards the request to Vertex AI `rawPredict` / `streamRawPredict`
 
 ## Proxy endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/wizard/health` | Health check (no auth) |
-| GET | `/wizard/v1/models` | Model list for SDK discovery (no auth) |
-| POST | `/wizard/v1/messages` | Proxy to Vertex AI (auth + rate limit) |
+| Method | Path                  | Description                            |
+| ------ | --------------------- | -------------------------------------- |
+| GET    | `/wizard/health`      | Health check (no auth)                 |
+| GET    | `/wizard/v1/models`   | Model list for SDK discovery (no auth) |
+| POST   | `/wizard/v1/messages` | Proxy to Vertex AI (auth + rate limit) |
 
 ## Production URLs
 
-| Region | URL |
-|--------|-----|
-| US | `https://core.amplitude.com/wizard` |
-| EU | `https://core.eu.amplitude.com/wizard` |
+| Region | URL                                    |
+| ------ | -------------------------------------- |
+| US     | `https://core.amplitude.com/wizard`    |
+| EU     | `https://core.eu.amplitude.com/wizard` |
 
 ## Local development
 
@@ -72,22 +74,23 @@ pnpm test:proxy
 
 ## Environment variables
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `WIZARD_LLM_PROXY_URL` | Override the proxy URL entirely | (auto-detected from host) |
-| `WIZARD_PROXY_DEV_BYPASS` | Set to `1` on the proxy to skip auth validation (local only) | - |
-| `ANTHROPIC_API_KEY` | Bypass the proxy entirely and use Anthropic API directly | - |
+| Variable                  | Description                                                  | Default                   |
+| ------------------------- | ------------------------------------------------------------ | ------------------------- |
+| `WIZARD_LLM_PROXY_URL`    | Override the proxy URL entirely                              | (auto-detected from host) |
+| `WIZARD_PROXY_DEV_BYPASS` | Set to `1` on the proxy to skip auth validation (local only) | -                         |
+| `ANTHROPIC_API_KEY`       | Bypass the proxy entirely and use Anthropic API directly     | -                         |
 
 ## Auth flow
 
 The proxy accepts the OAuth access token in two ways (checked in order):
+
 1. `x-api-key` header (Anthropic SDK standard)
 2. `Authorization: Bearer` header (Claude CLI standard)
 
 ## Wizard-side code
 
-| Component | Location |
-|-----------|----------|
-| Proxy URL logic | `src/utils/urls.ts` |
-| SDK setup | `src/lib/agent-interface.ts` |
-| Integration tests | `scripts/test-proxy.ts` |
+| Component         | Location                      |
+| ----------------- | ----------------------------- |
+| Proxy URL logic   | `src/utils/urls.ts`           |
+| SDK setup         | `src/lib/agent-interface.ts`  |
+| Integration tests | `src/__tests__/proxy.test.ts` |
