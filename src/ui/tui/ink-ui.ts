@@ -88,6 +88,15 @@ export class InkUI implements WizardUI {
     return this.store.showSettingsOverride(keys, backupAndFix);
   }
 
+  showUserIdentifyConfirmation(data: {
+    filePath: string;
+    line: number;
+    proposedCode: string;
+    context: string;
+  }): Promise<boolean> {
+    return this.store.showUserIdentifyConfirmation(data);
+  }
+
   startRun(): void {
     this.store.setRunPhase(RunPhase.Running);
   }

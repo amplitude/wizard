@@ -348,7 +348,7 @@ export async function runAgentWizard(
 /**
  * Build the integration prompt for the agent.
  */
-function buildIntegrationPrompt(
+export function buildIntegrationPrompt(
   config: FrameworkConfig,
   context: {
     frameworkVersion: string;
@@ -423,7 +423,33 @@ STEP 4: Load the installed skill's SKILL.md file to understand what references a
 
 STEP 5: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
 
-STEP 6: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
+STEP 6: Wire up user identification.
+   First, search the entire codebase for any existing uncommented setUserId() or set_user_id() call. If one already exists, skip this step entirely.
+
+   Otherwise, search for the location where a user is first concretely identified after authentication. Look for patterns like:
+   - Login success handlers or callbacks (a function that runs after credentials are validated)
+   - Session restore or hydration (app load logic that validates an existing session token and returns a user object)
+   - OAuth or SSO redirect handlers
+   - JWT decode/verify points where a user ID first becomes available
+   - Framework-specific auth patterns: onAuthStateChanged (Firebase), useSession/getServerSession (NextAuth), login_user() (Flask-Login), request.user (Django middleware), passport serializeUser (Node.js), OAuth2 token endpoints (FastAPI)
+
+   If you find a clear, unambiguous location where a real user ID is in scope:
+   - Before writing anything, call request_user_confirmation (from the wizard-tools MCP server) with the file path, approximate line number, the exact proposed code line, and a brief explanation of why this location was chosen
+   - If the user confirms: write the call using the actual user ID variable available in that scope
+     - JavaScript/TypeScript: amplitude.setUserId(userId);  // Identify user in Amplitude
+     - Python: amplitude_client.set_user_id(user_id)  # Identify user in Amplitude
+     - Use the exact client variable name already present in the codebase
+   - If the user declines: fall back to adding a commented-out TODO immediately after the Amplitude init() call (see fallback below)
+   - Do not add the call in more than one place — if multiple auth entry points exist, prefer session restore over login form, and middleware over individual route handlers
+
+   If you cannot find a clear auth location (auth is fully abstracted into a third-party library, split ambiguously across many files, or genuinely unclear):
+   - Fall back to adding a commented-out TODO immediately after the Amplitude init() call instead:
+     JavaScript/TypeScript: // TODO: Call setUserId() after the user authenticates (e.g. login callback, session restore, OAuth redirect)
+                            // amplitude.setUserId(user.id);
+     Python:                # TODO: Call set_user_id() after the user authenticates (e.g. login handler, session middleware)
+                            # amplitude_client.set_user_id('user-id')
+
+STEP 7: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
    - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
    - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
      config.metadata.name

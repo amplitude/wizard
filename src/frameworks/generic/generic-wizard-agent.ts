@@ -104,6 +104,21 @@ If the project uses a package manager: use the detect_package_manager tool to fi
 If the project is a static site with no server-side build pipeline (e.g. Zola, Hugo, Jekyll, Eleventy): use the CDN script tag approach instead, and store the API key in the site's config file (e.g. config.toml, config.yaml, _config.yml) — that is the correct pattern for static sites, not a .env file.
 For all other projects: reference env vars for the API key — never hardcode them in source files.
 
+After writing the init() call, search the codebase for where a user is first concretely identified after authentication — login handler, session restore/hydration, OAuth callback, JWT verify point, or framework-specific patterns (onAuthStateChanged, useSession/getServerSession, login_user(), request.user, passport serializeUser). If you find a clear, unambiguous location with a real user ID in scope, add the call there:
+  JavaScript/TypeScript: amplitude.setUserId(userId);  // Identify user in Amplitude
+  Python:                amplitude_client.set_user_id(user_id)  # Identify user in Amplitude
+Use the exact client variable name from the codebase. Do not add it in more than one place — prefer session restore over login form, middleware over individual route handlers.
+
+If no clear auth location exists (auth is fully abstracted or genuinely ambiguous), fall back to a commented-out TODO immediately after init():
+  JavaScript/TypeScript:
+    // TODO: Call setUserId() after the user authenticates (e.g. login callback, session restore, OAuth redirect)
+    // amplitude.setUserId(user.id);
+  Python:
+    # TODO: Call set_user_id() after the user authenticates (e.g. login handler, session middleware)
+    # amplitude_client.set_user_id('user-id')
+
+If an uncommented setUserId() or set_user_id() call already exists anywhere in the codebase, skip this step entirely.
+
 Add a sample tracking call demonstrating the integration.
 
 BROWSER SDK / CDN SNIPPET — SERVER URL AND CORS:

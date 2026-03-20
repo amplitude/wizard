@@ -170,7 +170,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     getOutroNextSteps: () => [
       'Start your Django development server to see Amplitude in action',
       'Visit your Amplitude dashboard to see incoming events',
-      'Use amplitude.track() to capture events and amplitude.identify() for users',
+      'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
     ],
   },
 };

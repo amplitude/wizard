@@ -269,12 +269,59 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
+  // -- request_user_confirmation --------------------------------------------
+
+  const requestUserConfirmation = tool(
+    'request_user_confirmation',
+    'Ask the user to confirm a proposed setUserId() call before writing it. Show them the file, line, and exact code. Returns "confirmed" if the user approves, "declined" if they prefer a TODO comment instead.',
+    {
+      filePath: z
+        .string()
+        .describe(
+          'Path to the file where setUserId() would be added, relative to the project root',
+        ),
+      line: z
+        .number()
+        .describe('Approximate line number where the call would be inserted'),
+      proposedCode: z
+        .string()
+        .describe('The exact code line that would be added, e.g. amplitude.setUserId(user.id);'),
+      context: z
+        .string()
+        .describe(
+          'Brief explanation of why this location was chosen, e.g. "Found login handler after credentials are validated"',
+        ),
+    },
+    async (args: {
+      filePath: string;
+      line: number;
+      proposedCode: string;
+      context: string;
+    }) => {
+      logToFile(
+        `request_user_confirmation: ${args.filePath}:${args.line} — ${args.proposedCode}`,
+      );
+
+      const { getUI } = await import('../ui/index.js');
+      const confirmed = await getUI().showUserIdentifyConfirmation(args);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: confirmed ? 'confirmed' : 'declined',
+          },
+        ],
+      };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: '1.0.0',
-    tools: [checkEnvKeys, setEnvValues, detectPM],
+    tools: [checkEnvKeys, setEnvValues, detectPM, requestUserConfirmation],
   });
 }
 
@@ -283,4 +330,5 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:check_env_keys`,
   `${SERVER_NAME}:set_env_values`,
   `${SERVER_NAME}:detect_package_manager`,
+  `${SERVER_NAME}:request_user_confirmation`,
 ];

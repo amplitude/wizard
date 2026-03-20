@@ -209,6 +209,12 @@ export interface WizardSession {
   // Runtime
   serviceStatus: { description: string; statusPageUrl: string } | null;
   settingsOverrideKeys: string[] | null;
+  userIdentifyConfirmation: {
+    filePath: string;
+    line: number;
+    proposedCode: string;
+    context: string;
+  } | null;
   outroData: OutroData | null;
 
   // Additional features queue (drained via stop hook after main integration)
@@ -287,6 +293,7 @@ export function buildSession(args: {
     credentials: null,
     serviceStatus: null,
     settingsOverrideKeys: null,
+    userIdentifyConfirmation: null,
     outroData: null,
     introConcluded: false,
     additionalFeatureQueue: [],

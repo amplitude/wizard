@@ -26,6 +26,7 @@ export type { FlowEntry };
 export enum Overlay {
   Outage = 'outage',
   SettingsOverride = 'settings-override',
+  UserIdentifyConfirm = 'user-identify-confirm',
   Snake = 'snake',
 }
 

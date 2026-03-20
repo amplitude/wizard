@@ -76,6 +76,18 @@ export interface WizardUI {
     backupAndFix: () => boolean,
   ): Promise<void>;
 
+  /**
+   * Ask the user to confirm a proposed setUserId() placement before the agent writes it.
+   * Returns true if the user confirms, false if they decline.
+   * In CI mode: auto-confirms (no interactivity available).
+   */
+  showUserIdentifyConfirmation(data: {
+    filePath: string;
+    line: number;
+    proposedCode: string;
+    context: string;
+  }): Promise<boolean>;
+
   // ── Display state ──────────────────────────────────────────────────
   /** Set the detected framework label (e.g., "Django with Wagtail CMS") */
   setDetectedFramework(label: string): void;

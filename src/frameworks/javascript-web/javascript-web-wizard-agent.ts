@@ -135,7 +135,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
     getOutroNextSteps: () => [
       'Ensure amplitude.init() is called before any track calls',
       'Autocapture tracks clicks, form submissions, and pageviews automatically',
-      'Use amplitude.track() for custom events and amplitude.setUserId() for users',
+      'Find the TODO comment after amplitude.init() to wire up user identification after authentication',
       'NEVER send PII in event properties (no emails, names, or user content)',
       'Visit your Amplitude dashboard to see incoming events',
     ],

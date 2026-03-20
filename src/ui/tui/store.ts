@@ -100,6 +100,9 @@ export class WizardStore {
   private _resolveSettingsOverride: (() => void) | null = null;
   private _backupAndFixSettings: (() => boolean) | null = null;
 
+  /** Blocks agent execution until the user confirms or declines a setUserId placement. */
+  private _resolveUserIdentifyConfirmation: ((confirmed: boolean) => void) | null = null;
+
   constructor(flow: Flow = Flow.Wizard) {
     this.router = new WizardRouter(flow);
   }
@@ -383,6 +386,34 @@ export class WizardStore {
       this._backupAndFixSettings = null;
     }
     return ok;
+  }
+
+  /**
+   * Push the user-identify-confirm overlay and return a promise that blocks
+   * until the user confirms or declines the proposed setUserId() placement.
+   */
+  showUserIdentifyConfirmation(data: {
+    filePath: string;
+    line: number;
+    proposedCode: string;
+    context: string;
+  }): Promise<boolean> {
+    this.$session.setKey('userIdentifyConfirmation', data);
+    this.pushOverlay(Overlay.UserIdentifyConfirm);
+    return new Promise((resolve) => {
+      this._resolveUserIdentifyConfirmation = resolve;
+    });
+  }
+
+  /**
+   * Resolve the user-identify-confirm overlay with the user's decision.
+   * Called by UserIdentifyConfirmScreen on confirm or decline.
+   */
+  resolveUserIdentifyConfirmation(confirmed: boolean): void {
+    this.$session.setKey('userIdentifyConfirmation', null);
+    this.popOverlay();
+    this._resolveUserIdentifyConfirmation?.(confirmed);
+    this._resolveUserIdentifyConfirmation = null;
   }
 
   addDiscoveredFeature(feature: DiscoveredFeature): void {
