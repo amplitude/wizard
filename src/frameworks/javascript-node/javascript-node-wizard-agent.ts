@@ -61,7 +61,7 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
       getOutroNextSteps: () => [
         'Use the Amplitude client instance for all tracking calls',
         'NEVER send PII in event properties (no emails, names, or user content)',
-        'Use amplitude.track() for events and amplitude.identify() for users',
+        'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
         'Visit your Amplitude dashboard to see incoming events',
       ],
     },

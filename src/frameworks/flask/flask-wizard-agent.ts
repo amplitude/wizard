@@ -179,7 +179,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     getOutroNextSteps: () => [
       'Start your Flask development server to see Amplitude in action',
       'Visit your Amplitude dashboard to see incoming events',
-      'Use amplitude.identify() to associate events with users',
+      'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
     ],
   },
 };

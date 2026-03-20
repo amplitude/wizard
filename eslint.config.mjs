@@ -20,6 +20,7 @@ export default tseslint.config(
       'scripts/**',
       'coverage/**',
       'e2e-tests/test-applications/**',
+      '.claude/**',
     ],
   },
 

@@ -104,6 +104,14 @@ If the project uses a package manager: use the detect_package_manager tool to fi
 If the project is a static site with no server-side build pipeline (e.g. Zola, Hugo, Jekyll, Eleventy): use the CDN script tag approach instead, and store the API key in the site's config file (e.g. config.toml, config.yaml, _config.yml) — that is the correct pattern for static sites, not a .env file.
 For all other projects: reference env vars for the API key — never hardcode them in source files.
 
+After writing the init() call, check whether an uncommented setUserId() or set_user_id() call already exists anywhere in the codebase. If not, add a commented-out TODO immediately after init(). The wizard cannot auto-instrument authentication because it happens at a project-specific location. Use the comment style for the language:
+  JavaScript/TypeScript:
+    // TODO: Call setUserId() after the user authenticates (e.g. login callback, session restore, OAuth redirect)
+    // amplitude.setUserId(user.id);
+  Python:
+    # TODO: Call set_user_id() after the user authenticates (e.g. login handler, session middleware)
+    # amplitude_client.set_user_id('user-id')
+
 Add a sample tracking call demonstrating the integration.
 
 BROWSER SDK / CDN SNIPPET — SERVER URL AND CORS:

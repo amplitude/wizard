@@ -193,7 +193,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
     getOutroNextSteps: () => [
       'Start your FastAPI development server to see Amplitude in action',
       'Visit your Amplitude dashboard to see incoming events',
-      'Use amplitude.identify() to associate events with users',
+      'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
     ],
   },
 };

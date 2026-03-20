@@ -195,7 +195,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
       'Use the Amplitude client for all tracking calls',
       'Call amplitude_client.shutdown() on application exit (use atexit.register)',
       'NEVER send PII in event properties (no emails, names, or user content)',
-      'Use amplitude_client.track() for events and amplitude_client.identify() for users',
+      'Find the TODO comment after amplitude initialization to wire up user identification after authentication',
       'Visit your Amplitude dashboard to see incoming events',
     ],
   },
