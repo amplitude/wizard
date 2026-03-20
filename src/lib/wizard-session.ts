@@ -87,6 +87,7 @@ export interface OutroData {
   kind: OutroKind;
   message?: string;
   changes?: string[];
+  nextSteps?: string[];
   docsUrl?: string;
   continueUrl?: string;
 }

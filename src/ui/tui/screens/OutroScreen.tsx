@@ -92,6 +92,19 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Box>
           )}
 
+          {outroData.nextSteps && outroData.nextSteps.length > 0 && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color="cyan" bold>
+                Next steps:
+              </Text>
+              {outroData.nextSteps.map((step, i) => (
+                <Text key={i}>
+                  {'\u2022'} {step}
+                </Text>
+              ))}
+            </Box>
+          )}
+
           {store.eventPlan.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               <Text color="cyan" bold>

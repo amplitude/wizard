@@ -333,9 +333,12 @@ export async function runAgentWizard(
       : '',
   ].filter(Boolean);
 
+  const nextSteps = config.ui.getOutroNextSteps(frameworkContext);
+
   session.outroData = {
     kind: OutroKind.Success,
     changes,
+    nextSteps,
     docsUrl: config.metadata.docsUrl,
     continueUrl,
   };
