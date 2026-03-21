@@ -312,7 +312,11 @@ describe('TUI auth task: region determines OAuth zone', () => {
 
     expect(mockStoreToken).toHaveBeenCalled();
     expect(mockStore.setOAuthComplete).toHaveBeenCalledWith(
-      expect.objectContaining({ idToken: 'id-abc', cloudRegion: 'us' }),
+      expect.objectContaining({
+        accessToken: 'access-abc',
+        idToken: 'id-abc',
+        cloudRegion: 'us',
+      }),
     );
   });
 });

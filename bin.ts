@@ -410,6 +410,7 @@ void yargs(hideBin(process.argv))
 
                 // Signal AuthScreen — triggers org/workspace/API key pickers
                 tui.store.setOAuthComplete({
+                  accessToken: auth.accessToken,
                   idToken: auth.idToken,
                   cloudRegion,
                   orgs: userInfo.orgs,

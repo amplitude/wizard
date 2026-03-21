@@ -14,6 +14,175 @@ import { logToFile } from '../utils/debug';
 import type { PackageManagerDetector } from './package-manager-detection';
 
 // ---------------------------------------------------------------------------
+// Skill types
+// ---------------------------------------------------------------------------
+
+export type SkillEntry = { id: string; name: string; downloadUrl: string };
+
+export interface SkillMenu {
+  categories: Record<string, SkillEntry[]>;
+}
+
+// ---------------------------------------------------------------------------
+// Remote skill helpers — for future use with amplitude/context-hub releases.
+// Currently unused; skills are bundled locally. Enable by setting SKILLS_URL
+// env var (e.g. https://github.com/amplitude/context-hub/releases/latest/download).
+// ---------------------------------------------------------------------------
+
+/**
+ * Fetch the skill menu from a remote skills server (GitHub Releases).
+ * Returns parsed data on success, `null` on failure.
+ */
+export async function fetchSkillMenu(
+  skillsBaseUrl: string,
+): Promise<SkillMenu | null> {
+  try {
+    const menuUrl = `${skillsBaseUrl}/skill-menu.json`;
+    logToFile(`fetchSkillMenu: fetching from ${menuUrl}`);
+    const resp = await fetch(menuUrl);
+    if (resp.ok) {
+      const data = (await resp.json()) as SkillMenu;
+      logToFile(
+        `fetchSkillMenu: loaded (${
+          Object.keys(data.categories).length
+        } categories)`,
+      );
+      return data;
+    }
+    logToFile(`fetchSkillMenu: failed with HTTP ${resp.status}`);
+    return null;
+  } catch (err) {
+    logToFile(
+      `fetchSkillMenu: error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Download and extract a skill from a remote URL.
+ * Installs to `<installDir>/.claude/skills/<id>/`.
+ */
+export function downloadSkill(
+  skillEntry: SkillEntry,
+  installDir: string,
+): { success: boolean; error?: string } {
+  const { execFileSync } =
+    require('child_process') as typeof import('child_process');
+  const skillDir = path.join(installDir, '.claude', 'skills', skillEntry.id);
+  const tmpFile = `/tmp/amplitude-skill-${skillEntry.id}.zip`;
+
+  try {
+    fs.mkdirSync(skillDir, { recursive: true });
+    execFileSync('curl', ['-sL', skillEntry.downloadUrl, '-o', tmpFile], {
+      timeout: 30000,
+    });
+    execFileSync('unzip', ['-o', tmpFile, '-d', skillDir], {
+      timeout: 30000,
+    });
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {
+      /* ignore cleanup errors */
+    }
+
+    logToFile(
+      `downloadSkill: installed ${skillEntry.id} from ${skillEntry.downloadUrl}`,
+    );
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`downloadSkill: error: ${msg}`);
+    return { success: false, error: msg };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Bundled skill helpers — reads skills from wizard/skills/integration/
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the bundled skills directory.
+ * Skills are shipped in `<wizardRoot>/skills/integration/` as extracted folders.
+ */
+function getSkillsDir(): string {
+  // Walk up from this file to find the wizard repo root (where skills/ lives)
+  let dir = path.dirname(new URL(import.meta.url).pathname);
+  for (let i = 0; i < 5; i++) {
+    if (fs.existsSync(path.join(dir, 'skills', 'integration'))) {
+      return path.join(dir, 'skills', 'integration');
+    }
+    dir = path.dirname(dir);
+  }
+  // Fallback: relative to cwd
+  return path.join(process.cwd(), 'skills', 'integration');
+}
+
+/**
+ * Build skill menu from bundled skill directories.
+ * Scans skills/integration/ for folders containing SKILL.md.
+ */
+export function loadBundledSkillMenu(): SkillMenu {
+  const skillsDir = getSkillsDir();
+  logToFile(`loadBundledSkillMenu: scanning ${skillsDir}`);
+  const entries: SkillEntry[] = [];
+
+  try {
+    for (const name of fs.readdirSync(skillsDir)) {
+      const skillPath = path.join(skillsDir, name);
+      const skillMd = path.join(skillPath, 'SKILL.md');
+      if (fs.statSync(skillPath).isDirectory() && fs.existsSync(skillMd)) {
+        // Extract display name from SKILL.md frontmatter
+        const content = fs.readFileSync(skillMd, 'utf8');
+        const descMatch = content.match(/^description:\s*>-?\s*\n\s+(.+)/m);
+        const displayName = descMatch
+          ? descMatch[1].trim()
+          : name.replace(/^integration-/, '').replace(/-/g, ' ');
+        entries.push({ id: name, name: displayName, downloadUrl: '' });
+      }
+    }
+  } catch (err) {
+    logToFile(
+      `loadBundledSkillMenu: error scanning: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  logToFile(`loadBundledSkillMenu: found ${entries.length} integration skills`);
+  return { categories: { integration: entries } };
+}
+
+/**
+ * Install a bundled skill by copying it to the project's .claude/skills/ dir.
+ */
+export function installBundledSkill(
+  skillId: string,
+  installDir: string,
+): { success: boolean; error?: string } {
+  const skillsDir = getSkillsDir();
+  const src = path.join(skillsDir, skillId);
+  const dest = path.join(installDir, '.claude', 'skills', skillId);
+
+  if (!fs.existsSync(src)) {
+    return { success: false, error: `Bundled skill "${skillId}" not found` };
+  }
+
+  try {
+    // Recursively copy the skill directory
+    fs.cpSync(src, dest, { recursive: true });
+    logToFile(`installBundledSkill: copied ${skillId} to ${dest}`);
+    return { success: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`installBundledSkill: error: ${msg}`);
+    return { success: false, error: msg };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // SDK dynamic import (ESM module loaded once, cached)
 // ---------------------------------------------------------------------------
 
@@ -46,6 +215,14 @@ export interface WizardToolsOptions {
 
   /** Framework-specific package manager detector */
   detectPackageManager: PackageManagerDetector;
+
+  /**
+   * Remote skills server URL (e.g. GitHub Releases base URL).
+   * When set, skills are fetched from this URL instead of bundled files.
+   * Set via SKILLS_URL env var or pass directly.
+   * Example: https://github.com/amplitude/context-hub/releases/latest/download
+   */
+  skillsBaseUrl?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,8 +332,19 @@ const SERVER_NAME = 'wizard-tools';
  * Must be called asynchronously because the SDK is an ESM module loaded via dynamic import.
  */
 export async function createWizardToolsServer(options: WizardToolsOptions) {
-  const { workingDirectory, detectPackageManager } = options;
+  const { workingDirectory, detectPackageManager, skillsBaseUrl } = options;
   const { tool, createSdkMcpServer } = await getSDKModule();
+
+  // Load skill menu: remote if SKILLS_URL is configured, bundled otherwise
+  const useRemote = !!skillsBaseUrl;
+  const menu = useRemote
+    ? await fetchSkillMenu(skillsBaseUrl)
+    : loadBundledSkillMenu();
+  const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
+
+  const keys = Object.keys(cachedSkillMenu);
+  const categoryNames: [string, ...string[]] =
+    keys.length > 0 ? (keys as [string, ...string[]]) : ['integration'];
 
   // -- check_env_keys -------------------------------------------------------
 
@@ -269,12 +457,112 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
+  // -- load_skill_menu ------------------------------------------------------
+
+  const loadSkillMenu = tool(
+    'load_skill_menu',
+    'Load available Amplitude skills for a category. Returns skill IDs and names. Call this first, then use install_skill with the chosen ID.',
+    {
+      category: z.enum(categoryNames).describe('Skill category'),
+    },
+    (args: { category: string }) => {
+      const skills = cachedSkillMenu[args.category];
+      if (!skills || skills.length === 0) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `No skills found for category "${args.category}".`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const menuText = skills.map((s) => `- ${s.id}: ${s.name}`).join('\n');
+
+      logToFile(
+        `load_skill_menu: returning ${skills.length} skills for "${args.category}"`,
+      );
+
+      return {
+        content: [{ type: 'text' as const, text: menuText }],
+      };
+    },
+  );
+
+  // -- install_skill --------------------------------------------------------
+
+  const installSkill = tool(
+    'install_skill',
+    'Download and install an Amplitude skill by ID. Call load_skill_menu first to see available skills. Extracts the skill to .claude/skills/<skillId>/.',
+    {
+      skillId: z
+        .string()
+        .describe(
+          'Skill ID from the skill menu (e.g., "integration-nextjs-app-router")',
+        ),
+    },
+    (args: { skillId: string }) => {
+      if (!/^[a-z0-9][a-z0-9_-]*$/.test(args.skillId)) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'Error: skillId must be lowercase alphanumeric with hyphens.',
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      // Look up download URL from cached menu
+      const allSkills: SkillEntry[] = Object.values(cachedSkillMenu).flat();
+      const skill = allSkills.find((s) => s.id === args.skillId);
+      if (!skill) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error: skill "${args.skillId}" not found. Use load_skill_menu to see available skills.`,
+            },
+          ],
+          isError: true,
+        };
+      }
+
+      const result = useRemote
+        ? downloadSkill(skill, workingDirectory)
+        : installBundledSkill(args.skillId, workingDirectory);
+      if (result.success) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Skill installed to .claude/skills/${args.skillId}/`,
+            },
+          ],
+        };
+      } else {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `Error installing skill: ${result.error}`,
+            },
+          ],
+          isError: true,
+        };
+      }
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: '1.0.0',
-    tools: [checkEnvKeys, setEnvValues, detectPM],
+    tools: [checkEnvKeys, setEnvValues, detectPM, loadSkillMenu, installSkill],
   });
 }
 
@@ -283,4 +571,6 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:check_env_keys`,
   `${SERVER_NAME}:set_env_values`,
   `${SERVER_NAME}:detect_package_manager`,
+  `${SERVER_NAME}:load_skill_menu`,
+  `${SERVER_NAME}:install_skill`,
 ];
