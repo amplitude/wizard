@@ -109,7 +109,7 @@ export function downloadSkill(
  */
 function getSkillsDir(): string {
   // Walk up from this file to find the wizard repo root (where skills/ lives)
-  let dir = path.dirname(new URL(import.meta.url).pathname);
+  let dir = __dirname;
   for (let i = 0; i < 5; i++) {
     if (fs.existsSync(path.join(dir, 'skills', 'integration'))) {
       return path.join(dir, 'skills', 'integration');
@@ -335,10 +335,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   const { workingDirectory, detectPackageManager, skillsBaseUrl } = options;
   const { tool, createSdkMcpServer } = await getSDKModule();
 
-  // Load skill menu: remote if SKILLS_URL is configured, bundled otherwise
-  const useRemote = !!skillsBaseUrl;
-  const menu = useRemote
-    ? await fetchSkillMenu(skillsBaseUrl)
+  // Load skill menu: try remote first, fall back to bundled
+  const menu = skillsBaseUrl
+    ? (await fetchSkillMenu(skillsBaseUrl)) ?? loadBundledSkillMenu()
     : loadBundledSkillMenu();
   const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
 
@@ -531,7 +530,8 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         };
       }
 
-      const result = useRemote
+      // Try remote download if URL available, otherwise use bundled copy
+      const result = skill.downloadUrl
         ? downloadSkill(skill, workingDirectory)
         : installBundledSkill(args.skillId, workingDirectory);
       if (result.success) {

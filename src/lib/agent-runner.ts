@@ -23,7 +23,7 @@ import {
   backupAndFixClaudeSettings,
   restoreClaudeSettings,
 } from './agent-interface';
-import { getCloudUrlFromRegion } from '../utils/urls';
+import { getCloudUrlFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls';
 import chalk from 'chalk';
 import * as semver from 'semver';
 import { checkAnthropicStatus } from '../utils/anthropic-status';
@@ -240,10 +240,11 @@ export async function runAgentWizard(
     ? 'http://localhost:8787/mcp'
     : process.env.MCP_URL || 'https://mcp.amplitude.com/mcp';
 
-  // Remote skills URL: when SKILLS_URL is set, download skills from Thunder
-  // instead of using bundled copies. Uses the same Thunder host as the LLM proxy.
-  // e.g. https://core.amplitude.com/wizard/skills
-  const skillsBaseUrl = process.env.SKILLS_URL || undefined;
+  // Skills URL: derived from the same host as the LLM proxy.
+  // Always tries remote first; falls back to bundled if fetch fails.
+  // Override with SKILLS_URL env var for testing.
+  const skillsBaseUrl =
+    process.env.SKILLS_URL || getLlmGatewayUrlFromHost(host) + '/skills';
 
   const restoreSettings = () => restoreClaudeSettings(session.installDir);
   getUI().onEnterScreen('outro', restoreSettings);
