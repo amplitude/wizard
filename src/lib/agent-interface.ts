@@ -187,6 +187,8 @@ export type AgentConfig = {
   wizardMetadata?: Record<string, string>;
   /** When true, omit the amplitude-wizard MCP server (e.g. for generic/quickstart path). */
   skipAmplitudeMcp?: boolean;
+  /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
+  skillsBaseUrl?: string;
 };
 
 /**
@@ -686,6 +688,7 @@ export async function initializeAgent(
     const wizardToolsServer = await createWizardToolsServer({
       workingDirectory: config.workingDirectory,
       detectPackageManager: config.detectPackageManager,
+      skillsBaseUrl: config.skillsBaseUrl,
     });
     mcpServers['wizard-tools'] = wizardToolsServer;
 

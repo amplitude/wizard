@@ -23,7 +23,7 @@ import {
   backupAndFixClaudeSettings,
   restoreClaudeSettings,
 } from './agent-interface';
-import { getCloudUrlFromRegion } from '../utils/urls';
+import { getCloudUrlFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls';
 import chalk from 'chalk';
 import * as semver from 'semver';
 import { checkAnthropicStatus } from '../utils/anthropic-status';
@@ -173,7 +173,28 @@ export async function runAgentWizard(
     getUI().setProjectHasData(false);
   }
 
-  const { accessToken, projectApiKey, host, projectId } = session.credentials;
+  const {
+    accessToken: rawAccessToken,
+    projectApiKey,
+    host,
+    projectId,
+  } = session.credentials;
+  // The TUI's AuthScreen may have stored the id_token instead of the
+  // OAuth access token (the field names were swapped historically).
+  // Always prefer the real OAuth access token from ~/.ampli.json for Hydra auth.
+  let accessToken = rawAccessToken;
+  try {
+    const { getStoredToken, getStoredUser } = await import(
+      '../utils/ampli-settings.js'
+    );
+    const user = getStoredUser();
+    const stored = getStoredToken(user?.id, user?.zone);
+    if (stored?.accessToken) {
+      accessToken = stored.accessToken;
+    }
+  } catch {
+    // Fall back to whatever the TUI provided
+  }
   // Derive cloudRegion from session (set during auth or defaulting to 'us')
   const cloudRegion: import('../utils/types.js').CloudRegion =
     (session.pendingAuthCloudRegion as
@@ -219,6 +240,12 @@ export async function runAgentWizard(
     ? 'http://localhost:8787/mcp'
     : process.env.MCP_URL || 'https://mcp.amplitude.com/mcp';
 
+  // Skills URL: derived from the same host as the LLM proxy.
+  // Always tries remote first; falls back to bundled if fetch fails.
+  // Override with SKILLS_URL env var for testing.
+  const skillsBaseUrl =
+    process.env.SKILLS_URL || getLlmGatewayUrlFromHost(host) + '/skills';
+
   const restoreSettings = () => restoreClaudeSettings(session.installDir);
   getUI().onEnterScreen('outro', restoreSettings);
   getUI().startRun();
@@ -234,6 +261,7 @@ export async function runAgentWizard(
       wizardFlags,
       wizardMetadata,
       skipAmplitudeMcp,
+      skillsBaseUrl,
     },
     sessionToOptions(session),
   );
@@ -403,27 +431,24 @@ Project context:
 
 Instructions (follow these steps IN ORDER - do not skip or reorder):
 
-STEP 1: List available skills from the Amplitude MCP server using ListMcpResourcesTool. If this tool is not available or you cannot access the MCP server, you must emit: ${
-    AgentSignals.ERROR_MCP_MISSING
-  } Could not access the Amplitude MCP server and halt.
+STEP 1: Call load_skill_menu (from the wizard-tools MCP server) to see available skills.
+   If the tool fails, emit: ${
+     AgentSignals.ERROR_MCP_MISSING
+   } Could not load skill menu and halt.
 
-   Review the skill descriptions and choose the one that best matches this project's framework and configuration.
-   If no suitable skill is found, or you cannot access the MCP server, you emit: ${
+   Choose a skill from the \`integration\` category that matches this project's framework. Do NOT pick skills from other categories (error-tracking, feature-flags, etc.) — those are handled separately.
+   If no suitable integration skill is found, emit: ${
      AgentSignals.ERROR_RESOURCE_MISSING
    } Could not find a suitable skill for this project.
 
-STEP 2: Fetch the chosen skill resource (e.g., amplitude://skills/{skill-id}).
-   The resource returns a shell command to install the skill.
+STEP 2: Call install_skill (from the wizard-tools MCP server) with the chosen skill ID (e.g., "integration-nextjs-app-router").
+   Do NOT run any shell commands to install skills.
 
-STEP 3: Run the installation command using Bash:
-   - Execute the EXACT command returned by the resource (do not modify it)
-   - This will download and extract the skill to .claude/skills/{skill-id}/
+STEP 3: Load the installed skill's SKILL.md file to understand what references are available.
 
-STEP 4: Load the installed skill's SKILL.md file to understand what references are available.
+STEP 4: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
 
-STEP 5: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
-
-STEP 6: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
+STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
    - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
    - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
      config.metadata.name

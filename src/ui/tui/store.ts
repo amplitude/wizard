@@ -306,10 +306,12 @@ export class WizardStore {
    * Also sets region from the detected cloud zone.
    */
   setOAuthComplete(data: {
+    accessToken: string;
     idToken: string;
     cloudRegion: WizardSession['pendingAuthCloudRegion'];
     orgs: WizardSession['pendingOrgs'];
   }): void {
+    this.$session.setKey('pendingAuthAccessToken', data.accessToken);
     this.$session.setKey('pendingAuthIdToken', data.idToken);
     this.$session.setKey('pendingAuthCloudRegion', data.cloudRegion);
     this.$session.setKey('pendingOrgs', data.orgs);
