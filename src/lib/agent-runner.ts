@@ -23,7 +23,7 @@ import {
   backupAndFixClaudeSettings,
   restoreClaudeSettings,
 } from './agent-interface';
-import { getCloudUrlFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls';
+import { getCloudUrlFromRegion } from '../utils/urls';
 import chalk from 'chalk';
 import * as semver from 'semver';
 import { checkAnthropicStatus } from '../utils/anthropic-status';
@@ -240,12 +240,6 @@ export async function runAgentWizard(
     ? 'http://localhost:8787/mcp'
     : process.env.MCP_URL || 'https://mcp.amplitude.com/mcp';
 
-  // Skills URL: derived from the same host as the LLM proxy.
-  // Always tries remote first; falls back to bundled if fetch fails.
-  // Override with SKILLS_URL env var for testing.
-  const skillsBaseUrl =
-    process.env.SKILLS_URL || getLlmGatewayUrlFromHost(host) + '/skills';
-
   const restoreSettings = () => restoreClaudeSettings(session.installDir);
   getUI().onEnterScreen('outro', restoreSettings);
   getUI().startRun();
@@ -261,7 +255,6 @@ export async function runAgentWizard(
       wizardFlags,
       wizardMetadata,
       skipAmplitudeMcp,
-      skillsBaseUrl,
     },
     sessionToOptions(session),
   );
@@ -414,7 +407,7 @@ function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
-  return `You have access to the Amplitude MCP server which provides skills to integrate Amplitude into this ${
+  return `You are integrating Amplitude analytics into this ${
     config.metadata.name
   } project.
 
@@ -429,34 +422,35 @@ Project context:
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
   }${additionalContext}
 
+Use [STATUS] <message> at the start of any line to report progress (e.g. "[STATUS] Installing Amplitude SDK").
+
 Instructions (follow these steps IN ORDER - do not skip or reorder):
 
-STEP 1: Call load_skill_menu (from the wizard-tools MCP server) to see available skills.
-   If the tool fails, emit: ${
-     AgentSignals.ERROR_MCP_MISSING
-   } Could not load skill menu and halt.
+STEP 1: Check if Amplitude is already integrated.
+[STATUS] Checking for existing Amplitude integration
+Search the project for existing Amplitude references (e.g. "amplitude" in source files).
+- If already present: skip to STEP 3 and diagnose any issues.
+- If not: continue to STEP 2.
 
-   Choose a skill from the \`integration\` category that matches this project's framework. Do NOT pick skills from other categories (error-tracking, feature-flags, etc.) — those are handled separately.
-   If no suitable integration skill is found, emit: ${
-     AgentSignals.ERROR_RESOURCE_MISSING
-   } Could not find a suitable skill for this project.
+STEP 2: Fetch Amplitude documentation for this framework.
+[STATUS] Fetching Amplitude documentation
+If a "Framework docs ID" is listed in the project context above, read the documentation resource from the Amplitude MCP server: amplitude://docs/frameworks/<id>
+Otherwise, use WebFetch to load the SDK documentation from: ${
+    config.metadata.docsUrl
+  }
 
-STEP 2: Call install_skill (from the wizard-tools MCP server) with the chosen skill ID (e.g., "integration-nextjs-app-router").
-   Do NOT run any shell commands to install skills.
+STEP 3: Install and initialize the Amplitude SDK following the documentation.
+[STATUS] Installing Amplitude SDK
+Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager to use. Install packages as a background task — do not await completion, proceed immediately. Never hardcode the Amplitude token; always reference environment variables.
 
-STEP 3: Load the installed skill's SKILL.md file to understand what references are available.
+STEP 4: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
+[STATUS] Writing environment variables
+- Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
+- Use set_env_values to write the Amplitude public token and host using the correct naming convention for ${
+    config.metadata.name
+  }. The tool ensures .gitignore coverage. Always write the correct value even if the key already exists.
+- Reference these environment variables in code instead of hardcoding values.
 
-STEP 4: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
-
-STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
-   - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
-   - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
-     config.metadata.name
-   }, which you'll find in example code. The tool will also ensure .gitignore coverage. Don't assume the presence of keys means the value is up to date. Write the correct value each time.
-   - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
-
-Important: Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager the project uses. Do not manually search for lockfiles or config files. Always install packages as a background task. Don't await completion; proceed with other work immediately after starting the installation. You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
-
-
+Important: You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
 `;
 }
