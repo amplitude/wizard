@@ -4,6 +4,7 @@
  */
 
 import { Box, Text } from 'ink';
+import { Colors } from '../styles.js';
 import { useState, useEffect } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
@@ -65,7 +66,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
   return (
     <Box flexDirection="column" height={visibleLines}>
       {lines.map((line, i) => (
-        <Text key={i} dimColor wrap="truncate">
+        <Text key={i} color={Colors.muted} wrap="truncate">
           {line}
         </Text>
       ))}

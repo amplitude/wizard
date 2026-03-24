@@ -80,22 +80,13 @@ const PickerItem = <T,>({
   const key = numKey(index);
   return (
     <Box gap={1}>
-      <Text
-        color={isFocused ? Colors.accent : undefined}
-        dimColor={!isFocused}
-      >
+      <Text color={isFocused ? Colors.accent : Colors.muted}>
         {isFocused ? Icons.triangleSmallRight : ' '}
       </Text>
       {key !== null && (
-        <Text dimColor color={isFocused ? Colors.accent : undefined}>
-          [{key}]
-        </Text>
+        <Text color={isFocused ? Colors.accent : Colors.muted}>[{key}]</Text>
       )}
-      <Text
-        color={isFocused ? Colors.accent : undefined}
-        bold={isFocused}
-        dimColor={!isFocused}
-      >
+      <Text color={isFocused ? Colors.accent : Colors.muted} bold={isFocused}>
         {label}
       </Text>
     </Box>
@@ -122,9 +113,10 @@ const SinglePickerMenu = <T,>({
   const scrollRef = useRef(0);
   const rowsPerCol = Math.ceil(options.length / columns);
 
-  const maxVisible = columns === 1
-    ? Math.min(rowsPerCol, Math.max(5, termRows - PICKER_CHROME_ROWS))
-    : rowsPerCol;
+  const maxVisible =
+    columns === 1
+      ? Math.min(rowsPerCol, Math.max(5, termRows - PICKER_CHROME_ROWS))
+      : rowsPerCol;
   const needsScroll = rowsPerCol > maxVisible;
 
   if (needsScroll) {
@@ -147,14 +139,19 @@ const SinglePickerMenu = <T,>({
     if (!isNaN(digit) && !key.ctrl && !key.meta) {
       const idx = digit === 0 ? 9 : digit - 1;
       const opt = options[idx];
-      if (opt) { onSelect(opt.value); return; }
+      if (opt) {
+        onSelect(opt.value);
+        return;
+      }
     }
 
     if (key.upArrow) {
       if (row > 0) {
         setFocused(col * rowsPerCol + row - 1);
       } else {
-        setFocused(Math.min(col * rowsPerCol + rowsPerCol - 1, options.length - 1));
+        setFocused(
+          Math.min(col * rowsPerCol + rowsPerCol - 1, options.length - 1),
+        );
       }
     }
     if (key.downArrow) {
@@ -192,7 +189,10 @@ const SinglePickerMenu = <T,>({
       <Box flexDirection="column" alignItems={align}>
         <PromptLabel message={message} />
         {hasAbove && (
-          <Text dimColor>{'  \u2191 '}{scrollOffset} more</Text>
+          <Text color={Colors.muted}>
+            {'  \u2191 '}
+            {scrollOffset} more
+          </Text>
         )}
         {visible.map((opt, i) => (
           <PickerItem
@@ -203,7 +203,10 @@ const SinglePickerMenu = <T,>({
           />
         ))}
         {hasBelow && (
-          <Text dimColor>{'  \u2193 '}{options.length - scrollOffset - maxVisible} more</Text>
+          <Text color={Colors.muted}>
+            {'  \u2193 '}
+            {options.length - scrollOffset - maxVisible} more
+          </Text>
         )}
       </Box>
     );
@@ -212,7 +215,9 @@ const SinglePickerMenu = <T,>({
   // Multi-column / short-list: render all items in column-first grid
   const columnArrays: PickerOption<T>[][] = [];
   for (let c = 0; c < columns; c++) {
-    columnArrays.push(options.slice(c * rowsPerCol, c * rowsPerCol + rowsPerCol));
+    columnArrays.push(
+      options.slice(c * rowsPerCol, c * rowsPerCol + rowsPerCol),
+    );
   }
 
   return (
@@ -266,7 +271,11 @@ const MultiPickerMenu = <T,>({
         setFocused(idx);
         setSelected((prev) => {
           const next = new Set(prev);
-          if (next.has(idx)) { next.delete(idx); } else { next.add(idx); }
+          if (next.has(idx)) {
+            next.delete(idx);
+          } else {
+            next.add(idx);
+          }
           return next;
         });
       }
@@ -321,7 +330,7 @@ const MultiPickerMenu = <T,>({
   return (
     <Box flexDirection="column" alignItems={centered ? 'center' : undefined}>
       <PromptLabel message={message} />
-      <Text dimColor> (space to toggle, enter to submit)</Text>
+      <Text color={Colors.muted}> (space to toggle, enter to submit)</Text>
       <Box
         flexDirection="row"
         gap={4}
@@ -335,25 +344,31 @@ const MultiPickerMenu = <T,>({
               const isFocused = flatIdx === focused;
               const isSelected = selected.has(flatIdx);
               const label = opt.hint ? `${opt.label} (${opt.hint})` : opt.label;
-              const checkbox = isSelected ? Icons.squareFilled : Icons.squareOpen;
+              const checkbox = isSelected
+                ? Icons.squareFilled
+                : Icons.squareOpen;
               const key = numKey(flatIdx);
               return (
                 <Box key={flatIdx} gap={1}>
                   <Text
-                    color={isSelected ? 'white' : Colors.muted}
-                    dimColor={!isFocused && !isSelected}
+                    color={
+                      isFocused
+                        ? Colors.accent
+                        : isSelected
+                        ? 'white'
+                        : Colors.muted
+                    }
                   >
                     {checkbox}
                   </Text>
                   {key !== null && (
-                    <Text dimColor color={isFocused ? Colors.accent : undefined}>
+                    <Text color={isFocused ? Colors.accent : Colors.muted}>
                       [{key}]
                     </Text>
                   )}
                   <Text
-                    color={isFocused ? Colors.accent : undefined}
+                    color={isFocused ? Colors.accent : Colors.muted}
                     bold={isFocused}
-                    dimColor={!isFocused}
                   >
                     {label}
                   </Text>

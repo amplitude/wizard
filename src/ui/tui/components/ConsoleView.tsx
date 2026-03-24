@@ -41,10 +41,14 @@ function executeCommand(raw: string, store: WizardStore): void {
       store.setRegionForced();
       break;
     case '/login':
-      store.setCommandFeedback('Re-authentication not yet available from within the wizard.');
+      store.setCommandFeedback(
+        'Re-authentication not yet available from within the wizard.',
+      );
       break;
     case '/logout':
-      store.setCommandFeedback('Use `amplitude-wizard logout` from a new terminal to log out.');
+      store.setCommandFeedback(
+        'Use `amplitude-wizard logout` from a new terminal to log out.',
+      );
       break;
     case '/whoami':
       store.setCommandFeedback(getWhoamiText(store.session));
@@ -55,7 +59,9 @@ function executeCommand(raw: string, store: WizardStore): void {
       const appName = region === 'eu' ? 'Amplitude - EU' : 'Amplitude';
       const open = (orgName: string | null) => {
         const url = slackSettingsUrl(base, orgName);
-        opn(url, { wait: false }).catch(() => { /* fire-and-forget */ });
+        opn(url, { wait: false }).catch(() => {
+          /* fire-and-forget */
+        });
         store.setCommandFeedback(
           `Opening Amplitude Settings → connect the "${appName}" Slack app.`,
         );
@@ -95,7 +101,12 @@ interface ConsoleViewProps {
   children?: ReactNode;
 }
 
-export const ConsoleView = ({ store, width, height, children }: ConsoleViewProps) => {
+export const ConsoleView = ({
+  store,
+  width,
+  height,
+  children,
+}: ConsoleViewProps) => {
   const [inputActive, setInputActive] = useState(false);
   const [initialValue, setInitialValue] = useState('');
   const [inputKey, setInputKey] = useState(0);
@@ -189,27 +200,35 @@ export const ConsoleView = ({ store, width, height, children }: ConsoleViewProps
       {lastStatus && (
         <Box paddingX={1} overflow="hidden">
           <Text color={Colors.muted}>{Icons.diamondOpen} </Text>
-          <Text dimColor wrap="truncate-end">{lastStatus}</Text>
+          <Text color={Colors.muted} wrap="truncate-end">
+            {lastStatus}
+          </Text>
         </Box>
       )}
 
       {/* Error banner — shown when a screen crashes or the agent fails to start */}
       {screenError && (
         <Box paddingX={1} gap={1}>
-          <Text color={Colors.error} bold>⚠</Text>
+          <Text color={Colors.error} bold>
+            ⚠
+          </Text>
           <Box flexGrow={1} overflow="hidden">
-            <Text color={Colors.error} wrap="truncate-end">{screenError.message}</Text>
+            <Text color={Colors.error} wrap="truncate-end">
+              {screenError.message}
+            </Text>
           </Box>
-          <Text dimColor>[R] retry</Text>
+          <Text color={Colors.muted}>[R] retry</Text>
         </Box>
       )}
 
       {/* Console input area */}
-      <Text dimColor>{separator}</Text>
+      <Text color={Colors.muted}>{separator}</Text>
       {showFeedback && (
         <Box paddingX={1}>
-          <Text color={Colors.accent} bold>{' '}</Text>
-          <Text dimColor>{feedback}</Text>
+          <Text color={Colors.accent} bold>
+            {' '}
+          </Text>
+          <Text color={Colors.muted}>{feedback}</Text>
         </Box>
       )}
       {showResponse && (

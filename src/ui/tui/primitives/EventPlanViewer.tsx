@@ -4,6 +4,7 @@
 
 import { Box, Text } from 'ink';
 import type { PlannedEvent } from '../store.js';
+import { Colors } from '../styles.js';
 
 interface EventPlanViewerProps {
   events: PlannedEvent[];
@@ -17,7 +18,7 @@ export const EventPlanViewer = ({ events }: EventPlanViewerProps) => {
       {events.map((event) => (
         <Box key={event.name}>
           <Text bold>{event.name}</Text>
-          <Text dimColor> {event.description}</Text>
+          <Text color={Colors.muted}> {event.description}</Text>
         </Box>
       ))}
     </Box>

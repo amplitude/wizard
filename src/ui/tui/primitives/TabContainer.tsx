@@ -21,7 +21,12 @@ interface TabContainerProps {
   onTabConsumed?: () => void;
 }
 
-export const TabContainer = ({ tabs, statusMessage, requestedTab, onTabConsumed }: TabContainerProps) => {
+export const TabContainer = ({
+  tabs,
+  statusMessage,
+  requestedTab,
+  onTabConsumed,
+}: TabContainerProps) => {
   const [activeTab, setActiveTab] = useState(0);
 
   useEffect(() => {
@@ -82,7 +87,9 @@ export const TabContainer = ({ tabs, statusMessage, requestedTab, onTabConsumed 
             </Text>
           ))}
         </Box>
-        <Text dimColor>← → to browse tabs while the wizard runs</Text>
+        <Text color={Colors.muted}>
+          ← → to browse tabs while the wizard runs
+        </Text>
       </Box>
     </Box>
   );

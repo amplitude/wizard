@@ -30,8 +30,8 @@ function parseAtom(xml: string): SmallWebEntry[] {
   const entries: Record<string, unknown>[] = Array.isArray(rawEntries)
     ? (rawEntries as Record<string, unknown>[])
     : rawEntries
-      ? [rawEntries as Record<string, unknown>]
-      : [];
+    ? [rawEntries as Record<string, unknown>]
+    : [];
 
   return entries.map((e) => {
     const text = (node: unknown): string => {
@@ -47,11 +47,13 @@ function parseAtom(xml: string): SmallWebEntry[] {
     };
 
     return {
-      title: text((e['title'] as Record<string, unknown> | undefined)),
-      url: attr((e['link'] as Record<string, unknown> | undefined), 'href'),
-      author: text((e['author'] as Record<string, unknown> | undefined)?.['name']),
-      published: text((e['published'] as Record<string, unknown> | undefined)),
-      summary: text((e['summary'] as Record<string, unknown> | undefined)),
+      title: text(e['title'] as Record<string, unknown> | undefined),
+      url: attr(e['link'] as Record<string, unknown> | undefined, 'href'),
+      author: text(
+        (e['author'] as Record<string, unknown> | undefined)?.['name'],
+      ),
+      published: text(e['published'] as Record<string, unknown> | undefined),
+      summary: text(e['summary'] as Record<string, unknown> | undefined),
     };
   });
 }
@@ -82,14 +84,16 @@ export const KagiSmallWebViewer = () => {
     const entry = entries[index];
     if (!entry) return;
     void import('child_process').then(({ exec }) => {
-      exec(`open "${entry.url}" 2>/dev/null || xdg-open "${entry.url}" 2>/dev/null`);
+      exec(
+        `open "${entry.url}" 2>/dev/null || xdg-open "${entry.url}" 2>/dev/null`,
+      );
     });
   });
 
   if (loading) {
     return (
       <Box paddingX={1}>
-        <Text dimColor>Loading Kagi Small Web...</Text>
+        <Text color={Colors.muted}>Loading Kagi Small Web...</Text>
       </Box>
     );
   }
@@ -97,7 +101,7 @@ export const KagiSmallWebViewer = () => {
   if (entries.length === 0) {
     return (
       <Box paddingX={1}>
-        <Text dimColor>Could not load Kagi Small Web.</Text>
+        <Text color={Colors.muted}>Could not load Kagi Small Web.</Text>
       </Box>
     );
   }
@@ -111,17 +115,28 @@ export const KagiSmallWebViewer = () => {
       {entries.map((entry, i) => {
         const key = i === 9 ? '0' : String(i + 1);
         const date = new Date(entry.published);
-        const dateStr = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-        const host = (() => { try { return new URL(entry.url).hostname; } catch { return ''; } })();
+        const dateStr = date.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+        });
+        const host = (() => {
+          try {
+            return new URL(entry.url).hostname;
+          } catch {
+            return '';
+          }
+        })();
 
         return (
           <Box key={entry.url} flexDirection="column">
             <Box>
-              <Text color={Colors.accent} bold>[{key}]</Text>
+              <Text color={Colors.accent} bold>
+                [{key}]
+              </Text>
               <Text bold> {entry.title}</Text>
             </Box>
             <Box marginLeft={4}>
-              <Text dimColor>
+              <Text color={Colors.muted}>
                 {entry.author || host}
                 {dateStr ? `, ${dateStr}` : ''}
               </Text>

@@ -46,7 +46,11 @@ export const SlashCommandInput = ({
   const query = value.slice(1).toLowerCase();
   const filtered = isSlashMode
     ? commands
-        .filter((c) => c.cmd.slice(1).startsWith(query) || c.desc.toLowerCase().includes(query))
+        .filter(
+          (c) =>
+            c.cmd.slice(1).startsWith(query) ||
+            c.desc.toLowerCase().includes(query),
+        )
         .sort((a, b) => {
           const aStarts = a.cmd.slice(1).startsWith(query) ? 0 : 1;
           const bStarts = b.cmd.slice(1).startsWith(query) ? 0 : 1;
@@ -54,7 +58,10 @@ export const SlashCommandInput = ({
         })
     : [];
 
-  const clampedIndex = Math.min(selectedIndex, Math.max(0, filtered.length - 1));
+  const clampedIndex = Math.min(
+    selectedIndex,
+    Math.max(0, filtered.length - 1),
+  );
 
   useInput(
     (char, key) => {
@@ -102,8 +109,10 @@ export const SlashCommandInput = ({
   if (!isActive) {
     return (
       <Box gap={1}>
-        <Text dimColor>{'>'}</Text>
-        <Text dimColor inverse={false}>{' '}</Text>
+        <Text color={Colors.muted}>{'>'}</Text>
+        <Text color={Colors.muted} inverse={false}>
+          {' '}
+        </Text>
       </Box>
     );
   }
@@ -111,20 +120,27 @@ export const SlashCommandInput = ({
   return (
     <Box flexDirection="column">
       <Box gap={1}>
-        <Text dimColor>{'>'}</Text>
+        <Text color={Colors.muted}>{'>'}</Text>
         <Text>
           {value}
-          {cursorVisible ? <Text inverse>{' '}</Text> : <Text>{' '}</Text>}
+          {cursorVisible ? <Text inverse> </Text> : <Text> </Text>}
         </Text>
       </Box>
       {isSlashMode && filtered.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           {filtered.map((c, i) => (
             <Box key={c.cmd} gap={2}>
-              <Text color={i === clampedIndex ? Colors.primary : undefined} bold={i === clampedIndex}>
-                {i === clampedIndex ? Icons.triangleSmallRight + ' ' + c.cmd : '  ' + c.cmd}
+              <Text
+                color={i === clampedIndex ? Colors.primary : undefined}
+                bold={i === clampedIndex}
+              >
+                {i === clampedIndex
+                  ? Icons.triangleSmallRight + ' ' + c.cmd
+                  : '  ' + c.cmd}
               </Text>
-              <Text dimColor={i !== clampedIndex}>{c.desc}</Text>
+              <Text color={i !== clampedIndex ? Colors.muted : undefined}>
+                {c.desc}
+              </Text>
             </Box>
           ))}
         </Box>

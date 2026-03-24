@@ -19,7 +19,7 @@ export const Colors = {
   accent: '#1e61f0',
   success: 'green',
   error: 'red',
-  muted: 'gray',
+  muted: '#cccccc',
 } as const;
 
 export const Icons = {

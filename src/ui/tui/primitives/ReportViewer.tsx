@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { Colors } from '../styles.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + separator + tab bar chrome */
 const CHROME_ROWS = 10;
@@ -109,13 +110,18 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
       {visible.map((line, i) => {
         const { text, bold, dimmed } = renderLine(line);
         return (
-          <Text key={i} bold={bold} dimColor={dimmed} wrap="truncate">
+          <Text
+            key={i}
+            bold={bold}
+            color={dimmed ? Colors.muted : undefined}
+            wrap="truncate"
+          >
             {text}
           </Text>
         );
       })}
       {lines.length > visibleLines && (
-        <Text dimColor>
+        <Text color={Colors.muted}>
           {' '}
           ↑↓ to scroll · {offset + visibleLines}/{lines.length} lines
         </Text>

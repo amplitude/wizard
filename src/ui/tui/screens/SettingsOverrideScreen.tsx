@@ -7,7 +7,7 @@ import { Box, Text } from 'ink';
 import { useState, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { ConfirmationInput } from '../primitives/index.js';
-import { Icons } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 
 interface SettingsOverrideScreenProps {
   store: WizardStore;
@@ -62,7 +62,7 @@ export const SettingsOverrideScreen = ({
             </Text>
           ))}
         </Box>
-        <Text dimColor>
+        <Text color={Colors.muted}>
           These overrides prevent the Wizard from reaching the Amplitude LLM
           Gateway. We can back up the file and continue.
         </Text>
@@ -76,7 +76,7 @@ export const SettingsOverrideScreen = ({
         )}
 
         <Box marginY={1}>
-          <Text dimColor>{'─'.repeat(56)}</Text>
+          <Text color={Colors.muted}>{'─'.repeat(56)}</Text>
         </Box>
 
         <ConfirmationInput

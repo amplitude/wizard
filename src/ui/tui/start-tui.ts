@@ -16,7 +16,7 @@ const CLEAR_SCREEN = '\x1b[2J';
 const CURSOR_HOME = '\x1b[H';
 const BG_BLACK = '\x1b[48;2;0;0;0m';
 // OSC 10/11: set terminal foreground/background colors (ignored by unsupporting terminals)
-const OSC_FG_BRIGHT = '\x1b]10;#e8e8f0\x07';
+const OSC_FG_BRIGHT = '\x1b]10;#f4f4ff\x07';
 const OSC_BG_DARK = '\x1b]11;#0d0d16\x07';
 // OSC 110/111: reset to user defaults
 const OSC_FG_RESET = '\x1b]110;\x07';

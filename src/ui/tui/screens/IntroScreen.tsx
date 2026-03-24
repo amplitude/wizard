@@ -17,6 +17,7 @@ import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
+import { Colors } from '../styles.js';
 
 interface IntroScreenProps {
   store: WizardStore;
@@ -73,10 +74,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
         {showDescription && (
           <Box flexDirection="column" alignItems="center" marginTop={1}>
-            <Text dimColor>
+            <Text color={Colors.muted}>
               We'll use AI to analyze your project and integrate Amplitude.
             </Text>
-            <Text dimColor>
+            <Text color={Colors.muted}>
               .env* file contents will not leave your machine.
             </Text>
             <Box marginTop={1}>

@@ -19,7 +19,9 @@ interface ActivationOptionsScreenProps {
 
 const DOCS_URL = 'https://amplitude.com/docs/sdks';
 
-export const ActivationOptionsScreen = ({ store }: ActivationOptionsScreenProps) => {
+export const ActivationOptionsScreen = ({
+  store,
+}: ActivationOptionsScreenProps) => {
   useSyncExternalStore(
     (cb) => store.subscribe(cb),
     () => store.getSnapshot(),
@@ -38,7 +40,9 @@ export const ActivationOptionsScreen = ({ store }: ActivationOptionsScreenProps)
         store.setActivationOptionsComplete();
         break;
       case 'docs':
-        opn(DOCS_URL, { wait: false }).catch(() => { /* fire-and-forget */ });
+        opn(DOCS_URL, { wait: false }).catch(() => {
+          /* fire-and-forget */
+        });
         // Stay on screen — don't advance
         break;
       case 'exit':
@@ -53,24 +57,33 @@ export const ActivationOptionsScreen = ({ store }: ActivationOptionsScreenProps)
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Text bold color={Colors.accent}>
-        Your SDK is{snippetConfigured ? ' installed' : ' partially set up'} — waiting for events
+        Your SDK is{snippetConfigured ? ' installed' : ' partially set up'} —
+        waiting for events
       </Text>
 
       <Box marginTop={1} flexDirection="column">
-        <Text dimColor>
+        <Text color={Colors.muted}>
           We can see your project is configured but hasn&apos;t received many
           events yet.
         </Text>
-        <Text dimColor>What would you like to do?</Text>
+        <Text color={Colors.muted}>What would you like to do?</Text>
       </Box>
 
       <Box marginTop={1}>
         <PickerMenu
           options={[
-            { value: 'test-locally', label: 'Help me test locally', hint: 'run the setup agent' },
+            {
+              value: 'test-locally',
+              label: 'Help me test locally',
+              hint: 'run the setup agent',
+            },
             { value: 'debug', label: "I'm blocked", hint: 'debug with Claude' },
             { value: 'docs', label: 'Take me to the docs', hint: DOCS_URL },
-            { value: 'exit', label: "I'm done for now", hint: 'exit and resume later' },
+            {
+              value: 'exit',
+              label: "I'm done for now",
+              hint: 'exit and resume later',
+            },
           ]}
           onSelect={(v) => handleSelect(v as string)}
         />

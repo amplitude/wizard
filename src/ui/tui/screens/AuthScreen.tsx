@@ -140,7 +140,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           <LoadingBox message="Waiting for authentication..." />
           {session.loginUrl && (
             <Box marginTop={1} flexDirection="column">
-              <Text dimColor>
+              <Text color={Colors.muted}>
                 If the browser didn't open, copy and paste this URL:
               </Text>
               <Text color="cyan">{session.loginUrl}</Text>
@@ -152,7 +152,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {/* Step 2: org picker (multiple orgs only) */}
       {needsOrgPick && pendingOrgs && (
         <Box flexDirection="column">
-          <Text dimColor>Select your Amplitude organization:</Text>
+          <Text color={Colors.muted}>Select your Amplitude organization:</Text>
           <PickerMenu<OrgEntry>
             options={pendingOrgs.map((org) => ({
               label: org.name,
@@ -169,7 +169,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {/* Step 3: workspace picker (multiple workspaces only) */}
       {needsWorkspacePick && effectiveOrg && (
         <Box flexDirection="column">
-          <Text dimColor>
+          <Text color={Colors.muted}>
             Select a workspace in <Text color="white">{effectiveOrg.name}</Text>
             :
           </Text>
@@ -193,7 +193,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             <Text>
               Enter your Amplitude project <Text bold>API Key</Text>
             </Text>
-            <Text dimColor>
+            <Text color={Colors.muted}>
               Amplitude → Settings → Projects → [your project] → API Keys
             </Text>
           </Box>

@@ -147,7 +147,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
                 {Icons.check} {tip.toggle.enabledLabel}
               </Text>
             ) : (
-              <Text dimColor>
+              <Text color={Colors.muted}>
                 {tip.toggle.prompt} Press{' '}
                 <Text bold color={Colors.accent}>
                   {tip.toggle.key.toUpperCase()}
@@ -156,7 +156,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
               </Text>
             )
           ) : (
-            <Text dimColor>
+            <Text color={Colors.muted}>
               {tip.description}
               {tip.url && (
                 <>

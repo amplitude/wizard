@@ -150,10 +150,12 @@ export const SlackScreen = ({
       </Text>
 
       <Box marginTop={1} flexDirection="column">
-        <Text dimColor>
+        <Text color={Colors.muted}>
           Connect Amplitude to Slack for chart previews, dashboard sharing,
         </Text>
-        <Text dimColor>and real-time tracking plan notifications.</Text>
+        <Text color={Colors.muted}>
+          and real-time tracking plan notifications.
+        </Text>
 
         {isEu && (
           <Box marginTop={1}>
@@ -176,14 +178,16 @@ export const SlackScreen = ({
           </Box>
         )}
 
-        {phase === Phase.Opening && <Text dimColor>Opening browser...</Text>}
+        {phase === Phase.Opening && (
+          <Text color={Colors.muted}>Opening browser...</Text>
+        )}
 
         {phase === Phase.Waiting && (
           <Box flexDirection="column" marginTop={1}>
             <Text>
               Browser opened to <Text color="cyan">{settingsUrl}</Text>
             </Text>
-            <Text dimColor>
+            <Text color={Colors.muted}>
               Go to Settings &gt; Personal Settings &gt; Profile and click
               &quot;Connect to Slack&quot;.
             </Text>

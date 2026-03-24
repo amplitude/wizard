@@ -7,6 +7,7 @@ import { Box, Text } from 'ink';
 import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { ConfirmationInput } from '../primitives/index.js';
+import { Colors } from '../styles.js';
 
 interface OutageScreenProps {
   store: WizardStore;
@@ -39,7 +40,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
           <Text color="cyan">{serviceStatus.statusPageUrl}</Text>
         </Text>
         <Text> </Text>
-        <Text dimColor>
+        <Text color={Colors.muted}>
           The wizard may not work reliably while services are affected.
         </Text>
       </Box>

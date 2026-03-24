@@ -51,7 +51,7 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
               ? 'Switch data-center region'
               : 'Where is your Amplitude organization?'}
           </Text>
-          <Text dimColor>
+          <Text color={Colors.muted}>
             {session.regionForced
               ? `Current: ${
                   session.region?.toUpperCase() ?? 'US'

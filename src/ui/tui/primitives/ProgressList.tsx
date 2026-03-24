@@ -53,14 +53,17 @@ export const ProgressList = ({ items, title }: ProgressListProps) => {
         return (
           <Text key={i}>
             <Text color={color}>{icon}</Text>
-            <Text dimColor={item.status === 'pending'}> {label}</Text>
+            <Text color={item.status === 'pending' ? Colors.muted : undefined}>
+              {' '}
+              {label}
+            </Text>
           </Text>
         );
       })}
       {total > 0 && (
         <Box marginTop={1} gap={1}>
           {completed < total && <Spinner />}
-          <Text dimColor>
+          <Text color={Colors.muted}>
             Progress: {completed}/{total} completed
           </Text>
         </Box>

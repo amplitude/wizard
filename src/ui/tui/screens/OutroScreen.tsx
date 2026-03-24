@@ -43,7 +43,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   if (!outroData) {
     return (
       <Box flexDirection="column" flexGrow={1}>
-        <Text dimColor>Finishing up...</Text>
+        <Text color={Colors.muted}>Finishing up...</Text>
       </Box>
     );
   }
@@ -57,7 +57,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           <Text bold color={Colors.accent}>
             Setup Report
           </Text>
-          <Text dimColor> (Esc to go back)</Text>
+          <Text color={Colors.muted}> (Esc to go back)</Text>
         </Box>
         <ReportViewer filePath={reportPath} />
       </Box>
@@ -100,7 +100,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               {store.eventPlan.map((event) => (
                 <Text key={event.name}>
                   {'\u2022'} <Text bold>{event.name}</Text>
-                  <Text dimColor> {event.description}</Text>
+                  <Text color={Colors.muted}> {event.description}</Text>
                 </Text>
               ))}
             </Box>
@@ -124,13 +124,13 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           )}
 
           <Box marginTop={1}>
-            <Text dimColor>
+            <Text color={Colors.muted}>
               Note: This wizard uses an LLM agent to analyze and modify your
               project. Please review the changes made.
             </Text>
           </Box>
           <Box>
-            <Text dimColor>
+            <Text color={Colors.muted}>
               How did this work for you? Drop us a line: wizard@amplitude.com
             </Text>
           </Box>

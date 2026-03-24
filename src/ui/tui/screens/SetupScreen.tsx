@@ -59,7 +59,7 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
   if (resolving) {
     return (
       <Box flexDirection="column" flexGrow={1}>
-        <Text dimColor>Detecting project configuration...</Text>
+        <Text color={Colors.muted}>Detecting project configuration...</Text>
       </Box>
     );
   }
@@ -84,7 +84,9 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
           Project Setup
         </Text>
         {config && (
-          <Text dimColor>Configuring {config.metadata.name} integration</Text>
+          <Text color={Colors.muted}>
+            Configuring {config.metadata.name} integration
+          </Text>
         )}
       </Box>
 

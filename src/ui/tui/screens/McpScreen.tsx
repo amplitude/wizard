@@ -154,11 +154,11 @@ export const McpScreen = ({
 
       <Box marginTop={1} flexDirection="column">
         {phase === Phase.Detecting && (
-          <Text dimColor>Detecting supported editors...</Text>
+          <Text color={Colors.muted}>Detecting supported editors...</Text>
         )}
 
         {phase === Phase.None && (
-          <Text dimColor>
+          <Text color={Colors.muted}>
             No {isRemove ? 'installed' : 'supported'} MCP clients detected.
             Skipping...
           </Text>
@@ -166,7 +166,7 @@ export const McpScreen = ({
 
         {phase === Phase.Ask && (
           <>
-            <Text dimColor>
+            <Text color={Colors.muted}>
               Detected: {clients.map((c) => c.name).join(', ')}
             </Text>
             <Box marginTop={1}>
@@ -201,7 +201,7 @@ export const McpScreen = ({
         )}
 
         {phase === Phase.Working && (
-          <Text dimColor>
+          <Text color={Colors.muted}>
             {isRemove ? 'Removing' : 'Installing'} MCP server...
           </Text>
         )}
@@ -222,7 +222,7 @@ export const McpScreen = ({
                 ))}
               </>
             ) : (
-              <Text dimColor>
+              <Text color={Colors.muted}>
                 {isRemove ? 'Removal' : 'Installation'} skipped.
               </Text>
             )}
