@@ -169,9 +169,6 @@ export interface WizardSession {
   /** OAuth id_token held during SUSI account-setup steps. */
   pendingAuthIdToken: string | null;
 
-  /** OAuth access_token held during SUSI — used for Hydra-validated proxy auth. */
-  pendingAuthAccessToken: string | null;
-
   /** Cloud region detected from the OAuth token. Drives RegionSelect auto-skip. */
   pendingAuthCloudRegion: CloudRegion | null;
 
@@ -281,7 +278,6 @@ export function buildSession(args: {
     slackOutcome: null,
     pendingOrgs: null,
     pendingAuthIdToken: null,
-    pendingAuthAccessToken: null,
     pendingAuthCloudRegion: null,
     selectedOrgId: null,
     selectedOrgName: null,

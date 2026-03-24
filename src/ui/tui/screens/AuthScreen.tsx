@@ -48,7 +48,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   // Auto-select the org when there's only one
   const effectiveOrg: OrgEntry | null =
-    selectedOrg ?? (pendingOrgs?.length === 1 ? pendingOrgs[0] : null);
+    selectedOrg ??
+    (pendingOrgs?.length === 1 ? pendingOrgs[0] : null);
 
   // Auto-select workspace when org has only one
   const singleWorkspace =
@@ -56,11 +57,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   useEffect(() => {
     if (effectiveOrg && singleWorkspace && !session.selectedWorkspaceId) {
-      store.setOrgAndWorkspace(
-        effectiveOrg,
-        singleWorkspace,
-        session.installDir,
-      );
+      store.setOrgAndWorkspace(effectiveOrg, singleWorkspace, session.installDir);
     }
   }, [effectiveOrg?.id, singleWorkspace?.id, session.selectedWorkspaceId]);
 
@@ -77,7 +74,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         if (result) {
           setSavedKeySource(result.source);
           store.setCredentials({
-            accessToken: session.pendingAuthAccessToken ?? '',
+            accessToken: session.pendingAuthIdToken ?? '',
             projectApiKey: result.key,
             host: DEFAULT_HOST_URL,
             projectId: 0,
@@ -105,7 +102,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     }
     setApiKeyError('');
     store.setCredentials({
-      accessToken: session.pendingAuthAccessToken ?? '',
+      accessToken: session.pendingAuthIdToken ?? '',
       projectApiKey: trimmed,
       host: DEFAULT_HOST_URL,
       projectId: 0,
@@ -170,8 +167,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {needsWorkspacePick && effectiveOrg && (
         <Box flexDirection="column">
           <Text dimColor>
-            Select a workspace in <Text color="white">{effectiveOrg.name}</Text>
-            :
+            Select a workspace in <Text color="white">{effectiveOrg.name}</Text>:
           </Text>
           <PickerMenu<{ id: string; name: string }>
             options={effectiveOrg.workspaces.map((ws) => ({

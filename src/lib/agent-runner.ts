@@ -173,28 +173,7 @@ export async function runAgentWizard(
     getUI().setProjectHasData(false);
   }
 
-  const {
-    accessToken: rawAccessToken,
-    projectApiKey,
-    host,
-    projectId,
-  } = session.credentials;
-  // The TUI's AuthScreen may have stored the id_token instead of the
-  // OAuth access token (the field names were swapped historically).
-  // Always prefer the real OAuth access token from ~/.ampli.json for Hydra auth.
-  let accessToken = rawAccessToken;
-  try {
-    const { getStoredToken, getStoredUser } = await import(
-      '../utils/ampli-settings.js'
-    );
-    const user = getStoredUser();
-    const stored = getStoredToken(user?.id, user?.zone);
-    if (stored?.accessToken) {
-      accessToken = stored.accessToken;
-    }
-  } catch {
-    // Fall back to whatever the TUI provided
-  }
+  const { accessToken, projectApiKey, host, projectId } = session.credentials;
   // Derive cloudRegion from session (set during auth or defaulting to 'us')
   const cloudRegion: import('../utils/types.js').CloudRegion =
     (session.pendingAuthCloudRegion as
@@ -407,7 +386,7 @@ function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
-  return `You are integrating Amplitude analytics into this ${
+  return `You have access to the Amplitude MCP server which provides skills to integrate Amplitude into this ${
     config.metadata.name
   } project.
 
@@ -422,35 +401,37 @@ Project context:
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
   }${additionalContext}
 
-Use [STATUS] <message> at the start of any line to report progress (e.g. "[STATUS] Installing Amplitude SDK").
-
 Instructions (follow these steps IN ORDER - do not skip or reorder):
 
-STEP 1: Check if Amplitude is already integrated.
-[STATUS] Checking for existing Amplitude integration
-Search the project for existing Amplitude references (e.g. "amplitude" in source files).
-- If already present: skip to STEP 3 and diagnose any issues.
-- If not: continue to STEP 2.
+STEP 1: List available skills from the Amplitude MCP server using ListMcpResourcesTool. If this tool is not available or you cannot access the MCP server, you must emit: ${
+    AgentSignals.ERROR_MCP_MISSING
+  } Could not access the Amplitude MCP server and halt.
 
-STEP 2: Fetch Amplitude documentation for this framework.
-[STATUS] Fetching Amplitude documentation
-If a "Framework docs ID" is listed in the project context above, read the documentation resource from the Amplitude MCP server: amplitude://docs/frameworks/<id>
-Otherwise, use WebFetch to load the SDK documentation from: ${
-    config.metadata.docsUrl
-  }
+   Review the skill descriptions and choose the one that best matches this project's framework and configuration.
+   If no suitable skill is found, or you cannot access the MCP server, you emit: ${
+     AgentSignals.ERROR_RESOURCE_MISSING
+   } Could not find a suitable skill for this project.
 
-STEP 3: Install and initialize the Amplitude SDK following the documentation.
-[STATUS] Installing Amplitude SDK
-Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager to use. Install packages as a background task — do not await completion, proceed immediately. Never hardcode the Amplitude token; always reference environment variables.
+STEP 2: Fetch the chosen skill resource (e.g., amplitude://skills/{skill-id}).
+   The resource returns a shell command to install the skill.
 
-STEP 4: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
-[STATUS] Writing environment variables
-- Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
-- Use set_env_values to write the Amplitude public token and host using the correct naming convention for ${
-    config.metadata.name
-  }. The tool ensures .gitignore coverage. Always write the correct value even if the key already exists.
-- Reference these environment variables in code instead of hardcoding values.
+STEP 3: Run the installation command using Bash:
+   - Execute the EXACT command returned by the resource (do not modify it)
+   - This will download and extract the skill to .claude/skills/{skill-id}/
 
-Important: You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
+STEP 4: Load the installed skill's SKILL.md file to understand what references are available.
+
+STEP 5: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
+
+STEP 6: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
+   - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
+   - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
+     config.metadata.name
+   }, which you'll find in example code. The tool will also ensure .gitignore coverage. Don't assume the presence of keys means the value is up to date. Write the correct value each time.
+   - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
+
+Important: Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager the project uses. Do not manually search for lockfiles or config files. Always install packages as a background task. Don't await completion; proceed with other work immediately after starting the installation. You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
+
+
 `;
 }
