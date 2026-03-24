@@ -12,6 +12,7 @@ import fs from 'fs';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import type { PackageManagerDetector } from './package-manager-detection';
+import { getUI } from '../ui';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -557,12 +558,60 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
+  // -- confirm --------------------------------------------------------------
+
+  const confirm = tool(
+    'confirm',
+    'Ask the user a yes/no question and wait for their answer. Returns true if confirmed, false if declined or skipped.',
+    {
+      message: z
+        .string()
+        .describe('The confirmation question to show the user'),
+    },
+    async (args: { message: string }) => {
+      logToFile(`confirm: ${args.message}`);
+      const answer = await getUI().promptConfirm(args.message);
+      return {
+        content: [{ type: 'text' as const, text: answer ? 'true' : 'false' }],
+      };
+    },
+  );
+
+  // -- choose ---------------------------------------------------------------
+
+  const choose = tool(
+    'choose',
+    'Present the user with a list of options and wait for their selection. Returns the chosen option, or an empty string if skipped.',
+    {
+      message: z.string().describe('The prompt to show above the options'),
+      options: z
+        .array(z.string())
+        .min(2)
+        .describe('The list of choices to present'),
+    },
+    async (args: { message: string; options: string[] }) => {
+      logToFile(`choose: ${args.message}, options: ${args.options.join(', ')}`);
+      const answer = await getUI().promptChoice(args.message, args.options);
+      return {
+        content: [{ type: 'text' as const, text: answer }],
+      };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   return createSdkMcpServer({
     name: SERVER_NAME,
     version: '1.0.0',
-    tools: [checkEnvKeys, setEnvValues, detectPM, loadSkillMenu, installSkill],
+    tools: [
+      checkEnvKeys,
+      setEnvValues,
+      detectPM,
+      loadSkillMenu,
+      installSkill,
+      confirm,
+      choose,
+    ],
   });
 }
 
@@ -573,4 +622,6 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:detect_package_manager`,
   `${SERVER_NAME}:load_skill_menu`,
   `${SERVER_NAME}:install_skill`,
+  `${SERVER_NAME}:confirm`,
+  `${SERVER_NAME}:choose`,
 ];

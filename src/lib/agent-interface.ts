@@ -22,7 +22,8 @@ import {
 } from './wizard-session';
 import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
-import { getLlmGatewayUrlFromHost } from '../utils/urls';
+import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
+import { getStoredToken } from '../utils/ampli-settings';
 import { LINTING_TOOLS } from './safe-tools';
 import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
@@ -179,6 +180,7 @@ export type AgentConfig = {
   workingDirectory: string;
   amplitudeMcpUrl: string;
   amplitudeApiKey: string;
+  amplitudeBearerToken: string;
   amplitudeApiHost: string;
   additionalMcpServers?: Record<string, { url: string }>;
   detectPackageManager: PackageManagerDetector;
@@ -246,9 +248,9 @@ export function createStopHook(
 }
 
 /**
- * Internal configuration object returned by initializeAgent
+ * Configuration object returned by initializeAgent / getAgent.
  */
-type AgentRunConfig = {
+export type AgentRunConfig = {
   workingDirectory: string;
   mcpServers: McpServersConfig;
   model: string;
@@ -636,7 +638,7 @@ export async function initializeAgent(
 
   try {
     const useDirectApiKey = !!process.env.ANTHROPIC_API_KEY;
-    const useLocalClaude = !config.amplitudeApiKey && !useDirectApiKey;
+    const useLocalClaude = !config.amplitudeBearerToken && !useDirectApiKey;
 
     if (useDirectApiKey) {
       logToFile('ANTHROPIC_API_KEY found — bypassing Amplitude gateway');
@@ -656,9 +658,9 @@ export async function initializeAgent(
       }
 
       process.env.ANTHROPIC_BASE_URL = gatewayUrl;
-      process.env.ANTHROPIC_AUTH_TOKEN = config.amplitudeApiKey;
+      process.env.ANTHROPIC_AUTH_TOKEN = config.amplitudeBearerToken;
       // Use CLAUDE_CODE_OAUTH_TOKEN to override any stored /login credentials
-      process.env.CLAUDE_CODE_OAUTH_TOKEN = config.amplitudeApiKey;
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = config.amplitudeBearerToken;
       // Disable experimental betas (like input_examples) that the LLM gateway doesn't support
       process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = 'true';
       logToFile('Configured LLM gateway:', gatewayUrl);
@@ -672,7 +674,7 @@ export async function initializeAgent(
         type: 'http',
         url: config.amplitudeMcpUrl,
         headers: {
-          Authorization: `Bearer ${config.amplitudeApiKey}`,
+          Authorization: `Bearer ${config.amplitudeBearerToken}`,
           'User-Agent': WIZARD_USER_AGENT,
         },
       };
@@ -710,7 +712,7 @@ export async function initializeAgent(
       amplitudeMcpUrl: config.amplitudeMcpUrl,
       useLocalClaude,
       useDirectApiKey,
-      apiKeyPresent: !!config.amplitudeApiKey,
+      bearerTokenPresent: !!config.amplitudeBearerToken,
     });
 
     if (options.debug) {
@@ -719,7 +721,7 @@ export async function initializeAgent(
         amplitudeMcpUrl: config.amplitudeMcpUrl,
         useLocalClaude,
         useDirectApiKey,
-        apiKeyPresent: !!config.amplitudeApiKey,
+        bearerTokenPresent: !!config.amplitudeBearerToken,
       });
     }
 
@@ -733,12 +735,63 @@ export async function initializeAgent(
   }
 }
 
+let _agentPromise: Promise<AgentRunConfig> | null = null;
+
+function buildDefaultAgentConfig(): AgentConfig {
+  const storedToken = getStoredToken()?.accessToken ?? '';
+  const host = getHostFromRegion('us');
+  const mcpUrl = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
+  return {
+    workingDirectory: process.cwd(),
+    amplitudeMcpUrl: mcpUrl,
+    amplitudeApiKey: storedToken,
+    amplitudeBearerToken: storedToken,
+    amplitudeApiHost: host,
+    skipAmplitudeMcp: !storedToken,
+    detectPackageManager: () =>
+      Promise.resolve({ detected: [], primary: null, recommendation: '' }),
+  };
+}
+
+const DEFAULT_WIZARD_OPTIONS: WizardOptions = {
+  debug: false,
+  forceInstall: false,
+  installDir: process.cwd(),
+  default: false,
+  signup: false,
+  localMcp: false,
+  ci: false,
+  menu: false,
+  benchmark: false,
+};
+
+/**
+ * Return the already-initialized agent config, or call initializeAgent to create it.
+ * Concurrent calls during initialization share the same Promise.
+ * On error the cached Promise is cleared so the next call retries.
+ *
+ * Omitting config/options reads the bearer token from ~/.ampli.json and uses production
+ * defaults (MCP disabled if no token found, cwd as working directory).
+ */
+export async function getAgent(
+  config: AgentConfig = buildDefaultAgentConfig(),
+  options: WizardOptions = DEFAULT_WIZARD_OPTIONS,
+): Promise<AgentRunConfig> {
+  if (!_agentPromise) {
+    _agentPromise = initializeAgent(config, options).catch((err) => {
+      _agentPromise = null;
+      throw err;
+    });
+  }
+  return _agentPromise;
+}
+
 /**
  * Run the agent by spawning the user's local `claude` CLI with --continue.
  * Used when no Amplitude API key is present (local development).
  * Streams stdout line-by-line and forwards text to the spinner.
  */
-async function runAgentLocally(
+export async function runAgentLocally(
   prompt: string,
   workingDirectory: string,
   spinner: SpinnerHandle,

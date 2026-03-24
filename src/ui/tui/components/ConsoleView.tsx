@@ -24,16 +24,23 @@ import { slackSettingsUrl } from '../screens/SlackScreen.js';
 import { fetchAmplitudeUser } from '../../../lib/api.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import { SlashCommandInput } from '../primitives/SlashCommandInput.js';
+import { PickerMenu } from '../primitives/PickerMenu.js';
 import { Colors, Icons } from '../styles.js';
 import { Overlay } from '../router.js';
 import {
   queryConsole,
   resolveConsoleCredentials,
   buildSessionContext,
+  type ConversationTurn,
 } from '../../../lib/console-query.js';
-import { COMMANDS, getWhoamiText, getHelpText } from '../console-commands.js';
+import {
+  COMMANDS,
+  getWhoamiText,
+  getHelpText,
+  TEST_PROMPT,
+} from '../console-commands.js';
 
-function executeCommand(raw: string, store: WizardStore): void {
+function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
 
   switch (cmd) {
@@ -80,6 +87,8 @@ function executeCommand(raw: string, store: WizardStore): void {
       }
       break;
     }
+    case '/test':
+      return TEST_PROMPT;
     case '/snake':
       store.showSnakeOverlay();
       break;
@@ -112,6 +121,7 @@ export const ConsoleView = ({
   const [inputKey, setInputKey] = useState(0);
   const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<ConversationTurn[]>([]);
 
   useSyncExternalStore(
     (cb) => store.subscribe(cb),
@@ -133,6 +143,17 @@ export const ConsoleView = ({
   // Watch for activation keys while the input is dormant
   useInput(
     (char, key) => {
+      // Escape or Q dismisses overlays: pending prompt (skip) or long response
+      if (key.escape || char === 'q' || char === 'Q') {
+        if (pendingPrompt) {
+          store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
+          return;
+        }
+        if (responseIsLong) {
+          setResponse(null);
+          return;
+        }
+      }
       if (screenError && (char === 'r' || char === 'R')) {
         store.clearScreenError();
         return;
@@ -149,7 +170,10 @@ export const ConsoleView = ({
   const handleSubmit = (value: string) => {
     if (value.startsWith('/')) {
       setResponse(null);
-      executeCommand(value, store);
+      const query = executeCommand(value, store);
+      if (query) {
+        handleSubmit(query);
+      }
       return;
     }
 
@@ -158,8 +182,15 @@ export const ConsoleView = ({
     const creds = resolveConsoleCredentials(store.session);
     const context = buildSessionContext(store.session);
 
-    queryConsole(value, context, creds)
-      .then((text) => setResponse(text))
+    queryConsole(value, context, creds, history)
+      .then((text) => {
+        setResponse(text);
+        setHistory((h) => [
+          ...h,
+          { role: 'user', content: value },
+          { role: 'assistant', content: text },
+        ]);
+      })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         setResponse(`Error: ${msg}`);
@@ -173,6 +204,8 @@ export const ConsoleView = ({
   const showFeedback = !showResponse && !!feedback;
   const innerWidth = width - 2;
   const separator = '─'.repeat(Math.max(0, innerWidth));
+  const responseIsLong = !!response && response.split('\n').length > 3;
+  const pendingPrompt = store.pendingPrompt;
 
   // Show the latest status message when an overlay is active — RunScreen's
   // own TabContainer handles this for the non-overlay case.
@@ -191,9 +224,41 @@ export const ConsoleView = ({
       borderStyle="round"
       borderColor={Colors.muted}
     >
-      {/* Content area — screens render here */}
+      {/* Content area — screens render here, prompt overlay, or long response */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {children}
+        {pendingPrompt ? (
+          <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
+            {pendingPrompt.kind === 'confirm' ? (
+              <PickerMenu
+                message={pendingPrompt.message}
+                options={[
+                  { label: 'Yes', value: 'yes' },
+                  { label: 'No', value: 'no' },
+                ]}
+                onSelect={(v) => store.resolvePrompt(v === 'yes')}
+              />
+            ) : (
+              <PickerMenu
+                message={pendingPrompt.message}
+                options={pendingPrompt.options.map((o) => ({
+                  label: o,
+                  value: o,
+                }))}
+                onSelect={(v) => store.resolvePrompt(v as string)}
+              />
+            )}
+            <Text color={Colors.muted}> [Q / Esc] skip</Text>
+          </Box>
+        ) : responseIsLong ? (
+          <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
+            <Box justifyContent="flex-end">
+              <Text color={Colors.muted}>[Q / Esc] close</Text>
+            </Box>
+            <Text color={Colors.primary}>{response}</Text>
+          </Box>
+        ) : (
+          children
+        )}
       </Box>
 
       {/* Status ticker — shown when an overlay is active (RunScreen handles its own) */}
@@ -231,15 +296,18 @@ export const ConsoleView = ({
           <Text color={Colors.muted}>{feedback}</Text>
         </Box>
       )}
-      {showResponse && (
-        <Box paddingX={1} gap={1}>
+      {showResponse && !responseIsLong && (
+        <Box paddingX={1} paddingY={1} gap={1} flexDirection="column">
           {loading ? (
             <Spinner />
           ) : (
-            <Text color={Colors.primary} wrap="truncate-end">
-              {response}
-            </Text>
+            <Text color={Colors.primary}>{response}</Text>
           )}
+        </Box>
+      )}
+      {loading && responseIsLong && (
+        <Box paddingX={1}>
+          <Spinner />
         </Box>
       )}
       <Box paddingX={1}>

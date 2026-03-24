@@ -98,6 +98,12 @@ export interface WizardUI {
    */
   setProjectHasData(value: boolean): void;
 
+  // ── Agent prompts (confirmation / multiple choice) ────────────────
+  /** Show a yes/no confirmation. Resolves false if the user skips. */
+  promptConfirm(message: string): Promise<boolean>;
+  /** Show a multiple-choice selector. Resolves empty string if the user skips. */
+  promptChoice(message: string, options: string[]): Promise<string>;
+
   // ── Todo tracking from SDK TodoWrite events ───────────────────────
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,

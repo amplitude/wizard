@@ -156,6 +156,17 @@ export class LoggingUI implements WizardUI {
     // No-op in CI mode
   }
 
+  promptConfirm(message: string): Promise<boolean> {
+    console.log(`?  ${message} (auto-skipped in CI)`);
+    return Promise.resolve(false);
+  }
+
+  promptChoice(message: string, options: string[]): Promise<string> {
+    console.log(`?  ${message} (auto-skipped in CI)`);
+    console.log(`│  Options: ${options.join(', ')}`);
+    return Promise.resolve('');
+  }
+
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {

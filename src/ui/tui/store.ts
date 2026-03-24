@@ -55,6 +55,15 @@ export interface PlannedEvent {
   description: string;
 }
 
+export type PendingPrompt =
+  | { kind: 'confirm'; message: string; resolve: (value: boolean) => void }
+  | {
+      kind: 'choice';
+      message: string;
+      options: string[];
+      resolve: (value: string) => void;
+    };
+
 export class WizardStore {
   // ── Internal nanostore atoms ─────────────────────────────────────
   private $session = map<WizardSession>(buildSession({}));
@@ -100,6 +109,9 @@ export class WizardStore {
   private _resolveSettingsOverride: (() => void) | null = null;
   private _backupAndFixSettings: (() => boolean) | null = null;
 
+  /** Pending confirmation or choice prompt from the agent. */
+  private $pendingPrompt = atom<PendingPrompt | null>(null);
+
   constructor(flow: Flow = Flow.Wizard) {
     this.router = new WizardRouter(flow);
   }
@@ -144,6 +156,10 @@ export class WizardStore {
 
   get eventPlan(): PlannedEvent[] {
     return this.$eventPlan.get();
+  }
+
+  get pendingPrompt(): PendingPrompt | null {
+    return this.$pendingPrompt.get();
   }
 
   // ── Session setters ─────────────────────────────────────────────
@@ -242,6 +258,35 @@ export class WizardStore {
     return new Promise((resolve) => {
       this._retryResolve = resolve;
     });
+  }
+
+  /** Show a confirmation prompt. Resolves with true (yes) or false (no / skipped). */
+  promptConfirm(message: string): Promise<boolean> {
+    return new Promise((resolve) => {
+      this.$pendingPrompt.set({ kind: 'confirm', message, resolve });
+      this.$version.set(this.$version.get() + 1);
+    });
+  }
+
+  /** Show a multiple-choice prompt. Resolves with the chosen option or empty string if skipped. */
+  promptChoice(message: string, options: string[]): Promise<string> {
+    return new Promise((resolve) => {
+      this.$pendingPrompt.set({ kind: 'choice', message, options, resolve });
+      this.$version.set(this.$version.get() + 1);
+    });
+  }
+
+  /** Resolve the pending prompt with an answer and clear it. */
+  resolvePrompt(answer: boolean | string): void {
+    const prompt = this.$pendingPrompt.get();
+    if (!prompt) return;
+    this.$pendingPrompt.set(null);
+    this.$version.set(this.$version.get() + 1);
+    if (prompt.kind === 'confirm') {
+      prompt.resolve(answer as boolean);
+    } else {
+      prompt.resolve(answer as string);
+    }
   }
 
   /** Enter or exit slash command mode. */

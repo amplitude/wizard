@@ -1,18 +1,16 @@
 /**
  * console-query — single-turn Claude call for the ConsoleView.
  *
- * Uses the Amplitude LLM gateway when credentials are available,
- * or falls back to ANTHROPIC_API_KEY for direct API access.
+ * Uses the global agent (getAgent) so all calls share the same initialized
+ * SDK config (gateway URL, model, env) rather than making raw fetch calls.
  */
 
-import { z } from 'zod';
 import type { WizardSession } from './wizard-session.js';
 import { getLlmGatewayUrlFromHost } from '../utils/urls.js';
 import { RunPhase } from './wizard-session.js';
-
-const MODEL_DIRECT = 'claude-haiku-4-5-20251001';
-const MODEL_GATEWAY = 'anthropic/claude-haiku-4-5-20251001';
-const MAX_TOKENS = 512;
+import { getAgent } from './agent-interface.js';
+import { safeParseSDKMessage } from './middleware/schemas.js';
+import { WIZARD_TOOL_NAMES } from './wizard-tools.js';
 
 export type ConsoleCredentials =
   | { kind: 'gateway'; baseUrl: string; apiKey: string }
@@ -85,58 +83,71 @@ export function buildSessionContext(session: WizardSession): string {
   return lines.join('\n');
 }
 
-/** Send a single-turn message to Claude and return the text response. */
+export interface ConversationTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/** Send a message to Claude with optional conversation history and return the text response. */
 export async function queryConsole(
   userMessage: string,
   sessionContext: string,
   creds: ConsoleCredentials,
+  history: ConversationTurn[] = [],
 ): Promise<string> {
   if (creds.kind === 'none') {
     return 'Claude is not available yet — complete authentication first.';
   }
 
-  const { baseUrl, headers } =
-    creds.kind === 'gateway'
-      ? {
-          baseUrl: `${creds.baseUrl}/v1/messages`,
-          headers: {
-            'Content-Type': 'application/json',
-            'anthropic-version': '2023-06-01',
-            Authorization: `Bearer ${creds.apiKey}`,
-          },
-        }
-      : {
-          baseUrl: 'https://api.anthropic.com/v1/messages',
-          headers: {
-            'Content-Type': 'application/json',
-            'anthropic-version': '2023-06-01',
-            'x-api-key': creds.apiKey,
-          },
-        };
+  const agentConfig = await getAgent();
+  const { query } = (await import('@anthropic-ai/claude-agent-sdk')) as {
+    query: (params: {
+      prompt: string;
+      options?: Record<string, unknown>;
+    }) => AsyncIterable<unknown>;
+  };
 
-  const res = await fetch(baseUrl, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      model: creds.kind === 'gateway' ? MODEL_GATEWAY : MODEL_DIRECT,
-      max_tokens: MAX_TOKENS,
-      system: sessionContext,
-      messages: [{ role: 'user', content: userMessage }],
-    }),
+  const historyBlock =
+    history.length > 0
+      ? '\n\n--- Conversation history ---\n' +
+        history
+          .map(
+            (t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`,
+          )
+          .join('\n') +
+        '\n--- End of history ---'
+      : '';
+
+  const collectedText: string[] = [];
+
+  const response = query({
+    prompt: userMessage,
+    options: {
+      model: agentConfig.model,
+      cwd: agentConfig.workingDirectory,
+      permissionMode: 'bypassPermissions',
+      mcpServers: agentConfig.mcpServers,
+      allowedTools: WIZARD_TOOL_NAMES,
+      systemPrompt: sessionContext + historyBlock,
+      env: process.env,
+    },
   });
 
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Claude API error ${res.status}: ${body.slice(0, 120)}`);
+  for await (const rawMessage of response) {
+    const parsed = safeParseSDKMessage(rawMessage);
+    if (!parsed.ok) continue;
+    const message = parsed.message;
+    if (message.type === 'assistant') {
+      const content = message.message?.content;
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'text' && typeof block.text === 'string') {
+            collectedText.push(block.text);
+          }
+        }
+      }
+    }
   }
 
-  const ClaudeResponseSchema = z
-    .object({
-      content: z
-        .array(z.object({ text: z.string().optional() }).passthrough())
-        .optional(),
-    })
-    .passthrough();
-  const data = ClaudeResponseSchema.parse(await res.json());
-  return data.content?.[0]?.text ?? '(empty response)';
+  return collectedText.join('') || '(empty response)';
 }

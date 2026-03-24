@@ -14,7 +14,7 @@ import type { WizardOptions } from '../utils/types';
 import { analytics } from '../utils/analytics';
 import { getUI } from '../ui';
 import {
-  initializeAgent,
+  getAgent,
   runAgent,
   AgentSignals,
   AgentErrorType,
@@ -250,11 +250,12 @@ export async function runAgentWizard(
   getUI().onEnterScreen('outro', restoreSettings);
   getUI().startRun();
 
-  const agent = await initializeAgent(
+  const agent = await getAgent(
     {
       workingDirectory: session.installDir,
       amplitudeMcpUrl: mcpUrl,
-      amplitudeApiKey: accessToken,
+      amplitudeApiKey: projectApiKey,
+      amplitudeBearerToken: accessToken,
       amplitudeApiHost: host,
       additionalMcpServers: config.metadata.additionalMcpServers,
       detectPackageManager: config.detection.detectPackageManager,

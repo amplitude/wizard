@@ -161,6 +161,14 @@ export class InkUI implements WizardUI {
     // TUI already shows live status updates reactively via pushStatus — no-op
   }
 
+  promptConfirm(message: string): Promise<boolean> {
+    return this.store.promptConfirm(message);
+  }
+
+  promptChoice(message: string, options: string[]): Promise<string> {
+    return this.store.promptChoice(message, options);
+  }
+
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {

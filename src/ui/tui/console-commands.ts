@@ -13,10 +13,17 @@ export const COMMANDS = [
   { cmd: '/logout', desc: 'Clear credentials' },
   { cmd: '/whoami', desc: 'Show current user, org, and project' },
   { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
+  { cmd: '/test', desc: 'Run a prompt-skill demo (confirm + choose)' },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
   { cmd: '/help', desc: 'List available slash commands' },
 ];
+
+export const TEST_PROMPT: string =
+  'Demo the wizard prompt tools. ' +
+  'First, use the wizard-tools:confirm tool to ask if I want to continue. ' +
+  'Then use the wizard-tools:choose tool to let me pick my favorite color from: Red, Blue, Green, Purple. ' +
+  'Finally, summarize what I chose in one sentence.';
 
 /** Returns the feedback text for the /whoami command. */
 export function getWhoamiText(
