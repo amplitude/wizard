@@ -1,22 +1,19 @@
-# PostHog SvelteKit Example Project
+# Amplitude SvelteKit Example Project
 
-Repository: https://github.com/amplitude/context-mill
+Repository: https://github.com/amplitude/context-hub
 Path: basics/sveltekit
 
 ---
 
 ## README.md
 
-# SvelteKit PostHog example
+# SvelteKit Amplitude example
 
-This example demonstrates how to integrate PostHog with a SvelteKit application, including:
+This example demonstrates how to integrate Amplitude with a SvelteKit application, including:
 
-- Client-side PostHog initialization using SvelteKit hooks
-- Server-side PostHog tracking with the Node.js SDK
-- Reverse proxy to avoid ad blockers
+- Client-side Amplitude initialization using SvelteKit hooks
+- Server-side Amplitude tracking with the Node.js SDK
 - User identification and event tracking
-- Error tracking with `captureException`
-- Session replay configuration
 
 ## Getting started
 
@@ -28,20 +25,19 @@ npm install
 
 ### 2. Configure environment variables
 
-Copy the example environment file and add your PostHog credentials:
+Copy the example environment file and add your Amplitude API key:
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` with your PostHog project token:
+Edit `.env` with your Amplitude API key:
 
 ```
-PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token_here
-PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key_here
 ```
 
-You can find your project token in your [PostHog project settings](https://app.posthog.com/project/settings).
+Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
 
 ### 3. Run the development server
 
@@ -60,20 +56,20 @@ src/
 │   ├── components/
 │   │   └── Header.svelte           # Navigation component
 │   └── server/
-│       └── posthog.ts              # Server-side PostHog singleton
+│       └── amplitude.ts            # Server-side Amplitude singleton
 ├── routes/
 │   ├── +layout.svelte              # Root layout with auth provider
 │   ├── +page.svelte                # Home/login page
 │   ├── burrito/
 │   │   └── +page.svelte            # Event tracking demo
 │   ├── profile/
-│   │   └── +page.svelte            # Error tracking demo
+│   │   └── +page.svelte            # User profile page
 │   └── api/
 │       └── auth/
 │           └── login/
 │               └── +server.ts      # Login API with server-side tracking
-├── hooks.client.ts                 # Client-side PostHog init + error handling
-├── hooks.server.ts                 # Server hooks with reverse proxy
+├── hooks.client.ts                 # Client-side Amplitude initialization
+├── hooks.server.ts                 # Server hooks
 ├── app.css                         # Global styles
 └── app.html                        # HTML template
 ```
@@ -82,120 +78,75 @@ src/
 
 ### Client-side initialization (`src/hooks.client.ts`)
 
-PostHog is initialized in the SvelteKit client hooks `init` function, which runs once when the app starts:
+Amplitude is initialized in the SvelteKit client hooks `init` function, which runs once when the app starts:
 
 ```typescript
-import posthog from 'posthog-js';
+import * as amplitude from '@amplitude/analytics-browser';
+import { PUBLIC_AMPLITUDE_API_KEY } from '$env/static/public';
 
 export async function init() {
-  posthog.init(PUBLIC_POSTHOG_PROJECT_TOKEN, {
-    api_host: '/ingest',
-    ui_host: 'https://us.posthog.com',
-    defaults: '2026-01-30',
-    capture_exceptions: true
-  });
+  amplitude.init(PUBLIC_AMPLITUDE_API_KEY);
 }
 ```
 
-### Server-side tracking (`src/lib/server/posthog.ts`)
+### Server-side tracking (`src/lib/server/amplitude.ts`)
 
-A singleton pattern ensures one PostHog client instance for server-side tracking:
+A singleton pattern ensures one Amplitude client instance for server-side tracking:
 
 ```typescript
-import { PostHog } from 'posthog-node';
+import { NodeClient, createInstance } from '@amplitude/analytics-node';
 
-let posthogClient: PostHog | null = null;
+let amplitudeClient: NodeClient | null = null;
 
-export function getPostHogClient() {
-  if (!posthogClient) {
-    posthogClient = new PostHog(PUBLIC_POSTHOG_PROJECT_TOKEN, {
-      host: PUBLIC_POSTHOG_HOST,
-      flushAt: 1,
-      flushInterval: 0
-    });
+export function getAmplitudeClient(): NodeClient {
+  if (!amplitudeClient) {
+    amplitudeClient = createInstance();
+    amplitudeClient.init(PUBLIC_AMPLITUDE_API_KEY);
   }
-  return posthogClient;
+  return amplitudeClient;
 }
-```
-
-### Reverse proxy (`src/hooks.server.ts`)
-
-The server hooks handle proxies requests through `/ingest` to avoid ad blockers:
-
-```typescript
-export const handle: Handle = async ({ event, resolve }) => {
-  if (event.url.pathname.startsWith('/ingest')) {
-    const pathname = event.url.pathname.replace('/ingest', '');
-    const host = pathname.startsWith('/static')
-      ? 'https://us-assets.i.posthog.com'
-      : 'https://us.i.posthog.com';
-    // Proxy to PostHog...
-  }
-  return resolve(event);
-};
 ```
 
 ### User identification
 
-When a user logs in, they are identified in PostHog:
+When a user logs in, they are identified in Amplitude:
 
 ```typescript
-import posthog from 'posthog-js';
+import * as amplitude from '@amplitude/analytics-browser';
+import { Identify } from '@amplitude/analytics-browser';
 
 // On login
-posthog.identify(userId, { username });
-posthog.capture('user_logged_in', { username });
+amplitude.setUserId(username);
+const identifyObj = new Identify();
+identifyObj.set('username', username);
+amplitude.identify(identifyObj);
+amplitude.track('user_logged_in', { username });
 
 // On logout
-posthog.capture('user_logged_out');
-posthog.reset();
+amplitude.track('user_logged_out');
+amplitude.reset();
 ```
 
-### Error tracking
-
-Errors are automatically captured via the `handleError` hook:
+### Event tracking
 
 ```typescript
-export const handleError: HandleClientError = async ({ error }) => {
-  posthog.captureException(error);
-  return { message: 'An error occurred' };
-};
-```
-
-You can also manually capture errors:
-
-```typescript
-try {
-  // Some operation
-} catch (err) {
-  posthog.captureException(err);
-}
-```
-
-### Session replay configuration
-
-For session replay to work correctly, add this to `svelte.config.js`:
-
-```javascript
-export default {
-  kit: {
-    paths: {
-      relative: false
-    }
-  }
-};
+amplitude.track('burrito_considered', {
+  total_considerations: auth.user.burritoConsiderations,
+  username: auth.user.username
+});
 ```
 
 ## Features demonstrated
 
-1. **Login page** (`/`) - User authentication with PostHog identification
+1. **Login page** (`/`) - User authentication with Amplitude identification
 2. **Burrito page** (`/burrito`) - Custom event tracking with properties
-3. **Profile page** (`/profile`) - Error tracking demonstration
+3. **Profile page** (`/profile`) - User profile display
 
 ## Learn more
 
-- [PostHog Svelte documentation](https://posthog.com/docs/libraries/svelte)
-- [PostHog SvelteKit proxy setup](https://posthog.com/docs/advanced/proxy/sveltekit)
+- [Amplitude Documentation](https://amplitude.com/docs)
+- [Amplitude Browser SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2)
+- [Amplitude Node.js SDK](https://amplitude.com/docs/sdks/analytics/node)
 - [SvelteKit documentation](https://svelte.dev/docs/kit)
 
 ---
@@ -203,10 +154,9 @@ export default {
 ## .env.example
 
 ```example
-# PostHog configuration
-# Get your PostHog project token from: https://app.posthog.com/project/settings
-PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token_here
-PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+# Amplitude configuration
+# Get your Amplitude API key from: https://app.amplitude.com
+PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key_here
 
 ```
 
@@ -264,29 +214,13 @@ export {};
 ## src/hooks.client.ts
 
 ```ts
-import posthog from 'posthog-js';
-import { PUBLIC_POSTHOG_PROJECT_TOKEN } from '$env/static/public';
-import type { HandleClientError } from '@sveltejs/kit';
+import * as amplitude from '@amplitude/analytics-browser';
+import { PUBLIC_AMPLITUDE_API_KEY } from '$env/static/public';
 
-// Initialize PostHog when the app starts in the browser
+// Initialize Amplitude when the app starts in the browser
 export async function init() {
-	posthog.init(PUBLIC_POSTHOG_PROJECT_TOKEN, {
-		api_host: '/ingest',
-		ui_host: 'https://us.posthog.com',
-  defaults: '2026-01-30',
-		capture_exceptions: true
-	});
+	amplitude.init(PUBLIC_AMPLITUDE_API_KEY);
 }
-
-// Capture client-side errors with PostHog
-export const handleError: HandleClientError = async ({ error, status, message }) => {
-	posthog.captureException(error);
-
-	return {
-		message,
-		status
-	};
-};
 
 ```
 
@@ -295,66 +229,10 @@ export const handleError: HandleClientError = async ({ error, status, message })
 ## src/hooks.server.ts
 
 ```ts
-import type { Handle, HandleServerError } from '@sveltejs/kit';
-import { getPostHogClient } from '$lib/server/posthog';
+import type { Handle } from '@sveltejs/kit';
 
-// Handle requests - includes reverse proxy for PostHog
 export const handle: Handle = async ({ event, resolve }) => {
-	const { pathname } = event.url;
-
-	// Reverse proxy for PostHog - route /ingest requests to PostHog servers
-	if (pathname.startsWith('/ingest')) {
-		const hostname = pathname.startsWith('/ingest/static/')
-			? 'us-assets.i.posthog.com'
-			: 'us.i.posthog.com';
-
-		const url = new URL(event.request.url);
-		url.protocol = 'https:';
-		url.hostname = hostname;
-		url.port = '443';
-		url.pathname = pathname.replace(/^\/ingest/, '');
-
-		const headers = new Headers(event.request.headers);
-		headers.set('host', hostname);
-		headers.set('accept-encoding', '');
-
-		const clientIp = event.request.headers.get('x-forwarded-for') || event.getClientAddress();
-		if (clientIp) {
-			headers.set('x-forwarded-for', clientIp);
-		}
-
-		const response = await fetch(url.toString(), {
-			method: event.request.method,
-			headers,
-			body: event.request.body,
-			// @ts-expect-error - duplex is required for streaming request bodies
-			duplex: 'half'
-		});
-
-		return response;
-	}
-
 	return resolve(event);
-};
-
-// Capture server-side errors with PostHog
-export const handleError: HandleServerError = async ({ error, status, message }) => {
-	const posthog = getPostHogClient();
-
-	posthog.capture({
-		distinctId: 'server',
-		event: 'server_error',
-		properties: {
-			error: error instanceof Error ? error.message : String(error),
-			status,
-			message
-		}
-	});
-
-	return {
-		message,
-		status
-	};
 };
 
 ```
@@ -365,7 +243,8 @@ export const handleError: HandleServerError = async ({ error, status, message })
 
 ```ts
 import { getContext, setContext } from 'svelte';
-import posthog from 'posthog-js';
+import * as amplitude from '@amplitude/analytics-browser';
+import { Identify } from '@amplitude/analytics-browser';
 import { browser } from '$app/environment';
 
 export interface User {
@@ -404,8 +283,11 @@ export class AuthState {
 
 				if (browser) {
 					localStorage.setItem('currentUser', username);
-					posthog.identify(username, { username });
-					posthog.capture('user_logged_in', { username });
+					amplitude.setUserId(username);
+					const identifyObj = new Identify();
+					identifyObj.set('username', username);
+					amplitude.identify(identifyObj);
+					amplitude.track('user_logged_in', { username });
 				}
 
 				return true;
@@ -419,8 +301,8 @@ export class AuthState {
 
 	logout = (): void => {
 		if (browser) {
-			posthog.capture('user_logged_out');
-			posthog.reset();
+			amplitude.track('user_logged_out');
+			amplitude.reset();
 			localStorage.removeItem('currentUser');
 		}
 		this.user = null;
@@ -488,28 +370,25 @@ export function getAuthContext(): AuthState {
 
 ---
 
-## src/lib/server/posthog.ts
+## src/lib/server/amplitude.ts
 
 ```ts
-import { PostHog } from 'posthog-node';
-import { PUBLIC_POSTHOG_PROJECT_TOKEN, PUBLIC_POSTHOG_HOST } from '$env/static/public';
+import { NodeClient, createInstance } from '@amplitude/analytics-node';
+import { PUBLIC_AMPLITUDE_API_KEY } from '$env/static/public';
 
-let posthogClient: PostHog | null = null;
+let amplitudeClient: NodeClient | null = null;
 
-export function getPostHogClient() {
-	if (!posthogClient) {
-		posthogClient = new PostHog(PUBLIC_POSTHOG_PROJECT_TOKEN, {
-			host: PUBLIC_POSTHOG_HOST,
-			flushAt: 1,
-			flushInterval: 0
-		});
+export function getAmplitudeClient(): NodeClient {
+	if (!amplitudeClient) {
+		amplitudeClient = createInstance();
+		amplitudeClient.init(PUBLIC_AMPLITUDE_API_KEY);
 	}
-	return posthogClient;
+	return amplitudeClient;
 }
 
-export async function shutdownPostHog() {
-	if (posthogClient) {
-		await posthogClient.shutdown();
+export async function flushAmplitude() {
+	if (amplitudeClient) {
+		await amplitudeClient.flush();
 	}
 }
 
@@ -534,7 +413,7 @@ export async function shutdownPostHog() {
 
 <svelte:head>
 	<title>Burrito consideration app</title>
-	<meta name="description" content="Consider the potential of burritos with PostHog analytics" />
+	<meta name="description" content="Consider the potential of burritos with Amplitude analytics" />
 </svelte:head>
 
 <Header />
@@ -622,7 +501,7 @@ export async function shutdownPostHog() {
 ```ts
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { getPostHogClient } from '$lib/server/posthog';
+import { getAmplitudeClient } from '$lib/server/amplitude';
 
 const users = new Map<string, { username: string; burritoConsiderations: number }>();
 
@@ -642,28 +521,11 @@ export const POST: RequestHandler = async ({ request }) => {
 	}
 
 	// Capture server-side login event with user context
-	const posthog = getPostHogClient();
-	posthog.withContext(
-		{
-			distinctId: username,
-			personProperties: {
-				username,
-				createdAt: isNewUser ? new Date().toISOString() : undefined
-			}
-		},
-		() => {
-			posthog.capture({
-				event: 'server_login',
-				properties: {
-					isNewUser,
-					source: 'api'
-				}
-			});
-		}
-	);
+	const amplitude = getAmplitudeClient();
+	amplitude.track('server_login', { isNewUser, source: 'api' }, { user_id: username });
 
 	// Flush events to ensure they're sent
-	await posthog.flush();
+	await amplitude.flush();
 
 	return json({ success: true, user });
 };
@@ -678,7 +540,7 @@ export const POST: RequestHandler = async ({ request }) => {
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
-	import posthog from 'posthog-js';
+	import * as amplitude from '@amplitude/analytics-browser';
 	import { getAuthContext } from '$lib/auth.svelte';
 
 	const auth = getAuthContext();
@@ -699,8 +561,8 @@ export const POST: RequestHandler = async ({ request }) => {
 		hasConsidered = true;
 		setTimeout(() => (hasConsidered = false), 2000);
 
-		// Capture burrito consideration event with PostHog
-		posthog.capture('burrito_considered', {
+		// Capture burrito consideration event with Amplitude
+		amplitude.track('burrito_considered', {
 			total_considerations: auth.user.burritoConsiderations,
 			username: auth.user.username
 		});
@@ -724,7 +586,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		{/if}
 
 		<div class="note">
-			<p>Each consideration is tracked as a PostHog event with custom properties.</p>
+			<p>Each consideration is tracked as an Amplitude event with custom properties.</p>
 		</div>
 	{:else}
 		<p>Please log in to consider burritos.</p>
@@ -741,7 +603,6 @@ export const POST: RequestHandler = async ({ request }) => {
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
-	import posthog from 'posthog-js';
 	import { getAuthContext } from '$lib/auth.svelte';
 
 	const auth = getAuthContext();
@@ -752,16 +613,6 @@ export const POST: RequestHandler = async ({ request }) => {
 			goto('/');
 		}
 	});
-
-	function triggerTestError() {
-		try {
-			throw new Error('Test error for PostHog error tracking');
-		} catch (err) {
-			posthog.captureException(err);
-			console.error('Captured error:', err);
-			alert('Error captured and sent to PostHog!');
-		}
-	}
 </script>
 
 <div class="container">
@@ -772,18 +623,6 @@ export const POST: RequestHandler = async ({ request }) => {
 			<h2>Your information</h2>
 			<p><strong>Username:</strong> {auth.user.username}</p>
 			<p><strong>Burrito considerations:</strong> {auth.user.burritoConsiderations}</p>
-		</div>
-
-		<h2 style="margin-top: 2rem;">Error tracking demo</h2>
-		<p>Click the button below to trigger a test error that will be captured by PostHog.</p>
-
-		<button class="btn-primary" onclick={triggerTestError} style="margin-top: 1rem;">
-			Trigger test error (for PostHog)
-		</button>
-
-		<div class="note">
-			<p>This demonstrates PostHog's error tracking capabilities.</p>
-			<p>The error will appear in your PostHog error tracking dashboard.</p>
 		</div>
 	{:else}
 		<p>Please log in to view your profile.</p>
@@ -822,7 +661,7 @@ const config = {
 		// If your environment is not supported, or you settled on a specific environment, switch out the adapter.
 		// See https://svelte.dev/docs/kit/adapters for more information about adapters.
 		adapter: adapter(),
-		// Required for PostHog session replay to work correctly with SSR
+		// Required for Amplitude session replay to work correctly with SSR
 		paths: {
 			relative: false
 		}

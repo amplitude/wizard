@@ -1,0 +1,52 @@
+name: Refresh Instrumentation Skills
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    name: Refresh instrumentation skills from mcp-marketplace
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Refresh skills
+        run: bash scripts/refresh-instrumentation-skills.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet skills/instrumentation/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open pull request
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b chore/refresh-instrumentation-skills
+          git add skills/instrumentation/
+          git commit -m "chore: refresh instrumentation skills from mcp-marketplace"
+          git push --force origin chore/refresh-instrumentation-skills
+          gh pr create \
+            --title "chore: refresh instrumentation skills from mcp-marketplace" \
+            --body "Automated refresh of bundled instrumentation skills from [amplitude/mcp-marketplace](https://github.com/amplitude/mcp-marketplace/tree/main/plugins/instrumentation/skills).
+
+          Triggered by scheduled workflow. Review the diff to confirm the upstream changes look intentional before merging." \
+            --label dependencies \
+            --head chore/refresh-instrumentation-skills \
+            || echo "PR already exists"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

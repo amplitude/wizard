@@ -1,27 +1,21 @@
-# PostHog Ruby on Rails Example Project
+# Amplitude Ruby on Rails Example Project
 
-Repository: https://github.com/amplitude/context-mill
+Repository: https://github.com/amplitude/context-hub
 Path: basics/ruby-on-rails
 
 ---
 
 ## README.md
 
-# PostHog Ruby on Rails example
+# Amplitude Ruby on Rails example
 
-This is a [Ruby on Rails](https://rubyonrails.org) example demonstrating PostHog integration with product analytics, error tracking (auto-instrumentation), feature flags, user identification, and ActiveJob instrumentation via the `posthog-rails` gem.
+This is a [Ruby on Rails](https://rubyonrails.org) example demonstrating Amplitude integration with product analytics, user identification, and event tracking via the `amplitude-analytics` gem.
 
 ## Features
 
-- **Product analytics**: Track user events and behaviors with `PostHog.capture`
-- **Error tracking (auto)**: Unhandled exceptions captured automatically by `posthog-rails`
-- **Error tracking (manual)**: Handled errors captured with `PostHog.capture_exception`
-- **Rails.error integration**: Rails 7+ error reporting captured automatically
-- **ActiveJob instrumentation**: Background job failures captured automatically
-- **User identification**: Associate events with authenticated users via `PostHog.identify`
-- **Feature flags**: Control feature rollouts with `PostHog.is_feature_enabled`
-- **User context**: Exceptions automatically associated with `current_user`
-- **Frontend tracking**: posthog-js captures pageviews and session replay alongside backend events
+- **Product analytics**: Track user events and behaviors with `amplitude_track`
+- **User identification**: Associate events with authenticated users via `amplitude.identify`
+- **Frontend tracking**: Amplitude Browser SDK captures pageviews alongside backend events
 
 ## Getting started
 
@@ -35,10 +29,10 @@ bundle install
 
 ```bash
 cp .env.example .env
-# Edit .env and add your PostHog project token
+# Edit .env and add your Amplitude API key
 ```
 
-Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
+Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
 
 ### 3. Setup database
 
@@ -61,27 +55,24 @@ ruby-on-rails/
 ├── config/
 │   ├── routes.rb                        # URL routing
 │   └── initializers/
-│       └── posthog.rb                   # PostHog + posthog-rails configuration
+│       └── amplitude.rb                 # Amplitude configuration
 ├── app/
 │   ├── controllers/
-│   │   ├── application_controller.rb    # Base controller with current_user
-│   │   ├── sessions_controller.rb       # Login/logout with PostHog identify
-│   │   ├── registrations_controller.rb  # Signup with PostHog identify
-│   │   ├── dashboard_controller.rb      # Feature flags + ActiveJob demo
+│   │   ├── application_controller.rb    # Base controller with amplitude helpers
+│   │   ├── sessions_controller.rb       # Login/logout with Amplitude identify
+│   │   ├── registrations_controller.rb  # Signup with Amplitude identify
+│   │   ├── dashboard_controller.rb      # Dashboard with event tracking
 │   │   ├── burritos_controller.rb       # Custom event tracking
-│   │   ├── profiles_controller.rb       # Page view tracking
-│   │   └── errors_controller.rb         # Error tracking demos
-│   ├── jobs/
-│   │   └── example_job.rb              # ActiveJob auto-instrumentation demo
+│   │   └── profiles_controller.rb       # Page view tracking
 │   ├── models/
-│   │   └── user.rb                     # posthog_distinct_id + posthog_properties
+│   │   └── user.rb                     # amplitude_user_id + amplitude_user_properties
 │   └── views/
-│       ├── layouts/application.html.erb # Base layout with posthog-js snippet
+│       ├── layouts/application.html.erb # Base layout with Amplitude Browser SDK
 │       ├── sessions/new.html.erb        # Login page
 │       ├── registrations/new.html.erb   # Signup page
-│       ├── dashboard/show.html.erb      # Feature flags demo
+│       ├── dashboard/show.html.erb      # Dashboard
 │       ├── burritos/show.html.erb       # Event tracking demo
-│       └── profiles/show.html.erb       # Error tracking demo
+│       └── profiles/show.html.erb       # User profile page
 ├── db/
 │   ├── migrate/                         # Database migrations
 │   └── seeds.rb                         # Default admin user
@@ -92,23 +83,13 @@ ruby-on-rails/
 
 ## Key integration points
 
-### PostHog initialization (config/initializers/posthog.rb)
+### Amplitude initialization (config/initializers/amplitude.rb)
 
 ```ruby
-# Rails-specific auto-instrumentation
-PostHog::Rails.configure do |config|
-  config.auto_capture_exceptions = true
-  config.report_rescued_exceptions = true
-  config.auto_instrument_active_job = true
-  config.capture_user_context = true
-  config.current_user_method = :current_user
-  config.user_id_method = :posthog_distinct_id
-end
+require 'amplitude-analytics'
 
-PostHog.init do |config|
-  config.api_key = ENV.fetch('POSTHOG_PROJECT_TOKEN', nil)
-  config.host = ENV.fetch('POSTHOG_HOST', 'https://us.i.posthog.com')
-end
+amplitude = Amplitude::Client.instance
+amplitude.api_key = ENV.fetch('AMPLITUDE_API_KEY', nil)
 ```
 
 ### User model (app/models/user.rb)
@@ -117,122 +98,57 @@ end
 class User < ApplicationRecord
   has_secure_password
 
-  # Called by posthog-rails for automatic user association in error reports
-  def posthog_distinct_id
+  def amplitude_user_id
     email
   end
 
-  def posthog_properties
+  def amplitude_user_properties
     { email: email, is_staff: is_staff, date_joined: created_at&.iso8601 }
   end
+end
+```
+
+### Base controller helpers (app/controllers/application_controller.rb)
+
+```ruby
+def amplitude_track(event_name, user_id:, properties: {})
+  event = Amplitude::BaseEvent.new(
+    event_type: event_name,
+    user_id: user_id,
+    event_properties: properties
+  )
+  amplitude.track(event)
 end
 ```
 
 ### User identification (app/controllers/sessions_controller.rb)
 
 ```ruby
-# Identify the user and capture login event
-PostHog.identify(
-  distinct_id: user.posthog_distinct_id,
-  properties: user.posthog_properties
+identify_event = Amplitude::IdentifyEvent.new(
+  user_id: user.amplitude_user_id,
+  user_properties: user.amplitude_user_properties
 )
+amplitude.identify(identify_event)
 
-PostHog.capture(
-  distinct_id: user.posthog_distinct_id,
-  event: 'user_logged_in',
+amplitude_track('user_logged_in',
+  user_id: user.amplitude_user_id,
   properties: { login_method: 'email' }
 )
 ```
 
-### Feature flags (app/controllers/dashboard_controller.rb)
+### Event tracking (app/controllers/burritos_controller.rb)
 
 ```ruby
-# Check if a feature flag is enabled
-@show_new_feature = PostHog.is_feature_enabled(
-  'new-dashboard-feature',
-  user.posthog_distinct_id,
-  person_properties: user.posthog_properties
-)
-
-# Get feature flag payload for configuration
-@feature_config = PostHog.get_feature_flag_payload(
-  'new-dashboard-feature',
-  user.posthog_distinct_id
+amplitude_track('burrito_considered',
+  user_id: user.amplitude_user_id,
+  properties: { total_considerations: count }
 )
 ```
-
-### Error tracking — auto-capture
-
-With `auto_capture_exceptions: true`, unhandled exceptions in controllers are captured automatically. No code needed:
-
-```ruby
-# This exception is automatically captured by posthog-rails
-# with the current_user's posthog_distinct_id attached
-def show
-  raise "Something went wrong"  # Captured automatically!
-end
-```
-
-### Error tracking — manual capture
-
-```ruby
-begin
-  risky_operation
-rescue => e
-  PostHog.capture_exception(e, current_user.posthog_distinct_id)
-end
-```
-
-### Error tracking — Rails.error integration
-
-```ruby
-# posthog-rails subscribes to Rails.error automatically
-Rails.error.handle(context: { user_id: user.id }) do
-  risky_operation
-end
-```
-
-### ActiveJob instrumentation
-
-```ruby
-# config: auto_instrument_active_job = true
-# Job failures are captured automatically.
-# Use the posthog_distinct_id DSL to associate errors with a user.
-class ExampleJob < ApplicationJob
-  posthog_distinct_id ->(distinct_id, *) { distinct_id }
-
-  def perform(distinct_id, should_fail: false)
-    raise "Job failed"  # Captured automatically with user context
-  end
-end
-
-# In the controller, pass the distinct_id when enqueuing:
-ExampleJob.perform_later(current_user.posthog_distinct_id, should_fail: true)
-```
-
-## Frontend + Backend integration
-
-This example includes the posthog-js snippet in the layout template to demonstrate how frontend and backend tracking work together.
-
-### How it works
-
-1. **posthog-js** (frontend) captures pageviews, clicks, and session replay
-2. **posthog-ruby + posthog-rails** (backend) captures business logic events, errors, and feature flag evaluations
-3. **Shared distinct_id** — frontend and backend events are linked when the same `distinct_id` is used on both sides. Call `posthog.identify(user.email)` in posthog-js after login, matching the `posthog_distinct_id` used on the backend
-4. **Session replay** lets you watch user sessions where errors occurred
-
-**Note:** Unlike the Django SDK, posthog-rails does not include a context middleware that reads `X-POSTHOG-SESSION-ID` or `X-POSTHOG-DISTINCT-ID` tracing headers. Frontend and backend events are correlated through the shared `distinct_id`.
-
-### When to track frontend vs backend
-
-- **Frontend**: UI interactions, client-side errors, session replay, pageviews
-- **Backend**: Business logic (signups, purchases), server errors, feature flag evaluations, background jobs
 
 ## Learn more
 
-- [PostHog Ruby on Rails integration](https://posthog.com/docs/libraries/ruby-on-rails)
-- [PostHog Ruby SDK](https://posthog.com/docs/libraries/ruby)
-- [PostHog Error Tracking](https://posthog.com/docs/error-tracking)
+- [Amplitude Documentation](https://amplitude.com/docs)
+- [Amplitude Ruby SDK](https://amplitude.com/docs/sdks/analytics/ruby)
 - [Ruby on Rails documentation](https://guides.rubyonrails.org/)
 
 ---
@@ -240,12 +156,8 @@ This example includes the posthog-js snippet in the layout template to demonstra
 ## .env.example
 
 ```example
-# PostHog Configuration
-POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
-POSTHOG_HOST=https://us.i.posthog.com
-
-# Optional: Enable debug mode to see PostHog requests
-# POSTHOG_DEBUG=true
+# Amplitude Configuration
+AMPLITUDE_API_KEY=your_amplitude_api_key_here
 
 ```
 
@@ -269,6 +181,19 @@ class ApplicationController < ActionController::Base
       redirect_to login_path
     end
   end
+
+  def amplitude
+    @amplitude ||= Rails.application.config.amplitude
+  end
+
+  def amplitude_track(event_name, user_id:, properties: {})
+    event = Amplitude::BaseEvent.new(
+      event_type: event_name,
+      user_id: user_id,
+      event_properties: properties
+    )
+    amplitude.track(event)
+  end
 end
 
 ```
@@ -291,15 +216,9 @@ class BurritosController < ApplicationController
 
     user = current_user
 
-    # PostHog: Track custom event
-    PostHog.identify(
-      distinct_id: user.posthog_distinct_id,
-      properties: user.posthog_properties
-    )
-
-    PostHog.capture(
-      distinct_id: user.posthog_distinct_id,
-      event: 'burrito_considered',
+    # Amplitude: Track custom event
+    amplitude_track('burrito_considered',
+      user_id: user.amplitude_user_id,
       properties: { total_considerations: count }
     )
 
@@ -320,36 +239,14 @@ class DashboardController < ApplicationController
   def show
     user = current_user
 
-    # PostHog: Track dashboard view
-    PostHog.capture(
-      distinct_id: user.posthog_distinct_id,
-      event: 'dashboard_viewed',
+    # Amplitude: Track dashboard view
+    amplitude_track('dashboard_viewed',
+      user_id: user.amplitude_user_id,
       properties: { is_staff: user.is_staff }
     )
 
-    # PostHog: Check feature flag
-    @show_new_feature = PostHog.is_feature_enabled(
-      'new-dashboard-feature',
-      user.posthog_distinct_id,
-      person_properties: user.posthog_properties
-    )
-
-    # PostHog: Get feature flag payload for configuration
-    @feature_config = PostHog.get_feature_flag_payload(
-      'new-dashboard-feature',
-      user.posthog_distinct_id
-    )
-  end
-
-  def enqueue_test_job
-    # Enqueue a job that will fail — posthog-rails captures the error automatically.
-    # The distinct_id is passed so the posthog_distinct_id DSL can associate the error with this user.
-    ExampleJob.perform_later(current_user.posthog_distinct_id, should_fail: true)
-
-    render json: {
-      success: true,
-      message: 'Job enqueued. The job will fail and posthog-rails will capture the error automatically.'
-    }
+    # TODO: Use Amplitude Experiment for feature flags
+    @show_new_feature = false
   end
 end
 
@@ -364,42 +261,7 @@ class ErrorsController < ApplicationController
   before_action :require_login
 
   def test
-    # Manual exception capture — catch the error and report it explicitly
-    begin
-      raise StandardError, 'Test exception from critical operation'
-    rescue StandardError => e
-      # PostHog: Manually capture the exception
-      PostHog.capture_exception(e, current_user.posthog_distinct_id)
-
-      PostHog.capture(
-        distinct_id: current_user.posthog_distinct_id,
-        event: 'error_triggered',
-        properties: {
-          error_type: e.class.name,
-          error_message: e.message
-        }
-      )
-
-      render json: {
-        success: false,
-        error: e.message,
-        message: 'Error has been captured by PostHog'
-      }, status: :internal_server_error
-    end
-  end
-
-  def test_rails_error
-    # Rails.error.handle — Rails 7+ error reporting integration.
-    # posthog-rails subscribes to Rails.error, so exceptions reported
-    # via Rails.error.handle are automatically captured in PostHog.
-    Rails.error.handle(context: { user_id: current_user.id }) do
-      raise StandardError, 'Test error via Rails.error.handle — captured automatically by posthog-rails'
-    end
-
-    render json: {
-      success: true,
-      message: 'Error was handled via Rails.error.handle and captured by posthog-rails'
-    }
+    render json: { success: true, message: 'Error tracking not available with Amplitude' }
   end
 end
 
@@ -414,11 +276,8 @@ class ProfilesController < ApplicationController
   before_action :require_login
 
   def show
-    # PostHog: Track profile view
-    PostHog.capture(
-      distinct_id: current_user.posthog_distinct_id,
-      event: 'profile_viewed'
-    )
+    # Amplitude: Track profile view
+    amplitude_track('profile_viewed', user_id: current_user.amplitude_user_id)
   end
 end
 
@@ -444,15 +303,15 @@ class RegistrationsController < ApplicationController
     if user.save
       session[:user_id] = user.id
 
-      # PostHog: Identify the new user and capture signup event
-      PostHog.identify(
-        distinct_id: user.posthog_distinct_id,
-        properties: user.posthog_properties
+      # Amplitude: Identify the new user and capture signup event
+      identify_event = Amplitude::IdentifyEvent.new(
+        user_id: user.amplitude_user_id,
+        user_properties: user.amplitude_user_properties
       )
+      amplitude.identify(identify_event)
 
-      PostHog.capture(
-        distinct_id: user.posthog_distinct_id,
-        event: 'user_signed_up',
+      amplitude_track('user_signed_up',
+        user_id: user.amplitude_user_id,
         properties: { signup_method: 'form' }
       )
 
@@ -482,15 +341,15 @@ class SessionsController < ApplicationController
     if user&.authenticate(params[:password])
       session[:user_id] = user.id
 
-      # PostHog: Identify the user and capture login event
-      PostHog.identify(
-        distinct_id: user.posthog_distinct_id,
-        properties: user.posthog_properties
+      # Amplitude: Identify the user and capture login event
+      identify_event = Amplitude::IdentifyEvent.new(
+        user_id: user.amplitude_user_id,
+        user_properties: user.amplitude_user_properties
       )
+      amplitude.identify(identify_event)
 
-      PostHog.capture(
-        distinct_id: user.posthog_distinct_id,
-        event: 'user_logged_in',
+      amplitude_track('user_logged_in',
+        user_id: user.amplitude_user_id,
         properties: { login_method: 'email' }
       )
 
@@ -503,11 +362,8 @@ class SessionsController < ApplicationController
 
   def destroy
     if current_user
-      # PostHog: Track logout before session ends
-      PostHog.capture(
-        distinct_id: current_user.posthog_distinct_id,
-        event: 'user_logged_out'
-      )
+      # Amplitude: Track logout before session ends
+      amplitude_track('user_logged_out', user_id: current_user.amplitude_user_id)
     end
 
     session.delete(:user_id)
@@ -532,29 +388,15 @@ end
 ## app/jobs/example_job.rb
 
 ```rb
-# Example ActiveJob demonstrating posthog-rails auto-instrumentation.
-#
-# When auto_instrument_active_job is enabled in the PostHog config,
-# posthog-rails automatically captures exceptions from failed jobs.
-# The job class name, queue, and arguments are included as properties
-# on the error event.
-#
-# Use the posthog_distinct_id DSL to associate job errors with a user.
-# The proc receives the same arguments as perform and should return
-# the distinct_id string. Without this, job errors have no user context.
 class ExampleJob < ApplicationJob
   queue_as :default
 
-  # Extract distinct_id from the first argument so posthog-rails
-  # can associate the error with the user who triggered the job.
-  posthog_distinct_id ->(distinct_id, *) { distinct_id }
-
-  def perform(distinct_id, should_fail: false)
+  def perform(user_id, should_fail: false)
     if should_fail
-      raise StandardError, 'Example job failure - this error is automatically captured by posthog-rails'
+      raise StandardError, 'Example job failure'
     end
 
-    Rails.logger.info "ExampleJob completed successfully for #{distinct_id}"
+    Rails.logger.info "ExampleJob completed successfully for #{user_id}"
   end
 end
 
@@ -581,16 +423,13 @@ class User < ApplicationRecord
 
   validates :email, presence: true, uniqueness: true
 
-  # Called by posthog-rails for automatic user association in error reports.
-  # When auto_capture_exceptions and capture_user_context are enabled,
-  # posthog-rails calls this method on current_user to get the distinct_id.
-  def posthog_distinct_id
+  # Helper used by controllers when calling Amplitude to set the user ID.
+  def amplitude_user_id
     email
   end
 
-  # Helper used by controllers when calling PostHog.identify to set person properties.
-  # These properties appear on the person profile in PostHog.
-  def posthog_properties
+  # Helper used by controllers when calling Amplitude.identify to set user properties.
+  def amplitude_user_properties
     {
       email: email,
       is_staff: is_staff,
@@ -606,11 +445,11 @@ end
 ## app/views/burritos/show.html.erb
 
 ```erb
-<% content_for(:title) { 'Burrito - PostHog Rails example' } %>
+<% content_for(:title) { 'Burrito - Amplitude Rails example' } %>
 
 <div class="card">
     <h1>Burrito consideration tracker</h1>
-    <p>This page demonstrates custom event tracking with PostHog.</p>
+    <p>This page demonstrates custom event tracking with Amplitude.</p>
 </div>
 
 <div class="card" style="text-align: center;">
@@ -623,10 +462,9 @@ end
 
 <div class="card">
     <h3>How event tracking works</h3>
-    <p>Each time you click the button, a <code>burrito_considered</code> event is sent to PostHog:</p>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto; margin-top: 15px;"><code>PostHog.capture(
-  distinct_id: user.posthog_distinct_id,
-  event: 'burrito_considered',
+    <p>Each time you click the button, a <code>burrito_considered</code> event is sent to Amplitude:</p>
+    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto; margin-top: 15px;"><code>amplitude_track('burrito_considered',
+  user_id: user.amplitude_user_id,
   properties: { total_considerations: count }
 )</code></pre>
 </div>
@@ -662,7 +500,7 @@ async function considerBurrito() {
 ## app/views/dashboard/show.html.erb
 
 ```erb
-<% content_for(:title) { 'Dashboard - PostHog Rails example' } %>
+<% content_for(:title) { 'Dashboard - Amplitude Rails example' } %>
 
 <div class="card">
     <h1>Dashboard</h1>
@@ -673,75 +511,13 @@ async function considerBurrito() {
     <h2>Feature flags</h2>
     <p>Feature flags allow you to control feature rollouts and run A/B tests.</p>
 
-    <% if @show_new_feature %>
-    <div class="feature-flag">
-        <h3>New feature enabled!</h3>
-        <p>
-            This section is only visible because the <code>new-dashboard-feature</code>
-            flag is enabled for your user.
-        </p>
-        <% if @feature_config %>
-        <p><strong>Feature config:</strong> <%= @feature_config %></p>
-        <% end %>
-    </div>
-    <% else %>
     <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-top: 15px;">
         <p>
-            The <code>new-dashboard-feature</code> flag is not enabled for your user.
-            Create this flag in your PostHog project to see it in action.
+            <!-- TODO: Use Amplitude Experiment for feature flags -->
+            Feature flags are available via <a href="https://www.docs.developers.amplitude.com/experiment/" target="_blank">Amplitude Experiment</a>.
         </p>
     </div>
-    <% end %>
 </div>
-
-<div class="card">
-    <h2>ActiveJob instrumentation</h2>
-    <p>
-        Click below to enqueue a background job that will fail.
-        <code>posthog-rails</code> automatically captures the exception — no extra code needed.
-    </p>
-    <button onclick="enqueueTestJob()" style="margin-top: 10px;">Enqueue failing job</button>
-    <div id="job-result" style="margin-top: 15px; display: none;"></div>
-</div>
-
-<div class="card">
-    <h3>How feature flags work</h3>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code># Check if a feature flag is enabled
-show_feature = PostHog.is_feature_enabled(
-  'new-dashboard-feature',
-  user.posthog_distinct_id,
-  person_properties: user.posthog_properties
-)
-
-# Get feature flag payload for configuration
-config = PostHog.get_feature_flag_payload(
-  'new-dashboard-feature',
-  user.posthog_distinct_id
-)</code></pre>
-</div>
-
-<% content_for :scripts do %>
-<script>
-async function enqueueTestJob() {
-    const resultDiv = document.getElementById('job-result');
-    try {
-        const response = await fetch('/api/test-job', {
-            method: 'POST',
-            headers: {
-                'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
-                'Content-Type': 'application/json',
-            },
-        });
-        const data = await response.json();
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<div class="flash success">' + data.message + '</div>';
-    } catch (error) {
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<div class="flash error">Request failed: ' + error + '</div>';
-    }
-}
-</script>
-<% end %>
 
 ```
 
@@ -755,7 +531,7 @@ async function enqueueTestJob() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title><%= content_for?(:title) ? yield(:title) : 'PostHog Rails example' %></title>
+    <title><%= content_for?(:title) ? yield(:title) : 'Amplitude Rails example' %></title>
     <%= csrf_meta_tags %>
     <style>
         * {
@@ -861,13 +637,10 @@ async function enqueueTestJob() {
         }
     </style>
 
-    <!-- PostHog frontend tracking (posthog-js) -->
-    <script>
-      !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host.replace(".i.posthog.com","-assets.i.posthog.com")+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="init capture register register_once register_for_session unregister unregister_for_session getFeatureFlag getFeatureFlagPayload isFeatureEnabled reloadFeatureFlags updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures on onFeatureFlags onSessionId getSurveys getActiveMatchingSurveys renderSurvey canRenderSurvey identify setPersonProperties group resetGroups setPersonPropertiesForFlags resetPersonPropertiesForFlags setGroupPropertiesForFlags resetGroupPropertiesForFlags reset get_distinct_id getGroups get_session_id get_session_replay_url alias set_config startSessionRecording stopSessionRecording sessionRecordingStarted captureException loadToolbar get_property getSessionProperty createPersonProfile opt_in_capturing opt_out_capturing has_opted_in_capturing has_opted_out_capturing clear_opt_in_out_capturing debug getPageViewId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
-      posthog.init('<%= ENV["POSTHOG_PROJECT_TOKEN"] %>', {
-        api_host: '<%= ENV.fetch("POSTHOG_HOST", "https://us.i.posthog.com") %>',
-        person_profiles: 'identified_only'
-      })
+    <!-- Amplitude frontend tracking -->
+    <script type="text/javascript">
+      !function(){"use strict";!function(e,t){var r=e.amplitude||{_q:[],_iq:{}};if(r.invoked)e.console&&console.error&&console.error("Amplitude snippet has been loaded.");else{r.invoked=!0;var n=t.createElement("script");n.type="text/javascript";n.integrity="sha384-x0ik2D45ZDEEEpYpEuDpmj05fY91P7hkm2LP+uH0/kA8R0mds/cYnMkEZquh9Kd";n.crossOrigin="anonymous";n.async=!0;n.src="https://cdn.amplitude.com/libs/analytics-browser-2.11.1-min.js.gz";n.onload=function(){e.amplitude.runQueuedFunctions||console.log("[Amplitude] Error: could not load SDK")};var s=t.getElementsByTagName("script")[0];function v(e,t){e.prototype[t]=function(){return this._q.push({name:t,args:Array.prototype.slice.call(arguments,0)}),this}}s.parentNode.insertBefore(n,s);for(var o=function(){return this._q=[],this},i=["add","append","clearAll","prepend","set","setOnce","unset","preInsert","postInsert","remove","getUserProperties"],a=0;a<i.length;a++)v(o,i[a]);r.Identify=o;for(var c=function(){return this._q=[],this},l=["getEventProperties","setProductId","setQuantity","setPrice","setRevenue","setRevenueType","setEventProperties"],u=0;u<l.length;u++)v(c,l[u]);r.Revenue=c;var p=["getDeviceId","setDeviceId","getSessionId","setSessionId","getUserId","setUserId","setOptOut","setTransport","reset","extendSession"],d=["init","add","remove","track","logEvent","identify","groupIdentify","setGroup","revenue","flush"];function f(e){function t(t,r){e[t]=function(){var n={promise:new Promise((r=>{e._q.push({name:t,args:Array.prototype.slice.call(arguments,0),resolve:r})}))};if(r)for(var s=0;s<r.length;s++)n[r[s]]=n.promise[r[s]].bind(n.promise);return n}}for(var r=0;r<p.length;r++)e[p[r]]=function(){return{promise:new Promise((t=>{e._q.push({name:p[r],args:Array.prototype.slice.call(arguments,0),resolve:t})}))};};for(var n=0;n<d.length;n++)t(d[n],["then","catch","finally"])}f(r),f(r.Identify.prototype),f(r.Revenue.prototype),e.amplitude=r}}(window,document)}();
+      amplitude.init('<%= ENV["AMPLITUDE_API_KEY"] %>');
     </script>
 </head>
 <body>
@@ -902,11 +675,11 @@ async function enqueueTestJob() {
 ## app/views/profiles/show.html.erb
 
 ```erb
-<% content_for(:title) { 'Profile - PostHog Rails example' } %>
+<% content_for(:title) { 'Profile - Amplitude Rails example' } %>
 
 <div class="card">
     <h1>Profile</h1>
-    <p>This page demonstrates error tracking with PostHog and <code>posthog-rails</code>.</p>
+    <p>Your account information.</p>
 </div>
 
 <div class="card">
@@ -927,77 +700,6 @@ async function enqueueTestJob() {
     </table>
 </div>
 
-<div class="card">
-    <h2>Error tracking demo</h2>
-    <p>Click the buttons below to trigger different types of errors and see how PostHog captures them.</p>
-
-    <div style="margin-top: 20px;">
-        <button class="danger" onclick="triggerError('manual')">
-            Manual capture_exception
-        </button>
-        <button class="danger" onclick="triggerError('rails')" style="margin-left: 10px;">
-            Rails.error.handle
-        </button>
-    </div>
-
-    <div id="error-result" style="margin-top: 20px; display: none;"></div>
-</div>
-
-<div class="card">
-    <h3>How error tracking works</h3>
-    <p><strong>Auto-capture (no code needed):</strong></p>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code># config/initializers/posthog.rb
-PostHog::Rails.configure do |config|
-  config.auto_capture_exceptions = true
-  config.capture_user_context = true
-end
-# That's it! Unhandled exceptions are captured automatically.</code></pre>
-
-    <p style="margin-top: 15px;"><strong>Manual capture:</strong></p>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code>begin
-  risky_operation
-rescue => e
-  PostHog.capture_exception(e, user.posthog_distinct_id)
-end</code></pre>
-
-    <p style="margin-top: 15px;"><strong>Rails.error integration:</strong></p>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code># posthog-rails subscribes to Rails.error automatically
-Rails.error.handle(context: { user_id: user.id }) do
-  risky_operation
-end</code></pre>
-</div>
-
-<% content_for :scripts do %>
-<script>
-async function triggerError(type) {
-    const resultDiv = document.getElementById('error-result');
-    const url = type === 'rails' ? '/api/test-rails-error' : '/api/test-error';
-
-    try {
-        const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-                'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content,
-                'Content-Type': 'application/json',
-            },
-        });
-
-        const data = await response.json();
-
-        resultDiv.style.display = 'block';
-        if (data.success) {
-            resultDiv.innerHTML = '<div class="flash success">' + data.message + '</div>';
-        } else {
-            resultDiv.innerHTML = '<div class="flash error"><strong>Error captured:</strong> ' + data.error + '<br><small>' + data.message + '</small></div>';
-        }
-    } catch (error) {
-        resultDiv.style.display = 'block';
-        resultDiv.innerHTML = '<div class="flash error">Request failed: ' + error + '</div>';
-    }
-}
-</script>
-<% end %>
-
 ```
 
 ---
@@ -1005,11 +707,11 @@ async function triggerError(type) {
 ## app/views/registrations/new.html.erb
 
 ```erb
-<% content_for(:title) { 'Sign Up - PostHog Rails example' } %>
+<% content_for(:title) { 'Sign Up - Amplitude Rails example' } %>
 
 <div class="card">
     <h1>Sign Up</h1>
-    <p>Create an account to see PostHog analytics in action.</p>
+    <p>Create an account to see Amplitude analytics in action.</p>
 
     <form action="<%= signup_path %>" method="post" style="margin-top: 20px;">
         <%= hidden_field_tag :authenticity_token, form_authenticity_token %>
@@ -1031,16 +733,16 @@ async function triggerError(type) {
 ## app/views/sessions/new.html.erb
 
 ```erb
-<% content_for(:title) { 'Login - PostHog Rails example' } %>
+<% content_for(:title) { 'Login - Amplitude Rails example' } %>
 
 <div class="card">
-    <h1>PostHog Rails example</h1>
-    <p>Welcome! This example demonstrates PostHog integration with Ruby on Rails, including automatic error tracking via <code>posthog-rails</code>.</p>
+    <h1>Amplitude Rails example</h1>
+    <p>Welcome! This example demonstrates Amplitude integration with Ruby on Rails.</p>
 </div>
 
 <div class="card">
     <h2>Login</h2>
-    <p>Login to see PostHog analytics in action.</p>
+    <p>Login to see Amplitude analytics in action.</p>
 
     <form action="<%= login_path %>" method="post" style="margin-top: 20px;">
         <%= hidden_field_tag :authenticity_token, form_authenticity_token %>
@@ -1058,14 +760,9 @@ async function triggerError(type) {
 <div class="card">
     <h3>What this example demonstrates</h3>
     <ul style="padding-left: 20px;">
-        <li><strong>User identification</strong> — Users are identified with <code>PostHog.identify</code> on login</li>
-        <li><strong>Event tracking</strong> — Custom events captured with <code>PostHog.capture</code></li>
-        <li><strong>Feature flags</strong> — Conditional features with <code>PostHog.is_feature_enabled</code></li>
-        <li><strong>Error tracking (auto)</strong> — Unhandled exceptions captured automatically by <code>posthog-rails</code></li>
-        <li><strong>Error tracking (manual)</strong> — Handled errors captured with <code>PostHog.capture_exception</code></li>
-        <li><strong>ActiveJob instrumentation</strong> — Background job failures captured automatically</li>
-        <li><strong>Rails.error integration</strong> — Rails 7+ error reporting captured by <code>posthog-rails</code></li>
-        <li><strong>Frontend tracking</strong> — posthog-js captures pageviews and session replay</li>
+        <li><strong>User identification</strong> — Users are identified with <code>amplitude.identify</code> on login</li>
+        <li><strong>Event tracking</strong> — Custom events captured with <code>amplitude_track</code></li>
+        <li><strong>Frontend tracking</strong> — Amplitude Browser SDK captures pageviews and session replay</li>
     </ul>
 </div>
 
@@ -1149,7 +846,7 @@ Rails.application.configure do
   config.server_timing = true
 
   # Secret key for development (not used in production)
-  config.secret_key_base = 'dev-secret-key-for-posthog-example-only'
+  config.secret_key_base = 'dev-secret-key-for-amplitude-example-only'
 
   config.action_controller.perform_caching = false
   config.cache_store = :memory_store
@@ -1166,35 +863,19 @@ end
 
 ---
 
-## config/initializers/posthog.rb
+## config/initializers/amplitude.rb
 
 ```rb
-# PostHog configuration with posthog-rails auto-instrumentation
+# Amplitude configuration
 #
-# The posthog-rails gem provides:
-# - Automatic exception capture for unhandled controller errors
-# - ActiveJob instrumentation for background job failures
-# - User context detection from current_user
-# - Rails.error integration for rescued exceptions 
-PostHog.init do |config|
-  config.api_key = ENV.fetch('POSTHOG_PROJECT_TOKEN', nil)
-  config.host = ENV.fetch('POSTHOG_HOST', 'https://us.i.posthog.com')
-end
+# Initializes the Amplitude client with the API key from environment variables.
+# The client is stored in Rails.application.config.amplitude for use throughout the app.
+require 'amplitude-analytics'
 
-PostHog::Rails.configure do |config|
-  # Auto-capture unhandled exceptions in controllers
-  config.auto_capture_exceptions = true
+api_key = ENV.fetch('AMPLITUDE_API_KEY', nil)
 
-  # Also capture exceptions that Rails rescues (e.g. ActiveRecord::RecordNotFound)
-  config.report_rescued_exceptions = true
-
-  # Auto-instrument ActiveJob failures
-  config.auto_instrument_active_job = true
-
-  # Automatically associate errors with the current user
-  config.capture_user_context = true
-  config.current_user_method = :current_user
-  config.user_id_method = :posthog_distinct_id
+if api_key
+  Rails.application.config.amplitude = Amplitude::Client.new(api_key)
 end
 
 
@@ -1312,9 +993,8 @@ gem 'puma', '~> 6.0'
 gem 'bcrypt', '~> 3.1'
 gem 'dotenv-rails', '~> 3.0'
 
-# PostHog
-gem 'posthog-ruby', '~> 3.0'
-gem 'posthog-rails'
+# Amplitude
+gem 'amplitude-analytics', '~> 1.0'
 
 ```
 

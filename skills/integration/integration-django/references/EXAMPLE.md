@@ -1,22 +1,22 @@
-# PostHog Django Example Project
+# Amplitude Django Example Project
 
-Repository: https://github.com/amplitude/context-mill
+Repository: https://github.com/amplitude/context-hub
 Path: basics/django
 
 ---
 
 ## README.md
 
-# PostHog Django example
+# Amplitude Django example
 
-This is a [Django](https://djangoproject.com) example demonstrating PostHog integration with product analytics, error tracking, feature flags, and user identification.
+This is a [Django](https://djangoproject.com) example demonstrating Amplitude integration with product analytics, error tracking, feature flags, and user identification.
 
 ## Features
 
 - **Product analytics**: Track user events and behaviors
 - **Error tracking**: Capture and track exceptions automatically
 - **User identification**: Associate events with authenticated users via context
-- **Feature flags**: Control feature rollouts with PostHog feature flags
+- **Feature flags**: Control feature rollouts with Amplitude feature flags
 - **Server-side tracking**: All tracking happens server-side with the Python SDK
 - **Context middleware**: Automatic session and user context extraction
 
@@ -25,7 +25,7 @@ This is a [Django](https://djangoproject.com) example demonstrating PostHog inte
 ### 1. Install dependencies
 
 ```bash
-pip install posthog
+pip install amplitude
 ```
 
 ### 2. Configure environment variables
@@ -33,11 +33,11 @@ pip install posthog
 Create a `.env` file in the root directory:
 
 ```bash
-POSTHOG_PROJECT_TOKEN=your_posthog_project_token
-POSTHOG_HOST=https://us.i.posthog.com
+AMPLITUDE_API_KEY=your_amplitude_project_token
+AMPLITUDE_HOST=https://us.i.amplitude.com
 ```
 
-Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
+Get your Amplitude project token from your [Amplitude project settings](https://app.amplitude.com/project/settings).
 
 ### 3. Run migrations
 
@@ -61,15 +61,15 @@ django/
 ├── requirements.txt             # Python dependencies
 ├── .env.example                 # Environment variable template
 ├── .gitignore
-├── posthog_example/
+├── amplitude_example/
 │   ├── __init__.py
-│   ├── settings.py              # Django settings with PostHog config
+│   ├── settings.py              # Django settings with Amplitude config
 │   ├── urls.py                  # URL routing
 │   ├── wsgi.py                  # WSGI application
 │   └── asgi.py                  # ASGI application
 └── core/
     ├── __init__.py
-    ├── apps.py                  # AppConfig with PostHog initialization
+    ├── apps.py                  # AppConfig with Amplitude initialization
     ├── views.py                 # Views with event tracking examples
     ├── urls.py                  # App URL patterns
     └── templates/
@@ -83,18 +83,18 @@ django/
 
 ## Key integration points
 
-### PostHog initialization (core/apps.py)
+### Amplitude initialization (core/apps.py)
 
 ```python
-import posthog
+import amplitude
 from django.conf import settings
 
 class CoreConfig(AppConfig):
     name = 'core'
 
     def ready(self):
-        posthog.api_key = settings.POSTHOG_PROJECT_TOKEN
-        posthog.host = settings.POSTHOG_HOST
+        amplitude.api_key = settings.AMPLITUDE_API_KEY
+        amplitude.host = settings.AMPLITUDE_HOST
 ```
 
 ### Django settings configuration (settings.py)
@@ -102,19 +102,19 @@ class CoreConfig(AppConfig):
 ```python
 import os
 
-# PostHog configuration
-POSTHOG_PROJECT_TOKEN = os.environ.get('POSTHOG_PROJECT_TOKEN', '<ph_project_token>')
-POSTHOG_HOST = os.environ.get('POSTHOG_HOST', 'https://us.i.posthog.com')
+# Amplitude configuration
+AMPLITUDE_API_KEY = os.environ.get('AMPLITUDE_API_KEY', '<ph_project_token>')
+AMPLITUDE_HOST = os.environ.get('AMPLITUDE_HOST', 'https://us.i.amplitude.com')
 
 MIDDLEWARE = [
     # ... other middleware
-    'posthog.integrations.django.PosthogContextMiddleware',
+    'amplitude.integrations.django.PosthogContextMiddleware',
 ]
 ```
 
 ### Built-in context middleware
 
-The PostHog SDK includes a Django middleware that automatically wraps all requests with a context. It extracts session and user information from request headers and tags all events captured during the request.
+The Amplitude SDK includes a Django middleware that automatically wraps all requests with a context. It extracts session and user information from request headers and tags all events captured during the request.
 
 The middleware automatically extracts:
 
@@ -126,16 +126,16 @@ The middleware automatically extracts:
 ### User identification (core/views.py)
 
 ```python
-import posthog
+import amplitude
 
 def login_view(request):
     # ... authentication logic
     if user:
-        with posthog.new_context():
-            posthog.identify_context(str(user.id))
-            posthog.tag('email', user.email)
-            posthog.tag('username', user.username)
-            posthog.capture('user_logged_in', properties={
+        with amplitude.new_context():
+            amplitude.identify_context(str(user.id))
+            amplitude.tag('email', user.email)
+            amplitude.tag('username', user.username)
+            amplitude.capture('user_logged_in', properties={
                 'login_method': 'email',
             })
 ```
@@ -143,14 +143,14 @@ def login_view(request):
 ### Event tracking (core/views.py)
 
 ```python
-import posthog
+import amplitude
 
 def consider_burrito(request):
     user_id = str(request.user.id) if request.user.is_authenticated else 'anonymous'
 
-    with posthog.new_context():
-        posthog.identify_context(user_id)
-        posthog.capture('burrito_considered', properties={
+    with amplitude.new_context():
+        amplitude.identify_context(user_id)
+        amplitude.capture('burrito_considered', properties={
             'total_considerations': request.session.get('burrito_count', 0),
         })
 ```
@@ -158,12 +158,12 @@ def consider_burrito(request):
 ### Feature flags (core/views.py)
 
 ```python
-import posthog
+import amplitude
 
 def dashboard_view(request):
     user_id = str(request.user.id) if request.user.is_authenticated else 'anonymous'
 
-    show_new_feature = posthog.feature_enabled(
+    show_new_feature = amplitude.feature_enabled(
         'new-dashboard-feature',
         distinct_id=user_id
     )
@@ -178,22 +178,22 @@ def dashboard_view(request):
 Capture exceptions manually using `capture_exception()`:
 
 ```python
-import posthog
+import amplitude
 
 def profile_view(request):
     try:
         risky_operation()
     except Exception as e:
-        posthog.capture_exception(e)
+        amplitude.capture_exception(e)
 ```
 
 ## Frontend integration (optional)
 
-If you're using PostHog's JavaScript SDK on the frontend, enable tracing headers to connect frontend sessions with backend events:
+If you're using Amplitude's JavaScript SDK on the frontend, enable tracing headers to connect frontend sessions with backend events:
 
 ```javascript
-posthog.init('<ph_project_token>', {
-    api_host: 'https://us.i.posthog.com',
+amplitude.init('<ph_project_token>', {
+    api_host: 'https://us.i.amplitude.com',
     __add_tracing_headers: ['your-backend-domain.com'],
 })
 ```
@@ -202,9 +202,9 @@ This automatically adds `X-POSTHOG-SESSION-ID` and `X-POSTHOG-DISTINCT-ID` heade
 
 ## Learn more
 
-- [PostHog Django integration](https://posthog.com/docs/libraries/django)
-- [PostHog Python SDK](https://posthog.com/docs/libraries/python)
-- [PostHog documentation](https://posthog.com/docs)
+- [Amplitude Django integration](https://amplitude.com/docs/libraries/django)
+- [Amplitude Python SDK](https://amplitude.com/docs/libraries/python)
+- [Amplitude documentation](https://amplitude.com/docs)
 - [Django documentation](https://docs.djangoproject.com/)
 
 ---
@@ -212,8 +212,7 @@ This automatically adds `X-POSTHOG-SESSION-ID` and `X-POSTHOG-DISTINCT-ID` heade
 ## .env.example
 
 ```example
-POSTHOG_PROJECT_TOKEN=
-POSTHOG_HOST=https://us.i.posthog.com
+AMPLITUDE_API_KEY=
 DJANGO_SECRET_KEY=your-secret-key-here
 DEBUG=True
 
@@ -224,7 +223,7 @@ DEBUG=True
 ## core/__init__.py
 
 ```py
-# Core app for PostHog Django example
+# Core app for Amplitude Django example
 
 ```
 
@@ -234,42 +233,17 @@ DEBUG=True
 
 ```py
 """
-Django AppConfig that initializes PostHog when the application starts.
+Django AppConfig for the Amplitude example application.
 
-This ensures the SDK is configured once when Django starts, making it available throughout the application.
+This ensures the app is configured correctly when Django starts.
 """
 
 from django.apps import AppConfig
-from django.conf import settings
 
 
 class CoreConfig(AppConfig):
     default_auto_field = 'django.db.models.BigAutoField'
     name = 'core'
-
-    def ready(self):
-        """
-        Initialize PostHog when Django starts.
-
-        This method is called once when Django starts. We configure the
-        PostHog SDK here so it's available everywhere in the application.
-
-        Note: Import posthog inside this method to avoid import issues
-        during Django's startup sequence.
-        """
-        import posthog
-
-        # Configure PostHog with settings from Django settings
-        posthog.api_key = settings.POSTHOG_PROJECT_TOKEN
-        posthog.host = settings.POSTHOG_HOST
-
-        # Disable PostHog if configured (useful for testing)
-        if settings.POSTHOG_DISABLED:
-            posthog.disabled = True
-
-        # Optional: Enable debug mode in development
-        if settings.DEBUG:
-            posthog.debug = True
 
 ```
 
@@ -283,7 +257,7 @@ class CoreConfig(AppConfig):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}PostHog Django example{% endblock %}</title>
+    <title>{% block title %}Amplitude Django example{% endblock %}</title>
     <style>
         * {
             box-sizing: border-box;
@@ -369,13 +343,6 @@ class CoreConfig(AppConfig):
             background: #d1fae5;
             color: #059669;
         }
-        .feature-flag {
-            background: #fef3c7;
-            border: 2px dashed #f59e0b;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
-        }
         code {
             background: #f3f4f6;
             padding: 2px 6px;
@@ -426,12 +393,12 @@ class CoreConfig(AppConfig):
 ```html
 {% extends 'core/base.html' %}
 
-{% block title %}Burrito - PostHog Django example{% endblock %}
+{% block title %}Burrito - Amplitude Django example{% endblock %}
 
 {% block content %}
 <div class="card">
     <h1>Burrito consideration tracker</h1>
-    <p>This page demonstrates custom event tracking with PostHog.</p>
+    <p>This page demonstrates custom event tracking with Amplitude.</p>
 </div>
 
 <div class="card" style="text-align: center;">
@@ -444,14 +411,15 @@ class CoreConfig(AppConfig):
 
 <div class="card">
     <h3>How event tracking works</h3>
-    <p>Each time you click the button, a <code>burrito_considered</code> event is sent to PostHog:</p>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto; margin-top: 15px;"><code>from posthog import new_context, identify_context, capture
+    <p>Each time you click the button, a <code>burrito_considered</code> event is sent to Amplitude:</p>
+    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto; margin-top: 15px;"><code>from amplitude import Amplitude, BaseEvent
 
-with new_context():
-    identify_context(user_id)
-    capture('burrito_considered', properties={
-        'total_considerations': count,
-    })</code></pre>
+client = Amplitude(api_key)
+client.track(BaseEvent(
+    event_type='burrito_considered',
+    user_id=user_id,
+    event_properties={'total_considerations': count},
+))</code></pre>
 </div>
 {% endblock %}
 
@@ -488,7 +456,7 @@ async function considerBurrito() {
 ```html
 {% extends 'core/base.html' %}
 
-{% block title %}Dashboard - PostHog Django example{% endblock %}
+{% block title %}Dashboard - Amplitude Django example{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -497,47 +465,23 @@ async function considerBurrito() {
 </div>
 
 <div class="card">
-    <h2>Feature flags</h2>
-    <p>Feature flags allow you to control feature rollouts and run A/B tests.</p>
-
-    {% if show_new_feature %}
-    <div class="feature-flag">
-        <h3>New feature enabled!</h3>
-        <p>
-            This section is only visible because the <code>new-dashboard-feature</code>
-            flag is enabled for your user.
-        </p>
-        {% if feature_config %}
-        <p><strong>Feature config:</strong> {{ feature_config }}</p>
-        {% endif %}
-    </div>
-    {% else %}
-    <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin-top: 15px;">
-        <p>
-            The <code>new-dashboard-feature</code> flag is not enabled for your user.
-            Create this flag in your PostHog project to see it in action.
-        </p>
-    </div>
-    {% endif %}
+    <h2>Analytics tracking</h2>
+    <p>This page view is tracked as a <code>dashboard_viewed</code> event in Amplitude.</p>
+    <p style="margin-top: 10px; color: #666; font-size: 14px;">
+        Note: Feature flags are available via Amplitude Experiment (separate SDK).
+    </p>
 </div>
 
 <div class="card">
-    <h3>How feature flags work</h3>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code># Check if a feature flag is enabled
-show_feature = posthog.feature_enabled(
-    'new-dashboard-feature',
-    distinct_id=user_id,
-    person_properties={
-        'email': user.email,
-        'is_staff': user.is_staff,
-    }
-)
+    <h3>How event tracking works</h3>
+    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code>from amplitude import Amplitude, BaseEvent
 
-# Get feature flag payload for configuration
-config = posthog.get_feature_flag_payload(
-    'new-dashboard-feature',
-    distinct_id=user_id,
-)</code></pre>
+client = Amplitude(api_key)
+client.track(BaseEvent(
+    event_type='dashboard_viewed',
+    user_id=user_id,
+    event_properties={'is_staff': user.is_staff},
+))</code></pre>
 </div>
 {% endblock %}
 
@@ -550,17 +494,17 @@ config = posthog.get_feature_flag_payload(
 ```html
 {% extends 'core/base.html' %}
 
-{% block title %}Login - PostHog Django example{% endblock %}
+{% block title %}Login - Amplitude Django example{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h1>PostHog Django example</h1>
-    <p>Welcome! This example demonstrates PostHog integration with Django.</p>
+    <h1>Amplitude Django example</h1>
+    <p>Welcome! This example demonstrates Amplitude integration with Django.</p>
 </div>
 
 <div class="card">
     <h2>Login</h2>
-    <p>Login to see PostHog analytics in action.</p>
+    <p>Login to see Amplitude analytics in action.</p>
 
     <form method="post" style="margin-top: 20px;">
         {% csrf_token %}
@@ -577,11 +521,9 @@ config = posthog.get_feature_flag_payload(
 <div class="card">
     <h3>What this example demonstrates</h3>
     <ul style="padding-left: 20px;">
-        <li><strong>User identification</strong> - Users are identified with <code>identify_context()</code> on login</li>
-        <li><strong>Pageview tracking</strong> - Middleware extracts session and user context</li>
-        <li><strong>Event tracking</strong> - Custom events captured with <code>capture()</code> in context</li>
-        <li><strong>Feature flags</strong> - Conditional features with <code>posthog.feature_enabled()</code></li>
-        <li><strong>Error tracking</strong> - Exceptions captured with <code>capture_exception()</code></li>
+        <li><strong>User identification</strong> - Users are identified with <code>client.identify()</code> on login</li>
+        <li><strong>Event tracking</strong> - Custom events captured with <code>client.track()</code></li>
+        <li><strong>Error tracking</strong> - Exceptions tracked as events</li>
     </ul>
 </div>
 {% endblock %}
@@ -595,12 +537,12 @@ config = posthog.get_feature_flag_payload(
 ```html
 {% extends 'core/base.html' %}
 
-{% block title %}Profile - PostHog Django example{% endblock %}
+{% block title %}Profile - Amplitude Django example{% endblock %}
 
 {% block content %}
 <div class="card">
     <h1>Profile</h1>
-    <p>This page demonstrates error tracking with PostHog.</p>
+    <p>This page demonstrates error tracking with Amplitude.</p>
 </div>
 
 <div class="card">
@@ -627,7 +569,7 @@ config = posthog.get_feature_flag_payload(
 
 <div class="card">
     <h2>Error tracking demo</h2>
-    <p>Click the buttons below to trigger different types of errors. These errors are caught and sent to PostHog.</p>
+    <p>Click the buttons below to trigger different types of errors. These errors are tracked and sent to Amplitude.</p>
 
     <div style="margin-top: 20px;">
         <button class="danger" onclick="triggerError('value')">
@@ -646,12 +588,17 @@ config = posthog.get_feature_flag_payload(
 
 <div class="card">
     <h3>How error tracking works</h3>
-    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code>import posthog
+    <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto;"><code>from amplitude import Amplitude, BaseEvent
 
+client = Amplitude(api_key)
 try:
     risky_operation()
 except Exception as e:
-    posthog.capture_exception(e)</code></pre>
+    client.track(BaseEvent(
+        event_type='error_triggered',
+        user_id=user_id,
+        event_properties={'error_message': str(e)},
+    ))</code></pre>
 </div>
 {% endblock %}
 
@@ -701,7 +648,7 @@ async function triggerError(errorType) {
 """
 URL configuration for the core app.
 
-This module defines all the URL patterns for the PostHog example views.
+This module defines all the URL patterns for the Amplitude example views.
 """
 
 from django.urls import path
@@ -714,7 +661,7 @@ urlpatterns = [
     # Authentication
     path('logout/', views.logout_view, name='logout'),
 
-    # Dashboard with feature flags
+    # Dashboard
     path('dashboard/', views.dashboard_view, name='dashboard'),
 
     # Burrito example for event tracking
@@ -724,9 +671,6 @@ urlpatterns = [
     # Profile with error tracking
     path('profile/', views.profile_view, name='profile'),
     path('api/trigger-error/', views.trigger_error_view, name='trigger_error'),
-
-    # Group analytics example
-    path('api/group-analytics/', views.group_analytics_view, name='group_analytics'),
 ]
 
 ```
@@ -736,16 +680,24 @@ urlpatterns = [
 ## core/views.py
 
 ```py
-"""Django views demonstrating PostHog integration patterns"""
+"""Django views demonstrating Amplitude integration patterns"""
 
-import posthog
-from posthog import new_context, identify_context, tag, capture
+from amplitude import Amplitude, BaseEvent, Identify
 from django.shortcuts import render, redirect
 from django.contrib.auth import authenticate, login, logout
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.http import JsonResponse
 from django.views.decorators.http import require_POST
+from django.conf import settings
+
+
+def get_amplitude_client():
+    """Get the Amplitude client instance."""
+    api_key = getattr(settings, 'AMPLITUDE_API_KEY', '')
+    if not api_key:
+        return None
+    return Amplitude(api_key)
 
 
 def home_view(request):
@@ -762,20 +714,22 @@ def home_view(request):
         if user is not None:
             login(request, user)
 
-            # PostHog: Identify user and capture login event
-            with new_context():
-                identify_context(str(user.id))
+            # Amplitude: Identify user and capture login event
+            client = get_amplitude_client()
+            if client:
+                identify_obj = Identify()
+                identify_obj.set('email', user.email)
+                identify_obj.set('username', user.username)
+                identify_obj.set('name', user.get_full_name() or user.username)
+                identify_obj.set('is_staff', user.is_staff)
+                identify_obj.set('date_joined', user.date_joined.isoformat())
+                client.identify(identify_obj, {"user_id": str(user.id)})
 
-                # Set person properties (PII goes in tag, not capture)
-                tag('email', user.email)
-                tag('username', user.username)
-                tag('name', user.get_full_name() or user.username)
-                tag('is_staff', user.is_staff)
-                tag('date_joined', user.date_joined.isoformat())
-
-                capture('user_logged_in', properties={
-                    'login_method': 'email',
-                })
+                client.track(BaseEvent(
+                    event_type='user_logged_in',
+                    user_id=str(user.id),
+                    event_properties={'login_method': 'email'},
+                ))
 
             return redirect('dashboard')
         else:
@@ -789,10 +743,13 @@ def logout_view(request):
     if request.user.is_authenticated:
         user_id = str(request.user.id)
 
-        # PostHog: Track logout before session ends
-        with new_context():
-            identify_context(user_id)
-            capture('user_logged_out')
+        # Amplitude: Track logout before session ends
+        client = get_amplitude_client()
+        if client:
+            client.track(BaseEvent(
+                event_type='user_logged_out',
+                user_id=user_id,
+            ))
 
         logout(request)
 
@@ -801,36 +758,21 @@ def logout_view(request):
 
 @login_required
 def dashboard_view(request):
-    """Dashboard page with feature flag example"""
+    """Dashboard page"""
     user_id = str(request.user.id)
 
-    # PostHog: Track dashboard view
-    with new_context():
-        identify_context(user_id)
-        capture('dashboard_viewed', properties={
-            'is_staff': request.user.is_staff,
-        })
+    # Amplitude: Track dashboard view
+    client = get_amplitude_client()
+    if client:
+        client.track(BaseEvent(
+            event_type='dashboard_viewed',
+            user_id=user_id,
+            event_properties={'is_staff': request.user.is_staff},
+        ))
 
-    # PostHog: Check feature flag
-    show_new_feature = posthog.feature_enabled(
-        'new-dashboard-feature',
-        distinct_id=user_id,
-        person_properties={
-            'email': request.user.email,
-            'is_staff': request.user.is_staff,
-        }
-    )
-
-    # PostHog: Get feature flag payload
-    feature_config = posthog.get_feature_flag_payload(
-        'new-dashboard-feature',
-        distinct_id=user_id,
-    )
-
-    context = {
-        'show_new_feature': show_new_feature,
-        'feature_config': feature_config,
-    }
+    # TODO: Use Amplitude Experiment for feature flags
+    # Feature flags are handled by Amplitude Experiment (separate SDK)
+    context = {}
 
     return render(request, 'core/dashboard.html', context)
 
@@ -856,12 +798,14 @@ def consider_burrito_view(request):
 
     user_id = str(request.user.id)
 
-    # PostHog: Track custom event
-    with new_context():
-        identify_context(user_id)
-        capture('burrito_considered', properties={
-            'total_considerations': count,
-        })
+    # Amplitude: Track custom event
+    client = get_amplitude_client()
+    if client:
+        client.track(BaseEvent(
+            event_type='burrito_considered',
+            user_id=user_id,
+            event_properties={'total_considerations': count},
+        ))
 
     return JsonResponse({
         'success': True,
@@ -871,13 +815,16 @@ def consider_burrito_view(request):
 
 @login_required
 def profile_view(request):
-    """Profile page with error tracking demonstration"""
+    """Profile page"""
     user_id = str(request.user.id)
 
-    # PostHog: Track profile view
-    with new_context():
-        identify_context(user_id)
-        capture('profile_viewed')
+    # Amplitude: Track profile view
+    client = get_amplitude_client()
+    if client:
+        client.track(BaseEvent(
+            event_type='profile_viewed',
+            user_id=user_id,
+        ))
 
     context = {
         'user': request.user,
@@ -902,59 +849,25 @@ def trigger_error_view(request):
             raise Exception("Something went wrong!")
 
     except Exception as e:
-        # PostHog: Capture exception
-        posthog.capture_exception(e)
-
-        # PostHog: Track error trigger event
-        with new_context():
-            identify_context(str(request.user.id))
-            capture('error_triggered', properties={
-                'error_type': error_type,
-                'error_message': str(e),
-            })
+        # Amplitude: Track error event
+        client = get_amplitude_client()
+        if client:
+            client.track(BaseEvent(
+                event_type='error_triggered',
+                user_id=str(request.user.id),
+                event_properties={
+                    'error_type': error_type,
+                    'error_message': str(e),
+                },
+            ))
 
         return JsonResponse({
             'success': False,
             'error': str(e),
-            'message': 'Error has been captured by PostHog',
+            'message': 'Error has been tracked by Amplitude',
         }, status=400)
 
     return JsonResponse({'success': True})
-
-
-@login_required
-def group_analytics_view(request):
-    """Example demonstrating group analytics"""
-    user_id = str(request.user.id)
-
-    # PostHog: Identify group
-    posthog.group_identify(
-        group_type='company',
-        group_key='acme-corp',
-        properties={
-            'name': 'Acme Corporation',
-            'plan': 'enterprise',
-            'employee_count': 150,
-        }
-    )
-
-    # PostHog: Capture event with group
-    with new_context():
-        identify_context(user_id)
-        capture(
-            'feature_used',
-            properties={
-                'feature_name': 'group_analytics',
-            },
-            groups={
-                'company': 'acme-corp',
-            }
-        )
-
-    return JsonResponse({
-        'success': True,
-        'message': 'Group analytics event captured',
-    })
 
 ```
 
@@ -971,7 +884,7 @@ import sys
 
 def main():
     """Run administrative tasks."""
-    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'posthog_example.settings')
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'amplitude_example.settings')
     try:
         from django.core.management import execute_from_command_line
     except ImportError as exc:
@@ -990,27 +903,27 @@ if __name__ == '__main__':
 
 ---
 
-## posthog_example/__init__.py
+## amplitude_example/__init__.py
 
 ```py
-# PostHog Django example project
+# Amplitude Django example project
 
 ```
 
 ---
 
-## posthog_example/asgi.py
+## amplitude_example/asgi.py
 
 ```py
 """
-ASGI config for PostHog example project
+ASGI config for Amplitude example project
 """
 
 import os
 
 from django.core.asgi import get_asgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'posthog_example.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'amplitude_example.settings')
 
 application = get_asgi_application()
 
@@ -1018,10 +931,10 @@ application = get_asgi_application()
 
 ---
 
-## posthog_example/settings.py
+## amplitude_example/settings.py
 
 ```py
-"""Django settings for PostHog example project"""
+"""Django settings for Amplitude example project"""
 
 import os
 from pathlib import Path
@@ -1041,10 +954,9 @@ DEBUG = os.environ.get('DEBUG', 'True').lower() == 'true'
 ALLOWED_HOSTS = ['localhost', '127.0.0.1']
 
 
-# PostHog configuration
-POSTHOG_PROJECT_TOKEN = os.environ.get('POSTHOG_PROJECT_TOKEN', '<ph_project_token>')
-POSTHOG_HOST = os.environ.get('POSTHOG_HOST', 'https://us.i.posthog.com')
-POSTHOG_DISABLED = os.environ.get('POSTHOG_DISABLED', 'False').lower() == 'true'
+# Amplitude configuration
+AMPLITUDE_API_KEY = os.environ.get('AMPLITUDE_API_KEY', '')
+AMPLITUDE_DISABLED = os.environ.get('AMPLITUDE_DISABLED', 'False').lower() == 'true'
 
 
 INSTALLED_APPS = [
@@ -1065,10 +977,9 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
-    'posthog.integrations.django.PosthogContextMiddleware',
 ]
 
-ROOT_URLCONF = 'posthog_example.urls'
+ROOT_URLCONF = 'amplitude_example.urls'
 
 TEMPLATES = [
     {
@@ -1086,7 +997,7 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'posthog_example.wsgi.application'
+WSGI_APPLICATION = 'amplitude_example.wsgi.application'
 
 DATABASES = {
     'default': {
@@ -1115,11 +1026,11 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 ---
 
-## posthog_example/urls.py
+## amplitude_example/urls.py
 
 ```py
 """
-URL configuration for PostHog example project
+URL configuration for Amplitude example project
 """
 
 from django.contrib import admin
@@ -1127,7 +1038,7 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # Include the core app URLs for PostHog examples
+    # Include the core app URLs for Amplitude examples
     path('', include('core.urls')),
 ]
 
@@ -1135,18 +1046,18 @@ urlpatterns = [
 
 ---
 
-## posthog_example/wsgi.py
+## amplitude_example/wsgi.py
 
 ```py
 """
-WSGI config for PostHog example project
+WSGI config for Amplitude example project
 """
 
 import os
 
 from django.core.wsgi import get_wsgi_application
 
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'posthog_example.settings')
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'amplitude_example.settings')
 
 application = get_wsgi_application()
 
@@ -1158,7 +1069,7 @@ application = get_wsgi_application()
 
 ```txt
 Django>=4.2,<5.0
-posthog  # Always use latest version
+amplitude-analytics  # Always use latest version
 python-dotenv>=1.0.0
 
 ```

@@ -1,53 +1,49 @@
 ---
 name: integration-react-native
-description: PostHog integration for React Native applications
+description: Amplitude integration for React Native applications
 metadata:
-  author: PostHog
+  author: Amplitude
   version: dev
 ---
 
-# PostHog integration for React Native
+# Amplitude integration for React Native
 
-This skill helps you add PostHog analytics to React Native applications.
+This skill helps you add Amplitude analytics to React Native applications.
 
 ## Workflow
 
 Follow these steps in order to complete the integration:
 
-1. `basic-integration-1.0-begin.md` - PostHog Setup - Begin ← **Start here**
-2. `basic-integration-1.1-edit.md` - PostHog Setup - Edit
-3. `basic-integration-1.2-revise.md` - PostHog Setup - Revise
-4. `basic-integration-1.3-conclude.md` - PostHog Setup - Conclusion
+1. `basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
+2. `basic-integration-1.1-edit.md` - Amplitude Setup - Edit
+3. `basic-integration-1.2-revise.md` - Amplitude Setup - Revise
+4. `basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
 
 ## Reference files
 
 - `references/EXAMPLE.md` - React Native example project code
-- `references/react-native.md` - React native - docs
-- `references/identify-users.md` - Identify users - docs
-- `references/basic-integration-1.0-begin.md` - PostHog setup - begin
-- `references/basic-integration-1.1-edit.md` - PostHog setup - edit
-- `references/basic-integration-1.2-revise.md` - PostHog setup - revise
-- `references/basic-integration-1.3-conclude.md` - PostHog setup - conclusion
+- `references/react-native-sdk.md` - Amplitude documentation for React Native Sdk
+- `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
+- `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
+- `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
+- `references/basic-integration-1.2-revise.md` - Amplitude setup - revise
+- `references/basic-integration-1.3-conclude.md` - Amplitude setup - conclusion
 
 The example project shows the target implementation pattern. Consult the documentation for API details.
 
 ## Key principles
 
-- **Environment variables**: Always use environment variables for PostHog keys. Never hardcode them.
-- **Minimal changes**: Add PostHog code alongside existing integrations. Don't replace or restructure existing code.
+- **Environment variables**: Always use environment variables for Amplitude keys. Never hardcode them.
+- **Minimal changes**: Add Amplitude code alongside existing integrations. Don't replace or restructure existing code.
 - **Match the example**: Your implementation should follow the example project's patterns as closely as possible.
 
 ## Framework guidelines
 
-- posthog-react-native is the React Native SDK package name
-- Use react-native-config to load POSTHOG_PROJECT_TOKEN and POSTHOG_HOST from .env (variables are embedded at build time, not runtime)
-- react-native-svg is a required peer dependency of posthog-react-native (used by the surveys feature) and must be installed alongside it
-- Place PostHogProvider INSIDE NavigationContainer for React Navigation v7 compatibility
+- @amplitude/analytics-react-native is the React Native SDK package name
+- Use react-native-config to load AMPLITUDE_API_KEY from .env (variables are embedded at build time, not runtime)
+- @amplitude/analytics-react-native requires @react-native-async-storage/async-storage and @react-native-community/netinfo as peer dependencies — install them alongside it
+- Initialize Amplitude once at the top level (e.g., App.tsx) before any track calls
 
 ## Identifying users
 
-Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. If both frontend and backend code exist, pass the client-side session and distinct ID using `X-POSTHOG-DISTINCT-ID` and `X-POSTHOG-SESSION-ID` headers to maintain correlation.
-
-## Error tracking
-
-Add PostHog error tracking to relevant files, particularly around critical user flows and API boundaries.
+Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.

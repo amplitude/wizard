@@ -1,22 +1,20 @@
-# PostHog React Native Example Project
+# Amplitude React Native Example Project
 
-Repository: https://github.com/amplitude/context-mill
+Repository: https://github.com/amplitude/context-hub
 Path: basics/react-native
 
 ---
 
 ## README.md
 
-# PostHog React Native example
+# Amplitude React Native example
 
-This is a bare [React Native](https://reactnative.dev/) example (no Expo) demonstrating PostHog integration with product analytics, user identification, autocapture, and error tracking.
+This is a bare [React Native](https://reactnative.dev/) example (no Expo) demonstrating Amplitude integration with product analytics and user identification.
 
 ## Features
 
 - **Product analytics**: Track user events and behaviors
-- **Autocapture**: Automatic touch event and screen view tracking
-- **Error tracking**: Capture and track errors manually
-- **User authentication**: Demo login system with PostHog user identification
+- **User authentication**: Demo login system with Amplitude user identification
 - **Session persistence**: AsyncStorage for maintaining user sessions across app restarts
 - **Native navigation**: React Navigation v7 with native stack navigator
 
@@ -72,7 +70,7 @@ You need a Mac with the following installed:
    export ANDROID_HOME=$HOME/Library/Android/sdk
    export PATH=$PATH:$ANDROID_HOME/emulator
    export PATH=$PATH:$ANDROID_HOME/platform-tools
-   
+
    # Java from Android Studio (required for Gradle)
    export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
    export PATH=$JAVA_HOME/bin:$PATH
@@ -106,16 +104,15 @@ Create a `.env` file:
 cp .env.example .env
 ```
 
-Edit `.env` and add your PostHog project token:
+Edit `.env` and add your Amplitude API key:
 
 ```bash
-POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
-POSTHOG_HOST=https://us.i.posthog.com
+AMPLITUDE_API_KEY=your_amplitude_api_key_here
 ```
 
-Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
+Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
 
-> **Note:** The app will still run without a PostHog project token - analytics will simply be disabled.
+> **Note:** The app will still run without an Amplitude API key - analytics will simply be disabled.
 
 ### 3. Run on iOS
 
@@ -176,15 +173,15 @@ npm run android
 ```
 src/
 ├── config/
-│   └── posthog.ts           # PostHog client configuration
+│   └── amplitude.ts           # Amplitude client configuration
 ├── contexts/
-│   └── AuthContext.tsx      # Authentication context with PostHog integration
+│   └── AuthContext.tsx      # Authentication context with Amplitude integration
 ├── navigation/
 │   └── RootNavigator.tsx    # React Navigation stack navigator
 ├── screens/
 │   ├── HomeScreen.tsx       # Home/login screen
 │   ├── BurritoScreen.tsx    # Demo feature screen with event tracking
-│   └── ProfileScreen.tsx    # User profile with error tracking demo
+│   └── ProfileScreen.tsx    # User profile screen
 ├── services/
 │   └── storage.ts           # AsyncStorage wrapper for persistence
 ├── styles/
@@ -192,7 +189,7 @@ src/
 └── types/
     └── env.d.ts             # Type declarations for environment variables
 
-App.tsx                      # Root component with PostHogProvider
+App.tsx                      # Root component
 index.js                     # App entry point
 .env                         # Environment variables (create from .env.example)
 ios/                         # Native iOS project (Xcode)
@@ -201,157 +198,74 @@ android/                     # Native Android project (Android Studio)
 
 ## Key integration points
 
-### PostHog client setup (config/posthog.ts)
+### Amplitude client setup (config/amplitude.ts)
 
-The PostHog client is configured with V4 SDK options. If no project token is provided, analytics are disabled gracefully:
+The Amplitude client is initialized with the API key from environment variables:
 
 ```typescript
-import PostHog from 'posthog-react-native'
+import * as amplitude from '@amplitude/analytics-react-native'
 import Config from 'react-native-config'
 
-const apiKey = Config.POSTHOG_PROJECT_TOKEN
-const isPostHogConfigured = apiKey && apiKey !== 'phc_your_project_token_here'
+const apiKey = Config.AMPLITUDE_API_KEY
+const isAmplitudeConfigured = apiKey && apiKey !== 'your_amplitude_api_key_here'
 
-export const posthog = new PostHog(apiKey || 'placeholder_key', {
-  host: Config.POSTHOG_HOST || 'https://us.i.posthog.com',
-  disabled: !isPostHogConfigured,  // Disable if no project token
-  captureAppLifecycleEvents: true,
-  debug: __DEV__,
-  flushAt: 20,
-  flushInterval: 10000,
-  preloadFeatureFlags: true,
-})
-```
-
-### Provider setup with React Navigation v7 (App.tsx)
-
-For React Navigation v7, `PostHogProvider` must be placed **inside** `NavigationContainer`, and screen tracking must be done manually:
-
-```typescript
-import { NavigationContainer, NavigationContainerRef } from '@react-navigation/native'
-import { PostHogProvider } from 'posthog-react-native'
-import { posthog } from './src/config/posthog'
-
-export default function App() {
-  const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null)
-  const routeNameRef = useRef<string | undefined>()
-
-  return (
-    <NavigationContainer
-      ref={navigationRef}
-      onReady={() => {
-        routeNameRef.current = navigationRef.current?.getCurrentRoute()?.name
-      }}
-      onStateChange={() => {
-        // Manual screen tracking for React Navigation v7
-        const previousRouteName = routeNameRef.current
-        const currentRouteName = navigationRef.current?.getCurrentRoute()?.name
-
-        if (previousRouteName !== currentRouteName && currentRouteName) {
-          posthog.screen(currentRouteName, {
-            previous_screen: previousRouteName,
-          })
-        }
-        routeNameRef.current = currentRouteName
-      }}
-    >
-      <PostHogProvider
-        client={posthog}
-        autocapture={{
-          captureScreens: false,  // Disabled for React Navigation v7
-          captureTouches: true,   // Enable touch event autocapture
-          propsToCapture: ['testID'],
-        }}
-      >
-        <AuthProvider>
-          <RootNavigator />
-        </AuthProvider>
-      </PostHogProvider>
-    </NavigationContainer>
-  )
+if (isAmplitudeConfigured && apiKey) {
+  amplitude.init(apiKey)
 }
+
+export { amplitude }
 ```
 
-### Autocapture
+### Screen tracking (App.tsx)
 
-PostHog autocapture automatically tracks:
-
-- **Touch events**: When users interact with the screen
-- **App lifecycle events**: Application Installed, Updated, Opened, Became Active, Backgrounded
-
-Use `testID` prop on components to help identify them in analytics:
+Screen views are tracked manually via React Navigation's `onStateChange`:
 
 ```typescript
-<TouchableOpacity testID="consider-burrito-button" onPress={handlePress}>
-  <Text>Consider Burrito</Text>
-</TouchableOpacity>
+import { amplitude } from './src/config/amplitude'
+
+onStateChange={() => {
+  const currentRouteName = navigationRef.current?.getCurrentRoute()?.name
+  if (previousRouteName !== currentRouteName && currentRouteName) {
+    amplitude.track('screen_viewed', {
+      screen_name: currentRouteName,
+      previous_screen: previousRouteName,
+    })
+  }
+}}
 ```
 
 ### User identification (contexts/AuthContext.tsx)
 
-Use `$set` and `$set_once` for person properties:
-
 ```typescript
-import { usePostHog } from 'posthog-react-native'
+import { Identify } from '@amplitude/analytics-react-native'
+import { amplitude } from '../config/amplitude'
 
-const posthog = usePostHog()
-
-// On login - identify with person properties
-posthog.identify(username, {
-  $set: {
-    username: username,
-  },
-  $set_once: {
-    first_login_date: new Date().toISOString(),
-  },
-})
+// On login - identify user with properties
+amplitude.setUserId(username)
+const identifyObj = new Identify()
+identifyObj.set('username', username)
+amplitude.identify(identifyObj)
 
 // Capture login event
-posthog.capture('user_logged_in', {
-  username: username,
+amplitude.track('user_logged_in', {
+  username,
   is_new_user: isNewUser,
 })
 
-// On logout - reset clears distinct ID and anonymous ID
-posthog.capture('user_logged_out')
-posthog.reset()
+// On logout - reset clears identity
+amplitude.track('user_logged_out')
+amplitude.reset()
 ```
 
 ### Event tracking (screens/BurritoScreen.tsx)
 
-Capture custom events with properties:
-
 ```typescript
-import { usePostHog } from 'posthog-react-native'
+import { amplitude } from '../config/amplitude'
 
-const posthog = usePostHog()
-
-// We recommend using a [object] [verb] format for event names
-posthog.capture('burrito_considered', {
-  total_considerations: user.burritoConsiderations + 1,
+amplitude.track('burrito_considered', {
+  total_considerations: newCount,
   username: user.username,
 })
-```
-
-### Error tracking (screens/ProfileScreen.tsx)
-
-Capture exceptions using the `$exception` event:
-
-```typescript
-import { usePostHog } from 'posthog-react-native'
-
-const posthog = usePostHog()
-
-try {
-  throw new Error('Test error for PostHog error tracking')
-} catch (err) {
-  posthog.capture('$exception', {
-    $exception_type: err.name,
-    $exception_message: err.message,
-    $exception_source: 'ProfileScreen',
-    $exception_stack_trace_raw: err.stack,
-  })
-}
 ```
 
 ### Session persistence (services/storage.ts)
@@ -380,10 +294,8 @@ export const storage = {
 
 ## Learn more
 
-- [PostHog documentation](https://posthog.com/docs)
-- [PostHog React Native integration](https://posthog.com/docs/libraries/react-native)
-- [PostHog React Native autocapture](https://posthog.com/docs/libraries/react-native#autocapture)
-- [PostHog React Native screen tracking](https://posthog.com/docs/libraries/react-native#capturing-screen-views)
+- [Amplitude documentation](https://amplitude.com/docs)
+- [Amplitude React Native SDK](https://amplitude.com/docs/sdks/analytics/react-native)
 - [React Native documentation](https://reactnative.dev/docs/getting-started)
 - [React Native environment setup](https://reactnative.dev/docs/set-up-your-environment)
 - [React Navigation documentation](https://reactnavigation.org/docs/getting-started)
@@ -414,8 +326,7 @@ test('renders correctly', async () => {
 ## .env.example
 
 ```example
-POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
-POSTHOG_HOST=https://us.i.posthog.com
+AMPLITUDE_API_KEY=your_amplitude_api_key_here
 
 ```
 
@@ -438,13 +349,29 @@ module.exports = {
 
 ```keystore
 ����          androiddebugkey  CJ���  0��0
-+* ��N���O�J�`>���X'����_���ȏ�R9���,xJ'K~\j��:ز��}�U)Q]"���ա!�	Ȉ��Ù��F�5�H�x�A�\�P�)��@�I�s�d��>�2#m�י�j/8p��","ȁ��|\����1e�7�!����h(����.�Fi5��o��ung�*�!�����vF��֪�Sb!��T��4��P<G�̑�8���(��է!Zd"�{�k���'_+ �k��5o�>9�R.+4�/w3Y�s�By�������0(J�)pB�g̝��R�]�hT.?�0���޳���kGg�=�/����	^Q����".O�Qŗ���Q���Yg+8��f�%� �"`�Vf�b���M�6hW�q�t���[x�Ӏ��%\l���XV���u}:�9��'+N��7:z\��4�#����A�G���ݘLJad��ɓ�����{tbP�ў�lʉD}�I����m;�Ɉ#�t�6G�;!w��b@�xf)�G�EA�5X8 �sE_?/f��)��y�#��~�EZiW��L��mj��9)��LpoBI@f�]u�C����8g1B4���9�����b,���,b� �;�i���� �#���^#�d�ˢ���~�<w%JE��V�1d���/��=��Z�o�l���JC2��85�%8j�o��U�)����-nE}1(���%���01�	-!I��Zz�g�l5����V�@v����>��x�VwLw_���N���o�i7E�/�(���f�0ڸl��ۅl��On�cѾ�d8�,J�&N��Ih��\pM^���{�z��T�Z�ڳ�r�u�(���3r�<��Y����K=��V�E�o�e��uǳ�z�"d#x�e�{o����\5�o�u��i�nvW��@%��9z��C�C:���mNA��8Z�zI��f�S�(ӝ{r292�p�{�pO') ��m5V�L��[c�ՒTd���'�� p>*�R��0>NH��c���'K���dp�Z�kl�=NmKW�ȧ��)�9���ɴ@:��l�c���~��������GF�K�`�� ����|���=����3P*�.��\vUԑd�����|��H���x��2����p�Z��g��E�ƈ#f�rK����F��D8�"�V)�n|���ʴ�1�(�o�$J����a��\sݦ8�$^@$�Q�.�vK��D�	e�/�������QG��
-˺��s����Y�q    X.509  0�{0�c�#.�b0	*�H�� 0m10	UUS10UUnknown10UUnknown10U
-Unknown10UAndroid10UAndroid Debug0 131231223504Z20520430223504Z0m10	UUS10UUnknown10UUnknown10U
-Unknown10UAndroid10UAndroid Debug0�"0	*�H�� � 0�
-� ��n &�l�Dx�%�[��w��zg�}��?�^�SkX��6��gp��5��q$����v�B�����/��4��X�Z[�H7�Wk�X���3�=!�)6�P���9�O�ٵa�WӈEI,Ժ��A_���u�si��>��W���@ُ-���' ��c8]������UJ�*5Y�}c����Jq���b@�C�G���H�ty+ ߓ!�Cߙ]�B7i��+�-#�O��.p���%x
++* ��N���O�J�`>���X'����_���ȏ�R9���,xJ'K~\j��:ز��}�U)Q]"���ա!�	Ȉ��Ù��F�5�H�x�A�\�P�)��@�I�s�d��>�2#m�י�j/8p��","ȁ��|\����1e�7�!����h(����.�Fi5��o��ung�*�!�����vF��֪�Sb!��T��4�
+�P
+<G�̑�8���(��է!Zd"�{�k���'_+ �k��5o�>9�R.+4�/w3Y�s�By�������0(J�)pB�g̝��R�]�hT.?�0���޳���kGg�=�/����	^Q����".O�Qŗ���Q���Yg+8��f�%� �"`�Vf�b���M�6hW�q�t���[x�Ӏ��%\l���XV���u}:�9��'+N��7:z\��4�#��
+��A�G���ݘLJad��ɓ�����{tbP�ў�lʉD}�I����m;�Ɉ#�t�6G�;!w��b@�xf)�G�EA�5X8 �sE_?/f��)��y�#��~�EZiW��L��mj��9)��LpoBI@f�]u�C����8g1B4���9�����b,���,b� �;�i���� �#���^#�d�ˢ���~�<w%JE��V�1d���/��=��Z�o�l���JC2��85�%8j�o��U�)����-nE}1(���%���01�	-!I��Zz�g�l5����V�@v����>��x�VwLw_���N���o�i7E�/�(���f�0ڸl��ۅl��On�cѾ�d8�,J�&N��Ih��\pM^���{�z��T�Z�ڳ�r�u�(���3r�<��Y����K=��V�E�o�e��uǳ�z�"d#x�e�{o����\5�o�u��i�nvW��@%��9z��C�C:���mNA��8Z�zI��f�S�(ӝ{r292�p�{�pO') ��m5V�L��[c�ՒTd���
+'�� p>*�R��0>NH��c���'K���dp�Z�kl�=NmKW�ȧ��)�9���ɴ@:�
+�l�c���~��������GF�K�`�� ����|���=����3P*�.��\vUԑd�����|��H���x��2����p�Z��g��E�ƈ#f�rK����F��D8�"�
+V)�n|���ʴ�1�(�o�$J����a��\sݦ8�$^@$�Q�.�vK��D�	e�/�������QG��
+˺��s����Y�q    X.509  0�{0�c�#.�b0
+	*�H��
+ 0m10	UUS10UUnknown10UUnknown10U
+Unknown10UAndroid10U
+Android Debug0 
+131231223504Z20520430223504Z0m10	UUS10UUnknown10UUnknown10U
+Unknown10UAndroid10U
+Android Debug0�"0
+	*�H��
+ � 0�
+� ��n &�l�Dx�%�
+[��w��zg�}��?�^�SkX��6��gp��5��q$����v�B�����/��4��X�Z[�H7�Wk�X���3�=!�)6�P���9�O�ٵa�WӈEI,Ժ��A_���u�si��>��W���@ُ-���' ��c8]������UJ�*5Y�}c����Jq���b@�C�G���H�ty+ ߓ!�Cߙ]�B7i��+�-#�O��.p���%x
 �EIr�M�%�����a �!00U��8�Ҋ�X��
-�C(�#� 0	*�H�� � _�v��cMP��u����Nz�w����==k��,
+�C(�#� 0
+	*�H��
+ � _�v��cMP��u����Nz�w����==k��,
 m~<���vֶ�'.��h%�h�w�0E^{�ù�/Oz��u�R��$_1�I�~����s��ܖ��ӓ���֭�\�JX��j��;RC�՜�n<q�f�$��Z1N�������7����ڵk[Ųm��5^B����]W��e���i4V��*:�D~]z�ޝ����<��l.e���Ɖ��#�L�:c�~0�?���q�I�@���x�٨�*I�ӗ���Y`G'@^w�
 ```
 
@@ -703,25 +630,21 @@ import {
   NavigationContainer,
   NavigationContainerRef,
 } from '@react-navigation/native'
-import { PostHogProvider } from 'posthog-react-native'
 
 import { AuthProvider } from './src/contexts/AuthContext'
 import { RootNavigator, RootStackParamList } from './src/navigation/RootNavigator'
-import { posthog } from './src/config/posthog'
+import { amplitude } from './src/config/amplitude'
 import { colors } from './src/styles/theme'
 
 /**
  * Burrito Consideration App
  *
- * A demo React Native application showcasing PostHog analytics integration.
+ * A demo React Native application showcasing Amplitude analytics integration.
  *
  * Features:
  * - User authentication (demo mode - accepts any credentials)
  * - Burrito consideration counter with event tracking
  * - User profile with statistics
- * - Error tracking demonstration
- *
- * @see https://posthog.com/docs/libraries/react-native
  */
 export default function App() {
   const navigationRef = useRef<NavigationContainerRef<RootStackParamList>>(null)
@@ -746,7 +669,8 @@ export default function App() {
 
           if (previousRouteName !== currentRouteName && currentRouteName) {
             // Capture screen view event
-            posthog.screen(currentRouteName, {
+            amplitude.track('screen_viewed', {
+              screen_name: currentRouteName,
               previous_screen: previousRouteName,
             })
           }
@@ -755,32 +679,9 @@ export default function App() {
           routeNameRef.current = currentRouteName
         }}
       >
-        {/*
-          PostHogProvider is placed INSIDE NavigationContainer for React Navigation v7.
-
-          For React Navigation v7, we disable automatic screen capture and handle it
-          manually via onStateChange above. Touch event autocapture is still enabled.
-
-          @see https://posthog.com/docs/libraries/react-native#with-react-navigationnative-and-autocapture
-        */}
-        <PostHogProvider
-          client={posthog}
-          autocapture={{
-            // Disable automatic screen capture for React Navigation v7
-            // We handle screen tracking manually via NavigationContainer.onStateChange
-            captureScreens: false,
-            // Enable touch event autocapture
-            captureTouches: true,
-            // Limit which props are captured for touch events
-            propsToCapture: ['testID'],
-            // Maximum number of elements captured in touch event hierarchy
-            maxElementsCaptured: 20,
-          }}
-        >
-          <AuthProvider>
-            <RootNavigator />
-          </AuthProvider>
-        </PostHogProvider>
+        <AuthProvider>
+          <RootNavigator />
+        </AuthProvider>
       </NavigationContainer>
     </SafeAreaProvider>
   )
@@ -1274,68 +1175,30 @@ module.exports = mergeConfig(getDefaultConfig(__dirname), config);
 
 ---
 
-## src/config/posthog.ts
+## src/config/amplitude.ts
 
 ```ts
-import PostHog from 'posthog-react-native'
+import * as amplitude from '@amplitude/analytics-react-native'
 import Config from 'react-native-config'
 
 // Environment variables are embedded at build time via react-native-config
-// Ensure .env file exists with POSTHOG_PROJECT_TOKEN and POSTHOG_HOST
-const apiKey = Config.POSTHOG_PROJECT_TOKEN
-const host = Config.POSTHOG_HOST || 'https://us.i.posthog.com'
-const isPostHogConfigured = apiKey && apiKey !== 'phc_your_project_token_here'
+// Ensure .env file exists with AMPLITUDE_API_KEY
+const apiKey = Config.AMPLITUDE_API_KEY
+const isAmplitudeConfigured = apiKey && apiKey !== 'your_amplitude_api_key_here'
 
-if (!isPostHogConfigured) {
+if (!isAmplitudeConfigured) {
   console.warn(
-    'PostHog project token not configured. Analytics will be disabled. ' +
-    'Set POSTHOG_PROJECT_TOKEN in your .env file to enable analytics.'
+    'Amplitude API key not configured. Analytics will be disabled. ' +
+    'Set AMPLITUDE_API_KEY in your .env file to enable analytics.'
   )
 }
 
-/**
- * PostHog client instance for bare React Native
- *
- * Configuration loaded from .env via react-native-config (embedded at build time).
- * Required peer dependencies: @react-native-async-storage/async-storage,
- * react-native-device-info, react-native-localize
- *
- * @see https://posthog.com/docs/libraries/react-native
- */
-export const posthog = new PostHog(apiKey || 'placeholder_key', {
-  // PostHog API host (usually 'https://us.i.posthog.com' or 'https://eu.i.posthog.com')
-  host,
+if (isAmplitudeConfigured && apiKey) {
+  amplitude.init(apiKey)
+}
 
-  // Disable PostHog if project token is not configured
-  disabled: !isPostHogConfigured,
-
-  // Capture app lifecycle events:
-  // - Application Installed, Application Updated
-  // - Application Opened, Application Became Active, Application Backgrounded
-  captureAppLifecycleEvents: true,
-
-  // Enable debug mode in development for verbose logging
-  debug: __DEV__,
-
-  // Batching: queue events and flush periodically to optimize battery usage
-  flushAt: 20,              // Number of events to queue before sending
-  flushInterval: 10000,     // Interval in ms between periodic flushes
-  maxBatchSize: 100,        // Maximum events per batch
-  maxQueueSize: 1000,       // Maximum queued events (oldest dropped when full)
-
-  // Feature flags
-  preloadFeatureFlags: true,        // Load flags on initialization
-  sendFeatureFlagEvent: true,       // Track getFeatureFlag calls for experiments
-  featureFlagsRequestTimeoutMs: 10000, // Timeout for flag requests (prevents blocking)
-
-  // Network settings
-  requestTimeout: 10000,    // General request timeout in ms
-  fetchRetryCount: 3,       // Number of retry attempts for failed requests
-  fetchRetryDelay: 3000,    // Delay between retries in ms
-})
-
-// Export helper to check if PostHog is enabled
-export const isPostHogEnabled = isPostHogConfigured
+export { amplitude }
+export const isAmplitudeEnabled = isAmplitudeConfigured
 
 ```
 
@@ -1352,7 +1215,8 @@ import React, {
   ReactNode,
   useCallback,
 } from 'react'
-import { usePostHog } from 'posthog-react-native'
+import { Identify } from '@amplitude/analytics-react-native'
+import { amplitude } from '../config/amplitude'
 import { storage, User } from '../services/storage'
 
 interface AuthContextType {
@@ -1370,17 +1234,14 @@ interface AuthProviderProps {
 }
 
 /**
- * Authentication Provider with PostHog integration
+ * Authentication Provider with Amplitude integration
  *
- * Manages user authentication state and integrates with PostHog for:
- * - User identification (posthog.identify)
+ * Manages user authentication state and integrates with Amplitude for:
+ * - User identification (amplitude.setUserId + amplitude.identify)
  * - Login/logout event tracking
  * - Session reset on logout
- *
- * @see https://posthog.com/docs/libraries/react-native#identifying-users
  */
 export function AuthProvider({ children }: AuthProviderProps) {
-  const posthog = usePostHog()
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -1397,13 +1258,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
         if (existingUser) {
           setUser(existingUser)
 
-          // Re-identify user in PostHog on session restore
-          // This ensures events are correctly attributed after app restart
-          posthog.identify(storedUsername, {
-            $set: {
-              username: storedUsername,
-            },
-          })
+          // Re-identify user in Amplitude on session restore
+          amplitude.setUserId(storedUsername)
+          const identifyObj = new Identify()
+          identifyObj.set('username', storedUsername)
+          amplitude.identify(identifyObj)
         }
       }
     } catch (error) {
@@ -1435,22 +1294,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
         await storage.setCurrentUser(username)
         setUser(userData)
 
-        // PostHog identify - use username as distinct ID
-        // $set updates properties every time, $set_once only sets if not already set
-        // @see https://posthog.com/docs/libraries/react-native#identifying-users
-        posthog.identify(username, {
-          $set: {
-            username: username,
-          },
-          $set_once: {
-            first_login_date: new Date().toISOString(),
-          },
-        })
+        // Identify user in Amplitude using username as user ID
+        amplitude.setUserId(username)
+        const identifyObj = new Identify()
+        identifyObj.set('username', username)
+        amplitude.identify(identifyObj)
 
         // Capture login event with properties
-        // @see https://posthog.com/docs/libraries/react-native#capturing-events
-        posthog.capture('user_logged_in', {
-          username: username,
+        amplitude.track('user_logged_in', {
+          username,
           is_new_user: isNewUser,
         })
 
@@ -1460,21 +1312,19 @@ export function AuthProvider({ children }: AuthProviderProps) {
         return false
       }
     },
-    [posthog],
+    [],
   )
 
   const logout = useCallback(async () => {
     // Capture logout event before reset
-    posthog.capture('user_logged_out')
+    amplitude.track('user_logged_out')
 
-    // Reset PostHog - clears the current user's distinct ID and anonymous ID
-    // This should be called when the user logs out
-    // @see https://posthog.com/docs/libraries/react-native#reset-after-logout
-    posthog.reset()
+    // Reset Amplitude - clears the current user's identity
+    amplitude.reset()
 
     await storage.removeCurrentUser()
     setUser(null)
-  }, [posthog])
+  }, [])
 
   const incrementBurritoConsiderations = useCallback(async () => {
     if (user) {
@@ -1607,7 +1457,7 @@ import React, { useState, useEffect } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { usePostHog } from 'posthog-react-native'
+import { amplitude } from '../config/amplitude'
 import { useAuth } from '../contexts/AuthContext'
 import { RootStackParamList } from '../navigation/RootNavigator'
 import {
@@ -1626,15 +1476,12 @@ type BurritoScreenNavigationProp = NativeStackNavigationProp<
 /**
  * Burrito Consideration Screen
  *
- * Demonstrates PostHog event tracking with custom properties.
+ * Demonstrates Amplitude event tracking with custom properties.
  * Each time the user considers a burrito, an event is captured.
- *
- * @see https://posthog.com/docs/libraries/react-native#capturing-events
  */
 export default function BurritoScreen() {
   const { user, incrementBurritoConsiderations } = useAuth()
   const navigation = useNavigation<BurritoScreenNavigationProp>()
-  const posthog = usePostHog()
   const [hasConsidered, setHasConsidered] = useState(false)
 
   // Redirect to home if not logged in
@@ -1658,10 +1505,8 @@ export default function BurritoScreen() {
     // Hide success message after 2 seconds
     setTimeout(() => setHasConsidered(false), 2000)
 
-    // Capture custom event in PostHog with properties
-    // We recommend using a [object] [verb] format for event names
-    // @see https://posthog.com/docs/libraries/react-native#capturing-events
-    posthog.capture('burrito_considered', {
+    // Capture custom event in Amplitude with properties
+    amplitude.track('burrito_considered', {
       total_considerations: newCount,
       username: user.username,
     })
@@ -1675,11 +1520,6 @@ export default function BurritoScreen() {
           Take a moment to truly consider the potential of burritos.
         </Text>
 
-        {/*
-          testID is captured by PostHog autocapture for touch events
-          This helps identify the button in analytics
-          @see https://posthog.com/docs/libraries/react-native#autocapture
-        */}
         <TouchableOpacity
           style={styles.burritoButton}
           onPress={handleConsideration}
@@ -2061,10 +1901,9 @@ const styles = StyleSheet.create({
 
 ```tsx
 import React, { useEffect } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native'
+import { View, Text, StyleSheet } from 'react-native'
 import { useNavigation } from '@react-navigation/native'
 import { NativeStackNavigationProp } from '@react-navigation/native-stack'
-import { usePostHog } from 'posthog-react-native'
 import { useAuth } from '../contexts/AuthContext'
 import { RootStackParamList } from '../navigation/RootNavigator'
 import {
@@ -2083,15 +1922,11 @@ type ProfileScreenNavigationProp = NativeStackNavigationProp<
 /**
  * Profile Screen
  *
- * Displays user information and demonstrates PostHog error tracking.
- * The test error button shows how to capture exceptions manually.
- *
- * @see https://posthog.com/docs/libraries/react-native#error-tracking
+ * Displays user information and burrito journey stats.
  */
 export default function ProfileScreen() {
   const { user } = useAuth()
   const navigation = useNavigation<ProfileScreenNavigationProp>()
-  const posthog = usePostHog()
 
   // Redirect to home if not logged in
   useEffect(() => {
@@ -2102,42 +1937,6 @@ export default function ProfileScreen() {
 
   if (!user) {
     return null
-  }
-
-  /**
-   * Triggers a test error and captures it in PostHog
-   *
-   * This demonstrates manual exception capture using the $exception event.
-   * In production, you would typically set up automatic exception capture
-   * or use the before_send callback for customization.
-   *
-   * @see https://posthog.com/docs/libraries/react-native#error-tracking
-   */
-  const triggerTestError = () => {
-    try {
-      throw new Error('Test error for PostHog error tracking')
-    } catch (err) {
-      const error = err as Error
-
-      // Capture exception in PostHog using the $exception event
-      // This follows PostHog's error tracking format
-      posthog.capture('$exception', {
-        $exception_type: error.name,
-        $exception_message: error.message,
-        $exception_source: 'ProfileScreen.triggerTestError',
-        $exception_stack_trace_raw: error.stack,
-        // Additional context
-        username: user.username,
-        screen: 'Profile',
-      })
-
-      console.error('Captured error:', error)
-      Alert.alert(
-        'Error Captured',
-        'The test error has been sent to PostHog!',
-        [{ text: 'OK' }],
-      )
-    }
   }
 
   const getJourneyMessage = () => {
@@ -2171,19 +1970,6 @@ export default function ProfileScreen() {
             <Text style={styles.infoValue}>{user.burritoConsiderations}</Text>
           </View>
         </View>
-
-        {/*
-          testID is captured by PostHog autocapture for touch events
-          @see https://posthog.com/docs/libraries/react-native#autocapture
-        */}
-        <TouchableOpacity
-          style={styles.errorButton}
-          onPress={triggerTestError}
-          activeOpacity={0.8}
-          testID="trigger-error-button"
-        >
-          <Text style={styles.buttonText}>Trigger Test Error (for PostHog)</Text>
-        </TouchableOpacity>
 
         <View style={styles.journey}>
           <Text style={styles.journeyTitle}>Your Burrito Journey</Text>
@@ -2236,18 +2022,6 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: typography.sizes.md,
     color: colors.text,
-  },
-  errorButton: {
-    backgroundColor: colors.danger,
-    borderRadius: borderRadius.sm,
-    padding: spacing.md,
-    alignItems: 'center',
-    marginTop: spacing.lg,
-  },
-  buttonText: {
-    color: colors.white,
-    fontSize: typography.sizes.md,
-    fontWeight: typography.weights.semibold,
   },
   journey: {
     marginTop: spacing.lg,
@@ -2482,8 +2256,8 @@ export const shadows = {
 ```ts
 declare module 'react-native-config' {
   export interface NativeConfig {
-    POSTHOG_PROJECT_TOKEN?: string
-    POSTHOG_HOST?: string
+    AMPLITUDE_API_KEY?: string
+    AMPLITUDE_SERVER_URL?: string
   }
 
   export const Config: NativeConfig

@@ -456,6 +456,14 @@ STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP se
    }, which you'll find in example code. The tool will also ensure .gitignore coverage. Don't assume the presence of keys means the value is up to date. Write the correct value each time.
    - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
 
+STEP 6: Add event tracking to this project using the instrumentation skills.
+   - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
+   - Install the "add-analytics-instrumentation" skill using install_skill.
+   - Load the installed skill's SKILL.md file to understand the workflow.
+   - Follow the skill's workflow using the "File / Directory" input type: analyze the project's main source directory to discover user-facing features and surfaces that should be instrumented.
+   - The skill will guide you through discovering candidate events, filtering to the most critical ones, and producing a concrete tracking plan with exact file locations and tracking code.
+   - Implement the tracking calls for all priority-3 (critical) events identified by the skill.
+
 Important: Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager the project uses. Do not manually search for lockfiles or config files. Always install packages as a background task. Don't await completion; proceed with other work immediately after starting the installation. You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
 
 

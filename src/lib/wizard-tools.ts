@@ -105,43 +105,54 @@ export function downloadSkill(
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve the bundled skills directory.
- * Skills are shipped in `<wizardRoot>/skills/integration/` as extracted folders.
+ * Resolve the bundled skills root directory.
+ * Skills are shipped in `<wizardRoot>/skills/<category>/` subdirectories.
  */
-function getSkillsDir(): string {
+function getSkillsRootDir(): string {
   // Walk up from this file to find the wizard repo root (where skills/ lives)
   let dir = __dirname;
   for (let i = 0; i < 5; i++) {
-    if (fs.existsSync(path.join(dir, 'skills', 'integration'))) {
-      return path.join(dir, 'skills', 'integration');
+    if (fs.existsSync(path.join(dir, 'skills'))) {
+      return path.join(dir, 'skills');
     }
     dir = path.dirname(dir);
   }
   // Fallback: relative to cwd
-  return path.join(process.cwd(), 'skills', 'integration');
+  return path.join(process.cwd(), 'skills');
 }
 
 /**
  * Build skill menu from bundled skill directories.
- * Scans skills/integration/ for folders containing SKILL.md.
+ * Scans skills/<category>/ subdirectories for folders containing SKILL.md.
+ * Each subdirectory of skills/ becomes a category (e.g. integration, instrumentation).
  */
 export function loadBundledSkillMenu(): SkillMenu {
-  const skillsDir = getSkillsDir();
-  logToFile(`loadBundledSkillMenu: scanning ${skillsDir}`);
-  const entries: SkillEntry[] = [];
+  const skillsRoot = getSkillsRootDir();
+  logToFile(`loadBundledSkillMenu: scanning ${skillsRoot}`);
+  const categories: Record<string, SkillEntry[]> = {};
 
   try {
-    for (const name of fs.readdirSync(skillsDir)) {
-      const skillPath = path.join(skillsDir, name);
-      const skillMd = path.join(skillPath, 'SKILL.md');
-      if (fs.statSync(skillPath).isDirectory() && fs.existsSync(skillMd)) {
-        // Extract display name from SKILL.md frontmatter
-        const content = fs.readFileSync(skillMd, 'utf8');
-        const descMatch = content.match(/^description:\s*>-?\s*\n\s+(.+)/m);
-        const displayName = descMatch
-          ? descMatch[1].trim()
-          : name.replace(/^integration-/, '').replace(/-/g, ' ');
-        entries.push({ id: name, name: displayName, downloadUrl: '' });
+    for (const category of fs.readdirSync(skillsRoot)) {
+      const categoryPath = path.join(skillsRoot, category);
+      if (!fs.statSync(categoryPath).isDirectory()) continue;
+
+      const entries: SkillEntry[] = [];
+      for (const name of fs.readdirSync(categoryPath)) {
+        const skillPath = path.join(categoryPath, name);
+        const skillMd = path.join(skillPath, 'SKILL.md');
+        if (fs.statSync(skillPath).isDirectory() && fs.existsSync(skillMd)) {
+          // Extract display name from SKILL.md frontmatter
+          const content = fs.readFileSync(skillMd, 'utf8');
+          const descMatch = content.match(/^description:\s*>-?\s*\n\s+(.+)/m);
+          const fallbackName = name
+            .replace(new RegExp(`^${category}-`), '')
+            .replace(/-/g, ' ');
+          const displayName = descMatch ? descMatch[1].trim() : fallbackName;
+          entries.push({ id: name, name: displayName, downloadUrl: '' });
+        }
+      }
+      if (entries.length > 0) {
+        categories[category] = entries;
       }
     }
   } catch (err) {
@@ -152,35 +163,47 @@ export function loadBundledSkillMenu(): SkillMenu {
     );
   }
 
-  logToFile(`loadBundledSkillMenu: found ${entries.length} integration skills`);
-  return { categories: { integration: entries } };
+  const total = Object.values(categories).reduce(
+    (sum, entries) => sum + entries.length,
+    0,
+  );
+  logToFile(
+    `loadBundledSkillMenu: found ${total} skills across ${
+      Object.keys(categories).length
+    } categories`,
+  );
+  return { categories };
 }
 
 /**
  * Install a bundled skill by copying it to the project's .claude/skills/ dir.
+ * Searches across all category subdirectories under skills/.
  */
 export function installBundledSkill(
   skillId: string,
   installDir: string,
 ): { success: boolean; error?: string } {
-  const skillsDir = getSkillsDir();
-  const src = path.join(skillsDir, skillId);
+  const skillsRoot = getSkillsRootDir();
   const dest = path.join(installDir, '.claude', 'skills', skillId);
 
-  if (!fs.existsSync(src)) {
-    return { success: false, error: `Bundled skill "${skillId}" not found` };
-  }
-
   try {
-    // Recursively copy the skill directory
-    fs.cpSync(src, dest, { recursive: true });
-    logToFile(`installBundledSkill: copied ${skillId} to ${dest}`);
-    return { success: true };
+    for (const category of fs.readdirSync(skillsRoot)) {
+      const src = path.join(skillsRoot, category, skillId);
+      if (fs.existsSync(src) && fs.statSync(src).isDirectory()) {
+        fs.cpSync(src, dest, { recursive: true });
+        logToFile(
+          `installBundledSkill: copied ${skillId} from ${src} to ${dest}`,
+        );
+        return { success: true };
+      }
+    }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logToFile(`installBundledSkill: error: ${msg}`);
     return { success: false, error: msg };
   }
+
+  return { success: false, error: `Bundled skill "${skillId}" not found` };
 }
 
 // ---------------------------------------------------------------------------

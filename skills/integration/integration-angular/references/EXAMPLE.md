@@ -1,24 +1,21 @@
-# PostHog Angular Example Project
+# Amplitude Angular Example Project
 
-Repository: https://github.com/amplitude/context-mill
+Repository: https://github.com/amplitude/context-hub
 Path: basics/angular
 
 ---
 
 ## README.md
 
-# PostHog Angular Example
+# Amplitude Angular Example
 
-This is an [Angular](https://angular.dev/) example demonstrating PostHog integration with product analytics, session replay, and error tracking.
+This is an [Angular](https://angular.dev/) example demonstrating Amplitude integration with product analytics.
 
 ## Features
 
 - **Product analytics**: Track user events and behaviors
-- **Session replay**: Record and replay user sessions
-- **Error tracking**: Capture and track errors
-- **User authentication**: Demo login system with PostHog user identification
-- **SSR-safe**: Uses platform checks for browser-only PostHog calls
-- **Reverse proxy**: PostHog ingestion through Angular proxy
+- **User authentication**: Demo login system with Amplitude user identification
+- **SSR-safe**: Uses platform checks for browser-only Amplitude calls
 
 ## Getting started
 
@@ -33,11 +30,10 @@ pnpm install
 Create a `.env` file in the root directory:
 
 ```bash
-VITE_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
-VITE_POSTHOG_HOST=https://us.posthog.com
+NG_APP_AMPLITUDE_API_KEY=your_amplitude_api_key
 ```
 
-Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
+Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com/).
 
 ### 3. Run the development server
 
@@ -57,13 +53,13 @@ src/
 │   ├── pages/
 │   │   ├── home/              # Home/Login page
 │   │   ├── burrito/           # Demo feature page with event tracking
-│   │   └── profile/           # User profile with error tracking demo
+│   │   └── profile/           # User profile page
 │   ├── services/
-│   │   ├── posthog.service.ts # PostHog service wrapper (SSR-safe)
-│   │   └── auth.service.ts    # Auth service with PostHog integration
+│   │   ├── amplitude.service.ts # Amplitude service wrapper (SSR-safe)
+│   │   └── auth.service.ts    # Auth service with Amplitude integration
 │   ├── guards/
 │   │   └── auth.guard.ts      # Route guard for protected pages
-│   ├── app.component.ts       # Root component with PostHog init
+│   ├── app.component.ts       # Root component with Amplitude init
 │   ├── app.routes.ts          # Route definitions
 │   └── app.config.ts          # App configuration
 ├── environments/
@@ -74,54 +70,50 @@ src/
 
 ## Key integration points
 
-### PostHog service (services/posthog.service.ts)
+### Amplitude service (services/amplitude.service.ts)
 
-A wrapper service that handles SSR safety and provides access to the PostHog instance:
+A wrapper service that handles SSR safety and provides access to the Amplitude instance:
 
 ```typescript
 import { Injectable, inject, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
-import posthog from 'posthog-js';
+import * as amplitude from '@amplitude/analytics-browser';
 
 @Injectable({ providedIn: 'root' })
-export class PostHogService {
+export class AmplitudeService {
   private readonly platformId = inject(PLATFORM_ID);
 
-  get posthog(): typeof posthog {
+  get amplitude(): typeof amplitude {
     if (isPlatformBrowser(this.platformId)) {
-      return posthog;
+      return amplitude;
     }
     // Return a no-op proxy for SSR safety
-    return new Proxy({} as typeof posthog, {
+    return new Proxy({} as typeof amplitude, {
       get: () => () => undefined,
     });
   }
 
-  init(apiKey: string, options: Partial<PostHogConfig>): void {
+  init(apiKey: string): void {
     if (isPlatformBrowser(this.platformId)) {
-      posthog.init(apiKey, options);
+      amplitude.init(apiKey);
     }
   }
 }
 ```
 
-### PostHog initialization (app.component.ts)
+### Amplitude initialization (app.component.ts)
 
-PostHog is initialized in the root component's `ngOnInit`:
+Amplitude is initialized in the root component's `ngOnInit`:
 
 ```typescript
-import { PostHogService } from './services/posthog.service';
+import { AmplitudeService } from './services/amplitude.service';
 import { environment } from '../environments/environment';
 
 export class AppComponent implements OnInit {
-  private readonly posthogService = inject(PostHogService);
+  private readonly amplitudeService = inject(AmplitudeService);
 
   ngOnInit(): void {
-    this.posthogService.init(environment.posthogKey, {
-      api_host: '/ingest',
-      ui_host: environment.posthogHost || 'https://us.posthog.com',
-      capture_exceptions: true,
-    });
+    this.amplitudeService.init(environment.amplitudeApiKey);
   }
 }
 ```
@@ -129,36 +121,27 @@ export class AppComponent implements OnInit {
 ### User identification (services/auth.service.ts)
 
 ```typescript
-import { PostHogService } from './posthog.service';
+import { AmplitudeService } from './amplitude.service';
+import { Identify } from '@amplitude/analytics-browser';
 
-const posthogService = inject(PostHogService);
+const amplitudeService = inject(AmplitudeService);
 
-posthogService.posthog.identify(username, {
-  username,
-  isNewUser,
-});
+amplitudeService.amplitude.setUserId(username);
+const identifyObj = new Identify();
+identifyObj.set('username', username);
+amplitudeService.amplitude.identify(identifyObj);
 ```
 
 ### Event tracking (pages/burrito/burrito.component.ts)
 
 ```typescript
-import { PostHogService } from '../../services/posthog.service';
+import { AmplitudeService } from '../../services/amplitude.service';
 
-const posthogService = inject(PostHogService);
+const amplitudeService = inject(AmplitudeService);
 
-posthogService.posthog.capture('burrito_considered', {
+amplitudeService.amplitude.track('burrito_considered', {
   total_considerations: count,
   username: username,
-});
-```
-
-### Error tracking (pages/profile/profile.component.ts)
-
-```typescript
-posthogService.posthog.capture('$exception', {
-  $exception_message: error.message,
-  $exception_type: error.name,
-  $exception_stack_trace_raw: error.stack,
 });
 ```
 
@@ -169,31 +152,21 @@ This example uses Angular 21 with modern features:
 1. **Standalone components**: No NgModules, all components use `standalone: true`
 2. **Signals**: Reactive state management with Angular signals
 3. **SSR support**: Uses `isPlatformBrowser()` checks for SSR safety
-4. **Dependency injection**: PostHog wrapped in an injectable service
-5. **Proxy configuration**: Uses `proxy.conf.json` for PostHog API calls
-6. **Environment files**: Generated from `.env` at build time via prebuild script
-
-## Environment variable handling
-
-Angular CLI doesn't natively support `.env` files. This project uses a prebuild script:
-
-1. `scripts/generate-env.js` reads `.env` and generates `environment.generated.ts`
-2. The script runs automatically before `pnpm start` and `pnpm build`
-3. Environment files import from the generated file
+4. **Dependency injection**: Amplitude wrapped in an injectable service
+5. **Environment files**: Generated from `.env` at build time via prebuild script
 
 ## Learn more
 
-- [PostHog Documentation](https://posthog.com/docs)
+- [Amplitude Documentation](https://www.docs.developers.amplitude.com/)
 - [Angular Documentation](https://angular.dev/)
-- [PostHog JavaScript Web SDK](https://posthog.com/docs/libraries/js)
+- [Amplitude Browser SDK](https://www.docs.developers.amplitude.com/data/sdks/browser-2/)
 
 ---
 
 ## .env.example
 
 ```example
-NG_APP_POSTHOG_PROJECT_TOKEN=<ph_project_token>
-NG_APP_POSTHOG_HOST=https://us.posthog.com
+NG_APP_AMPLITUDE_API_KEY=your_amplitude_api_key
 
 ```
 
@@ -212,7 +185,7 @@ import {
 import { isPlatformBrowser } from '@angular/common';
 import { RouterOutlet } from '@angular/router';
 import { HeaderComponent } from './components/header/header.component';
-import { PostHogService } from './services/posthog.service';
+import { AmplitudeService } from './services/amplitude.service';
 import { environment } from '../environments/environment';
 
 @Component({
@@ -226,15 +199,11 @@ import { environment } from '../environments/environment';
 })
 export class AppComponent implements OnInit {
   private readonly platformId = inject(PLATFORM_ID);
-  private readonly posthogService = inject(PostHogService);
+  private readonly amplitudeService = inject(AmplitudeService);
 
   ngOnInit(): void {
     if (isPlatformBrowser(this.platformId)) {
-      this.posthogService.init(environment.posthogKey, {
-        api_host: '/ingest',
-        ui_host: environment.posthogHost || 'https://us.posthog.com',
-        capture_exceptions: true,
-      });
+      this.amplitudeService.init(environment.amplitudeApiKey);
     }
   }
 }
@@ -429,7 +398,7 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
-import { PostHogService } from '../../services/posthog.service';
+import { AmplitudeService } from '../../services/amplitude.service';
 
 @Component({
   selector: 'app-burrito',
@@ -463,7 +432,7 @@ import { PostHogService } from '../../services/posthog.service';
 })
 export class BurritoComponent {
   readonly auth = inject(AuthService);
-  private readonly posthogService = inject(PostHogService);
+  private readonly amplitudeService = inject(AmplitudeService);
   private readonly router = inject(Router);
 
   hasConsidered = signal(false);
@@ -483,7 +452,7 @@ export class BurritoComponent {
     this.hasConsidered.set(true);
     setTimeout(() => this.hasConsidered.set(false), 2000);
 
-    this.posthogService.posthog.capture('burrito_considered', {
+    this.amplitudeService.amplitude.track('burrito_considered', {
       total_considerations: user.burritoConsiderations + 1,
       username: user.username,
     });
@@ -609,7 +578,6 @@ import {
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { AuthService } from '../../services/auth.service';
-import { PostHogService } from '../../services/posthog.service';
 
 @Component({
   selector: 'app-profile',
@@ -628,16 +596,6 @@ import { PostHogService } from '../../services/posthog.service';
         </div>
 
         <div style="margin-top: 2rem">
-          <button
-            (click)="triggerTestError()"
-            class="btn-primary"
-            style="background-color: #dc3545"
-          >
-            Trigger Test Error (for PostHog)
-          </button>
-        </div>
-
-        <div style="margin-top: 2rem">
           <h3>Your Burrito Journey</h3>
           <p>{{ journeyMessage() }}</p>
         </div>
@@ -648,7 +606,6 @@ import { PostHogService } from '../../services/posthog.service';
 })
 export class ProfileComponent {
   readonly auth = inject(AuthService);
-  private readonly posthogService = inject(PostHogService);
   private readonly router = inject(Router);
 
   journeyMessage = computed(() => {
@@ -672,19 +629,42 @@ export class ProfileComponent {
       this.router.navigate(['/']);
     }
   }
+}
 
-  triggerTestError(): void {
-    try {
-      throw new Error('Test error for PostHog error tracking');
-    } catch (err) {
-      const error = err as Error;
-      this.posthogService.posthog.capture('$exception', {
-        $exception_message: error.message,
-        $exception_type: error.name,
-        $exception_stack_trace_raw: error.stack,
-      });
-      console.error('Captured error:', err);
-      alert('Error captured and sent to PostHog!');
+```
+
+---
+
+## src/app/services/amplitude.service.ts
+
+```ts
+import { Injectable, inject, PLATFORM_ID } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
+import * as amplitude from '@amplitude/analytics-browser';
+
+@Injectable({ providedIn: 'root' })
+export class AmplitudeService {
+  private readonly platformId = inject(PLATFORM_ID);
+  private initialized = false;
+
+  /**
+   * The amplitude instance. Use this directly to call amplitude methods.
+   * Returns the actual amplitude instance on browser, or a no-op proxy on server.
+   */
+  get amplitude(): typeof amplitude {
+    if (isPlatformBrowser(this.platformId) && this.initialized) {
+      return amplitude;
+    }
+    // Return a no-op proxy for SSR safety
+    return new Proxy({} as typeof amplitude, {
+      get: () => () => undefined,
+    });
+  }
+
+  init(apiKey: string): void {
+    if (isPlatformBrowser(this.platformId) && !this.initialized) {
+      amplitude.init(apiKey);
+      this.initialized = true;
     }
   }
 }
@@ -704,7 +684,8 @@ import {
   PLATFORM_ID,
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
-import { PostHogService } from './posthog.service';
+import { AmplitudeService } from './amplitude.service';
+import { Identify } from '@amplitude/analytics-browser';
 
 export interface User {
   username: string;
@@ -714,7 +695,7 @@ export interface User {
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private readonly platformId = inject(PLATFORM_ID);
-  private readonly posthogService = inject(PostHogService);
+  private readonly amplitudeService = inject(AmplitudeService);
 
   // In-memory user store (matches TanStack behavior)
   private readonly users = new Map<string, User>();
@@ -759,13 +740,14 @@ export class AuthService {
       localStorage.setItem('currentUser', username);
     }
 
-    // PostHog identification (client-side only)
-    this.posthogService.posthog.identify(username, {
-      username,
-      isNewUser,
-    });
+    // Amplitude identification (client-side only)
+    this.amplitudeService.amplitude.setUserId(username);
+    const identifyObj = new Identify();
+    identifyObj.set('username', username);
+    identifyObj.set('isNewUser', isNewUser);
+    this.amplitudeService.amplitude.identify(identifyObj);
 
-    this.posthogService.posthog.capture('user_logged_in', {
+    this.amplitudeService.amplitude.track('user_logged_in', {
       username,
       isNewUser,
     });
@@ -774,8 +756,8 @@ export class AuthService {
   }
 
   logout(): void {
-    this.posthogService.posthog.capture('user_logged_out');
-    this.posthogService.posthog.reset();
+    this.amplitudeService.amplitude.track('user_logged_out');
+    this.amplitudeService.amplitude.reset();
 
     this._user.set(null);
 
@@ -801,52 +783,13 @@ export class AuthService {
 
 ---
 
-## src/app/services/posthog.service.ts
-
-```ts
-import { Injectable, inject, PLATFORM_ID } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
-import posthog, { PostHogConfig } from 'posthog-js';
-
-@Injectable({ providedIn: 'root' })
-export class PostHogService {
-  private readonly platformId = inject(PLATFORM_ID);
-  private initialized = false;
-
-  /**
-   * The posthog instance. Use this directly to call posthog methods.
-   * Returns the actual posthog instance on browser, or a no-op proxy on server.
-   */
-  get posthog(): typeof posthog {
-    if (isPlatformBrowser(this.platformId) && this.initialized) {
-      return posthog;
-    }
-    // Return a no-op proxy for SSR safety
-    return new Proxy({} as typeof posthog, {
-      get: () => () => undefined,
-    });
-  }
-
-  init(apiKey: string, options: Partial<PostHogConfig>): void {
-    if (isPlatformBrowser(this.platformId) && !this.initialized) {
-      posthog.init(apiKey, options);
-      this.initialized = true;
-    }
-  }
-}
-
-```
-
----
-
 ## src/env.d.ts
 
 ```ts
 // Define the type of the environment variables.
 declare interface Env {
   readonly NODE_ENV: string;
-  readonly NG_APP_POSTHOG_PROJECT_TOKEN: string;
-  readonly NG_APP_POSTHOG_HOST: string;
+  readonly NG_APP_AMPLITUDE_API_KEY: string;
 }
 
 // Use import.meta.env.YOUR_ENV_VAR in your code.
@@ -863,8 +806,7 @@ declare interface ImportMeta {
 ```ts
 export const environment = {
   production: true,
-  posthogKey: import.meta.env['NG_APP_POSTHOG_PROJECT_TOKEN'] || '<ph_project_token>',
-  posthogHost: import.meta.env['NG_APP_POSTHOG_HOST'] || 'https://us.posthog.com',
+  amplitudeApiKey: import.meta.env['NG_APP_AMPLITUDE_API_KEY'] || '',
 };
 
 ```
@@ -876,8 +818,7 @@ export const environment = {
 ```ts
 export const environment = {
   production: true,
-  posthogKey: import.meta.env['NG_APP_POSTHOG_PROJECT_TOKEN'] || '<ph_project_token>',
-  posthogHost: import.meta.env['NG_APP_POSTHOG_HOST'] || 'https://us.posthog.com',
+  amplitudeApiKey: import.meta.env['NG_APP_AMPLITUDE_API_KEY'] || '',
 };
 
 ```
@@ -889,8 +830,7 @@ export const environment = {
 ```ts
 export const environment = {
   production: false,
-  posthogKey: import.meta.env['NG_APP_POSTHOG_PROJECT_TOKEN'] || '<ph_project_token>',
-  posthogHost: import.meta.env['NG_APP_POSTHOG_HOST'] || 'https://us.posthog.com',
+  amplitudeApiKey: import.meta.env['NG_APP_AMPLITUDE_API_KEY'] || '',
 };
 
 ```
