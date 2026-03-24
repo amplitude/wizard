@@ -56,7 +56,7 @@ export interface SDKMessage {
   errors?: string[];
   model?: string;
   tools?: unknown[];
-  mcp_servers?: unknown[];
+  mcp_servers?: { name: string; status: string }[];
   usage?: SDKUsage;
   total_cost_usd?: number;
   num_turns?: number;

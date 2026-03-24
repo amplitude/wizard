@@ -10,8 +10,9 @@ import type { WizardSession } from '../../lib/wizard-session.js';
 export const COMMANDS = [
   { cmd: '/region', desc: 'Switch data-center region (US or EU)' },
   { cmd: '/login', desc: 'Re-authenticate' },
-  { cmd: '/logout', desc: 'Clear credentials' },
+  { cmd: '/logout', desc: 'Clear stored credentials' },
   { cmd: '/whoami', desc: 'Show current user, org, and project' },
+  { cmd: '/mcp', desc: 'Install or remove the Amplitude MCP server' },
   { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
   { cmd: '/test', desc: 'Run a prompt-skill demo (confirm + choose)' },
   { cmd: '/snake', desc: 'Play Snake' },

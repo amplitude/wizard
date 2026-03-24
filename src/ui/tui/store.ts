@@ -303,6 +303,30 @@ export class WizardStore {
     this.popOverlay();
   }
 
+  showMcpOverlay(): void {
+    this.pushOverlay(Overlay.Mcp);
+  }
+
+  hideMcpOverlay(): void {
+    this.popOverlay();
+  }
+
+  showSlackOverlay(): void {
+    this.pushOverlay(Overlay.Slack);
+  }
+
+  hideSlackOverlay(): void {
+    this.popOverlay();
+  }
+
+  showLogoutOverlay(): void {
+    this.pushOverlay(Overlay.Logout);
+  }
+
+  hideLogoutOverlay(): void {
+    this.popOverlay();
+  }
+
   /** Request the TabContainer to switch to a tab by id. Clears after consumption. */
   setRequestedTab(id: string): void {
     this.$requestedTab.set(id);

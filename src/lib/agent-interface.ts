@@ -1334,11 +1334,21 @@ function handleSDKMessage(
 
     case 'system': {
       if (message.subtype === 'init') {
+        const mcpStatuses = message.mcp_servers ?? [];
         logToFile('Agent session initialized', {
           model: message.model,
           tools: message.tools?.length,
-          mcpServers: message.mcp_servers,
+          mcpServers: mcpStatuses,
         });
+
+        for (const server of mcpStatuses) {
+          logToFile(`MCP "${server.name}": ${server.status}`);
+          if (server.status !== 'connected') {
+            getUI().log.warn(
+              `MCP server "${server.name}" is not connected (${server.status})`,
+            );
+          }
+        }
       }
       break;
     }

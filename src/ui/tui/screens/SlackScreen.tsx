@@ -25,6 +25,8 @@ interface SlackScreenProps {
   store: WizardStore;
   /** When true, exit the process after completion instead of routing to outro. */
   standalone?: boolean;
+  /** When provided, called on completion instead of setSlackComplete (overlay mode). */
+  onComplete?: () => void;
 }
 
 enum Phase {
@@ -54,16 +56,22 @@ const markDone = (
   store: WizardStore,
   outcome: SlackOutcome,
   standalone: boolean,
+  onComplete?: () => void,
 ) => {
-  store.setSlackComplete(outcome);
-  if (standalone) {
-    process.exit(0);
+  if (onComplete) {
+    onComplete();
+  } else {
+    store.setSlackComplete(outcome);
+    if (standalone) {
+      process.exit(0);
+    }
   }
 };
 
 export const SlackScreen = ({
   store,
   standalone = false,
+  onComplete,
 }: SlackScreenProps) => {
   useSyncExternalStore(
     (cb) => store.subscribe(cb),
@@ -132,13 +140,13 @@ export const SlackScreen = ({
   };
 
   const handleSkip = () => {
-    markDone(store, SlackOutcome.Skipped, standalone);
+    markDone(store, SlackOutcome.Skipped, standalone, onComplete);
   };
 
   const handleDone = () => {
     setPhase(Phase.Done);
     setTimeout(
-      () => markDone(store, SlackOutcome.Configured, standalone),
+      () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
       1500,
     );
   };

@@ -27,6 +27,8 @@ interface McpScreenProps {
   mode?: McpMode;
   /** When true, exit the process after completion instead of routing to outro. */
   standalone?: boolean;
+  /** When provided, called on completion instead of setMcpComplete (overlay mode). */
+  onComplete?: () => void;
 }
 
 enum Phase {
@@ -43,10 +45,15 @@ const markDone = (
   outcome: McpOutcome,
   clients: string[] = [],
   standalone = false,
+  onComplete?: () => void,
 ) => {
-  store.setMcpComplete(outcome, clients);
-  if (standalone) {
-    process.exit(0);
+  if (onComplete) {
+    onComplete();
+  } else {
+    store.setMcpComplete(outcome, clients);
+    if (standalone) {
+      process.exit(0);
+    }
   }
 };
 
@@ -55,6 +62,7 @@ export const McpScreen = ({
   installer,
   mode = 'install',
   standalone = false,
+  onComplete,
 }: McpScreenProps) => {
   useSyncExternalStore(
     (cb) => store.subscribe(cb),
@@ -76,7 +84,8 @@ export const McpScreen = ({
         if (detected.length === 0) {
           setPhase(Phase.None);
           setTimeout(
-            () => markDone(store, McpOutcome.NoClients, [], standalone),
+            () =>
+              markDone(store, McpOutcome.NoClients, [], standalone, onComplete),
             1500,
           );
         } else {
@@ -86,7 +95,7 @@ export const McpScreen = ({
       } catch {
         setPhase(Phase.None);
         setTimeout(
-          () => markDone(store, McpOutcome.Failed, [], standalone),
+          () => markDone(store, McpOutcome.Failed, [], standalone, onComplete),
           1500,
         );
       }
@@ -104,7 +113,7 @@ export const McpScreen = ({
   };
 
   const handleSkip = () => {
-    markDone(store, McpOutcome.Skipped, [], standalone);
+    markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
   const doInstall = async (names: string[]) => {
@@ -119,7 +128,10 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    setTimeout(() => markDone(store, outcome, result, standalone), 2000);
+    setTimeout(
+      () => markDone(store, outcome, result, standalone, onComplete),
+      2000,
+    );
   };
 
   const doRemove = async () => {
@@ -134,7 +146,10 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    setTimeout(() => markDone(store, outcome, result, standalone), 2000);
+    setTimeout(
+      () => markDone(store, outcome, result, standalone, onComplete),
+      2000,
+    );
   };
 
   return (
@@ -195,6 +210,7 @@ export const McpScreen = ({
             mode="multi"
             onSelect={(selected) => {
               const names = Array.isArray(selected) ? selected : [selected];
+              if (names.length === 0) return;
               void doInstall(names);
             }}
           />

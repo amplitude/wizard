@@ -18,11 +18,6 @@ import { useState, useSyncExternalStore } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
-import opn from 'opn';
-import { getCloudUrlFromRegion } from '../../../utils/urls.js';
-import { slackSettingsUrl } from '../screens/SlackScreen.js';
-import { fetchAmplitudeUser } from '../../../lib/api.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
 import { SlashCommandInput } from '../primitives/SlashCommandInput.js';
 import { PickerMenu } from '../primitives/PickerMenu.js';
 import { Colors, Icons } from '../styles.js';
@@ -53,42 +48,19 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       );
       break;
     case '/logout':
-      store.setCommandFeedback(
-        'Use `amplitude-wizard logout` from a new terminal to log out.',
-      );
+      store.showLogoutOverlay();
       break;
     case '/whoami':
       store.setCommandFeedback(getWhoamiText(store.session));
       break;
-    case '/slack': {
-      const region = store.session.region ?? 'us';
-      const base = getCloudUrlFromRegion(region);
-      const appName = region === 'eu' ? 'Amplitude - EU' : 'Amplitude';
-      const open = (orgName: string | null) => {
-        const url = slackSettingsUrl(base, orgName);
-        opn(url, { wait: false }).catch(() => {
-          /* fire-and-forget */
-        });
-        store.setCommandFeedback(
-          `Opening Amplitude Settings → connect the "${appName}" Slack app.`,
-        );
-      };
-      if (store.session.selectedOrgName) {
-        open(store.session.selectedOrgName);
-      } else if (store.session.credentials) {
-        void fetchAmplitudeUser(
-          store.session.credentials.accessToken,
-          region as AmplitudeZone,
-        )
-          .then((info) => open(info.orgs[0]?.name ?? null))
-          .catch(() => open(null));
-      } else {
-        open(null);
-      }
+    case '/slack':
+      store.showSlackOverlay();
       break;
-    }
     case '/test':
       return TEST_PROMPT;
+    case '/mcp':
+      store.showMcpOverlay();
+      break;
     case '/snake':
       store.showSnakeOverlay();
       break;

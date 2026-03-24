@@ -27,6 +27,9 @@ export enum Overlay {
   Outage = 'outage',
   SettingsOverride = 'settings-override',
   Snake = 'snake',
+  Mcp = 'mcp-overlay',
+  Slack = 'slack-overlay',
+  Logout = 'logout-overlay',
 }
 
 /** Union of all screen names */

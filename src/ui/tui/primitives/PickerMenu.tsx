@@ -318,7 +318,13 @@ const MultiPickerMenu = <T,>({
     }
     if (key.return) {
       const values = [...selected].sort().map((i) => options[i].value);
-      onSelect(values);
+      if (values.length === 0) {
+        // Nothing toggled — fall back to the focused item so Enter always submits
+        const focusedOpt = options[focused];
+        if (focusedOpt) onSelect([focusedOpt.value]);
+      } else {
+        onSelect(values);
+      }
     }
   });
 

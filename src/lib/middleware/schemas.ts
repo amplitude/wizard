@@ -77,7 +77,9 @@ export const sdkMessageSchema: z.ZodType<SDKMessage> = z
     errors: z.array(z.string()).optional(),
     model: z.string().optional(),
     tools: z.array(z.unknown()).optional(),
-    mcp_servers: z.array(z.unknown()).optional(),
+    mcp_servers: z
+      .array(z.object({ name: z.string(), status: z.string() }))
+      .optional(),
     usage: sdkUsageSchema.optional(),
     total_cost_usd: z.number().optional(),
     num_turns: z.number().optional(),

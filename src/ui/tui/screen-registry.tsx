@@ -24,6 +24,7 @@ import { ActivationOptionsScreen } from './screens/ActivationOptionsScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
 import { SlackScreen } from './screens/SlackScreen.js';
+import { LogoutScreen } from './screens/LogoutScreen.js';
 import { OutroScreen } from './screens/OutroScreen.js';
 import { createMcpInstaller } from './services/mcp-installer.js';
 import type { McpInstaller } from './services/mcp-installer.js';
@@ -48,6 +49,19 @@ export function createScreens(
     [Overlay.Outage]: <OutageScreen store={store} />,
     [Overlay.SettingsOverride]: <SettingsOverrideScreen store={store} />,
     [Overlay.Snake]: <SnakeGame onExit={() => store.hideSnakeOverlay()} />,
+    [Overlay.Mcp]: (
+      <McpScreen
+        store={store}
+        installer={services.mcpInstaller}
+        onComplete={() => store.hideMcpOverlay()}
+      />
+    ),
+    [Overlay.Slack]: (
+      <SlackScreen store={store} onComplete={() => store.hideSlackOverlay()} />
+    ),
+    [Overlay.Logout]: (
+      <LogoutScreen onComplete={() => store.hideLogoutOverlay()} />
+    ),
 
     // Wizard flow
     [Screen.Intro]: <IntroScreen store={store} />,
