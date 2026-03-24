@@ -1062,13 +1062,13 @@ export async function runAgent(
       '.amplitude-events.json',
     );
     const eventPlanSchema = z.array(
-      z
-        .object({
-          name: z.string().optional(),
-          event: z.string().optional(),
-          description: z.string().optional(),
-        })
-        .passthrough(),
+      z.looseObject({
+        name: z.string().optional(),
+        event: z.string().optional(),
+        eventName: z.string().optional(),
+        description: z.string().optional(),
+        eventDescriptionAndReasoning: z.string().optional(),
+      }),
     );
     const readEventPlan = () => {
       try {
@@ -1077,8 +1077,9 @@ export async function runAgent(
         if (result.success) {
           getUI().setEventPlan(
             result.data.map((e) => ({
-              name: e.name ?? e.event ?? '',
-              description: e.description ?? '',
+              name: e.name ?? e.event ?? e.eventName ?? '',
+              description:
+                e.description ?? e.eventDescriptionAndReasoning ?? '',
             })),
           );
         }
