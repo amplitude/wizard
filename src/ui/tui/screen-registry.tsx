@@ -25,6 +25,7 @@ import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
 import { SlackScreen } from './screens/SlackScreen.js';
 import { LogoutScreen } from './screens/LogoutScreen.js';
+import { LoginScreen } from './screens/LoginScreen.js';
 import { OutroScreen } from './screens/OutroScreen.js';
 import { createMcpInstaller } from './services/mcp-installer.js';
 import type { McpInstaller } from './services/mcp-installer.js';
@@ -61,6 +62,9 @@ export function createScreens(
     ),
     [Overlay.Logout]: (
       <LogoutScreen onComplete={() => store.hideLogoutOverlay()} />
+    ),
+    [Overlay.Login]: (
+      <LoginScreen store={store} onComplete={() => store.hideLoginOverlay()} />
     ),
 
     // Wizard flow

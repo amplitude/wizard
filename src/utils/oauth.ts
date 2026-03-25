@@ -357,6 +357,38 @@ export async function performAmplitudeAuth(options: {
   }
 }
 
+/**
+ * Exchanges a stored refresh token for a new access token.
+ * Uses the same /oauth2/token endpoint as the initial auth-code exchange.
+ */
+export async function refreshAccessToken(
+  refreshToken: string,
+  zone: AmplitudeZone = DEFAULT_AMPLITUDE_ZONE,
+): Promise<{
+  accessToken: string;
+  idToken: string;
+  refreshToken: string;
+  expiresAt: string;
+}> {
+  const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const response = await axios.post(
+    `${oAuthHost}/oauth2/token`,
+    new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
+      client_id: oAuthClientId,
+    }).toString(),
+    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+  );
+  const parsed = OAuthTokenResponseSchema.parse(response.data);
+  return {
+    accessToken: parsed.access_token,
+    idToken: parsed.id_token,
+    refreshToken: parsed.refresh_token,
+    expiresAt: new Date(Date.now() + parsed.expires_in * 1000).toISOString(),
+  };
+}
+
 // ── Legacy shim — keeps existing callers compiling ───────────────────
 
 export type OAuthConfig = { scopes: string[]; signup?: boolean };

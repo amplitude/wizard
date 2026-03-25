@@ -30,6 +30,7 @@ export enum Overlay {
   Mcp = 'mcp-overlay',
   Slack = 'slack-overlay',
   Logout = 'logout-overlay',
+  Login = 'login-overlay',
 }
 
 /** Union of all screen names */

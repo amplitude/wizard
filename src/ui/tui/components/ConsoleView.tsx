@@ -43,9 +43,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       store.setRegionForced();
       break;
     case '/login':
-      store.setCommandFeedback(
-        'Re-authentication not yet available from within the wizard.',
-      );
+      store.showLoginOverlay();
       break;
     case '/logout':
       store.showLogoutOverlay();

@@ -327,6 +327,22 @@ export class WizardStore {
     this.popOverlay();
   }
 
+  showLoginOverlay(): void {
+    this.pushOverlay(Overlay.Login);
+  }
+
+  hideLoginOverlay(): void {
+    this.popOverlay();
+  }
+
+  /** Update just the access token in credentials without triggering auth analytics. */
+  updateAccessToken(accessToken: string): void {
+    const creds = this.$session.get().credentials;
+    if (!creds) return;
+    this.$session.setKey('credentials', { ...creds, accessToken });
+    this.$version.set(this.$version.get() + 1);
+  }
+
   /** Request the TabContainer to switch to a tab by id. Clears after consumption. */
   setRequestedTab(id: string): void {
     this.$requestedTab.set(id);
