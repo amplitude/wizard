@@ -22,6 +22,7 @@ export enum Screen {
   DataSetup = 'data-setup',
   Options = 'options',
   ActivationOptions = 'activation-options',
+  Plan = 'plan',
   Run = 'run',
   Mcp = 'mcp',
   Slack = 'slack',
@@ -107,7 +108,8 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: needsSetup,
       isComplete: (s) => !needsSetup(s),
     },
-    // 5. Agent run
+    // 5. Agent run — installs SDK, then calls confirm_event_plan tool for plan approval,
+    //    then instruments events based on approved plan.
     {
       screen: Screen.Run,
       isComplete: (s) =>

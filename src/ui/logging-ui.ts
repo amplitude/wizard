@@ -3,7 +3,12 @@
  * No prompts, no TUI, no interactivity. Just console output.
  */
 
-import { TaskStatus, type WizardUI, type SpinnerHandle } from './wizard-ui';
+import {
+  TaskStatus,
+  type WizardUI,
+  type SpinnerHandle,
+  type EventPlanDecision,
+} from './wizard-ui';
 
 export class LoggingUI implements WizardUI {
   intro(message: string): void {
@@ -165,6 +170,16 @@ export class LoggingUI implements WizardUI {
     console.log(`?  ${message} (auto-skipped in CI)`);
     console.log(`│  Options: ${options.join(', ')}`);
     return Promise.resolve('');
+  }
+
+  promptEventPlan(
+    events: Array<{ name: string; description: string }>,
+  ): Promise<EventPlanDecision> {
+    console.log(`?  Instrumentation plan (auto-approved in CI):`);
+    for (const e of events) {
+      console.log(`│  - ${e.name}: ${e.description}`);
+    }
+    return Promise.resolve({ decision: 'approved' });
   }
 
   syncTodos(

@@ -8,6 +8,11 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
+/** Result returned by the confirm_event_plan tool to the agent. */
+export type EventPlanDecision =
+  | { decision: 'approved' | 'skipped' }
+  | { decision: 'revised'; feedback: string };
+
 export enum TaskStatus {
   Pending = 'pending',
   InProgress = 'in_progress',
@@ -98,11 +103,20 @@ export interface WizardUI {
    */
   setProjectHasData(value: boolean): void;
 
-  // ── Agent prompts (confirmation / multiple choice) ────────────────
+  // ── Agent prompts (confirmation / multiple choice / event plan) ─────
   /** Show a yes/no confirmation. Resolves false if the user skips. */
   promptConfirm(message: string): Promise<boolean>;
   /** Show a multiple-choice selector. Resolves empty string if the user skips. */
   promptChoice(message: string, options: string[]): Promise<string>;
+  /**
+   * Show the instrumentation plan for user approval.
+   * Called by the confirm_event_plan wizard tool AFTER the SDK is installed.
+   * The agent shows proposed events; the user can approve, skip, or give feedback.
+   * Feedback causes the agent to revise and call this again (feedback loop).
+   */
+  promptEventPlan(
+    events: Array<{ name: string; description: string }>,
+  ): Promise<EventPlanDecision>;
 
   // ── Todo tracking from SDK TodoWrite events ───────────────────────
   syncTodos(

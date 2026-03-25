@@ -14,7 +14,7 @@
 
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
-import { useState, useSyncExternalStore } from 'react';
+import { useState, useEffect, useSyncExternalStore } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
@@ -93,6 +93,13 @@ export const ConsoleView = ({
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState<ConversationTurn[]>([]);
 
+  // Event plan prompt local state
+  const [planInputMode, setPlanInputMode] = useState<'options' | 'feedback'>(
+    'options',
+  );
+  const [planFeedbackText, setPlanFeedbackText] = useState('');
+  const [planCursorVisible, setPlanCursorVisible] = useState(true);
+
   useSyncExternalStore(
     (cb) => store.subscribe(cb),
     () => store.getSnapshot(),
@@ -110,12 +117,21 @@ export const ConsoleView = ({
     store.setCommandMode(false);
   };
 
+  const feedback = store.commandFeedback;
+  const screenError = store.screenError;
+  const showResponse = loading || !!response;
+  const showFeedback = !showResponse && !!feedback;
+  const innerWidth = width - 2;
+  const separator = '─'.repeat(Math.max(0, innerWidth));
+  const responseIsLong = !!response && response.split('\n').length > 3;
+  const pendingPrompt = store.pendingPrompt;
+
   // Watch for activation keys while the input is dormant
   useInput(
     (char, key) => {
       // Escape or Q dismisses overlays: pending prompt (skip) or long response
       if (key.escape || char === 'q' || char === 'Q') {
-        if (pendingPrompt) {
+        if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
           return;
         }
@@ -168,14 +184,66 @@ export const ConsoleView = ({
       .finally(() => setLoading(false));
   };
 
-  const feedback = store.commandFeedback;
-  const screenError = store.screenError;
-  const showResponse = loading || !!response;
-  const showFeedback = !showResponse && !!feedback;
-  const innerWidth = width - 2;
-  const separator = '─'.repeat(Math.max(0, innerWidth));
-  const responseIsLong = !!response && response.split('\n').length > 3;
-  const pendingPrompt = store.pendingPrompt;
+  // Blinking cursor for event-plan feedback input
+  useEffect(() => {
+    if (planInputMode !== 'feedback') return;
+    const id = setInterval(() => setPlanCursorVisible((v) => !v), 530);
+    return () => clearInterval(id);
+  }, [planInputMode]);
+
+  // Reset plan input state when the prompt clears (agent got the answer)
+  useEffect(() => {
+    if (!pendingPrompt) {
+      setPlanInputMode('options');
+      setPlanFeedbackText('');
+    }
+  }, [pendingPrompt]);
+
+  // Keyboard handling for event-plan prompt
+  useInput(
+    (char, key) => {
+      if (!pendingPrompt || pendingPrompt.kind !== 'event-plan') return;
+
+      if (planInputMode === 'feedback') {
+        if (key.return) {
+          const text = planFeedbackText.trim();
+          if (text) {
+            store.resolveEventPlan({ decision: 'revised', feedback: text });
+            setPlanFeedbackText('');
+            setPlanInputMode('options');
+          }
+          return;
+        }
+        if (key.escape) {
+          setPlanInputMode('options');
+          setPlanFeedbackText('');
+          return;
+        }
+        if (key.backspace || key.delete) {
+          setPlanFeedbackText((v) => v.slice(0, -1));
+          return;
+        }
+        if (!key.ctrl && !key.meta && !key.tab && char) {
+          setPlanFeedbackText((v) => v + char);
+        }
+        return;
+      }
+
+      // options mode
+      const lc = char.toLowerCase();
+      if (lc === 'y' || key.return) {
+        store.resolveEventPlan({ decision: 'approved' });
+      } else if (lc === 's') {
+        store.resolveEventPlan({ decision: 'skipped' });
+      } else if (lc === 'f') {
+        setPlanInputMode('feedback');
+      }
+    },
+    {
+      isActive:
+        !inputActive && !!pendingPrompt && pendingPrompt.kind === 'event-plan',
+    },
+  );
 
   // Show the latest status message when an overlay is active — RunScreen's
   // own TabContainer handles this for the non-overlay case.
@@ -207,7 +275,7 @@ export const ConsoleView = ({
                 ]}
                 onSelect={(v) => store.resolvePrompt(v === 'yes')}
               />
-            ) : (
+            ) : pendingPrompt.kind === 'choice' ? (
               <PickerMenu
                 message={pendingPrompt.message}
                 options={pendingPrompt.options.map((o) => ({
@@ -216,8 +284,38 @@ export const ConsoleView = ({
                 }))}
                 onSelect={(v) => store.resolvePrompt(v as string)}
               />
+            ) : (
+              <Box flexDirection="column" gap={1}>
+                <Text color={Colors.primary} bold>
+                  Instrumentation Plan
+                </Text>
+                {pendingPrompt.events.map((e) => (
+                  <Box key={e.name} flexDirection="column">
+                    <Text color={Colors.accent} bold>
+                      {e.name}
+                    </Text>
+                    <Text color={Colors.muted}>{e.description}</Text>
+                  </Box>
+                ))}
+                {planInputMode === 'feedback' ? (
+                  <Box gap={1}>
+                    <Text color={Colors.muted}>Feedback: </Text>
+                    <Text>
+                      {planFeedbackText}
+                      {planCursorVisible ? '▎' : ' '}
+                    </Text>
+                    <Text color={Colors.muted}>[Enter] send [Esc] cancel</Text>
+                  </Box>
+                ) : (
+                  <Text color={Colors.muted}>
+                    [Y] approve [S] skip [F] give feedback
+                  </Text>
+                )}
+              </Box>
             )}
-            <Text color={Colors.muted}> [Q / Esc] skip</Text>
+            {pendingPrompt.kind !== 'event-plan' && (
+              <Text color={Colors.muted}> [Q / Esc] skip</Text>
+            )}
           </Box>
         ) : responseIsLong ? (
           <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>

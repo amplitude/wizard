@@ -220,6 +220,11 @@ export interface WizardSession {
   // Resolved framework config (set after integration is known)
   frameworkConfig: FrameworkConfig | null;
 
+  // Instrumentation plan (generated before agent run, confirmed by user)
+  instrumentationPlan: string | null;
+  planStatus: 'pending' | 'generating' | 'ready' | 'approved' | 'skipped';
+  planFeedback: string[];
+
   /**
    * True when the agent run was skipped because Amplitude was already
    * detected in the project via static analysis. Set in bin.ts before
@@ -296,5 +301,8 @@ export function buildSession(args: {
     additionalFeatureQueue: [],
     frameworkConfig: null,
     amplitudePreDetected: false,
+    instrumentationPlan: null,
+    planStatus: 'pending',
+    planFeedback: [],
   };
 }

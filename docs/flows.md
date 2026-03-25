@@ -77,9 +77,15 @@ flowchart TD
 
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
 
-    subgraph AGENT_RUN ["Agent Run"]
+    subgraph AGENT_RUN ["Agent Run (RunScreen)"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
-        AGENT --> FEATURES{Features discovered?}
+        AGENT --> SDK_INSTALL["1. Install SDK + add initialization code"]
+        SDK_INSTALL --> PLAN_TOOL["2. confirm_event_plan tool<br/>(present plan to user via ConsoleView overlay)"]
+        PLAN_TOOL --> PLAN_LOOP{User decision?}
+        PLAN_LOOP -->|feedback| PLAN_REVISE["Agent revises plan"] --> PLAN_TOOL
+        PLAN_LOOP -->|approve| INSTRUMENT["3. Instrument events with track() calls"]
+        PLAN_LOOP -->|skip| OUTCOME
+        INSTRUMENT --> FEATURES{Features discovered?}
         FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
         FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
         FEATURES -->|none| OUTCOME

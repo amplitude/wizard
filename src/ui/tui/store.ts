@@ -11,7 +11,7 @@
  */
 
 import { atom, map } from 'nanostores';
-import { TaskStatus } from '../wizard-ui.js';
+import { TaskStatus, type EventPlanDecision } from '../wizard-ui.js';
 import {
   type WizardSession,
   type OutroData,
@@ -62,6 +62,11 @@ export type PendingPrompt =
       message: string;
       options: string[];
       resolve: (value: string) => void;
+    }
+  | {
+      kind: 'event-plan';
+      events: PlannedEvent[];
+      resolve: (value: EventPlanDecision) => void;
     };
 
 export class WizardStore {
@@ -276,10 +281,10 @@ export class WizardStore {
     });
   }
 
-  /** Resolve the pending prompt with an answer and clear it. */
+  /** Resolve a confirm or choice pending prompt. */
   resolvePrompt(answer: boolean | string): void {
     const prompt = this.$pendingPrompt.get();
-    if (!prompt) return;
+    if (!prompt || prompt.kind === 'event-plan') return;
     this.$pendingPrompt.set(null);
     this.$version.set(this.$version.get() + 1);
     if (prompt.kind === 'confirm') {
@@ -287,6 +292,23 @@ export class WizardStore {
     } else {
       prompt.resolve(answer as string);
     }
+  }
+
+  /** Show an event-plan confirmation. Resolves when the user approves, skips, or gives feedback. */
+  promptEventPlan(events: PlannedEvent[]): Promise<EventPlanDecision> {
+    return new Promise((resolve) => {
+      this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
+      this.$version.set(this.$version.get() + 1);
+    });
+  }
+
+  /** Resolve the pending event-plan prompt. */
+  resolveEventPlan(decision: EventPlanDecision): void {
+    const prompt = this.$pendingPrompt.get();
+    if (!prompt || prompt.kind !== 'event-plan') return;
+    this.$pendingPrompt.set(null);
+    this.$version.set(this.$version.get() + 1);
+    prompt.resolve(decision);
   }
 
   /** Enter or exit slash command mode. */
@@ -497,6 +519,46 @@ export class WizardStore {
 
   setAmplitudePreDetected(): void {
     this.$session.setKey('amplitudePreDetected', true);
+    this.emitChange();
+  }
+
+  // ── Instrumentation plan ─────────────────────────────────────────
+
+  startPlanGeneration(): void {
+    this.$session.setKey('planStatus', 'generating');
+    this.emitChange();
+  }
+
+  setInstrumentationPlan(plan: string): void {
+    this.$session.setKey('instrumentationPlan', plan);
+    this.$session.setKey('planStatus', 'ready');
+    this.emitChange();
+  }
+
+  setPlanError(message: string): void {
+    // On error, store the error as the plan and let the user proceed or skip
+    this.$session.setKey('instrumentationPlan', message);
+    this.$session.setKey('planStatus', 'ready');
+    this.emitChange();
+  }
+
+  approvePlan(): void {
+    this.$session.setKey('planStatus', 'approved');
+    analytics.wizardCapture('plan approved', sessionProperties(this.session));
+    this.emitChange();
+  }
+
+  skipPlan(): void {
+    this.$session.setKey('planStatus', 'skipped');
+    analytics.wizardCapture('plan skipped', sessionProperties(this.session));
+    this.emitChange();
+  }
+
+  addPlanFeedback(feedback: string): void {
+    const existing = this.$session.get().planFeedback;
+    this.$session.setKey('planFeedback', [...existing, feedback]);
+    this.$session.setKey('planStatus', 'generating');
+    analytics.wizardCapture('plan feedback', sessionProperties(this.session));
     this.emitChange();
   }
 

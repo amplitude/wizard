@@ -6,7 +6,11 @@
  * The router derives the active screen from session state.
  */
 
-import type { WizardUI, SpinnerHandle } from '../wizard-ui.js';
+import type {
+  WizardUI,
+  SpinnerHandle,
+  EventPlanDecision,
+} from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
 import { Overlay } from './router.js';
 import { RunPhase, OutroKind } from '../../lib/wizard-session.js';
@@ -167,6 +171,12 @@ export class InkUI implements WizardUI {
 
   promptChoice(message: string, options: string[]): Promise<string> {
     return this.store.promptChoice(message, options);
+  }
+
+  promptEventPlan(
+    events: Array<{ name: string; description: string }>,
+  ): Promise<EventPlanDecision> {
+    return this.store.promptEventPlan(events);
   }
 
   syncTodos(

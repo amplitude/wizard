@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
+import type { EventPlanDecision } from '../ui/wizard-ui';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -621,6 +622,44 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
+  // -- confirm_event_plan ---------------------------------------------------
+
+  const confirmEventPlan = tool(
+    'confirm_event_plan',
+    `Present the proposed instrumentation plan to the user for review BEFORE instrumenting any events.
+Call this tool AFTER installing the SDK and adding initialization code, but BEFORE writing any track() calls.
+The user can approve the plan, skip the review, or give feedback.
+If the user gives feedback, revise your plan and call this tool again — loop until approved or skipped.
+Returns: "approved", "skipped", or "feedback: <user message>"`,
+    {
+      events: z
+        .array(
+          z.object({
+            name: z.string().describe('Event name, e.g. "Button Clicked"'),
+            description: z
+              .string()
+              .describe('When this event fires and what it tracks'),
+          }),
+        )
+        .min(1)
+        .describe('The list of events you plan to instrument'),
+    },
+    async (args: { events: Array<{ name: string; description: string }> }) => {
+      logToFile(`confirm_event_plan: ${args.events.length} events`);
+      const decision: EventPlanDecision = await getUI().promptEventPlan(
+        args.events,
+      );
+      let text: string;
+      if (decision.decision === 'revised') {
+        text = `feedback: ${decision.feedback}`;
+      } else {
+        text = decision.decision; // 'approved' or 'skipped'
+      }
+      logToFile(`confirm_event_plan result: ${text}`);
+      return { content: [{ type: 'text' as const, text }] };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   return createSdkMcpServer({
@@ -634,6 +673,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       installSkill,
       confirm,
       choose,
+      confirmEventPlan,
     ],
   });
 }
@@ -647,4 +687,5 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:install_skill`,
   `${SERVER_NAME}:confirm`,
   `${SERVER_NAME}:choose`,
+  `${SERVER_NAME}:confirm_event_plan`,
 ];
