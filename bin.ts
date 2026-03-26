@@ -49,6 +49,10 @@ import { runWizard } from './src/run';
 import { isNonInteractiveEnvironment } from './src/utils/environment';
 import { getUI, setUI } from './src/ui';
 import { LoggingUI } from './src/ui/logging-ui';
+import {
+  ZSH_COMPLETION_SCRIPT,
+  BASH_COMPLETION_SCRIPT,
+} from './src/utils/shell-completions';
 
 if (process.env.NODE_ENV === 'test') {
   void (async () => {
@@ -195,6 +199,12 @@ void yargs(hideBin(process.argv))
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
+          // Silently install shell completions on first run.
+          const { installCompletions } = await import(
+            './src/utils/shell-completions.js'
+          );
+          installCompletions();
+
           try {
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
             const { buildSession } = await import(
@@ -872,6 +882,18 @@ void yargs(hideBin(process.argv))
       .demandCommand(1, 'You must specify a subcommand (add or remove)')
       .help();
   })
+  .command(
+    'completion',
+    'Print shell completion script\n(add `eval "$(amplitude-wizard completion)"` to ~/.zshrc or ~/.bashrc)',
+    () => {},
+    () => {
+      const script = (process.env.SHELL ?? '').endsWith('zsh')
+        ? ZSH_COMPLETION_SCRIPT
+        : BASH_COMPLETION_SCRIPT;
+      process.stdout.write(script + '\n');
+      process.exit(0);
+    },
+  )
   .help()
   .alias('help', 'h')
   .version()

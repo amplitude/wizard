@@ -20,9 +20,13 @@
   "publishConfig": {
     "access": "public"
   },
+  "man": [
+    "man/amplitude-wizard.1"
+  ],
   "files": [
     "dist/bin.*",
     "dist/src",
+    "man/",
     "package.json",
     "README.md"
   ],
