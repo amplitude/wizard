@@ -57,24 +57,67 @@ Feature: Wizard flow
     When I select the "EU" region
     Then the data check should re-run for the new region
 
-  Scenario: Returning user with credentials and existing data — options menu
+  Scenario: Returning user with credentials and existing data — goes to MCP then checklist
     Given I have valid credentials stored in "~/.ampli.json"
     And the current project has existing data
     And my region is already set to "us"
     When the wizard launches
     And I continue past the intro
-    Then I should see options to open overview, chart, dashboard, taxonomy agent, or switch project
+    Then I should be on the MCP screen
 
-  @todo
-  Scenario: Returning user with existing data gets MCP setup then Slack setup after selecting an option
+  Scenario: User with existing data (full activation) skips agent run — goes straight to MCP
     Given I have valid credentials stored in "~/.ampli.json"
     And the current project has existing data
-    When I select an option from the options menu
-    Then I should be taken to MCP setup
-    When MCP setup is complete
+    And my region is already set to "us"
+    When the wizard launches
+    And I continue past the intro
+    Then I should be on the MCP screen
+
+  Scenario: After MCP, wizard waits for data ingestion then shows checklist
+    Given I have reached the RunScreen
+    When the Claude agent completes successfully
+    And MCP setup is complete
+    Then I should be on the DataIngestionCheck screen
+    When events are detected in the project
+    Then I should be on the Checklist screen
+
+  Scenario: Full-activation user passes DataIngestionCheck immediately
+    Given I have valid credentials stored in "~/.ampli.json"
+    And the current project has existing data
+    And my region is already set to "us"
+    When the wizard launches
+    And I continue past the intro
+    And MCP setup is complete
+    Then I should be on the Checklist screen
+
+  Scenario: User exits DataIngestionCheck and returns later
+    Given I am on the DataIngestionCheck screen
+    When I press "q" to exit
+    Then I should be taken to the Outro with a cancel state
+
+  Scenario: User creates first chart from checklist
+    Given I am on the Checklist screen
+    And the chart is not yet complete
+    When I select "Create your first chart"
+    Then the chart creation page should open in my browser
+    And the chart should be marked as complete
+
+  Scenario: Dashboard is locked until chart is complete
+    Given I am on the Checklist screen
+    And the chart is not yet complete
+    Then "Create your first dashboard" should be disabled
+
+  Scenario: User creates first dashboard after chart is complete
+    Given I am on the Checklist screen
+    And the chart is complete
+    When I select "Create your first dashboard"
+    Then the dashboard creation page should open in my browser
+    And the dashboard should be marked as complete
+
+  Scenario: User skips remaining checklist items and continues
+    Given I am on the Checklist screen
+    When I select "Skip remaining and continue"
     Then I should be on the Slack screen
-    When Slack setup is complete
-    Then I should be taken to the Outro
 
   Scenario: Run screen is shown before the agent starts
     Given I have reached the RunScreen

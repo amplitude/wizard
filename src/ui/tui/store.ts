@@ -402,6 +402,26 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setDataIngestionConfirmed(): void {
+    this.$session.setKey('dataIngestionConfirmed', true);
+    this.emitChange();
+  }
+
+  setChecklistChartComplete(): void {
+    this.$session.setKey('checklistChartComplete', true);
+    this.emitChange();
+  }
+
+  setChecklistDashboardComplete(): void {
+    this.$session.setKey('checklistDashboardComplete', true);
+    this.emitChange();
+  }
+
+  setChecklistComplete(): void {
+    this.$session.setKey('checklistComplete', true);
+    this.emitChange();
+  }
+
   setActivationOptionsComplete(): void {
     this.$session.setKey('activationOptionsComplete', true);
     this.emitChange();

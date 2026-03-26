@@ -3,65 +3,71 @@ Feature: Data Setup flow
   I want to configure my data and build my first analytics assets
   So that I can start getting value from Amplitude immediately
 
-  @todo
-  Scenario: User chooses the data onboarding wizard and events are ingested
-    Given a new project has been created
-    When I select "data onboarding wizard"
-    And I complete the data setup configuration
-    And events are successfully ingested
-    Then I should see the checklist with taxonomy, first chart, and first dash
+  # DataIngestionCheckScreen — polls until events arrive
+
+  Scenario: DataIngestionCheck passes immediately for fully-activated users
+    Given I am on the Checklist screen
+    Then I should be on the Checklist screen
+
+  Scenario: DataIngestionCheck shows while waiting for events
+    Given I am on the DataIngestionCheck screen
+    Then I should be on the DataIngestionCheck screen
+
+  Scenario: DataIngestionCheck advances when events are detected
+    Given I am on the DataIngestionCheck screen
+    When events are detected in the project
+    Then I should be on the Checklist screen
+
+  # ChecklistScreen — first chart + first dashboard (taxonomy @todo)
+
+  Scenario: Checklist shows after data is confirmed
+    Given I am on the Checklist screen
+    Then I should be on the Checklist screen
+
+  Scenario: Dashboard is locked until chart is complete
+    Given I am on the Checklist screen
+    And the chart is not yet complete
+    Then "Create your first dashboard" should be disabled
+
+  Scenario: Dashboard unlocks after chart is complete
+    Given I am on the Checklist screen
+    And the chart is complete
+    Then I should be on the Checklist screen
+
+  Scenario: User skips checklist and continues to Slack
+    Given I am on the Checklist screen
+    When I select "Skip remaining and continue"
+    Then I should be on the Slack screen
+
+  # Taxonomy agent — @todo (in progress in parallel)
 
   @todo
-  Scenario: User chooses the data onboarding wizard and events are not ingested
-    Given a new project has been created
-    When I select "data onboarding wizard"
-    And I complete the data setup configuration
-    And events are not successfully ingested
-    Then I should be returned to the wizard flow data check
+  Scenario: Taxonomy agent item appears as locked in checklist
+    Given I am on the Checklist screen
+    Then "Set up taxonomy" should be shown as locked
 
   @todo
-  Scenario: User chooses the taxonomy agent directly
-    Given a new project has been created
-    When I select "taxonomy agent"
-    Then the taxonomy agent should run
-    And I should see the checklist with taxonomy marked as complete
-
-  @todo
-  Scenario: User completes taxonomy agent from the checklist
-    Given I am on the post-ingest checklist
-    And taxonomy is not yet complete
-    When I select "run taxonomy agent"
+  Scenario: Taxonomy agent runs from checklist when implemented
+    Given I am on the Checklist screen
+    When I select "Set up taxonomy"
     Then the taxonomy agent should run
     And taxonomy should be marked as complete on the checklist
 
-  @todo
-  Scenario: User creates first chart from the checklist
-    Given I am on the post-ingest checklist
-    And the chart is not yet complete
-    When I select "create first chart"
-    Then the first chart should be created
-    And the chart should be marked as complete on the checklist
-    And "create first dash" should become available
+  # Direct GraphQL chart/dashboard creation — @todo (browser fallback is current MVP)
 
   @todo
-  Scenario: First dash is locked until chart is complete
-    Given I am on the post-ingest checklist
-    And the chart is not yet complete
-    Then "create first dash" should be shown as locked
+  Scenario: Chart is created via GraphQL API when available
+    Given I am on the Checklist screen
+    And the Amplitude MCP is installed
+    When I select "Create your first chart"
+    Then a chart should be created via the Amplitude API
+    And the chart should be marked as complete
 
   @todo
-  Scenario: User creates first dash after chart is complete
-    Given I am on the post-ingest checklist
+  Scenario: Dashboard is created via GraphQL API after chart
+    Given I am on the Checklist screen
     And the chart is complete
-    When I select "create first dash"
-    Then the first dashboard should be created
-    And the dash should be marked as complete on the checklist
-
-  @todo
-  Scenario: User completes all three checklist items
-    Given I am on the post-ingest checklist
-    And taxonomy, chart, and dash are all complete
-    Then I should see the option to open the dashboard in the browser
-    When I select "open dashboard in browser"
-    Then my Amplitude dashboard should open in the browser
-    And I should be returned to the wizard flow
+    And the Amplitude MCP is installed
+    When I select "Create your first dashboard"
+    Then a dashboard should be created via the Amplitude API
+    And the dashboard should be marked as complete

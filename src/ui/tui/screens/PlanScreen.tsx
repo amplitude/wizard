@@ -19,6 +19,7 @@ import { LoadingBox } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { generateInstrumentationPlan } from '../../../lib/plan-generator.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 
 interface PlanScreenProps {
   store: WizardStore;
@@ -45,10 +46,23 @@ export const PlanScreen = ({ store }: PlanScreenProps) => {
   const { planStatus, instrumentationPlan, planFeedback, frameworkConfig } =
     session;
 
+  const [, rows] = useStdoutDimensions();
+
   const [inputMode, setInputMode] = useState<InputMode>('options');
   const [focusedOption, setFocusedOption] = useState<OptionKey>('y');
   const [feedbackText, setFeedbackText] = useState('');
   const [cursorVisible, setCursorVisible] = useState(true);
+  const [scrollOffset, setScrollOffset] = useState(0);
+
+  // Rows consumed by PlanScreen chrome: paddingY + header + options bar
+  const CHROME_ROWS = 10;
+  const visibleLines = Math.max(5, rows - CHROME_ROWS);
+  const planLineCount = instrumentationPlan
+    ? instrumentationPlan.split('\n').length
+    : 0;
+  const maxScrollOffset = Math.max(0, planLineCount - visibleLines);
+  const isOverflowing = planLineCount > visibleLines;
+  const atBottom = scrollOffset >= maxScrollOffset;
 
   // Kick off plan generation whenever status is 'pending' or 'generating'
   useEffect(() => {
@@ -84,18 +98,31 @@ export const PlanScreen = ({ store }: PlanScreenProps) => {
     return () => clearInterval(id);
   }, [inputMode]);
 
-  // Reset input mode when plan is regenerated
+  // Reset input mode and scroll when plan is regenerated
   useEffect(() => {
     if (planStatus === 'ready') {
       setInputMode('options');
       setFeedbackText('');
+      setScrollOffset(0);
     }
   }, [planStatus]);
 
-  // Keyboard handling for options mode
+  // Keyboard handling for options mode (includes scroll)
   useScreenInput(
     (_char, key) => {
       if (inputMode !== 'options' || planStatus !== 'ready') return;
+
+      // Scroll up: up arrow, w, or Shift+Enter
+      if (key.upArrow || _char === 'w' || (key.shift && key.return)) {
+        setScrollOffset((o) => Math.max(0, o - 1));
+        return;
+      }
+
+      // Scroll down: down arrow, or s when content overflows and not at bottom
+      if (key.downArrow || (!atBottom && isOverflowing && _char === 's')) {
+        setScrollOffset((o) => Math.min(maxScrollOffset, o + 1));
+        return;
+      }
 
       if (key.leftArrow || key.rightArrow) {
         setFocusedOption((prev) => {
@@ -191,7 +218,19 @@ export const PlanScreen = ({ store }: PlanScreenProps) => {
       {/* Plan text */}
       {!isGenerating && instrumentationPlan && (
         <Box flexDirection="column" marginBottom={1}>
-          <PlanText text={instrumentationPlan} />
+          <PlanText
+            text={instrumentationPlan}
+            scrollOffset={scrollOffset}
+            maxLines={visibleLines}
+          />
+          {isOverflowing && (
+            <Text color={Colors.muted}>
+              {' '}
+              ↑↓ · w/s to scroll ·{' '}
+              {Math.min(scrollOffset + visibleLines, planLineCount)}/
+              {planLineCount} lines
+            </Text>
+          )}
         </Box>
       )}
 
@@ -203,6 +242,7 @@ export const PlanScreen = ({ store }: PlanScreenProps) => {
               options={OPTIONS}
               focused={focusedOption}
               onFocus={setFocusedOption}
+              isOverflowing={isOverflowing && !atBottom}
             />
           )}
 
@@ -215,9 +255,62 @@ export const PlanScreen = ({ store }: PlanScreenProps) => {
   );
 };
 
-/** Renders plan text line-by-line, styling markdown headers. */
-const PlanText = ({ text }: { text: string }) => {
-  const lines = text.split('\n');
+/** Renders inline text, converting **bold** spans to bold Text nodes. */
+const InlineText = ({ text, color }: { text: string; color?: string }) => {
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return (
+            <Text key={i} bold color={color}>
+              {part.slice(2, -2)}
+            </Text>
+          );
+        }
+        return (
+          <Text key={i} color={color}>
+            {part}
+          </Text>
+        );
+      })}
+    </>
+  );
+};
+
+const NUMBERED_LIST_RE = /^(\d+)\. (.*)/;
+
+/** Renders plan text line-by-line, styling markdown headers and lists. */
+const PlanText = ({
+  text,
+  scrollOffset = 0,
+  maxLines,
+}: {
+  text: string;
+  scrollOffset?: number;
+  maxLines?: number;
+}) => {
+  const allLines = text.split('\n');
+
+  // Pre-pass: assign sequential numbers to consecutive numbered list items (over all lines)
+  let listCounter = 0;
+  const allNumbered: Array<{ seq: number; content: string } | null> =
+    allLines.map((line) => {
+      const m = NUMBERED_LIST_RE.exec(line);
+      if (m) {
+        listCounter += 1;
+        return { seq: listCounter, content: m[2] };
+      }
+      listCounter = 0;
+      return null;
+    });
+
+  // Slice to visible window
+  const end =
+    maxLines !== undefined ? scrollOffset + maxLines : allLines.length;
+  const lines = allLines.slice(scrollOffset, end);
+  const numbered = allNumbered.slice(scrollOffset, end);
+
   return (
     <Box flexDirection="column">
       {lines.map((line, i) => {
@@ -241,7 +334,16 @@ const PlanText = ({ text }: { text: string }) => {
           return (
             <Box key={i}>
               <Text color={Colors.muted}>{Icons.bullet} </Text>
-              <Text>{line.slice(2)}</Text>
+              <InlineText text={line.slice(2)} />
+            </Box>
+          );
+        }
+        const num = numbered[i];
+        if (num) {
+          return (
+            <Box key={i}>
+              <Text color={Colors.muted}>{num.seq}. </Text>
+              <InlineText text={num.content} />
             </Box>
           );
         }
@@ -250,7 +352,7 @@ const PlanText = ({ text }: { text: string }) => {
         }
         return (
           <Box key={i}>
-            <Text>{line}</Text>
+            <InlineText text={line} />
           </Box>
         );
       })}
@@ -262,12 +364,15 @@ interface OptionsBarProps {
   options: typeof OPTIONS;
   focused: OptionKey;
   onFocus: (key: OptionKey) => void;
+  isOverflowing?: boolean;
 }
 
-const OptionsBar = ({ options, focused }: OptionsBarProps) => (
+const OptionsBar = ({ options, focused, isOverflowing }: OptionsBarProps) => (
   <Box flexDirection="column">
     <Text color={Colors.muted}>
-      Use arrow keys or shortcuts, then press Enter
+      {isOverflowing
+        ? 'Scroll with ↑↓/w/s, then press Enter or shortcut to choose'
+        : 'Use ←/→ or shortcuts, then press Enter'}
     </Text>
     <Box gap={3} marginTop={1}>
       {options.map(({ key, label }) => {

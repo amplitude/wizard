@@ -69,16 +69,17 @@ flowchart TD
         SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
     end
 
-    AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
-    DATA_SETUP --> DATA_CHECK{Project has data?}
+    AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — sets activationLevel: none / partial / full)"]
+    DATA_SETUP --> DATA_CHECK{activationLevel?}
 
-    DATA_CHECK -->|partial activation| ACTIVATION_OPTIONS["ActivationOptionsScreen"]
-    DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch project"]
-    DATA_CHECK -->|no| SETUP_Q
+    DATA_CHECK -->|partial — SDK installed, few events| ACTIVATION_OPTIONS["ActivationOptionsScreen<br/>(help me test / I'm blocked / exit)"]
+    DATA_CHECK -->|full — 50+ events| MCP_SCREEN
+    DATA_CHECK -->|none — no SDK, no events| SETUP_Q
 
-    ACTIVATION_OPTIONS --> SETUP_Q{Unresolved setup questions?}
-    OPTIONS --> MCP_SCREEN
+    ACTIVATION_OPTIONS -->|test locally or blocked| SETUP_Q
+    ACTIVATION_OPTIONS -->|exit| OUTRO
 
+    SETUP_Q{Unresolved setup questions?}
     SETUP_Q -->|no| PLAN
     SETUP_Q -->|yes| SETUP["SetupScreen<br/>(per-framework questions)"]
     SETUP --> PLAN
@@ -101,9 +102,11 @@ flowchart TD
         OUTCOME -->|error| ERR["Set error state"]
     end
 
-    POST --> MCP_SCREEN["McpScreen<br/>(install MCP server — skipped on error)"]
+    POST --> MCP_SCREEN["McpScreen<br/>(install MCP server · skipped on error)"]
     ERR --> OUTRO["See: Outro flow"]
-    MCP_SCREEN --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
+    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls activation API every 30s · skipped on error)<br/>full users pass immediately · user can exit and resume later"]
+    DATA_INGESTION --> CHECKLIST["ChecklistScreen<br/>(first chart · first dashboard · taxonomy @todo)<br/>dashboard unlocks after chart · user can skip any item"]
+    CHECKLIST --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
     SLACK_SCREEN --> OUTRO
 
     SUSI -. overlay .-> OUTAGE["OutageScreen"]
@@ -175,10 +178,11 @@ flowchart TD
 
 ## Data Setup flow
 
-> **Not yet implemented.** The `DataSetupScreen` currently performs only an
-> activation gate (has the project ingested any events?). The full checklist
-> below — taxonomy agent, first chart, first dashboard — is planned but not
-> built. See `features/05-data-setup-flow.feature` for the target behaviour.
+> **Partially implemented.** `DataSetupScreen` sets `activationLevel`
+> (none / partial / full). `DataIngestionCheckScreen` polls until events arrive.
+> `ChecklistScreen` offers first chart and first dashboard via browser deep-links.
+> Taxonomy agent and direct GraphQL chart/dashboard creation are planned.
+> See `features/05-data-setup-flow.feature` for the full target behaviour.
 
 ```mermaid
 ---

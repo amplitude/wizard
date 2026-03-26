@@ -354,11 +354,30 @@ describe('WizardStore', () => {
       expect(store.currentScreen).toBe(Screen.Mcp);
     });
 
-    it('advances to slack after mcp completes', () => {
+    it('advances to data ingestion check after mcp completes', () => {
       const store = createStore();
       advanceToRun(store);
       store.setRunPhase(RunPhase.Completed);
       store.setMcpComplete();
+      expect(store.currentScreen).toBe(Screen.DataIngestionCheck);
+    });
+
+    it('advances to checklist after data ingestion confirmed', () => {
+      const store = createStore();
+      advanceToRun(store);
+      store.setRunPhase(RunPhase.Completed);
+      store.setMcpComplete();
+      store.setDataIngestionConfirmed();
+      expect(store.currentScreen).toBe(Screen.Checklist);
+    });
+
+    it('advances to slack after checklist completes', () => {
+      const store = createStore();
+      advanceToRun(store);
+      store.setRunPhase(RunPhase.Completed);
+      store.setMcpComplete();
+      store.setDataIngestionConfirmed();
+      store.setChecklistComplete();
       expect(store.currentScreen).toBe(Screen.Slack);
     });
 
@@ -367,6 +386,8 @@ describe('WizardStore', () => {
       advanceToRun(store);
       store.setRunPhase(RunPhase.Completed);
       store.setMcpComplete();
+      store.setDataIngestionConfirmed();
+      store.setChecklistComplete();
       store.setSlackComplete();
       expect(store.currentScreen).toBe(Screen.Outro);
     });
@@ -891,14 +912,22 @@ describe('WizardStore', () => {
 
       // Step 6: Complete MCP
       store.setMcpComplete();
+      expect(store.currentScreen).toBe(Screen.DataIngestionCheck);
+
+      // Step 7: Confirm data ingestion
+      store.setDataIngestionConfirmed();
+      expect(store.currentScreen).toBe(Screen.Checklist);
+
+      // Step 8: Complete checklist
+      store.setChecklistComplete();
       expect(store.currentScreen).toBe(Screen.Slack);
 
-      // Step 7: Complete Slack
+      // Step 9: Complete Slack
       store.setSlackComplete();
       expect(store.currentScreen).toBe(Screen.Outro);
 
-      // Verify version was bumped for each setter call (9 setters above)
-      expect(store.getVersion()).toBe(9);
+      // Verify version was bumped for each setter call (11 setters above)
+      expect(store.getVersion()).toBe(11);
     });
   });
 

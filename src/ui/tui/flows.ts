@@ -25,6 +25,8 @@ export enum Screen {
   Plan = 'plan',
   Run = 'run',
   Mcp = 'mcp',
+  DataIngestionCheck = 'data-ingestion-check',
+  Checklist = 'checklist',
   Slack = 'slack',
   Outro = 'outro',
   McpAdd = 'mcp-add',
@@ -96,37 +98,48 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: (s) => s.activationLevel === 'partial',
       isComplete: (s) => s.activationOptionsComplete,
     },
-    // 3b. Options menu (when project already has significant data)
-    {
-      screen: Screen.Options,
-      show: (s) => s.projectHasData === true,
-      isComplete: (_s) => false, // terminal: user picks an action from here
-    },
-    // 4. Framework setup questions (if any unresolved)
+    // 3b. Framework setup questions — skipped for full users (already have data)
     {
       screen: Screen.Setup,
-      show: needsSetup,
+      show: (s) => needsSetup(s) && s.activationLevel !== 'full',
       isComplete: (s) => !needsSetup(s),
     },
-    // 5. Instrumentation plan — analyzes project, presents plan for approve/skip/feedback
+    // 3c. Instrumentation plan — skipped for full users
     {
       screen: Screen.Plan,
+      show: (s) => s.activationLevel !== 'full',
       isComplete: (s) =>
         s.planStatus === 'approved' || s.planStatus === 'skipped',
     },
-    // 6. Agent run — installs SDK then instruments events based on approved plan.
+    // 3d. Agent run — skipped for full users (already instrumented)
     {
       screen: Screen.Run,
+      show: (s) => s.activationLevel !== 'full',
       isComplete: (s) =>
         s.runPhase === RunPhase.Completed || s.runPhase === RunPhase.Error,
     },
-    // 7. MCP server setup (skipped on error)
+    // 4. MCP server setup — skipped on error; full users go straight here
     {
       screen: Screen.Mcp,
       show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) => s.mcpComplete,
     },
-    // 8. Slack integration setup (skipped on error)
+    // 5. Wait for events — polls activation API until events are flowing.
+    //    Passes immediately for full users (already have data).
+    //    Skipped on error.
+    {
+      screen: Screen.DataIngestionCheck,
+      show: (s) => s.runPhase !== RunPhase.Error,
+      isComplete: (s) => s.dataIngestionConfirmed,
+    },
+    // 6. Post-setup checklist — first chart + first dashboard.
+    //    Skipped on error.
+    {
+      screen: Screen.Checklist,
+      show: (s) => s.runPhase !== RunPhase.Error,
+      isComplete: (s) => s.checklistComplete,
+    },
+    // 7. Slack integration setup (skipped on error)
     {
       screen: Screen.Slack,
       show: (s) => s.runPhase !== RunPhase.Error,

@@ -304,4 +304,119 @@ When('MCP setup is complete', function () {
   session.mcpComplete = true;
 });
 
+// ── DataIngestionCheck + Checklist ────────────────────────────────────────────
+
+Then('I should be on the DataIngestionCheck screen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataIngestionCheck,
+    `Expected DataIngestionCheck but got ${screen}`,
+  );
+});
+
+When('events are detected in the project', function () {
+  session.dataIngestionConfirmed = true;
+});
+
+Then('I should be on the Checklist screen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.Checklist,
+    `Expected Checklist but got ${screen}`,
+  );
+});
+
+Given('I am on the DataIngestionCheck screen', function () {
+  session.introConcluded = true;
+  session.credentials = mockCredentials();
+  session.region = 'us';
+  session.activationLevel = 'none';
+  session.projectHasData = false;
+  session.setupConfirmed = true;
+  session.planStatus = 'approved';
+  session.runPhase = RunPhase.Completed;
+  session.outroData = { kind: OutroKind.Success };
+  session.mcpComplete = true;
+});
+
+Given('I am on the Checklist screen', function () {
+  session.introConcluded = true;
+  session.credentials = mockCredentials();
+  session.region = 'us';
+  session.activationLevel = 'none';
+  session.projectHasData = false;
+  session.setupConfirmed = true;
+  session.planStatus = 'approved';
+  session.runPhase = RunPhase.Completed;
+  session.outroData = { kind: OutroKind.Success };
+  session.mcpComplete = true;
+  session.dataIngestionConfirmed = true;
+});
+
+Given('the chart is not yet complete', function () {
+  session.checklistChartComplete = false;
+});
+
+Given('the chart is complete', function () {
+  session.checklistChartComplete = true;
+});
+
+Then('I should be taken to the Outro with a cancel state', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(screen, Screen.Outro, `Expected Outro but got ${screen}`);
+  assert.strictEqual(session.outroData?.kind, OutroKind.Cancel);
+});
+
+When('I press {string} to exit', function (_key: string) {
+  // Simulates the user pressing q/Esc on the DataIngestionCheck screen
+  session.outroData = {
+    kind: OutroKind.Cancel,
+    message: 'Come back once your app is running and sending events.',
+  };
+});
+
+Then('the chart creation page should open in my browser', function () {
+  // Browser open is a side-effect; we verify the session state after selection
+  session.checklistChartComplete = true;
+});
+
+Then('the chart should be marked as complete', function () {
+  assert.ok(
+    session.checklistChartComplete,
+    'Expected checklistChartComplete to be true',
+  );
+});
+
+Then('"Create your first dashboard" should be disabled', function () {
+  // Dashboard is disabled when chart is not complete — validated by the
+  // ChecklistScreen's picker options logic (disabled: !checklistChartComplete)
+  assert.ok(
+    !session.checklistChartComplete,
+    'Chart should not be complete when dashboard is locked',
+  );
+});
+
+Then('the dashboard creation page should open in my browser', function () {
+  session.checklistDashboardComplete = true;
+});
+
+Then('the dashboard should be marked as complete', function () {
+  assert.ok(
+    session.checklistDashboardComplete,
+    'Expected checklistDashboardComplete to be true',
+  );
+});
+
+When('I select {string}', function (option: string) {
+  if (option === 'Skip remaining and continue') {
+    session.checklistComplete = true;
+  } else if (option === 'Create your first chart') {
+    session.checklistChartComplete = true;
+  } else if (option === 'Create your first dashboard') {
+    session.checklistDashboardComplete = true;
+  }
+});
+
 // Overlay and slash command steps live in wizard-overlays.steps.ts

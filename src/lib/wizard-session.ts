@@ -231,6 +231,26 @@ export interface WizardSession {
    * runPhase is set to Completed.
    */
   amplitudePreDetected: boolean;
+
+  // Data ingestion + post-setup checklist
+  /**
+   * True once the activation check confirms events are flowing into the project.
+   * Set immediately if activationLevel is already 'full', otherwise set after
+   * the DataIngestionCheckScreen detects events via the API.
+   */
+  dataIngestionConfirmed: boolean;
+
+  /** Checklist item: whether the user's first chart has been created. */
+  checklistChartComplete: boolean;
+
+  /** Checklist item: whether the user's first dashboard has been created. */
+  checklistDashboardComplete: boolean;
+
+  /**
+   * True once the user has dismissed the checklist (either all items done,
+   * or they chose to continue without completing everything).
+   */
+  checklistComplete: boolean;
 }
 
 /**
@@ -304,5 +324,9 @@ export function buildSession(args: {
     instrumentationPlan: null,
     planStatus: 'pending',
     planFeedback: [],
+    dataIngestionConfirmed: false,
+    checklistChartComplete: false,
+    checklistDashboardComplete: false,
+    checklistComplete: false,
   };
 }
