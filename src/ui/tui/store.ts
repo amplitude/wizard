@@ -196,8 +196,15 @@ export class WizardStore {
 
   setCredentials(credentials: WizardSession['credentials']): void {
     this.$session.setKey('credentials', credentials);
+    if (credentials?.projectId) {
+      analytics.setDistinctId(String(credentials.projectId));
+    }
     analytics.wizardCapture('auth complete', {
       project_id: credentials?.projectId,
+    });
+    analytics.wizardCapture('credentials updated', {
+      project_id: credentials?.projectId,
+      region: this.session.region,
     });
     this.emitChange();
   }
@@ -285,6 +292,10 @@ export class WizardStore {
   resolvePrompt(answer: boolean | string): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind === 'event-plan') return;
+    analytics.wizardCapture('prompt response', {
+      prompt_kind: prompt.kind,
+      response: String(answer),
+    });
     this.$pendingPrompt.set(null);
     this.$version.set(this.$version.get() + 1);
     if (prompt.kind === 'confirm') {
@@ -306,6 +317,10 @@ export class WizardStore {
   resolveEventPlan(decision: EventPlanDecision): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind !== 'event-plan') return;
+    analytics.wizardCapture('prompt response', {
+      prompt_kind: 'event-plan',
+      response: typeof decision === 'object' ? 'feedback' : String(decision),
+    });
     this.$pendingPrompt.set(null);
     this.$version.set(this.$version.get() + 1);
     prompt.resolve(decision);
@@ -404,6 +419,10 @@ export class WizardStore {
 
   setDataIngestionConfirmed(): void {
     this.$session.setKey('dataIngestionConfirmed', true);
+    analytics.wizardCapture(
+      'data ingestion confirmed',
+      sessionProperties(this.session),
+    );
     this.emitChange();
   }
 
@@ -419,6 +438,11 @@ export class WizardStore {
 
   setChecklistComplete(): void {
     this.$session.setKey('checklistComplete', true);
+    analytics.wizardCapture('checklist completed', {
+      chart_complete: this.session.checklistChartComplete,
+      dashboard_complete: this.session.checklistDashboardComplete,
+      ...sessionProperties(this.session),
+    });
     this.emitChange();
   }
 

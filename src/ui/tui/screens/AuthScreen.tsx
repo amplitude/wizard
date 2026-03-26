@@ -18,6 +18,7 @@ import type { WizardStore } from '../store.js';
 import { LoadingBox, PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { DEFAULT_HOST_URL } from '../../../lib/constants.js';
+import { analytics } from '../../../utils/analytics.js';
 
 interface AuthScreenProps {
   store: WizardStore;
@@ -76,6 +77,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         const result = readApiKeyWithSource(session.installDir);
         if (result) {
           setSavedKeySource(result.source);
+          analytics.wizardCapture('api key submitted', {
+            key_source: result.source,
+          });
           store.setCredentials({
             accessToken: session.pendingAuthAccessToken ?? '',
             projectApiKey: result.key,
@@ -104,6 +108,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       return;
     }
     setApiKeyError('');
+    analytics.wizardCapture('api key submitted', {
+      key_source: 'manual_entry',
+    });
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       projectApiKey: trimmed,

@@ -34,6 +34,7 @@ import {
   getHelpText,
   TEST_PROMPT,
 } from '../console-commands.js';
+import { analytics } from '../../../utils/analytics.js';
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -154,7 +155,12 @@ export const ConsoleView = ({
   );
 
   const handleSubmit = (value: string) => {
-    if (value.startsWith('/')) {
+    const isSlashCommand = value.startsWith('/');
+    analytics.wizardCapture('agent message sent', {
+      message_length: value.length,
+      is_slash_command: isSlashCommand,
+    });
+    if (isSlashCommand) {
       setResponse(null);
       const query = executeCommand(value, store);
       if (query) {

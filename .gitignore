@@ -2,6 +2,8 @@
 
 # Thumbnails
 ._*
+.claude/skills
+
 
 # Files that might appear on external disk
 .Spotlight-V100

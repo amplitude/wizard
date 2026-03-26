@@ -2,7 +2,8 @@ import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
 
-const AMPLITUDE_API_KEY = process.env.AMPLITUDE_API_KEY ?? '';
+const AMPLITUDE_API_KEY =
+  process.env.AMPLITUDE_API_KEY ?? 'e5a2c9bdffe949f7da77e6b481e118fa';
 const AMPLITUDE_SERVER_URL =
   process.env.AMPLITUDE_SERVER_URL ?? 'https://api2.amplitude.com';
 

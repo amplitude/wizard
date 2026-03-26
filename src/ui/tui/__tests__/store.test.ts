@@ -18,6 +18,7 @@ vi.mock('../../../utils/analytics.js', () => ({
     capture: vi.fn(),
     wizardCapture: vi.fn(),
     setTag: vi.fn(),
+    setDistinctId: vi.fn(),
     shutdown: vi.fn().mockResolvedValue(undefined),
   },
   sessionProperties: vi.fn(() => ({})),

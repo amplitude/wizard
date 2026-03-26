@@ -76,6 +76,10 @@ export async function runWizard(argv: Args, session?: WizardSession) {
 
   session.integration = integration;
   analytics.setTag('integration', integration);
+  analytics.wizardCapture('session started', {
+    integration,
+    ci: session.ci ?? false,
+  });
 
   const config = FRAMEWORK_REGISTRY[integration];
   session.frameworkConfig = config;

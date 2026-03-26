@@ -23,6 +23,7 @@ import { Colors, Icons } from '../styles.js';
 import { AMPLITUDE_ZONE_SETTINGS } from '../../../lib/constants.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import opn from 'opn';
+import { analytics } from '../../../utils/analytics.js';
 
 interface ChecklistScreenProps {
   store: WizardStore;
@@ -61,6 +62,7 @@ export const ChecklistScreen = ({ store }: ChecklistScreenProps) => {
 
   function openInBrowser(url: string, item: 'chart' | 'dashboard') {
     setOpening(item);
+    analytics.wizardCapture('checklist item opened', { item });
     opn(url, { wait: false })
       .catch(() => {
         /* fire-and-forget */
