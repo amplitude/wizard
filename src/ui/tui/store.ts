@@ -542,46 +542,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  // ── Instrumentation plan ─────────────────────────────────────────
-
-  startPlanGeneration(): void {
-    this.$session.setKey('planStatus', 'generating');
-    this.emitChange();
-  }
-
-  setInstrumentationPlan(plan: string): void {
-    this.$session.setKey('instrumentationPlan', plan);
-    this.$session.setKey('planStatus', 'ready');
-    this.emitChange();
-  }
-
-  setPlanError(message: string): void {
-    // On error, store the error as the plan and let the user proceed or skip
-    this.$session.setKey('instrumentationPlan', message);
-    this.$session.setKey('planStatus', 'ready');
-    this.emitChange();
-  }
-
-  approvePlan(): void {
-    this.$session.setKey('planStatus', 'approved');
-    analytics.wizardCapture('plan approved', sessionProperties(this.session));
-    this.emitChange();
-  }
-
-  skipPlan(): void {
-    this.$session.setKey('planStatus', 'skipped');
-    analytics.wizardCapture('plan skipped', sessionProperties(this.session));
-    this.emitChange();
-  }
-
-  addPlanFeedback(feedback: string): void {
-    const existing = this.$session.get().planFeedback;
-    this.$session.setKey('planFeedback', [...existing, feedback]);
-    this.$session.setKey('planStatus', 'generating');
-    analytics.wizardCapture('plan feedback', sessionProperties(this.session));
-    this.emitChange();
-  }
-
   setMcpComplete(
     outcome: McpOutcome = McpOutcome.Skipped,
     installedClients: string[] = [],

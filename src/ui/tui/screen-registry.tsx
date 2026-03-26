@@ -21,7 +21,6 @@ import { AuthScreen } from './screens/AuthScreen.js';
 import { RegionSelectScreen } from './screens/RegionSelectScreen.js';
 import { DataSetupScreen } from './screens/DataSetupScreen.js';
 import { ActivationOptionsScreen } from './screens/ActivationOptionsScreen.js';
-import { PlanScreen } from './screens/PlanScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
 import { DataIngestionCheckScreen } from './screens/DataIngestionCheckScreen.js';
@@ -78,7 +77,6 @@ export function createScreens(
     [Screen.DataSetup]: <DataSetupScreen store={store} />,
     [Screen.ActivationOptions]: <ActivationOptionsScreen store={store} />,
     [Screen.Options]: null,
-    [Screen.Plan]: <PlanScreen store={store} />,
     [Screen.Run]: <RunScreen store={store} />,
     [Screen.Mcp]: <McpScreen store={store} installer={services.mcpInstaller} />,
     [Screen.DataIngestionCheck]: <DataIngestionCheckScreen store={store} />,

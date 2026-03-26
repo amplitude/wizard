@@ -335,7 +335,6 @@ Given('I am on the DataIngestionCheck screen', function () {
   session.activationLevel = 'none';
   session.projectHasData = false;
   session.setupConfirmed = true;
-  session.planStatus = 'approved';
   session.runPhase = RunPhase.Completed;
   session.outroData = { kind: OutroKind.Success };
   session.mcpComplete = true;
@@ -348,7 +347,6 @@ Given('I am on the Checklist screen', function () {
   session.activationLevel = 'none';
   session.projectHasData = false;
   session.setupConfirmed = true;
-  session.planStatus = 'approved';
   session.runPhase = RunPhase.Completed;
   session.outroData = { kind: OutroKind.Success };
   session.mcpComplete = true;

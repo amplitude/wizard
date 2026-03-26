@@ -22,7 +22,6 @@ export enum Screen {
   DataSetup = 'data-setup',
   Options = 'options',
   ActivationOptions = 'activation-options',
-  Plan = 'plan',
   Run = 'run',
   Mcp = 'mcp',
   DataIngestionCheck = 'data-ingestion-check',
@@ -104,14 +103,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: (s) => needsSetup(s) && s.activationLevel !== 'full',
       isComplete: (s) => !needsSetup(s),
     },
-    // 3c. Instrumentation plan — skipped for full users
-    {
-      screen: Screen.Plan,
-      show: (s) => s.activationLevel !== 'full',
-      isComplete: (s) =>
-        s.planStatus === 'approved' || s.planStatus === 'skipped',
-    },
-    // 3d. Agent run — skipped for full users (already instrumented)
+    // 3c. Agent run — skipped for full users (already instrumented)
     {
       screen: Screen.Run,
       show: (s) => s.activationLevel !== 'full',

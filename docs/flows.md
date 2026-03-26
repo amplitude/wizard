@@ -80,12 +80,9 @@ flowchart TD
     ACTIVATION_OPTIONS -->|exit| OUTRO
 
     SETUP_Q{Unresolved setup questions?}
-    SETUP_Q -->|no| PLAN
+    SETUP_Q -->|no| RUN
     SETUP_Q -->|yes| SETUP["SetupScreen<br/>(per-framework questions)"]
-    SETUP --> PLAN
-
-    PLAN["PlanScreen<br/>(analyze project → show instrumentation plan · approve / skip / feedback)"]
-    PLAN --> RUN
+    SETUP --> RUN
 
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
 
