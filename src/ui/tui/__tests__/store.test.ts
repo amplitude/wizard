@@ -303,7 +303,7 @@ describe('WizardStore', () => {
 
   // ── Screen resolution (derived state) ────────────────────────────
 
-  // Helper: advance store to RunScreen (past Intro → RegionSelect → Auth → DataSetup)
+  // Helper: advance store to RunScreen (past Intro → RegionSelect → Auth → DataSetup → Plan)
   function advanceToRun(store: ReturnType<typeof createStore>) {
     // Intro: conclude intro (Intro screen isComplete)
     store.concludeIntro();
@@ -318,6 +318,8 @@ describe('WizardStore', () => {
     });
     // DataSetup: set projectHasData (DataSetup screen isComplete)
     store.setProjectHasData(false);
+    // Plan: skip plan (Plan screen isComplete when planStatus === 'skipped')
+    store.skipPlan();
   }
 
   describe('currentScreen', () => {
@@ -872,8 +874,12 @@ describe('WizardStore', () => {
       });
       expect(store.currentScreen).toBe(Screen.DataSetup);
 
-      // Step 4: DataSetup auto-advances directly to Run (no setup questions)
+      // Step 4: DataSetup advances to Plan (instrumentation plan screen)
       store.setProjectHasData(false);
+      expect(store.currentScreen).toBe(Screen.Plan);
+
+      // Step 4b: Skip plan — advances to Run
+      store.skipPlan();
       expect(store.currentScreen).toBe(Screen.Run);
 
       // Step 5: Start and complete run
@@ -891,8 +897,8 @@ describe('WizardStore', () => {
       store.setSlackComplete();
       expect(store.currentScreen).toBe(Screen.Outro);
 
-      // Verify version was bumped for each setter call (8 setters above)
-      expect(store.getVersion()).toBe(8);
+      // Verify version was bumped for each setter call (9 setters above)
+      expect(store.getVersion()).toBe(9);
     });
   });
 

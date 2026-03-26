@@ -59,6 +59,9 @@ flowchart TD
 title: Wizard flow
 ---
 flowchart TD
+    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected · user confirms or exits)"]
+    INTRO --> REGION_SELECT
+
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
     REGION_SELECT --> AUTH
 
@@ -69,22 +72,26 @@ flowchart TD
     AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
     DATA_SETUP --> DATA_CHECK{Project has data?}
 
-    DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
+    DATA_CHECK -->|partial activation| ACTIVATION_OPTIONS["ActivationOptionsScreen"]
     DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent / switch project"]
+    DATA_CHECK -->|no| SETUP_Q
 
+    ACTIVATION_OPTIONS --> SETUP_Q{Unresolved setup questions?}
     OPTIONS --> MCP_SCREEN
-    FRAMEWORK --> RUN
+
+    SETUP_Q -->|no| PLAN
+    SETUP_Q -->|yes| SETUP["SetupScreen<br/>(per-framework questions)"]
+    SETUP --> PLAN
+
+    PLAN["PlanScreen<br/>(analyze project → show instrumentation plan · approve / skip / feedback)"]
+    PLAN --> RUN
 
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
 
     subgraph AGENT_RUN ["Agent Run (RunScreen)"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
         AGENT --> SDK_INSTALL["1. Install SDK + add initialization code"]
-        SDK_INSTALL --> PLAN_TOOL["2. confirm_event_plan tool<br/>(present plan to user via ConsoleView overlay)"]
-        PLAN_TOOL --> PLAN_LOOP{User decision?}
-        PLAN_LOOP -->|feedback| PLAN_REVISE["Agent revises plan"] --> PLAN_TOOL
-        PLAN_LOOP -->|approve| INSTRUMENT["3. Instrument events with track() calls"]
-        PLAN_LOOP -->|skip| OUTCOME
+        SDK_INSTALL --> INSTRUMENT["2. Instrument events from approved plan"]
         INSTRUMENT --> FEATURES{Features discovered?}
         FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
         FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
@@ -168,9 +175,14 @@ flowchart TD
 
 ## Data Setup flow
 
+> **Not yet implemented.** The `DataSetupScreen` currently performs only an
+> activation gate (has the project ingested any events?). The full checklist
+> below — taxonomy agent, first chart, first dashboard — is planned but not
+> built. See `features/05-data-setup-flow.feature` for the target behaviour.
+
 ```mermaid
 ---
-title: Data Setup flow
+title: Data Setup flow (planned)
 ---
 flowchart TD
     START["Project created"] --> CHOICE{How do you want<br/>to get started?}
@@ -195,23 +207,31 @@ flowchart TD
 
 ## Framework Detection flow
 
+> **Implementation note:** Detection runs eagerly in `run.ts` before the TUI
+> starts. The result (or generic fallback) is stored in `session.integration`
+> and displayed in `IntroScreen`, where the user confirms or exits. `--menu`
+> skips auto-detection and shows a picker inside IntroScreen instead.
+
 ```mermaid
 ---
 title: Framework Detection flow
 ---
 flowchart TD
-    DETECT{Auto-detect framework?}
-    DETECT -->|success| RESULT["Show detection result"]
-    DETECT -->|failed| GENERIC["Auto-select Generic integration"] --> RESULT
-    DETECT -->|--menu flag| PICKER["Framework picker menu"] --> RESULT
-    RESULT --> CONFIRM{User confirms?}
+    PRE["run.ts — before TUI starts"]
+    PRE --> DETECT{Auto-detect framework?}
+    DETECT -->|success| STORE["Store integration in session"]
+    DETECT -->|failed| GENERIC["Store Generic integration in session"] --> STORE
+    DETECT -->|--menu flag| PICKER["Framework picker menu in IntroScreen"] --> STORE
+
+    STORE --> INTRO["IntroScreen shows result"]
+    INTRO --> CONFIRM{User confirms?}
     CONFIRM -->|cancel| EXIT["Exit"]
     CONFIRM -->|continue| SETUP_Q{Unresolved setup questions?}
-    SETUP_Q -->|no| RUN["→ Agent Run"]
+    SETUP_Q -->|no| PLAN["→ PlanScreen"]
     SETUP_Q -->|yes| SETUP["SetupScreen"]
     SETUP --> ANSWER{Answer auto-detectable?}
-    ANSWER -->|yes| RUN
-    ANSWER -->|no| PICKER_Q["PickerMenu for question"] --> RUN
+    ANSWER -->|yes| PLAN
+    ANSWER -->|no| PICKER_Q["PickerMenu for question"] --> PLAN
 ```
 
 ---

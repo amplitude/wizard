@@ -440,7 +440,7 @@ const DANGEROUS_OPERATORS = /[;`$()]/;
  * 1. It installs to .claude/skills/
  * 2. It downloads from our GitHub releases or localhost (dev)
  */
-function isSkillInstallCommand(command: string): boolean {
+export function isSkillInstallCommand(command: string): boolean {
   if (!command.startsWith('mkdir -p .claude/skills/')) return false;
 
   const urlMatch = command.match(/curl -sL ['"]([^'"]+)['"]/);
@@ -457,7 +457,7 @@ function isSkillInstallCommand(command: string): boolean {
  * Check if command is an allowed package manager command.
  * Matches: <pkg-manager> [run|exec] <safe-script> [args...]
  */
-function matchesAllowedPrefix(command: string): boolean {
+export function matchesAllowedPrefix(command: string): boolean {
   const parts = command.split(/\s+/);
   if (parts.length === 0 || !PACKAGE_MANAGERS.includes(parts[0])) {
     return false;
@@ -900,22 +900,10 @@ export async function runAgent(
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
   // the result is received, keeping the stdin stream alive for permission responses.
+  // signalDone is reassigned each retry attempt — the outer catch always has the latest.
   // See: https://github.com/anthropics/claude-code/issues/4775
   // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/41
   let signalDone: () => void = Function.prototype as () => void;
-  const resultReceived = new Promise<void>((resolve) => {
-    signalDone = resolve;
-  });
-
-  const createPromptStream = async function* () {
-    yield {
-      type: 'user',
-      session_id: '',
-      message: { role: 'user', content: prompt },
-      parent_tool_use_id: null,
-    };
-    await resultReceived;
-  };
 
   // Helper to handle successful completion (used in normal path and race condition recovery)
   const completeWithSuccess = (
@@ -997,66 +985,7 @@ export async function runAgent(
       ...WIZARD_TOOL_NAMES,
     ];
 
-    const response = query({
-      prompt: createPromptStream(),
-      options: {
-        model: agentConfig.model,
-        cwd: agentConfig.workingDirectory,
-        permissionMode: 'acceptEdits',
-        mcpServers: agentConfig.mcpServers,
-        // Load skills from project's .claude/skills/ directory
-        settingSources: ['project'],
-        // Explicitly enable required tools including Skill
-        allowedTools,
-        systemPrompt: {
-          type: 'preset',
-          preset: 'claude_code',
-          // Append wizard-wide commandments (from YAML) rather than replacing
-          // the preset so we keep default Claude Code behaviors.
-          append: getWizardCommandments(),
-        },
-        env: {
-          ...process.env,
-          // When using the Amplitude gateway, block ANTHROPIC_API_KEY so it doesn't
-          // override the gateway's OAuth token. When using a direct API key, pass it through.
-          ...(agentConfig.useDirectApiKey
-            ? {}
-            : { ANTHROPIC_API_KEY: undefined }),
-          ANTHROPIC_CUSTOM_HEADERS: buildAgentEnv(
-            agentConfig.wizardMetadata ?? {},
-            agentConfig.wizardFlags ?? {},
-          ),
-        },
-        canUseTool: (toolName: string, input: unknown) => {
-          logToFile('canUseTool called:', { toolName, input });
-          const result = wizardCanUseTool(
-            toolName,
-            input as Record<string, unknown>,
-          );
-          logToFile('canUseTool result:', result);
-          return Promise.resolve(result);
-        },
-        tools: { type: 'preset', preset: 'claude_code' },
-        // Capture stderr from CLI subprocess for debugging
-        stderr: (data: string) => {
-          logToFile('CLI stderr:', data);
-          if (options.debug) {
-            debug('CLI stderr:', data);
-          }
-        },
-        // Stop hook: drain additional feature queue, then collect remark, then allow stop
-        hooks: {
-          Stop: [
-            {
-              hooks: [createStopHook(config?.additionalFeatureQueue ?? [])],
-              timeout: 30,
-            },
-          ],
-        },
-      },
-    });
-
-    // Watch for .amplitude-events.json and feed into the store
+    // Watch for .amplitude-events.json and feed into the store (set up once, before retries)
     const eventPlanPath = path.join(
       agentConfig.workingDirectory,
       '.amplitude-events.json',
@@ -1106,44 +1035,193 @@ export async function runAgent(
       }, 1000);
     }
 
-    // Process the async generator — validate each message at the boundary
-    for await (const rawMessage of response) {
-      const parsed = safeParseSDKMessage(rawMessage);
-      if (!parsed.ok) {
-        logToFile(
-          'Skipping malformed SDK message:',
-          parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-        );
-        continue;
-      }
-      const message = parsed.message;
+    // Retry loop: if the agent stalls (no message for STALL_TIMEOUT_MS), abort and
+    // re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES retries.
+    const MAX_RETRIES = 2;
+    const STALL_TIMEOUT_MS = 20_000;
 
-      // Pass receivedSuccessResult so handleSDKMessage can suppress user-facing error
-      // output for post-success cleanup errors while still logging them to file
-      handleSDKMessage(
-        message,
-        options,
-        spinner,
-        collectedText,
-        receivedSuccessResult,
-        recentStatuses,
-      );
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      if (attempt > 0) {
+        logToFile(
+          `Agent stall retry: attempt ${attempt + 1} of ${MAX_RETRIES + 1}`,
+        );
+        analytics.wizardCapture('agent stall retry', { attempt });
+        // Clear per-attempt output so stale error markers don't affect the fresh run
+        collectedText.length = 0;
+        recentStatuses.length = 0;
+      }
+
+      // Fresh prompt stream per attempt — stdin stays open until result received
+      const resultReceived = new Promise<void>((resolve) => {
+        signalDone = resolve;
+      });
+
+      const createPromptStream = async function* () {
+        yield {
+          type: 'user',
+          session_id: '',
+          message: { role: 'user', content: prompt },
+          parent_tool_use_id: null,
+        };
+        await resultReceived;
+      };
+
+      // AbortController lets us cancel a stalled query so we can retry
+      const controller = new AbortController();
+      let staleTimer: ReturnType<typeof setTimeout> | undefined;
+
+      const resetStaleTimer = () => {
+        if (staleTimer) clearTimeout(staleTimer);
+        staleTimer = setTimeout(() => {
+          logToFile(
+            `Agent stalled — no message for ${
+              STALL_TIMEOUT_MS / 1000
+            }s (attempt ${attempt + 1})`,
+          );
+          analytics.wizardCapture('agent stall detected', {
+            attempt: attempt + 1,
+            stall_timeout_ms: STALL_TIMEOUT_MS,
+          });
+          controller.abort('stall');
+        }, STALL_TIMEOUT_MS);
+      };
 
       try {
-        middleware?.onMessage(message);
-      } catch (e) {
-        logToFile(`${AgentSignals.BENCHMARK} Middleware onMessage error:`, e);
-      }
+        const response = query({
+          prompt: createPromptStream(),
+          options: {
+            model: agentConfig.model,
+            cwd: agentConfig.workingDirectory,
+            permissionMode: 'acceptEdits',
+            mcpServers: agentConfig.mcpServers,
+            // Load skills from project's .claude/skills/ directory
+            settingSources: ['project'],
+            // Explicitly enable required tools including Skill
+            allowedTools,
+            systemPrompt: {
+              type: 'preset',
+              preset: 'claude_code',
+              // Append wizard-wide commandments (from YAML) rather than replacing
+              // the preset so we keep default Claude Code behaviors.
+              append: getWizardCommandments(),
+            },
+            env: {
+              ...process.env,
+              // When using the Amplitude gateway, block ANTHROPIC_API_KEY so it doesn't
+              // override the gateway's OAuth token. When using a direct API key, pass it through.
+              ...(agentConfig.useDirectApiKey
+                ? {}
+                : { ANTHROPIC_API_KEY: undefined }),
+              ANTHROPIC_CUSTOM_HEADERS: buildAgentEnv(
+                agentConfig.wizardMetadata ?? {},
+                agentConfig.wizardFlags ?? {},
+              ),
+            },
+            canUseTool: (toolName: string, input: unknown) => {
+              logToFile('canUseTool called:', { toolName, input });
+              const result = wizardCanUseTool(
+                toolName,
+                input as Record<string, unknown>,
+              );
+              logToFile('canUseTool result:', result);
+              return Promise.resolve(result);
+            },
+            tools: { type: 'preset', preset: 'claude_code' },
+            // Capture stderr from CLI subprocess for debugging
+            stderr: (data: string) => {
+              logToFile('CLI stderr:', data);
+              if (options.debug) {
+                debug('CLI stderr:', data);
+              }
+            },
+            // Stop hook: drain additional feature queue, then collect remark, then allow stop
+            hooks: {
+              Stop: [
+                {
+                  hooks: [createStopHook(config?.additionalFeatureQueue ?? [])],
+                  timeout: 30,
+                },
+              ],
+            },
+            // Allow aborting a stalled query so we can retry cleanly
+            abortSignal: controller.signal,
+          },
+        });
 
-      // Signal completion when result received
-      if (message.type === 'result') {
-        // Track successful results before any potential cleanup errors
-        // The SDK may emit a second error result during cleanup due to a race condition
-        if (message.subtype === 'success' && !message.is_error) {
-          receivedSuccessResult = true;
-          lastResultMessage = message;
+        // Start stale timer — reset on each received message
+        resetStaleTimer();
+
+        // Process the async generator — validate each message at the boundary
+        for await (const rawMessage of response) {
+          resetStaleTimer();
+          const parsed = safeParseSDKMessage(rawMessage);
+          if (!parsed.ok) {
+            logToFile(
+              'Skipping malformed SDK message:',
+              parsed.error.issues.map(
+                (i) => `${i.path.join('.')}: ${i.message}`,
+              ),
+            );
+            continue;
+          }
+          const message = parsed.message;
+
+          // Pass receivedSuccessResult so handleSDKMessage can suppress user-facing error
+          // output for post-success cleanup errors while still logging them to file
+          handleSDKMessage(
+            message,
+            options,
+            spinner,
+            collectedText,
+            receivedSuccessResult,
+            recentStatuses,
+          );
+
+          try {
+            middleware?.onMessage(message);
+          } catch (e) {
+            logToFile(
+              `${AgentSignals.BENCHMARK} Middleware onMessage error:`,
+              e,
+            );
+          }
+
+          // Signal completion when result received
+          if (message.type === 'result') {
+            // Track successful results before any potential cleanup errors
+            // The SDK may emit a second error result during cleanup due to a race condition
+            if (message.subtype === 'success' && !message.is_error) {
+              receivedSuccessResult = true;
+              lastResultMessage = message;
+            }
+            signalDone();
+          }
         }
-        signalDone();
+
+        // Clean completion — exit the retry loop
+        clearTimeout(staleTimer);
+        break;
+      } catch (innerError) {
+        clearTimeout(staleTimer);
+        signalDone(); // unblock the prompt stream for this attempt
+
+        // Stall-aborted with retries remaining — try again
+        if (controller.signal.aborted && attempt < MAX_RETRIES) {
+          logToFile(
+            `Retrying after stall (next attempt: ${attempt + 2} of ${
+              MAX_RETRIES + 1
+            })`,
+          );
+          continue;
+        }
+
+        // Already received a successful result — this is an SDK cleanup race condition
+        if (receivedSuccessResult) {
+          return completeWithSuccess(innerError as Error);
+        }
+
+        // Re-throw to the outer catch for API error handling / spinner cleanup
+        throw innerError;
       }
     }
 

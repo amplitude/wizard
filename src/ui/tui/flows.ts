@@ -108,20 +108,25 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: needsSetup,
       isComplete: (s) => !needsSetup(s),
     },
-    // 5. Agent run — installs SDK, then calls confirm_event_plan tool for plan approval,
-    //    then instruments events based on approved plan.
+    // 5. Instrumentation plan — analyzes project, presents plan for approve/skip/feedback
+    {
+      screen: Screen.Plan,
+      isComplete: (s) =>
+        s.planStatus === 'approved' || s.planStatus === 'skipped',
+    },
+    // 6. Agent run — installs SDK then instruments events based on approved plan.
     {
       screen: Screen.Run,
       isComplete: (s) =>
         s.runPhase === RunPhase.Completed || s.runPhase === RunPhase.Error,
     },
-    // 6. MCP server setup (skipped on error)
+    // 7. MCP server setup (skipped on error)
     {
       screen: Screen.Mcp,
       show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) => s.mcpComplete,
     },
-    // 7. Slack integration setup (skipped on error)
+    // 8. Slack integration setup (skipped on error)
     {
       screen: Screen.Slack,
       show: (s) => s.runPhase !== RunPhase.Error,
