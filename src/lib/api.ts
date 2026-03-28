@@ -38,6 +38,7 @@ const AmplitudeUserSchema = z.object({
                     .nullable(),
                 }),
               )
+              .nullable()
               .optional(),
           }),
         ),
@@ -56,7 +57,7 @@ export type AmplitudeOrg = {
       name: string;
       rank: number;
       app: { id: string; apiKey?: string | null } | null;
-    }>;
+    }> | null;
   }>;
 };
 
