@@ -17,6 +17,7 @@ import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
+import { analytics } from '../../../utils/analytics.js';
 
 interface IntroScreenProps {
   store: WizardStore;
@@ -136,6 +137,9 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               onSelect={(value) => {
                 const choice = Array.isArray(value) ? value[0] : value;
                 if (choice === 'cancel') {
+                  analytics.wizardCapture('intro cancelled', {
+                    detected_framework: session.detectedFrameworkLabel,
+                  });
                   store.setOutroData({
                     kind: OutroKind.Cancel,
                     message: 'Setup cancelled.',
@@ -177,6 +181,7 @@ const FrameworkPicker = ({
       options={options}
       onSelect={(value) => {
         const integration = Array.isArray(value) ? value[0] : value;
+        analytics.wizardCapture('framework manually selected', { integration });
         void import('../../../lib/registry.js').then(
           ({ FRAMEWORK_REGISTRY }) => {
             const config = FRAMEWORK_REGISTRY[integration];

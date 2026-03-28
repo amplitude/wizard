@@ -18,6 +18,7 @@ import { fetchProjectActivationStatus } from '../../../lib/api.js';
 import { detectAmplitudeInProject } from '../../../lib/detect-amplitude.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import { logToFile } from '../../../utils/debug.js';
+import { analytics } from '../../../utils/analytics.js';
 
 interface DataSetupScreenProps {
   store: WizardStore;
@@ -38,6 +39,10 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
     // No credentials or project ID — can't check, fall through to Framework Detection
     if (!credentials || !appId || !selectedOrgId) {
       logToFile('[DataSetup] no credentials/appId — skipping activation check');
+      analytics.wizardCapture('activation level determined', {
+        activation_level: 'none',
+        source: 'no_credentials',
+      });
       store.setActivationLevel('none');
       return;
     }
@@ -67,9 +72,18 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
             status.hasPageViewedEvent &&
             status.hasSessionStartEvent &&
             status.hasSessionEndEvent;
-          store.setActivationLevel(isFull ? 'full' : 'partial');
+          const level = isFull ? 'full' : 'partial';
+          analytics.wizardCapture('activation level determined', {
+            activation_level: level,
+            source: 'api',
+          });
+          store.setActivationLevel(level);
         } else if (status.hasDetSource) {
           // SDK installed but no events yet
+          analytics.wizardCapture('activation level determined', {
+            activation_level: 'partial',
+            source: 'api',
+          });
           store.setActivationLevel('partial');
         } else if (localDetection.confidence !== 'none') {
           // API sees no SDK, but local files suggest Amplitude is already installed.
@@ -78,9 +92,17 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
           logToFile(
             `[DataSetup] upgrading to partial via local detection: ${localDetection.reason}`,
           );
+          analytics.wizardCapture('activation level determined', {
+            activation_level: 'partial',
+            source: 'local_detection',
+          });
           store.setActivationLevel('partial');
         } else {
           // No SDK, no events, no local evidence — full install needed
+          analytics.wizardCapture('activation level determined', {
+            activation_level: 'none',
+            source: 'api',
+          });
           store.setActivationLevel('none');
         }
       })
@@ -91,9 +113,13 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
           } — falling back to local detection`,
         );
         // If the API fails, use local detection as a fallback.
-        store.setActivationLevel(
-          localDetection.confidence !== 'none' ? 'partial' : 'none',
-        );
+        const fallbackLevel =
+          localDetection.confidence !== 'none' ? 'partial' : 'none';
+        analytics.wizardCapture('activation level determined', {
+          activation_level: fallbackLevel,
+          source: 'local_detection_fallback',
+        });
+        store.setActivationLevel(fallbackLevel);
       });
   }, []);
 

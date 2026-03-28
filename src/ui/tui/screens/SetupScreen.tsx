@@ -13,6 +13,7 @@ import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { SetupQuestion } from '../../../lib/framework-config.js';
+import { analytics } from '../../../utils/analytics.js';
 
 interface SetupScreenProps {
   store: WizardStore;
@@ -97,6 +98,11 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
         }))}
         onSelect={(value) => {
           const selected = Array.isArray(value) ? value[0] : value;
+          analytics.wizardCapture('setup question answered', {
+            question_key: question.key,
+            selected_value: selected,
+            integration: config?.metadata.integration,
+          });
           store.setFrameworkContext(question.key, selected);
 
           // Check if more unresolved questions remain

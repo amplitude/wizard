@@ -361,6 +361,11 @@ export async function runAgentWizard(
       : '',
   ].filter(Boolean);
 
+  analytics.wizardCapture('agent completed', {
+    integration: config.metadata.integration,
+    changes_count: changes.length,
+  });
+
   session.outroData = {
     kind: OutroKind.Success,
     changes,

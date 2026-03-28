@@ -15,6 +15,7 @@ import { PickerMenu, ReportViewer } from '../primitives/index.js';
 import { getCloudUrlFromRegion } from '../../../utils/urls.js';
 import opn from 'opn';
 import path from 'path';
+import { analytics } from '../../../utils/analytics.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -163,6 +164,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             ]}
             onSelect={(value) => {
               const choice = Array.isArray(value) ? value[0] : value;
+              analytics.wizardCapture('outro action taken', { action: choice });
               if (choice === 'report') {
                 setShowReport(true);
               } else if (choice === 'dashboard') {
