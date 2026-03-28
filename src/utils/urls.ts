@@ -72,25 +72,6 @@ export async function detectRegionFromToken(
 }
 
 /**
- * Get the Thunder API base URL for a given cloud region.
- * Used for agentic API calls (e.g. /agentic/api/project-credentials).
- */
-export const getThunderBaseUrl = (region: CloudRegion): string => {
-  const override = process.env.WIZARD_THUNDER_BASE_URL;
-  if (override) return override;
-
-  if (IS_DEV) {
-    return 'http://localhost:8010';
-  }
-
-  if (region === 'eu') {
-    return 'https://core.eu.amplitude.com';
-  }
-
-  return 'https://core.amplitude.com';
-};
-
-/**
  * Get the LLM proxy URL for the Claude Agent SDK.
  *
  * Routes through the wizard-proxy-router in Thunder (javascript repo), which

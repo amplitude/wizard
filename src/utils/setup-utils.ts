@@ -18,14 +18,10 @@ import { DEFAULT_HOST_URL, ISSUES_URL } from '../lib/constants';
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
-import {
-  fetchAmplitudeUser,
-  fetchProjectCredentials,
-  type AmplitudeOrg,
-} from '../lib/api';
+import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
 import { storeToken } from './ampli-settings';
 import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
-import { detectRegionFromToken, getThunderBaseUrl } from './urls';
+import { detectRegionFromToken } from './urls';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
 
@@ -498,47 +494,55 @@ async function askForWizardLogin(
   }
 
   // ── 5. Get the Amplitude project API key ─────────────────────────
-  // Try to fetch automatically via Thunder's agentic API, falling back
-  // to manual prompt if the user lacks permission or the API is unavailable.
+  // The Data API returns apiKey on the Environment → App type, so we
+  // can grab it directly from the workspace data we already fetched.
+  // Falls back to Thunder's agentic API, then manual prompt.
   let projectApiKey: string | undefined;
 
   if (selectedWorkspace) {
-    const thunderBaseUrl = getThunderBaseUrl(cloudRegion);
-    // Resolve the numeric app ID from the workspace's environments
-    const appId = selectedWorkspace.environments
-      ?.map((env) => env.app?.id)
-      .find((id): id is string => id != null);
+    // Get environments that have an app with an API key, sorted by rank (lowest = primary)
+    const envsWithKey = (selectedWorkspace.environments ?? [])
+      .filter((env) => env.app?.apiKey)
+      .sort((a, b) => a.rank - b.rank);
 
-    if (appId) {
-      const credentials = await fetchProjectCredentials(
-        auth.accessToken,
-        thunderBaseUrl,
-        appId,
+    if (envsWithKey.length === 1) {
+      projectApiKey = envsWithKey[0].app!.apiKey!;
+      getUI().log.success(
+        chalk.dim(
+          `Retrieved API key for ${chalk.bold(
+            envsWithKey[0].name,
+          )} environment`,
+        ),
       );
+    } else if (envsWithKey.length > 1) {
+      const { select } = await import('@inquirer/prompts');
+      const selectedEnv = await select({
+        message: 'Select an environment:',
+        choices: envsWithKey.map((env) => ({
+          name: `${env.name} (${env.app!.id})`,
+          value: env,
+        })),
+      });
 
-      if (credentials?.apiKey) {
-        projectApiKey = credentials.apiKey;
-        getUI().log.success(
-          chalk.dim(
-            `Retrieved API key for project ${chalk.bold(
-              credentials.appName ?? selectedWorkspace.name,
-            )}`,
-          ),
-        );
+      projectApiKey = selectedEnv.app!.apiKey!;
+      getUI().log.success(
+        chalk.dim(
+          `Retrieved API key for ${chalk.bold(selectedEnv.name)} environment`,
+        ),
+      );
+    }
 
-        // Persist so future runs don't need to fetch again
-        if (opts.installDir) {
-          const { persistApiKey } = await import('./api-key-store.js');
-          const source = persistApiKey(projectApiKey, opts.installDir);
-          getUI().log.success(
-            chalk.dim(
-              source === 'keychain'
-                ? 'API key saved to system keychain'
-                : 'API key saved to .env.local (added to .gitignore)',
-            ),
-          );
-        }
-      }
+    // Persist so future runs don't need to fetch again
+    if (projectApiKey && opts.installDir) {
+      const { persistApiKey } = await import('./api-key-store.js');
+      const source = persistApiKey(projectApiKey, opts.installDir);
+      getUI().log.success(
+        chalk.dim(
+          source === 'keychain'
+            ? 'API key saved to system keychain'
+            : 'API key saved to .env.local (added to .gitignore)',
+        ),
+      );
     }
   }
 
