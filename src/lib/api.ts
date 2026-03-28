@@ -25,6 +25,13 @@ const AmplitudeUserSchema = z.object({
           z.object({
             id: z.string(),
             name: z.string(),
+            environments: z
+              .array(
+                z.object({
+                  app: z.object({ id: z.string() }).nullable(),
+                }),
+              )
+              .optional(),
           }),
         ),
       }),
@@ -35,7 +42,11 @@ const AmplitudeUserSchema = z.object({
 export type AmplitudeOrg = {
   id: string;
   name: string;
-  workspaces: Array<{ id: string; name: string }>;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    environments?: Array<{ app: { id: string } | null }>;
+  }>;
 };
 
 export type AmplitudeUserInfo = {
@@ -60,6 +71,9 @@ query orgs {
     workspaces {
       id
       name
+      environments {
+        app { id }
+      }
     }
   }
 }`;
@@ -377,6 +391,51 @@ export async function fetchProjectActivationStatus(
     const apiError = handleApiError(error, 'fetch project activation status');
     analytics.captureException(apiError, { endpoint: dataApiUrl });
     throw apiError;
+  }
+}
+
+// ── Project credentials (API key) via Thunder agentic API ───────────────
+
+export type ProjectCredentials = {
+  apiKey: string;
+  appName: string;
+  appId: string;
+  orgId: string;
+};
+
+/**
+ * Fetches the project's public API key from Thunder's agentic API.
+ * Uses the OAuth access token for auth (Hydra introspection on the server).
+ * Returns null if the request fails (permission denied, not found, etc.).
+ */
+export async function fetchProjectCredentials(
+  accessToken: string,
+  thunderBaseUrl: string,
+  appId: string,
+): Promise<ProjectCredentials | null> {
+  try {
+    const response = await axios.get(
+      `${thunderBaseUrl}/agentic/api/project-credentials/${appId}`,
+      {
+        headers: {
+          'x-amplitude-auth': accessToken,
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+      },
+    );
+    return response.data as ProjectCredentials;
+  } catch (error) {
+    // Don't throw — caller will fall back to manual prompt
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      if (status === 403) {
+        return null; // User doesn't have VIEW_PROJECT_KEY permission
+      }
+      if (status === 404) {
+        return null; // App not found
+      }
+    }
+    return null;
   }
 }
 

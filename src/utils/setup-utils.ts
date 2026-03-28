@@ -18,10 +18,14 @@ import { DEFAULT_HOST_URL, ISSUES_URL } from '../lib/constants';
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
-import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
+import {
+  fetchAmplitudeUser,
+  fetchProjectCredentials,
+  type AmplitudeOrg,
+} from '../lib/api';
 import { storeToken } from './ampli-settings';
 import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
-import { detectRegionFromToken } from './urls';
+import { detectRegionFromToken, getThunderBaseUrl } from './urls';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
 
@@ -466,13 +470,14 @@ async function askForWizardLogin(
   }
 
   // ── 4b. Workspace selection ───────────────────────────────────────
-  let selectedWorkspace: { id: string; name: string } | undefined;
+  type Workspace = AmplitudeOrg['workspaces'][number];
+  let selectedWorkspace: Workspace | undefined;
   if (selectedOrg) {
     if (selectedOrg.workspaces.length === 1) {
       selectedWorkspace = selectedOrg.workspaces[0];
     } else if (selectedOrg.workspaces.length > 1) {
       const { select } = await import('@inquirer/prompts');
-      selectedWorkspace = await select<{ id: string; name: string }>({
+      selectedWorkspace = await select<Workspace>({
         message: `Select a workspace in ${selectedOrg.name}:`,
         choices: selectedOrg.workspaces.map((ws) => ({
           name: ws.name,
@@ -492,10 +497,55 @@ async function askForWizardLogin(
     }
   }
 
-  // ── 5. Ask for the Amplitude project API key ─────────────────────
-  // The analytics write key is not exposed via the Data API and must be
-  // copied from Amplitude project settings.
-  const projectApiKey = await askForAmplitudeApiKey(opts.installDir);
+  // ── 5. Get the Amplitude project API key ─────────────────────────
+  // Try to fetch automatically via Thunder's agentic API, falling back
+  // to manual prompt if the user lacks permission or the API is unavailable.
+  let projectApiKey: string | undefined;
+
+  if (selectedWorkspace) {
+    const thunderBaseUrl = getThunderBaseUrl(cloudRegion);
+    // Resolve the numeric app ID from the workspace's environments
+    const appId = selectedWorkspace.environments
+      ?.map((env) => env.app?.id)
+      .find((id): id is string => id != null);
+
+    if (appId) {
+      const credentials = await fetchProjectCredentials(
+        auth.accessToken,
+        thunderBaseUrl,
+        appId,
+      );
+
+      if (credentials?.apiKey) {
+        projectApiKey = credentials.apiKey;
+        getUI().log.success(
+          chalk.dim(
+            `Retrieved API key for project ${chalk.bold(
+              credentials.appName ?? selectedWorkspace.name,
+            )}`,
+          ),
+        );
+
+        // Persist so future runs don't need to fetch again
+        if (opts.installDir) {
+          const { persistApiKey } = await import('./api-key-store.js');
+          const source = persistApiKey(projectApiKey, opts.installDir);
+          getUI().log.success(
+            chalk.dim(
+              source === 'keychain'
+                ? 'API key saved to system keychain'
+                : 'API key saved to .env.local (added to .gitignore)',
+            ),
+          );
+        }
+      }
+    }
+  }
+
+  // Fall back to manual prompt if auto-fetch didn't work
+  if (!projectApiKey) {
+    projectApiKey = await askForAmplitudeApiKey(opts.installDir);
+  }
 
   return {
     accessToken: auth.idToken,

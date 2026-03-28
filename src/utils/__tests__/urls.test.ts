@@ -4,6 +4,7 @@ import {
   getUiHostFromHost,
   getCloudUrlFromRegion,
   getLlmGatewayUrlFromHost,
+  getThunderBaseUrl,
 } from '../urls.js';
 
 // ── getAssetHostFromHost ──────────────────────────────────────────────────────
@@ -128,5 +129,15 @@ describe('getLlmGatewayUrlFromHost', () => {
     expect(getLlmGatewayUrlFromHost('https://us.i.amplitude.com')).toBe(
       'https://core.amplitude.com/wizard',
     );
+  });
+});
+
+// ── getThunderBaseUrl ────────────────────────────────────────────────────────
+
+describe('getThunderBaseUrl', () => {
+  it('returns localhost in dev/test environment', () => {
+    // IS_DEV is true when NODE_ENV is 'test', which it is during vitest
+    expect(getThunderBaseUrl('us')).toBe('http://localhost:8010');
+    expect(getThunderBaseUrl('eu')).toBe('http://localhost:8010');
   });
 });
