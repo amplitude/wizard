@@ -25,6 +25,21 @@ const AmplitudeUserSchema = z.object({
           z.object({
             id: z.string(),
             name: z.string(),
+            environments: z
+              .array(
+                z.object({
+                  name: z.string(),
+                  rank: z.number(),
+                  app: z
+                    .object({
+                      id: z.string(),
+                      apiKey: z.string().nullable().optional(),
+                    })
+                    .nullable(),
+                }),
+              )
+              .nullable()
+              .optional(),
           }),
         ),
       }),
@@ -35,7 +50,15 @@ const AmplitudeUserSchema = z.object({
 export type AmplitudeOrg = {
   id: string;
   name: string;
-  workspaces: Array<{ id: string; name: string }>;
+  workspaces: Array<{
+    id: string;
+    name: string;
+    environments?: Array<{
+      name: string;
+      rank: number;
+      app: { id: string; apiKey?: string | null } | null;
+    }> | null;
+  }>;
 };
 
 export type AmplitudeUserInfo = {
@@ -60,6 +83,11 @@ query orgs {
     workspaces {
       id
       name
+      environments {
+        name
+        rank
+        app { id apiKey }
+      }
     }
   }
 }`;

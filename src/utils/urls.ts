@@ -2,40 +2,16 @@ import axios from 'axios';
 import { IS_DEV, WIZARD_USER_AGENT } from '../lib/constants';
 import type { CloudRegion } from './types';
 
-export const getAssetHostFromHost = (host: string) => {
-  if (host.includes('us.i.amplitude.com')) {
-    return 'https://us-assets.i.amplitude.com';
-  }
-
-  if (host.includes('eu.i.amplitude.com')) {
-    return 'https://eu-assets.i.amplitude.com';
-  }
-
-  return host;
-};
-
-export const getUiHostFromHost = (host: string) => {
-  if (host.includes('us.i.amplitude.com')) {
-    return 'https://us.amplitude.com';
-  }
-
-  if (host.includes('eu.i.amplitude.com')) {
-    return 'https://eu.amplitude.com';
-  }
-
-  return host;
-};
-
 export const getHostFromRegion = (region: CloudRegion) => {
   if (IS_DEV) {
     return 'http://localhost:8010';
   }
 
   if (region === 'eu') {
-    return 'https://eu.i.amplitude.com';
+    return 'https://api.eu.amplitude.com';
   }
 
-  return 'https://us.i.amplitude.com';
+  return 'https://api2.amplitude.com';
 };
 
 export const getCloudUrlFromRegion = (region: CloudRegion) => {
@@ -92,10 +68,7 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
     return 'http://localhost:3030/wizard';
   }
 
-  if (
-    host.includes('eu.amplitude.com') ||
-    host.includes('eu.i.amplitude.com')
-  ) {
+  if (host.includes('eu.amplitude.com')) {
     return 'https://core.eu.amplitude.com/wizard';
   }
 

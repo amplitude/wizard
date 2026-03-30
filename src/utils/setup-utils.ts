@@ -466,13 +466,14 @@ async function askForWizardLogin(
   }
 
   // ── 4b. Workspace selection ───────────────────────────────────────
-  let selectedWorkspace: { id: string; name: string } | undefined;
+  type Workspace = AmplitudeOrg['workspaces'][number];
+  let selectedWorkspace: Workspace | undefined;
   if (selectedOrg) {
     if (selectedOrg.workspaces.length === 1) {
       selectedWorkspace = selectedOrg.workspaces[0];
     } else if (selectedOrg.workspaces.length > 1) {
       const { select } = await import('@inquirer/prompts');
-      selectedWorkspace = await select<{ id: string; name: string }>({
+      selectedWorkspace = await select<Workspace>({
         message: `Select a workspace in ${selectedOrg.name}:`,
         choices: selectedOrg.workspaces.map((ws) => ({
           name: ws.name,
@@ -492,10 +493,63 @@ async function askForWizardLogin(
     }
   }
 
-  // ── 5. Ask for the Amplitude project API key ─────────────────────
-  // The analytics write key is not exposed via the Data API and must be
-  // copied from Amplitude project settings.
-  const projectApiKey = await askForAmplitudeApiKey(opts.installDir);
+  // ── 5. Get the Amplitude project API key ─────────────────────────
+  // The Data API returns apiKey on the Environment → App type, so we
+  // can grab it directly from the workspace data we already fetched.
+  // Falls back to Thunder's agentic API, then manual prompt.
+  let projectApiKey: string | undefined;
+
+  if (selectedWorkspace) {
+    // Get environments that have an app with an API key, sorted by rank (lowest = primary)
+    const envsWithKey = (selectedWorkspace.environments ?? [])
+      .filter((env) => env.app?.apiKey)
+      .sort((a, b) => a.rank - b.rank);
+
+    if (envsWithKey.length === 1) {
+      projectApiKey = envsWithKey[0].app!.apiKey!;
+      getUI().log.success(
+        chalk.dim(
+          `Retrieved API key for ${chalk.bold(
+            envsWithKey[0].name,
+          )} environment`,
+        ),
+      );
+    } else if (envsWithKey.length > 1) {
+      const { select } = await import('@inquirer/prompts');
+      const selectedEnv = await select({
+        message: 'Select an environment:',
+        choices: envsWithKey.map((env) => ({
+          name: `${env.name} (${env.app!.id})`,
+          value: env,
+        })),
+      });
+
+      projectApiKey = selectedEnv.app!.apiKey!;
+      getUI().log.success(
+        chalk.dim(
+          `Retrieved API key for ${chalk.bold(selectedEnv.name)} environment`,
+        ),
+      );
+    }
+
+    // Persist so future runs don't need to fetch again
+    if (projectApiKey && opts.installDir) {
+      const { persistApiKey } = await import('./api-key-store.js');
+      const source = persistApiKey(projectApiKey, opts.installDir);
+      getUI().log.success(
+        chalk.dim(
+          source === 'keychain'
+            ? 'API key saved to system keychain'
+            : 'API key saved to .env.local (added to .gitignore)',
+        ),
+      );
+    }
+  }
+
+  // Fall back to manual prompt if auto-fetch didn't work
+  if (!projectApiKey) {
+    projectApiKey = await askForAmplitudeApiKey(opts.installDir);
+  }
 
   return {
     accessToken: auth.idToken,
