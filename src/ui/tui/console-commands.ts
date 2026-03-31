@@ -40,5 +40,6 @@ export function getWhoamiText(
 
 /** Returns the feedback text for the /help command. */
 export function getHelpText(): string {
-  return COMMANDS.map((c) => `${c.cmd}  ${c.desc}`).join('  ·  ');
+  const maxCmd = Math.max(...COMMANDS.map((c) => c.cmd.length));
+  return COMMANDS.map((c) => `${c.cmd.padEnd(maxCmd)}  ${c.desc}`).join('\n');
 }
