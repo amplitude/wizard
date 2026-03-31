@@ -155,3 +155,33 @@ export function storeToken(
 export function clearStoredCredentials(configPath?: string): void {
   writeConfig({}, configPath);
 }
+
+/**
+ * Updates the stored user's zone in ~/.ampli.json, migrating the entry to the
+ * new zone key. Returns the updated user, or undefined if no user is stored.
+ */
+export function updateStoredUserZone(
+  newZone: AmplitudeZone,
+  configPath?: string,
+): StoredUser | undefined {
+  const user = getStoredUser(configPath);
+  if (!user) return undefined;
+
+  const config = readConfig(configPath);
+  const oldKey = userKey(user.id, user.zone);
+  const newKey = userKey(user.id, newZone);
+  const entry = config[oldKey];
+
+  if (entry !== undefined) {
+    if (oldKey !== newKey) {
+      delete config[oldKey];
+    }
+    config[newKey] = {
+      ...(entry as object),
+      User: { ...user, zone: newZone },
+    };
+  }
+
+  writeConfig(config, configPath);
+  return { ...user, zone: newZone };
+}

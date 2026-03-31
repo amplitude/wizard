@@ -39,6 +39,7 @@ export enum Flow {
   McpAdd = 'mcp-add',
   McpRemove = 'mcp-remove',
   SlackSetup = 'slack-setup',
+  RegionSelect = 'region-select',
 }
 
 // ── Flow definitions ─────────────────────────────────────────────────
@@ -162,5 +163,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       isComplete: (s) => s.slackComplete,
     },
     { screen: Screen.Outro },
+  ],
+
+  [Flow.RegionSelect]: [
+    {
+      screen: Screen.RegionSelect,
+      isComplete: (s) => s.region !== null && !s.regionForced,
+    },
   ],
 };
