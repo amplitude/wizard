@@ -6,7 +6,7 @@
 set -euo pipefail
 
 REPO="amplitude/mcp-marketplace"
-REMOTE_BASE="plugins/instrumentation/skills"
+REMOTE_BASE="plugins/amplitude/skills"
 LOCAL_BASE="$(cd "$(dirname "$0")/.." && pwd)/skills/instrumentation"
 
 SKILLS=(
@@ -31,16 +31,5 @@ for skill in "${SKILLS[@]}"; do
   echo "[$skill]"
   fetch_file "$REMOTE_BASE/$skill/SKILL.md" "$LOCAL_BASE/$skill/SKILL.md"
 done
-
-# instrument-events has a references/ directory
-echo "[instrument-events/references]"
-fetch_file "$REMOTE_BASE/instrument-events/references/best-practices.md" \
-  "$LOCAL_BASE/instrument-events/references/best-practices.md"
-
-# discover-event-surfaces references the same best-practices.md
-echo "[discover-event-surfaces/references]"
-cp "$LOCAL_BASE/instrument-events/references/best-practices.md" \
-   "$LOCAL_BASE/discover-event-surfaces/references/best-practices.md"
-echo "  copied best-practices.md from instrument-events"
 
 echo "Done."
