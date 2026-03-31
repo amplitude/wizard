@@ -1,15 +1,15 @@
-# Amplitude FastAPI Example Project
+# PostHog FastAPI Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/fastapi
 
 ---
 
 ## README.md
 
-# Amplitude FastAPI Example
+# PostHog FastAPI Example
 
-A FastAPI application demonstrating Amplitude integration for analytics and event tracking.
+A FastAPI application demonstrating PostHog integration for analytics, feature flags, and error tracking.
 
 ## Features
 
@@ -17,6 +17,8 @@ A FastAPI application demonstrating Amplitude integration for analytics and even
 - SQLite database persistence with SQLAlchemy
 - User identification and property tracking
 - Custom event tracking
+- Feature flags with payload support
+- Error tracking with manual exception capture
 
 ## Quick Start
 
@@ -34,7 +36,7 @@ A FastAPI application demonstrating Amplitude integration for analytics and even
 3. Copy the environment file and configure:
    ```bash
    cp .env.example .env
-   # Edit .env with your Amplitude API key
+   # Edit .env with your PostHog project key
    ```
 
 4. Run the application:
@@ -46,54 +48,71 @@ A FastAPI application demonstrating Amplitude integration for analytics and even
    - Login with default credentials: `admin@example.com` / `admin`
    - Or click "Sign up here" to create a new account
 
-## Amplitude Integration Points
+## PostHog Integration Points
 
 ### User Registration
-New users are identified and tracked on signup:
+New users are identified and tracked on signup using the context-based API:
 ```python
-client = get_amplitude_client()
-if client:
-    identify_obj = Identify()
-    identify_obj.set('email', user.email)
-    identify_obj.set('is_staff', user.is_staff)
-    identify_obj.set('date_joined', user.date_joined.isoformat())
-    client.identify(identify_obj, {'user_id': user.email})
-
-    client.track(BaseEvent(
-        event_type='user_signed_up',
-        user_id=user.email,
-        event_properties={'signup_method': 'form'},
-    ))
+with new_context():
+    identify_context(user.email)
+    tag('email', user.email)
+    tag('is_staff', user.is_staff)
+    capture('user_signed_up', properties={'signup_method': 'form'})
 ```
 
 ### User Identification
 Users are identified on login with their properties:
 ```python
-client = get_amplitude_client()
-if client:
-    identify_obj = Identify()
-    identify_obj.set('email', user.email)
-    identify_obj.set('is_staff', user.is_staff)
-    client.identify(identify_obj, {'user_id': user.email})
-
-    client.track(BaseEvent(
-        event_type='user_logged_in',
-        user_id=user.email,
-        event_properties={'login_method': 'password'},
-    ))
+with new_context():
+    identify_context(user.email)
+    tag('email', user.email)
+    tag('is_staff', user.is_staff)
+    capture('user_logged_in', properties={'login_method': 'password'})
 ```
 
 ### Event Tracking
-Custom events are tracked throughout the app:
+Custom events are captured throughout the app:
 ```python
-client = get_amplitude_client()
-if client:
-    client.track(BaseEvent(
-        event_type='burrito_considered',
-        user_id=current_user.email,
-        event_properties={'total_considerations': new_count},
-    ))
+with new_context():
+    identify_context(current_user.email)
+    capture('burrito_considered', properties={'total_considerations': count})
 ```
+
+### Feature Flags
+The dashboard demonstrates feature flag checking:
+```python
+show_new_feature = posthog.feature_enabled(
+    'new-dashboard-feature',
+    current_user.email,
+    person_properties={'email': current_user.email, 'is_staff': current_user.is_staff}
+)
+feature_config = posthog.get_feature_flag_payload('new-dashboard-feature', current_user.email)
+```
+
+### Error Tracking
+
+The example demonstrates two approaches to error tracking:
+
+Manual capture for specific critical operations** (`app/routers/api.py`).
+
+```python
+try:
+    # Critical operation that might fail
+    result = process_payment()
+except Exception as e:
+    # Manually capture this specific exception
+    with new_context():
+        identify_context(current_user.email)
+        event_id = posthog.capture_exception(e)
+
+    return JSONResponse({
+        "error": "Operation failed",
+        "error_id": event_id,
+        "message": f"Error captured in PostHog. Reference ID: {event_id}"
+    }, status_code=500)
+```
+
+The `/api/test-error` endpoint demonstrates manual exception capture. Use `?capture=true` to capture in PostHog, or `?capture=false` to skip tracking.
 
 ## Project Structure
 
@@ -105,7 +124,6 @@ basics/fastapi/
 │   ├── database.py              # SQLAlchemy setup
 │   ├── dependencies.py          # FastAPI dependency injection
 │   ├── main.py                  # Application factory and lifespan
-│   ├── middleware.py             # Amplitude client helper
 │   ├── models.py                # User model (SQLAlchemy)
 │   ├── routers/
 │   │   ├── __init__.py          # Routers package
@@ -124,10 +142,11 @@ basics/fastapi/
 ## .env.example
 
 ```example
-AMPLITUDE_API_KEY=your_amplitude_api_key_here
+POSTHOG_PROJECT_TOKEN=<ph_project_token>
+POSTHOG_HOST=https://us.i.posthog.com
 SECRET_KEY=your-secret-key-here
 DEBUG=True
-AMPLITUDE_DISABLED=False
+POSTHOG_DISABLED=False
 
 ```
 
@@ -136,7 +155,7 @@ AMPLITUDE_DISABLED=False
 ## app/__init__.py
 
 ```py
-"""FastAPI Amplitude example application."""
+"""FastAPI PostHog example application."""
 
 ```
 
@@ -168,9 +187,10 @@ class Settings(BaseSettings):
     # Database (SQLite like Flask example)
     database_url: str = "sqlite:///./db.sqlite3"
 
-    # Amplitude
-    amplitude_api_key: str = ""
-    amplitude_disabled: bool = False
+    # PostHog
+    posthog_project_token: str = "<ph_project_token>"
+    posthog_host: str = "https://us.i.posthog.com"
+    posthog_disabled: bool = False
 
 
 @lru_cache
@@ -294,17 +314,20 @@ DbSession = Annotated[Session, Depends(get_db)]
 ## app/main.py
 
 ```py
-"""FastAPI application with Amplitude integration."""
+"""FastAPI application with PostHog integration."""
 
 from contextlib import asynccontextmanager
 from pathlib import Path
 
+import posthog
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from app.config import get_settings
 from app.database import SessionLocal, init_db
+from app.middleware import PostHogMiddleware
 from app.models import User
 from app.routers import api, main
 
@@ -318,6 +341,12 @@ templates = Jinja2Templates(directory=str(templates_dir))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan events for startup/shutdown."""
+    # Startup: Initialize PostHog
+    if not settings.posthog_disabled:
+        posthog.api_key = settings.posthog_project_token
+        posthog.host = settings.posthog_host
+        posthog.debug = settings.debug
+
     # Initialize database and seed default user
     init_db()
     db = SessionLocal()
@@ -334,12 +363,18 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # Shutdown: Flush PostHog events
+    if not settings.posthog_disabled:
+        posthog.flush()
+
 
 app = FastAPI(
-    title="Amplitude FastAPI Example",
-    description="Example application demonstrating Amplitude integration with FastAPI",
+    title="PostHog FastAPI Example",
+    description="Example application demonstrating PostHog integration with FastAPI",
     lifespan=lifespan,
 )
+
+app.add_middleware(PostHogMiddleware)
 
 # Include routers
 app.include_router(main.router)
@@ -373,19 +408,81 @@ async def internal_error_handler(request: Request, exc):
 ## app/middleware.py
 
 ```py
-"""Amplitude helper for FastAPI request tracking."""
+"""PostHog middleware for automatic context and user identification.
 
-from amplitude import Amplitude
+Uses pure ASGI middleware instead of BaseHTTPMiddleware for better performance/best practices.
+"""
+
+from http.cookies import SimpleCookie
+from typing import Callable, Optional
+
+from posthog import identify_context, new_context, tag
 
 from app.config import get_settings
+from app.database import SessionLocal
+from app.dependencies import serializer
+from app.models import User
 
 
-def get_amplitude_client():
-    """Get the Amplitude client instance, or None if disabled."""
-    settings = get_settings()
-    if not settings.amplitude_api_key or settings.amplitude_disabled:
-        return None
-    return Amplitude(settings.amplitude_api_key)
+class PostHogMiddleware:
+    """Pure ASGI middleware that wraps each request in a PostHog context.
+
+    If the user is authenticated, identifies them in the context so routes
+    can just call capture() without needing to set up context each time.
+
+    Uses pure ASGI interface for better performance than BaseHTTPMiddleware.
+    """
+
+    def __init__(self, app):
+        self.app = app
+        self.settings = get_settings()
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or self.settings.posthog_disabled:
+            await self.app(scope, receive, send)
+            return
+
+        user = self._get_user_from_scope(scope)
+
+        with new_context():
+            if user:
+                identify_context(user.email)
+                tag("email", user.email)
+                tag("is_staff", user.is_staff)
+
+            await self.app(scope, receive, send)
+
+    def _get_user_from_scope(self, scope) -> Optional[User]:
+        """Extract authenticated user from session cookie in ASGI scope."""
+        headers = dict(scope.get("headers", []))
+        cookie_header = headers.get(b"cookie", b"").decode("utf-8")
+
+        if not cookie_header:
+            return None
+
+        cookies = SimpleCookie()
+        cookies.load(cookie_header)
+
+        session_cookie = cookies.get("session_token")
+        if not session_cookie:
+            return None
+
+        session_token = session_cookie.value
+
+        try:
+            data = serializer.loads(session_token)
+            user_id = data.get("user_id")
+        except Exception:
+            return None
+
+        if not user_id:
+            return None
+
+        db = SessionLocal()
+        try:
+            return User.get_by_id(db, user_id)
+        finally:
+            db.close()
 
 ```
 
@@ -497,16 +594,16 @@ class User(Base):
 ## app/routers/api.py
 
 ```py
-"""API endpoints demonstrating Amplitude integration patterns."""
+"""API endpoints demonstrating PostHog integration patterns."""
 
 from typing import Annotated
 
-from amplitude import BaseEvent
+import posthog
 from fastapi import APIRouter, Cookie, Form, Query
 from fastapi.responses import JSONResponse
+from posthog import capture
 
 from app.dependencies import RequiredUser
-from app.middleware import get_amplitude_client
 
 router = APIRouter()
 
@@ -522,14 +619,7 @@ async def consider_burrito(
     safe_count = max(0, min(burrito_count, MAX_BURRITO_COUNT))
     new_count = safe_count + 1
 
-    # Amplitude: Capture custom event
-    client = get_amplitude_client()
-    if client:
-        client.track(BaseEvent(
-            event_type="burrito_considered",
-            user_id=current_user.email,
-            event_properties={"total_considerations": new_count},
-        ))
+    capture("burrito_considered", properties={"total_considerations": new_count})
 
     response = JSONResponse({"success": True, "count": new_count})
     response.set_cookie(
@@ -546,32 +636,62 @@ async def test_error(
     current_user: RequiredUser,
     capture_param: Annotated[str, Query(alias="capture")] = "true",
 ):
-    """Test endpoint demonstrating manual error event capture in Amplitude."""
+    """Test endpoint demonstrating manual exception capture in PostHog."""
     should_capture = capture_param.lower() == "true"
 
     try:
         raise Exception("Test exception from critical operation")
     except Exception as e:
         if should_capture:
-            client = get_amplitude_client()
-            if client:
-                client.track(BaseEvent(
-                    event_type="error_occurred",
-                    user_id=current_user.email,
-                    event_properties={
-                        "error_message": str(e),
-                        "error_type": type(e).__name__,
-                    },
-                ))
+            event_id = posthog.capture_exception(e)
             return JSONResponse(
                 {
                     "error": "Operation failed",
-                    "message": f"Error captured in Amplitude: {str(e)}",
+                    "error_id": event_id,
+                    "message": f"Error captured in PostHog. Reference ID: {event_id}",
                 },
                 status_code=500,
             )
         else:
             return JSONResponse({"error": "Operation failed"}, status_code=500)
+
+
+@router.post("/trigger-error")
+async def trigger_error(
+    current_user: RequiredUser,
+    error_type: Annotated[str, Form()] = "generic",
+):
+    """Trigger different error types for testing error tracking."""
+    error_messages = {
+        "value": "Invalid value provided",
+        "key": "Missing required key",
+        "generic": "Generic test error",
+    }
+
+    safe_error_type = error_type if error_type in error_messages else "generic"
+    error_message = error_messages[safe_error_type]
+
+    try:
+        if safe_error_type == "value":
+            raise ValueError(error_message)
+        elif safe_error_type == "key":
+            raise KeyError("missing_key")
+        else:
+            raise Exception(error_message)
+    except Exception as e:
+        posthog.capture_exception(e)
+        capture(
+            "error_triggered",
+            properties={"error_type": safe_error_type, "error_message": error_message},
+        )
+
+        return JSONResponse(
+            {
+                "success": True,
+                "message": "Error captured in PostHog",
+                "error": error_message,
+            }
+        )
 
 
 @router.post("/reports/activity")
@@ -585,6 +705,7 @@ async def generate_activity_report(
 
     report_data = {
         "user": current_user.email,
+        "name": current_user.name,
         "date_joined": current_user.date_joined.isoformat(),
         "login_count": current_user.login_count,
         "is_staff": current_user.is_staff,
@@ -598,17 +719,14 @@ async def generate_activity_report(
 
     row_count = len(report_data)
 
-    # Amplitude: Track report generation
-    client = get_amplitude_client()
-    if client:
-        client.track(BaseEvent(
-            event_type="report_generated",
-            user_id=current_user.email,
-            event_properties={
-                "report_type": safe_report_type,
-                "row_count": row_count,
-            },
-        ))
+    capture(
+        "report_generated",
+        properties={
+            "report_type": safe_report_type,
+            "row_count": row_count,
+            "username": current_user.email,
+        },
+    )
 
     return JSONResponse(
         {
@@ -626,15 +744,16 @@ async def generate_activity_report(
 ## app/routers/main.py
 
 ```py
-"""Main routes demonstrating Amplitude integration patterns."""
+"""Main routes demonstrating PostHog integration patterns."""
 
 from pathlib import Path
 from typing import Annotated
 
-from amplitude import BaseEvent, Identify
+import posthog
 from fastapi import APIRouter, Cookie, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from posthog import capture
 
 from app.dependencies import (
     CurrentUser,
@@ -642,7 +761,6 @@ from app.dependencies import (
     RequiredUser,
     create_session_token,
 )
-from app.middleware import get_amplitude_client
 from app.models import User
 
 router = APIRouter()
@@ -674,21 +792,16 @@ async def login(
     user = User.authenticate(db, email, password)
 
     if user:
-        user.record_login(db)
-
-        # Amplitude: Identify user and capture login event
-        client = get_amplitude_client()
-        if client:
-            identify_obj = Identify()
-            identify_obj.set("email", user.email)
-            identify_obj.set("is_staff", user.is_staff)
-            client.identify(identify_obj, {"user_id": user.email})
-
-            client.track(BaseEvent(
-                event_type="user_logged_in",
-                user_id=user.email,
-                event_properties={"login_method": "password"},
-            ))
+        is_new_user = user.record_login(db)
+        posthog.identify(user.email, {"email": user.email, "is_staff": user.is_staff})
+        posthog.capture(
+            user.email,
+            "user_logged_in",
+            properties={
+                "username": user.email,
+                "is_new_user": is_new_user,
+            },
+        )
 
         # Create session and redirect
         response = RedirectResponse(url="/dashboard", status_code=302)
@@ -745,20 +858,15 @@ async def signup(
     # Create new user
     user = User.create_user(db, email=email, password=password, is_staff=False)
 
-    # Amplitude: Identify new user and capture signup event
-    client = get_amplitude_client()
-    if client:
-        identify_obj = Identify()
-        identify_obj.set("email", user.email)
-        identify_obj.set("is_staff", user.is_staff)
-        identify_obj.set("date_joined", user.date_joined.isoformat())
-        client.identify(identify_obj, {"user_id": user.email})
-
-        client.track(BaseEvent(
-            event_type="user_signed_up",
-            user_id=user.email,
-            event_properties={"signup_method": "form"},
-        ))
+    posthog.identify(user.email, {"email": user.email, "is_staff": user.is_staff})
+    posthog.capture(
+        user.email,
+        "user_signed_up",
+        properties={
+            "username": user.email,
+            "signup_method": "form",
+        },
+    )
 
     # Create session and redirect
     response = RedirectResponse(url="/dashboard", status_code=302)
@@ -774,13 +882,7 @@ async def signup(
 @router.get("/logout")
 async def logout(current_user: RequiredUser):
     """Logout and capture event."""
-    # Amplitude: Capture logout event
-    client = get_amplitude_client()
-    if client:
-        client.track(BaseEvent(
-            event_type="user_logged_out",
-            user_id=current_user.email,
-        ))
+    capture("user_logged_out")
 
     response = RedirectResponse(url="/", status_code=302)
     response.delete_cookie(key="session_token")
@@ -792,22 +894,32 @@ async def dashboard(
     request: Request,
     current_user: RequiredUser,
 ):
-    """Dashboard page."""
-    # Amplitude: Capture dashboard view
-    client = get_amplitude_client()
-    if client:
-        client.track(BaseEvent(
-            event_type="dashboard_viewed",
-            user_id=current_user.email,
-            event_properties={"is_staff": current_user.is_staff},
-        ))
+    """Dashboard with feature flag demonstration."""
+    capture("dashboard_viewed", properties={"is_staff": current_user.is_staff})
 
-    # TODO: Use Amplitude Experiment for feature flags
+    # Check feature flag
+    show_new_feature = posthog.feature_enabled(
+        "new-dashboard-feature",
+        current_user.email,
+        person_properties={
+            "email": current_user.email,
+            "is_staff": current_user.is_staff,
+        },
+    )
+
+    # Get feature flag payload
+    feature_config = posthog.get_feature_flag_payload(
+        "new-dashboard-feature", current_user.email
+    )
 
     return templates.TemplateResponse(
         request,
         "dashboard.html",
-        {"current_user": current_user},
+        {
+            "current_user": current_user,
+            "show_new_feature": show_new_feature,
+            "feature_config": feature_config,
+        },
     )
 
 
@@ -828,16 +940,39 @@ async def burrito(
 @router.get("/profile", response_class=HTMLResponse)
 async def profile(request: Request, current_user: RequiredUser):
     """User profile page."""
-    # Amplitude: Capture profile view
-    client = get_amplitude_client()
-    if client:
-        client.track(BaseEvent(
-            event_type="profile_viewed",
-            user_id=current_user.email,
-        ))
+    capture("profile_viewed")
 
     return templates.TemplateResponse(
         request, "profile.html", {"current_user": current_user}
+    )
+
+
+@router.post("/profile", response_class=HTMLResponse)
+async def update_profile(
+    request: Request,
+    db: DbSession,
+    current_user: RequiredUser,
+    name: Annotated[str, Form()],
+):
+    """Handle profile update."""
+    fields_changed = current_user.update_profile(db, name=name)
+
+    if fields_changed:
+        capture(
+            "profile_updated",
+            properties={
+                "username": current_user.email,
+                "fields_changed": fields_changed,
+            },
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "profile.html",
+        {
+            "current_user": current_user,
+            "success": "Profile updated" if fields_changed else None,
+        },
     )
 
 ```
@@ -852,7 +987,7 @@ async def profile(request: Request, current_user: RequiredUser):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Amplitude FastAPI Example{% endblock %}</title>
+    <title>{% block title %}PostHog FastAPI Example{% endblock %}</title>
     <style>
         * {
             box-sizing: border-box;
@@ -1020,12 +1155,12 @@ async def profile(request: Request, current_user: RequiredUser):
 ```html
 {% extends "base.html" %}
 
-{% block title %}Burrito - Amplitude FastAPI Example{% endblock %}
+{% block title %}Burrito - PostHog FastAPI Example{% endblock %}
 
 {% block content %}
 <div class="card">
     <h1>Burrito Consideration Tracker</h1>
-    <p>This page demonstrates custom event tracking with Amplitude.</p>
+    <p>This page demonstrates custom event tracking with PostHog.</p>
 
     <div class="count" id="burrito-count">{{ burrito_count }}</div>
     <p style="text-align: center; color: #666;">Times you've considered a burrito</p>
@@ -1039,13 +1174,11 @@ async def profile(request: Request, current_user: RequiredUser):
     <h3>Code Example</h3>
     <pre>
 # API endpoint captures the event
-client = get_amplitude_client()
-if client:
-    client.track(BaseEvent(
-        event_type='burrito_considered',
-        user_id=current_user.email,
-        event_properties={'total_considerations': new_count},
-    ))</pre>
+with new_context():
+    identify_context(current_user.email)
+    capture('burrito_considered', properties={
+        'total_considerations': burrito_count
+    })</pre>
 </div>
 {% endblock %}
 
@@ -1079,7 +1212,7 @@ async function considerBurrito() {
 ```html
 {% extends "base.html" %}
 
-{% block title %}Dashboard - Amplitude FastAPI Example{% endblock %}
+{% block title %}Dashboard - PostHog FastAPI Example{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -1088,21 +1221,38 @@ async function considerBurrito() {
 </div>
 
 <div class="card">
-    <h2>Amplitude Event Tracking</h2>
-    <p>This page is tracked with Amplitude on every visit.</p>
+    <h2>Feature Flags</h2>
+
+    {% if show_new_feature %}
+    <div class="feature-flag">
+        <strong>New Feature Enabled!</strong>
+        <p>You're seeing this because the <code>new-dashboard-feature</code> flag is enabled for you.</p>
+        {% if feature_config %}
+        <p><strong>Feature Configuration:</strong></p>
+        <pre>{{ feature_config | tojson(indent=2) }}</pre>
+        {% endif %}
+    </div>
+    {% else %}
+    <p>The <code>new-dashboard-feature</code> flag is not enabled for your account.</p>
+    {% endif %}
 
     <h3 style="margin-top: 20px;">Code Example</h3>
     <pre>
-# Track dashboard view
-client = get_amplitude_client()
-if client:
-    client.track(BaseEvent(
-        event_type='dashboard_viewed',
-        user_id=current_user.email,
-        event_properties={'is_staff': current_user.is_staff},
-    ))
+# Check if feature flag is enabled
+show_new_feature = posthog.feature_enabled(
+    'new-dashboard-feature',
+    user_id,
+    person_properties={
+        'email': current_user.email,
+        'is_staff': current_user.is_staff
+    }
+)
 
-# TODO: Use Amplitude Experiment for feature flags</pre>
+# Get feature flag payload
+feature_config = posthog.get_feature_flag_payload(
+    'new-dashboard-feature',
+    user_id
+)</pre>
 </div>
 {% endblock %}
 
@@ -1115,7 +1265,7 @@ if client:
 ```html
 {% extends "base.html" %}
 
-{% block title %}Page Not Found - Amplitude FastAPI Example{% endblock %}
+{% block title %}Page Not Found - PostHog FastAPI Example{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -1134,7 +1284,7 @@ if client:
 ```html
 {% extends "base.html" %}
 
-{% block title %}Server Error - Amplitude FastAPI Example{% endblock %}
+{% block title %}Server Error - PostHog FastAPI Example{% endblock %}
 
 {% block content %}
 <div class="card">
@@ -1153,12 +1303,12 @@ if client:
 ```html
 {% extends "base.html" %}
 
-{% block title %}Login - Amplitude FastAPI Example{% endblock %}
+{% block title %}Login - PostHog FastAPI Example{% endblock %}
 
 {% block content %}
 <div class="card">
-    <h1>Welcome to Amplitude FastAPI Example</h1>
-    <p>This example demonstrates how to integrate Amplitude with a FastAPI application.</p>
+    <h1>Welcome to PostHog FastAPI Example</h1>
+    <p>This example demonstrates how to integrate PostHog with a FastAPI application.</p>
 
     <form method="POST">
         <label for="email">Email</label>
@@ -1183,7 +1333,9 @@ if client:
     <ul style="margin-left: 20px; color: #666;">
         <li>User registration and identification</li>
         <li>Event tracking</li>
-        <li>User properties</li>
+        <li>Feature flags</li>
+        <li>Error tracking</li>
+        <li>Group analytics</li>
     </ul>
 </div>
 {% endblock %}
@@ -1197,12 +1349,12 @@ if client:
 ```html
 {% extends "base.html" %}
 
-{% block title %}Profile - Amplitude FastAPI Example{% endblock %}
+{% block title %}Profile - PostHog FastAPI Example{% endblock %}
 
 {% block content %}
 <div class="card">
     <h1>Your Profile</h1>
-    <p>This page demonstrates profile updates and report generation with Amplitude.</p>
+    <p>This page demonstrates profile updates and report generation with PostHog.</p>
 
     {% if success %}
     <div class="message success">{{ success }}</div>
@@ -1250,20 +1402,66 @@ if client:
 </div>
 
 <div class="card">
+    <h2>Error Tracking Demo</h2>
+    <p>Click a button to trigger an error and see it captured in PostHog:</p>
+
+    <div style="margin: 20px 0;">
+        <button class="danger" onclick="triggerError('value')">
+            Trigger ValueError
+        </button>
+        <button class="danger" onclick="triggerError('key')">
+            Trigger KeyError
+        </button>
+        <button class="danger" onclick="triggerError('generic')">
+            Trigger Generic Error
+        </button>
+    </div>
+
+    <div id="error-result" style="display: none;" class="message"></div>
+</div>
+
+<div class="card">
     <h3>Code Example</h3>
     <pre>
-# Track profile view
-client = get_amplitude_client()
-if client:
-    client.track(BaseEvent(
-        event_type='profile_viewed',
-        user_id=current_user.email,
-    ))</pre>
+try:
+    raise ValueError('Invalid value provided')
+except Exception as e:
+    # Capture exception and event with user context
+    with new_context():
+        identify_context(current_user.email)
+        posthog.capture_exception(e)
+        capture('error_triggered', properties={
+            'error_type': 'value',
+            'error_message': str(e)
+        })</pre>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+async function triggerError(errorType) {
+    const resultDiv = document.getElementById('error-result');
+    try {
+        const formData = new FormData();
+        formData.append('error_type', errorType);
+
+        const response = await fetch('/api/trigger-error', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await response.json();
+
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'message ' + (data.success ? 'success' : 'error');
+        resultDiv.textContent = data.message + ': ' + data.error;
+    } catch (error) {
+        console.error('Error:', error);
+        resultDiv.style.display = 'block';
+        resultDiv.className = 'message error';
+        resultDiv.textContent = 'Request failed: ' + error.message;
+    }
+}
+
 async function generateReport(reportType) {
     const resultDiv = document.getElementById('report-result');
     try {
@@ -1298,12 +1496,12 @@ async function generateReport(reportType) {
 ```html
 {% extends "base.html" %}
 
-{% block title %}Sign Up - Amplitude FastAPI Example{% endblock %}
+{% block title %}Sign Up - PostHog FastAPI Example{% endblock %}
 
 {% block content %}
 <div class="card">
     <h1>Create an Account</h1>
-    <p>Sign up to explore the Amplitude FastAPI integration example.</p>
+    <p>Sign up to explore the PostHog FastAPI integration example.</p>
 
     <form method="POST">
         <label for="email">Email *</label>
@@ -1324,29 +1522,25 @@ async function generateReport(reportType) {
 </div>
 
 <div class="card">
-    <h2>Amplitude Integration</h2>
-    <p>When you sign up, the following Amplitude events are captured:</p>
+    <h2>PostHog Integration</h2>
+    <p>When you sign up, the following PostHog events are captured:</p>
     <ul style="margin-left: 20px; color: #666;">
-        <li><code>client.identify()</code> - Sets user properties (email, is_staff, date_joined)</li>
+        <li><code>identify_context()</code> - Associates your email with the context</li>
+        <li><code>tag()</code> - Sets person properties (email, etc.)</li>
         <li><code>user_signed_up</code> event - Tracks the signup action</li>
     </ul>
 
     <h3 style="margin-top: 20px;">Code Example</h3>
     <pre>
 # After creating the user
-client = get_amplitude_client()
-if client:
-    identify_obj = Identify()
-    identify_obj.set('email', user.email)
-    identify_obj.set('is_staff', user.is_staff)
-    identify_obj.set('date_joined', user.date_joined.isoformat())
-    client.identify(identify_obj, {'user_id': user.email})
+with new_context():
+    identify_context(user.email)
 
-    client.track(BaseEvent(
-        event_type='user_signed_up',
-        user_id=user.email,
-        event_properties={'signup_method': 'form'},
-    ))</pre>
+    tag('email', user.email)
+    tag('is_staff', user.is_staff)
+    tag('date_joined', user.date_joined.isoformat())
+
+    capture('user_signed_up', properties={'signup_method': 'form'})</pre>
 </div>
 {% endblock %}
 
@@ -1361,7 +1555,7 @@ fastapi>=0.109.0
 uvicorn>=0.27.0
 sqlalchemy>=2.0.0
 python-dotenv>=1.0.0
-amplitude-analytics>=1.0.0
+posthog>=3.0.0
 pydantic>=2.0.0
 pydantic-settings>=2.0.0
 jinja2>=3.0.0

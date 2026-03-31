@@ -1,43 +1,45 @@
-# Amplitude TanStack Start Example Project
+# PostHog TanStack Start Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/tanstack-start
 
 ---
 
 ## README.md
 
-# Amplitude TanStack Start example
+# PostHog TanStack Start example
 
-This is a [TanStack Start](https://tanstack.com/start) example demonstrating Amplitude integration with product analytics and event tracking.
+This is a [TanStack Start](https://tanstack.com/start) example demonstrating PostHog integration with product analytics, session replay, feature flags, and error tracking.
 
 ## Features
 
 - **Product analytics**: Track user events and behaviors
-- **User authentication**: Demo login system with Amplitude user identification
-- **Client and server tracking**: Examples of both client-side and server-side tracking
+- **Session replay**: Record and replay user sessions
+- **Error tracking**: Capture and track errors automatically
+- **User authentication**: Demo login system with PostHog user identification
+- **Server-side & client-side tracking**: Complete examples of both tracking methods
+- **Reverse proxy**: PostHog ingestion through Vite dev server proxy
 
-## Getting Started
+## Getting started
 
-### 1. Install Dependencies
+### 1. Install dependencies
 
 ```bash
 npm install
-# or
-pnpm install
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure environment variables
 
 Create a `.env` file in the root directory:
 
 ```bash
-VITE_PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
+VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
+VITE_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
-Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
+Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
 
-### 3. Run the Development Server
+### 3. Run the development server
 
 ```bash
 npm run dev
@@ -45,60 +47,176 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the app.
 
-## Key Integration Points
+## Project structure
 
-### Client-side initialization (src/routes/__root.tsx)
+```
+src/
+├── components/
+│   └── Header.tsx           # Navigation header with auth state
+├── contexts/
+│   └── AuthContext.tsx      # Authentication context with PostHog integration
+├── utils/
+│   └── posthog-server.ts   # Server-side PostHog client
+├── routes/
+│   ├── __root.tsx           # Root route with PostHogProvider
+│   ├── index.tsx            # Home/login page
+│   ├── burrito.tsx          # Demo feature page with event tracking
+│   ├── profile.tsx          # User profile with error tracking demo
+│   └── api/
+│       ├── auth/
+│       │   └── login.ts     # Login API with server-side tracking
+│       └── burrito/
+│           └── consider.ts  # Burrito API with server-side tracking
+└── styles.css               # Global styles
 
-```typescript
-import * as amplitude from '@amplitude/analytics-browser'
-
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
+vite.config.ts               # Vite config with PostHog proxy
+.env                         # Environment variables
 ```
 
-### User identification (src/contexts/AuthContext.tsx)
+## Key integration points
+
+### Client-side initialization (routes/__root.tsx)
+
+PostHog is initialized using `PostHogProvider` from `@posthog/react`. The provider wraps the entire app in the root shell component and handles calling `posthog.init()` automatically:
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+import { PostHogProvider } from '@posthog/react'
 
-amplitude.setUserId(username)
-const identifyObj = new Identify()
-identifyObj.set('username', username)
-amplitude.identify(identifyObj)
-amplitude.track('user_logged_in', { username })
+<PostHogProvider
+  apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN!}
+  options={{
+    api_host: '/ingest',
+    ui_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST || 'https://us.posthog.com',
+    defaults: '2025-05-24',
+    capture_exceptions: true,
+    debug: import.meta.env.DEV,
+  }}
+>
+  {children}
+</PostHogProvider>
 ```
 
-### Server-side tracking (src/utils/amplitude-server.ts)
+### Server-side setup (utils/posthog-server.ts)
+
+For server-side tracking, we use the `posthog-node` SDK with a singleton pattern:
 
 ```typescript
-import { NodeClient, createInstance } from '@amplitude/analytics-node'
+import { PostHog } from 'posthog-node'
 
-const amplitude = getAmplitudeClient()
-amplitude.track('server_login', { username, source: 'api' }, { user_id: username })
-await amplitude.flush()
+export function getPostHogClient() {
+  if (!posthogClient) {
+    posthogClient = new PostHog(
+      process.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN || import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN!,
+      {
+        host: process.env.VITE_PUBLIC_POSTHOG_HOST || import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+        flushAt: 1,
+        flushInterval: 0,
+      }
+    )
+  }
+  return posthogClient
+}
 ```
 
-### Event tracking (src/routes/burrito.tsx)
+This client is used in API routes to track server-side events.
+
+### Server-side capture (routes/api/*)
+
+Server-side events include the client's `$session_id` so they appear in the same session in PostHog. The frontend sends it via a header:
 
 ```typescript
-amplitude.track('burrito_considered', {
+// Frontend: include session ID in API requests
+await fetch('/api/burrito/consider', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'X-PostHog-Session-Id': posthog.get_session_id() ?? '',
+  },
+  body: JSON.stringify({ ... }),
+})
+```
+
+```typescript
+// Server: read session ID from header and include in capture
+import { getPostHogClient } from '../../utils/posthog-server'
+
+const sessionId = request.headers.get('X-PostHog-Session-Id')
+
+const posthog = getPostHogClient()
+posthog.capture({
+  distinctId: username,
+  event: 'burrito_considered',
+  properties: {
+    $session_id: sessionId || undefined,
+    username: username,
+    source: 'api',
+  },
+})
+```
+
+### Reverse proxy configuration
+
+The Vite dev server is configured to proxy PostHog requests to avoid CORS issues and improve reliability:
+
+```typescript
+server: {
+  proxy: {
+    '/ingest': {
+      target: 'https://us.i.posthog.com',
+      changeOrigin: true,
+      rewrite: (path) => path.replace(/^\/ingest/, ''),
+      secure: false,
+    },
+  },
+}
+```
+
+### User identification (contexts/AuthContext.tsx)
+
+```typescript
+import { usePostHog } from '@posthog/react'
+
+const posthog = usePostHog()
+
+posthog.identify(username, {
+  username: username,
+})
+```
+
+### Event tracking (routes/burrito.tsx)
+
+```typescript
+import { usePostHog } from '@posthog/react'
+
+const posthog = usePostHog()
+
+posthog.capture('burrito_considered', {
   total_considerations: user.burritoConsiderations + 1,
   username: user.username,
 })
 ```
 
-## Learn More
+### Error tracking (routes/profile.tsx)
 
-- [Amplitude Documentation](https://amplitude.com/docs)
-- [TanStack Start Documentation](https://tanstack.com/start/latest)
-- [Amplitude Browser SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2)
+```typescript
+posthog.captureException(error)
+```
+
+## Learn more
+
+- [PostHog documentation](https://posthog.com/docs)
+- [TanStack Start documentation](https://tanstack.com/start)
+- [TanStack Router documentation](https://tanstack.com/router)
+- [PostHog React integration](https://posthog.com/docs/libraries/react)
+- [PostHog Node.js integration](https://posthog.com/docs/libraries/node)
 
 ---
 
 ## .env.example
 
 ```example
-VITE_PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key_here
+VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=<ph_project_token>
+VITE_PUBLIC_POSTHOG_HOST=<ph_client_api_host>
 
 ```
 
@@ -194,8 +312,7 @@ import {
   useState,
   ReactNode,
 } from 'react'
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+import { usePostHog } from '@posthog/react'
 
 interface User {
   username: string
@@ -214,6 +331,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 const users: Map<string, User> = new Map()
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const posthog = usePostHog()
+
   // Use lazy initializer to read from localStorage only once on mount
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window === 'undefined') return null
@@ -237,6 +356,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-PostHog-Session-Id': posthog.get_session_id() ?? '',
         },
         body: JSON.stringify({ username, password }),
       })
@@ -256,14 +376,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           localStorage.setItem('currentUser', username)
         }
 
-        // Identify user in Amplitude using username as user ID
-        amplitude.setUserId(username)
-        const identifyObj = new Identify()
-        identifyObj.set('username', username)
-        amplitude.identify(identifyObj)
+        // Identify user in PostHog using username as distinct ID
+        posthog.identify(username, {
+          username: username,
+        })
 
-        // Track login event
-        amplitude.track('user_logged_in', { username })
+        // Capture login event
+        posthog.capture('user_logged_in', {
+          username: username,
+        })
 
         return true
       }
@@ -275,9 +396,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const logout = () => {
-    // Track logout event before resetting
-    amplitude.track('user_logged_out')
-    amplitude.reset()
+    // Capture logout event before resetting
+    posthog.capture('user_logged_out')
+    posthog.reset()
 
     setUser(null)
     if (typeof window !== 'undefined') {
@@ -341,16 +462,12 @@ export const getRouter = () => {
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
-import * as amplitude from '@amplitude/analytics-browser'
+import { PostHogProvider } from '@posthog/react'
 
 import Header from '../components/Header'
 import { AuthProvider } from '../contexts/AuthContext'
 
 import appCss from '../styles.css?url'
-
-if (typeof window !== 'undefined') {
-  amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
-}
 
 export const Route = createRootRoute({
   head: () => ({
@@ -384,21 +501,32 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body>
-        <AuthProvider>
-          <Header />
-          {children}
-        <TanStackDevtools
-          config={{
-            position: 'bottom-right',
+        <PostHogProvider
+          apiKey={import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN!}
+          options={{
+            api_host: '/ingest',
+            ui_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST || 'https://us.posthog.com',
+            defaults: '2025-05-24',
+            capture_exceptions: true,
+            debug: import.meta.env.DEV,
           }}
-          plugins={[
-            {
-              name: 'Tanstack Router',
-              render: <TanStackRouterDevtoolsPanel />,
-            },
-          ]}
-        />
-        </AuthProvider>
+        >
+          <AuthProvider>
+            <Header />
+            {children}
+          <TanStackDevtools
+            config={{
+              position: 'bottom-right',
+            }}
+            plugins={[
+              {
+                name: 'Tanstack Router',
+                render: <TanStackRouterDevtoolsPanel />,
+              },
+            ]}
+          />
+          </AuthProvider>
+        </PostHogProvider>
         <Scripts />
       </body>
     </html>
@@ -414,7 +542,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
 ```ts
 import { createFileRoute } from '@tanstack/react-router'
 import { json } from '@tanstack/react-start'
-import { getAmplitudeClient } from '../../../utils/amplitude-server'
+import { getPostHogClient } from '../../../utils/posthog-server'
 
 export const Route = createFileRoute('/api/auth/login')({
   server: {
@@ -440,15 +568,29 @@ export const Route = createFileRoute('/api/auth/login')({
           burritoConsiderations: 0,
         }
 
-        // Capture server-side login event
-        const amplitude = getAmplitudeClient()
-        amplitude.track('server_login', {
-          username,
-          isNewUser,
-          source: 'api',
-        }, { user_id: username })
+        const sessionId = request.headers.get('X-PostHog-Session-Id')
 
-        await amplitude.flush()
+        // Capture server-side login event
+        const posthog = getPostHogClient()
+        posthog.capture({
+          distinctId: username,
+          event: 'server_login',
+          properties: {
+            $session_id: sessionId || undefined,
+            username: username,
+            isNewUser: isNewUser,
+            source: 'api',
+          },
+        })
+
+        // Identify user on server side
+        posthog.identify({
+          distinctId: username,
+          properties: {
+            username: username,
+            createdAt: isNewUser ? new Date().toISOString() : undefined,
+          },
+        })
 
         return json({ success: true, user })
       },
@@ -465,7 +607,7 @@ export const Route = createFileRoute('/api/auth/login')({
 ```ts
 import { createFileRoute } from '@tanstack/react-router'
 import { json } from '@tanstack/react-start'
-import { getAmplitudeClient } from '../../../utils/amplitude-server'
+import { getPostHogClient } from '../../../utils/posthog-server'
 
 export const Route = createFileRoute('/api/burrito/consider')({
   server: {
@@ -481,14 +623,19 @@ export const Route = createFileRoute('/api/burrito/consider')({
           )
         }
 
-        const amplitude = getAmplitudeClient()
-        amplitude.track('burrito_considered', {
-          total_considerations: totalConsiderations,
-          username,
-          source: 'api',
-        }, { user_id: username })
+        const sessionId = request.headers.get('X-PostHog-Session-Id')
 
-        await amplitude.flush()
+        const posthog = getPostHogClient()
+        posthog.capture({
+          distinctId: username,
+          event: 'burrito_considered',
+          properties: {
+            $session_id: sessionId || undefined,
+            total_considerations: totalConsiderations,
+            username: username,
+            source: 'api',
+          },
+        })
 
         return json({ success: true })
       },
@@ -505,7 +652,7 @@ export const Route = createFileRoute('/api/burrito/consider')({
 ```tsx
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
-import * as amplitude from '@amplitude/analytics-browser'
+import { usePostHog } from '@posthog/react'
 import { useAuth } from '../contexts/AuthContext'
 
 export const Route = createFileRoute('/burrito')({
@@ -526,6 +673,7 @@ export const Route = createFileRoute('/burrito')({
 function BurritoPage() {
   const { user, incrementBurritoConsiderations } = useAuth()
   const navigate = useNavigate()
+  const posthog = usePostHog()
   const [hasConsidered, setHasConsidered] = useState(false)
 
   // Redirect to home if not logged in
@@ -539,7 +687,7 @@ function BurritoPage() {
     setHasConsidered(true)
     setTimeout(() => setHasConsidered(false), 2000)
 
-    amplitude.track('burrito_considered', {
+    posthog.capture('burrito_considered', {
       total_considerations: user.burritoConsiderations + 1,
       username: user.username,
     })
@@ -554,6 +702,7 @@ function BurritoPage() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'X-PostHog-Session-Id': posthog.get_session_id() ?? '',
       },
       body: JSON.stringify({
         username: user.username,
@@ -714,6 +863,7 @@ function Home() {
 
 ```tsx
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
+import { usePostHog } from '@posthog/react'
 import { useAuth } from '../contexts/AuthContext'
 
 export const Route = createFileRoute('/profile')({
@@ -734,11 +884,22 @@ export const Route = createFileRoute('/profile')({
 function ProfilePage() {
   const { user } = useAuth()
   const navigate = useNavigate()
+  const posthog = usePostHog()
 
   // Redirect to home if not logged in
   if (!user) {
     navigate({ to: '/' })
     return null
+  }
+
+  const triggerTestError = () => {
+    try {
+      throw new Error('Test error for PostHog error tracking')
+    } catch (err) {
+      posthog.captureException(err)
+      console.error('Captured error:', err)
+      alert('Error captured and sent to PostHog!')
+    }
   }
 
   return (
@@ -758,6 +919,16 @@ function ProfilePage() {
         </div>
 
         <div style={{ marginTop: '2rem' }}>
+          <button
+            onClick={triggerTestError}
+            className="btn-primary"
+            style={{ backgroundColor: '#dc3545' }}
+          >
+            Trigger Test Error (for PostHog)
+          </button>
+        </div>
+
+        <div style={{ marginTop: '2rem' }}>
           <h3>Your Burrito Journey</h3>
           {user.burritoConsiderations === 0 ? (
             <p>
@@ -771,7 +942,7 @@ function ProfilePage() {
           ) : user.burritoConsiderations < 10 ? (
             <p>You're becoming a burrito consideration expert!</p>
           ) : (
-            <p>You are a true burrito consideration master!</p>
+            <p>You are a true burrito consideration master! 🌯</p>
           )}
         </div>
       </div>
@@ -783,21 +954,191 @@ function ProfilePage() {
 
 ---
 
-## src/utils/amplitude-server.ts
+## src/routeTree.gen.ts
 
 ```ts
-import { NodeClient, createInstance } from '@amplitude/analytics-node'
+/* eslint-disable */
 
-let amplitudeClient: NodeClient | null = null
+// @ts-nocheck
 
-export function getAmplitudeClient(): NodeClient {
-  if (!amplitudeClient) {
-    const apiKey = process.env.VITE_PUBLIC_AMPLITUDE_API_KEY || import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY!
-    amplitudeClient = createInstance()
-    amplitudeClient.init(apiKey)
-  }
-  return amplitudeClient
+// noinspection JSUnusedGlobalSymbols
+
+// This file was automatically generated by TanStack Router.
+// You should NOT make any changes in this file as it will be overwritten.
+// Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
+
+import { Route as rootRouteImport } from './routes/__root'
+import { Route as ProfileRouteImport } from './routes/profile'
+import { Route as BurritoRouteImport } from './routes/burrito'
+import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiBurritoConsiderRouteImport } from './routes/api/burrito/consider'
+import { Route as ApiAuthLoginRouteImport } from './routes/api/auth/login'
+
+const ProfileRoute = ProfileRouteImport.update({
+  id: '/profile',
+  path: '/profile',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BurritoRoute = BurritoRouteImport.update({
+  id: '/burrito',
+  path: '/burrito',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiBurritoConsiderRoute = ApiBurritoConsiderRouteImport.update({
+  id: '/api/burrito/consider',
+  path: '/api/burrito/consider',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAuthLoginRoute = ApiAuthLoginRouteImport.update({
+  id: '/api/auth/login',
+  path: '/api/auth/login',
+  getParentRoute: () => rootRouteImport,
+} as any)
+
+export interface FileRoutesByFullPath {
+  '/': typeof IndexRoute
+  '/burrito': typeof BurritoRoute
+  '/profile': typeof ProfileRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/burrito/consider': typeof ApiBurritoConsiderRoute
 }
+export interface FileRoutesByTo {
+  '/': typeof IndexRoute
+  '/burrito': typeof BurritoRoute
+  '/profile': typeof ProfileRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/burrito/consider': typeof ApiBurritoConsiderRoute
+}
+export interface FileRoutesById {
+  __root__: typeof rootRouteImport
+  '/': typeof IndexRoute
+  '/burrito': typeof BurritoRoute
+  '/profile': typeof ProfileRoute
+  '/api/auth/login': typeof ApiAuthLoginRoute
+  '/api/burrito/consider': typeof ApiBurritoConsiderRoute
+}
+export interface FileRouteTypes {
+  fileRoutesByFullPath: FileRoutesByFullPath
+  fullPaths:
+    | '/'
+    | '/burrito'
+    | '/profile'
+    | '/api/auth/login'
+    | '/api/burrito/consider'
+  fileRoutesByTo: FileRoutesByTo
+  to:
+    | '/'
+    | '/burrito'
+    | '/profile'
+    | '/api/auth/login'
+    | '/api/burrito/consider'
+  id:
+    | '__root__'
+    | '/'
+    | '/burrito'
+    | '/profile'
+    | '/api/auth/login'
+    | '/api/burrito/consider'
+  fileRoutesById: FileRoutesById
+}
+export interface RootRouteChildren {
+  IndexRoute: typeof IndexRoute
+  BurritoRoute: typeof BurritoRoute
+  ProfileRoute: typeof ProfileRoute
+  ApiAuthLoginRoute: typeof ApiAuthLoginRoute
+  ApiBurritoConsiderRoute: typeof ApiBurritoConsiderRoute
+}
+
+declare module '@tanstack/react-router' {
+  interface FileRoutesByPath {
+    '/profile': {
+      id: '/profile'
+      path: '/profile'
+      fullPath: '/profile'
+      preLoaderRoute: typeof ProfileRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/burrito': {
+      id: '/burrito'
+      path: '/burrito'
+      fullPath: '/burrito'
+      preLoaderRoute: typeof BurritoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/burrito/consider': {
+      id: '/api/burrito/consider'
+      path: '/api/burrito/consider'
+      fullPath: '/api/burrito/consider'
+      preLoaderRoute: typeof ApiBurritoConsiderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/auth/login': {
+      id: '/api/auth/login'
+      path: '/api/auth/login'
+      fullPath: '/api/auth/login'
+      preLoaderRoute: typeof ApiAuthLoginRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+  }
+}
+
+const rootRouteChildren: RootRouteChildren = {
+  IndexRoute: IndexRoute,
+  BurritoRoute: BurritoRoute,
+  ProfileRoute: ProfileRoute,
+  ApiAuthLoginRoute: ApiAuthLoginRoute,
+  ApiBurritoConsiderRoute: ApiBurritoConsiderRoute,
+}
+export const routeTree = rootRouteImport
+  ._addFileChildren(rootRouteChildren)
+  ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { createStart } from '@tanstack/react-start'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+  }
+}
+
+```
+
+---
+
+## src/utils/posthog-server.ts
+
+```ts
+import { PostHog } from 'posthog-node'
+
+let posthogClient: PostHog | null = null
+
+export function getPostHogClient() {
+  if (!posthogClient) {
+    posthogClient = new PostHog(
+      process.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN || import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN!,
+      {
+        host: process.env.VITE_PUBLIC_POSTHOG_HOST || import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+        flushAt: 1,
+        flushInterval: 0,
+      },
+    )
+  }
+  return posthogClient
+}
+
 
 ```
 
@@ -820,6 +1161,16 @@ const config = defineConfig({
     tanstackStart(),
     viteReact(),
   ],
+  server: {
+    proxy: {
+      '/ingest': {
+        target: 'https://us.i.posthog.com',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/ingest/, ''),
+        secure: false,
+      },
+    },
+  },
 })
 
 export default config

@@ -1,21 +1,21 @@
-# Amplitude Python Example Project
+# PostHog Python Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/python
 
 ---
 
 ## README.md
 
-# Amplitude Python Example - CLI Todo App
+# PostHog Python Example - CLI Todo App
 
-A simple command-line todo application built with plain Python (no frameworks) demonstrating Amplitude integration for CLIs, scripts, data pipelines, and non-web Python applications.
+A simple command-line todo application built with plain Python (no frameworks) demonstrating PostHog integration for CLIs, scripts, data pipelines, and non-web Python applications.
 
 ## Purpose
 
 This example serves as:
-- **Verification** that the context-hub wizard works for plain Python projects
-- **Reference implementation** of Amplitude best practices for non-framework Python code
+- **Verification** that the context-mill wizard works for plain Python projects
+- **Reference implementation** of PostHog best practices for non-framework Python code
 - **Working example** you can run and modify
 
 ## Features Demonstrated
@@ -40,15 +40,15 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Configure Amplitude
+### 2. Configure PostHog
 
 ```bash
 # Copy environment template
 cp .env.example .env
 
-# Edit .env and add your Amplitude project token
-# AMPLITUDE_API_KEY=phc_your_project_token_here
-# AMPLITUDE_HOST=https://us.i.amplitude.com
+# Edit .env and add your PostHog project token
+# POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
+# POSTHOG_HOST=https://us.i.posthog.com
 ```
 
 ### 3. Run the App
@@ -72,7 +72,7 @@ python todo.py stats
 
 ## What Gets Tracked
 
-The app tracks these events in Amplitude:
+The app tracks these events in PostHog:
 
 | Event | Properties | Purpose |
 |-------|-----------|---------|
@@ -98,11 +98,11 @@ basics/python/
 ### 1. Instance-Based Initialization
 
 ```python
-from amplitude import Posthog
+from posthog import Posthog
 
-amplitude = Posthog(
+posthog = Posthog(
     api_key,
-    host='https://us.i.amplitude.com',
+    host='https://us.i.posthog.com',
     enable_exception_autocapture=True  # Automatically capture exceptions
 )
 ```
@@ -111,7 +111,7 @@ amplitude = Posthog(
 
 ```python
 # Track events with distinct_id
-amplitude_client.capture(
+posthog_client.capture(
     distinct_id="user_123",
     event="event_name",
     properties={"key": "value"}
@@ -126,14 +126,14 @@ try:
     pass
 finally:
     # Always call shutdown() to flush events and close connections
-    amplitude.shutdown()
+    posthog.shutdown()
 ```
 
 ### 4. Identifying Users
 
 ```python
 # Set person properties on a user profile
-amplitude_client.set(
+posthog_client.set(
     distinct_id="user_123",
     properties={"email": "user@example.com", "plan": "pro"}
 )
@@ -147,33 +147,37 @@ try:
     risky_operation()
 except Exception as e:
     # Manually capture handled errors you want to track
-    amplitude_client.capture_exception(e, distinct_id="user_123")
+    posthog_client.capture_exception(e, distinct_id="user_123")
 ```
 
-## Running Without Amplitude
+## Running Without PostHog
 
-The app works fine without Amplitude configured - it simply won't track analytics. You'll see a warning message but the app continues to function normally.
+The app works fine without PostHog configured - it simply won't track analytics. You'll see a warning message but the app continues to function normally.
 
 ## Next Steps
 
-- Modify `todo.py` to experiment with Amplitude tracking
+- Modify `todo.py` to experiment with PostHog tracking
 - Add new commands and track their usage
-- Explore feature flags: `amplitude.feature_enabled('flag-name', user_id)`
-- Check your Amplitude dashboard to see tracked events
+- Explore feature flags: `posthog.feature_enabled('flag-name', user_id)`
+- Check your PostHog dashboard to see tracked events
 
 ## Learn More
 
-- [Amplitude Python SDK Documentation](https://amplitude.com/docs/libraries/python)
-- [Amplitude Python SDK API Reference](https://amplitude.com/docs/references/amplitude-python)
-- [Amplitude Product Analytics](https://amplitude.com/docs/product-analytics)
+- [PostHog Python SDK Documentation](https://posthog.com/docs/libraries/python)
+- [PostHog Python SDK API Reference](https://posthog.com/docs/references/posthog-python)
+- [PostHog Product Analytics](https://posthog.com/docs/product-analytics)
 
 ---
 
 ## .env.example
 
 ```example
-# Amplitude Configuration
-AMPLITUDE_API_KEY=your_amplitude_api_key_here
+# PostHog Configuration
+POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
+POSTHOG_HOST=https://us.i.posthog.com
+
+# Optional: Enable debug mode to see PostHog requests
+# POSTHOG_DEBUG=true
 
 ```
 
@@ -182,7 +186,7 @@ AMPLITUDE_API_KEY=your_amplitude_api_key_here
 ## requirements.txt
 
 ```txt
-amplitude-analytics>=1.0.0
+posthog>=3.0.0
 python-dotenv>=1.0.0
 
 ```
@@ -193,9 +197,9 @@ python-dotenv>=1.0.0
 
 ```py
 #!/usr/bin/env python3
-"""Simple CLI Todo App with Amplitude Analytics
+"""Simple CLI Todo App with PostHog Analytics
 
-A minimal plain Python CLI application demonstrating Amplitude integration
+A minimal plain Python CLI application demonstrating PostHog integration
 for non-framework Python projects (CLIs, scripts, data pipelines, etc.).
 """
 
@@ -206,7 +210,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
-from amplitude import Amplitude, BaseEvent, Identify
+from posthog import Posthog
 
 # Load environment variables
 load_dotenv()
@@ -215,22 +219,27 @@ load_dotenv()
 DATA_FILE = Path.home() / ".todo_app.json"
 
 
-def initialize_amplitude():
-    """Initialize Amplitude with instance-based API.
+def initialize_posthog():
+    """Initialize PostHog with instance-based API.
 
-    Returns Amplitude instance or None if API key not configured.
+    Returns PostHog instance or None if project token not configured.
     """
-    api_key = os.getenv('AMPLITUDE_API_KEY')
+    project_token = os.getenv('POSTHOG_PROJECT_TOKEN')
 
-    if not api_key:
-        print("WARNING: Amplitude not configured (AMPLITUDE_API_KEY not set)")
+    if not project_token:
+        print("WARNING: PostHog not configured (POSTHOG_PROJECT_TOKEN not set)")
         print("         App will work but analytics won't be tracked")
         return None
 
-    # Create Amplitude instance
-    client = Amplitude(api_key)
+    # Create PostHog instance with opinionated defaults
+    posthog = Posthog(
+        project_token,
+        host=os.getenv('POSTHOG_HOST', 'https://us.i.posthog.com'),
+        debug=os.getenv('POSTHOG_DEBUG', 'False').lower() == 'true',
+        enable_exception_autocapture=True  # Auto-capture unhandled exceptions
+    )
 
-    return client
+    return posthog
 
 
 def get_user_id():
@@ -263,22 +272,22 @@ def save_todos(data):
     DATA_FILE.write_text(json.dumps(data, indent=2))
 
 
-def track_event(client, event_name, properties=None):
-    """Track an event with Amplitude.
+def track_event(posthog, event_name, properties=None):
+    """Track an event with PostHog.
 
-    Uses the Amplitude Python SDK API.
+    Uses the real PostHog Python SDK API.
     """
-    if not client:
+    if not posthog:
         return
 
-    client.track(BaseEvent(
-        event_type=event_name,
-        user_id=get_user_id(),
-        event_properties=properties or {}
-    ))
+    posthog.capture(
+        distinct_id=get_user_id(),
+        event=event_name,
+        properties=properties or {}
+    )
 
 
-def cmd_add(args, client):
+def cmd_add(args, posthog):
     """Add a new todo item."""
     data = load_todos()
 
@@ -295,14 +304,14 @@ def cmd_add(args, client):
     print(f"Added todo #{todo['id']}: {todo['text']}")
 
     # Track the event
-    track_event(client, "todo_added", {
+    track_event(posthog, "todo_added", {
         "todo_id": todo["id"],
         "todo_length": len(todo["text"]),
         "total_todos": len(data["todos"])
     })
 
 
-def cmd_list(args, client):
+def cmd_list(args, posthog):
     """List all todos."""
     data = load_todos()
 
@@ -319,13 +328,13 @@ def cmd_list(args, client):
     print()
 
     # Track the event
-    track_event(client, "todos_viewed", {
+    track_event(posthog, "todos_viewed", {
         "total_todos": len(data["todos"]),
         "completed_todos": sum(1 for t in data["todos"] if t["completed"])
     })
 
 
-def cmd_complete(args, client):
+def cmd_complete(args, posthog):
     """Mark a todo as completed."""
     data = load_todos()
 
@@ -346,7 +355,7 @@ def cmd_complete(args, client):
     print(f"Completed todo #{todo['id']}: {todo['text']}")
 
     # Track the event
-    track_event(client, "todo_completed", {
+    track_event(posthog, "todo_completed", {
         "todo_id": todo["id"],
         "time_to_complete_hours": (
             datetime.fromisoformat(todo["completed_at"]) -
@@ -355,7 +364,7 @@ def cmd_complete(args, client):
     })
 
 
-def cmd_delete(args, client):
+def cmd_delete(args, posthog):
     """Delete a todo."""
     data = load_todos()
 
@@ -371,13 +380,13 @@ def cmd_delete(args, client):
     print(f"Deleted todo #{args.id}")
 
     # Track the event
-    track_event(client, "todo_deleted", {
+    track_event(posthog, "todo_deleted", {
         "todo_id": todo["id"],
         "was_completed": todo["completed"]
     })
 
 
-def cmd_stats(args, client):
+def cmd_stats(args, posthog):
     """Show usage statistics."""
     data = load_todos()
 
@@ -393,7 +402,7 @@ def cmd_stats(args, client):
     print()
 
     # Track the event
-    track_event(client, "stats_viewed", {
+    track_event(posthog, "stats_viewed", {
         "total_todos": total,
         "completed_todos": completed,
         "pending_todos": pending
@@ -403,7 +412,7 @@ def cmd_stats(args, client):
 def main():
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
-        description="Simple todo app with Amplitude analytics"
+        description="Simple todo app with PostHog analytics"
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")
@@ -432,30 +441,35 @@ def main():
         parser.print_help()
         return
 
-    # Initialize Amplitude
-    client = initialize_amplitude()
+    # Initialize PostHog
+    posthog = initialize_posthog()
 
     try:
         # Route to appropriate command
         if args.command == "add":
-            cmd_add(args, client)
+            cmd_add(args, posthog)
         elif args.command == "list":
-            cmd_list(args, client)
+            cmd_list(args, posthog)
         elif args.command == "complete":
-            cmd_complete(args, client)
+            cmd_complete(args, posthog)
         elif args.command == "delete":
-            cmd_delete(args, client)
+            cmd_delete(args, posthog)
         elif args.command == "stats":
-            cmd_stats(args, client)
+            cmd_stats(args, posthog)
 
     except Exception as e:
         print(f"ERROR: {e}")
+
+        # Manually capture handled errors
+        if posthog:
+            posthog.capture_exception(e, get_user_id())
+
         sys.exit(1)
 
     finally:
-        # IMPORTANT: Always flush Amplitude to send queued events
-        if client:
-            client.shutdown()
+        # IMPORTANT: Always shutdown PostHog to flush events
+        if posthog:
+            posthog.shutdown()
 
 
 if __name__ == "__main__":

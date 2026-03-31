@@ -1,33 +1,34 @@
-# Amplitude Swift (iOS/macOS) Example Project
+# PostHog Swift (iOS/macOS) Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/swift
 
 ---
 
 ## README.md
 
-# Amplitude Swift (iOS/macOS) example
+# PostHog Swift (iOS/macOS) example
 
-This is a [SwiftUI](https://developer.apple.com/xcode/swiftui/) example demonstrating Amplitude integration with product analytics and user identification. The app targets both iOS and macOS using `NavigationSplitView`.
+This is a [SwiftUI](https://developer.apple.com/xcode/swiftui/) example demonstrating PostHog integration with product analytics, error tracking, and user identification. The app targets both iOS and macOS using `NavigationSplitView`.
 
 ## Features
 
 - **Product analytics**: Track user events and behaviors
+- **Error tracking**: Capture and track errors
 - **User identification**: Associate events with authenticated users
 - **Multi-platform**: Runs on iOS, iPadOS, macOS, and visionOS
 
 ## Getting started
 
-### 1. Add the Amplitude dependency
+### 1. Add the PostHog dependency
 
-The Xcode project already includes the Amplitude Swift SDK via Swift Package Manager. When you open the project, Xcode will resolve the package automatically.
+The Xcode project already includes the PostHog iOS SDK via Swift Package Manager. When you open the project, Xcode will resolve the package automatically.
 
-To add it manually to a new project: File > Add Package Dependencies > enter `https://github.com/amplitude/Amplitude-Swift`.
+To add it manually to a new project: File > Add Package Dependencies > enter `https://github.com/PostHog/posthog-ios`.
 
 ### 2. Configure environment variables
 
-Set your Amplitude API key as an environment variable in the Xcode scheme:
+Set your PostHog project token and host as environment variables in the Xcode scheme:
 
 1. In Xcode, go to **Product > Scheme > Edit Scheme…**
 2. Select **Run** in the sidebar
@@ -36,11 +37,12 @@ Set your Amplitude API key as an environment variable in the Xcode scheme:
 
 | Variable | Value |
 |----------|-------|
-| `AMPLITUDE_API_KEY` | Your Amplitude API key |
+| `POSTHOG_PROJECT_TOKEN` | Your PostHog project token |
+| `POSTHOG_HOST` | `https://us.i.posthog.com` |
 
-Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
+Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
 
-The app reads this via `ProcessInfo.processInfo.environment` and will crash with a clear message if it's missing.
+The app reads these via `ProcessInfo.processInfo.environment` and will crash with a clear message if they're missing.
 
 ### 3. Build and run
 
@@ -50,44 +52,46 @@ Open `BurritoConsiderationClient.xcodeproj` in Xcode and run on an iOS Simulator
 
 ```
 BurritoConsiderationClient/
-├── BurritoConsiderationClientApp.swift  # App entry point with Amplitude initialization
+├── BurritoConsiderationClientApp.swift  # App entry point with PostHog initialization
 ├── ContentView.swift                    # NavigationSplitView with sidebar routing
-├── UserState.swift                      # @Observable user state with Amplitude identify
+├── UserState.swift                      # @Observable user state with PostHog identify
 ├── LoginView.swift                      # Login form
 ├── DashboardView.swift                  # Welcome screen with dashboard_viewed tracking
-├── BurritoView.swift                    # Burrito consideration with event tracking
-├── ProfileView.swift                    # Profile with journey progress
+├── BurritoView.swift                    # Burrito consideration with event capture
+├── ProfileView.swift                    # Profile with journey progress and error trigger
 └── Assets.xcassets/                     # Asset catalog
 ```
 
 ## Key integration points
 
-### Amplitude initialization (BurritoConsiderationClientApp.swift)
+### PostHog initialization (BurritoConsiderationClientApp.swift)
 
 ```swift
-import AmplitudeSwift
+import PostHog
 
-guard let apiKey = ProcessInfo.processInfo.environment["AMPLITUDE_API_KEY"] else {
-    fatalError("Set AMPLITUDE_API_KEY in the Xcode scheme environment variables.")
+guard let POSTHOG_PROJECT_TOKEN = ProcessInfo.processInfo.environment["POSTHOG_PROJECT_TOKEN"],
+      let POSTHOG_HOST = ProcessInfo.processInfo.environment["POSTHOG_HOST"] else {
+    fatalError("Set POSTHOG_PROJECT_TOKEN and POSTHOG_HOST in the Xcode scheme environment variables.")
 }
 
-Amplitude.instance().initializeApiKey(apiKey)
+let config = PostHogConfig(apiKey: POSTHOG_PROJECT_TOKEN, host: POSTHOG_HOST)
+config.captureApplicationLifecycleEvents = true
+PostHogSDK.shared.setup(config)
 ```
 
 ### User identification (UserState.swift)
 
 ```swift
-Amplitude.instance().setUserId(username)
-let identify = AMPIdentify()
-identify.set("username", value: username as NSObject)
-Amplitude.instance().identify(identify)
+PostHogSDK.shared.identify(username, userProperties: [
+    "username": username,
+])
 ```
 
 ### Screen view tracking (DashboardView.swift, ProfileView.swift)
 
 ```swift
 .onAppear {
-    Amplitude.instance().logEvent("dashboard_viewed", withEventProperties: [
+    PostHogSDK.shared.capture("dashboard_viewed", properties: [
         "username": userState.username ?? "unknown",
     ])
 }
@@ -96,24 +100,32 @@ Amplitude.instance().identify(identify)
 ### Event tracking (BurritoView.swift)
 
 ```swift
-Amplitude.instance().logEvent("burrito_considered", withEventProperties: [
+PostHogSDK.shared.capture("burrito_considered", properties: [
     "total_considerations": count,
     "username": username,
+])
+```
+
+### Error tracking (ProfileView.swift)
+
+```swift
+PostHogSDK.shared.capture("test_error_triggered", properties: [
+    "error_type": "test",
+    "error_message": error.localizedDescription,
 ])
 ```
 
 ### User logout (UserState.swift)
 
 ```swift
-Amplitude.instance().logEvent("user_logged_out")
-Amplitude.instance().setUserId(nil)
-Amplitude.instance().regenerateDeviceId()
+PostHogSDK.shared.capture("user_logged_out")
+PostHogSDK.shared.reset()
 ```
 
 ## Learn more
 
-- [Amplitude iOS SDK Documentation](https://amplitude.com/docs/sdks/analytics/ios)
-- [Amplitude Documentation](https://amplitude.com/docs)
+- [PostHog iOS SDK Documentation](https://posthog.com/docs/libraries/ios)
+- [PostHog Documentation](https://posthog.com/docs)
 - [SwiftUI Documentation](https://developer.apple.com/documentation/swiftui)
 
 ---
@@ -140,12 +152,12 @@ Amplitude.instance().regenerateDeviceId()
   "originHash" : "a2fc303e4b16c93c972ef2ddc4042cf91a9400e5d1639bc9740a80c0336cdd4e",
   "pins" : [
     {
-      "identity" : "amplitude-swift",
+      "identity" : "posthog-ios",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/amplitude/Amplitude-Swift",
+      "location" : "https://github.com/PostHog/posthog-ios",
       "state" : {
-        "revision" : "b1c5e7d1f3a2f4e6d8b0c2a4f6e8d0b2c4a6f8e0",
-        "version" : "1.10.0"
+        "revision" : "1783865d79a1cabc472cf2d56a1fe3f797417b52",
+        "version" : "3.40.0"
       }
     }
   ],
@@ -213,13 +225,13 @@ Amplitude.instance().regenerateDeviceId()
       </BuildableProductRunnable>
       <EnvironmentVariables>
          <EnvironmentVariable
-            key = "AMPLITUDE_API_KEY"
-            value = ""
+            key = "POSTHOG_PROJECT_TOKEN"
+            value = "phc_jE9kXU0depRekiuabVROlxxkIXn95NqsNO3qB4qNKtl"
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
-            key = "AMPLITUDE_API_KEY"
-            value = ""
+            key = "POSTHOG_HOST"
+            value = "https://us.i.posthog.com"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
@@ -265,10 +277,11 @@ Amplitude.instance().regenerateDeviceId()
 //
 
 import SwiftUI
-import AmplitudeSwift
+import PostHog
 
-enum AmplitudeEnv: String {
-    case apiKey = "AMPLITUDE_API_KEY"
+enum PostHogEnv: String {
+    case apiKey = "POSTHOG_PROJECT_TOKEN"
+    case host = "POSTHOG_HOST"
 
     var value: String {
         guard let value = ProcessInfo.processInfo.environment[rawValue] else {
@@ -280,11 +293,13 @@ enum AmplitudeEnv: String {
 
 @main
 struct BurritoConsiderationClientApp: App {
-    @State private var userState: UserState
+    @State private var userState = UserState()
 
     init() {
-        let amplitude = Amplitude(configuration: Configuration(apiKey: ProcessInfo.processInfo.environment["AMPLITUDE_API_KEY"] ?? ""))
-        _userState = State(initialValue: UserState(amplitude: amplitude))
+        let config = PostHogConfig(apiKey: PostHogEnv.apiKey.value, host: PostHogEnv.host.value)
+        config.captureApplicationLifecycleEvents = true
+        config.debug = true
+        PostHogSDK.shared.setup(config)
     }
 
     var body: some Scene {
@@ -308,6 +323,7 @@ struct BurritoConsiderationClientApp: App {
 //
 
 import SwiftUI
+import PostHog
 
 struct BurritoView: View {
     @Environment(UserState.self) private var userState
@@ -325,8 +341,11 @@ struct BurritoView: View {
             Button("I Have Considered the Burrito Potential") {
                 userState.burritoConsiderations += 1
 
-                // Amplitude: Track burrito consideration event
-                userState.trackBurritoConsidered()
+                // PostHog: Capture burrito consideration event
+                PostHogSDK.shared.capture("burrito_considered", properties: [
+                    "total_considerations": userState.burritoConsiderations,
+                    "username": userState.username ?? "unknown",
+                ])
 
                 showConfirmation = true
                 Task {
@@ -438,6 +457,7 @@ struct ContentView: View {
 //
 
 import SwiftUI
+import PostHog
 
 struct DashboardView: View {
     @Environment(UserState.self) private var userState
@@ -462,8 +482,10 @@ struct DashboardView: View {
         .padding()
         .navigationTitle("Home")
         .onAppear {
-            // Amplitude: Track dashboard view
-            userState.trackDashboardViewed()
+            // PostHog: Track dashboard view
+            PostHogSDK.shared.capture("dashboard_viewed", properties: [
+                "username": userState.username ?? "unknown",
+            ])
         }
     }
 }
@@ -532,6 +554,7 @@ struct LoginView: View {
 //
 
 import SwiftUI
+import PostHog
 
 struct ProfileView: View {
     @Environment(UserState.self) private var userState
@@ -562,6 +585,23 @@ struct ProfileView: View {
                 Text(journeyMessage)
             }
 
+            Section("Diagnostics") {
+                Button("Trigger Test Error") {
+                    let error = NSError(
+                        domain: "com.posthog.BurritoConsiderationClient",
+                        code: 42,
+                        userInfo: [NSLocalizedDescriptionKey: "Test error triggered by user"]
+                    )
+
+                    // PostHog: Capture exception for error tracking
+                    PostHogSDK.shared.capture("test_error_triggered", properties: [
+                        "error_type": "test",
+                        "error_message": error.localizedDescription,
+                        "username": userState.username ?? "unknown",
+                    ])
+                }
+            }
+
             Section {
                 Button("Log Out", role: .destructive) {
                     userState.logout()
@@ -571,8 +611,10 @@ struct ProfileView: View {
         .formStyle(.grouped)
         .navigationTitle("Profile")
         .onAppear {
-            // Amplitude: Track profile view
-            userState.trackProfileViewed()
+            // PostHog: Track profile view
+            PostHogSDK.shared.capture("profile_viewed", properties: [
+                "username": userState.username ?? "unknown",
+            ])
         }
     }
 }
@@ -590,18 +632,12 @@ struct ProfileView: View {
 //
 
 import Foundation
-import AmplitudeSwift
+import PostHog
 
 @Observable
 class UserState {
     var username: String?
     var burritoConsiderations: Int = 0
-
-    private let amplitude: Amplitude
-
-    init(amplitude: Amplitude) {
-        self.amplitude = amplitude
-    }
 
     var isLoggedIn: Bool {
         username != nil
@@ -616,14 +652,13 @@ class UserState {
         self.username = username
         self.burritoConsiderations = 0
 
-        // Amplitude: Identify user on login
-        amplitude.setUserId(userId: username)
-        let identifyEvent = IdentifyEvent()
-        identifyEvent.userProperties = ["username": username]
-        amplitude.identify(event: identifyEvent)
+        // PostHog: Identify user on login
+        PostHogSDK.shared.identify(username, userProperties: [
+            "username": username,
+        ])
 
-        // Amplitude: Track login event
-        amplitude.track(eventType: "user_logged_in", eventProperties: [
+        // PostHog: Capture login event
+        PostHogSDK.shared.capture("user_logged_in", properties: [
             "username": username,
         ])
 
@@ -631,34 +666,12 @@ class UserState {
     }
 
     func logout() {
-        // Amplitude: Track logout event before reset
-        amplitude.track(eventType: "user_logged_out")
-        amplitude.reset()
+        // PostHog: Capture logout event before reset
+        PostHogSDK.shared.capture("user_logged_out")
+        PostHogSDK.shared.reset()
 
         username = nil
         burritoConsiderations = 0
-    }
-
-    func trackBurritoConsidered() {
-        // Amplitude: Track burrito consideration event
-        amplitude.track(eventType: "burrito_considered", eventProperties: [
-            "total_considerations": burritoConsiderations,
-            "username": username ?? "unknown",
-        ])
-    }
-
-    func trackDashboardViewed() {
-        // Amplitude: Track dashboard view
-        amplitude.track(eventType: "dashboard_viewed", eventProperties: [
-            "username": username ?? "unknown",
-        ])
-    }
-
-    func trackProfileViewed() {
-        // Amplitude: Track profile view
-        amplitude.track(eventType: "profile_viewed", eventProperties: [
-            "username": username ?? "unknown",
-        ])
     }
 }
 

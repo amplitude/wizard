@@ -1,21 +1,24 @@
-# Amplitude React Router v7 - Declarative mode Example Project
+# PostHog React Router v7 - Declarative mode Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/react-react-router-7-declarative
 
 ---
 
 ## README.md
 
-# Amplitude React Router 7 Declarative example
+# PostHog React Router 7 Declarative example
 
-This is a [React Router 7](https://reactrouter.com) Declarative example demonstrating Amplitude integration with product analytics and event tracking.
+This is a [React Router 7](https://reactrouter.com) Declarative example demonstrating PostHog integration with product analytics, session replay, feature flags, and error tracking.
 
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
-- **User Authentication**: Demo login system with Amplitude user identification
+- **Session Replay**: Record and replay user sessions
+- **Error Tracking**: Capture and track errors
+- **User Authentication**: Demo login system with PostHog user identification
 - **Client-side Tracking**: Examples of client-side tracking methods
+- **Declarative Routing**: React Router 7 declarative routing configuration
 
 ## Getting Started
 
@@ -32,10 +35,11 @@ pnpm install
 Create a `.env` file in the root directory:
 
 ```bash
-VITE_PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
+VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
+VITE_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
-Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
+Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
 
 ### 3. Run the Development Server
 
@@ -54,13 +58,14 @@ src/
 ├── components/
 │   └── Header.tsx           # Navigation header with auth state
 ├── contexts/
-│   └── AuthContext.tsx      # Authentication context with Amplitude integration
+│   └── AuthContext.tsx      # Authentication context with PostHog integration
 ├── routes/
 │   ├── Root.tsx             # Root route component
 │   ├── Home.tsx             # Home/Login page
 │   ├── Burrito.tsx          # Demo feature page with event tracking
-│   └── Profile.tsx          # User profile page
-└── main.tsx                 # App entry point with Amplitude initialization
+│   └── Profile.tsx          # User profile with error tracking demo
+├── main.tsx                 # App entry point with PostHog initialization
+└── globals.css              # Global styles
 ```
 
 ## Key Integration Points
@@ -68,37 +73,71 @@ src/
 ### Client-side initialization (main.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
+import posthog from "posthog-js"
+import { PostHogProvider } from "@posthog/react"
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+posthog.init(import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN, {
+  api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+  defaults: '2026-01-30',
+});
+
+<PostHogProvider client={posthog}>
+  <RouterProvider router={router} />
+</PostHogProvider>
 ```
 
-### User identification (contexts/AuthContext.tsx)
+### User identification (AuthContext.tsx)
+
+The user is identified when the user logs in on the **client-side**.
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
-
-amplitude.setUserId(username);
-const identifyObj = new Identify();
-identifyObj.set('username', username);
-amplitude.identify(identifyObj);
-amplitude.track('user_logged_in', { username });
+posthog.identify(username);
+posthog.capture('user_logged_in');
 ```
+
+The session and distinct ID can be passed to the backend by including the `X-POSTHOG-SESSION-ID` and `X-POSTHOG-DISTINCT-ID` headers.
+
+You should use these headers in the backend to identify events. 
+
+**Important**: Identify the user once on the client-side to consolidate the new user ID and the automatically generated anonymous ID. Don't identify again on the server-side.
+
+### Event tracking (Burrito.tsx)
+
+```typescript
+posthog?.capture('burrito_considered', {
+  total_considerations: updatedUser.burritoConsiderations,
+  username: user.username,
+});
+```
+
+### Error tracking (PostHogErrorBoundary)
+
+The app is wrapped with `PostHogErrorBoundary` from `@posthog/react` in `main.tsx` to automatically capture unhandled React errors:
+
+```typescript
+<PostHogProvider client={posthog}>
+  <PostHogErrorBoundary>
+    {/* app content */}
+  </PostHogErrorBoundary>
+</PostHogProvider>
+```
+
+Manual error capture can also be added to components using `posthog?.captureException(err)`.
 
 ## Learn More
 
-- [Amplitude Documentation](https://amplitude.com/docs)
-- [React Router 7 Documentation](https://reactrouter.com/home)
-- [Amplitude Browser SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2)
+- [PostHog Documentation](https://posthog.com/docs)
+- [React Router 7 Documentation](https://reactrouter.com)
+- [PostHog React Integration Guide](https://posthog.com/docs/libraries/react)
 
 ---
 
 ## .env.example
 
 ```example
-VITE_PUBLIC_AMPLITUDE_API_KEY=
-
+VITE_PUBLIC_POSTHOG_PROJECT_TOKEN=
+VITE_PUBLIC_POSTHOG_HOST=
+PROJECT_ID=
 ```
 
 ---
@@ -172,14 +211,14 @@ export default App
 ```tsx
 import { Link } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
+import { usePostHog } from '@posthog/react';
 
 export default function Header() {
   const { user, logout } = useAuth();
+  const posthog = usePostHog();
 
   const handleLogout = () => {
-    amplitude.track('user_logged_out');
-    amplitude.reset();
+    posthog?.reset();
     logout();
   };
 
@@ -212,6 +251,7 @@ export default function Header() {
   );
 }
 
+
 ```
 
 ---
@@ -219,8 +259,7 @@ export default function Header() {
 ## src/contexts/AuthContext.tsx
 
 ```tsx
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import { usePostHog } from '@posthog/react';
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
 interface User {
@@ -240,6 +279,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const users: Map<string, User> = new Map();
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const posthog = usePostHog();
   const [user, setUser] = useState<User | null>(() => {
     if (typeof window === 'undefined') return null;
 
@@ -261,23 +301,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     let localUser = users.get(username);
     if (!localUser) {
-      localUser = {
-        username,
-        burritoConsiderations: 0
+      localUser = { 
+        username, 
+        burritoConsiderations: 0 
       };
       users.set(username, localUser);
     }
 
     setUser(localUser);
     localStorage.setItem('currentUser', username);
-
-    // Identify user in Amplitude using username as user ID
-    amplitude.setUserId(username);
-    const identifyObj = new Identify();
-    identifyObj.set('username', username);
-    amplitude.identify(identifyObj);
-    amplitude.track('user_logged_in', { username });
-
+    
+    // Identifying the user once on login/sign up is enough.
+    posthog.identify(username);
+    posthog.capture('user_logged_in');
+    
     return true;
   };
 
@@ -306,6 +343,7 @@ export function useAuth() {
   return context;
 }
 
+
 ```
 
 ---
@@ -323,26 +361,35 @@ import Home from './routes/Home';
 import Burrito from './routes/Burrito';
 import Profile from './routes/Profile';
 
-import * as amplitude from '@amplitude/analytics-browser';
+import posthog from 'posthog-js';
+import { PostHogErrorBoundary, PostHogProvider } from '@posthog/react'
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+posthog.init(import.meta.env.VITE_PUBLIC_POSTHOG_PROJECT_TOKEN, {
+  api_host: import.meta.env.VITE_PUBLIC_POSTHOG_HOST,
+  defaults: '2026-01-30',
+});
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
 
 ReactDOM.createRoot(root).render(
   <StrictMode>
+    <PostHogProvider client={posthog}>
+    <PostHogErrorBoundary>
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Root />}>
           <Route index element={<Home />} />
           <Route path="burrito" element={<Burrito />} />
           <Route path="profile" element={<Profile />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+          </Route>
+        </Routes>
+      </BrowserRouter>
+      </PostHogErrorBoundary> 
+    </PostHogProvider>
   </StrictMode>,
 );
+
 
 ```
 

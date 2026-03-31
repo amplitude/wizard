@@ -1,6 +1,6 @@
-# Amplitude Expo Example Project
+# PostHog Expo Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/expo
 
 ---
@@ -9,12 +9,14 @@ Path: basics/expo
 
 # Burrito Consideration App (Expo)
 
-A React Native Expo app demonstrating Amplitude product analytics integration with modern React Native best practices.
+A React Native Expo app demonstrating PostHog product analytics integration with modern React Native best practices.
 
 ## Features
 
-- **Product Analytics**: Full Amplitude integration with event tracking
-- **User Authentication**: Demo login with Amplitude user identification
+- **Product Analytics**: Full PostHog integration with event tracking
+- **Autocapture**: Touch events and screen tracking
+- **Error Tracking**: Manual exception capture with `$exception` events
+- **User Authentication**: Demo login with PostHog user identification
 - **Session Persistence**: AsyncStorage for session management
 - **Modern React**: React 19 with React Compiler for automatic memoization
 - **File-based Routing**: Expo Router for navigation
@@ -25,20 +27,20 @@ A React Native Expo app demonstrating Amplitude product analytics integration wi
 ```
 basics/expo/
 ├── app/                          # Expo Router screens (file-based routing)
-│   ├── _layout.tsx               # Root layout with AuthProvider
+│   ├── _layout.tsx               # Root layout with PostHogProvider + AuthProvider
 │   ├── index.tsx                 # Home screen (login/welcome)
 │   ├── burrito.tsx               # Burrito consideration screen
 │   └── profile.tsx               # User profile screen
 ├── src/
 │   ├── config/
-│   │   └── amplitude.ts          # Amplitude client configuration
+│   │   └── posthog.ts            # PostHog client configuration
 │   ├── contexts/
-│   │   └── AuthContext.tsx       # Authentication context with Amplitude
+│   │   └── AuthContext.tsx       # Authentication context with PostHog
 │   ├── services/
 │   │   └── storage.ts            # AsyncStorage wrapper
 │   └── styles/
 │       └── theme.ts              # Shared style constants
-├── app.config.js                 # Expo configuration
+├── app.json                      # Expo configuration
 ├── babel.config.js               # Babel config with React Compiler
 ├── eslint.config.js              # ESLint flat config
 ├── package.json                  # Dependencies
@@ -79,10 +81,10 @@ Then run `source ~/.zshrc` to apply.
    npm install
    ```
 
-2. Configure Amplitude (optional):
+2. Configure PostHog (optional):
    ```bash
    cp .env.example .env
-   # Edit .env with your Amplitude API key
+   # Edit .env with your PostHog project token
    ```
 
 3. Start the development server:
@@ -103,24 +105,24 @@ npx expo run:ios
 npx expo run:android
 ```
 
-## Amplitude Integration
+## PostHog Integration
 
 ### Configuration
 
-Amplitude is configured in `src/config/amplitude.ts` using environment variables from `app.config.js`:
+PostHog is configured in `src/config/posthog.ts` using environment variables from `app.json`:
 
 ```typescript
 import Constants from 'expo-constants'
 
-const apiKey = Constants.expoConfig?.extra?.amplitudeApiKey
+const apiKey = Constants.expoConfig?.extra?.posthogProjectToken
 ```
 
 ### Event Tracking
 
-Events are tracked with properties:
+Events are captured with properties:
 
 ```typescript
-amplitude.track('burrito_considered', {
+posthog.capture('burrito_considered', {
   total_considerations: count,
   username: user.username,
 })
@@ -131,10 +133,10 @@ amplitude.track('burrito_considered', {
 Users are identified on login:
 
 ```typescript
-amplitude.setUserId(username)
-const identifyObj = new Identify()
-identifyObj.set('username', username)
-amplitude.identify(identifyObj)
+posthog.identify(username, {
+  $set: { username },
+  $set_once: { first_login_date: new Date().toISOString() },
+})
 ```
 
 ### Screen Tracking
@@ -143,11 +145,22 @@ Manual screen tracking with Expo Router:
 
 ```typescript
 useEffect(() => {
-  amplitude.track('screen_viewed', {
-    screen_name: pathname,
+  posthog.screen(pathname, {
     previous_screen: previousPathname.current,
   })
 }, [pathname])
+```
+
+### Error Tracking
+
+Manual exception capture:
+
+```typescript
+posthog.capture('$exception', {
+  $exception_type: error.name,
+  $exception_message: error.message,
+  $exception_stack_trace_raw: error.stack,
+})
 ```
 
 ## Modern React Features
@@ -172,12 +185,12 @@ export function useAuth() {
 
 ### New Architecture
 
-Enabled in `app.config.js` for better performance:
+Enabled in `app.json` for better performance:
 
-```javascript
+```json
 {
-  expo: {
-    newArchEnabled: true
+  "expo": {
+    "newArchEnabled": true
   }
 }
 ```
@@ -191,7 +204,7 @@ Use EAS Build for production builds:
 npm install -g eas-cli
 
 # Configure EAS
- eas build:configure
+eas build:configure
 
 # Build for iOS
 eas build --platform ios
@@ -200,13 +213,19 @@ eas build --platform ios
 eas build --platform android
 ```
 
+## Performance Debugging
+
+1. Press `J` in Expo CLI to open Chrome DevTools
+2. Go to: **Profiler > [Gear icon] > "Highlight updates when components render"**
+3. Interact with your app to see which components re-render
+
 ## Tech Stack
 
 - **Expo SDK 54** - Managed workflow
 - **React 19** - Latest React with Compiler support
 - **React Native 0.81** - Latest stable
 - **Expo Router 6** - File-based navigation
-- **Amplitude** - Product analytics
+- **PostHog** - Product analytics
 - **TypeScript** - Strict mode enabled
 - **React Native Reanimated** - Smooth animations
 - **React Native Gesture Handler** - Native gestures
@@ -220,7 +239,8 @@ MIT
 ## .env.example
 
 ```example
-AMPLITUDE_API_KEY=your_amplitude_api_key_here
+POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
+POSTHOG_HOST=https://us.i.posthog.com
 
 ```
 
@@ -257,14 +277,14 @@ export default {
     },
     ios: {
       supportsTablet: true,
-      bundleIdentifier: 'com.amplitude.burritoapp',
+      bundleIdentifier: 'com.posthog.burritoapp',
     },
     android: {
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#333333',
       },
-      package: 'com.amplitude.burritoapp',
+      package: 'com.posthog.burritoapp',
       edgeToEdgeEnabled: true,
     },
     web: {
@@ -272,7 +292,8 @@ export default {
     },
     scheme: 'burritoapp',
     extra: {
-      amplitudeApiKey: process.env.AMPLITUDE_API_KEY,
+      posthogProjectToken: process.env.POSTHOG_PROJECT_TOKEN,
+      posthogHost: process.env.POSTHOG_HOST || 'https://us.i.posthog.com',
     },
     plugins: ['expo-router', 'expo-localization'],
   },
@@ -288,11 +309,12 @@ export default {
 import { Stack, usePathname, useGlobalSearchParams } from 'expo-router'
 import { useEffect, useRef } from 'react'
 import { StatusBar } from 'expo-status-bar'
+import { PostHogProvider } from 'posthog-react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { GestureHandlerRootView } from 'react-native-gesture-handler'
 
 import { AuthProvider } from '../src/contexts/AuthContext'
-import { amplitude } from '../src/config/amplitude'
+import { posthog } from '../src/config/posthog'
 import { colors } from '../src/styles/theme'
 
 export default function RootLayout() {
@@ -305,8 +327,7 @@ export default function RootLayout() {
   // React Compiler will auto-optimize this effect
   useEffect(() => {
     if (previousPathname.current !== pathname) {
-      amplitude.track('screen_viewed', {
-        screen_name: pathname,
+      posthog.screen(pathname, {
         previous_screen: previousPathname.current ?? null,
         // Include route params for analytics (filter sensitive data if needed)
         ...params,
@@ -319,20 +340,30 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <StatusBar style="light" backgroundColor={colors.headerBackground} />
-        <AuthProvider>
-          <Stack
-            screenOptions={{
-              headerStyle: { backgroundColor: colors.headerBackground },
-              headerTintColor: colors.headerText,
-              headerTitleStyle: { fontWeight: 'bold' },
-              animation: 'slide_from_right',
-            }}
-          >
-            <Stack.Screen name="index" options={{ title: 'Burrito App' }} />
-            <Stack.Screen name="burrito" options={{ title: 'Burrito Consideration' }} />
-            <Stack.Screen name="profile" options={{ title: 'Profile' }} />
-          </Stack>
-        </AuthProvider>
+        <PostHogProvider
+          client={posthog}
+          autocapture={{
+            captureScreens: false, // Manual tracking with Expo Router
+            captureTouches: true,
+            propsToCapture: ['testID'],
+            maxElementsCaptured: 20,
+          }}
+        >
+          <AuthProvider>
+            <Stack
+              screenOptions={{
+                headerStyle: { backgroundColor: colors.headerBackground },
+                headerTintColor: colors.headerText,
+                headerTitleStyle: { fontWeight: 'bold' },
+                animation: 'slide_from_right',
+              }}
+            >
+              <Stack.Screen name="index" options={{ title: 'Burrito App' }} />
+              <Stack.Screen name="burrito" options={{ title: 'Burrito Consideration' }} />
+              <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+            </Stack>
+          </AuthProvider>
+        </PostHogProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   )
@@ -348,21 +379,22 @@ export default function RootLayout() {
 import { useState, useEffect } from 'react'
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
 import { useRouter } from 'expo-router'
+import { usePostHog } from 'posthog-react-native'
 import { useAuth } from '../src/contexts/AuthContext'
-import { amplitude } from '../src/config/amplitude'
 import { colors, spacing, typography, borderRadius, shadows } from '../src/styles/theme'
 
 /**
  * Burrito Consideration Screen
  *
- * Demonstrates Amplitude event tracking with custom properties.
+ * Demonstrates PostHog event tracking with custom properties.
  * Each time the user considers a burrito, an event is captured.
  *
- * @see https://amplitude.com/docs/sdks/analytics/react-native
+ * @see https://posthog.com/docs/libraries/react-native#capturing-events
  */
 export default function BurritoScreen() {
   const { user, incrementBurritoConsiderations } = useAuth()
   const router = useRouter()
+  const posthog = usePostHog()
   const [hasConsidered, setHasConsidered] = useState(false)
 
   // Redirect to home if not logged in
@@ -386,8 +418,10 @@ export default function BurritoScreen() {
     // Hide success message after 2 seconds
     setTimeout(() => setHasConsidered(false), 2000)
 
-    // Capture custom event in Amplitude with properties
-    amplitude.track('burrito_considered', {
+    // Capture custom event in PostHog with properties
+    // We recommend using a [object] [verb] format for event names
+    // @see https://posthog.com/docs/libraries/react-native#capturing-events
+    posthog.capture('burrito_considered', {
       total_considerations: newCount,
       username: user.username,
     })
@@ -401,6 +435,11 @@ export default function BurritoScreen() {
           Take a moment to truly consider the potential of burritos.
         </Text>
 
+        {/*
+          testID is captured by PostHog autocapture for touch events
+          This helps identify the button in analytics
+          @see https://posthog.com/docs/libraries/react-native#autocapture
+        */}
         <TouchableOpacity
           style={styles.burritoButton}
           onPress={handleConsideration}
@@ -750,22 +789,24 @@ const styles = StyleSheet.create({
 
 ```tsx
 import { useEffect } from 'react'
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native'
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native'
 import { useRouter } from 'expo-router'
+import { usePostHog } from 'posthog-react-native'
 import { useAuth } from '../src/contexts/AuthContext'
-import { amplitude } from '../src/config/amplitude'
 import { colors, spacing, typography, borderRadius, shadows } from '../src/styles/theme'
 
 /**
  * Profile Screen
  *
- * Displays user information and demonstrates Amplitude event tracking.
+ * Displays user information and demonstrates PostHog error tracking.
+ * The test error button shows how to capture exceptions manually.
  *
- * @see https://amplitude.com/docs/sdks/analytics/react-native
+ * @see https://posthog.com/docs/libraries/react-native#error-tracking
  */
 export default function ProfileScreen() {
   const { user } = useAuth()
   const router = useRouter()
+  const posthog = usePostHog()
 
   // Redirect to home if not logged in
   useEffect(() => {
@@ -776,6 +817,45 @@ export default function ProfileScreen() {
 
   if (!user) {
     return null
+  }
+
+  /**
+   * Triggers a test error and captures it in PostHog
+   *
+   * This demonstrates manual exception capture using the $exception event.
+   * In production, you would typically set up automatic exception capture
+   * or use the before_send callback for customization.
+   *
+   * @see https://posthog.com/docs/libraries/react-native#error-tracking
+   */
+  const triggerTestError = () => {
+    try {
+      throw new Error('Test error for PostHog error tracking')
+    } catch (err) {
+      const error = err as Error
+
+      // Capture exception in PostHog
+      // @see https://posthog.com/docs/error-tracking
+      posthog.capture('$exception', {
+        $exception_list: [
+          {
+            type: error.name,
+            value: error.message,
+            stacktrace: {
+              type: 'raw',
+              frames: error.stack ?? '',
+            },
+          },
+        ],
+        $exception_source: 'react-native',
+        // Additional context
+        username: user.username,
+        screen: 'Profile',
+      })
+
+      console.error('Captured error:', error)
+      Alert.alert('Error Captured', 'The test error has been sent to PostHog!', [{ text: 'OK' }])
+    }
   }
 
   const getJourneyMessage = () => {
@@ -809,6 +889,19 @@ export default function ProfileScreen() {
             <Text style={styles.infoValue}>{user.burritoConsiderations}</Text>
           </View>
         </View>
+
+        {/*
+          testID is captured by PostHog autocapture for touch events
+          @see https://posthog.com/docs/libraries/react-native#autocapture
+        */}
+        <TouchableOpacity
+          style={styles.errorButton}
+          onPress={triggerTestError}
+          activeOpacity={0.8}
+          testID="trigger-error-button"
+        >
+          <Text style={styles.buttonText}>Trigger Test Error (for PostHog)</Text>
+        </TouchableOpacity>
 
         <View style={styles.journey}>
           <Text style={styles.journeyTitle}>Your Burrito Journey</Text>
@@ -862,6 +955,18 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.md,
     color: colors.text,
   },
+  errorButton: {
+    backgroundColor: colors.danger,
+    borderRadius: borderRadius.sm,
+    padding: spacing.md,
+    alignItems: 'center',
+    marginTop: spacing.lg,
+  },
+  buttonText: {
+    color: colors.white,
+    fontSize: typography.sizes.md,
+    fontWeight: typography.weights.semibold,
+  },
   journey: {
     marginTop: spacing.lg,
   },
@@ -900,44 +1005,78 @@ module.exports = function (api) {
 
 ---
 
-## src/config/amplitude.ts
+## src/config/posthog.ts
 
 ```ts
-import * as amplitude from '@amplitude/analytics-react-native'
+import PostHog from 'posthog-react-native'
 import Constants from 'expo-constants'
 
 // Configuration loaded from app.config.js extras via expo-constants
 // Environment variables are read at build time in app.config.js
-const apiKey = Constants.expoConfig?.extra?.amplitudeApiKey as string | undefined
-const isAmplitudeConfigured = !!apiKey
+const apiKey = Constants.expoConfig?.extra?.posthogProjectToken as string | undefined
+const host = (Constants.expoConfig?.extra?.posthogHost as string) || 'https://us.i.posthog.com'
+const isPostHogConfigured = apiKey && apiKey !== 'phc_your_project_token_here'
 
 if (__DEV__) {
-  console.log('Amplitude config:', {
-    apiKey: apiKey ? 'SET' : 'NOT SET',
-    isConfigured: isAmplitudeConfigured,
+  console.log('PostHog config:', {
+    apiKey: apiKey ? `SET` : 'NOT SET',
+    host,
+    isConfigured: isPostHogConfigured,
   })
 }
 
-if (!isAmplitudeConfigured) {
+if (!isPostHogConfigured) {
   console.warn(
-    'Amplitude API key not configured. Analytics will be disabled. ' +
-      'Set AMPLITUDE_API_KEY in your .env file to enable analytics.'
+    'PostHog project token not configured. Analytics will be disabled. ' +
+      'Set POSTHOG_PROJECT_TOKEN in your .env file to enable analytics.'
   )
 }
 
 /**
- * Initialize the Amplitude SDK for Expo
+ * PostHog client instance for Expo
  *
  * Configuration loaded from app.config.js extras via expo-constants.
+ * Required peer dependencies: expo-file-system, expo-application,
+ * expo-device, expo-localization
  *
- * @see https://amplitude.com/docs/sdks/analytics/react-native
+ * For React Native Web targets, use @react-native-async-storage/async-storage
+ * instead of expo-file-system (Web and macOS targets not supported by expo-file-system).
+ *
+ * @see https://posthog.com/docs/libraries/react-native
  */
-if (isAmplitudeConfigured && apiKey) {
-  amplitude.init(apiKey)
-}
+export const posthog = new PostHog(apiKey || 'placeholder_key', {
+  // PostHog API host
+  host,
 
-export { amplitude }
-export const isAmplitudeEnabled = isAmplitudeConfigured
+  // Disable PostHog if project token is not configured
+  disabled: !isPostHogConfigured,
+
+  // Capture app lifecycle events:
+  // - Application Installed, Application Updated
+  // - Application Opened, Application Became Active, Application Backgrounded
+  captureAppLifecycleEvents: true,
+
+  // Enable debug mode in development for verbose logging
+  debug: __DEV__,
+
+  // Batching: queue events and flush periodically to optimize battery usage
+  flushAt: 20,              // Number of events to queue before sending
+  flushInterval: 10000,     // Interval in ms between periodic flushes
+  maxBatchSize: 100,        // Maximum events per batch
+  maxQueueSize: 1000,       // Maximum queued events (oldest dropped when full)
+
+  // Feature flags
+  preloadFeatureFlags: true,        // Load flags on initialization
+  sendFeatureFlagEvent: true,       // Track getFeatureFlag calls for experiments
+  featureFlagsRequestTimeoutMs: 10000, // Timeout for flag requests (prevents blocking)
+
+  // Network settings
+  requestTimeout: 10000,    // General request timeout in ms
+  fetchRetryCount: 3,       // Number of retry attempts for failed requests
+  fetchRetryDelay: 3000,    // Delay between retries in ms
+})
+
+export const isPostHogEnabled = isPostHogConfigured
 
 ```
 
@@ -948,8 +1087,7 @@ export const isAmplitudeEnabled = isAmplitudeConfigured
 ```tsx
 import React, { createContext, useState, useEffect, use } from 'react'
 import type { ReactNode } from 'react'
-import { Identify } from '@amplitude/analytics-react-native'
-import { amplitude } from '../config/amplitude'
+import { usePostHog } from 'posthog-react-native'
 import { storage } from '../services/storage'
 import type { User } from '../services/storage'
 
@@ -968,6 +1106,7 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children }: AuthProviderProps) {
+  const posthog = usePostHog()
   const [user, setUser] = useState<User | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -979,10 +1118,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
           const existingUser = await storage.getUser(storedUsername)
           if (existingUser) {
             setUser(existingUser)
-            amplitude.setUserId(storedUsername)
-            const identifyObj = new Identify()
-            identifyObj.set('username', storedUsername)
-            amplitude.identify(identifyObj)
+            posthog.identify(storedUsername, {
+              $set: { username: storedUsername },
+            })
           }
         }
       } catch (error) {
@@ -992,7 +1130,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       }
     }
     restoreSession()
-  }, [])
+  }, [posthog])
 
   // React Compiler auto-memoizes these callbacks - no useCallback needed!
   const login = async (username: string, password: string): Promise<boolean> => {
@@ -1013,13 +1151,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
       await storage.setCurrentUser(username)
       setUser(userData)
 
-      // Amplitude: Identify user and capture login event
-      amplitude.setUserId(username)
-      const identifyObj = new Identify()
-      identifyObj.set('username', username)
-      amplitude.identify(identifyObj)
+      posthog.identify(username, {
+        $set: { username },
+        $set_once: { first_login_date: new Date().toISOString() },
+      })
 
-      amplitude.track('user_logged_in', {
+      posthog.capture('user_logged_in', {
         username,
         is_new_user: isNewUser,
       })
@@ -1032,8 +1169,8 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }
 
   const logout = async () => {
-    amplitude.track('user_logged_out')
-    amplitude.reset()
+    posthog.capture('user_logged_out')
+    posthog.reset()
     await storage.removeCurrentUser()
     setUser(null)
   }

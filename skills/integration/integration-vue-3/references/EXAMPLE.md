@@ -1,32 +1,34 @@
-# Amplitude Vue 3 Example Project
+# PostHog Vue 3 Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/vue-3
 
 ---
 
 ## README.md
 
-# Amplitude Vue 3 + Vite example
+# PostHog Vue 3 + Vite example
 
-This is a [Vue 3](https://vuejs.org/) + [Vite](https://vitejs.dev/) example demonstrating Amplitude integration with product analytics and event tracking.
+This is a [Vue 3](https://vuejs.org/) + [Vite](https://vitejs.dev/) example demonstrating PostHog integration with product analytics, session replay, and error tracking.
 
-It uses the `@amplitude/analytics-browser` SDK directly and shows how to:
+It uses the `posthog-js` browser SDK directly and shows how to:
 
-- Initialize Amplitude in `main.ts`
-- Identify users on login
-- Track custom events
-- Reset the session on logout
+- Initialize PostHog in a Vue 3 SPA
+- Identify users after login
+- Track custom events from components
+- Capture errors via Vue’s global `errorHandler`
+- Reset PostHog state on logout
 
 ## Features
 
-- **Product Analytics**: Track user events and behaviors
-- **User Authentication**: Demo login system with Amplitude user identification
-- **Client-side Tracking**: Examples of client-side tracking methods
+- **Product analytics**: Track login and burrito consideration events
+- **Session replay**: Enabled via `posthog-js` configuration
+- **Error tracking**: Global Vue error handler sends exceptions to PostHog
+- **Simple auth flow**: Demo login + protected routes using Pinia + Vue Router
 
-## Getting Started
+## Getting started
 
-### 1. Install Dependencies
+### 1. Install dependencies
 
 ```bash
 npm install
@@ -34,69 +36,127 @@ npm install
 pnpm install
 ```
 
-### 2. Configure Environment Variables
+### 2. Configure environment variables
 
-Create a `.env` file in the root directory:
+Create a `.env` file in the project root:
 
 ```bash
-VITE_AMPLITUDE_API_KEY=your_amplitude_api_key
+VITE_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
+VITE_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
-Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
+Get your PostHog project token from your project settings in PostHog.
 
-### 3. Run the Development Server
+### 3. Run the development server
 
 ```bash
 npm run dev
+# or
+pnpm dev
 ```
 
-Open [http://localhost:5173](http://localhost:5173) with your browser to see the app.
+Open `http://localhost:5173` (or whatever Vite prints) in your browser.
 
-## Key Integration Points
+## Project structure
 
-### Initialization (src/main.ts)
-
-```typescript
-import * as amplitude from '@amplitude/analytics-browser'
-
-amplitude.init(import.meta.env.VITE_AMPLITUDE_API_KEY || '')
+```text
+src/
+  main.ts            # Vue app entrypoint, PostHog init + global errorHandler
+  router/
+    index.ts         # Routes + simple auth guard
+  stores/
+    auth.ts          # Pinia auth store (login, logout, user state)
+  components/
+    Header.vue       # Navigation + logout, calls posthog.reset()
+  views/
+    Home.vue         # Login form, identifies user + captures 'user_logged_in'
+    Burrito.vue      # Burrito consideration demo, captures 'burrito_considered'
+    Profile.vue      # Profile + error tracking demo (if implemented)
+  App.vue            # Root layout
 ```
 
-### User identification (src/views/Home.vue)
+## Key integration points
 
-```typescript
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+### PostHog initialization (`src/main.ts`)
 
-amplitude.setUserId(username)
-const identifyObj = new Identify()
-identifyObj.set('username', username)
-amplitude.identify(identifyObj)
-amplitude.track('user_logged_in', { username })
+`posthog-js` is initialized once when the app boots:
+
+```ts
+import posthog from 'posthog-js'
+
+posthog.init(import.meta.env.VITE_POSTHOG_PROJECT_TOKEN || '', {
+  api_host: import.meta.env.VITE_POSTHOG_HOST || 'https://us.i.posthog.com',
+})
+
+app.config.errorHandler = (err) => {
+  posthog.captureException(err)
+}
 ```
 
-### Event tracking (src/views/Burrito.vue)
+This ensures:
 
-```typescript
-amplitude.track('burrito_considered', {
+- The SDK is configured with your project key and host
+- The singleton instance is initialized only once and before the app mounts
+- Any uncaught Vue errors are sent to PostHog
+
+### User identification (`src/views/Home.vue`)
+
+After a successful “login”, the app identifies the user and captures a login event:
+
+```ts
+const success = await authStore.login(username.value, password.value)
+if (success) {
+  posthog.identify(username.value)
+  posthog.capture('user_logged_in')
+}
+```
+
+Identification happens **only on login**, all further requests will automatically use the same distinct ID.
+
+### Event tracking (`src/views/Burrito.vue`)
+
+The burrito page tracks a custom event when a user “considers” the burrito:
+
+```ts
+posthog.capture('burrito_considered', {
   total_considerations: updatedUser.burritoConsiderations,
-  username: updatedUser.username
+  username: updatedUser.username,
 })
 ```
 
-### Session reset on logout (src/components/Header.vue)
+This shows how to attach useful properties to events (e.g. counts, usernames).
 
-```typescript
-amplitude.track('user_logged_out')
-amplitude.reset()
+### Logout and session reset (`src/components/Header.vue`)
+
+On logout, both the local auth state and PostHog state are cleared:
+
+```ts
+authStore.logout()
+posthog.reset()
+router.push({ name: 'home' })
 ```
 
-## Learn More
+`posthog.reset()` clears the current distinct ID and session so the next login starts a fresh identity.
 
-- [Amplitude Documentation](https://amplitude.com/docs)
-- [Amplitude Browser SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2)
-- [Vue 3 Documentation](https://vuejs.org/)
-- [Vite Documentation](https://vitejs.dev/)
+## Scripts
+
+```bash
+# Run dev server
+npm run dev
+
+# Type-check, compile, and minify for production
+npm run build
+
+# Lint
+npm run lint
+```
+
+## Learn more
+
+- [PostHog documentation](https://posthog.com/docs)
+- [posthog-js SDK](https://posthog.com/docs/libraries/js)
+- [Vue 3 documentation](https://vuejs.org/guide/introduction.html)
+- [Vite documentation](https://vitejs.dev/guide/)
 
 ---
 
@@ -119,7 +179,8 @@ max_line_length = 100
 ## .env.example
 
 ```example
-VITE_AMPLITUDE_API_KEY=your_amplitude_api_key
+VITE_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
+VITE_POSTHOG_HOST=https://us.i.posthog.com
 
 ```
 
@@ -246,15 +307,15 @@ p {
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import * as amplitude from '@amplitude/analytics-browser'
+import posthog from 'posthog-js'
 
 const authStore = useAuthStore()
 const router = useRouter()
 
 const handleLogout = () => {
-  amplitude.track('user_logged_out')
   authStore.logout()
-  amplitude.reset()
+  // IMPORTANT: Reset the PostHog instance to clear the user session
+  posthog.reset()
   router.push({ name: 'home' })
 }
 </script>
@@ -325,14 +386,22 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
-import * as amplitude from '@amplitude/analytics-browser'
+import posthog from "posthog-js";
 
-amplitude.init(import.meta.env.VITE_AMPLITUDE_API_KEY || '')
+const app = createApp(App);
 
-const app = createApp(App)
+posthog.init(import.meta.env.VITE_POSTHOG_PROJECT_TOKEN || '', {
+  api_host: import.meta.env.VITE_POSTHOG_HOST || 'https://us.i.posthog.com',
+  defaults: '2026-01-30',
+});
 
 app.use(createPinia())
 app.use(router)
+
+app.config.errorHandler = (err, instance, info) => {
+  // report error to tracking services
+  posthog.captureException(err)
+}
 
 app.mount('#app')
 
@@ -502,7 +571,7 @@ export const useAuthStore = defineStore('auth', () => {
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import * as amplitude from '@amplitude/analytics-browser'
+import posthog from 'posthog-js'
 
 const authStore = useAuthStore()
 const hasConsidered = ref(false)
@@ -521,8 +590,8 @@ const handleConsideration = () => {
     hasConsidered.value = false
   }, 2000)
 
-  // Track burrito consideration event
-  amplitude.track('burrito_considered', {
+  // Capture burrito consideration event
+  posthog.capture('burrito_considered', {
     total_considerations: updatedUser.burritoConsiderations,
     username: updatedUser.username
   })
@@ -629,8 +698,7 @@ h3 {
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+import posthog from 'posthog-js'
 
 const authStore = useAuthStore()
 const username = ref('')
@@ -649,12 +717,10 @@ const handleSubmit = async () => {
 
   const success = await authStore.login(username.value, password.value)
   if (success) {
-    amplitude.setUserId(username.value)
-    const identifyObj = new Identify()
-    identifyObj.set('username', username.value)
-    amplitude.identify(identifyObj)
-    amplitude.track('user_logged_in', { username: username.value })
-
+    // Identifying the user once on login/sign up is enough.
+    posthog.identify(username.value)
+    posthog.capture('user_logged_in')
+    
     username.value = ''
     password.value = ''
   } else {

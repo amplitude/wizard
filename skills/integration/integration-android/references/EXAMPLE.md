@@ -1,22 +1,24 @@
-# Amplitude Android Example Project
+# PostHog Android Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/android
 
 ---
 
 ## README.md
 
-# Amplitude Android example
+# PostHog Android example
 
-This is an Android example demonstrating Amplitude integration with product analytics using Kotlin and Jetpack Compose.
+This is an Android example demonstrating PostHog integration with product analytics, session replay, and error tracking using Kotlin and Jetpack Compose.
 
-This example uses the Amplitude Android SDK (`analytics-android`) to provide analytics integration with simplified configuration.
+This example uses the PostHog Android SDK (`posthog-android`) to provide automatic PostHog integration with built-in error tracking, session replay, and simplified configuration.
 
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
-- **User Authentication**: Demo login system with Amplitude user identification
+- **Session Replay**: Record and replay user sessions
+- **Error Tracking**: Automatic error capture and crash reporting
+- **User Authentication**: Demo login system with PostHog user identification
 - **Event Tracking**: Examples of custom event tracking throughout the app
 
 ## Getting Started
@@ -27,28 +29,30 @@ This example uses the Amplitude Android SDK (`analytics-android`) to provide ana
 - Android SDK (API level 24 or higher)
 - JDK 11 or higher
 - Gradle 8.0 or higher
-- An [Amplitude account](https://amplitude.com/signup)
+- A [PostHog account](https://app.posthog.com/signup)
 
 ### 2. Configure Environment Variables
 
-The Amplitude configuration is stored in `local.properties` (this file is gitignored):
+The PostHog configuration is stored in `local.properties` (this file is gitignored):
 
 ```properties
-# Amplitude configuration
-amplitude.apiKey=your_amplitude_api_key
+# PostHog configuration
+posthog.apiKey=your_posthog_project_token
+posthog.host=https://us.i.posthog.com
 ```
 
-Alternatively, you can configure Amplitude in your `build.gradle` file:
+Alternatively, you can configure PostHog in your `build.gradle` file:
 
 ```gradle
 android {
     defaultConfig {
-        buildConfigField "String", "AMPLITUDE_API_KEY", "\"your_amplitude_api_key\""
+        buildConfigField "String", "POSTHOG_PROJECT_TOKEN", "\"your_posthog_project_token\""
+        buildConfigField "String", "POSTHOG_HOST", "\"https://us.i.posthog.com\""
     }
 }
 ```
 
-Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com/).
+Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
 
 ### 3. Build and Run
 
@@ -62,15 +66,17 @@ Get your Amplitude API key from your [Amplitude project settings](https://app.am
 ├── app/
 │   ├── src/
 │   │   ├── main/
-│   │   │   ├── java/com/example/amplitude/
-│   │   │   │   ├── BurritoApplication.kt      # Application class with Amplitude initialization
+│   │   │   ├── java/com/example/posthog/
+│   │   │   │   ├── BurritoApplication.kt      # Application class with PostHog initialization
 │   │   │   │   ├── MainActivity.kt           # Main activity
 │   │   │   │   ├── ui/
 │   │   │   │   │   ├── screens/
-│   │   │   │   │   │   ├── HomeScreen.kt      # Home screen with login
+│   │   │   │   │   │   ├── LoginScreen.kt     # Login screen with user identification
 │   │   │   │   │   │   ├── BurritoScreen.kt   # Demo feature screen with event tracking
-│   │   │   │   │   │   └── ProfileScreen.kt   # User profile screen
+│   │   │   │   │   │   └── ProfileScreen.kt   # User profile with error tracking demo
 │   │   │   │   │   └── components/            # Reusable UI components
+│   │   │   │   └── utils/
+│   │   │   │       └── PostHogHelper.kt       # PostHog utility functions
 │   │   │   ├── res/                           # Resources (layouts, strings, etc.)
 │   │   │   └── AndroidManifest.xml            # App manifest
 │   │   └── test/                              # Unit tests
@@ -84,58 +90,175 @@ Get your Amplitude API key from your [Amplitude project settings](https://app.am
 
 ### Application Initialization (BurritoApplication.kt)
 
-Amplitude is initialized in the `Application` class to ensure it's available throughout the app lifecycle:
+PostHog is initialized in the `Application` class to ensure it's available throughout the app lifecycle:
 
 ```kotlin
 class BurritoApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-
-        // Initialize Amplitude early in Application lifecycle
-        Amplitude.getInstance().initialize(
-            this,
-            BuildConfig.AMPLITUDE_API_KEY
-        )
+        
+        val posthogConfig = PostHogConfig(
+            apiKey = BuildConfig.POSTHOG_PROJECT_TOKEN,
+            host = BuildConfig.POSTHOG_HOST
+        ).apply {
+            // Enable session replay
+            sessionReplay = true
+            
+            // Enable automatic exception capture
+            captureApplicationLifecycleEvents = true
+            captureDeepLinks = true
+            captureScreenViews = true
+        }
+        
+        PostHog.setup(this, posthogConfig)
     }
 }
 ```
 
 **Key Points:**
-- Amplitude is initialized in `onCreate()` to ensure it's initialized as early as possible
+- PostHog is initialized in `onCreate()` to ensure it's initialized as early as possible
 - Configuration is loaded from `BuildConfig` (set in `build.gradle`)
+- Session replay, lifecycle events, and screen views are enabled
 - The Application class must be registered in `AndroidManifest.xml`
 
-### User Identification (AuthViewModel.kt)
+### User Identification (LoginScreen.kt)
 
 Users are identified when they log in:
 
 ```kotlin
-fun login(username: String) {
-    Amplitude.getInstance().setUserId(username)
-    Amplitude.getInstance().track("user_logged_in")
+val posthog = PostHog.getInstance()
+
+fun handleLogin(username: String, password: String) {
+    // Authenticate user
+    val success = authenticateUser(username, password)
+    
+    if (success) {
+        // Identify the user once on login/sign up
+        posthog.identify(
+            distinctId = username,
+            properties = mapOf(
+                "username" to username,
+                "login_method" to "password"
+            )
+        )
+        
+        // Capture login event
+        posthog.capture("user_logged_in", mapOf(
+            "username" to username
+        ))
+    }
 }
 ```
 
 **Key Points:**
-- `setUserId()` is called once when the user logs in or signs up
-- Events are tracked using `track()` with event names and properties
+- `identify()` is called once when the user logs in or signs up
+- User properties can be set during identification
+- Events are captured using `capture()` with event names and properties
+- The `distinctId` should be a unique identifier for the user
 
-### Event Tracking (AuthViewModel.kt)
+### Event Tracking (BurritoScreen.kt)
 
 Custom events are tracked throughout the app:
 
 ```kotlin
-val eventProperties = mapOf(
-    "total_considerations" to updatedUser.burritoConsiderations,
-    "username" to updatedUser.username
-)
-Amplitude.getInstance().track("burrito_considered", eventProperties)
+val posthog = PostHog.getInstance()
+
+fun handleBurritoConsideration() {
+    // Track custom event
+    posthog.capture("burrito_considered", mapOf(
+        "total_considerations" to considerationCount,
+        "username" to currentUser.username,
+        "timestamp" to System.currentTimeMillis()
+    ))
+    
+    // Update user properties
+    posthog.setUserProperties(mapOf(
+        "last_burrito_consideration" to System.currentTimeMillis(),
+        "total_burrito_considerations" to considerationCount
+    ))
+}
 ```
 
 **Key Points:**
-- Events are tracked with `track()` method
+- Events are captured with `capture()` method
 - Event properties provide context about the event
+- User properties can be updated with `setUserProperties()`
 - Properties can be strings, numbers, booleans, or dates
+
+### Error Tracking
+
+Errors are captured automatically and can also be tracked manually:
+
+**Automatic Error Capture:**
+PostHog automatically captures uncaught exceptions when configured:
+
+```kotlin
+val posthogConfig = PostHogConfig(
+    apiKey = BuildConfig.POSTHOG_PROJECT_TOKEN,
+    host = BuildConfig.POSTHOG_HOST
+).apply {
+    // Automatic exception capture is enabled by default
+    captureApplicationLifecycleEvents = true
+}
+```
+
+**Manual Error Capture:**
+```kotlin
+val posthog = PostHog.getInstance()
+
+try {
+    // Risky operation
+    performRiskyOperation()
+} catch (e: Exception) {
+    // Capture exception manually
+    posthog.captureException(e, mapOf(
+        "context" to "burrito_consideration",
+        "user_id" to currentUser.id
+    ))
+}
+```
+
+### Screen View Tracking
+
+Screen views are automatically tracked when `captureScreenViews` is enabled. You can also manually track screen views:
+
+```kotlin
+val posthog = PostHog.getInstance()
+
+// Manual screen view tracking
+posthog.screen("BurritoScreen", mapOf(
+    "screen_category" to "features",
+    "user_type" to "premium"
+))
+```
+
+### Session Replay
+
+Session replay is enabled in the PostHog configuration:
+
+```kotlin
+val posthogConfig = PostHogConfig(
+    apiKey = BuildConfig.POSTHOG_PROJECT_TOKEN,
+    host = BuildConfig.POSTHOG_HOST
+).apply {
+    sessionReplay = true
+    sessionReplayConfig = SessionReplayConfig(
+        maskAllInputs = false, // Set to true to mask all input fields
+        maskAllText = false    // Set to true to mask all text
+    )
+}
+```
+
+### Accessing PostHog in Components
+
+PostHog is accessed via the singleton instance:
+
+```kotlin
+val posthog = PostHog.getInstance()
+posthog.capture("event_name", mapOf("property" to "value"))
+```
+
+The instance is available throughout your application after initialization.
 
 ## Gradle Configuration
 
@@ -144,33 +267,52 @@ Amplitude.getInstance().track("burrito_considered", eventProperties)
 ```gradle
 android {
     defaultConfig {
-        // Amplitude configuration
-        buildConfigField "String", "AMPLITUDE_API_KEY", "\"${project.findProperty("amplitude.apiKey") ?: ""}\""
+        // PostHog configuration
+        buildConfigField "String", "POSTHOG_PROJECT_TOKEN", "\"${project.findProperty("posthog.apiKey") ?: ""}\""
+        buildConfigField "String", "POSTHOG_HOST", "\"${project.findProperty("posthog.host") ?: "https://us.i.posthog.com"}\""
     }
 }
 
 dependencies {
-    // Amplitude Android SDK
-    implementation 'com.amplitude:analytics-android:1.+'
-
+    // PostHog Android SDK
+    implementation 'com.posthog:posthog-android:3.+'
+    
     // Other dependencies...
+}
+```
+
+### Reading from local.properties
+
+The `local.properties` file is automatically read by Gradle:
+
+```gradle
+def localProperties = new Properties()
+localProperties.load(new FileInputStream(rootProject.file("local.properties")))
+
+android {
+    defaultConfig {
+        buildConfigField "String", "POSTHOG_PROJECT_TOKEN", "\"${localProperties.getProperty("posthog.apiKey", "")}\""
+        buildConfigField "String", "POSTHOG_HOST", "\"${localProperties.getProperty("posthog.host", "https://us.i.posthog.com")}\""
+    }
 }
 ```
 
 ## Best Practices
 
-1. **Initialize Early**: Initialize Amplitude in your `Application.onCreate()` method
-2. **Identify Once**: Call `setUserId()` once when the user logs in or signs up
+1. **Initialize Early**: Initialize PostHog in your `Application.onCreate()` method
+2. **Identify Once**: Call `identify()` once when the user logs in or signs up
 3. **Use Meaningful Event Names**: Use clear, descriptive event names (e.g., `user_logged_in` instead of `login`)
 4. **Include Context**: Add relevant properties to events for better analysis
-5. **Test in Development**: Use a separate Amplitude project for development/testing
-6. **Respect Privacy**: Be mindful of PII (Personally Identifiable Information) in events and properties
+5. **Handle Errors Gracefully**: Don't let PostHog errors break your app
+6. **Test in Development**: Use a separate PostHog project for development/testing
+7. **Respect Privacy**: Be mindful of PII (Personally Identifiable Information) in events and properties
 
 ## Learn More
 
-- [Amplitude Documentation](https://www.docs.developers.amplitude.com/)
+- [PostHog Documentation](https://posthog.com/docs)
 - [Android Documentation](https://developer.android.com)
-- [Amplitude Android SDK](https://github.com/amplitude/Amplitude-Kotlin)
+- [PostHog Android Integration Guide](https://posthog.com/docs/libraries/android)
+- [PostHog Android SDK](https://github.com/PostHog/posthog-android)
 
 ---
 
@@ -220,14 +362,14 @@ dependencies {
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.Amplitude">
+        android:theme="@style/Theme.PostHog">
         <!-- We have to export the MainActivity to be able to start it from the system launcher.
              Ignores added for semgrep. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.Amplitude"
+            android:theme="@style/Theme.PostHog"
             tools:ignore="ExportedActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -242,28 +384,29 @@ dependencies {
 
 ---
 
-## app/src/main/java/com/example/amplitude/BurritoApp.kt
+## app/src/main/java/com/example/posthog/BurritoApp.kt
 
 ```kt
-package com.example.amplitude
+package com.example.posthog
 
 import android.app.Application
-import com.amplitude.android.Amplitude
-import com.amplitude.android.Configuration
+import com.posthog.android.PostHogAndroid
+import com.posthog.android.PostHogAndroidConfig
 
 class BurritoApplication : Application() {
-    lateinit var amplitude: Amplitude
-
     override fun onCreate() {
         super.onCreate()
-
-        // Initialize Amplitude early in Application lifecycle
-        amplitude = Amplitude(
-            Configuration(
-                apiKey = BuildConfig.AMPLITUDE_API_KEY,
-                context = applicationContext
-            )
-        )
+        
+        // Initialize PostHog early in Application lifecycle
+        val config = PostHogAndroidConfig(
+            apiKey = BuildConfig.POSTHOG_PROJECT_TOKEN,
+            host = BuildConfig.POSTHOG_HOST,
+        ).apply {
+            debug = true
+            errorTrackingConfig.autoCapture = true
+        }
+        
+        PostHogAndroid.setup(this, config)
     }
 }
 
@@ -271,10 +414,10 @@ class BurritoApplication : Application() {
 
 ---
 
-## app/src/main/java/com/example/amplitude/data/User.kt
+## app/src/main/java/com/example/posthog/data/User.kt
 
 ```kt
-package com.example.amplitude.data
+package com.example.posthog.data
 
 data class User(
     val username: String,
@@ -285,10 +428,10 @@ data class User(
 
 ---
 
-## app/src/main/java/com/example/amplitude/data/UserRepository.kt
+## app/src/main/java/com/example/posthog/data/UserRepository.kt
 
 ```kt
-package com.example.amplitude.data
+package com.example.posthog.data
 
 import android.content.Context
 import android.content.SharedPreferences
@@ -351,10 +494,10 @@ class UserRepository(context: Context) {
 
 ---
 
-## app/src/main/java/com/example/amplitude/MainActivity.kt
+## app/src/main/java/com/example/posthog/MainActivity.kt
 
 ```kt
-package com.example.amplitude
+package com.example.posthog
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -372,20 +515,20 @@ import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
-import com.example.amplitude.navigation.NavGraph
-import com.example.amplitude.navigation.Screen
-import com.example.amplitude.ui.components.AppHeader
-import com.example.amplitude.ui.components.BottomNavBar
-import com.example.amplitude.ui.theme.BackgroundGray
-import com.example.amplitude.ui.theme.AmplitudeTheme
-import com.example.amplitude.viewmodel.AuthViewModel
+import com.example.posthog.navigation.NavGraph
+import com.example.posthog.navigation.Screen
+import com.example.posthog.ui.components.AppHeader
+import com.example.posthog.ui.components.BottomNavBar
+import com.example.posthog.ui.theme.BackgroundGray
+import com.example.posthog.ui.theme.PostHogTheme
+import com.example.posthog.viewmodel.AuthViewModel
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            AmplitudeTheme {
+            PostHogTheme {
                 BurritoApp()
             }
         }
@@ -456,10 +599,10 @@ fun BurritoApp() {
 
 ---
 
-## app/src/main/java/com/example/amplitude/navigation/NavGraph.kt
+## app/src/main/java/com/example/posthog/navigation/NavGraph.kt
 
 ```kt
-package com.example.amplitude.navigation
+package com.example.posthog.navigation
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -468,10 +611,10 @@ import androidx.compose.runtime.getValue
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import com.example.amplitude.ui.screens.BurritoScreen
-import com.example.amplitude.ui.screens.HomeScreen
-import com.example.amplitude.ui.screens.ProfileScreen
-import com.example.amplitude.viewmodel.AuthViewModel
+import com.example.posthog.ui.screens.BurritoScreen
+import com.example.posthog.ui.screens.HomeScreen
+import com.example.posthog.ui.screens.ProfileScreen
+import com.example.posthog.viewmodel.AuthViewModel
 
 sealed class Screen(val route: String) {
     object Home : Screen("home")
@@ -535,10 +678,10 @@ fun NavGraph(
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/components/AppHeader.kt
+## app/src/main/java/com/example/posthog/ui/components/AppHeader.kt
 
 ```kt
-package com.example.amplitude.ui.components
+package com.example.posthog.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -556,9 +699,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.amplitude.ui.theme.DarkHeader
-import com.example.amplitude.ui.theme.ErrorRed
-import com.example.amplitude.ui.theme.White
+import com.example.posthog.ui.theme.DarkHeader
+import com.example.posthog.ui.theme.ErrorRed
+import com.example.posthog.ui.theme.White
 
 @Composable
 fun AppHeader(
@@ -622,10 +765,10 @@ fun AppHeader(
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/components/BottomNavBar.kt
+## app/src/main/java/com/example/posthog/ui/components/BottomNavBar.kt
 
 ```kt
-package com.example.amplitude.ui.components
+package com.example.posthog.ui.components
 
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
@@ -643,10 +786,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.amplitude.navigation.Screen
-import com.example.amplitude.ui.theme.PrimaryBlue
-import com.example.amplitude.ui.theme.TextGray
-import com.example.amplitude.ui.theme.White
+import com.example.posthog.navigation.Screen
+import com.example.posthog.ui.theme.PrimaryBlue
+import com.example.posthog.ui.theme.TextGray
+import com.example.posthog.ui.theme.White
 
 sealed class BottomNavItem(
     val route: String,
@@ -734,10 +877,10 @@ fun BottomNavBar(
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/components/StatsCard.kt
+## app/src/main/java/com/example/posthog/ui/components/StatsCard.kt
 
 ```kt
-package com.example.amplitude.ui.components
+package com.example.posthog.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -752,9 +895,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.amplitude.ui.theme.LightGray
-import com.example.amplitude.ui.theme.TextDark
-import com.example.amplitude.ui.theme.TextGray
+import com.example.posthog.ui.theme.LightGray
+import com.example.posthog.ui.theme.TextDark
+import com.example.posthog.ui.theme.TextGray
 
 @Composable
 fun StatsCard(
@@ -790,10 +933,10 @@ fun StatsCard(
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/screens/BurritoScreen.kt
+## app/src/main/java/com/example/posthog/ui/screens/BurritoScreen.kt
 
 ```kt
-package com.example.amplitude.ui.screens
+package com.example.posthog.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -823,12 +966,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.amplitude.ui.components.StatsCard
-import com.example.amplitude.ui.theme.BackgroundGray
-import com.example.amplitude.ui.theme.SuccessGreen
-import com.example.amplitude.ui.theme.TextDark
-import com.example.amplitude.ui.theme.TextGray
-import com.example.amplitude.ui.theme.White
+import com.example.posthog.ui.components.StatsCard
+import com.example.posthog.ui.theme.BackgroundGray
+import com.example.posthog.ui.theme.SuccessGreen
+import com.example.posthog.ui.theme.TextDark
+import com.example.posthog.ui.theme.TextGray
+import com.example.posthog.ui.theme.White
 import kotlinx.coroutines.delay
 
 @Composable
@@ -952,10 +1095,10 @@ fun BurritoScreen(
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/screens/HomeScreen.kt
+## app/src/main/java/com/example/posthog/ui/screens/HomeScreen.kt
 
 ```kt
-package com.example.amplitude.ui.screens
+package com.example.posthog.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -990,12 +1133,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.amplitude.ui.theme.BackgroundGray
-import com.example.amplitude.ui.theme.BorderGray
-import com.example.amplitude.ui.theme.PrimaryBlue
-import com.example.amplitude.ui.theme.TextDark
-import com.example.amplitude.ui.theme.TextGray
-import com.example.amplitude.ui.theme.White
+import com.example.posthog.ui.theme.BackgroundGray
+import com.example.posthog.ui.theme.BorderGray
+import com.example.posthog.ui.theme.PrimaryBlue
+import com.example.posthog.ui.theme.TextDark
+import com.example.posthog.ui.theme.TextGray
+import com.example.posthog.ui.theme.White
 
 @Composable
 fun HomeScreen(
@@ -1178,10 +1321,10 @@ private fun ContentCard(
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/screens/ProfileScreen.kt
+## app/src/main/java/com/example/posthog/ui/screens/ProfileScreen.kt
 
 ```kt
-package com.example.amplitude.ui.screens
+package com.example.posthog.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -1204,11 +1347,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.example.amplitude.ui.components.StatsCard
-import com.example.amplitude.ui.theme.BackgroundGray
-import com.example.amplitude.ui.theme.TextDark
-import com.example.amplitude.ui.theme.TextGray
-import com.example.amplitude.ui.theme.White
+import com.example.posthog.ui.components.StatsCard
+import com.example.posthog.ui.theme.BackgroundGray
+import com.example.posthog.ui.theme.TextDark
+import com.example.posthog.ui.theme.TextGray
+import com.example.posthog.ui.theme.White
 
 @Composable
 fun ProfileScreen(
@@ -1327,10 +1470,10 @@ private fun getJourneyMessage(count: Int): String = when {
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/theme/Color.kt
+## app/src/main/java/com/example/posthog/ui/theme/Color.kt
 
 ```kt
-package com.example.amplitude.ui.theme
+package com.example.posthog.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
@@ -1353,10 +1496,10 @@ val White = Color(0xFFFFFFFF)
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/theme/Theme.kt
+## app/src/main/java/com/example/posthog/ui/theme/Theme.kt
 
 ```kt
-package com.example.amplitude.ui.theme
+package com.example.posthog.ui.theme
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
@@ -1376,7 +1519,7 @@ private val LightColorScheme = lightColorScheme(
 )
 
 @Composable
-fun AmplitudeTheme(
+fun PostHogTheme(
     content: @Composable () -> Unit
 ) {
     MaterialTheme(
@@ -1389,10 +1532,10 @@ fun AmplitudeTheme(
 
 ---
 
-## app/src/main/java/com/example/amplitude/ui/theme/Type.kt
+## app/src/main/java/com/example/posthog/ui/theme/Type.kt
 
 ```kt
-package com.example.amplitude.ui.theme
+package com.example.posthog.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
@@ -1479,17 +1622,17 @@ val Typography = Typography(
 
 ---
 
-## app/src/main/java/com/example/amplitude/viewmodel/AuthViewModel.kt
+## app/src/main/java/com/example/posthog/viewmodel/AuthViewModel.kt
 
 ```kt
-package com.example.amplitude.viewmodel
+package com.example.posthog.viewmodel
 
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.example.amplitude.BurritoApplication
-import com.example.amplitude.data.User
-import com.example.amplitude.data.UserRepository
+import com.example.posthog.data.User
+import com.example.posthog.data.UserRepository
+import com.posthog.PostHog
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -1498,7 +1641,6 @@ import kotlinx.coroutines.launch
 class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
     private val repository = UserRepository(application)
-    private val amplitude = (application as BurritoApplication).amplitude
 
     private val _currentUser = MutableStateFlow<User?>(null)
     val currentUser: StateFlow<User?> = _currentUser.asStateFlow()
@@ -1526,15 +1668,15 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             _currentUser.value = user
             _isAuthenticated.value = true
 
-            amplitude.setUserId(username)
-            amplitude.track("user_logged_in")
+            PostHog.identify(username)
+            PostHog.capture(event = "user_logged_in")
         }
     }
 
     fun logout() {
         viewModelScope.launch {
-            amplitude.track("user_logged_out")
-            amplitude.reset()
+            PostHog.capture("user_logged_out")
+            PostHog.reset()
             repository.clearCurrentUser()
             _currentUser.value = null
             _isAuthenticated.value = false
@@ -1548,11 +1690,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             repository.saveUser(updatedUser)
             _currentUser.value = updatedUser
 
-            val eventProperties = mapOf(
-                "total_considerations" to updatedUser.burritoConsiderations,
-                "username" to updatedUser.username
+            PostHog.capture(
+                event = "burrito_considered",
+                properties = mapOf(
+                    "total_considerations" to updatedUser.burritoConsiderations,
+                    "username" to updatedUser.username
+                )
             )
-            amplitude.track("burrito_considered", eventProperties)
         }
     }
 }
@@ -1823,7 +1967,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 
 ```xml
 <resources>
-    <string name="app_name">Amplitude</string>
+    <string name="app_name">PostHog</string>
 </resources>
 ```
 
@@ -1835,7 +1979,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <style name="Theme.Amplitude" parent="android:Theme.Material.Light.NoActionBar" />
+    <style name="Theme.PostHog" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>
 ```
 
@@ -1931,7 +2075,7 @@ activityCompose = "1.8.0"
 kotlin = "2.0.21"
 composeBom = "2024.09.00"
 navigationCompose = "2.7.5"
-amplitude = "1.+"
+posthog = "3.31.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -1949,7 +2093,7 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
-amplitude-android = { group = "com.amplitude", name = "analytics-android", version.ref = "amplitude" }
+posthog-android = { group = "com.posthog", name = "posthog-android", version.ref = "posthog" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
@@ -1968,8 +2112,9 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 
 sdk.dir=/path/to/your/android/sdk
 
-# Amplitude configuration
-amplitude.apiKey=your_amplitude_api_key_here
+# PostHog configuration
+posthog.apiKey=your_posthog_project_token_here
+posthog.host=https://us.i.posthog.com
 
 ```
 

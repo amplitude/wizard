@@ -1,28 +1,30 @@
-# Amplitude Ruby Example Project
+# PostHog Ruby Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/ruby
 
 ---
 
 ## README.md
 
-# Amplitude Ruby Example - CLI Todo App
+# PostHog Ruby Example - CLI Todo App
 
-A simple command-line todo application built with plain Ruby (no frameworks) demonstrating Amplitude integration for CLIs, scripts, data pipelines, and non-web Ruby applications.
+A simple command-line todo application built with plain Ruby (no frameworks) demonstrating PostHog integration for CLIs, scripts, data pipelines, and non-web Ruby applications.
 
 ## Purpose
 
 This example serves as:
-- **Verification** that the context-hub wizard works for plain Ruby projects
-- **Reference implementation** of Amplitude best practices for non-framework Ruby code
+- **Verification** that the context-mill wizard works for plain Ruby projects
+- **Reference implementation** of PostHog best practices for non-framework Ruby code
 - **Working example** you can run and modify
 
 ## Features Demonstrated
 
-- **Instance-based API** - Uses `Amplitude::Client.instance` for explicit client management
-- **Proper shutdown** - Uses `flush` in `ensure` block to send events before exit
-- **Event tracking** - Captures user actions with `user_id` and event properties
+- **Instance-based API** - Uses `PostHog::Client.new(...)` for explicit client management
+- **Proper shutdown** - Uses `shutdown` in `ensure` block to flush events before exit
+- **Event tracking** - Captures user actions with `distinct_id` and properties
+- **User identification** - Associates properties with users via `identify`
+- **Error handling** - Manual exception capture for handled errors
 
 ## Quick Start
 
@@ -36,17 +38,16 @@ gem install bundler
 bundle install
 ```
 
-### 2. Configure Amplitude
+### 2. Configure PostHog
 
 ```bash
 # Copy environment template
 cp .env.example .env
 
-# Edit .env and add your Amplitude API key
-# AMPLITUDE_API_KEY=your_amplitude_api_key_here
+# Edit .env and add your PostHog project token
+# POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
+# POSTHOG_HOST=https://us.i.posthog.com
 ```
-
-Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
 
 ### 3. Run the App
 
@@ -69,7 +70,7 @@ ruby todo.rb stats
 
 ## What Gets Tracked
 
-The app tracks these events in Amplitude:
+The app tracks these events in PostHog:
 
 | Event | Properties | Purpose |
 |-------|-----------|---------|
@@ -95,21 +96,24 @@ basics/ruby/
 ### 1. Instance-Based Initialization
 
 ```ruby
-require 'amplitude-analytics'
+require 'posthog-ruby'
 
-client = Amplitude::Client.instance
-client.api_key = ENV['AMPLITUDE_API_KEY']
+posthog = PostHog::Client.new(
+  api_key: api_key,
+  host: 'https://us.i.posthog.com',
+  on_error: proc { |status, msg| puts "PostHog error: #{status} - #{msg}" }
+)
 ```
 
 ### 2. Event Tracking Pattern
 
 ```ruby
-event = Amplitude::BaseEvent.new(
-  event_type: 'event_name',
-  user_id: 'user_123',
-  event_properties: { key: 'value' }
+# Track events with distinct_id
+posthog.capture(
+  distinct_id: 'user_123',
+  event: 'event_name',
+  properties: { key: 'value' }
 )
-client.track(event)
 ```
 
 ### 3. Proper Shutdown
@@ -118,27 +122,48 @@ client.track(event)
 begin
   # Your application code
 ensure
-  # Always call flush to send events before exit
-  amplitude&.flush
+  # Always call shutdown to flush events and close connections
+  posthog&.shutdown
 end
 ```
 
-## Running Without Amplitude
+### 4. Identifying Users
 
-The app works fine without Amplitude configured - it simply won't track analytics. You'll see a warning message but the app continues to function normally.
+```ruby
+# Identify users (optional - adds user properties)
+posthog.identify(
+  distinct_id: 'user_123',
+  properties: { email: 'user@example.com', plan: 'pro' }
+)
+```
+
+## Running Without PostHog
+
+The app works fine without PostHog configured - it simply won't track analytics. You'll see a warning message but the app continues to function normally.
+
+## Next Steps
+
+- Modify `todo.rb` to experiment with PostHog tracking
+- Add new commands and track their usage
+- Explore feature flags: `posthog.is_feature_enabled('flag-name', 'user_id')`
+- Check your PostHog dashboard to see tracked events
 
 ## Learn More
 
-- [Amplitude Documentation](https://amplitude.com/docs)
-- [Amplitude Ruby SDK](https://amplitude.com/docs/sdks/analytics/ruby)
+- [PostHog Ruby SDK Documentation](https://posthog.com/docs/libraries/ruby)
+- [PostHog Product Analytics](https://posthog.com/docs/product-analytics)
 
 ---
 
 ## .env.example
 
 ```example
-# Amplitude Configuration
-AMPLITUDE_API_KEY=your_amplitude_api_key_here
+# PostHog Configuration
+POSTHOG_PROJECT_TOKEN=phc_your_project_token_here
+POSTHOG_HOST=https://us.i.posthog.com
+
+# Optional: Enable debug mode to see PostHog requests
+# POSTHOG_DEBUG=true
 
 ```
 
@@ -149,7 +174,7 @@ AMPLITUDE_API_KEY=your_amplitude_api_key_here
 ```
 source 'https://rubygems.org'
 
-gem 'amplitude-analytics', '~> 1.0'
+gem 'posthog-ruby', '~> 3.0'
 gem 'dotenv', '~> 3.0'
 
 ```
@@ -162,32 +187,36 @@ gem 'dotenv', '~> 3.0'
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Simple CLI Todo App with Amplitude Analytics
+# Simple CLI Todo App with PostHog Analytics
 #
-# A minimal plain Ruby CLI application demonstrating Amplitude integration
+# A minimal plain Ruby CLI application demonstrating PostHog integration
 # for non-framework Ruby projects (CLIs, scripts, data pipelines, etc.).
 
 require 'json'
 require 'securerandom'
 require 'time'
 require 'dotenv/load'
-require 'amplitude-analytics'
+require 'posthog'
 
 # Data file location
 DATA_FILE = File.join(Dir.home, '.todo_app.json')
 
-def initialize_amplitude
-  # Initialize Amplitude with constructor-based API.
-  # Returns Amplitude client or nil if API key not configured.
-  api_key = ENV['AMPLITUDE_API_KEY']
+def initialize_posthog
+  # Initialize PostHog with instance-based API.
+  # Returns PostHog client or nil if project token not configured.
+  project_token = ENV['POSTHOG_PROJECT_TOKEN']
 
-  unless api_key
-    puts 'WARNING: Amplitude not configured (AMPLITUDE_API_KEY not set)'
+  unless project_token
+    puts 'WARNING: PostHog not configured (POSTHOG_PROJECT_TOKEN not set)'
     puts '         App will work but analytics won\'t be tracked'
     return nil
   end
 
-  Amplitude::Client.new(api_key)
+  PostHog::Client.new(
+    api_key: project_token,
+    host: ENV.fetch('POSTHOG_HOST', 'https://us.i.posthog.com'),
+    on_error: proc { |status, msg| puts "PostHog error: #{status} - #{msg}" }
+  )
 end
 
 def get_user_id
@@ -213,19 +242,18 @@ def save_todos(data)
   File.write(DATA_FILE, JSON.pretty_generate(data))
 end
 
-def track_event(amplitude, event_name, properties = {})
-  # Track an event with Amplitude.
-  return unless amplitude
+def track_event(posthog, event_name, properties = {})
+  # Track an event with PostHog.
+  return unless posthog
 
-  event = Amplitude::BaseEvent.new(
-    event_type: event_name,
-    user_id: get_user_id,
-    event_properties: properties
+  posthog.capture(
+    distinct_id: get_user_id,
+    event: event_name,
+    properties: properties
   )
-  amplitude.track(event)
 end
 
-def cmd_add(text, amplitude)
+def cmd_add(text, posthog)
   # Add a new todo item.
   data = load_todos
 
@@ -241,14 +269,14 @@ def cmd_add(text, amplitude)
 
   puts "Added todo ##{todo['id']}: #{todo['text']}"
 
-  track_event(amplitude, 'todo_added', {
+  track_event(posthog, 'todo_added', {
     'todo_id' => todo['id'],
     'todo_length' => todo['text'].length,
     'total_todos' => data['todos'].length
   })
 end
 
-def cmd_list(amplitude)
+def cmd_list(posthog)
   # List all todos.
   data = load_todos
 
@@ -266,13 +294,13 @@ def cmd_list(amplitude)
 
   puts
 
-  track_event(amplitude, 'todos_viewed', {
+  track_event(posthog, 'todos_viewed', {
     'total_todos' => data['todos'].length,
     'completed_todos' => data['todos'].count { |t| t['completed'] }
   })
 end
 
-def cmd_complete(id, amplitude)
+def cmd_complete(id, posthog)
   # Mark a todo as completed.
   data = load_todos
 
@@ -296,13 +324,13 @@ def cmd_complete(id, amplitude)
 
   time_to_complete = (Time.parse(todo['completed_at']) - Time.parse(todo['created_at'])) / 3600.0
 
-  track_event(amplitude, 'todo_completed', {
+  track_event(posthog, 'todo_completed', {
     'todo_id' => todo['id'],
     'time_to_complete_hours' => time_to_complete
   })
 end
 
-def cmd_delete(id, amplitude)
+def cmd_delete(id, posthog)
   # Delete a todo.
   data = load_todos
 
@@ -318,13 +346,13 @@ def cmd_delete(id, amplitude)
 
   puts "Deleted todo ##{id}"
 
-  track_event(amplitude, 'todo_deleted', {
+  track_event(posthog, 'todo_deleted', {
     'todo_id' => todo['id'],
     'was_completed' => todo['completed']
   })
 end
 
-def cmd_stats(amplitude)
+def cmd_stats(posthog)
   # Show usage statistics.
   data = load_todos
 
@@ -339,7 +367,7 @@ def cmd_stats(amplitude)
   puts "  Completion rate: #{total > 0 ? format('%.1f', completed.to_f / total * 100) : '0.0'}%"
   puts
 
-  track_event(amplitude, 'stats_viewed', {
+  track_event(posthog, 'stats_viewed', {
     'total_todos' => total,
     'completed_todos' => completed,
     'pending_todos' => pending
@@ -348,7 +376,7 @@ end
 
 def print_usage
   puts <<~USAGE
-    Simple todo app with Amplitude analytics
+    Simple todo app with PostHog analytics
 
     Usage:
       ruby todo.rb add "Todo text"    Add a new todo
@@ -360,10 +388,10 @@ def print_usage
 end
 
 # Main entry point
-amplitude = nil
+posthog = nil
 
 begin
-  amplitude = initialize_amplitude
+  posthog = initialize_posthog
 
   command = ARGV[0]
 
@@ -380,9 +408,9 @@ begin
       puts 'Usage: ruby todo.rb add "Your task"'
       exit 1
     end
-    cmd_add(text, amplitude)
+    cmd_add(text, posthog)
   when 'list'
-    cmd_list(amplitude)
+    cmd_list(posthog)
   when 'complete'
     id = ARGV[1]&.to_i
     unless id && id > 0
@@ -390,7 +418,7 @@ begin
       puts 'Usage: ruby todo.rb complete <id>'
       exit 1
     end
-    cmd_complete(id, amplitude)
+    cmd_complete(id, posthog)
   when 'delete'
     id = ARGV[1]&.to_i
     unless id && id > 0
@@ -398,9 +426,9 @@ begin
       puts 'Usage: ruby todo.rb delete <id>'
       exit 1
     end
-    cmd_delete(id, amplitude)
+    cmd_delete(id, posthog)
   when 'stats'
-    cmd_stats(amplitude)
+    cmd_stats(posthog)
   else
     puts "ERROR: Unknown command '#{command}'"
     print_usage
@@ -408,10 +436,26 @@ begin
   end
 rescue StandardError => e
   puts "ERROR: #{e.message}"
+
+  # Manually capture handled errors
+  posthog&.capture(
+    distinct_id: get_user_id,
+    event: '$exception',
+    properties: {
+      '$exception_type' => e.class.name,
+      '$exception_message' => e.message,
+      '$exception_list' => [{
+        'type' => e.class.name,
+        'value' => e.message,
+        'stacktrace' => { 'frames' => (e.backtrace || []).first(10).map { |line| { 'filename' => line } } }
+      }]
+    }
+  )
+
   exit 1
 ensure
-  # IMPORTANT: Always flush Amplitude to send events before exit
-  amplitude&.flush
+  # IMPORTANT: Always shutdown PostHog to flush events
+  posthog&.shutdown
 end
 
 ```

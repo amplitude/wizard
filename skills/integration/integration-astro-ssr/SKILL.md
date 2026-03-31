@@ -1,52 +1,56 @@
 ---
 name: integration-astro-ssr
-description: Amplitude integration for server-rendered Astro applications with API routes
+description: PostHog integration for server-rendered Astro applications with API routes
 metadata:
-  author: Amplitude
+  author: PostHog
   version: dev
 ---
 
-# Amplitude integration for Astro (SSR)
+# PostHog integration for Astro (SSR)
 
-This skill helps you add Amplitude analytics to Astro (SSR) applications.
+This skill helps you add PostHog analytics to Astro (SSR) applications.
 
 ## Workflow
 
 Follow these steps in order to complete the integration:
 
-1. `basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
-2. `basic-integration-1.1-edit.md` - Amplitude Setup - Edit
-3. `basic-integration-1.2-revise.md` - Amplitude Setup - Revise
-4. `basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
+1. `basic-integration-1.0-begin.md` - PostHog Setup - Begin ← **Start here**
+2. `basic-integration-1.1-edit.md` - PostHog Setup - Edit
+3. `basic-integration-1.2-revise.md` - PostHog Setup - Revise
+4. `basic-integration-1.3-conclude.md` - PostHog Setup - Conclusion
 
 ## Reference files
 
 - `references/EXAMPLE.md` - Astro (SSR) example project code
-- `references/browser-sdk-2.md` - Or install unified SDK to get access to all Amplitude products
-- `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
-- `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
-- `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
-- `references/basic-integration-1.2-revise.md` - Amplitude setup - revise
-- `references/basic-integration-1.3-conclude.md` - Amplitude setup - conclusion
+- `references/astro.md` - Astro - docs
+- `references/identify-users.md` - Identify users - docs
+- `references/basic-integration-1.0-begin.md` - PostHog setup - begin
+- `references/basic-integration-1.1-edit.md` - PostHog setup - edit
+- `references/basic-integration-1.2-revise.md` - PostHog setup - revise
+- `references/basic-integration-1.3-conclude.md` - PostHog setup - conclusion
 
 The example project shows the target implementation pattern. Consult the documentation for API details.
 
 ## Key principles
 
-- **Environment variables**: Always use environment variables for Amplitude keys. Never hardcode them.
-- **Minimal changes**: Add Amplitude code alongside existing integrations. Don't replace or restructure existing code.
+- **Environment variables**: Always use environment variables for PostHog keys. Never hardcode them.
+- **Minimal changes**: Add PostHog code alongside existing integrations. Don't replace or restructure existing code.
 - **Match the example**: Your implementation should follow the example project's patterns as closely as possible.
 
 ## Framework guidelines
 
-- Always use the is:inline directive on Amplitude script tags to prevent Astro from processing them and causing TypeScript errors
-- Use PUBLIC_ prefix for client-side environment variables in Astro (e.g., PUBLIC_AMPLITUDE_API_KEY)
-- Create an amplitude.astro component in src/components/ for reusable initialization across pages
-- Import the Amplitude component in a Layout and wrap all pages with that layout
-- Use @amplitude/analytics-node in API routes under src/pages/api/ for server-side event tracking
-- Store the Amplitude node client instance in a singleton pattern (src/lib/amplitude-server.ts) to avoid creating multiple clients
-- Pass a consistent user/device ID to server via custom headers for unified session tracking
+- Always use the is:inline directive on PostHog script tags to prevent Astro from processing them and causing TypeScript errors
+- Use PUBLIC_ prefix for client-side environment variables in Astro (e.g., PUBLIC_POSTHOG_PROJECT_TOKEN)
+- Create a posthog.astro component in src/components/ for reusable initialization across pages
+- Import the PostHog component in a Layout and wrap all pages with that layout
+- Use posthog-node in API routes under src/pages/api/ for server-side event tracking
+- Store the posthog-node client instance in a singleton pattern (src/lib/posthog-server.ts) to avoid creating multiple clients
+- Pass the client session ID to server via X-PostHog-Session-Id header for unified session tracking
 
 ## Identifying users
 
-Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.
+Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. If both frontend and backend code exist, pass the client-side session and distinct ID using `X-POSTHOG-DISTINCT-ID` and `X-POSTHOG-SESSION-ID` headers to maintain correlation.
+
+## Error tracking
+
+Add PostHog error tracking to relevant files, particularly around critical user flows and API boundaries.

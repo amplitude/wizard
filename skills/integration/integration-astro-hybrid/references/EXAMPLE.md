@@ -1,29 +1,29 @@
-# Amplitude Astro (Hybrid) Example Project
+# PostHog Astro (Hybrid) Example Project
 
-Repository: https://github.com/amplitude/context-hub
+Repository: https://github.com/amplitude/context-mill
 Path: basics/astro-hybrid
 
 ---
 
 ## README.md
 
-# Amplitude Astro Hybrid Example
+# PostHog Astro Hybrid Example
 
-This is an [Astro](https://astro.build/) hybrid rendering example demonstrating Amplitude integration with both static and on-demand rendered pages.
+This is an [Astro](https://astro.build/) hybrid rendering example demonstrating PostHog integration with both static and on-demand rendered pages.
 
 Hybrid mode allows you to have most pages prerendered (static) while opting specific pages into server-side rendering (SSR) when needed.
 
 It uses:
 
-- **Client-side**: Amplitude web snippet for browser analytics
-- **Server-side**: `@amplitude/analytics-node` for API route event tracking
+- **Client-side**: PostHog web snippet for browser analytics
+- **Server-side**: `posthog-node` for API route event tracking
 
 This shows how to:
 
 - Configure Astro for hybrid rendering (static default with per-page SSR opt-in)
 - Opt specific pages into SSR with `export const prerender = false`
 - Keep most pages static for performance
-- Track events from API routes using `@amplitude/analytics-node`
+- Track events from API routes using `posthog-node`
 - Pass session IDs from client to server for unified sessions
 
 ## Features
@@ -33,7 +33,7 @@ This shows how to:
 - **Dual tracking**: Events captured on both client and server
 - **Session continuity**: Session ID passed to server via headers
 - **Product analytics**: Track login and burrito consideration events
-- **Error tracking**: Manual error capture sent to Amplitude
+- **Error tracking**: Manual error capture sent to PostHog
 
 ## Getting started
 
@@ -50,11 +50,11 @@ pnpm install
 Create a `.env` file in the project root:
 
 ```bash
-PUBLIC_AMPLITUDE_API_KEY=your_amplitude_project_token
-PUBLIC_AMPLITUDE_API_KEY=https://us.i.amplitude.com
+PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
+PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 ```
 
-Get your Amplitude project token from your project settings in Amplitude.
+Get your PostHog project token from your project settings in PostHog.
 
 ### 3. Run the development server
 
@@ -71,20 +71,20 @@ Open `http://localhost:4321` in your browser.
 ```text
 src/
   components/
-    amplitude.astro      # Amplitude snippet for client-side tracking
-    Header.astro       # Navigation + logout, calls amplitude.reset()
+    posthog.astro      # PostHog snippet for client-side tracking
+    Header.astro       # Navigation + logout, calls posthog.reset()
   layouts/
-    AmplitudeLayout.astro # Root layout that includes Amplitude + Header
+    PostHogLayout.astro # Root layout that includes PostHog + Header
   lib/
     auth.ts            # Client-side auth utilities
-    amplitude-server.ts  # Server-side Amplitude client singleton
+    posthog-server.ts  # Server-side PostHog client singleton
   pages/
     index.astro        # Static (prerendered) - login form
     burrito.astro      # SSR (prerender=false) - calls API routes
     profile.astro      # Static (prerendered) - user profile
     api/
       auth/
-        login.ts       # Server-side login endpoint with Amplitude tracking
+        login.ts       # Server-side login endpoint with PostHog tracking
       events/
         burrito.ts     # Server-side event capture endpoint
   styles/
@@ -118,38 +118,38 @@ export const prerender = false;
 ---
 ```
 
-### Server-side Amplitude client (`src/lib/amplitude-server.ts`)
+### Server-side PostHog client (`src/lib/posthog-server.ts`)
 
-A singleton pattern ensures only one Amplitude client is created:
+A singleton pattern ensures only one PostHog client is created:
 
 ```typescript
-import { Amplitude } from "@amplitude/analytics-node";
+import { PostHog } from "posthog-node";
 
-let amplitudeClient: Amplitude | null = null;
+let posthogClient: PostHog | null = null;
 
-export function getAmplitudeServer(): Amplitude {
-  if (!amplitudeClient) {
-    amplitudeClient = new Amplitude(import.meta.env.PUBLIC_AMPLITUDE_API_KEY, {
-      host: import.meta.env.PUBLIC_AMPLITUDE_API_KEY,
+export function getPostHogServer(): PostHog {
+  if (!posthogClient) {
+    posthogClient = new PostHog(import.meta.env.PUBLIC_POSTHOG_PROJECT_TOKEN, {
+      host: import.meta.env.PUBLIC_POSTHOG_HOST,
       flushAt: 1,
       flushInterval: 0,
     });
   }
-  return amplitudeClient;
+  return posthogClient;
 }
 ```
 
 ### API route with server-side tracking (`src/pages/api/events/burrito.ts`)
 
 ```typescript
-import { getAmplitudeServer } from "../../../lib/amplitude-server";
+import { getPostHogServer } from "../../../lib/posthog-server";
 
 export const POST: APIRoute = async ({ request }) => {
   const body = await request.json();
-  const sessionId = request.headers.get("X-Amplitude-Session-Id");
+  const sessionId = request.headers.get("X-PostHog-Session-Id");
 
-  const amplitude = getAmplitudeServer();
-  amplitude.capture({
+  const posthog = getPostHogServer();
+  posthog.capture({
     distinctId: body.username,
     event: "burrito_considered",
     properties: {
@@ -185,9 +185,9 @@ npm run preview
 
 ## Learn more
 
-- [Amplitude documentation](https://amplitude.com/docs)
-- [Amplitude Astro guide](https://amplitude.com/docs/libraries/astro)
-- [Amplitude Node.js SDK](https://amplitude.com/docs/libraries/node)
+- [PostHog documentation](https://posthog.com/docs)
+- [PostHog Astro guide](https://posthog.com/docs/libraries/astro)
+- [PostHog Node.js SDK](https://posthog.com/docs/libraries/node)
 - [Astro Hybrid Rendering](https://docs.astro.build/en/guides/on-demand-rendering/)
 
 ---
@@ -195,7 +195,8 @@ npm run preview
 ## .env.example
 
 ```example
-PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key_here
+PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token_here
+PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 
 ```
 
@@ -218,23 +219,6 @@ export default defineConfig({
     service: { entrypoint: "astro/assets/services/noop" },
   },
 });
-
-```
-
----
-
-## src/components/amplitude.astro
-
-```astro
----
-// Amplitude analytics snippet for client-side tracking
-// Uses is:inline to prevent Astro from processing the script
----
-<script is:inline define:vars={{ apiKey: import.meta.env.PUBLIC_AMPLITUDE_API_KEY }}>
-  !function(){"use strict";!function(e,t){var r=e.amplitude||{_q:[],_iq:{}};if(r.invoked)e.console&&console.error&&console.error("Amplitude snippet has been loaded.");else{r.invoked=!0;var n=t.createElement("script");n.type="text/javascript",n.integrity="sha384-x0ik2D45ZDEEEpYpEuDpmj05fY91P7EOZkgdKmVBAZoGtzwnlsHI9AqlBJmg+WT4",n.crossOrigin="anonymous",n.async=!0,n.src="https://cdn.amplitude.com/libs/analytics-browser-2.11.1-min.js.gz",n.onload=function(){e.amplitude.runQueuedFunctions||console.log("[Amplitude] Error: could not load SDK")};var s=t.getElementsByTagName("script")[0];function v(e,t){e.prototype[t]=function(){return this._q.push({name:t,args:Array.prototype.slice.call(arguments,0)}),this}}s.parentNode.insertBefore(n,s);for(var o=function(){return this._q=[],this},a=["add","append","clearAll","prepend","set","setOnce","unset","preInsert","postInsert","remove","getUserProperties"],c=0;c<a.length;c++)v(o,a[c]);r.Identify=o;for(var u=function(){return this._q=[],this},l=["getEventProperties","setProductId","setQuantity","setPrice","setRevenue","setRevenueType","setEventProperties"],p=0;p<l.length;p++)v(u,l[p]);r.Revenue=u;var d=["getDeviceId","setDeviceId","getSessionId","setSessionId","getUserId","setUserId","setOptOut","setTransport","reset","extendSession"],f=["init","add","remove","track","logEvent","identify","groupIdentify","setGroup","revenue","flush"];function m(e){function t(t,r){e[t]=function(){var n={promise:new Promise((r=>{e._q.push({name:t,args:Array.prototype.slice.call(arguments,0),resolve:r})}))};if(r)return n}}for(var r=0;r<d.length;r++)t(d[r],!1);for(var n=0;n<f.length;n++)t(f[n],!0)}m(r),r.getInstance=function(e){return e=(e&&e.length>0&&e||"$default_instance").toLowerCase(),Object.prototype.hasOwnProperty.call(r._iq,e)||(r._iq[e]={_q:[]},m(r._iq[e])),r._iq[e]},e.amplitude=r}}(window,document)}();
-
-  amplitude.init(apiKey || '');
-</script>
 
 ```
 
@@ -287,12 +271,12 @@ export default defineConfig({
   function handleLogout() {
     const currentUser = localStorage.getItem('currentUser');
     if (currentUser) {
-      window.amplitude?.track('user_logged_out');
+      window.posthog?.capture('user_logged_out');
     }
     localStorage.removeItem('currentUser');
     localStorage.removeItem('burritoConsiderations');
-    // Reset Amplitude instance to clear the user session
-    window.amplitude?.reset();
+    // IMPORTANT: Reset the PostHog instance to clear the user session
+    window.posthog?.reset();
     window.location.href = '/';
   }
 
@@ -363,11 +347,30 @@ export default defineConfig({
 
 ---
 
-## src/layouts/AmplitudeLayout.astro
+## src/components/posthog.astro
 
 ```astro
 ---
-import Amplitude from '../components/amplitude.astro';
+// PostHog analytics snippet for client-side tracking
+// Uses is:inline to prevent Astro from processing the script
+---
+<script is:inline define:vars={{ apiKey: import.meta.env.PUBLIC_POSTHOG_PROJECT_TOKEN, apiHost: import.meta.env.PUBLIC_POSTHOG_HOST }}>
+  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
+  posthog.init(apiKey || '', {
+    api_host: apiHost || 'https://us.i.posthog.com',
+    defaults: '2026-01-30'
+  })
+</script>
+
+```
+
+---
+
+## src/layouts/PostHogLayout.astro
+
+```astro
+---
+import PostHog from '../components/posthog.astro';
 import Header from '../components/Header.astro';
 import '../styles/global.css';
 
@@ -382,10 +385,10 @@ const { title } = Astro.props;
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Astro Amplitude Hybrid Integration Example" />
+    <meta name="description" content="Astro PostHog SSR Integration Example" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title}</title>
-    <Amplitude />
+    <PostHog />
   </head>
   <body>
     <Header />
@@ -394,38 +397,6 @@ const { title } = Astro.props;
     </main>
   </body>
 </html>
-
-```
-
----
-
-## src/lib/amplitude-server.ts
-
-```ts
-import { NodeClient, init, flush } from "@amplitude/analytics-node";
-
-let amplitudeClient: NodeClient | null = null;
-
-/**
- * Get the Amplitude server-side client.
- * Uses a singleton pattern to avoid creating multiple clients.
- */
-export function getAmplitudeServer(): NodeClient {
-  if (!amplitudeClient) {
-    amplitudeClient = init(import.meta.env.PUBLIC_AMPLITUDE_API_KEY || "");
-  }
-  return amplitudeClient;
-}
-
-/**
- * Flush the Amplitude client gracefully.
- * Call this when your server is shutting down.
- */
-export async function flushAmplitude(): Promise<void> {
-  if (amplitudeClient) {
-    await flush();
-  }
-}
 
 ```
 
@@ -489,12 +460,50 @@ export function incrementBurritoConsiderations(): number {
 
 ---
 
+## src/lib/posthog-server.ts
+
+```ts
+import { PostHog } from "posthog-node";
+
+let posthogClient: PostHog | null = null;
+
+/**
+ * Get the PostHog server-side client.
+ * Uses a singleton pattern to avoid creating multiple clients.
+ */
+export function getPostHogServer(): PostHog {
+  if (!posthogClient) {
+    posthogClient = new PostHog(import.meta.env.PUBLIC_POSTHOG_PROJECT_TOKEN || "", {
+      host: import.meta.env.PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
+      // Flush immediately for demo purposes
+      // In production, you might want to batch events
+      flushAt: 1,
+      flushInterval: 0,
+    });
+  }
+  return posthogClient;
+}
+
+/**
+ * Shutdown the PostHog client gracefully.
+ * Call this when your server is shutting down.
+ */
+export async function shutdownPostHog(): Promise<void> {
+  if (posthogClient) {
+    await posthogClient.shutdown();
+    posthogClient = null;
+  }
+}
+
+```
+
+---
+
 ## src/pages/api/auth/login.ts
 
 ```ts
 import type { APIRoute } from "astro";
-import { getAmplitudeServer } from "../../../lib/amplitude-server";
-import { track, identify, Identify } from "@amplitude/analytics-node";
+import { getPostHogServer } from "../../../lib/posthog-server";
 
 export const prerender = false;
 
@@ -523,23 +532,32 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    // Get the Amplitude server client
-    getAmplitudeServer();
+    // Get the PostHog server client
+    const posthog = getPostHogServer();
+
+    // Get session ID from client if available (passed via header)
+    const sessionId = request.headers.get("X-PostHog-Session-Id");
 
     // Capture server-side login event
-    track("server_login", {
-      isNewUser,
-      source: "api",
-      timestamp: new Date().toISOString(),
-    }, { user_id: username });
+    posthog.capture({
+      distinctId: username,
+      event: "server_login",
+      properties: {
+        $session_id: sessionId || undefined,
+        isNewUser,
+        source: "api",
+        timestamp: new Date().toISOString(),
+      },
+    });
 
-    // Identify the user server-side
-    const identifyEvent = new Identify();
-    identifyEvent.set("username", username);
-    if (isNewUser) {
-      identifyEvent.set("createdAt", new Date().toISOString());
-    }
-    identify(identifyEvent, { user_id: username });
+    // Also identify the user server-side
+    posthog.identify({
+      distinctId: username,
+      properties: {
+        username,
+        createdAt: isNewUser ? new Date().toISOString() : undefined,
+      },
+    });
 
     return new Response(
       JSON.stringify({
@@ -566,8 +584,7 @@ export const POST: APIRoute = async ({ request }) => {
 
 ```ts
 import type { APIRoute } from "astro";
-import { getAmplitudeServer } from "../../../lib/amplitude-server";
-import { track } from "@amplitude/analytics-node";
+import { getPostHogServer } from "../../../lib/posthog-server";
 
 export const prerender = false;
 
@@ -583,15 +600,23 @@ export const POST: APIRoute = async ({ request }) => {
       });
     }
 
-    // Get the Amplitude server client
-    getAmplitudeServer();
+    // Get the PostHog server client
+    const posthog = getPostHogServer();
+
+    // Get session ID from client if available (passed via header)
+    const sessionId = request.headers.get("X-PostHog-Session-Id");
 
     // Capture server-side burrito consideration event
-    track("burrito_considered", {
-      total_considerations: totalConsiderations,
-      source: "api",
-      timestamp: new Date().toISOString(),
-    }, { user_id: username });
+    posthog.capture({
+      distinctId: username,
+      event: "burrito_considered",
+      properties: {
+        $session_id: sessionId || undefined,
+        total_considerations: totalConsiderations,
+        source: "api",
+        timestamp: new Date().toISOString(),
+      },
+    });
 
     return new Response(
       JSON.stringify({
@@ -617,13 +642,13 @@ export const POST: APIRoute = async ({ request }) => {
 
 ```astro
 ---
-import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
+import PostHogLayout from '../layouts/PostHogLayout.astro';
 
 // Opt this page into on-demand rendering (SSR)
 // In hybrid mode, pages are static by default
 export const prerender = false;
 ---
-<AmplitudeLayout title="Burrito Consideration - Astro Amplitude Hybrid Example">
+<PostHogLayout title="Burrito Consideration - Astro PostHog Hybrid Example">
   <div class="container">
     <h1>Burrito consideration zone</h1>
     <p>Take a moment to truly consider the potential of burritos.</p>
@@ -647,7 +672,7 @@ export const prerender = false;
       Events are tracked both client-side and server-side for demonstration.
     </p>
   </div>
-</AmplitudeLayout>
+</PostHogLayout>
 
 <script is:inline>
   function checkAuth() {
@@ -687,7 +712,7 @@ export const prerender = false;
     }, 2000);
 
     // Client-side event tracking
-    window.amplitude?.track('burrito_considered', {
+    window.posthog?.capture('burrito_considered', {
       total_considerations: newCount,
       username: currentUser,
       source: 'client'
@@ -695,10 +720,13 @@ export const prerender = false;
 
     // Also send to server-side API for server tracking
     try {
+      const sessionId = window.posthog?.get_session_id?.() || null;
+
       await fetch('/api/events/burrito', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-PostHog-Session-Id': sessionId || ''
         },
         body: JSON.stringify({
           username: currentUser,
@@ -726,12 +754,12 @@ export const prerender = false;
 
 ```astro
 ---
-import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
+import PostHogLayout from '../layouts/PostHogLayout.astro';
 
 // This page is prerendered (static) by default in hybrid mode
 // No need to set prerender = true explicitly
 ---
-<AmplitudeLayout title="Home - Astro Amplitude Hybrid Example">
+<PostHogLayout title="Home - Astro PostHog Hybrid Example">
   <div class="container">
     <div id="logged-in-view" style="display: none;">
       <h1>Welcome back, <span id="welcome-username"></span>!</h1>
@@ -777,7 +805,7 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
       </p>
     </div>
   </div>
-</AmplitudeLayout>
+</PostHogLayout>
 
 <script is:inline>
   function updateView() {
@@ -810,11 +838,15 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
     }
 
     try {
+      // Get the session ID from PostHog to pass to the server
+      const sessionId = window.posthog?.get_session_id?.() || null;
+
       // Call the server-side login API
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-PostHog-Session-Id': sessionId || ''
         },
         body: JSON.stringify({ username, password })
       });
@@ -832,8 +864,8 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
       }
 
       // Also identify on the client side (for session continuity)
-      window.amplitude?.setUserId(username);
-      window.amplitude?.track('user_logged_in');
+      window.posthog?.identify(username);
+      window.posthog?.capture('user_logged_in');
 
       // Clear form
       document.getElementById('username').value = '';
@@ -868,11 +900,11 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
 
 ```astro
 ---
-import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
+import PostHogLayout from '../layouts/PostHogLayout.astro';
 
 // This page is prerendered (static) by default in hybrid mode
 ---
-<AmplitudeLayout title="Profile - Astro Amplitude Hybrid Example">
+<PostHogLayout title="Profile - Astro PostHog Hybrid Example">
   <div class="container">
     <h1>User Profile</h1>
 
@@ -886,8 +918,19 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
       <h3>Your Burrito Journey</h3>
       <p id="journey-message"></p>
     </div>
+
+    <div style="margin-top: 2rem;">
+      <h3>Error Tracking Demo</h3>
+      <p>Click the button below to trigger a test error and send it to PostHog:</p>
+      <button id="error-btn" class="btn-error">
+        Trigger Test Error
+      </button>
+      <p id="error-feedback" class="success" style="display: none;">
+        Error captured and sent to PostHog!
+      </p>
+    </div>
   </div>
-</AmplitudeLayout>
+</PostHogLayout>
 
 <script is:inline>
   function checkAuth() {
@@ -921,10 +964,28 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
     }
   }
 
+  function triggerTestError() {
+    try {
+      throw new Error('Test error for PostHog error tracking');
+    } catch (err) {
+      // Capture the error in PostHog
+      window.posthog?.captureException(err);
+      console.error('Captured error:', err);
+
+      // Show feedback to user
+      const feedback = document.getElementById('error-feedback');
+      feedback.style.display = 'block';
+      setTimeout(() => {
+        feedback.style.display = 'none';
+      }, 3000);
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     if (!checkAuth()) return;
 
     updateProfile();
+    document.getElementById('error-btn')?.addEventListener('click', triggerTestError);
   });
 </script>
 
