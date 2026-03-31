@@ -1,9 +1,7 @@
 onlyBuiltDependencies:
   - esbuild
   - msw
-minimumReleaseAge: 1440
-minimumReleaseAgeExclude:
-- '@pavus/snake-game'
+minimumReleaseAge: 10080
 
 
 packages:
