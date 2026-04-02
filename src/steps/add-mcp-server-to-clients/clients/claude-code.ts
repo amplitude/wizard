@@ -1,7 +1,7 @@
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
 import { z } from 'zod';
-import { execSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import { analytics } from '../../../utils/analytics';
 import { debug } from '../../../utils/debug';
 import * as os from 'os';
@@ -27,6 +27,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
 
     // Common installation paths for Claude Code CLI
     const possiblePaths = [
+      path.join(os.homedir(), '.local', 'bin', 'claude'),
       path.join(os.homedir(), '.claude', 'local', 'claude'),
       '/usr/local/bin/claude',
       '/opt/homebrew/bin/claude',
@@ -40,14 +41,17 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
       }
     }
 
-    // Try PATH as fallback
-    try {
-      execSync('command -v claude', { stdio: 'pipe' });
-      debug('  Found claude in PATH');
-      this.claudeBinaryPath = 'claude';
-      return 'claude';
-    } catch {
-      // Not in PATH
+    // Search PATH directories manually — no exec, no tainted strings passed
+    // to child_process.
+    const pathDirs = (process.env.PATH ?? '').split(path.delimiter);
+    for (const dir of pathDirs) {
+      if (!dir) continue;
+      const candidate = path.join(dir, 'claude');
+      if (fs.existsSync(candidate)) {
+        debug(`  Found claude in PATH: ${candidate}`);
+        this.claudeBinaryPath = candidate;
+        return candidate;
+      }
     }
 
     return null;
@@ -60,6 +64,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
 
       if (!claudeBinary) {
         debug('  Claude Code not found. Installation paths checked:');
+        debug(`    - ${path.join(os.homedir(), '.local', 'bin', 'claude')}`);
         debug(`    - ${path.join(os.homedir(), '.claude', 'local', 'claude')}`);
         debug(`    - /usr/local/bin/claude`);
         debug(`    - /opt/homebrew/bin/claude`);
@@ -67,8 +72,11 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
         return Promise.resolve(false);
       }
 
-      const output = execSync(`${claudeBinary} --version`, { stdio: 'pipe' });
-      const version = output.toString().trim();
+      const result = spawnSync(claudeBinary, ['--version'], { stdio: 'pipe' });
+      if (result.status !== 0) {
+        return Promise.resolve(false);
+      }
+      const version = result.stdout.toString().trim();
       debug(`  Claude Code detected: ${version}`);
       return Promise.resolve(true);
     } catch (error) {
@@ -88,15 +96,12 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
         return Promise.resolve(false);
       }
 
-      // check if specific server name exists in output
-      const output = execSync(`${claudeBinary} mcp list`, {
+      const result = spawnSync(claudeBinary, ['mcp', 'list'], {
         stdio: 'pipe',
       });
-
-      const outputStr = output.toString();
       const serverName = local ? 'amplitude-local' : 'amplitude';
 
-      if (outputStr.includes(serverName)) {
+      if (result.stdout.toString().includes(serverName)) {
         return Promise.resolve(true);
       }
     } catch {
@@ -115,52 +120,74 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
     selectedFeatures?: string[],
     local?: boolean,
   ): Promise<{ success: boolean }> {
-    const claudeBinary = this.findClaudeBinary();
-    if (!claudeBinary) {
+    const binary = this.findClaudeBinary();
+    if (!binary) {
       return Promise.resolve({ success: false });
     }
 
     const serverName = local ? 'amplitude-local' : 'amplitude';
     const url = buildMCPUrl('streamable-http', selectedFeatures, local);
 
-    // OAuth mode: no auth header
-    const authArgs = apiKey ? `--header "Authorization: Bearer ${apiKey}"` : '';
-    const command =
-      `${claudeBinary} mcp add --transport http ${serverName} ${url} ${authArgs} -s user`.trim();
+    // Build args array — no shell interpolation, no injection risk
+    const addArgs = ['mcp', 'add', '--transport', 'http', serverName, url];
+    if (apiKey) {
+      addArgs.push('--header', `Authorization: Bearer ${apiKey}`);
+    }
+    addArgs.push('-s', 'user');
 
-    try {
-      execSync(command);
-    } catch (error) {
-      analytics.captureException(
-        new Error(
-          `Failed to add server to Claude Code: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        ),
-      );
-      return Promise.resolve({ success: false });
+    let addResult = spawnSync(binary, addArgs, { stdio: 'pipe' });
+
+    if (addResult.status !== 0) {
+      const stderr = addResult.stderr?.toString() ?? '';
+      // If the server already exists, remove and re-add so the config stays
+      // current (e.g. URL params or auth changes).
+      if (stderr.includes('already exists')) {
+        const removeResult = spawnSync(
+          binary,
+          ['mcp', 'remove', '--scope', 'user', serverName],
+          { stdio: 'pipe' },
+        );
+        if (removeResult.status !== 0) {
+          analytics.captureException(
+            new Error(
+              `Failed to remove existing Claude Code MCP entry: ${removeResult.stderr?.toString()}`,
+            ),
+          );
+          return Promise.resolve({ success: false });
+        }
+        addResult = spawnSync(binary, addArgs, { stdio: 'pipe' });
+      }
+
+      if (addResult.status !== 0) {
+        analytics.captureException(
+          new Error(
+            `Failed to add server to Claude Code: ${addResult.stderr?.toString()}`,
+          ),
+        );
+        return Promise.resolve({ success: false });
+      }
     }
 
     return Promise.resolve({ success: true });
   }
 
   removeServer(local?: boolean): Promise<{ success: boolean }> {
-    const claudeBinary = this.findClaudeBinary();
-    if (!claudeBinary) {
+    const binary = this.findClaudeBinary();
+    if (!binary) {
       return Promise.resolve({ success: false });
     }
 
     const serverName = local ? 'amplitude-local' : 'amplitude';
-    const command = `${claudeBinary} mcp remove --scope user ${serverName}`;
+    const result = spawnSync(
+      binary,
+      ['mcp', 'remove', '--scope', 'user', serverName],
+      { stdio: 'pipe' },
+    );
 
-    try {
-      execSync(command);
-    } catch (error) {
+    if (result.status !== 0) {
       analytics.captureException(
         new Error(
-          `Failed to remove server from Claude Code: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          `Failed to remove server from Claude Code: ${result.stderr?.toString()}`,
         ),
       );
       return Promise.resolve({ success: false });

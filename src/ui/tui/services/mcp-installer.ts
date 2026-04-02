@@ -68,20 +68,9 @@ export function createMcpInstaller(local = false): McpInstaller {
     async install(clientNames: string[]): Promise<string[]> {
       const features = [...ALL_FEATURE_VALUES];
 
-      // Read the stored OAuth access token at install time so the MCP server
-      // config is written with a real Bearer token, not undefined.
-      let accessToken: string | undefined;
-      try {
-        const { getStoredToken, getStoredUser } = await import(
-          '../../../utils/ampli-settings.js'
-        );
-        const user = getStoredUser();
-        const stored = getStoredToken(user?.id, user?.zone);
-        accessToken = stored?.accessToken;
-      } catch {
-        // Fall back to undefined — addServer will write "Bearer undefined" but
-        // that's no worse than the status quo; callers can re-run /mcp to fix.
-      }
+      // No access token — write URL only and let each editor handle OAuth on
+      // first use. Pre-populating a token would break after 24 hours.
+      const accessToken: string | undefined = undefined;
 
       const toInstall: RawMCPClient[] = [];
       for (const c of cachedClients) {

@@ -69,22 +69,23 @@ export class ZedClient extends DefaultMCPClient {
   }
 
   getServerConfig(
-    apiKey: string,
+    apiKey: string | undefined,
     type: 'sse' | 'streamable-http',
     selectedFeatures?: string[],
     local?: boolean,
   ): MCPServerConfig {
-    return {
+    const config: MCPServerConfig = {
       enabled: true,
       url: buildMCPUrl(type, selectedFeatures, local),
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
     };
+    if (apiKey) {
+      config.headers = { Authorization: `Bearer ${apiKey}` };
+    }
+    return config;
   }
 
   async addServer(
-    apiKey: string,
+    apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
   ): Promise<{ success: boolean }> {

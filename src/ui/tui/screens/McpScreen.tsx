@@ -18,6 +18,7 @@ import { type WizardStore, McpOutcome, RunPhase } from '../store.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
+import { analytics } from '../../../utils/analytics.js';
 
 export type McpMode = 'install' | 'remove';
 
@@ -82,6 +83,7 @@ export const McpScreen = ({
       try {
         const detected = await installer.detectClients();
         if (detected.length === 0) {
+          analytics.wizardCapture('mcp no clients detected', { mode });
           setPhase(Phase.None);
           setTimeout(
             () =>
@@ -89,10 +91,16 @@ export const McpScreen = ({
             1500,
           );
         } else {
+          analytics.wizardCapture('mcp clients detected', {
+            mode,
+            clients: detected.map((c) => c.name),
+            count: detected.length,
+          });
           setClients(detected);
           setPhase(Phase.Ask);
         }
       } catch {
+        analytics.wizardCapture('mcp detection failed', { mode });
         setPhase(Phase.None);
         setTimeout(
           () => markDone(store, McpOutcome.Failed, [], standalone, onComplete),
@@ -104,15 +112,22 @@ export const McpScreen = ({
 
   const handleConfirm = () => {
     if (isRemove) {
+      analytics.wizardCapture('mcp remove confirmed');
       void doRemove();
     } else if (clients.length === 1) {
-      void doInstall(clients.map((c) => c.name));
+      const names = clients.map((c) => c.name);
+      analytics.wizardCapture('mcp install confirmed', { clients: names });
+      void doInstall(names);
     } else {
+      analytics.wizardCapture('mcp client picker shown', {
+        available_clients: clients.map((c) => c.name),
+      });
       setPhase(Phase.Pick);
     }
   };
 
   const handleSkip = () => {
+    analytics.wizardCapture('mcp skipped', { mode });
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
@@ -125,6 +140,12 @@ export const McpScreen = ({
     } catch {
       setResultClients([]);
     }
+    const failed = names.filter((n) => !result.includes(n));
+    analytics.wizardCapture('mcp install complete', {
+      installed: result,
+      failed,
+      attempted: names,
+    });
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
@@ -143,6 +164,7 @@ export const McpScreen = ({
     } catch {
       setResultClients([]);
     }
+    analytics.wizardCapture('mcp remove complete', { removed: result });
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
@@ -211,6 +233,10 @@ export const McpScreen = ({
             onSelect={(selected) => {
               const names = Array.isArray(selected) ? selected : [selected];
               if (names.length === 0) return;
+              analytics.wizardCapture('mcp clients selected', {
+                selected_clients: names,
+                available_clients: clients.map((c) => c.name),
+              });
               void doInstall(names);
             }}
           />
