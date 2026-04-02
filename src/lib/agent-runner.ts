@@ -184,13 +184,29 @@ export async function runAgentWizard(
   // Always prefer the real OAuth access token from ~/.ampli.json for Hydra auth.
   let accessToken = rawAccessToken;
   try {
-    const { getStoredToken, getStoredUser } = await import(
+    const { getStoredToken, getStoredUser, storeToken } = await import(
       '../utils/ampli-settings.js'
     );
+    const { refreshAccessToken } = await import('../utils/oauth.js');
     const user = getStoredUser();
     const stored = getStoredToken(user?.id, user?.zone);
     if (stored?.accessToken) {
       accessToken = stored.accessToken;
+      // Silently refresh if the access token has expired but the refresh window is still valid
+      if (user && new Date() > new Date(stored.expiresAt)) {
+        try {
+          const refreshed = await refreshAccessToken(stored.refreshToken);
+          storeToken(user, {
+            accessToken: refreshed.accessToken,
+            idToken: refreshed.idToken,
+            refreshToken: refreshed.refreshToken,
+            expiresAt: refreshed.expiresAt,
+          });
+          accessToken = refreshed.accessToken;
+        } catch {
+          // Refresh failed — proceed with the existing token; auth error will surface during the run
+        }
+      }
     }
   } catch {
     // Fall back to whatever the TUI provided
@@ -287,6 +303,27 @@ export async function runAgentWizard(
   );
 
   // Handle error cases detected in agent output
+  if (agentResult.error === AgentErrorType.AUTH_ERROR) {
+    analytics.wizardCapture('agent auth error', {
+      integration: config.metadata.integration,
+    });
+    const authMessage = `Authentication failed\n\nYour Amplitude session has expired. Please run the wizard again to log in.`;
+    session.credentials = null;
+    session.outroData = {
+      kind: OutroKind.Error,
+      message: authMessage,
+      promptLogin: true,
+      canRestart: true,
+    };
+    await wizardAbort({
+      message: authMessage,
+      error: new WizardError('Authentication failed during agent run', {
+        integration: config.metadata.integration,
+        error_type: AgentErrorType.AUTH_ERROR,
+      }),
+    });
+  }
+
   if (agentResult.error === AgentErrorType.MCP_MISSING) {
     await wizardAbort({
       message: `Could not access the Amplitude MCP server\n\nThe wizard was unable to connect to the Amplitude MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,

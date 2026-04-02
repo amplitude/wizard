@@ -82,9 +82,11 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: (s) => s.region === null || s.regionForced,
       isComplete: (s) => s.region !== null && !s.regionForced,
     },
-    // 3. Authenticate (SUSI for new users, silent login check for returning users)
+    // 3. Authenticate (SUSI for new users, silent login check for returning users).
+    //    Skipped on error so auth-failure runs route directly to Outro.
     {
       screen: Screen.Auth,
+      show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) => s.credentials !== null,
     },
     // 4. Data check — is the project already ingesting events?

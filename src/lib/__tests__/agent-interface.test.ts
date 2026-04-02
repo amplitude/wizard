@@ -343,6 +343,66 @@ describe('runAgent', () => {
       expect(result.error).toBe(AgentErrorType.API_ERROR);
       expect(result.message).toContain('API Error: 500');
     });
+
+    it('should report AUTH_ERROR when result contains authentication_failed', async () => {
+      function* authFailedGenerator() {
+        yield {
+          type: 'system',
+          subtype: 'init',
+          model: 'claude-opus-4-5-20251101',
+          tools: [],
+          mcp_servers: [{ name: 'amplitude-wizard', status: 'connected' }],
+        };
+        yield {
+          type: 'result',
+          subtype: 'error',
+          is_error: true,
+          result: '',
+          error: 'authentication_failed',
+        };
+      }
+
+      mockQuery.mockReturnValue(authFailedGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
+      expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
+    });
+
+    it('should report AUTH_ERROR when amplitude-wizard MCP has needs-auth status', async () => {
+      function* needsAuthGenerator() {
+        yield {
+          type: 'system',
+          subtype: 'init',
+          model: 'claude-opus-4-5-20251101',
+          tools: [],
+          mcp_servers: [{ name: 'amplitude-wizard', status: 'needs-auth' }],
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Done',
+        };
+      }
+
+      mockQuery.mockReturnValue(needsAuthGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
+    });
   });
 
   describe('stall retry', () => {
@@ -541,74 +601,111 @@ describe('runAgent', () => {
 describe('createStopHook', () => {
   const hookInput = { stop_hook_active: false };
 
-  it('empty queue: first call blocks for remark, second allows stop', () => {
+  it('empty queue: first call blocks for remark, second allows stop', async () => {
     const hook = createStopHook([]);
 
     // First call → remark prompt
-    const first = hook(hookInput);
+    const first = await hook(hookInput, undefined, {
+      signal: new AbortController().signal,
+    });
     expect(first).toHaveProperty('decision', 'block');
     expect((first as { reason: string }).reason).toContain('WIZARD-REMARK');
 
     // Second call → allow stop
-    const second = hook(hookInput);
+    const second = await hook(hookInput, undefined, {
+      signal: new AbortController().signal,
+    });
     expect(second).toEqual({});
   });
 
-  it('single feature: feature prompt, then remark, then allow stop', () => {
+  it('single feature: feature prompt, then remark, then allow stop', async () => {
     const hook = createStopHook([AdditionalFeature.LLM]);
 
     // First call → LLM feature prompt
-    const first = hook(hookInput);
+    const first = await hook(hookInput, undefined, {
+      signal: new AbortController().signal,
+    });
     expect(first).toHaveProperty('decision', 'block');
     expect((first as { reason: string }).reason).toBe(
       ADDITIONAL_FEATURE_PROMPTS[AdditionalFeature.LLM],
     );
 
     // Second call → remark prompt
-    const second = hook(hookInput);
+    const second = await hook(hookInput, undefined, {
+      signal: new AbortController().signal,
+    });
     expect(second).toHaveProperty('decision', 'block');
     expect((second as { reason: string }).reason).toContain('WIZARD-REMARK');
 
     // Third call → allow stop
-    const third = hook(hookInput);
+    const third = await hook(hookInput, undefined, {
+      signal: new AbortController().signal,
+    });
     expect(third).toEqual({});
   });
 
-  it('multiple queue entries: drains all, then remark, then allow stop', () => {
+  it('multiple queue entries: drains all, then remark, then allow stop', async () => {
     // Queue the same feature twice to exercise multi-item draining
     const hook = createStopHook([AdditionalFeature.LLM, AdditionalFeature.LLM]);
+    const signal = new AbortController().signal;
 
     // First call → LLM prompt
-    const first = hook(hookInput);
+    const first = await hook(hookInput, undefined, { signal });
     expect(first).toHaveProperty('decision', 'block');
     expect((first as { reason: string }).reason).toBe(
       ADDITIONAL_FEATURE_PROMPTS[AdditionalFeature.LLM],
     );
 
     // Second call → LLM prompt again
-    const second = hook(hookInput);
+    const second = await hook(hookInput, undefined, { signal });
     expect(second).toHaveProperty('decision', 'block');
     expect((second as { reason: string }).reason).toBe(
       ADDITIONAL_FEATURE_PROMPTS[AdditionalFeature.LLM],
     );
 
     // Third call → remark prompt
-    const third = hook(hookInput);
+    const third = await hook(hookInput, undefined, { signal });
     expect(third).toHaveProperty('decision', 'block');
     expect((third as { reason: string }).reason).toContain('WIZARD-REMARK');
 
     // Fourth call → allow stop
-    const fourth = hook(hookInput);
+    const fourth = await hook(hookInput, undefined, { signal });
     expect(fourth).toEqual({});
   });
 
-  it('allow stop is idempotent after all phases complete', () => {
+  it('allow stop is idempotent after all phases complete', async () => {
     const hook = createStopHook([]);
+    const signal = new AbortController().signal;
 
-    hook(hookInput); // remark
-    hook(hookInput); // allow
-    const extra = hook(hookInput); // still allow
+    await hook(hookInput, undefined, { signal }); // remark
+    await hook(hookInput, undefined, { signal }); // allow
+    const extra = await hook(hookInput, undefined, { signal }); // still allow
     expect(extra).toEqual({});
+  });
+
+  it('auth error: allows stop immediately, skipping queue and remark', async () => {
+    let authError = false;
+    const hook = createStopHook([AdditionalFeature.LLM], () => authError);
+    const signal = new AbortController().signal;
+
+    authError = true;
+    const result = await hook(hookInput, undefined, { signal });
+    expect(result).toEqual({});
+  });
+
+  it('auth error detected mid-run: skips remaining phases on next call', async () => {
+    let authError = false;
+    const hook = createStopHook([AdditionalFeature.LLM], () => authError);
+    const signal = new AbortController().signal;
+
+    // First call drains queue normally
+    const first = await hook(hookInput, undefined, { signal });
+    expect(first).toHaveProperty('decision', 'block');
+
+    // Auth error occurs before second call
+    authError = true;
+    const second = await hook(hookInput, undefined, { signal });
+    expect(second).toEqual({});
   });
 });
 

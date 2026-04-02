@@ -32,10 +32,32 @@ import type { PackageManagerDetector } from './package-manager-detection';
 import { z } from 'zod';
 import type { SDKMessage } from './middleware/types';
 import { safeParseSDKMessage } from './middleware/schemas';
+import {
+  type HookCallback,
+  type HookCallbackMatcher,
+  type HookEvent,
+  buildHooksConfig,
+} from './agent-hooks';
+
+type SDKQueryOptions = {
+  model?: string;
+  cwd?: string;
+  permissionMode?: string;
+  mcpServers?: McpServersConfig;
+  settingSources?: string[];
+  allowedTools?: string[];
+  systemPrompt?: unknown;
+  env?: Record<string, string | undefined>;
+  canUseTool?: (toolName: string, input: unknown) => Promise<unknown>;
+  tools?: unknown;
+  stderr?: (data: string) => void;
+  hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
+  abortSignal?: AbortSignal;
+};
 
 type SDKQueryFn = (params: {
   prompt: string | AsyncIterable<unknown>;
-  options?: Record<string, unknown>;
+  options?: SDKQueryOptions;
 }) => AsyncIterable<unknown>;
 
 // Dynamic import cache for ESM module
@@ -88,6 +110,8 @@ export enum AgentErrorType {
   RATE_LIMIT = 'WIZARD_RATE_LIMIT',
   /** Generic API error */
   API_ERROR = 'WIZARD_API_ERROR',
+  /** Authentication failed — bearer token invalid or expired */
+  AUTH_ERROR = 'WIZARD_AUTH_ERROR',
 }
 
 const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
@@ -194,13 +218,6 @@ export type AgentConfig = {
 };
 
 /**
- * Stop hook return type: either allow stop or block with a reason.
- */
-export type StopHookResult =
-  | Record<string, never>
-  | { decision: 'block'; reason: string };
-
-/**
  * Create a stop hook callback that drains the additional feature queue,
  * then collects a remark, then allows stop.
  *
@@ -208,42 +225,54 @@ export type StopHookResult =
  *   Phase 1 — drain queue: block with each feature prompt in order
  *   Phase 2 — collect remark (once): block with remark prompt
  *   Phase 3 — allow stop: return {}
+ *
+ * If `isAuthError()` returns true, all phases are skipped and stop is
+ * allowed immediately — the agent cannot respond when auth has failed.
  */
 export function createStopHook(
   featureQueue: readonly AdditionalFeature[],
-): (input: { stop_hook_active: boolean }) => StopHookResult {
+  isAuthError: () => boolean = () => false,
+): HookCallback {
   let featureIndex = 0;
   let remarkRequested = false;
 
-  return (input: { stop_hook_active: boolean }): StopHookResult => {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const stop_hook_active = input.stop_hook_active as boolean;
     logToFile('Stop hook triggered', {
-      stop_hook_active: input.stop_hook_active,
+      stop_hook_active,
       featureIndex,
       remarkRequested,
       queueLength: featureQueue.length,
     });
+
+    // If an auth error occurred, allow stop immediately — the agent cannot
+    // make further API calls to process feature prompts or reflection requests.
+    if (isAuthError()) {
+      logToFile('Stop hook: allowing stop (auth error detected)');
+      return Promise.resolve({});
+    }
 
     // Phase 1: drain feature queue
     if (featureIndex < featureQueue.length) {
       const feature = featureQueue[featureIndex++];
       const prompt = ADDITIONAL_FEATURE_PROMPTS[feature];
       logToFile(`Stop hook: injecting feature prompt for ${feature}`);
-      return { decision: 'block', reason: prompt };
+      return Promise.resolve({ decision: 'block', reason: prompt });
     }
 
     // Phase 2: collect remark (once)
     if (!remarkRequested) {
       remarkRequested = true;
       logToFile('Stop hook: requesting reflection');
-      return {
+      return Promise.resolve({
         decision: 'block',
         reason: `Before concluding, provide a brief remark about what information or guidance would have been useful to have in the integration prompt or documentation for this run. Specifically cite anything that would have prevented tool failures, erroneous edits, or other wasted turns. Format your response exactly as: ${AgentSignals.WIZARD_REMARK} Your remark here`,
-      };
+      });
     }
 
     // Phase 3: allow stop
     logToFile('Stop hook: allowing stop');
-    return {};
+    return Promise.resolve({});
   };
 }
 
@@ -1040,6 +1069,10 @@ export async function runAgent(
     const MAX_RETRIES = 2;
     const STALL_TIMEOUT_MS = 20_000;
 
+    // Tracks whether an authentication failure was detected in the current attempt.
+    // Passed to createStopHook so it can skip reflection when auth is broken.
+    let authErrorDetected = false;
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         logToFile(
@@ -1049,6 +1082,7 @@ export async function runAgent(
         // Clear per-attempt output so stale error markers don't affect the fresh run
         collectedText.length = 0;
         recentStatuses.length = 0;
+        authErrorDetected = false;
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received
@@ -1134,15 +1168,12 @@ export async function runAgent(
                 debug('CLI stderr:', data);
               }
             },
-            // Stop hook: drain additional feature queue, then collect remark, then allow stop
-            hooks: {
-              Stop: [
-                {
-                  hooks: [createStopHook(config?.additionalFeatureQueue ?? [])],
-                  timeout: 30,
-                },
-              ],
-            },
+            hooks: buildHooksConfig({
+              Stop: createStopHook(
+                config?.additionalFeatureQueue ?? [],
+                () => authErrorDetected,
+              ),
+            }),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
           },
@@ -1186,6 +1217,34 @@ export async function runAgent(
             );
           }
 
+          // Detect authentication failures so the stop hook can skip reflection
+          if (
+            message.type === 'result' &&
+            message.is_error &&
+            JSON.stringify(message).includes('authentication_failed')
+          ) {
+            authErrorDetected = true;
+            logToFile('Auth error detected: authentication_failed in result');
+          }
+
+          if (message.type === 'system' && message.subtype === 'init') {
+            for (const server of (
+              message as unknown as {
+                mcp_servers?: { name: string; status: string }[];
+              }
+            ).mcp_servers ?? []) {
+              if (
+                server.name === 'amplitude-wizard' &&
+                server.status === 'needs-auth'
+              ) {
+                authErrorDetected = true;
+                logToFile(
+                  'Auth error detected: amplitude-wizard MCP needs-auth',
+                );
+              }
+            }
+          }
+
           // Signal completion when result received
           if (message.type === 'result') {
             // Track successful results before any potential cleanup errors
@@ -1226,6 +1285,13 @@ export async function runAgent(
     }
 
     const outputText = collectedText.join('\n');
+
+    // Auth error takes priority — the agent cannot recover without re-authentication
+    if (authErrorDetected) {
+      logToFile('Agent error: AUTH_ERROR');
+      spinner.stop('Authentication failed');
+      return { error: AgentErrorType.AUTH_ERROR };
+    }
 
     // Check for error markers in the agent's output
     if (outputText.includes(AgentSignals.ERROR_MCP_MISSING)) {

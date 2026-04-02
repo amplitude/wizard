@@ -15,6 +15,14 @@ Feature: Outro
     Then I should reach the Outro screen
     And I should see an error message
 
+  Scenario: Agent run failed due to expired or invalid credentials
+    Given the agent run has errored with an authentication failure
+    Then I should reach the Outro screen
+    And I should see an error message
+    And The existing credentials should be cleared
+    And I should be prompted to log in again
+    And I should be able to restart the agent run
+
   Scenario: Wizard was cancelled
     Given the wizard was cancelled by the user
     Then I should reach the Outro screen

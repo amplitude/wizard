@@ -19,7 +19,7 @@ let session: WizardSession;
 Before(function () {
   router = new WizardRouter(Flow.Wizard);
   session = buildSession({});
-  // Advance past intro, auth, region, data setup, setup, run, mcp
+  // Advance past intro, auth, region, data setup, setup, run, mcp, data ingestion, checklist, slack
   session.introConcluded = true;
   session.credentials = {
     accessToken: 'tok',
@@ -31,6 +31,8 @@ Before(function () {
   session.projectHasData = false;
   session.setupConfirmed = true;
   session.mcpComplete = true;
+  session.dataIngestionConfirmed = true;
+  session.checklistComplete = true;
   session.slackComplete = true;
 });
 
@@ -52,6 +54,18 @@ Given('the agent run has errored', function () {
   session.outroData = {
     kind: OutroKind.Error,
     message: 'The agent encountered an error.',
+  };
+});
+
+Given('the agent run has errored with an authentication failure', function () {
+  session.runPhase = RunPhase.Error;
+  session.credentials = null;
+  session.outroData = {
+    kind: OutroKind.Error,
+    message:
+      'Authentication failed\n\nYour Amplitude session has expired. Please run the wizard again to log in.',
+    promptLogin: true,
+    canRestart: true,
   };
 });
 
@@ -99,6 +113,30 @@ Then('I should see an error message', function () {
     'Expected outroData.kind to be Error',
   );
   assert.ok(session.outroData?.message, 'Expected outroData.message to be set');
+});
+
+Then('The existing credentials should be cleared', function () {
+  assert.strictEqual(
+    session.credentials,
+    null,
+    'Expected credentials to be cleared (null)',
+  );
+});
+
+Then('I should be prompted to log in again', function () {
+  assert.strictEqual(
+    session.outroData?.promptLogin,
+    true,
+    'Expected outroData.promptLogin to be true',
+  );
+});
+
+Then('I should be able to restart the agent run', function () {
+  assert.strictEqual(
+    session.outroData?.canRestart,
+    true,
+    'Expected outroData.canRestart to be true',
+  );
 });
 
 Then('I should see a cancellation message', function () {

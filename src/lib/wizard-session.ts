@@ -89,6 +89,8 @@ export interface OutroData {
   changes?: string[];
   docsUrl?: string;
   continueUrl?: string;
+  promptLogin?: boolean;
+  canRestart?: boolean;
 }
 
 export interface WizardSession {
