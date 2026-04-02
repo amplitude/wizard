@@ -39,6 +39,3 @@ plugins
 .vercel
 
 e2e-tests/fixtures/.tracking/*
-
-# Generated at build time by scripts/generate-version.js
-src/lib/version.ts

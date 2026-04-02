@@ -2,7 +2,7 @@
  * Shared constants for the Amplitude wizard.
  */
 
-import { VERSION } from './version';
+import { version as VERSION } from '../../package.json';
 
 // ── Integration / CLI ───────────────────────────────────────────────
 
