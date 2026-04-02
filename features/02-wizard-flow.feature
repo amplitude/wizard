@@ -132,6 +132,8 @@ Feature: Wizard flow
     Given I have reached the RunScreen
     When the Claude agent completes successfully
     And MCP setup is complete
+    And events are detected in the project
+    And the checklist is complete
     Then I should be on the Slack screen
 
   Scenario: Agent run completes successfully

@@ -35,6 +35,8 @@ function advancePastMcp(s: WizardSession): void {
   s.runPhase = RunPhase.Completed;
   s.outroData = { kind: OutroKind.Success };
   s.mcpComplete = true;
+  s.dataIngestionConfirmed = true;
+  s.checklistComplete = true;
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────

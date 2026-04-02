@@ -51,22 +51,22 @@ Feature: Activation Check
 
   Scenario: User chooses to test locally
     Given I am at the "What would you like to do?" prompt
-    When I select "help me test locally"
+    When I choose "help me test locally"
     Then I should proceed to the Agent Run to set up the snippet
 
   Scenario: User chooses to exit and resume later
     Given I am at the "What would you like to do?" prompt
-    When I select "I'm done for now"
+    When I choose "I'm done for now"
     Then I should see a message to resume when data arrives
 
   Scenario: User chooses debug mode
     Given I am at the "What would you like to do?" prompt
-    When I select "I'm blocked"
+    When I choose "I'm blocked"
     Then the Claude agent should run in debug mode
 
   @todo
   Scenario: User opens docs and prompt stays open
     Given I am at the "What would you like to do?" prompt
-    When I select "take me to the docs"
+    When I choose "take me to the docs"
     Then the docs should open in my browser
     And the "What would you like to do?" prompt should remain open

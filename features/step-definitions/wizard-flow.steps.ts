@@ -144,6 +144,7 @@ Given('I am on the options menu for an existing project', function () {
 
 Given('the current project has existing data', function () {
   session.projectHasData = true;
+  session.activationLevel = 'full';
 });
 
 // ── When ──────────────────────────────────────────────────────────────────────
@@ -259,6 +260,8 @@ Then('environment variables should be uploaded to hosting', function () {
 
 Then('I should be taken to the Outro', function () {
   session.mcpComplete = true;
+  session.dataIngestionConfirmed = true;
+  session.checklistComplete = true;
   session.slackComplete = true;
   const screen = router.resolve(session);
   assert.strictEqual(screen, Screen.Outro, `Expected Outro but got ${screen}`);
@@ -302,6 +305,10 @@ Then('I should be on the MCP screen', function () {
 
 When('MCP setup is complete', function () {
   session.mcpComplete = true;
+});
+
+When('the checklist is complete', function () {
+  session.checklistComplete = true;
 });
 
 // ── DataIngestionCheck + Checklist ────────────────────────────────────────────

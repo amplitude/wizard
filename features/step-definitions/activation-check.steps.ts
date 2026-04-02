@@ -91,7 +91,7 @@ When('the activation check runs', function () {
   // activationLevel was set by the Given steps — the router resolves from it
 });
 
-When('I select {string}', function (choice: string) {
+When('I choose {string}', function (choice: string) {
   switch (choice) {
     case 'help me test locally':
       // Routes to Framework Detection: complete activation options + reset to fresh project
@@ -126,8 +126,8 @@ Then('I should proceed to the data check', function () {
   const screen = router.resolve(session);
   assert.strictEqual(
     screen,
-    Screen.Options,
-    `Expected Options (data check) but got ${screen}`,
+    Screen.Mcp,
+    `Expected Mcp (data check) but got ${screen}`,
   );
 });
 

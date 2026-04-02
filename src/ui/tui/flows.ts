@@ -124,7 +124,8 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     //    Skipped on error.
     {
       screen: Screen.DataIngestionCheck,
-      show: (s) => s.runPhase !== RunPhase.Error,
+      show: (s) =>
+        s.runPhase !== RunPhase.Error && s.activationLevel !== 'full',
       isComplete: (s) => s.dataIngestionConfirmed,
     },
     // 6. Post-setup checklist — first chart + first dashboard.
