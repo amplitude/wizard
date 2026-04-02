@@ -17,7 +17,7 @@ import {
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
 
-export const AMPLI_CONFIG_PATH = path.join(os.homedir(), 'ampli.json');
+export const AMPLI_CONFIG_PATH = path.join(os.homedir(), '.ampli.json');
 
 export interface StoredOAuthToken {
   accessToken: string;

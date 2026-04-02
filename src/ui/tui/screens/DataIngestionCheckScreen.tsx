@@ -10,19 +10,28 @@
  * The user can exit and come back later — next time through, DataSetupScreen
  * will re-check activation and this screen will confirm immediately if events
  * have arrived.
+ *
+ * When the activation API is unavailable (e.g. external users hitting Thunder
+ * endpoints that require browser session auth), the screen falls back to showing
+ * cataloged event types from the data API so the user can verify events arrived,
+ * then manually confirms with Enter.
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useRef, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { Colors, Icons } from '../styles.js';
-import { fetchProjectActivationStatus } from '../../../lib/api.js';
+import {
+  fetchProjectActivationStatus,
+  fetchWorkspaceEventTypes,
+} from '../../../lib/api.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 
 const POLL_INTERVAL_MS = 30_000;
+const MAX_EVENTS_SHOWN = 8;
 
 interface DataIngestionCheckScreenProps {
   store: WizardStore;
@@ -39,17 +48,28 @@ export const DataIngestionCheckScreen = ({
   const { session } = store;
   const { credentials, region, activationLevel } = session;
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [apiUnavailable, setApiUnavailable] = useState(false);
+  const [eventTypes, setEventTypes] = useState<string[] | null>(null);
 
   async function checkIngestion() {
-    if (!credentials) return;
-    const appId = credentials.projectId;
+    if (!credentials) {
+      setApiUnavailable(true);
+      return;
+    }
+    // credentials.projectId is 0 for OAuth users; fall back to workspace UUID
+    const appId = credentials.projectId || session.selectedWorkspaceId;
+    if (!appId) {
+      setApiUnavailable(true);
+      return;
+    }
     const zone = (region ?? 'us') as AmplitudeZone;
 
     try {
       const status = await fetchProjectActivationStatus(
-        credentials.accessToken,
+        credentials.idToken ?? credentials.accessToken,
         zone,
         appId,
+        session.selectedOrgId,
       );
       logToFile(
         `[DataIngestionCheck] poll result: hasAnyEvents=${status.hasAnyEvents} hasDetSource=${status.hasDetSource}`,
@@ -63,6 +83,26 @@ export const DataIngestionCheckScreen = ({
           err instanceof Error ? err.message : String(err)
         }`,
       );
+      setApiUnavailable(true);
+
+      // Fetch cataloged event types from the data API as a proxy for "events arrived"
+      if (session.selectedOrgId && session.selectedWorkspaceId) {
+        const idToken = credentials.idToken ?? credentials.accessToken;
+        fetchWorkspaceEventTypes(
+          idToken,
+          zone,
+          session.selectedOrgId,
+          session.selectedWorkspaceId,
+        )
+          .then((names) => {
+            setEventTypes(names);
+          })
+          .catch(() => {
+            setEventTypes([]);
+          });
+      } else {
+        setEventTypes([]);
+      }
     }
   }
 
@@ -86,7 +126,6 @@ export const DataIngestionCheckScreen = ({
     };
   }, []);
 
-  // Allow user to exit and come back later
   useScreenInput((_char, key) => {
     if (key.escape || _char === 'q') {
       if (pollingRef.current !== null) clearInterval(pollingRef.current);
@@ -95,8 +134,17 @@ export const DataIngestionCheckScreen = ({
         message:
           'Come back once your app is running and sending events. Your SDK is installed — you just need to trigger some actions.',
       });
+      return;
+    }
+    // Manual confirmation when API is unavailable
+    if (apiUnavailable && key.return) {
+      if (pollingRef.current !== null) clearInterval(pollingRef.current);
+      store.setDataIngestionConfirmed();
     }
   });
+
+  const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
+  const overflow = (eventTypes?.length ?? 0) - MAX_EVENTS_SHOWN;
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
@@ -111,17 +159,67 @@ export const DataIngestionCheckScreen = ({
           Your SDK is installed. Once you run your app and trigger some actions,
           events will start flowing into Amplitude.
         </Text>
-        <Text color={Colors.muted}>
-          Checking every 30 seconds — this screen will advance automatically.
-        </Text>
+        {!apiUnavailable && (
+          <Text color={Colors.muted}>
+            Checking every 30 seconds — this screen will advance automatically.
+          </Text>
+        )}
       </Box>
 
-      <Box gap={2} alignItems="center">
-        <Text color={Colors.accent}>{Icons.diamond}</Text>
-        <Text color={Colors.muted}>Waiting for your events...</Text>
-      </Box>
+      {apiUnavailable && eventTypes === null && (
+        <Box gap={2} alignItems="center">
+          <Text color={Colors.accent}>{Icons.diamond}</Text>
+          <Text color={Colors.muted}>Checking your event catalog...</Text>
+        </Box>
+      )}
 
-      <Box marginTop={2}>
+      {apiUnavailable && eventTypes !== null && eventTypes.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color={Colors.muted} dimColor>
+            Events cataloged in your workspace:
+          </Text>
+          <Box flexDirection="column" marginTop={1} marginLeft={2}>
+            {shown.map((name) => (
+              <Box key={name} gap={2}>
+                <Text color={Colors.accent}>{Icons.diamond}</Text>
+                <Text>{name}</Text>
+              </Box>
+            ))}
+            {overflow > 0 && (
+              <Text color={Colors.muted} dimColor>
+                ... and {overflow} more
+              </Text>
+            )}
+          </Box>
+        </Box>
+      )}
+
+      {apiUnavailable && eventTypes !== null && eventTypes.length === 0 && (
+        <Box gap={2} alignItems="center" marginBottom={1}>
+          <Text color={Colors.accent}>{Icons.diamond}</Text>
+          <Text color={Colors.muted}>Waiting for your events...</Text>
+        </Box>
+      )}
+
+      {!apiUnavailable && (
+        <Box gap={2} alignItems="center">
+          <Text color={Colors.accent}>{Icons.diamond}</Text>
+          <Text color={Colors.muted}>Waiting for your events...</Text>
+        </Box>
+      )}
+
+      <Box marginTop={2} flexDirection="column" gap={1}>
+        {apiUnavailable && (
+          <Text color={Colors.muted} dimColor>
+            Press{' '}
+            <Text bold color={Colors.muted}>
+              Enter
+            </Text>{' '}
+            {eventTypes && eventTypes.length > 0
+              ? 'to continue'
+              : 'once you see events in your Amplitude dashboard'}
+          </Text>
+        )}
         <Text color={Colors.muted} dimColor>
           Press{' '}
           <Text bold color={Colors.muted}>

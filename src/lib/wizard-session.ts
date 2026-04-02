@@ -188,6 +188,8 @@ export interface WizardSession {
   // From OAuth
   credentials: {
     accessToken: string;
+    /** id_token from OAuth — used for Amplitude Data API / Thunder calls */
+    idToken?: string;
     projectApiKey: string;
     host: string;
     projectId: number;

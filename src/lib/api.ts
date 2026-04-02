@@ -221,6 +221,93 @@ export async function fetchBranches(
   }
 }
 
+// ── Workspace event types ─────────────────────────────────────────────────
+
+const WorkspaceEventsSchema = z.object({
+  data: z.object({
+    orgs: z.array(
+      z.object({
+        workspaces: z.array(
+          z.object({
+            branches: z.array(
+              z.object({
+                versions: z.array(
+                  z.object({
+                    events: z.array(
+                      z.object({ id: z.string(), name: z.string() }),
+                    ),
+                  }),
+                ),
+              }),
+            ),
+          }),
+        ),
+      }),
+    ),
+  }),
+});
+
+const WORKSPACE_EVENTS_QUERY = `
+query workspaceEvents($orgId: ID!, $workspaceId: ID!, $branchId: ID!, $versionId: ID!) {
+  orgs(id: $orgId) {
+    workspaces(id: $workspaceId) {
+      branches(id: $branchId) {
+        versions(id: $versionId) {
+          events { id name }
+        }
+      }
+    }
+  }
+}`;
+
+/**
+ * Fetches the event type names cataloged in the default branch of a workspace.
+ * Returns an empty array if the workspace has no events or the query fails.
+ */
+export async function fetchWorkspaceEventTypes(
+  idToken: string,
+  zone: AmplitudeZone,
+  orgId: string,
+  workspaceId: string,
+): Promise<string[]> {
+  const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
+  try {
+    // Step 1: get default branch + its current version
+    const branches = await fetchBranches(idToken, zone, orgId, workspaceId);
+    const defaultBranch = branches.find((b) => b.default) ?? branches[0];
+    if (!defaultBranch) return [];
+
+    // Step 2: fetch events for that version
+    const response = await axios.post(
+      dataApiUrl,
+      {
+        query: WORKSPACE_EVENTS_QUERY,
+        variables: {
+          orgId,
+          workspaceId,
+          branchId: defaultBranch.id,
+          versionId: defaultBranch.currentVersionId,
+        },
+      },
+      {
+        headers: {
+          Authorization: idToken,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+      },
+    );
+    const parsed = WorkspaceEventsSchema.parse(response.data);
+    return (
+      parsed.data.orgs[0]?.workspaces[0]?.branches[0]?.versions[0]?.events.map(
+        (e) => e.name,
+      ) ?? []
+    );
+  } catch {
+    return [];
+  }
+}
+
 // ── Sources ───────────────────────────────────────────────────────────────
 
 const SourcesSchema = z.object({
@@ -373,18 +460,24 @@ query hasAnyDefaultEventTrackingSourceAndEvents($appId: ID!) {
 
 /**
  * Checks whether an Amplitude project has ingested any events and whether
- * the SDK snippet is configured.  Uses the same Data API endpoint as the
- * other queries.
+ * the SDK snippet is configured.
+ *
+ * The query lives in Thunder (the main Amplitude app GraphQL server), served
+ * at /graphql/org/:orgId.  orgId is required to construct the endpoint URL.
  */
 export async function fetchProjectActivationStatus(
   idToken: string,
   zone: AmplitudeZone,
   appId: number | string,
+  orgId?: string | null,
 ): Promise<ProjectActivationStatus> {
-  const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const { appApiUrlBase, dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
+  // Use the Thunder org-scoped endpoint when orgId is available; fall back to
+  // the data API (which may not expose this field for all users).
+  const url = orgId ? `${appApiUrlBase}${orgId}` : dataApiUrl;
   try {
     const response = await axios.post(
-      dataApiUrl,
+      url,
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
         headers: {
@@ -403,7 +496,7 @@ export async function fetchProjectActivationStatus(
     };
   } catch (error) {
     const apiError = handleApiError(error, 'fetch project activation status');
-    analytics.captureException(apiError, { endpoint: dataApiUrl });
+    analytics.captureException(apiError, { endpoint: url });
     throw apiError;
   }
 }

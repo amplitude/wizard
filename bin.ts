@@ -286,6 +286,7 @@ void yargs(hideBin(process.argv))
                 const accessToken = storedToken?.idToken ?? apiKeyResult.key;
                 session.credentials = {
                   accessToken,
+                  idToken: storedToken?.idToken,
                   projectApiKey: apiKeyResult.key,
                   host: getHostFromRegion(zone),
                   projectId: 0,
@@ -296,6 +297,16 @@ void yargs(hideBin(process.argv))
                 // real check), so this is equivalent — just earlier.
                 session.activationLevel = 'none';
                 session.projectHasData = false;
+              }
+
+              // Pre-populate org/workspace from ampli.json so activation checks
+              // (DataSetupScreen, DataIngestionCheckScreen) have the IDs they need
+              // even when the SUSI flow was skipped.
+              if (projectConfig.ok && projectConfig.config.OrgId) {
+                session.selectedOrgId = String(projectConfig.config.OrgId);
+              }
+              if (projectConfig.ok && projectConfig.config.WorkspaceId) {
+                session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
               }
             }
 

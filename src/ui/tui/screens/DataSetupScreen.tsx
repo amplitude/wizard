@@ -32,8 +32,11 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
   useEffect(() => {
     if (store.session.projectHasData !== null) return;
 
-    const { credentials, region, selectedOrgId } = store.session;
-    const appId = store.session.credentials?.projectId;
+    const { credentials, region, selectedOrgId, selectedWorkspaceId } =
+      store.session;
+    // credentials.projectId is 0 for OAuth users; fall back to the workspace UUID
+    const appId =
+      store.session.credentials?.projectId || selectedWorkspaceId || null;
 
     // No credentials or project ID — can't check, fall through to Framework Detection
     if (!credentials || !appId || !selectedOrgId) {
@@ -55,7 +58,12 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       } reason=${localDetection.reason ?? 'none'}`,
     );
 
-    void fetchProjectActivationStatus(credentials.accessToken, zone, appId)
+    void fetchProjectActivationStatus(
+      credentials.idToken ?? credentials.accessToken,
+      zone,
+      appId,
+      selectedOrgId,
+    )
       .then((status) => {
         logToFile(`[DataSetup] activation status: ${JSON.stringify(status)}`);
         store.setSnippetConfigured(status.hasDetSource);

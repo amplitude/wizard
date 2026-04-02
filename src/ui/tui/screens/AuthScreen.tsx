@@ -82,6 +82,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           });
           store.setCredentials({
             accessToken: session.pendingAuthAccessToken ?? '',
+            idToken: session.pendingAuthIdToken ?? undefined,
             projectApiKey: result.key,
             host: DEFAULT_HOST_URL,
             projectId: 0,
@@ -113,6 +114,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     });
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
+      idToken: session.pendingAuthIdToken ?? undefined,
       projectApiKey: trimmed,
       host: DEFAULT_HOST_URL,
       projectId: 0,

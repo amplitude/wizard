@@ -107,7 +107,10 @@ export const SlackScreen = ({
       return;
     }
     logToFile(`[SlackScreen] fetching org name via API`);
-    void fetchAmplitudeUser(credentials.accessToken, region as AmplitudeZone)
+    void fetchAmplitudeUser(
+      credentials.idToken ?? credentials.accessToken,
+      region as AmplitudeZone,
+    )
       .then((info) => {
         const name = info.orgs[0]?.name ?? null;
         logToFile(
