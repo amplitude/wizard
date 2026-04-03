@@ -23,7 +23,8 @@ import {
   backupAndFixClaudeSettings,
   restoreClaudeSettings,
 } from './agent-interface';
-import { getCloudUrlFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls';
+import { getLlmGatewayUrlFromHost } from '../utils/urls';
+import { OUTBOUND_URLS } from './constants.js';
 import chalk from 'chalk';
 import * as semver from 'semver';
 import { checkAnthropicStatus } from '../utils/anthropic-status';
@@ -386,7 +387,7 @@ export async function runAgentWizard(
 
   // Build outro data and store it for OutroScreen
   const continueUrl = session.signup
-    ? `${getCloudUrlFromRegion(cloudRegion)}/products?source=wizard`
+    ? OUTBOUND_URLS.products(cloudRegion)
     : undefined;
 
   const changes = [

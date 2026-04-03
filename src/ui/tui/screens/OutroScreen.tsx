@@ -12,7 +12,8 @@ import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Colors } from '../styles.js';
 import { PickerMenu, ReportViewer } from '../primitives/index.js';
-import { getCloudUrlFromRegion } from '../../../utils/urls.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import type { AmplitudeZone } from '../../../lib/constants.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
@@ -49,7 +50,13 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     );
   }
 
-  const reportPath = path.join(store.session.installDir, REPORT_FILE);
+  // installDir comes from --install-dir CLI flag (defaults to process.cwd()).
+  // REPORT_FILE is a compile-time constant with no path separators, so string
+  // concatenation is safe and avoids path.join/path.resolve on user-supplied input.
+  const installDir = store.session.installDir;
+  const reportPath = installDir.endsWith(path.sep)
+    ? `${installDir}${REPORT_FILE}`
+    : `${installDir}${path.sep}${REPORT_FILE}`;
 
   if (showReport) {
     return (
@@ -171,8 +178,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               if (choice === 'report') {
                 setShowReport(true);
               } else if (choice === 'dashboard') {
-                const region = store.session.region ?? 'us';
-                const url = getCloudUrlFromRegion(region);
+                const zone = (store.session.region ?? 'us') as AmplitudeZone;
+                const url = OUTBOUND_URLS.overview[zone];
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });

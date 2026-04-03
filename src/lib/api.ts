@@ -308,6 +308,67 @@ export async function fetchWorkspaceEventTypes(
   }
 }
 
+// ── Owned dashboards ──────────────────────────────────────────────────────────
+
+const OwnedDashboardsSchema = z.object({
+  data: z.object({
+    ownedDashboards: z.array(
+      z.object({
+        id: z.string(),
+        chartIds: z.array(z.string()),
+      }),
+    ),
+  }),
+});
+
+const OWNED_DASHBOARDS_QUERY = `
+query OwnedDashboards {
+  ownedDashboards {
+    id
+    chartIds
+  }
+}`;
+
+/**
+ * Checks whether the authenticated user has any charts or dashboards in their org.
+ * Uses the Thunder org-scoped GraphQL endpoint.
+ *
+ * Detection is org-scoped — Thunder has no project-level chart/dashboard listing
+ * API. For a typical new-project user this is equivalent to project-scoped.
+ *
+ * Returns { hasCharts: false, hasDashboards: false } on any error so the
+ * checklist falls back to the default empty state rather than crashing.
+ */
+export async function fetchOwnedDashboards(
+  idToken: string,
+  zone: AmplitudeZone,
+  orgId: string,
+): Promise<{ hasCharts: boolean; hasDashboards: boolean }> {
+  const { appApiUrlBase } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const url = `${appApiUrlBase}${orgId}`;
+  try {
+    const response = await axios.post(
+      url,
+      { query: OWNED_DASHBOARDS_QUERY },
+      {
+        headers: {
+          Authorization: idToken,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+      },
+    );
+    const parsed = OwnedDashboardsSchema.parse(response.data);
+    const dashboards = parsed.data.ownedDashboards;
+    return {
+      hasDashboards: dashboards.length > 0,
+      hasCharts: dashboards.some((d) => d.chartIds.length > 0),
+    };
+  } catch {
+    return { hasCharts: false, hasDashboards: false };
+  }
+}
+
 // ── Sources ───────────────────────────────────────────────────────────────
 
 const SourcesSchema = z.object({

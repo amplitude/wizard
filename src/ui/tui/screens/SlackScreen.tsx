@@ -15,9 +15,8 @@ import { useSyncExternalStore } from 'react';
 import { type WizardStore, SlackOutcome } from '../store.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
-import { getCloudUrlFromRegion } from '../../../utils/urls.js';
 import { fetchAmplitudeUser } from '../../../lib/api.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
+import { OUTBOUND_URLS, type AmplitudeZone } from '../../../lib/constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import opn from 'opn';
 
@@ -130,7 +129,7 @@ export const SlackScreen = ({
   }, []);
 
   const settingsUrl = slackSettingsUrl(
-    getCloudUrlFromRegion(region),
+    OUTBOUND_URLS.overview[(region ?? 'us') as AmplitudeZone],
     resolvedOrgName,
   );
 

@@ -16,14 +16,15 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
-import { AMPLITUDE_ZONE_SETTINGS } from '../../../lib/constants.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import opn from 'opn';
 import { analytics } from '../../../utils/analytics.js';
+import { fetchOwnedDashboards } from '../../../lib/api.js';
 
 interface ChecklistScreenProps {
   store: WizardStore;
@@ -48,17 +49,34 @@ export const ChecklistScreen = ({ store }: ChecklistScreenProps) => {
   const [opening, setOpening] = useState<'chart' | 'dashboard' | null>(null);
 
   const zone = (region ?? 'us') as AmplitudeZone;
-  const { webUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
-  // app.amplitude.com uses a different subdomain than data.amplitude.com
-  const appBase = webUrl.replace('data.', 'app.');
 
-  // Build deep-link URLs — org-scoped if we have an org ID
-  const chartUrl = selectedOrgId
-    ? `${appBase}/${selectedOrgId}/chart/new?type=segmentation`
-    : `${appBase}/chart/new?type=segmentation`;
-  const dashboardUrl = selectedOrgId
-    ? `${appBase}/${selectedOrgId}/dashboard/new`
-    : `${appBase}/dashboard/new`;
+  // On mount, detect any charts/dashboards the user already owns in their org
+  // so a returning user sees the correct state without re-doing completed steps.
+  // Detection is org-scoped (Thunder has no project-level listing API); for a
+  // new-project user this is equivalent.
+  useEffect(() => {
+    const {
+      credentials,
+      selectedOrgId,
+      checklistChartComplete,
+      checklistDashboardComplete,
+    } = store.session;
+    if (!credentials || !selectedOrgId) return;
+    if (checklistChartComplete && checklistDashboardComplete) return;
+    const idToken = credentials.idToken ?? credentials.accessToken;
+    const sessionZone = (store.session.region ?? 'us') as AmplitudeZone;
+    fetchOwnedDashboards(idToken, sessionZone, selectedOrgId)
+      .then(({ hasCharts, hasDashboards }) => {
+        if (hasCharts) store.setChecklistChartComplete();
+        if (hasDashboards) store.setChecklistDashboardComplete();
+      })
+      .catch(() => {
+        // fetchOwnedDashboards never rejects — handled defensively
+      });
+  }, []);
+
+  const chartUrl = OUTBOUND_URLS.newChart(zone, selectedOrgId);
+  const dashboardUrl = OUTBOUND_URLS.newDashboard(zone, selectedOrgId);
 
   function openInBrowser(url: string, item: 'chart' | 'dashboard') {
     setOpening(item);

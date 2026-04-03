@@ -360,12 +360,33 @@ Given('I am on the Checklist screen', function () {
   session.dataIngestionConfirmed = true;
 });
 
+Given('I have completed MCP setup on a fully-activated project', function () {
+  session.introConcluded = true;
+  session.credentials = mockCredentials();
+  session.region = 'us';
+  session.projectHasData = true;
+  session.activationLevel = 'full';
+  session.mcpComplete = true;
+});
+
 Given('the chart is not yet complete', function () {
   session.checklistChartComplete = false;
 });
 
 Given('the chart is complete', function () {
   session.checklistChartComplete = true;
+});
+
+Given('the dashboard is complete', function () {
+  session.checklistDashboardComplete = true;
+});
+
+Given('the user already has charts in their Amplitude org', function () {
+  session.checklistChartComplete = true;
+});
+
+Given('the user already has dashboards in their Amplitude org', function () {
+  session.checklistDashboardComplete = true;
 });
 
 Then('I should be taken to the Outro with a cancel state', function () {
@@ -403,6 +424,42 @@ Then('"Create your first dashboard" should be disabled', function () {
   );
 });
 
+Given('a chart has already been created', function () {
+  session.checklistChartComplete = true;
+});
+
+Given('no dashboard has been created yet', function () {
+  session.checklistDashboardComplete = false;
+});
+
+Then('"Create your first chart" should be shown as complete', function () {
+  assert.ok(
+    session.checklistChartComplete,
+    'Expected checklistChartComplete to be true',
+  );
+});
+
+Then('the dashboard item should be unlocked', function () {
+  assert.ok(
+    session.checklistChartComplete,
+    'Dashboard should be unlocked once chart is complete',
+  );
+});
+
+Then('a chart should be created via the Amplitude API', function () {
+  assert.ok(
+    session.checklistChartComplete,
+    'Expected checklistChartComplete to be true after chart creation',
+  );
+});
+
+Then('a dashboard should be created via the Amplitude API', function () {
+  assert.ok(
+    session.checklistDashboardComplete,
+    'Expected checklistDashboardComplete to be true after dashboard creation',
+  );
+});
+
 Then('the dashboard creation page should open in my browser', function () {
   session.checklistDashboardComplete = true;
 });
@@ -415,7 +472,10 @@ Then('the dashboard should be marked as complete', function () {
 });
 
 When('I select {string}', function (option: string) {
-  if (option === 'Skip remaining and continue') {
+  if (
+    option === 'Skip remaining and continue' ||
+    option === 'Done — continue'
+  ) {
     session.checklistComplete = true;
   } else if (option === 'Create your first chart') {
     session.checklistChartComplete = true;

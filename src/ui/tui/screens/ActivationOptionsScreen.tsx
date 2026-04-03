@@ -11,13 +11,14 @@ import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import opn from 'opn';
 
 interface ActivationOptionsScreenProps {
   store: WizardStore;
 }
 
-const DOCS_URL = 'https://amplitude.com/docs/sdks';
+const DOCS_URL = OUTBOUND_URLS.sdkDocs;
 
 export const ActivationOptionsScreen = ({
   store,

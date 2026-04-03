@@ -55,7 +55,6 @@ export const DEFAULT_URL = IS_DEV
 export const DEFAULT_HOST_URL = IS_DEV
   ? 'http://localhost:8010'
   : 'https://api2.amplitude.com';
-export const ISSUES_URL = 'https://github.com/amplitude/wizard/issues';
 
 // ── Analytics (internal) ──────────────────────────────────────────────
 
@@ -92,6 +91,111 @@ export const AMPLITUDE_ZONE_SETTINGS = {
 
 export type AmplitudeZone = keyof typeof AMPLITUDE_ZONE_SETTINGS;
 export const DEFAULT_AMPLITUDE_ZONE: AmplitudeZone = 'us';
+
+/**
+ * Every URL the wizard opens in the browser or presents as a link to the user.
+ * Keep this inventory accurate — the Amplitude UI uses it to allowlist outbound
+ * navigation from the wizard.
+ *
+ * Zone-dependent entries are keyed by AmplitudeZone.
+ * Builder functions compose the full URL from the base + runtime data (orgId, orgName).
+ */
+export const OUTBOUND_URLS = {
+  // ── Amplitude app base URLs ──────────────────────────────────────────────
+  // Deep-links into the chart/dashboard editor use app.eu.amplitude.com for EU.
+  // Overview and Slack settings use eu.amplitude.com (no "app." prefix) for EU.
+
+  /** App base — used for chart/dashboard/checklist deep-links. */
+  app: {
+    us: 'https://app.amplitude.com',
+    eu: 'https://app.eu.amplitude.com',
+  } as Record<AmplitudeZone, string>,
+
+  /** Overview base — used for Outro, Slack settings, and sign-up continuation. */
+  overview: {
+    us: 'https://app.amplitude.com',
+    eu: 'https://eu.amplitude.com',
+  } as Record<AmplitudeZone, string>,
+
+  // ── Auth ─────────────────────────────────────────────────────────────────
+
+  /** OAuth authorization page — opened automatically to start sign-in. */
+  oAuth: (zone: AmplitudeZone): string =>
+    `${AMPLITUDE_ZONE_SETTINGS[zone].oAuthHost}/oauth2/auth`,
+
+  // ── Checklist deep-links ─────────────────────────────────────────────────
+
+  /** New segmentation chart — opened from the Checklist screen. */
+  newChart: (zone: AmplitudeZone, orgId?: string | null): string => {
+    const base = OUTBOUND_URLS.app[zone];
+    return orgId
+      ? `${base}/${orgId}/chart/new?type=segmentation`
+      : `${base}/chart/new?type=segmentation`;
+  },
+
+  /** New dashboard — opened from the Checklist screen. */
+  newDashboard: (zone: AmplitudeZone, orgId?: string | null): string => {
+    const base = OUTBOUND_URLS.app[zone];
+    return orgId ? `${base}/${orgId}/dashboard/new` : `${base}/dashboard/new`;
+  },
+
+  // ── Post-setup ────────────────────────────────────────────────────────────
+
+  /** Slack integration settings — opened from the Slack screen. */
+  slackSettings: (zone: AmplitudeZone, orgName?: string | null): string => {
+    const base = OUTBOUND_URLS.overview[zone];
+    return orgName
+      ? `${base}/analytics/${encodeURIComponent(orgName)}/settings/profile`
+      : `${base}/settings/profile`;
+  },
+
+  /** Products page — shown in the Outro for sign-up users. */
+  products: (zone: AmplitudeZone): string =>
+    `${OUTBOUND_URLS.overview[zone]}/products?source=wizard`,
+
+  // ── Docs ─────────────────────────────────────────────────────────────────
+
+  /** SDK overview — opened from the Activation Options screen. */
+  sdkDocs: 'https://amplitude.com/docs/sdks',
+
+  /** Per-framework SDK docs — referenced in agent prompts and post-run links. */
+  frameworkDocs: {
+    browser: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
+    python: 'https://amplitude.com/docs/sdks/analytics/python',
+    java: 'https://amplitude.com/docs/sdks/analytics/java/jre-java-sdk',
+    go: 'https://amplitude.com/docs/sdks/analytics/go/go-sdk',
+    android:
+      'https://amplitude.com/docs/sdks/analytics/android/android-kotlin-sdk',
+    reactNative:
+      'https://amplitude.com/docs/sdks/analytics/react-native/react-native-sdk',
+    ios: 'https://amplitude.com/docs/sdks/analytics/ios/unified-sdk',
+    flutter: 'https://amplitude.com/docs/sdks/analytics/flutter/flutter-sdk-4',
+    unity: 'https://amplitude.com/docs/sdks/analytics/unity/unity-sdk',
+    unreal: 'https://amplitude.com/docs/sdks/analytics/unreal/unreal-sdk',
+  },
+
+  // ── Tips ──────────────────────────────────────────────────────────────────
+
+  /** Stripe data-source deep-link — shown as a tip in the RunScreen. */
+  stripeDataSource:
+    'https://app.amplitude.com/project/data-warehouse/new-source?kind=Stripe',
+
+  // ── Status ────────────────────────────────────────────────────────────────
+
+  /** Service status pages — shown in the OutageOverlay. */
+  status: {
+    claude: 'https://status.claude.com',
+    amplitude: 'https://www.amplitudestatus.com',
+  },
+
+  // ── Support ───────────────────────────────────────────────────────────────
+
+  /** Bug reports and feedback. */
+  githubIssues: 'https://github.com/amplitude/wizard/issues',
+};
+
+/** @deprecated Use OUTBOUND_URLS.githubIssues */
+export const ISSUES_URL = OUTBOUND_URLS.githubIssues;
 
 /** Placeholder embedded in generated code when the user skips key entry. */
 export const DUMMY_PROJECT_API_KEY = '_YOUR_AMPLITUDE_API_KEY_';

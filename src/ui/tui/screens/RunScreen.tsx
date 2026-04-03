@@ -32,6 +32,7 @@ import {
   AdditionalFeature,
   ADDITIONAL_FEATURE_LABELS,
 } from '../../../lib/wizard-session.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
 
 const LOG_FILE = '/tmp/amplitude-wizard.log';
 
@@ -155,7 +156,7 @@ const CONDITIONAL_TIPS: Tip[] = [
     id: 'stripe',
     title: 'You can track Stripe revenue with Amplitude',
     description: 'Add Stripe as a data source while you wait:',
-    url: 'https://app.amplitude.com/project/data-warehouse/new-source?kind=Stripe',
+    url: OUTBOUND_URLS.stripeDataSource,
     visible: (store) =>
       store.session.discoveredFeatures.includes(DiscoveredFeature.Stripe),
   },
