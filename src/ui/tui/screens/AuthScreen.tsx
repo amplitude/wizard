@@ -205,6 +205,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             <Text color={Colors.muted}>
               Amplitude → Settings → Projects → [your project] → API Keys
             </Text>
+            {session.apiKeyNotice && (
+              <Text color="yellow">{session.apiKeyNotice}</Text>
+            )}
           </Box>
           <TextInput
             placeholder="Paste API key here…"

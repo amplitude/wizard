@@ -185,6 +185,13 @@ export interface WizardSession {
   selectedWorkspaceId: string | null;
   selectedWorkspaceName: string | null;
 
+  /**
+   * Notice shown on the API key entry step of AuthScreen.
+   * Set when auto-fetch fails (e.g. user is not an org admin) so the user
+   * understands why manual entry is required.
+   */
+  apiKeyNotice: string | null;
+
   // From OAuth
   credentials: {
     accessToken: string;
@@ -313,6 +320,7 @@ export function buildSession(args: {
     selectedWorkspaceName: null,
     loginUrl: null,
     credentials: null,
+    apiKeyNotice: null,
     serviceStatus: null,
     settingsOverrideKeys: null,
     outroData: null,

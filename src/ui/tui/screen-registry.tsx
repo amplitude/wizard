@@ -63,7 +63,10 @@ export function createScreens(
       <SlackScreen store={store} onComplete={() => store.hideSlackOverlay()} />
     ),
     [Overlay.Logout]: (
-      <LogoutScreen onComplete={() => store.hideLogoutOverlay()} />
+      <LogoutScreen
+        onComplete={() => store.hideLogoutOverlay()}
+        installDir={store.session.installDir}
+      />
     ),
     [Overlay.Login]: (
       <LoginScreen store={store} onComplete={() => store.hideLoginOverlay()} />

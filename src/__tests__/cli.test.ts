@@ -71,6 +71,7 @@ vi.mock('../lib/wizard-session', () => ({
     region: null,
     credentials: null,
     frameworkContext: {},
+    apiKeyNotice: null,
     ...args,
   }),
   DiscoveredFeature: { Stripe: 'stripe', LLM: 'llm' },
@@ -91,6 +92,7 @@ vi.mock('../utils/ampli-settings', () => ({
   storeToken: mockStoreToken,
   getStoredUser: mockGetStoredUser,
   getStoredToken: mockGetStoredToken,
+  clearStoredCredentials: vi.fn(),
 }));
 vi.mock('../lib/ampli-config', () => ({
   ampliConfigExists: mockAmpliConfigExists,
@@ -98,6 +100,11 @@ vi.mock('../lib/ampli-config', () => ({
 }));
 vi.mock('../utils/api-key-store', () => ({
   readApiKeyWithSource: vi.fn().mockReturnValue(null),
+  persistApiKey: vi.fn().mockReturnValue('env'),
+  clearApiKey: vi.fn(),
+}));
+vi.mock('../utils/get-api-key', () => ({
+  getAPIKey: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../utils/environment', () => ({
   isNonInteractiveEnvironment: mockIsNonInteractiveEnvironment,

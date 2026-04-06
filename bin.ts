@@ -53,6 +53,7 @@ import {
   ZSH_COMPLETION_SCRIPT,
   BASH_COMPLETION_SCRIPT,
 } from './src/utils/shell-completions';
+import { persistApiKey } from './src/utils/api-key-store';
 
 if (process.env.NODE_ENV === 'test') {
   void (async () => {
@@ -251,12 +252,12 @@ void yargs(hideBin(process.argv))
               const [
                 { getStoredUser, getStoredToken },
                 { readAmpliConfig },
-                { readApiKeyWithSource },
+                { getAPIKey },
                 { getHostFromRegion },
               ] = await Promise.all([
                 import('./src/utils/ampli-settings.js'),
                 import('./src/lib/ampli-config.js'),
-                import('./src/utils/api-key-store.js'),
+                import('./src/utils/get-api-key.js'),
                 import('./src/utils/urls.js'),
               ]);
 
@@ -275,28 +276,44 @@ void yargs(hideBin(process.argv))
                 session.region = zone;
               }
 
-              // Credentials: only skip Auth when we have a saved API key.
-              // Use stored OAuth id_token as the access token when available;
-              // fall back to the API key itself (matches the --api-key flow).
-              const apiKeyResult = readApiKeyWithSource(installDir);
-              if (apiKeyResult && zone) {
+              // Skip Auth when we have a stored OAuth token — use it to fetch
+              // (or look up) the project API key, then pre-populate credentials.
+              if (zone) {
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
-                const accessToken = storedToken?.idToken ?? apiKeyResult.key;
-                session.credentials = {
-                  accessToken,
-                  idToken: storedToken?.idToken,
-                  projectApiKey: apiKeyResult.key,
-                  host: getHostFromRegion(zone),
-                  projectId: 0,
-                };
-                // Pre-populate activationLevel so DataSetup is also skipped,
-                // giving a single wipe from Intro → Run/Setup.
-                // DataSetup would set 'none' anyway (projectId=0 prevents the
-                // real check), so this is equivalent — just earlier.
-                session.activationLevel = 'none';
-                session.projectHasData = false;
+
+                if (storedToken) {
+                  const projectApiKey = await getAPIKey({
+                    installDir,
+                    idToken: storedToken.idToken,
+                    zone,
+                    workspaceId: session.selectedWorkspaceId ?? undefined,
+                  });
+                  if (projectApiKey) {
+                    persistApiKey(projectApiKey, installDir);
+                    session.credentials = {
+                      accessToken: storedToken.idToken,
+                      idToken: storedToken.idToken,
+                      projectApiKey,
+                      host: getHostFromRegion(zone),
+                      projectId: 0,
+                    };
+                    // Pre-populate activationLevel so DataSetup is also skipped,
+                    // giving a single wipe from Intro → Run/Setup.
+                    // DataSetup would set 'none' anyway (projectId=0 prevents the
+                    // real check), so this is equivalent — just earlier.
+                    session.activationLevel = 'none';
+                    session.projectHasData = false;
+                  } else {
+                    // Region is already pre-populated above; prompt for the
+                    // key manually with a hint about org-admin permissions.
+                    session.apiKeyNotice =
+                      "Your API key couldn't be fetched automatically. " +
+                      'Only organization admins can access project API keys — ' +
+                      'if you need one, ask an admin to share it with you.';
+                  }
+                }
               }
 
               // Pre-populate org/workspace from ampli.json so activation checks
@@ -702,16 +719,18 @@ void yargs(hideBin(process.argv))
     'Log out of your Amplitude account',
 
     () => {},
-    (_argv) => {
+    (argv) => {
       void (async () => {
-        const { getStoredUser } = await import('./src/utils/ampli-settings.js');
-        const fs = await import('node:fs');
-        const os = await import('node:os');
-        const path = await import('node:path');
-        const configPath = path.join(os.homedir(), 'ampli.json');
+        const { getStoredUser, clearStoredCredentials } = await import(
+          './src/utils/ampli-settings.js'
+        );
+        const { clearApiKey } = await import('./src/utils/api-key-store.js');
+        const installDir =
+          (argv.installDir as string | undefined) ?? process.cwd();
         const user = getStoredUser();
         try {
-          fs.writeFileSync(configPath, '{}', 'utf-8');
+          clearStoredCredentials();
+          clearApiKey(installDir);
           if (user) {
             console.log(chalk.green(`✔ Logged out ${user.email}`));
           } else {

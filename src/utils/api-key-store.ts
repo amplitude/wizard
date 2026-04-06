@@ -149,6 +149,36 @@ export function persistApiKey(
 }
 
 /**
+ * Remove the stored API key for this project directory from the system
+ * keychain (macOS / Linux). Has no effect if no key is stored.
+ */
+export function clearApiKey(installDir: string): void {
+  const account = projectHandle(installDir);
+
+  if (process.platform === 'darwin') {
+    try {
+      execSync(
+        `security delete-generic-password -a "${account}" -s "${KEYCHAIN_SERVICE}" 2>/dev/null`,
+        { stdio: 'ignore' },
+      );
+    } catch {
+      // Key wasn't in keychain — ignore
+    }
+  }
+
+  if (process.platform === 'linux') {
+    try {
+      execSync(
+        `secret-tool clear service "${KEYCHAIN_SERVICE}" account "${account}" 2>/dev/null`,
+        { stdio: 'ignore' },
+      );
+    } catch {
+      // Key wasn't in keyring — ignore
+    }
+  }
+}
+
+/**
  * Read a previously persisted API key for this project directory.
  * Returns null if not found in any storage.
  */

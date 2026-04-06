@@ -10,9 +10,11 @@ import { useState } from 'react';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { clearStoredCredentials } from '../../../utils/ampli-settings.js';
+import { clearApiKey } from '../../../utils/api-key-store.js';
 
 interface LogoutScreenProps {
   onComplete: () => void;
+  installDir: string;
 }
 
 enum Phase {
@@ -20,11 +22,12 @@ enum Phase {
   Done = 'done',
 }
 
-export const LogoutScreen = ({ onComplete }: LogoutScreenProps) => {
+export const LogoutScreen = ({ onComplete, installDir }: LogoutScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Confirm);
 
   const handleConfirm = () => {
     clearStoredCredentials();
+    clearApiKey(installDir);
     setPhase(Phase.Done);
     setTimeout(onComplete, 1500);
   };
