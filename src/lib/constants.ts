@@ -128,9 +128,7 @@ export const OUTBOUND_URLS = {
   /** New segmentation chart — opened from the Checklist screen. */
   newChart: (zone: AmplitudeZone, orgId?: string | null): string => {
     const base = OUTBOUND_URLS.app[zone];
-    return orgId
-      ? `${base}/${orgId}/chart/new?type=segmentation`
-      : `${base}/chart/new?type=segmentation`;
+    return orgId ? `${base}/${orgId}/chart/new` : `${base}/chart/new`;
   },
 
   /** New dashboard — opened from the Checklist screen. */
