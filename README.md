@@ -30,15 +30,22 @@ See [`docs/flows.md`](./docs/flows.md) for detailed flow diagrams.
 
 ## Supported frameworks
 
-- Next.js
-- Vue
-- React Router (covers modern React/Vite setups)
-- JavaScript (plain web / React fallback)
-- Node.js
-- Django
-- Flask
-- FastAPI
-- Python (generic fallback)
+**Web / JavaScript:**
+Next.js, Vue, React Router, JavaScript (web), JavaScript (Node.js)
+
+**Python:**
+Django, Flask, FastAPI, Python (generic)
+
+**Mobile:**
+Swift (iOS), React Native, Android, Flutter
+
+**Game engines:**
+Unity, Unreal
+
+**Other:**
+Go, Java
+
+A generic fallback handles unrecognized frameworks.
 
 ## Usage
 
@@ -56,18 +63,20 @@ npx @amplitude/wizard --ci --org <org> --project <project> --api-key <key> --ins
 
 Available at any time during the wizard session:
 
-| Command      | Description                              |
-| ------------ | ---------------------------------------- |
-| `/org`       | Switch the active org                    |
-| `/project`   | Switch the active project                |
-| `/login`     | Re-authenticate                          |
-| `/logout`    | Clear credentials                        |
-| `/whoami`    | Show current user, org, and project      |
-| `/overview`  | Open the project overview in the browser |
-| `/chart`     | Set up a new chart                       |
-| `/dashboard` | Create a new dashboard                   |
-| `/taxonomy`  | Interact with the taxonomy agent         |
-| `/help`      | List available slash commands            |
+| Command      | Description                                                       |
+| ------------ | ----------------------------------------------------------------- |
+| `/region`    | Switch the data-center region (US or EU) — re-triggers data setup |
+| `/org`       | Switch the active org                                             |
+| `/project`   | Switch the active project                                         |
+| `/login`     | Re-authenticate                                                   |
+| `/logout`    | Clear credentials                                                 |
+| `/whoami`    | Show current user, org, and project                               |
+| `/overview`  | Open the project overview in the browser                          |
+| `/chart`     | Set up a new chart                                                |
+| `/dashboard` | Create a new dashboard                                            |
+| `/taxonomy`  | Interact with the taxonomy agent                                  |
+| `/slack`     | Connect your Amplitude project to Slack                           |
+| `/help`      | List available slash commands                                     |
 
 ## Development
 
@@ -82,8 +91,9 @@ pnpm try
 The wizard routes Claude API calls through a Langley proxy instead of hitting
 Anthropic directly. For local development you need to run it alongside the wizard.
 
-**Prerequisites:** `aws-vault` with the `us-prod-engineer` profile, and the
-`amplitude/amplitude` repo checked out as a sibling directory (`../amplitude`).
+**Prerequisites:** `aws-sso` with the `us-prod-dev` profile, and the
+`amplitude/javascript` repo checked out as a sibling directory (`../javascript`).
+Override with `JS_REPO=/path/to/javascript`.
 
 ```bash
 # Terminal 1 — start the proxy
@@ -96,7 +106,7 @@ WIZARD_PROXY_DEV_TOKEN=dev-token pnpm try
 Or use `pnpm dev` to start both in one terminal (builds first, then runs
 `build:watch` and the proxy in parallel).
 
-Override the amplitude repo location: `AMPLITUDE_REPO=/path/to/amplitude pnpm proxy`
+Override the javascript repo location: `JS_REPO=/path/to/javascript pnpm proxy`
 
 Validate the proxy is working: `pnpm test:proxy`
 
