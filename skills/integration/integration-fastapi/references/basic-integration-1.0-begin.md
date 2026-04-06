@@ -1,13 +1,13 @@
 ---
-title: PostHog Setup - Begin
+title: Amplitude Setup - Begin
 description: Start the event tracking setup process by analyzing the project and creating an event tracking plan
 ---
 
 We're making an event tracking plan for this project.
 
-Before proceeding, find any existing `posthog.capture()` code. Make note of event name formatting.
+Before proceeding, find any existing `amplitude.track()` code. Make note of event name formatting.
 
-From the project's file list, select between 10 and 15 files that might have interesting business value for event tracking, especially conversion and churn events. Also look for additional files related to login that could be used for identifying users, along with error handling. Read the files. If a file is already well-covered by PostHog events, replace it with another option. Do not spawn subagents.
+From the project's file list, select between 10 and 15 files that might have interesting business value for event tracking, especially conversion and churn events. Also look for additional files related to login that could be used for identifying users. Read the files. If a file is already well-covered by Amplitude events, replace it with another option. Do not spawn subagents.
 
 Look for opportunities to track client-side events.
 
@@ -19,11 +19,11 @@ Look for opportunities to track client-side events.
 
 Do not skip server-side events - they capture actions that cannot be tracked client-side.
 
-Create a new file with a JSON array at the root of the project: .posthog-events.json. It should include one object for each event we want to add: event name, event description, and the file path we want to place the event in. If events already exist, don't duplicate them; supplement them.
+Create a new file with a JSON array at the root of the project: .amplitude-events.json. It should include one object for each event we want to add: event name, event description, and the file path we want to place the event in. If events already exist, don't duplicate them; supplement them.
 
 Track actions only, not pageviews. These can be captured automatically. Exceptions can be made for "viewed"-type events that correspond to the top of a conversion funnel.
 
-As you review files, make an internal note of opportunities to identify users and catch errors. We'll need them for the next step.
+As you review files, make an internal note of opportunities to identify users. We'll need them for the next step.
 
 ## Status
 
@@ -34,7 +34,7 @@ Before beginning a phase of the setup, you will send a status message with the e
 Status to report in this phase:
 
 - Checking project structure
-- Verifying PostHog dependencies
+- Verifying Amplitude dependencies
 - Generating events based on project
 
 

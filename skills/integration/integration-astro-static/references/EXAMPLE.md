@@ -1,29 +1,29 @@
-# PostHog Astro (Static) Example Project
+# Amplitude Astro (Static) Example Project
 
-Repository: https://github.com/amplitude/context-mill
+Repository: https://github.com/amplitude/context-hub
 Path: basics/astro-static
 
 ---
 
 ## README.md
 
-# PostHog Astro Static Example
+# Amplitude Astro Static Example
 
-This is an [Astro](https://astro.build/) static site (SSG) example demonstrating PostHog integration with product analytics, session replay, and error tracking.
+This is an [Astro](https://astro.build/) static site (SSG) example demonstrating Amplitude integration with product analytics, session replay, and error tracking.
 
-It uses the PostHog web snippet directly and shows how to:
+It uses the Amplitude web snippet directly and shows how to:
 
-- Initialize PostHog in a static Astro site using a reusable component
+- Initialize Amplitude in a static Astro site using a reusable component
 - Identify users after login
 - Track custom events from pages
-- Capture errors via `posthog.captureException()`
-- Reset PostHog state on logout
+- Capture errors via `amplitude.captureException()`
+- Reset Amplitude state on logout
 
 ## Features
 
 - **Product analytics**: Track login and burrito consideration events
-- **Session replay**: Enabled via PostHog snippet configuration
-- **Error tracking**: Manual error capture sent to PostHog
+- **Session replay**: Enabled via Amplitude snippet configuration
+- **Error tracking**: Manual error capture sent to Amplitude
 - **Simple auth flow**: Demo login using localStorage
 
 ## Getting started
@@ -41,11 +41,11 @@ pnpm install
 Create a `.env` file in the project root:
 
 ```bash
-PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
-PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+PUBLIC_AMPLITUDE_API_KEY=your_amplitude_project_token
+PUBLIC_AMPLITUDE_API_KEY=https://us.i.amplitude.com
 ```
 
-Get your PostHog project token from your project settings in PostHog.
+Get your Amplitude project token from your project settings in Amplitude.
 
 ### 3. Run the development server
 
@@ -62,10 +62,10 @@ Open `http://localhost:4321` in your browser.
 ```text
 src/
   components/
-    posthog.astro      # PostHog snippet with is:inline directive
-    Header.astro       # Navigation + logout, calls posthog.reset()
+    amplitude.astro      # Amplitude snippet with is:inline directive
+    Header.astro       # Navigation + logout, calls amplitude.reset()
   layouts/
-    PostHogLayout.astro # Root layout that includes PostHog + Header
+    AmplitudeLayout.astro # Root layout that includes Amplitude + Header
   lib/
     auth.ts            # Auth utilities (localStorage-based)
   pages/
@@ -78,29 +78,29 @@ src/
 
 ## Key integration points
 
-### PostHog initialization (`src/components/posthog.astro`)
+### Amplitude initialization (`src/components/amplitude.astro`)
 
-The PostHog snippet is included as an inline script to prevent Astro from processing it:
+The Amplitude snippet is included as an inline script to prevent Astro from processing it:
 
 ```astro
 <script is:inline>
-  !function(t,e){...}(document,window.posthog||[]);
-  posthog.init('<ph_project_token>', {
-    api_host: 'https://us.i.posthog.com',
+  !function(t,e){...}(document,window.amplitude||[]);
+  amplitude.init('<ph_project_token>', {
+    api_host: 'https://us.i.amplitude.com',
     defaults: '2026-01-30'
   })
 </script>
 ```
 
-The `is:inline` directive is required to prevent TypeScript errors about `window.posthog`.
+The `is:inline` directive is required to prevent TypeScript errors about `window.amplitude`.
 
 ### User identification (`src/pages/index.astro`)
 
 After a successful "login", the app identifies the user and captures a login event:
 
 ```javascript
-window.posthog?.identify(username);
-window.posthog?.capture("user_logged_in");
+window.amplitude?.identify(username);
+window.amplitude?.capture("user_logged_in");
 ```
 
 Identification happens **only on login**, all further requests will automatically use the same distinct ID.
@@ -110,7 +110,7 @@ Identification happens **only on login**, all further requests will automaticall
 The burrito page tracks a custom event when a user "considers" the burrito:
 
 ```javascript
-window.posthog?.capture("burrito_considered", {
+window.amplitude?.capture("burrito_considered", {
   total_considerations: newCount,
   username: currentUser,
 });
@@ -124,23 +124,23 @@ The profile page includes a button to trigger a test error:
 
 ```javascript
 try {
-  throw new Error("Test error for PostHog error tracking");
+  throw new Error("Test error for Amplitude error tracking");
 } catch (err) {
-  window.posthog?.captureException(err);
+  window.amplitude?.captureException(err);
 }
 ```
 
 ### Logout and session reset (`src/components/Header.astro`)
 
-On logout, both the local auth state and PostHog state are cleared:
+On logout, both the local auth state and Amplitude state are cleared:
 
 ```javascript
-window.posthog?.capture("user_logged_out");
+window.amplitude?.capture("user_logged_out");
 localStorage.removeItem("currentUser");
-window.posthog?.reset();
+window.amplitude?.reset();
 ```
 
-`posthog.reset()` clears the current distinct ID and session so the next login starts a fresh identity.
+`amplitude.reset()` clears the current distinct ID and session so the next login starts a fresh identity.
 
 ## Scripts
 
@@ -157,8 +157,8 @@ npm run preview
 
 ## Learn more
 
-- [PostHog documentation](https://posthog.com/docs)
-- [PostHog Astro guide](https://posthog.com/docs/libraries/astro)
+- [Amplitude documentation](https://amplitude.com/docs)
+- [Amplitude Astro guide](https://amplitude.com/docs/libraries/astro)
 - [Astro documentation](https://docs.astro.build/)
 
 ---
@@ -166,8 +166,7 @@ npm run preview
 ## .env.example
 
 ```example
-PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token_here
-PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key_here
 
 ```
 
@@ -179,6 +178,23 @@ PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
 import { defineConfig } from "astro/config";
 
 export default defineConfig({});
+
+```
+
+---
+
+## src/components/amplitude.astro
+
+```astro
+---
+// Amplitude analytics snippet for client-side tracking
+// Uses is:inline to prevent Astro from processing the script
+---
+<script is:inline define:vars={{ apiKey: import.meta.env.PUBLIC_AMPLITUDE_API_KEY }}>
+  !function(){"use strict";!function(e,t){var r=e.amplitude||{_q:[],_iq:{}};if(r.invoked)e.console&&console.error&&console.error("Amplitude snippet has been loaded.");else{r.invoked=!0;var n=t.createElement("script");n.type="text/javascript",n.integrity="sha384-x0ik2D45ZDEEEpYpEuDpmj05fY91P7EOZkgdKmVBAZoGtzwnlsHI9AqlBJmg+WT4",n.crossOrigin="anonymous",n.async=!0,n.src="https://cdn.amplitude.com/libs/analytics-browser-2.11.1-min.js.gz",n.onload=function(){e.amplitude.runQueuedFunctions||console.log("[Amplitude] Error: could not load SDK")};var s=t.getElementsByTagName("script")[0];function v(e,t){e.prototype[t]=function(){return this._q.push({name:t,args:Array.prototype.slice.call(arguments,0)}),this}}s.parentNode.insertBefore(n,s);for(var o=function(){return this._q=[],this},a=["add","append","clearAll","prepend","set","setOnce","unset","preInsert","postInsert","remove","getUserProperties"],c=0;c<a.length;c++)v(o,a[c]);r.Identify=o;for(var u=function(){return this._q=[],this},l=["getEventProperties","setProductId","setQuantity","setPrice","setRevenue","setRevenueType","setEventProperties"],p=0;p<l.length;p++)v(u,l[p]);r.Revenue=u;var d=["getDeviceId","setDeviceId","getSessionId","setSessionId","getUserId","setUserId","setOptOut","setTransport","reset","extendSession"],f=["init","add","remove","track","logEvent","identify","groupIdentify","setGroup","revenue","flush"];function m(e){function t(t,r){e[t]=function(){var n={promise:new Promise((r=>{e._q.push({name:t,args:Array.prototype.slice.call(arguments,0),resolve:r})}))};if(r)return n}}for(var r=0;r<d.length;r++)t(d[r],!1);for(var n=0;n<f.length;n++)t(f[n],!0)}m(r),r.getInstance=function(e){return e=(e&&e.length>0&&e||"$default_instance").toLowerCase(),Object.prototype.hasOwnProperty.call(r._iq,e)||(r._iq[e]={_q:[]},m(r._iq[e])),r._iq[e]},e.amplitude=r}}(window,document)}();
+
+  amplitude.init(apiKey || '');
+</script>
 
 ```
 
@@ -231,12 +247,12 @@ export default defineConfig({});
   function handleLogout() {
     const currentUser = localStorage.getItem('currentUser');
     if (currentUser) {
-      window.posthog?.capture('user_logged_out');
+      window.amplitude?.track('user_logged_out');
     }
     localStorage.removeItem('currentUser');
     localStorage.removeItem('burritoConsiderations');
-    // IMPORTANT: Reset the PostHog instance to clear the user session
-    window.posthog?.reset();
+    // IMPORTANT: Reset Amplitude to clear the user/session identity
+    window.amplitude?.reset();
     window.location.href = '/';
   }
 
@@ -307,30 +323,11 @@ export default defineConfig({});
 
 ---
 
-## src/components/posthog.astro
+## src/layouts/AmplitudeLayout.astro
 
 ```astro
 ---
-// PostHog analytics snippet
-// Uses is:inline to prevent Astro from processing the script
----
-<script is:inline define:vars={{ apiKey: import.meta.env.PUBLIC_POSTHOG_PROJECT_TOKEN, apiHost: import.meta.env.PUBLIC_POSTHOG_HOST }}>
-  !function(t,e){var o,n,p,r;e.__SV||(window.posthog=e,e._i=[],e.init=function(i,s,a){function g(t,e){var o=e.split(".");2==o.length&&(t=t[o[0]],e=o[1]),t[e]=function(){t.push([e].concat(Array.prototype.slice.call(arguments,0)))}}(p=t.createElement("script")).type="text/javascript",p.crossOrigin="anonymous",p.async=!0,p.src=s.api_host+"/static/array.js",(r=t.getElementsByTagName("script")[0]).parentNode.insertBefore(p,r);var u=e;for(void 0!==a?u=e[a]=[]:a="posthog",u.people=u.people||[],u.toString=function(t){var e="posthog";return"posthog"!==a&&(e+="."+a),t||(e+=" (stub)"),e},u.people.toString=function(){return u.toString(1)+".people (stub)"},o="capture identify alias people.set people.set_once set_config register register_once unregister opt_out_capturing has_opted_out_capturing opt_in_capturing reset isFeatureEnabled onFeatureFlags getFeatureFlag getFeatureFlagPayload reloadFeatureFlags group updateEarlyAccessFeatureEnrollment getEarlyAccessFeatures getActiveMatchingSurveys getSurveys getNextSurveyStep onSessionId".split(" "),n=0;n<o.length;n++)g(u,o[n]);e._i.push([i,s,a])},e.__SV=1)}(document,window.posthog||[]);
-  posthog.init(apiKey || '', {
-    api_host: apiHost || 'https://us.i.posthog.com',
-    defaults: '2026-01-30'
-  })
-</script>
-
-```
-
----
-
-## src/layouts/PostHogLayout.astro
-
-```astro
----
-import PostHog from '../components/posthog.astro';
+import Amplitude from '../components/amplitude.astro';
 import Header from '../components/Header.astro';
 import '../styles/global.css';
 
@@ -345,10 +342,10 @@ const { title } = Astro.props;
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Astro PostHog Integration Example" />
+    <meta name="description" content="Astro Amplitude Static Integration Example" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title}</title>
-    <PostHog />
+    <Amplitude />
   </head>
   <body>
     <Header />
@@ -424,9 +421,9 @@ export function incrementBurritoConsiderations(): number {
 
 ```astro
 ---
-import PostHogLayout from '../layouts/PostHogLayout.astro';
+import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
 ---
-<PostHogLayout title="Burrito Consideration - Astro PostHog Example">
+<AmplitudeLayout title="Burrito Consideration - Astro Amplitude Example">
   <div class="container">
     <h1>Burrito consideration zone</h1>
     <p>Take a moment to truly consider the potential of burritos.</p>
@@ -446,7 +443,7 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
       <p>Total considerations: <span id="total-considerations">0</span></p>
     </div>
   </div>
-</PostHogLayout>
+</AmplitudeLayout>
 
 <script is:inline>
   function checkAuth() {
@@ -485,8 +482,8 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
       successMessage.style.display = 'none';
     }, 2000);
 
-    // Capture burrito consideration event in PostHog
-    window.posthog?.capture('burrito_considered', {
+    // Capture burrito consideration event in Amplitude
+    window.amplitude?.track('burrito_considered', {
       total_considerations: newCount,
       username: currentUser
     });
@@ -508,9 +505,9 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
 
 ```astro
 ---
-import PostHogLayout from '../layouts/PostHogLayout.astro';
+import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
 ---
-<PostHogLayout title="Home - Astro PostHog Example">
+<AmplitudeLayout title="Home - Astro Amplitude Example">
   <div class="container">
     <div id="logged-in-view" style="display: none;">
       <h1>Welcome back, <span id="welcome-username"></span>!</h1>
@@ -556,7 +553,7 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
       </p>
     </div>
   </div>
-</PostHogLayout>
+</AmplitudeLayout>
 
 <script is:inline>
   function updateView() {
@@ -594,9 +591,9 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
       localStorage.setItem('burritoConsiderations', '0');
     }
 
-    // Identify the user in PostHog (once on login is enough)
-    window.posthog?.identify(username);
-    window.posthog?.capture('user_logged_in');
+    // Identify the user in Amplitude (once on login is enough)
+    window.amplitude?.setUserId(username);
+    window.amplitude?.track('user_logged_in');
 
     // Clear form
     document.getElementById('username').value = '';
@@ -627,9 +624,9 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
 
 ```astro
 ---
-import PostHogLayout from '../layouts/PostHogLayout.astro';
+import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
 ---
-<PostHogLayout title="Profile - Astro PostHog Example">
+<AmplitudeLayout title="Profile - Astro Amplitude Example">
   <div class="container">
     <h1>User Profile</h1>
 
@@ -643,19 +640,8 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
       <h3>Your Burrito Journey</h3>
       <p id="journey-message"></p>
     </div>
-
-    <div style="margin-top: 2rem;">
-      <h3>Error Tracking Demo</h3>
-      <p>Click the button below to trigger a test error and send it to PostHog:</p>
-      <button id="error-btn" class="btn-error">
-        Trigger Test Error
-      </button>
-      <p id="error-feedback" class="success" style="display: none;">
-        Error captured and sent to PostHog!
-      </p>
-    </div>
   </div>
-</PostHogLayout>
+</AmplitudeLayout>
 
 <script is:inline>
   function checkAuth() {
@@ -689,28 +675,10 @@ import PostHogLayout from '../layouts/PostHogLayout.astro';
     }
   }
 
-  function triggerTestError() {
-    try {
-      throw new Error('Test error for PostHog error tracking');
-    } catch (err) {
-      // Capture the error in PostHog
-      window.posthog?.captureException(err);
-      console.error('Captured error:', err);
-
-      // Show feedback to user
-      const feedback = document.getElementById('error-feedback');
-      feedback.style.display = 'block';
-      setTimeout(() => {
-        feedback.style.display = 'none';
-      }, 3000);
-    }
-  }
-
   document.addEventListener('DOMContentLoaded', () => {
     if (!checkAuth()) return;
 
     updateProfile();
-    document.getElementById('error-btn')?.addEventListener('click', triggerTestError);
   });
 </script>
 

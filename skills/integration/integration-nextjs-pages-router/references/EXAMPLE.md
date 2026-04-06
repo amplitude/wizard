@@ -1,24 +1,21 @@
-# PostHog Next.js Pages Router Example Project
+# Amplitude Next.js Pages Router Example Project
 
-Repository: https://github.com/amplitude/context-mill
+Repository: https://github.com/amplitude/context-hub
 Path: basics/next-pages-router
 
 ---
 
 ## README.md
 
-# PostHog Next.js pages router example
+# Amplitude Next.js Pages Router Example
 
-This is a [Next.js](https://nextjs.org) Pages Router example demonstrating PostHog integration with product analytics, session replay, feature flags, and error tracking.
+This is a [Next.js](https://nextjs.org) Pages Router example demonstrating Amplitude integration with product analytics and event tracking.
 
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
-- **Session Replay**: Record and replay user sessions
-- **Error Tracking**: Capture and track errors
-- **User Authentication**: Demo login system with PostHog user identification
+- **User Authentication**: Demo login system with Amplitude user identification
 - **Server-side & Client-side Tracking**: Examples of both tracking methods
-- **Reverse Proxy**: PostHog ingestion through Next.js rewrites
 
 ## Getting Started
 
@@ -35,11 +32,10 @@ pnpm install
 Create a `.env.local` file in the root directory:
 
 ```bash
-NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN=your_posthog_project_token
-NEXT_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+NEXT_PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
 ```
 
-Get your PostHog project token from your [PostHog project settings](https://app.posthog.com/project/settings).
+Get your Amplitude API key from your [Amplitude project settings](https://app.amplitude.com).
 
 ### 3. Run the Development Server
 
@@ -56,24 +52,24 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 ```
 src/
 ├── components/
-│   └── Header.tsx           # Navigation header with auth state
+│   └── Header.tsx              # Navigation header with auth state
 ├── contexts/
-│   └── AuthContext.tsx      # Authentication context with PostHog integration
+│   └── AuthContext.tsx         # Authentication context with Amplitude integration
 ├── lib/
-│   └── posthog-server.ts    # Server-side PostHog client
+│   └── amplitude-server.ts     # Server-side Amplitude client
 ├── pages/
-│   ├── _app.tsx             # App wrapper with Auth provider
-│   ├── _document.tsx        # Document wrapper
-│   ├── index.tsx            # Home/Login page
-│   ├── burrito.tsx          # Demo feature page with event tracking
-│   ├── profile.tsx          # User profile with error tracking demo
+│   ├── _app.tsx                # App wrapper with Auth provider
+│   ├── _document.tsx           # Document wrapper
+│   ├── index.tsx               # Home/Login page
+│   ├── burrito.tsx             # Demo feature page with event tracking
+│   ├── profile.tsx             # User profile page
 │   └── api/
 │       └── auth/
-│           └── login.ts     # Login API with server-side tracking
+│           └── login.ts        # Login API with server-side tracking
 └── styles/
-    └── globals.css          # Global styles
+    └── globals.css             # Global styles
 
-instrumentation-client.ts    # Client-side PostHog initialization
+instrumentation-client.ts       # Client-side Amplitude initialization
 ```
 
 ## Key Integration Points
@@ -81,49 +77,34 @@ instrumentation-client.ts    # Client-side PostHog initialization
 ### Client-side initialization (instrumentation-client.ts)
 
 ```typescript
-import posthog from "posthog-js"
+import * as amplitude from "@amplitude/analytics-browser";
 
-posthog.init(process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN!, {
-  api_host: "/ingest",
-  ui_host: "https://us.posthog.com",
-  defaults: '2026-01-30',
-  capture_exceptions: true,
-  debug: process.env.NODE_ENV === "development",
-});
+amplitude.init(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY!);
 ```
 
 ### User identification (AuthContext.tsx)
 
 ```typescript
-posthog.identify(username, {
-  username: username,
-});
+amplitude.setUserId(username);
+const identifyObj = new Identify();
+identifyObj.set('username', username);
+amplitude.identify(identifyObj);
 ```
 
 ### Event tracking (burrito.tsx)
 
 ```typescript
-posthog.capture('burrito_considered', {
+amplitude.track('burrito_considered', {
   total_considerations: count,
   username: username,
 });
 ```
 
-### Error tracking (profile.tsx)
-
-```typescript
-posthog.captureException(error);
-```
-
 ### Server-side tracking (api/auth/login.ts)
 
 ```typescript
-const posthog = getPostHogClient();
-posthog.capture({
-  distinctId: username,
-  event: 'server_login',
-  properties: { ... }
-});
+const amplitude = getAmplitudeClient();
+amplitude.track('server_login', { username }, { user_id: username });
 ```
 
 ## Pages router differences from app router
@@ -139,9 +120,8 @@ This example uses Next.js Pages Router instead of App Router. Key differences:
 
 ## Learn More
 
-- [PostHog Documentation](https://posthog.com/docs)
+- [Amplitude Documentation](https://amplitude.com/docs)
 - [Next.js Pages Router Documentation](https://nextjs.org/docs/pages)
-- [PostHog Next.js Integration Guide](https://posthog.com/docs/libraries/next-js)
 
 ## Deploy on Vercel
 
@@ -154,20 +134,13 @@ Check out the [Next.js deployment documentation](https://nextjs.org/docs/pages/b
 ## instrumentation-client.ts
 
 ```ts
-import posthog from "posthog-js"
+import * as amplitude from "@amplitude/analytics-browser";
 
-posthog.init(process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN!, {
-  api_host: "/ingest",
-  ui_host: "https://us.posthog.com",
-  // Include the defaults option as required by PostHog
-  defaults: '2026-01-30',
-  // Enables capturing unhandled exceptions via Error Tracking
-  capture_exceptions: true,
+amplitude.init(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY!, {
   // Turn on debug in development mode
-  debug: process.env.NODE_ENV === "development",
+  logLevel: process.env.NODE_ENV === "development" ? amplitude.Types.LogLevel.Debug : amplitude.Types.LogLevel.None,
 });
 
-//IMPORTANT: Never combine this approach with other client-side PostHog initialization approaches, especially components like a PostHogProvider. instrumentation-client.ts is the correct solution for initializating client-side PostHog in Next.js 15.3+ apps.
 ```
 
 ---
@@ -180,20 +153,6 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /* config options here */
   reactStrictMode: true,
-  async rewrites() {
-    return [
-      {
-        source: "/ingest/static/:path*",
-        destination: "https://us-assets.i.posthog.com/static/:path*",
-      },
-      {
-        source: "/ingest/:path*",
-        destination: "https://us.i.posthog.com/:path*",
-      },
-    ];
-  },
-  // This is required to support PostHog trailing slash API requests
-  skipTrailingSlashRedirect: true,
 };
 
 export default nextConfig;
@@ -248,7 +207,8 @@ export default function Header() {
 
 ```tsx
 import { createContext, useContext, useState, ReactNode } from 'react';
-import posthog from 'posthog-js';
+import * as amplitude from '@amplitude/analytics-browser';
+import { Identify } from '@amplitude/analytics-browser';
 
 interface User {
   username: string;
@@ -302,13 +262,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(localUser);
         localStorage.setItem('currentUser', username);
 
-        // Identify user in PostHog using username as distinct ID
-        posthog.identify(username, {
-          username: username,
-        });
+        // Identify user in Amplitude using username as user ID
+        amplitude.setUserId(username);
+        const identifyObj = new Identify();
+        identifyObj.set('username', username);
+        amplitude.identify(identifyObj);
 
         // Capture login event
-        posthog.capture('user_logged_in', {
+        amplitude.track('user_logged_in', {
           username: username,
         });
 
@@ -323,8 +284,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     // Capture logout event before resetting
-    posthog.capture('user_logged_out');
-    posthog.reset();
+    amplitude.track('user_logged_out');
+    amplitude.reset();
 
     setUser(null);
     localStorage.removeItem('currentUser');
@@ -357,30 +318,27 @@ export function useAuth() {
 
 ---
 
-## src/lib/posthog-server.ts
+## src/lib/amplitude-server.ts
 
 ```ts
-import { PostHog } from 'posthog-node';
+import { NodeClient, createInstance } from '@amplitude/analytics-node';
 
-let posthogClient: PostHog | null = null;
+let amplitudeClient: NodeClient | null = null;
 
-export function getPostHogClient() {
-  if (!posthogClient) {
-    posthogClient = new PostHog(
-      process.env.NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN!,
-      {
-        host: process.env.NEXT_PUBLIC_POSTHOG_HOST,
-        flushAt: 1,
-        flushInterval: 0
-      }
-    );
+export function getAmplitudeClient(): NodeClient | null {
+  const apiKey = process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY;
+  if (!apiKey) return null;
+
+  if (!amplitudeClient) {
+    amplitudeClient = createInstance();
+    amplitudeClient.init(apiKey);
   }
-  return posthogClient;
+  return amplitudeClient;
 }
 
-export async function shutdownPostHog() {
-  if (posthogClient) {
-    await posthogClient.shutdown();
+export async function flushAmplitude() {
+  if (amplitudeClient) {
+    await amplitudeClient.flush();
   }
 }
 
@@ -432,7 +390,7 @@ export default function Document() {
 
 ```ts
 import type { NextApiRequest, NextApiResponse } from 'next';
-import { getPostHogClient } from '@/lib/posthog-server';
+import { getAmplitudeClient } from '@/lib/amplitude-server';
 
 const users = new Map<string, { username: string; burritoConsiderations: number }>();
 
@@ -458,26 +416,15 @@ export default async function handler(
     users.set(username, user);
   }
 
-  // Capture server-side login event
-  const posthog = getPostHogClient();
-  posthog.capture({
-    distinctId: username,
-    event: 'server_login',
-    properties: {
+  // Capture server-side login event with Amplitude
+  const amplitude = getAmplitudeClient();
+  if (amplitude) {
+    amplitude.track('server_login', {
       username: username,
       isNewUser: isNewUser,
-      source: 'api'
-    }
-  });
-
-  // Identify user on server side
-  posthog.identify({
-    distinctId: username,
-    properties: {
-      username: username,
-      createdAt: isNewUser ? new Date().toISOString() : undefined
-    }
-  });
+      source: 'api',
+    }, { user_id: username });
+  }
 
   return res.status(200).json({ success: true, user });
 }
@@ -513,7 +460,7 @@ export default function handler(
 import { useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import posthog from 'posthog-js';
+import * as amplitude from '@amplitude/analytics-browser';
 import { useAuth } from '@/contexts/AuthContext';
 import Header from '@/components/Header';
 
@@ -533,8 +480,8 @@ export default function BurritoPage() {
     setHasConsidered(true);
     setTimeout(() => setHasConsidered(false), 2000);
 
-    // Capture burrito consideration event
-    posthog.capture('burrito_considered', {
+    // Track burrito consideration event with Amplitude
+    amplitude.track('burrito_considered', {
       total_considerations: user.burritoConsiderations + 1,
       username: user.username,
     });
@@ -686,7 +633,6 @@ export default function Home() {
 ```tsx
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import posthog from 'posthog-js';
 import { useAuth } from '@/contexts/AuthContext';
 import Header from '@/components/Header';
 
@@ -699,16 +645,6 @@ export default function ProfilePage() {
     router.push('/');
     return null;
   }
-
-  const triggerTestError = () => {
-    try {
-      throw new Error('Test error for PostHog error tracking');
-    } catch (err) {
-      posthog.captureException(err);
-      console.error('Captured error:', err);
-      alert('Error captured and sent to PostHog!');
-    }
-  };
 
   return (
     <>
@@ -730,12 +666,6 @@ export default function ProfilePage() {
           </div>
 
           <div style={{ marginTop: '2rem' }}>
-            <button onClick={triggerTestError} className="btn-primary" style={{ backgroundColor: '#dc3545' }}>
-              Trigger Test Error (for PostHog)
-            </button>
-          </div>
-
-          <div style={{ marginTop: '2rem' }}>
             <h3>Your Burrito Journey</h3>
             {user.burritoConsiderations === 0 ? (
               <p>You haven&apos;t considered any burritos yet. Visit the Burrito Consideration page to start!</p>
@@ -746,7 +676,7 @@ export default function ProfilePage() {
             ) : user.burritoConsiderations < 10 ? (
               <p>You&apos;re becoming a burrito consideration expert!</p>
             ) : (
-              <p>You are a true burrito consideration master! 🌯</p>
+              <p>You are a true burrito consideration master!</p>
             )}
           </div>
         </div>

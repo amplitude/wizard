@@ -1,57 +1,52 @@
 ---
 name: integration-laravel
-description: PostHog integration for Laravel applications
+description: Amplitude integration for Laravel applications
 metadata:
-  author: PostHog
-  version: dev
+  author: Amplitude
+  version: 1.2.0
 ---
 
-# PostHog integration for Laravel
+# Amplitude integration for Laravel
 
-This skill helps you add PostHog analytics to Laravel applications.
+This skill helps you add Amplitude analytics to Laravel applications.
 
 ## Workflow
 
 Follow these steps in order to complete the integration:
 
-1. `basic-integration-1.0-begin.md` - PostHog Setup - Begin ← **Start here**
-2. `basic-integration-1.1-edit.md` - PostHog Setup - Edit
-3. `basic-integration-1.2-revise.md` - PostHog Setup - Revise
-4. `basic-integration-1.3-conclude.md` - PostHog Setup - Conclusion
+1. `basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
+2. `basic-integration-1.1-edit.md` - Amplitude Setup - Edit
+3. `basic-integration-1.2-revise.md` - Amplitude Setup - Revise
+4. `basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
 
 ## Reference files
 
 - `references/EXAMPLE.md` - Laravel example project code
-- `references/laravel.md` - Laravel - docs
-- `references/identify-users.md` - Identify users - docs
-- `references/basic-integration-1.0-begin.md` - PostHog setup - begin
-- `references/basic-integration-1.1-edit.md` - PostHog setup - edit
-- `references/basic-integration-1.2-revise.md` - PostHog setup - revise
-- `references/basic-integration-1.3-conclude.md` - PostHog setup - conclusion
+- `references/analytics.md` - Amplitude documentation for Analytics
+- `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
+- `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
+- `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
+- `references/basic-integration-1.2-revise.md` - Amplitude setup - revise
+- `references/basic-integration-1.3-conclude.md` - Amplitude setup - conclusion
 
 The example project shows the target implementation pattern. Consult the documentation for API details.
 
 ## Key principles
 
-- **Environment variables**: Always use environment variables for PostHog keys. Never hardcode them.
-- **Minimal changes**: Add PostHog code alongside existing integrations. Don't replace or restructure existing code.
+- **Environment variables**: Always use environment variables for Amplitude keys. Never hardcode them.
+- **Minimal changes**: Add Amplitude code alongside existing integrations. Don't replace or restructure existing code.
 - **Match the example**: Your implementation should follow the example project's patterns as closely as possible.
 
 ## Framework guidelines
 
-- Create a dedicated PostHogService class in app/Services/ - do NOT scatter PostHog::capture calls throughout controllers
-- Register PostHog configuration in config/posthog.php using env() for all settings (api_key, host, disabled)
-- Do NOT use Laravel's event system or observers for analytics - call capture explicitly where actions occur
+- Create a dedicated AmplitudeService class in app/Services/ — do NOT scatter amplitude track calls throughout controllers
+- Register Amplitude configuration in config/amplitude.php using env() for all settings (api_key)
+- Do NOT use Laravel's event system or observers for analytics — call track explicitly where actions occur
 - Remember that source code is available in the vendor directory after composer install
-- posthog/posthog-php is the PHP SDK package name
+- amplitude/amplitude-php is the PHP SDK package name (community SDK — check composer.json for availability)
 - Check composer.json for existing dependencies and autoload configuration before adding new files
-- The PHP SDK uses static methods (PostHog::capture, PostHog::identify) - initialize once with PostHog::init()
-- PHP SDK methods take associative arrays with 'distinctId', 'event', 'properties' keys - not positional arguments
+- Initialize the Amplitude client once with your API key and reuse it throughout the application
 
 ## Identifying users
 
-Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. If both frontend and backend code exist, pass the client-side session and distinct ID using `X-POSTHOG-DISTINCT-ID` and `X-POSTHOG-SESSION-ID` headers to maintain correlation.
-
-## Error tracking
-
-Add PostHog error tracking to relevant files, particularly around critical user flows and API boundaries.
+Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.
