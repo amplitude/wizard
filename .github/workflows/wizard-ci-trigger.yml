@@ -27,10 +27,13 @@ jobs:
     steps:
       - name: Fetch available apps from wizard-workbench
         id: fetch-apps
+        env:
+          GH_TOKEN: ${{ secrets.WIZARD_WORKBENCH_TOKEN }}
         run: |
           # Fetch app categories from wizard-workbench repo
           CATEGORIES=$(curl -s "https://api.github.com/repos/amplitude/wizard-workbench/contents/apps" \
             -H "Accept: application/vnd.github.v3+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
             | jq -r '[.[] | select(.type == "dir") | .name] | sort | .[]')
 
           # Build lists by category
@@ -44,6 +47,7 @@ jobs:
             # Fetch apps in this category
             APPS=$(curl -s "https://api.github.com/repos/amplitude/wizard-workbench/contents/apps/$category" \
               -H "Accept: application/vnd.github.v3+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
               | jq -r '[.[] | select(.type == "dir") | .name] | sort | .[]' 2>/dev/null || echo "")
 
             if [ -n "$APPS" ]; then
@@ -145,19 +149,10 @@ jobs:
       startsWith(github.event.comment.body, '/wizard-ci')
     runs-on: ubuntu-latest
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547 # v1
-        with:
-          app-id: ${{ secrets.GH_APP_AMPLITUDE_WIZARD_CI_BOT_APP_ID }}
-          private-key: ${{ secrets.GH_APP_AMPLITUDE_WIZARD_CI_BOT_PRIVATE_KEY }}
-          owner: Amplitude
-          repositories: wizard-workbench,wizard
-
       - name: Parse command and trigger
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
-          github-token: ${{ steps.app-token.outputs.token }}
+          github-token: ${{ secrets.WIZARD_WORKBENCH_TOKEN }}
           script: |
             // Get PR details first to check state
             const pr = await github.rest.pulls.get({
