@@ -28,12 +28,7 @@ import {
   buildSessionContext,
   type ConversationTurn,
 } from '../../../lib/console-query.js';
-import {
-  COMMANDS,
-  getWhoamiText,
-  getHelpText,
-  TEST_PROMPT,
-} from '../console-commands.js';
+import { COMMANDS, getWhoamiText, TEST_PROMPT } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 
 function executeCommand(raw: string, store: WizardStore): string | void {
@@ -66,11 +61,11 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;
-    case '/help':
-      store.setCommandFeedback(getHelpText());
-      break;
     default:
-      if (cmd) store.setCommandFeedback(`Unknown command: ${cmd}. Type /help.`);
+      if (cmd)
+        store.setCommandFeedback(
+          `Unknown command: ${cmd}. Type / to see available commands.`,
+        );
   }
 }
 

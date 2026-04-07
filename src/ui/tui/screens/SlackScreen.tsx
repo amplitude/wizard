@@ -35,22 +35,6 @@ enum Phase {
   Done = 'done',
 }
 
-/**
- * Build the Amplitude settings URL for Slack connection.
- * Uses the org name from the API; falls back to base URL.
- */
-export function slackSettingsUrl(
-  baseUrl: string,
-  orgName: string | null,
-): string {
-  if (orgName) {
-    return `${baseUrl}/analytics/${encodeURIComponent(
-      orgName,
-    )}/settings/profile`;
-  }
-  return `${baseUrl}/settings/profile`;
-}
-
 const markDone = (
   store: WizardStore,
   outcome: SlackOutcome,
@@ -128,8 +112,9 @@ export const SlackScreen = ({
       });
   }, []);
 
-  const settingsUrl = slackSettingsUrl(
-    OUTBOUND_URLS.overview[(region ?? 'us') as AmplitudeZone],
+  const settingsUrl = OUTBOUND_URLS.slackSettings(
+    (region ?? 'us') as AmplitudeZone,
+    store.session.selectedOrgId,
     resolvedOrgName,
   );
 

@@ -255,12 +255,14 @@ void yargs(hideBin(process.argv))
                 { getAPIKey },
                 { getHostFromRegion },
                 { logToFile },
+                { fetchAmplitudeUser },
               ] = await Promise.all([
                 import('./src/utils/ampli-settings.js'),
                 import('./src/lib/ampli-config.js'),
                 import('./src/utils/get-api-key.js'),
                 import('./src/utils/urls.js'),
                 import('./src/utils/debug.js'),
+                import('./src/lib/api.js'),
               ]);
 
               // Zone: prefer a real (non-pending) stored user, fall back to
@@ -333,6 +335,41 @@ void yargs(hideBin(process.argv))
               }
               if (projectConfig.ok && projectConfig.config.WorkspaceId) {
                 session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
+              }
+
+              // Resolve org/workspace display names so /whoami shows them.
+              // Uses the stored token to fetch user info — fire-and-forget so it
+              // doesn't block startup.
+              if (zone && session.selectedOrgId) {
+                const storedToken = realUser
+                  ? getStoredToken(realUser.id, realUser.zone)
+                  : getStoredToken(undefined, zone);
+                if (storedToken) {
+                  fetchAmplitudeUser(storedToken.idToken, zone)
+                    .then((userInfo) => {
+                      const org = userInfo.orgs.find(
+                        (o) => o.id === session.selectedOrgId,
+                      );
+                      if (org) {
+                        session.selectedOrgName = org.name;
+                        const ws = session.selectedWorkspaceId
+                          ? org.workspaces.find(
+                              (w) => w.id === session.selectedWorkspaceId,
+                            )
+                          : undefined;
+                        if (ws) {
+                          session.selectedWorkspaceName = ws.name;
+                        }
+                        // Update the store if it's already been assigned
+                        if (tui.store.session === session) {
+                          tui.store.emitChange();
+                        }
+                      }
+                    })
+                    .catch(() => {
+                      // Non-fatal — /whoami will just show (none)
+                    });
+                }
               }
             }
 

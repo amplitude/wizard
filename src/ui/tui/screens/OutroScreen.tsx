@@ -191,7 +191,6 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });
-                process.exit(0);
               } else {
                 process.exit(0);
               }
