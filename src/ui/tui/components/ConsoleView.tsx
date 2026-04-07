@@ -32,9 +32,11 @@ import {
   COMMANDS,
   getWhoamiText,
   getHelpText,
+  parseFeedbackSlashInput,
   TEST_PROMPT,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
+import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -55,6 +57,25 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/slack':
       store.showSlackOverlay();
       break;
+    case '/feedback': {
+      const message = parseFeedbackSlashInput(raw);
+      if (!message) {
+        store.setCommandFeedback('Usage: /feedback <your message>');
+        break;
+      }
+      void trackWizardFeedback(message)
+        .then(() =>
+          store.setCommandFeedback('Thanks — your feedback was sent.'),
+        )
+        .catch((err: unknown) => {
+          store.setCommandFeedback(
+            `Could not send feedback: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
+      break;
+    }
     case '/test':
       return TEST_PROMPT;
     case '/mcp':
@@ -156,7 +177,7 @@ export const ConsoleView = ({
 
   const handleSubmit = (value: string) => {
     const isSlashCommand = value.startsWith('/');
-    analytics.wizardCapture('agent message sent', {
+    analytics.wizardCapture('Agent Message Sent', {
       message_length: value.length,
       is_slash_command: isSlashCommand,
     });

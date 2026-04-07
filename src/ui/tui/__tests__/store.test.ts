@@ -22,6 +22,7 @@ vi.mock('../../../utils/analytics.js', () => ({
     shutdown: vi.fn().mockResolvedValue(undefined),
   },
   sessionProperties: vi.fn(() => ({})),
+  sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
 function createStore(flow?: Flow): WizardStore {
@@ -263,7 +264,7 @@ describe('WizardStore', () => {
       const store = createStore();
       store.completeSetup();
       expect(wizardCaptureMock).toHaveBeenCalledWith(
-        'setup confirmed',
+        'Setup Confirmed',
         expect.any(Object),
       );
     });
@@ -276,15 +277,16 @@ describe('WizardStore', () => {
         host: 'h',
         projectId: 42,
       });
-      expect(wizardCaptureMock).toHaveBeenCalledWith('auth complete', {
+      expect(wizardCaptureMock).toHaveBeenCalledWith('Auth Complete', {
         project_id: 42,
+        region: null,
       });
     });
 
     it('enableFeature fires feature enabled event', () => {
       const store = createStore();
       store.enableFeature(AdditionalFeature.LLM);
-      expect(wizardCaptureMock).toHaveBeenCalledWith('feature enabled', {
+      expect(wizardCaptureMock).toHaveBeenCalledWith('Feature Enabled', {
         feature: AdditionalFeature.LLM,
       });
     });
@@ -293,7 +295,7 @@ describe('WizardStore', () => {
       const store = createStore();
       store.setMcpComplete(McpOutcome.Installed, ['Cursor', 'VS Code']);
       expect(wizardCaptureMock).toHaveBeenCalledWith(
-        'mcp complete',
+        'MCP Complete',
         expect.objectContaining({
           mcp_outcome: McpOutcome.Installed,
           mcp_installed_clients: ['Cursor', 'VS Code'],

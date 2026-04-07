@@ -80,7 +80,7 @@ export const ChecklistScreen = ({ store }: ChecklistScreenProps) => {
 
   function openInBrowser(url: string, item: 'chart' | 'dashboard') {
     setOpening(item);
-    analytics.wizardCapture('checklist item opened', { item });
+    analytics.wizardCapture('Checklist Step Opened', { item });
     opn(url, { wait: false })
       .catch(() => {
         /* fire-and-forget */

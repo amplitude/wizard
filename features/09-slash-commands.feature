@@ -54,3 +54,8 @@ Feature: Slash commands
     Given the wizard is active
     When I enter the slash command "/help"
     Then I should see a list of all available slash commands with descriptions
+
+  Scenario: /feedback records the user message
+    Given the wizard is active
+    When I enter the slash command "/feedback love this tool"
+    Then the recorded slash feedback message should be "love this tool"

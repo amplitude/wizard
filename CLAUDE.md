@@ -75,8 +75,9 @@ Skills are bundled markdown-based instructions that the agent can follow during 
 
 - `skills/integration/` — Per-framework SDK integration guides (step-by-step workflows with reference docs)
 - `skills/instrumentation/` — Analytics instrumentation skills (event discovery, pattern matching, diff intake)
+- `skills/taxonomy/` — Quickstart taxonomy agent (`amplitude-quickstart-taxonomy-agent`) for event naming, starter-kit scoping, and UrlEventSuggesterResponse-shaped JSON plans
 
-Skills are refreshed via `pnpm skills:refresh`.
+Skills under `skills/instrumentation/` are refreshed via `pnpm skills:refresh`. Taxonomy skills ship only in-repo.
 
 ### Steps (`src/steps/`)
 
@@ -92,7 +93,7 @@ OAuth flow, analytics tracking, env var handling, API key storage, debug logging
 - **Session is the single source of truth.** All state lives in `WizardSession`. Screens and steps read from and write to the session; they do not communicate directly.
 - **Flows are declarative.** Each flow is a pipeline of `{ screen, show, isComplete }` entries. Navigation advances automatically when `isComplete` returns true.
 - **Overlays interrupt without breaking flow.** `OutageScreen` and `SettingsOverrideScreen` are pushed onto an overlay stack and popped when resolved, resuming the flow where it left off. Overlay enum: `Outage`, `SettingsOverride`, `Snake`, `Mcp`, `Slack`, `Logout`, `Login`.
-- **Slash commands are always available.** `/org`, `/project`, `/region`, `/login`, `/logout`, `/whoami`, `/chart`, `/dashboard`, `/taxonomy`, `/slack`, `/help` must be interceptable at any point in the session.
+- **Slash commands are always available.** `/org`, `/project`, `/region`, `/login`, `/logout`, `/whoami`, `/chart`, `/dashboard`, `/taxonomy`, `/slack`, `/feedback`, `/help` must be interceptable at any point in the session.
 - **Framework configs are data-driven.** No switch statements or per-framework routing. Everything goes through `FrameworkConfig` + `FRAMEWORK_REGISTRY`. The universal runner handles all shared behavior.
 - **Agent commandments** (`src/lib/commandments.ts`) are always injected as system prompt. Key rules: never hardcode secrets, always use `wizard-tools` MCP for env vars and package manager detection, must call `confirm_event_plan` before writing `track()` calls.
 - **Detection order matters.** The `Integration` enum order in `constants.ts` controls both auto-detection priority (first match wins) and display order in the CLI select menu.

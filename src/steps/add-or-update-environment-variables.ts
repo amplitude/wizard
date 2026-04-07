@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { Integration } from '../lib/constants';
 import { traceStep } from '../telemetry';
-import { analytics } from '../utils/analytics';
+import { analytics, captureWizardError } from '../utils/analytics';
 import { getUI } from '../ui';
 import { getDotGitignore } from '../utils/file-utils';
 import * as fs from 'fs';
@@ -87,10 +87,12 @@ export async function addOrUpdateEnvironmentVariablesStep({
           )}. Please update them manually.`,
         );
 
-        analytics.wizardCapture('env vars error', {
-          integration,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
+        captureWizardError(
+          'Environment Variables',
+          error instanceof Error ? error.message : 'Unknown error',
+          'add-or-update-env:update-existing',
+          { integration },
+        );
 
         return {
           relativeEnvFilePath,
@@ -118,10 +120,12 @@ export async function addOrUpdateEnvironmentVariablesStep({
           )} with environment variables. Please add them manually.`,
         );
 
-        analytics.wizardCapture('env vars error', {
-          integration,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
+        captureWizardError(
+          'Environment Variables',
+          error instanceof Error ? error.message : 'Unknown error',
+          'add-or-update-env:create-new',
+          { integration },
+        );
 
         return {
           relativeEnvFilePath,
@@ -165,10 +169,12 @@ export async function addOrUpdateEnvironmentVariablesStep({
             )} to include ${chalk.bold.cyan(envFileName)}.`,
           );
 
-          analytics.wizardCapture('env vars error', {
-            integration,
-            error: error instanceof Error ? error.message : 'Unknown error',
-          });
+          captureWizardError(
+            'Environment Variables',
+            error instanceof Error ? error.message : 'Unknown error',
+            'add-or-update-env:gitignore-update',
+            { integration },
+          );
 
           return {
             relativeEnvFilePath,
@@ -199,10 +205,12 @@ export async function addOrUpdateEnvironmentVariablesStep({
           )} with environment files.`,
         );
 
-        analytics.wizardCapture('env vars error', {
-          integration,
-          error: error instanceof Error ? error.message : 'Unknown error',
-        });
+        captureWizardError(
+          'Environment Variables',
+          error instanceof Error ? error.message : 'Unknown error',
+          'add-or-update-env:gitignore-create',
+          { integration },
+        );
 
         return {
           relativeEnvFilePath,
@@ -212,7 +220,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
       }
     }
 
-    analytics.wizardCapture('env vars added', {
+    analytics.wizardCapture('Environment Variables Added', {
       integration,
     });
 

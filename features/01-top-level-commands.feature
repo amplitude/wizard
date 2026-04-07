@@ -42,6 +42,10 @@ Feature: Top-level CLI commands
     When I run "amplitude-wizard whoami"
     Then I should see "Not logged in"
 
+  Scenario: Feedback command records the user message
+    When I run "amplitude-wizard feedback --message Great wizard"
+    Then the feedback command should record message "Great wizard"
+
   Scenario: Wizard in CI mode
     When I run "amplitude-wizard --ci --api-key abc123 --install-dir /tmp/app"
     Then the wizard should run non-interactively

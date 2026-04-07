@@ -790,6 +790,49 @@ void yargs(hideBin(process.argv))
     },
   )
   .command(
+    'feedback',
+    'Send product feedback (Amplitude event: wizard: Feedback Submitted)',
+    (yargs) => {
+      return yargs.options({
+        message: {
+          alias: 'm',
+          describe: 'Feedback message',
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        setUI(new LoggingUI());
+        const fromFlag =
+          typeof argv.message === 'string' ? argv.message.trim() : '';
+        const argvRest = (argv._ as string[]).slice(1).join(' ').trim();
+        const message = (fromFlag || argvRest).trim();
+        if (!message) {
+          getUI().log.error(
+            'Usage: amplitude-wizard feedback <message>  or  feedback --message <message>',
+          );
+          process.exit(1);
+        }
+        try {
+          const { trackWizardFeedback } = await import(
+            './src/utils/track-wizard-feedback.js'
+          );
+          await trackWizardFeedback(message);
+          console.log(chalk.green('✔ Thanks — your feedback was sent.'));
+          process.exit(0);
+        } catch (e) {
+          console.error(
+            chalk.red(
+              `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
+            ),
+          );
+          process.exit(1);
+        }
+      })();
+    },
+  )
+  .command(
     'slack',
     'Set up Amplitude Slack integration',
     (y) => y,

@@ -91,7 +91,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const local = readApiKeyWithSource(s.installDir);
       if (local) {
         setSavedKeySource(local.source);
-        analytics.wizardCapture('api key submitted', {
+        analytics.wizardCapture('API Key Submitted', {
           key_source: local.source,
         });
         store.setCredentials({
@@ -127,7 +127,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
       if (projectApiKey) {
         persistApiKey(projectApiKey, s.installDir);
-        analytics.wizardCapture('api key submitted', {
+        analytics.wizardCapture('API Key Submitted', {
           key_source: 'backend_fetch',
         });
         store.setCredentials({
@@ -177,7 +177,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       return;
     }
     setApiKeyError('');
-    analytics.wizardCapture('api key submitted', {
+    analytics.wizardCapture('API Key Submitted', {
       key_source: 'manual_entry',
     });
     store.setApiKeyNotice(null);

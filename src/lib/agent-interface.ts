@@ -8,9 +8,8 @@ import * as fs from 'fs';
 import { getUI, type SpinnerHandle } from '../ui';
 import { debug, logToFile, initLogFile, getLogFilePath } from '../utils/debug';
 import type { WizardOptions } from '../utils/types';
-import { analytics } from '../utils/analytics';
+import { analytics, captureWizardError } from '../utils/analytics';
 import {
-  WIZARD_REMARK_EVENT_NAME,
   AMPLITUDE_PROPERTY_HEADER_PREFIX,
   WIZARD_VARIANT_FLAG_KEY,
   WIZARD_VARIANTS,
@@ -156,7 +155,7 @@ export function backupAndFixClaudeSettings(workingDirectory: string): boolean {
   for (const name of ['settings.json', 'settings']) {
     const filePath = path.join(workingDirectory, '.claude', name);
     const backupPath = `${filePath}.wizard-backup`;
-    analytics.wizardCapture('backedup-claude-settings');
+    analytics.wizardCapture('Claude Settings Backed Up');
     try {
       fs.copyFileSync(filePath, backupPath);
       fs.unlinkSync(filePath);
@@ -190,7 +189,7 @@ export function restoreClaudeSettings(workingDirectory: string): void {
     );
     try {
       fs.copyFileSync(backup, path.join(workingDirectory, '.claude', name));
-      analytics.wizardCapture('restored-claude-settings');
+      analytics.wizardCapture('Claude Settings Restored');
       return;
     } catch (error) {
       analytics.captureException(
@@ -579,10 +578,12 @@ export function wizardCanUseTool(
   if (DANGEROUS_OPERATORS.test(command)) {
     logToFile(`Denying bash command with dangerous operators: ${command}`);
     debug(`Denying bash command with dangerous operators: ${command}`);
-    analytics.wizardCapture('bash denied', {
-      reason: 'dangerous operators',
-      command,
-    });
+    captureWizardError(
+      'Bash Policy',
+      'Dangerous shell operators are not permitted',
+      'wizardCanUseBash',
+      { deny_reason: 'dangerous operators', command },
+    );
     return {
       behavior: 'deny',
       message: `Bash command not allowed. Shell operators like ; \` $ ( ) are not permitted.`,
@@ -601,10 +602,12 @@ export function wizardCanUseTool(
     if (/[|&]/.test(baseCommand)) {
       logToFile(`Denying bash command with multiple pipes: ${command}`);
       debug(`Denying bash command with multiple pipes: ${command}`);
-      analytics.wizardCapture('bash denied', {
-        reason: 'multiple pipes',
-        command,
-      });
+      captureWizardError(
+        'Bash Policy',
+        'Multiple pipes are not permitted',
+        'wizardCanUseBash',
+        { deny_reason: 'multiple pipes', command },
+      );
       return {
         behavior: 'deny',
         message: `Bash command not allowed. Only single pipe to tail/head is permitted.`,
@@ -622,10 +625,12 @@ export function wizardCanUseTool(
   if (/[|&]/.test(normalized)) {
     logToFile(`Denying bash command with pipe/&: ${command}`);
     debug(`Denying bash command with pipe/&: ${command}`);
-    analytics.wizardCapture('bash denied', {
-      reason: 'disallowed pipe',
-      command,
-    });
+    captureWizardError(
+      'Bash Policy',
+      'Pipes are only allowed with tail/head',
+      'wizardCanUseBash',
+      { deny_reason: 'disallowed pipe', command },
+    );
     return {
       behavior: 'deny',
       message: `Bash command not allowed. Pipes are only permitted with tail/head for output limiting.`,
@@ -641,10 +646,12 @@ export function wizardCanUseTool(
 
   logToFile(`Denying bash command: ${command}`);
   debug(`Denying bash command: ${command}`);
-  analytics.wizardCapture('bash denied', {
-    reason: 'not in allowlist',
-    command,
-  });
+  captureWizardError(
+    'Bash Policy',
+    'Command not in allowlist',
+    'wizardCanUseBash',
+    { deny_reason: 'not in allowlist', command },
+  );
   return {
     behavior: 'deny',
     message: `Bash command not allowed. Only install, build, typecheck, lint, and formatting commands are permitted.`,
@@ -963,11 +970,11 @@ export async function runAgent(
     if (remarkMatch && remarkMatch[1]) {
       const remark = remarkMatch[1].trim();
       if (remark) {
-        analytics.capture(WIZARD_REMARK_EVENT_NAME, { remark });
+        analytics.wizardCapture('Wizard Remark', { remark });
       }
     }
 
-    analytics.wizardCapture('agent completed', {
+    analytics.wizardCapture('Agent Completed', {
       duration_ms: durationMs,
       duration_seconds: durationSeconds,
     });
@@ -1078,7 +1085,7 @@ export async function runAgent(
         logToFile(
           `Agent stall retry: attempt ${attempt + 1} of ${MAX_RETRIES + 1}`,
         );
-        analytics.wizardCapture('agent stall retry', { attempt });
+        analytics.wizardCapture('Agent Stall Retry', { attempt });
         // Clear per-attempt output so stale error markers don't affect the fresh run
         collectedText.length = 0;
         recentStatuses.length = 0;
@@ -1112,7 +1119,7 @@ export async function runAgent(
               STALL_TIMEOUT_MS / 1000
             }s (attempt ${attempt + 1})`,
           );
-          analytics.wizardCapture('agent stall detected', {
+          analytics.wizardCapture('Agent Stall Detected', {
             attempt: attempt + 1,
             stall_timeout_ms: STALL_TIMEOUT_MS,
           });

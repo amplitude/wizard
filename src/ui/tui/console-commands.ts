@@ -14,6 +14,10 @@ export const COMMANDS = [
   { cmd: '/whoami', desc: 'Show current user, org, and project' },
   { cmd: '/mcp', desc: 'Install or remove the Amplitude MCP server' },
   { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
+  {
+    cmd: '/feedback',
+    desc: 'Send product feedback (event: wizard: Feedback Submitted)',
+  },
   { cmd: '/test', desc: 'Run a prompt-skill demo (confirm + choose)' },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
@@ -42,4 +46,15 @@ export function getWhoamiText(
 export function getHelpText(): string {
   const maxCmd = Math.max(...COMMANDS.map((c) => c.cmd.length));
   return COMMANDS.map((c) => `${c.cmd.padEnd(maxCmd)}  ${c.desc}`).join('\n');
+}
+
+/**
+ * Parses `/feedback <message>` from a slash command line.
+ * Returns `undefined` if the line is not a feedback command or the message is empty.
+ */
+export function parseFeedbackSlashInput(raw: string): string | undefined {
+  const m = /^\s*\/feedback(?:\s+(.*))?\s*$/i.exec(raw);
+  if (!m) return undefined;
+  const body = m[1]?.trim();
+  return body || undefined;
 }

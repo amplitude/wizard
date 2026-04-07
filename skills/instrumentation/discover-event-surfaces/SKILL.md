@@ -23,8 +23,10 @@ succeeds. Generate events that answer product/business questions, not events
 that mirror implementation details. Aim for **breadth and quality** — a
 downstream skill will narrow the list.
 
-Read the `taxonomy` skill at `../taxonomy/SKILL.md` to understand core
-analytics philosophy and naming standards.
+Read the **Amplitude Quickstart Taxonomy Agent** skill at
+`../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md` (or install
+`amplitude-quickstart-taxonomy-agent` from the `taxonomy` category via
+wizard-tools) for event naming, scoping, and property rules.
 
 ---
 
