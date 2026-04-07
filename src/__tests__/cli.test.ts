@@ -31,6 +31,8 @@ const {
     onEnterScreen: vi.fn(),
     completeSetup: vi.fn(),
     setAmplitudePreDetected: vi.fn(),
+    waitForPreDetectedChoice: vi.fn().mockResolvedValue(false),
+    resetForAgentAfterPreDetected: vi.fn(),
     setOutroData: vi.fn(),
     setRunPhase: vi.fn(),
   };

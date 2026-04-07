@@ -238,6 +238,13 @@ export interface WizardSession {
    */
   amplitudePreDetected: boolean;
 
+  /**
+   * While true, McpScreen shows a prompt: skip the agent (default) or run
+   * the setup wizard anyway. Cleared when the user chooses or when resetting
+   * for a forced wizard run.
+   */
+  amplitudePreDetectedChoicePending: boolean;
+
   // Data ingestion + post-setup checklist
   /**
    * True once the activation check confirms events are flowing into the project.
@@ -328,6 +335,7 @@ export function buildSession(args: {
     additionalFeatureQueue: [],
     frameworkConfig: null,
     amplitudePreDetected: false,
+    amplitudePreDetectedChoicePending: false,
 
     dataIngestionConfirmed: false,
     checklistChartComplete: false,

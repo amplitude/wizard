@@ -117,6 +117,11 @@ export class WizardStore {
   /** Pending confirmation or choice prompt from the agent. */
   private $pendingPrompt = atom<PendingPrompt | null>(null);
 
+  /** Resolves when the user picks continue vs run wizard after Amplitude pre-detection. */
+  private _preDetectedChoiceResolver:
+    | ((runWizardAnyway: boolean) => void)
+    | null = null;
+
   constructor(flow: Flow = Flow.Wizard) {
     this.router = new WizardRouter(flow);
   }
@@ -563,6 +568,41 @@ export class WizardStore {
 
   setAmplitudePreDetected(): void {
     this.$session.setKey('amplitudePreDetected', true);
+    this.$session.setKey('amplitudePreDetectedChoicePending', true);
+    this.emitChange();
+  }
+
+  /**
+   * Blocks bin.ts until McpScreen resolves via resolvePreDetectedChoice().
+   */
+  waitForPreDetectedChoice(): Promise<boolean> {
+    return new Promise((resolve) => {
+      this._preDetectedChoiceResolver = resolve;
+    });
+  }
+
+  /**
+   * Called from McpScreen when the user chooses to skip the agent (continue to
+   * MCP) or run the full setup wizard anyway.
+   */
+  resolvePreDetectedChoice(runWizardAnyway: boolean): void {
+    const resolveFn = this._preDetectedChoiceResolver;
+    this._preDetectedChoiceResolver = null;
+    if (!runWizardAnyway) {
+      this.$session.setKey('amplitudePreDetectedChoicePending', false);
+    }
+    this.emitChange();
+    resolveFn?.(runWizardAnyway);
+  }
+
+  /**
+   * Undo the pre-detection fast-path so runWizard can run; used when the user
+   * opts into the setup agent after Amplitude was already found in the project.
+   */
+  resetForAgentAfterPreDetected(): void {
+    this.$session.setKey('amplitudePreDetected', false);
+    this.$session.setKey('amplitudePreDetectedChoicePending', false);
+    this.$session.setKey('runPhase', RunPhase.Idle);
     this.emitChange();
   }
 

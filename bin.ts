@@ -616,14 +616,27 @@ void yargs(hideBin(process.argv))
               log(
                 `[bin] Amplitude already detected (${
                   localDetection.reason ?? 'unknown'
-                }) — skipping agent`,
+                }) — prompting on MCP screen (continue vs run wizard)`,
               );
               const { RunPhase, OutroKind } = await import(
                 './src/lib/wizard-session.js'
               );
               tui.store.setAmplitudePreDetected();
-              tui.store.setOutroData({ kind: OutroKind.Success });
               tui.store.setRunPhase(RunPhase.Completed);
+              const runWizardAnyway =
+                await tui.store.waitForPreDetectedChoice();
+              if (runWizardAnyway) {
+                log(
+                  '[bin] user chose to run setup wizard despite pre-detection',
+                );
+                tui.store.resetForAgentAfterPreDetected();
+                await runWizard(
+                  options as Parameters<typeof runWizard>[0],
+                  tui.store.session,
+                );
+              } else {
+                tui.store.setOutroData({ kind: OutroKind.Success });
+              }
             } else {
               await runWizard(
                 options as Parameters<typeof runWizard>[0],

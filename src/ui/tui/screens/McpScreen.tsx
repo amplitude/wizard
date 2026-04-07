@@ -71,7 +71,8 @@ export const McpScreen = ({
   );
 
   const isRemove = mode === 'remove';
-  const { runPhase, amplitudePreDetected } = store.session;
+  const { runPhase, amplitudePreDetected, amplitudePreDetectedChoicePending } =
+    store.session;
   const dataSetupComplete = runPhase === RunPhase.Completed;
 
   const [phase, setPhase] = useState<Phase>(Phase.Detecting);
@@ -79,6 +80,9 @@ export const McpScreen = ({
   const [resultClients, setResultClients] = useState<string[]>([]);
 
   useEffect(() => {
+    if (amplitudePreDetectedChoicePending) {
+      return;
+    }
     void (async () => {
       try {
         const detected = await installer.detectClients();
@@ -108,7 +112,7 @@ export const McpScreen = ({
         );
       }
     })();
-  }, [installer]);
+  }, [installer, amplitudePreDetectedChoicePending]);
 
   const handleConfirm = () => {
     if (isRemove) {
@@ -185,92 +189,124 @@ export const McpScreen = ({
           </Text>
         </Box>
       )}
-      <Text bold color={Colors.accent}>
-        MCP Server {isRemove ? 'Removal' : 'Setup'}
-      </Text>
-
-      <Box marginTop={1} flexDirection="column">
-        {phase === Phase.Detecting && (
-          <Text color={Colors.muted}>Detecting supported editors...</Text>
-        )}
-
-        {phase === Phase.None && (
+      {amplitudePreDetectedChoicePending && !isRemove && (
+        <Box marginBottom={1} flexDirection="column">
           <Text color={Colors.muted}>
-            No {isRemove ? 'installed' : 'supported'} MCP clients detected.
-            Skipping...
+            The installer skipped the automated setup step because Amplitude is
+            already present. You can continue to editor MCP setup, or run the
+            full setup wizard if you want to review or change the integration.
           </Text>
-        )}
-
-        {phase === Phase.Ask && (
-          <>
-            <Text color={Colors.muted}>
-              Detected: {clients.map((c) => c.name).join(', ')}
-            </Text>
-            <Box marginTop={1}>
-              <ConfirmationInput
-                message={
-                  isRemove
-                    ? 'Remove the Amplitude MCP server from your editor?'
-                    : 'Install the Amplitude MCP server to your editor?'
-                }
-                confirmLabel={isRemove ? 'Remove MCP' : 'Install MCP'}
-                cancelLabel="No thanks"
-                onConfirm={handleConfirm}
-                onCancel={handleSkip}
-              />
-            </Box>
-          </>
-        )}
-
-        {phase === Phase.Pick && (
-          <PickerMenu
-            message="Select editor to install MCP server"
-            options={clients.map((c) => ({
-              label: c.name,
-              value: c.name,
-            }))}
-            mode="multi"
-            onSelect={(selected) => {
-              const names = Array.isArray(selected) ? selected : [selected];
-              if (names.length === 0) return;
-              analytics.wizardCapture('mcp clients selected', {
-                selected_clients: names,
-                available_clients: clients.map((c) => c.name),
-              });
-              void doInstall(names);
-            }}
-          />
-        )}
-
-        {phase === Phase.Working && (
-          <Text color={Colors.muted}>
-            {isRemove ? 'Removing' : 'Installing'} MCP server...
+          <Box marginTop={1}>
+            <PickerMenu
+              message="How would you like to proceed?"
+              options={[
+                { label: 'Continue to MCP setup', value: 'continue' as const },
+                {
+                  label: 'Run setup wizard anyway',
+                  value: 'wizard' as const,
+                },
+              ]}
+              onSelect={(value) => {
+                const runWizard = value === 'wizard';
+                analytics.wizardCapture('amplitude pre-detected choice', {
+                  run_wizard_anyway: runWizard,
+                });
+                store.resolvePreDetectedChoice(runWizard);
+              }}
+            />
+          </Box>
+        </Box>
+      )}
+      {!amplitudePreDetectedChoicePending && (
+        <>
+          <Text bold color={Colors.accent}>
+            MCP Server {isRemove ? 'Removal' : 'Setup'}
           </Text>
-        )}
 
-        {phase === Phase.Done && (
-          <Box flexDirection="column">
-            {resultClients.length > 0 ? (
-              <>
-                <Text color="green" bold>
-                  {'\u2714'} MCP server{' '}
-                  {isRemove ? 'removed from' : 'installed for'}:
-                </Text>
-                {resultClients.map((name, i) => (
-                  <Text key={i}>
-                    {' '}
-                    {'\u2022'} {name}
-                  </Text>
-                ))}
-              </>
-            ) : (
+          <Box marginTop={1} flexDirection="column">
+            {phase === Phase.Detecting && (
+              <Text color={Colors.muted}>Detecting supported editors...</Text>
+            )}
+
+            {phase === Phase.None && (
               <Text color={Colors.muted}>
-                {isRemove ? 'Removal' : 'Installation'} skipped.
+                No {isRemove ? 'installed' : 'supported'} MCP clients detected.
+                Skipping...
               </Text>
             )}
+
+            {phase === Phase.Ask && (
+              <>
+                <Text color={Colors.muted}>
+                  Detected: {clients.map((c) => c.name).join(', ')}
+                </Text>
+                <Box marginTop={1}>
+                  <ConfirmationInput
+                    message={
+                      isRemove
+                        ? 'Remove the Amplitude MCP server from your editor?'
+                        : 'Install the Amplitude MCP server to your editor?'
+                    }
+                    confirmLabel={isRemove ? 'Remove MCP' : 'Install MCP'}
+                    cancelLabel="No thanks"
+                    onConfirm={handleConfirm}
+                    onCancel={handleSkip}
+                  />
+                </Box>
+              </>
+            )}
+
+            {phase === Phase.Pick && (
+              <PickerMenu
+                message="Select editor to install MCP server"
+                options={clients.map((c) => ({
+                  label: c.name,
+                  value: c.name,
+                }))}
+                mode="multi"
+                onSelect={(selected) => {
+                  const names = Array.isArray(selected) ? selected : [selected];
+                  if (names.length === 0) return;
+                  analytics.wizardCapture('mcp clients selected', {
+                    selected_clients: names,
+                    available_clients: clients.map((c) => c.name),
+                  });
+                  void doInstall(names);
+                }}
+              />
+            )}
+
+            {phase === Phase.Working && (
+              <Text color={Colors.muted}>
+                {isRemove ? 'Removing' : 'Installing'} MCP server...
+              </Text>
+            )}
+
+            {phase === Phase.Done && (
+              <Box flexDirection="column">
+                {resultClients.length > 0 ? (
+                  <>
+                    <Text color="green" bold>
+                      {'\u2714'} MCP server{' '}
+                      {isRemove ? 'removed from' : 'installed for'}:
+                    </Text>
+                    {resultClients.map((name, i) => (
+                      <Text key={i}>
+                        {' '}
+                        {'\u2022'} {name}
+                      </Text>
+                    ))}
+                  </>
+                ) : (
+                  <Text color={Colors.muted}>
+                    {isRemove ? 'Removal' : 'Installation'} skipped.
+                  </Text>
+                )}
+              </Box>
+            )}
           </Box>
-        )}
-      </Box>
+        </>
+      )}
     </Box>
   );
 };
