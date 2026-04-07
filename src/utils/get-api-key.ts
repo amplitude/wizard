@@ -1,5 +1,6 @@
 import { readApiKeyWithSource } from './api-key-store.js';
 import { fetchAmplitudeUser } from '../lib/api.js';
+import { logToFile } from './debug.js';
 import type { AmplitudeZone } from '../lib/constants.js';
 
 /**
@@ -27,6 +28,8 @@ export async function getAPIKey(params: {
   // ── 2. Amplitude backend ────────────────────────────────────────────────────
   try {
     const userInfo = await fetchAmplitudeUser(idToken, zone);
+    let foundWorkspace = false;
+    let foundEnvWithKey = false;
 
     for (const org of userInfo.orgs) {
       const workspace = workspaceId
@@ -34,16 +37,27 @@ export async function getAPIKey(params: {
         : org.workspaces[0];
 
       if (!workspace?.environments) continue;
+      foundWorkspace = true;
 
       const envsWithKey = workspace.environments
         .filter((env) => env.app?.apiKey)
         .sort((a, b) => a.rank - b.rank);
 
+      if (envsWithKey.length > 0) foundEnvWithKey = true;
+
       const apiKey = envsWithKey[0]?.app?.apiKey;
       if (apiKey) return apiKey;
     }
-  } catch {
-    // Backend fetch failed — caller falls back to prompting the user
+
+    logToFile(
+      `[getAPIKey] no key found: ${userInfo.orgs.length} org(s), foundWorkspace=${foundWorkspace}, foundEnvWithKey=${foundEnvWithKey}`,
+    );
+  } catch (err) {
+    logToFile(
+      `[getAPIKey] backend fetch failed: ${
+        err instanceof Error ? err.constructor.name : 'unknown'
+      }`,
+    );
   }
 
   return null;

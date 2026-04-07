@@ -19,8 +19,11 @@ export class LoggingUI implements WizardUI {
     console.log(`└  ${message}`);
   }
 
-  cancel(message: string): void {
+  cancel(message: string, options?: { docsUrl?: string }): void {
     console.log(`■  ${message}`);
+    if (options?.docsUrl) {
+      console.log(`│  Manual setup guide: ${options.docsUrl}`);
+    }
   }
 
   log = {

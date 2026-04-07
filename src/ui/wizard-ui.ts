@@ -29,7 +29,7 @@ export interface WizardUI {
   // ── Lifecycle messages ────────────────────────────────────────────
   intro(message: string): void;
   outro(message: string): void;
-  cancel(message: string): void;
+  cancel(message: string, options?: { docsUrl?: string }): void;
 
   // ── Logging ───────────────────────────────────────────────────────
   log: {

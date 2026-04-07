@@ -25,10 +25,9 @@ import {
 } from './agent-interface';
 import { getLlmGatewayUrlFromHost } from '../utils/urls';
 import { OUTBOUND_URLS } from './constants.js';
-import chalk from 'chalk';
 import * as semver from 'semver';
 import { checkAnthropicStatus } from '../utils/anthropic-status';
-import { enableDebugLogs } from '../utils/debug';
+import { enableDebugLogs, logToFile } from '../utils/debug';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
@@ -71,18 +70,23 @@ export async function runAgentWizard(
     const version = await config.detection.getInstalledVersion(
       sessionToOptions(session),
     );
+    logToFile(`[runAgentWizard] detected version: ${version}`);
     if (version) {
       const coerced = semver.coerce(version);
       if (coerced && semver.lt(coerced, config.detection.minimumVersion)) {
+        logToFile(
+          `[runAgentWizard] version ${version} is less than minimum required ${config.detection.minimumVersion}`,
+        );
         const docsUrl =
           config.metadata.unsupportedVersionDocsUrl ?? config.metadata.docsUrl;
-        getUI().log.warn(
-          `Sorry: the wizard can't help you with ${config.metadata.name} ${version}. Upgrade to ${config.metadata.name} ${config.detection.minimumVersion} or later, or check out the manual setup guide.`,
+        logToFile(
+          `[runAgentWizard] directing user to manual setup guide: ${docsUrl}`,
         );
-        getUI().log.info(
-          `Setup ${config.metadata.name} manually: ${chalk.cyan(docsUrl)}`,
+        getUI().cancel(
+          `The wizard requires ${config.metadata.name} ${config.detection.minimumVersion} or later, but found version ${version}. Upgrade your ${config.metadata.name} version to use the wizard, or follow the manual setup guide.`,
+          { docsUrl },
         );
-        getUI().outro('Amplitude wizard will see you next time!');
+        logToFile('[runAgentWizard] cancel displayed to user');
         return;
       }
     }

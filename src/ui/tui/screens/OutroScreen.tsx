@@ -155,9 +155,17 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
 
       {outroData.kind === OutroKind.Cancel && (
         <Box flexDirection="column">
-          <Text color="yellow">
+          <Text color="yellow" bold>
             {'\u25A0'} {outroData.message || 'Cancelled'}
           </Text>
+          {outroData.docsUrl && (
+            <Box marginTop={1}>
+              <Text>
+                Manual setup guide:{' '}
+                <Text color="cyan">{outroData.docsUrl}</Text>
+              </Text>
+            </Box>
+          )}
         </Box>
       )}
 

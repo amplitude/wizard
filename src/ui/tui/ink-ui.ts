@@ -102,13 +102,14 @@ export class InkUI implements WizardUI {
     return true;
   }
 
-  cancel(message: string): void {
+  cancel(message: string, options?: { docsUrl?: string }): void {
     this.store.pushStatus(stripAnsi(message));
 
     if (!this.store.session.outroData) {
       this.store.setOutroData({
         kind: OutroKind.Cancel,
         message: stripAnsi(message),
+        docsUrl: options?.docsUrl,
       });
     }
 

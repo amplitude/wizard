@@ -254,11 +254,13 @@ void yargs(hideBin(process.argv))
                 { readAmpliConfig },
                 { getAPIKey },
                 { getHostFromRegion },
+                { logToFile },
               ] = await Promise.all([
                 import('./src/utils/ampli-settings.js'),
                 import('./src/lib/ampli-config.js'),
                 import('./src/utils/get-api-key.js'),
                 import('./src/utils/urls.js'),
+                import('./src/utils/debug.js'),
               ]);
 
               // Zone: prefer a real (non-pending) stored user, fall back to
@@ -284,6 +286,9 @@ void yargs(hideBin(process.argv))
                   : getStoredToken(undefined, zone);
 
                 if (storedToken) {
+                  logToFile(
+                    `[bin] getAPIKey: zone=${zone} hasWorkspaceId=${!!session.selectedWorkspaceId}`,
+                  );
                   const projectApiKey = await getAPIKey({
                     installDir,
                     idToken: storedToken.idToken,
@@ -291,6 +296,7 @@ void yargs(hideBin(process.argv))
                     workspaceId: session.selectedWorkspaceId ?? undefined,
                   });
                   if (projectApiKey) {
+                    logToFile('[bin] getAPIKey: resolved project API key');
                     persistApiKey(projectApiKey, installDir);
                     session.credentials = {
                       accessToken: storedToken.idToken,
@@ -306,6 +312,9 @@ void yargs(hideBin(process.argv))
                     session.activationLevel = 'none';
                     session.projectHasData = false;
                   } else {
+                    logToFile(
+                      '[bin] getAPIKey: returned null — showing apiKeyNotice',
+                    );
                     // Region is already pre-populated above; prompt for the
                     // key manually with a hint about org-admin permissions.
                     session.apiKeyNotice =
