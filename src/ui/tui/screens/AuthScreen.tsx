@@ -17,7 +17,10 @@ import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { LoadingBox, PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
-import { DEFAULT_HOST_URL } from '../../../lib/constants.js';
+import {
+  DEFAULT_HOST_URL,
+  type AmplitudeZone,
+} from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface AuthScreenProps {
@@ -69,29 +72,94 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     session.selectedWorkspaceId !== null ||
     (effectiveOrg !== null && effectiveOrg.workspaces.length === 1);
 
-  // Auto-advance past API key step if a saved key exists for this project
+  // Resolve API key: local storage first, then Amplitude backend (same as bin.ts
+  // for returning users) once org/workspace are on the session after OAuth.
   useEffect(() => {
     if (!workspaceChosen || session.credentials !== null) return;
-    void import('../../../utils/api-key-store.js').then(
-      ({ readApiKeyWithSource }) => {
-        const result = readApiKeyWithSource(session.installDir);
-        if (result) {
-          setSavedKeySource(result.source);
-          analytics.wizardCapture('api key submitted', {
-            key_source: result.source,
-          });
-          store.setCredentials({
-            accessToken: session.pendingAuthAccessToken ?? '',
-            idToken: session.pendingAuthIdToken ?? undefined,
-            projectApiKey: result.key,
-            host: DEFAULT_HOST_URL,
-            projectId: 0,
-          });
-          store.setProjectHasData(false);
-        }
-      },
-    );
-  }, [workspaceChosen, session.credentials]);
+
+    let cancelled = false;
+
+    void (async () => {
+      const s = store.session;
+      if (s.credentials !== null) return;
+
+      const { readApiKeyWithSource, persistApiKey } = await import(
+        '../../../utils/api-key-store.js'
+      );
+      if (cancelled) return;
+
+      const local = readApiKeyWithSource(s.installDir);
+      if (local) {
+        setSavedKeySource(local.source);
+        analytics.wizardCapture('api key submitted', {
+          key_source: local.source,
+        });
+        store.setCredentials({
+          accessToken: s.pendingAuthAccessToken ?? '',
+          idToken: s.pendingAuthIdToken ?? undefined,
+          projectApiKey: local.key,
+          host: DEFAULT_HOST_URL,
+          projectId: 0,
+        });
+        store.setProjectHasData(false);
+        store.setApiKeyNotice(null);
+        return;
+      }
+
+      const idToken = s.pendingAuthIdToken;
+      if (!idToken) return;
+
+      const zone = (s.region ??
+        s.pendingAuthCloudRegion ??
+        'us') as AmplitudeZone;
+
+      const { getAPIKey } = await import('../../../utils/get-api-key.js');
+      const { getHostFromRegion } = await import('../../../utils/urls.js');
+
+      const projectApiKey = await getAPIKey({
+        installDir: s.installDir,
+        idToken,
+        zone,
+        workspaceId: s.selectedWorkspaceId ?? undefined,
+      });
+
+      if (cancelled || store.session.credentials !== null) return;
+
+      if (projectApiKey) {
+        persistApiKey(projectApiKey, s.installDir);
+        analytics.wizardCapture('api key submitted', {
+          key_source: 'backend_fetch',
+        });
+        store.setCredentials({
+          accessToken: s.pendingAuthAccessToken ?? '',
+          idToken: s.pendingAuthIdToken ?? undefined,
+          projectApiKey,
+          host: getHostFromRegion(zone),
+          projectId: 0,
+        });
+        store.setProjectHasData(false);
+        store.setApiKeyNotice(null);
+      } else {
+        store.setApiKeyNotice(
+          "Your API key couldn't be fetched automatically. " +
+            'Only organization admins can access project API keys — ' +
+            'if you need one, ask an admin to share it with you.',
+        );
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    workspaceChosen,
+    session.credentials,
+    session.selectedWorkspaceId,
+    session.pendingAuthIdToken,
+    session.region,
+    session.pendingAuthCloudRegion,
+    session.installDir,
+  ]);
 
   const needsOrgPick =
     pendingOrgs !== null && pendingOrgs.length > 1 && effectiveOrg === null;
@@ -112,6 +180,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     analytics.wizardCapture('api key submitted', {
       key_source: 'manual_entry',
     });
+    store.setApiKeyNotice(null);
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       idToken: session.pendingAuthIdToken ?? undefined,

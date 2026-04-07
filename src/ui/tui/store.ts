@@ -214,6 +214,11 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setApiKeyNotice(notice: string | null): void {
+    this.$session.setKey('apiKeyNotice', notice);
+    this.emitChange();
+  }
+
   setFrameworkConfig(
     integration: WizardSession['integration'],
     config: WizardSession['frameworkConfig'],
