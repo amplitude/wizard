@@ -5,7 +5,7 @@ description: >-
   @amplitude/analytics-node
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for JavaScript Node
@@ -23,6 +23,7 @@ Follow these steps in order to complete the integration:
 
 ## Reference files
 
+- `references/EXAMPLE.md` - JavaScript Node example project code
 - `references/analytics.md` - Amplitude documentation for Analytics
 - `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin

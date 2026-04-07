@@ -5,7 +5,7 @@ description: >-
   @amplitude/analytics-browser
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for JavaScript Web
@@ -23,6 +23,7 @@ Follow these steps in order to complete the integration:
 
 ## Reference files
 
+- `references/EXAMPLE.md` - JavaScript Web example project code
 - `references/browser-sdk-2.md` - Or install unified SDK to get access to all Amplitude products
 - `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin

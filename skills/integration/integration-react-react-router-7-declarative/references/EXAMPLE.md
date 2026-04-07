@@ -11,6 +11,12 @@ Path: basics/react-react-router-7-declarative
 
 This is a [React Router 7](https://reactrouter.com) Declarative example demonstrating Amplitude integration with product analytics and event tracking.
 
+### Amplitude SDKs
+
+The client uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with a single `initAll` call. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) documents that call as initializing every product bundled with Unified npm. See [configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) and [Browser SDK 2](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2#initialize-the-sdk) for `analytics` options. The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`); Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the [Unified script (CDN)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-script-cdn), not Unified **npm**.
+
+If you add backend events, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node).
+
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
@@ -68,22 +74,22 @@ src/
 ### Client-side initialization (main.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 ```
 
 ### User identification (contexts/AuthContext.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 amplitude.setUserId(username);
 const identifyObj = new Identify();
 identifyObj.set('username', username);
 amplitude.identify(identifyObj);
-amplitude.track('user_logged_in', { username });
+amplitude.track('User Logged In', { username });
 ```
 
 ## Learn More
@@ -172,13 +178,13 @@ export default App
 ```tsx
 import { Link } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 export default function Header() {
   const { user, logout } = useAuth();
 
   const handleLogout = () => {
-    amplitude.track('user_logged_out');
+    amplitude.track('User Logged Out');
     amplitude.reset();
     logout();
   };
@@ -219,8 +225,8 @@ export default function Header() {
 ## src/contexts/AuthContext.tsx
 
 ```tsx
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
 interface User {
@@ -276,7 +282,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const identifyObj = new Identify();
     identifyObj.set('username', username);
     amplitude.identify(identifyObj);
-    amplitude.track('user_logged_in', { username });
+    amplitude.track('User Logged In', { username });
 
     return true;
   };
@@ -298,6 +304,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- useAuth is the companion hook for AuthProvider
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -323,9 +330,9 @@ import Home from './routes/Home';
 import Burrito from './routes/Burrito';
 import Profile from './routes/Profile';
 
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");

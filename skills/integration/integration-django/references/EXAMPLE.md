@@ -110,7 +110,7 @@ if client:
     client.identify(identify_obj, {"user_id": str(user.id)})
 
     client.track(BaseEvent(
-        event_type='user_logged_in',
+        event_type='User Logged In',
         user_id=str(user.id),
         event_properties={'login_method': 'email'},
     ))
@@ -122,7 +122,7 @@ if client:
 client = get_amplitude_client()
 if client:
     client.track(BaseEvent(
-        event_type='burrito_considered',
+        event_type='Burrito Considered',
         user_id=user_id,
         event_properties={'total_considerations': count},
     ))
@@ -500,12 +500,12 @@ class CoreConfig(AppConfig):
 
 <div class="card">
     <h3>How event tracking works</h3>
-    <p>Each time you click the button, a <code>burrito_considered</code> event is sent to Amplitude:</p>
+    <p>Each time you click the button, a <code>Burrito Considered</code> event is sent to Amplitude:</p>
     <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto; margin-top: 15px;"><code>from amplitude import Amplitude, BaseEvent
 
 client = Amplitude(api_key)
 client.track(BaseEvent(
-    event_type='burrito_considered',
+    event_type='Burrito Considered',
     user_id=user_id,
     event_properties={'total_considerations': count},
 ))</code></pre>
@@ -555,7 +555,7 @@ async function considerBurrito() {
 
 <div class="card">
     <h2>Analytics tracking</h2>
-    <p>This page view is tracked as a <code>dashboard_viewed</code> event in Amplitude.</p>
+    <p>This page view is tracked as a <code>Dashboard Viewed</code> event in Amplitude.</p>
     <p style="margin-top: 10px; color: #666; font-size: 14px;">
         Note: Feature flags are available via Amplitude Experiment (separate SDK).
     </p>
@@ -567,7 +567,7 @@ async function considerBurrito() {
 
 client = Amplitude(api_key)
 client.track(BaseEvent(
-    event_type='dashboard_viewed',
+    event_type='Dashboard Viewed',
     user_id=user_id,
     event_properties={'is_staff': user.is_staff},
 ))</code></pre>
@@ -684,7 +684,7 @@ try:
     risky_operation()
 except Exception as e:
     client.track(BaseEvent(
-        event_type='error_triggered',
+        event_type='Error Triggered',
         user_id=user_id,
         event_properties={'error_message': str(e)},
     ))</code></pre>
@@ -815,7 +815,7 @@ def home_view(request):
                 client.identify(identify_obj, {"user_id": str(user.id)})
 
                 client.track(BaseEvent(
-                    event_type='user_logged_in',
+                    event_type='User Logged In',
                     user_id=str(user.id),
                     event_properties={'login_method': 'email'},
                 ))
@@ -836,7 +836,7 @@ def logout_view(request):
         client = get_amplitude_client()
         if client:
             client.track(BaseEvent(
-                event_type='user_logged_out',
+                event_type='User Logged Out',
                 user_id=user_id,
             ))
 
@@ -854,7 +854,7 @@ def dashboard_view(request):
     client = get_amplitude_client()
     if client:
         client.track(BaseEvent(
-            event_type='dashboard_viewed',
+            event_type='Dashboard Viewed',
             user_id=user_id,
             event_properties={'is_staff': request.user.is_staff},
         ))
@@ -891,7 +891,7 @@ def consider_burrito_view(request):
     client = get_amplitude_client()
     if client:
         client.track(BaseEvent(
-            event_type='burrito_considered',
+            event_type='Burrito Considered',
             user_id=user_id,
             event_properties={'total_considerations': count},
         ))
@@ -911,7 +911,7 @@ def profile_view(request):
     client = get_amplitude_client()
     if client:
         client.track(BaseEvent(
-            event_type='profile_viewed',
+            event_type='Profile Viewed',
             user_id=user_id,
         ))
 
@@ -942,7 +942,7 @@ def trigger_error_view(request):
         client = get_amplitude_client()
         if client:
             client.track(BaseEvent(
-                event_type='error_triggered',
+                event_type='Error Triggered',
                 user_id=str(request.user.id),
                 event_properties={
                     'error_type': error_type,

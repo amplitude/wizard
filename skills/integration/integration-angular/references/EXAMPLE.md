@@ -11,6 +11,12 @@ Path: basics/angular
 
 This is an [Angular](https://angular.dev/) example demonstrating Amplitude integration with product analytics.
 
+The app runs in the browser and uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): `@amplitude/unified` with one `initAll(apiKey)` call (see `AmplitudeService`). [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) describes that call as initializing every product bundled into the npm package; use an optional second argument for [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) (`serverZone`, `instanceName`, and the `analytics`, `sessionReplay`, `experiment`, and `engagement` sections). `analytics` settings match [Browser SDK 2](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2#initialize-the-sdk).
+
+The `experiment` section configures **Feature Experiment** (`@amplitude/experiment-js-client`). Per Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method), **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) is listed for the Unified **CDN** script, not the Unified **npm** row—the npm `experiment` options still cover code-based flags and the Experiment JS client bundled with `@amplitude/unified`.
+
+This sample does not send events from Node. For API or server-only analytics, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node).
+
 ## Features
 
 - **Product analytics**: Track user events and behaviors
@@ -77,25 +83,26 @@ A wrapper service that handles SSR safety and provides access to the Amplitude i
 ```typescript
 import { Injectable, inject, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 @Injectable({ providedIn: 'root' })
 export class AmplitudeService {
   private readonly platformId = inject(PLATFORM_ID);
+  private initialized = false;
 
   get amplitude(): typeof amplitude {
-    if (isPlatformBrowser(this.platformId)) {
+    if (isPlatformBrowser(this.platformId) && this.initialized) {
       return amplitude;
     }
-    // Return a no-op proxy for SSR safety
     return new Proxy({} as typeof amplitude, {
       get: () => () => undefined,
     });
   }
 
   init(apiKey: string): void {
-    if (isPlatformBrowser(this.platformId)) {
-      amplitude.init(apiKey);
+    if (isPlatformBrowser(this.platformId) && !this.initialized) {
+      void amplitude.initAll(apiKey);
+      this.initialized = true;
     }
   }
 }
@@ -122,7 +129,7 @@ export class AppComponent implements OnInit {
 
 ```typescript
 import { AmplitudeService } from './amplitude.service';
-import { Identify } from '@amplitude/analytics-browser';
+import { Identify } from '@amplitude/unified';
 
 const amplitudeService = inject(AmplitudeService);
 
@@ -139,7 +146,7 @@ import { AmplitudeService } from '../../services/amplitude.service';
 
 const amplitudeService = inject(AmplitudeService);
 
-amplitudeService.amplitude.track('burrito_considered', {
+amplitudeService.amplitude.track('Burrito Considered', {
   total_considerations: count,
   username: username,
 });
@@ -452,7 +459,7 @@ export class BurritoComponent {
     this.hasConsidered.set(true);
     setTimeout(() => this.hasConsidered.set(false), 2000);
 
-    this.amplitudeService.amplitude.track('burrito_considered', {
+    this.amplitudeService.amplitude.track('Burrito Considered', {
       total_considerations: user.burritoConsiderations + 1,
       username: user.username,
     });
@@ -640,7 +647,7 @@ export class ProfileComponent {
 ```ts
 import { Injectable, inject, PLATFORM_ID } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 @Injectable({ providedIn: 'root' })
 export class AmplitudeService {
@@ -663,7 +670,7 @@ export class AmplitudeService {
 
   init(apiKey: string): void {
     if (isPlatformBrowser(this.platformId) && !this.initialized) {
-      amplitude.init(apiKey);
+      void amplitude.initAll(apiKey);
       this.initialized = true;
     }
   }
@@ -685,7 +692,7 @@ import {
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 import { AmplitudeService } from './amplitude.service';
-import { Identify } from '@amplitude/analytics-browser';
+import { Identify } from '@amplitude/unified';
 
 export interface User {
   username: string;
@@ -747,7 +754,7 @@ export class AuthService {
     identifyObj.set('isNewUser', isNewUser);
     this.amplitudeService.amplitude.identify(identifyObj);
 
-    this.amplitudeService.amplitude.track('user_logged_in', {
+    this.amplitudeService.amplitude.track('User Logged In', {
       username,
       isNewUser,
     });
@@ -756,7 +763,7 @@ export class AuthService {
   }
 
   logout(): void {
-    this.amplitudeService.amplitude.track('user_logged_out');
+    this.amplitudeService.amplitude.track('User Logged Out');
     this.amplitudeService.amplitude.reset();
 
     this._user.set(null);

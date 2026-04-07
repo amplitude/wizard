@@ -9,162 +9,122 @@ Path: basics/astro-view-transitions
 
 # Amplitude Astro View Transitions Example
 
-This is an [Astro](https://astro.build/) example demonstrating Amplitude integration with [View Transitions](https://docs.astro.build/en/guides/view-transitions/) (ClientRouter) for SPA-like navigation.
+This is an [Astro](https://astro.build/) example with [View Transitions](https://docs.astro.build/en/guides/view-transitions/) (`<ClientRouter />`), demonstrating Amplitude in the browser.
 
-It uses the Amplitude web snippet with special handling to prevent stack overflow errors during soft navigation, and shows how to:
+### Amplitude SDKs
 
-- Initialize Amplitude with an initialization guard for View Transitions
-- Track pageviews automatically during soft navigation
-- Identify users after login
-- Track custom events from pages
-- Capture errors via `amplitude.captureException()`
-- Reset Amplitude state on logout
+The app uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with `initAll` in `src/components/amplitude.astro`, including an `analytics` block. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) documents `initAll` as initializing every product bundled with Unified npm. See [configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration); `analytics` options match [Browser SDK 2](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2#initialize-the-sdk).
+
+Initialization runs only once so soft navigations do not call `initAll` again (Amplitude expects a single init for the app lifecycle). `analytics: { capture_pageview: 'history_change' }` keeps automatic pageviews aligned with client-side history changes.
+
+`window.amplitude` is exposed for `is:inline` scripts ([access SDK features](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#access-sdk-features)). The `experiment` config here is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not Unified **npm**.
 
 ## Features
 
-- **View Transitions**: Smooth client-side navigation with `<ClientRouter />`
-- **Product analytics**: Track login and burrito consideration events
-- **Automatic pageview tracking**: Uses `capture_pageview: 'history_change'` for soft navigation
-- **Session replay**: Enabled via Amplitude snippet configuration
-- **Error tracking**: Manual error capture sent to Amplitude
-- **Simple auth flow**: Demo login using localStorage
+- **View Transitions**: Client-side navigation with `<ClientRouter />`
+- **Product analytics**: Login and burrito events
+- **Automatic pageviews**: `history_change` tracking during soft navigation
 
 ## Getting started
 
 ### 1. Install dependencies
 
 ```bash
-npm install
-# or
 pnpm install
 ```
 
 ### 2. Configure environment variables
 
-Create a `.env` file in the project root:
-
 ```bash
-PUBLIC_AMPLITUDE_API_KEY=your_amplitude_project_token
-PUBLIC_AMPLITUDE_API_KEY=https://us.i.amplitude.com
+PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
 ```
 
-Get your Amplitude project token from your project settings in Amplitude.
+Get your API key from [Amplitude project settings](https://app.amplitude.com).
 
 ### 3. Run the development server
 
 ```bash
-npm run dev
-# or
 pnpm dev
 ```
 
-Open `http://localhost:4321` in your browser.
+Open `http://localhost:4321`.
 
 ## Project structure
 
 ```text
 src/
   components/
-    amplitude.astro      # Amplitude snippet WITH initialization guard
-    Header.astro       # Navigation + logout, uses astro:page-load event
+    amplitude.astro        # initAll + guard (View Transitions fire scripts again)
+    Header.astro           # Logout; listens on astro:page-load where needed
   layouts/
-    AmplitudeLayout.astro # Root layout with <ClientRouter /> and Amplitude
+    AmplitudeLayout.astro  # <ClientRouter /> + Amplitude
   lib/
-    auth.ts            # Auth utilities (localStorage-based)
+    auth.ts
   pages/
-    index.astro        # Login form, identifies user + captures 'user_logged_in'
-    burrito.astro      # Burrito consideration demo, captures 'burrito_considered'
-    profile.astro      # Profile + error tracking demo
+    index.astro            # Login; setUserId + track('User Logged In')
+    burrito.astro          # track('Burrito Considered', …)
+    profile.astro
   styles/
-    global.css         # Global styles + view transition animations
+    global.css
 ```
 
 ## Key integration points
 
-### Amplitude initialization with View Transitions (`src/components/amplitude.astro`)
+### Amplitude initialization (`src/components/amplitude.astro`)
 
-When using Astro's View Transitions (ClientRouter), you **must** wrap the Amplitude initialization with a guard to prevent stack overflow errors:
+With View Transitions, guard `initAll` so soft navigations do not re-run initialization:
 
 ```astro
-<script is:inline>
-  // IMPORTANT: Guard against multiple initializations during view transitions
-  if (!window.__amplitude_initialized) {
-    window.__amplitude_initialized = true;
-    !function(t,e){...}(document,window.amplitude||[]);
-    amplitude.init('<ph_project_token>', {
-      api_host: 'https://us.i.amplitude.com',
-      defaults: '2026-01-30',
-      // IMPORTANT: Use 'history_change' for automatic pageview tracking during soft navigation
-      capture_pageview: 'history_change'
-    })
+<script>
+  import * as amplitude from "@amplitude/unified";
+
+  const w = window as Window & { __amplitude_initialized?: boolean };
+  if (!w.__amplitude_initialized) {
+    w.__amplitude_initialized = true;
+    const apiKey = import.meta.env.PUBLIC_AMPLITUDE_API_KEY;
+    if (apiKey) {
+      void amplitude.initAll(apiKey, {
+        analytics: {
+          capture_pageview: "history_change",
+        },
+      });
+    }
+    window.amplitude = amplitude;
   }
 </script>
 ```
 
-Without this guard, ClientRouter's soft navigation can re-execute the inline script during page transitions, causing a stack overflow error.
-
-The `capture_pageview: 'history_change'` option ensures pageviews are tracked automatically as users navigate between pages.
-
-### Layout with ClientRouter (`src/layouts/AmplitudeLayout.astro`)
-
-The layout includes Astro's ClientRouter for smooth page transitions:
+### Layout (`src/layouts/AmplitudeLayout.astro`)
 
 ```astro
----
-import { ClientRouter } from 'astro:transitions';
-import Amplitude from '../components/amplitude.astro';
----
-<html>
-  <head>
-    <ClientRouter />
-    <Amplitude />
-  </head>
-  ...
-</html>
+<ClientRouter />
+<Amplitude />
 ```
 
-### Handling View Transitions in scripts
+### Page scripts after view transitions
 
-When using View Transitions, you need to set up event listeners after each page navigation:
+Use `astro:page-load` (and `DOMContentLoaded` for the first load) so listeners work after soft navigation (`src/pages/index.astro`).
+
+### User identification and events
 
 ```javascript
-function setupPage() {
-  // Your setup code here
-}
-
-// Run on initial page load
-document.addEventListener("DOMContentLoaded", setupPage);
-
-// Run after view transitions complete (for soft navigation)
-document.addEventListener("astro:page-load", setupPage);
+window.amplitude?.setUserId(username);
+window.amplitude?.track("User Logged In");
 ```
 
-### User identification (`src/pages/index.astro`)
-
-After a successful "login", the app identifies the user and captures a login event:
+Burrito page:
 
 ```javascript
-window.amplitude?.identify(username);
-window.amplitude?.capture("user_logged_in");
-```
-
-### Event tracking (`src/pages/burrito.astro`)
-
-The burrito page tracks a custom event when a user "considers" the burrito:
-
-```javascript
-window.amplitude?.capture("burrito_considered", {
+window.amplitude?.track("Burrito Considered", {
   total_considerations: newCount,
   username: currentUser,
 });
 ```
 
-### Logout and session reset (`src/components/Header.astro`)
-
-On logout, both the local auth state and Amplitude state are cleared:
+Logout (`src/components/Header.astro`):
 
 ```javascript
-window.amplitude?.capture("user_logged_out");
+window.amplitude?.track("User Logged Out");
 localStorage.removeItem("currentUser");
 window.amplitude?.reset();
 ```
@@ -172,22 +132,15 @@ window.amplitude?.reset();
 ## Scripts
 
 ```bash
-# Run dev server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
+pnpm dev
+pnpm build
+pnpm preview
 ```
 
 ## Learn more
 
-- [Amplitude documentation](https://amplitude.com/docs)
-- [Amplitude Astro guide](https://amplitude.com/docs/libraries/astro)
+- [Browser Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk) — [npm & `initAll`](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm), [analytics options (Browser SDK 2)](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2#initialize-the-sdk)
 - [Astro View Transitions](https://docs.astro.build/en/guides/view-transitions/)
-- [Astro documentation](https://docs.astro.build/)
 
 ---
 
@@ -215,19 +168,24 @@ export default defineConfig({});
 
 ```astro
 ---
-// Amplitude analytics snippet with View Transitions support
-// Uses is:inline to prevent Astro from processing the script
-// Includes initialization guard to prevent double-loading with ClientRouter
+// Client-side Amplitude with View Transitions: guard so ClientRouter soft nav
+// does not re-run initialization. Bundled @amplitude/unified (initAll).
 ---
-<script is:inline define:vars={{ apiKey: import.meta.env.PUBLIC_AMPLITUDE_API_KEY }}>
-  // IMPORTANT: Guard against multiple initializations during view transitions
-  // Without this guard, ClientRouter's soft navigation can re-execute the inline script
-  // during page transitions.
-  if (!window.__amplitude_initialized) {
-    window.__amplitude_initialized = true;
-    !function(){"use strict";!function(e,t){var r=e.amplitude||{_q:[],_iq:{}};if(r.invoked)e.console&&console.error&&console.error("Amplitude snippet has been loaded.");else{r.invoked=!0;var n=t.createElement("script");n.type="text/javascript",n.integrity="sha384-x0ik2D45ZDEEEpYpEuDpmj05fY91P7EOZkgdKmVBAZoGtzwnlsHI9AqlBJmg+WT4",n.crossOrigin="anonymous",n.async=!0,n.src="https://cdn.amplitude.com/libs/analytics-browser-2.11.1-min.js.gz",n.onload=function(){e.amplitude.runQueuedFunctions||console.log("[Amplitude] Error: could not load SDK")};var s=t.getElementsByTagName("script")[0];function v(e,t){e.prototype[t]=function(){return this._q.push({name:t,args:Array.prototype.slice.call(arguments,0)}),this}}s.parentNode.insertBefore(n,s);for(var o=function(){return this._q=[],this},a=["add","append","clearAll","prepend","set","setOnce","unset","preInsert","postInsert","remove","getUserProperties"],c=0;c<a.length;c++)v(o,a[c]);r.Identify=o;for(var u=function(){return this._q=[],this},l=["getEventProperties","setProductId","setQuantity","setPrice","setRevenue","setRevenueType","setEventProperties"],p=0;p<l.length;p++)v(u,l[p]);r.Revenue=u;var d=["getDeviceId","setDeviceId","getSessionId","setSessionId","getUserId","setUserId","setOptOut","setTransport","reset","extendSession"],f=["init","add","remove","track","logEvent","identify","groupIdentify","setGroup","revenue","flush"];function m(e){function t(t,r){e[t]=function(){var n={promise:new Promise((r=>{e._q.push({name:t,args:Array.prototype.slice.call(arguments,0),resolve:r})}))};if(r)return n}}for(var r=0;r<d.length;r++)t(d[r],!1);for(var n=0;n<f.length;n++)t(f[n],!0)}m(r),r.getInstance=function(e){return e=(e&&e.length>0&&e||"$default_instance").toLowerCase(),Object.prototype.hasOwnProperty.call(r._iq,e)||(r._iq[e]={_q:[]},m(r._iq[e])),r._iq[e]},e.amplitude=r}}(window,document)}();
+<script>
+  import * as amplitude from "@amplitude/unified";
 
-    amplitude.init(apiKey || '');
+  const w = window as Window & { __amplitude_initialized?: boolean };
+  if (!w.__amplitude_initialized) {
+    w.__amplitude_initialized = true;
+    const apiKey = import.meta.env.PUBLIC_AMPLITUDE_API_KEY;
+    if (apiKey) {
+      void amplitude.initAll(apiKey, {
+        analytics: {
+          capture_pageview: "history_change",
+        },
+      });
+    }
+    window.amplitude = amplitude;
   }
 </script>
 
@@ -283,7 +241,7 @@ export default defineConfig({});
   function handleLogout() {
     const currentUser = localStorage.getItem('currentUser');
     if (currentUser) {
-      window.amplitude?.track('user_logged_out');
+      window.amplitude?.track('User Logged Out');
     }
     localStorage.removeItem('currentUser');
     localStorage.removeItem('burritoConsiderations');
@@ -363,6 +321,24 @@ export default defineConfig({});
     background-color: #c82333;
   }
 </style>
+
+```
+
+---
+
+## src/env.d.ts
+
+```ts
+/// <reference types="astro/client" />
+
+declare global {
+  interface Window {
+    amplitude?: typeof import("@amplitude/unified");
+    __amplitude_initialized?: boolean;
+  }
+}
+
+export {};
 
 ```
 
@@ -537,7 +513,7 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
     }
 
     // Capture burrito consideration event in Amplitude
-    window.amplitude?.track('burrito_considered', {
+    window.amplitude?.track('Burrito Considered', {
       total_considerations: newCount,
       username: currentUser
     });
@@ -656,7 +632,7 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
 
     // Identify the user in Amplitude (once on login is enough)
     window.amplitude?.setUserId(username);
-    window.amplitude?.track('user_logged_in');
+    window.amplitude?.track('User Logged In');
 
     // Clear form
     document.getElementById('username').value = '';

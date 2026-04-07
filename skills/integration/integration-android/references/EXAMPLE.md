@@ -112,7 +112,7 @@ Users are identified when they log in:
 ```kotlin
 fun login(username: String) {
     Amplitude.getInstance().setUserId(username)
-    Amplitude.getInstance().track("user_logged_in")
+    Amplitude.getInstance().track("User Logged In")
 }
 ```
 
@@ -129,7 +129,7 @@ val eventProperties = mapOf(
     "total_considerations" to updatedUser.burritoConsiderations,
     "username" to updatedUser.username
 )
-Amplitude.getInstance().track("burrito_considered", eventProperties)
+Amplitude.getInstance().track("Burrito Considered", eventProperties)
 ```
 
 **Key Points:**
@@ -161,7 +161,7 @@ dependencies {
 
 1. **Initialize Early**: Initialize Amplitude in your `Application.onCreate()` method
 2. **Identify Once**: Call `setUserId()` once when the user logs in or signs up
-3. **Use Meaningful Event Names**: Use clear, descriptive event names (e.g., `user_logged_in` instead of `login`)
+3. **Use Meaningful Event Names**: Use clear, descriptive event names (e.g., `User Logged In` instead of `login`)
 4. **Include Context**: Add relevant properties to events for better analysis
 5. **Test in Development**: Use a separate Amplitude project for development/testing
 6. **Respect Privacy**: Be mindful of PII (Personally Identifiable Information) in events and properties
@@ -242,7 +242,7 @@ dependencies {
 
 ---
 
-## app/src/main/java/com/example/posthog/BurritoApp.kt
+## app/src/main/java/com/example/amplitude/BurritoApp.kt
 
 ```kt
 package com.example.amplitude
@@ -271,7 +271,7 @@ class BurritoApplication : Application() {
 
 ---
 
-## app/src/main/java/com/example/posthog/data/User.kt
+## app/src/main/java/com/example/amplitude/data/User.kt
 
 ```kt
 package com.example.amplitude.data
@@ -285,7 +285,7 @@ data class User(
 
 ---
 
-## app/src/main/java/com/example/posthog/data/UserRepository.kt
+## app/src/main/java/com/example/amplitude/data/UserRepository.kt
 
 ```kt
 package com.example.amplitude.data
@@ -351,7 +351,7 @@ class UserRepository(context: Context) {
 
 ---
 
-## app/src/main/java/com/example/posthog/MainActivity.kt
+## app/src/main/java/com/example/amplitude/MainActivity.kt
 
 ```kt
 package com.example.amplitude
@@ -456,7 +456,7 @@ fun BurritoApp() {
 
 ---
 
-## app/src/main/java/com/example/posthog/navigation/NavGraph.kt
+## app/src/main/java/com/example/amplitude/navigation/NavGraph.kt
 
 ```kt
 package com.example.amplitude.navigation
@@ -535,7 +535,7 @@ fun NavGraph(
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/components/AppHeader.kt
+## app/src/main/java/com/example/amplitude/ui/components/AppHeader.kt
 
 ```kt
 package com.example.amplitude.ui.components
@@ -622,7 +622,7 @@ fun AppHeader(
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/components/BottomNavBar.kt
+## app/src/main/java/com/example/amplitude/ui/components/BottomNavBar.kt
 
 ```kt
 package com.example.amplitude.ui.components
@@ -734,7 +734,7 @@ fun BottomNavBar(
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/components/StatsCard.kt
+## app/src/main/java/com/example/amplitude/ui/components/StatsCard.kt
 
 ```kt
 package com.example.amplitude.ui.components
@@ -790,7 +790,7 @@ fun StatsCard(
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/screens/BurritoScreen.kt
+## app/src/main/java/com/example/amplitude/ui/screens/BurritoScreen.kt
 
 ```kt
 package com.example.amplitude.ui.screens
@@ -952,7 +952,7 @@ fun BurritoScreen(
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/screens/HomeScreen.kt
+## app/src/main/java/com/example/amplitude/ui/screens/HomeScreen.kt
 
 ```kt
 package com.example.amplitude.ui.screens
@@ -1178,7 +1178,7 @@ private fun ContentCard(
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/screens/ProfileScreen.kt
+## app/src/main/java/com/example/amplitude/ui/screens/ProfileScreen.kt
 
 ```kt
 package com.example.amplitude.ui.screens
@@ -1327,7 +1327,7 @@ private fun getJourneyMessage(count: Int): String = when {
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/theme/Color.kt
+## app/src/main/java/com/example/amplitude/ui/theme/Color.kt
 
 ```kt
 package com.example.amplitude.ui.theme
@@ -1353,7 +1353,7 @@ val White = Color(0xFFFFFFFF)
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/theme/Theme.kt
+## app/src/main/java/com/example/amplitude/ui/theme/Theme.kt
 
 ```kt
 package com.example.amplitude.ui.theme
@@ -1389,7 +1389,7 @@ fun AmplitudeTheme(
 
 ---
 
-## app/src/main/java/com/example/posthog/ui/theme/Type.kt
+## app/src/main/java/com/example/amplitude/ui/theme/Type.kt
 
 ```kt
 package com.example.amplitude.ui.theme
@@ -1479,7 +1479,7 @@ val Typography = Typography(
 
 ---
 
-## app/src/main/java/com/example/posthog/viewmodel/AuthViewModel.kt
+## app/src/main/java/com/example/amplitude/viewmodel/AuthViewModel.kt
 
 ```kt
 package com.example.amplitude.viewmodel
@@ -1527,13 +1527,13 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
             _isAuthenticated.value = true
 
             amplitude.setUserId(username)
-            amplitude.track("user_logged_in")
+            amplitude.track("User Logged In")
         }
     }
 
     fun logout() {
         viewModelScope.launch {
-            amplitude.track("user_logged_out")
+            amplitude.track("User Logged Out")
             amplitude.reset()
             repository.clearCurrentUser()
             _currentUser.value = null
@@ -1552,7 +1552,7 @@ class AuthViewModel(application: Application) : AndroidViewModel(application) {
                 "total_considerations" to updatedUser.burritoConsiderations,
                 "username" to updatedUser.username
             )
-            amplitude.track("burrito_considered", eventProperties)
+            amplitude.track("Burrito Considered", eventProperties)
         }
     }
 }

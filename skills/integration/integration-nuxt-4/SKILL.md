@@ -3,7 +3,7 @@ name: integration-nuxt-4
 description: Amplitude integration for Nuxt 4 applications
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for Nuxt 4

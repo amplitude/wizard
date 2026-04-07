@@ -5,7 +5,7 @@ description: >-
   server-rendered pages
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for Astro (Hybrid)

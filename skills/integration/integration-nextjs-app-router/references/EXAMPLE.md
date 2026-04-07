@@ -11,6 +11,14 @@ Path: basics/next-app-router
 
 This is a [Next.js](https://nextjs.org) App Router example demonstrating Amplitude integration with product analytics and event tracking.
 
+### Amplitude SDKs
+
+On the client, this example follows the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm). Add [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) and call `initAll` once. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) documents that call as initializing every product bundled with Unified npm. Here `initAll` runs from [instrumentation-client.ts](instrumentation-client.ts). Optional arguments cover `serverZone`, `instanceName`, and product blocks for `analytics`, `sessionReplay`, `experiment`, and `engagement` ([configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration)). Analytics settings match [Browser SDK 2](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2#initialize-the-sdk).
+
+The `experiment` config is for **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not the Unified **npm** package.
+
+On the server, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node) from `src/lib/amplitude-server.ts`. Keep `@amplitude/unified` on the client only.
+
 ## Features
 
 - **Product analytics**: Track user events and behaviors
@@ -78,9 +86,16 @@ instrumentation-client.ts      # Client-side Amplitude initialization
 ### Client-side initialization (instrumentation-client.ts)
 
 ```typescript
-import * as amplitude from "@amplitude/analytics-browser";
+import * as amplitude from "@amplitude/unified";
 
-amplitude.init(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY!);
+void amplitude.initAll(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY!, {
+  analytics: {
+    logLevel:
+      process.env.NODE_ENV === "development"
+        ? amplitude.Types.LogLevel.Debug
+        : amplitude.Types.LogLevel.None,
+  },
+});
 ```
 
 ### User identification (AuthContext.tsx)
@@ -95,7 +110,7 @@ amplitude.identify(identifyObj);
 ### Event tracking (burrito/page.tsx)
 
 ```typescript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: count,
   username: username,
 });
@@ -105,7 +120,7 @@ amplitude.track('burrito_considered', {
 
 ```typescript
 const amplitude = getAmplitudeClient();
-amplitude.track('server_login', { username }, { user_id: username });
+amplitude.track('Server Login Completed', { username }, { user_id: username });
 ```
 
 ## App router differences from pages router
@@ -146,11 +161,15 @@ NEXT_PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key_here
 ## instrumentation-client.ts
 
 ```ts
-import * as amplitude from "@amplitude/analytics-browser";
+import * as amplitude from "@amplitude/unified";
 
-amplitude.init(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY!, {
-  // Turn on debug in development mode
-  logLevel: process.env.NODE_ENV === "development" ? amplitude.Types.LogLevel.Debug : amplitude.Types.LogLevel.None,
+void amplitude.initAll(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY!, {
+  analytics: {
+    logLevel:
+      process.env.NODE_ENV === "development"
+        ? amplitude.Types.LogLevel.Debug
+        : amplitude.Types.LogLevel.None,
+  },
 });
 
 ```
@@ -198,7 +217,7 @@ export async function POST(request: Request) {
   // Capture server-side login event with Amplitude
   const amplitude = getAmplitudeClient();
   if (amplitude) {
-    amplitude.track('server_login', {
+    amplitude.track('Server Login Completed', {
       username: username,
       isNewUser: isNewUser,
       source: 'api',
@@ -220,7 +239,7 @@ export async function POST(request: Request) {
 import { useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useRouter } from 'next/navigation';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 export default function BurritoPage() {
   const { user, incrementBurritoConsiderations } = useAuth();
@@ -239,7 +258,7 @@ export default function BurritoPage() {
     setTimeout(() => setHasConsidered(false), 2000);
 
     // Track burrito consideration event with Amplitude
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       total_considerations: user.burritoConsiderations + 1,
       username: user.username,
     });
@@ -498,8 +517,8 @@ export default function Header() {
 'use client';
 
 import { createContext, useContext, useState, ReactNode } from 'react';
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 interface User {
   username: string;
@@ -559,7 +578,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         amplitude.identify(identifyObj);
 
         // Capture login event
-        amplitude.track('user_logged_in', {
+        amplitude.track('User Logged In', {
           username: username,
         });
 
@@ -574,7 +593,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     // Capture logout event before resetting
-    amplitude.track('user_logged_out');
+    amplitude.track('User Logged Out');
     amplitude.reset();
 
     setUser(null);
@@ -611,11 +630,13 @@ export function useAuth() {
 ## src/lib/amplitude-server.ts
 
 ```ts
-import { NodeClient, createInstance } from '@amplitude/analytics-node';
+import { createInstance } from '@amplitude/analytics-node';
 
-let amplitudeClient: NodeClient | null = null;
+type AmplitudeNodeClient = ReturnType<typeof createInstance>;
 
-export function getAmplitudeClient(): NodeClient | null {
+let amplitudeClient: AmplitudeNodeClient | null = null;
+
+export function getAmplitudeClient(): AmplitudeNodeClient | null {
   const apiKey = process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY;
   if (!apiKey) return null;
 

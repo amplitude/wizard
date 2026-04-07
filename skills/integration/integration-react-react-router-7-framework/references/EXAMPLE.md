@@ -11,6 +11,12 @@ Path: basics/react-react-router-7-framework
 
 This is a [React Router 7](https://reactrouter.com) Framework example demonstrating Amplitude integration with product analytics and event tracking.
 
+### Amplitude SDKs
+
+The browser uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with `initAll` in `entry.client.tsx`. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) documents `initAll` as initializing every product bundled with Unified npm. [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) covers `analytics`, `sessionReplay`, `experiment`, and `engagement`. The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not Unified **npm**.
+
+Middleware and API-style routes use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node).
+
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
@@ -73,22 +79,22 @@ app/
 ### Client-side initialization (app/entry.client.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 ```
 
 ### User identification (app/routes/home.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 amplitude.setUserId(username);
 const identifyObj = new Identify();
 identifyObj.set('username', username);
 amplitude.identify(identifyObj);
-amplitude.track('user_logged_in', { username });
+amplitude.track('User Logged In', { username });
 ```
 
 ### Server-side tracking (app/routes/api.auth.login.ts)
@@ -98,7 +104,7 @@ import { getServerAmplitude } from "../lib/amplitude-middleware";
 
 const amplitude = getServerAmplitude(apiKey);
 if (amplitude) {
-  amplitude.track('server_login', { username }, { user_id: username });
+  amplitude.track('Server Login Completed', { username }, { user_id: username });
   await amplitude.flush();
 }
 ```
@@ -126,13 +132,13 @@ VITE_PUBLIC_AMPLITUDE_API_KEY=
 ```tsx
 import { Link } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 export default function Header() {
   const { user, logout } = useAuth();
 
   const handleLogout = () => {
-    amplitude.track('user_logged_out');
+    amplitude.track('User Logged Out');
     amplitude.reset();
     logout();
   };
@@ -280,9 +286,9 @@ import { startTransition, StrictMode } from "react";
 import { hydrateRoot } from "react-dom/client";
 import { HydratedRouter } from "react-router/dom";
 
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 
 startTransition(() => {
   hydrateRoot(
@@ -609,7 +615,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const apiKey = (context as AmplitudeContext).amplitudeApiKey;
   const amplitude = getServerAmplitude(apiKey);
   if (amplitude) {
-    amplitude.track('server_login', { username }, { user_id: username });
+    amplitude.track('Server Login Completed', { username }, { user_id: username });
     await amplitude.flush();
   }
 
@@ -652,7 +658,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const apiKey = (context as AmplitudeContext).amplitudeApiKey;
   const amplitude = getServerAmplitude(apiKey);
   if (amplitude) {
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       username,
       total_considerations: burritoConsiderations,
     }, { user_id: username });
@@ -781,8 +787,8 @@ export default function ErrorPage() {
 import { useState } from 'react';
 import type { Route } from "./+types/home";
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 export function meta({}: Route.MetaArgs) {
   return [
@@ -811,7 +817,7 @@ export default function Home() {
         amplitude.identify(identifyObj);
 
         // Capture login event
-        amplitude.track('user_logged_in', { username });
+        amplitude.track('User Logged In', { username });
 
         setUsername('');
         setPassword('');

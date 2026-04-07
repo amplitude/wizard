@@ -60,7 +60,7 @@ if client:
     client.identify(identify_obj, {'user_id': user.email})
 
     client.track(BaseEvent(
-        event_type='user_signed_up',
+        event_type='User Signed Up',
         user_id=user.email,
         event_properties={'signup_method': 'form'},
     ))
@@ -77,7 +77,7 @@ if client:
     client.identify(identify_obj, {'user_id': user.email})
 
     client.track(BaseEvent(
-        event_type='user_logged_in',
+        event_type='User Logged In',
         user_id=user.email,
         event_properties={'login_method': 'password'},
     ))
@@ -89,7 +89,7 @@ Custom events are tracked throughout the app:
 client = get_amplitude_client()
 if client:
     client.track(BaseEvent(
-        event_type='burrito_considered',
+        event_type='Burrito Considered',
         user_id=current_user.email,
         event_properties={'total_considerations': count},
     ))
@@ -236,7 +236,7 @@ def consider_burrito():
     client = get_amplitude_client()
     if client:
         client.track(BaseEvent(
-            event_type="burrito_considered",
+            event_type="Burrito Considered",
             user_id=current_user.email,
             event_properties={"total_considerations": burrito_count},
         ))
@@ -266,7 +266,7 @@ def test_error():
             client = get_amplitude_client()
             if client:
                 client.track(BaseEvent(
-                    event_type="error_occurred",
+                    event_type="Error Occurred",
                     user_id=current_user.email,
                     event_properties={
                         "error_message": str(e),
@@ -411,7 +411,7 @@ def home():
                 client.identify(identify_obj, {"user_id": user.email})
 
                 client.track(BaseEvent(
-                    event_type="user_logged_in",
+                    event_type="User Logged In",
                     user_id=user.email,
                     event_properties={"login_method": "password"},
                 ))
@@ -459,7 +459,7 @@ def signup():
                 client.identify(identify_obj, {"user_id": user.email})
 
                 client.track(BaseEvent(
-                    event_type="user_signed_up",
+                    event_type="User Signed Up",
                     user_id=user.email,
                     event_properties={"signup_method": "form"},
                 ))
@@ -480,7 +480,7 @@ def logout():
     client = get_amplitude_client()
     if client:
         client.track(BaseEvent(
-            event_type="user_logged_out",
+            event_type="User Logged Out",
             user_id=current_user.email,
         ))
 
@@ -496,7 +496,7 @@ def dashboard():
     client = get_amplitude_client()
     if client:
         client.track(BaseEvent(
-            event_type="dashboard_viewed",
+            event_type="Dashboard Viewed",
             user_id=current_user.email,
             event_properties={"is_staff": current_user.is_staff},
         ))
@@ -522,7 +522,7 @@ def profile():
     client = get_amplitude_client()
     if client:
         client.track(BaseEvent(
-            event_type="profile_viewed",
+            event_type="Profile Viewed",
             user_id=current_user.email,
         ))
 
@@ -797,7 +797,7 @@ class User(UserMixin, db.Model):
 client = get_amplitude_client()
 if client:
     client.track(BaseEvent(
-        event_type='burrito_considered',
+        event_type='Burrito Considered',
         user_id=current_user.email,
         event_properties={'total_considerations': burrito_count},
     ))</pre>
@@ -852,7 +852,7 @@ async function considerBurrito() {
 client = get_amplitude_client()
 if client:
     client.track(BaseEvent(
-        event_type='dashboard_viewed',
+        event_type='Dashboard Viewed',
         user_id=current_user.email,
         event_properties={'is_staff': current_user.is_staff},
     ))
@@ -1027,7 +1027,7 @@ if client:
 client = get_amplitude_client()
 if client:
     client.track(BaseEvent(
-        event_type='profile_viewed',
+        event_type='Profile Viewed',
         user_id=current_user.email,
     ))</pre>
 </div>
@@ -1072,7 +1072,7 @@ if client:
     <p>When you sign up, the following Amplitude events are captured:</p>
     <ul style="margin-left: 20px; color: #666;">
         <li><code>client.identify()</code> - Sets user properties (email, is_staff, date_joined)</li>
-        <li><code>user_signed_up</code> event - Tracks the signup action</li>
+        <li><code>User Signed Up</code> event - Tracks the signup action</li>
     </ul>
 
     <h3 style="margin-top: 20px;">Code Example</h3>
@@ -1087,7 +1087,7 @@ if client:
     client.identify(identify_obj, {'user_id': user.email})
 
     client.track(BaseEvent(
-        event_type='user_signed_up',
+        event_type='User Signed Up',
         user_id=user.email,
         event_properties={'signup_method': 'form'},
     ))</pre>

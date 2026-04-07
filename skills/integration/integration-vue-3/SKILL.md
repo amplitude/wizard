@@ -3,7 +3,7 @@ name: integration-vue-3
 description: Amplitude integration for Vue 3 applications
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for Vue 3

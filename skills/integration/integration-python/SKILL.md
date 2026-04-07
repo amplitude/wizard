@@ -3,7 +3,7 @@ name: integration-python
 description: Amplitude integration for any Python application using the Python SDK
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for Python

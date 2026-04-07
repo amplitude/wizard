@@ -3,7 +3,7 @@ name: integration-react-react-router-7-declarative
 description: Amplitude integration for React Router v7 - Declarative mode applications
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for React Router v7 - Declarative mode

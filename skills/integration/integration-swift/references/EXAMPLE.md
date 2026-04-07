@@ -54,7 +54,7 @@ BurritoConsiderationClient/
 ├── ContentView.swift                    # NavigationSplitView with sidebar routing
 ├── UserState.swift                      # @Observable user state with Amplitude identify
 ├── LoginView.swift                      # Login form
-├── DashboardView.swift                  # Welcome screen with dashboard_viewed tracking
+├── DashboardView.swift                  # Welcome screen with Dashboard Viewed tracking
 ├── BurritoView.swift                    # Burrito consideration with event tracking
 ├── ProfileView.swift                    # Profile with journey progress
 └── Assets.xcassets/                     # Asset catalog
@@ -67,27 +67,25 @@ BurritoConsiderationClient/
 ```swift
 import AmplitudeSwift
 
-guard let apiKey = ProcessInfo.processInfo.environment["AMPLITUDE_API_KEY"] else {
-    fatalError("Set AMPLITUDE_API_KEY in the Xcode scheme environment variables.")
-}
-
-Amplitude.instance().initializeApiKey(apiKey)
+let amplitude = Amplitude(configuration: Configuration(
+    apiKey: ProcessInfo.processInfo.environment["AMPLITUDE_API_KEY"] ?? ""
+))
 ```
 
 ### User identification (UserState.swift)
 
 ```swift
-Amplitude.instance().setUserId(username)
-let identify = AMPIdentify()
-identify.set("username", value: username as NSObject)
-Amplitude.instance().identify(identify)
+amplitude.setUserId(userId: username)
+let identifyEvent = IdentifyEvent()
+identifyEvent.userProperties = ["username": username]
+amplitude.identify(event: identifyEvent)
 ```
 
 ### Screen view tracking (DashboardView.swift, ProfileView.swift)
 
 ```swift
 .onAppear {
-    Amplitude.instance().logEvent("dashboard_viewed", withEventProperties: [
+    amplitude.track(eventType: "Dashboard Viewed", eventProperties: [
         "username": userState.username ?? "unknown",
     ])
 }
@@ -96,18 +94,17 @@ Amplitude.instance().identify(identify)
 ### Event tracking (BurritoView.swift)
 
 ```swift
-Amplitude.instance().logEvent("burrito_considered", withEventProperties: [
-    "total_considerations": count,
-    "username": username,
+amplitude.track(eventType: "Burrito Considered", eventProperties: [
+    "total_considerations": burritoConsiderations,
+    "username": username ?? "unknown",
 ])
 ```
 
 ### User logout (UserState.swift)
 
 ```swift
-Amplitude.instance().logEvent("user_logged_out")
-Amplitude.instance().setUserId(nil)
-Amplitude.instance().regenerateDeviceId()
+amplitude.track(eventType: "User Logged Out")
+amplitude.reset()
 ```
 
 ## Learn more
@@ -140,12 +137,12 @@ Amplitude.instance().regenerateDeviceId()
   "originHash" : "a2fc303e4b16c93c972ef2ddc4042cf91a9400e5d1639bc9740a80c0336cdd4e",
   "pins" : [
     {
-      "identity" : "posthog-ios",
+      "identity" : "amplitude-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/PostHog/posthog-ios",
+      "location" : "https://github.com/amplitude/Amplitude-Swift",
       "state" : {
-        "revision" : "1783865d79a1cabc472cf2d56a1fe3f797417b52",
-        "version" : "3.40.0"
+        "revision" : "db0d1b9b6a1bfad58ddbe0e2e4b549e0c0d3f28f",
+        "version" : "1.12.0"
       }
     }
   ],
@@ -213,13 +210,8 @@ Amplitude.instance().regenerateDeviceId()
       </BuildableProductRunnable>
       <EnvironmentVariables>
          <EnvironmentVariable
-            key = "POSTHOG_PROJECT_TOKEN"
-            value = "phc_jE9kXU0depRekiuabVROlxxkIXn95NqsNO3qB4qNKtl"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "POSTHOG_HOST"
-            value = "https://us.i.posthog.com"
+            key = "AMPLITUDE_API_KEY"
+            value = "YOUR_AMPLITUDE_API_KEY"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>
@@ -623,7 +615,7 @@ class UserState {
         amplitude.identify(event: identifyEvent)
 
         // Amplitude: Track login event
-        amplitude.track(eventType: "user_logged_in", eventProperties: [
+        amplitude.track(eventType: "User Logged In", eventProperties: [
             "username": username,
         ])
 
@@ -632,7 +624,7 @@ class UserState {
 
     func logout() {
         // Amplitude: Track logout event before reset
-        amplitude.track(eventType: "user_logged_out")
+        amplitude.track(eventType: "User Logged Out")
         amplitude.reset()
 
         username = nil
@@ -641,7 +633,7 @@ class UserState {
 
     func trackBurritoConsidered() {
         // Amplitude: Track burrito consideration event
-        amplitude.track(eventType: "burrito_considered", eventProperties: [
+        amplitude.track(eventType: "Burrito Considered", eventProperties: [
             "total_considerations": burritoConsiderations,
             "username": username ?? "unknown",
         ])
@@ -649,14 +641,14 @@ class UserState {
 
     func trackDashboardViewed() {
         // Amplitude: Track dashboard view
-        amplitude.track(eventType: "dashboard_viewed", eventProperties: [
+        amplitude.track(eventType: "Dashboard Viewed", eventProperties: [
             "username": username ?? "unknown",
         ])
     }
 
     func trackProfileViewed() {
         // Amplitude: Track profile view
-        amplitude.track(eventType: "profile_viewed", eventProperties: [
+        amplitude.track(eventType: "Profile Viewed", eventProperties: [
             "username": username ?? "unknown",
         ])
     }

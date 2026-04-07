@@ -11,6 +11,12 @@ Path: basics/tanstack-start
 
 This is a [TanStack Start](https://tanstack.com/start) example demonstrating Amplitude integration with product analytics and event tracking.
 
+### Amplitude SDKs
+
+The browser loads the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with `initAll` in `src/routes/__root.tsx`. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) describes `initAll` as initializing every product bundled with Unified npm. Optional sections are in [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) (`analytics`, `sessionReplay`, `experiment`, `engagement`). The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for Amplitude’s CDN Unified script, not Unified **npm**.
+
+Server code uses [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node) in `src/utils/amplitude-server.ts`.
+
 ## Features
 
 - **Product analytics**: Track user events and behaviors
@@ -47,25 +53,25 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 ## Key Integration Points
 
-### Client-side initialization (src/routes/__root.tsx)
+### Client-side initialization (src/routes/\_\_root.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
 ```
 
 ### User identification (src/contexts/AuthContext.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
+import { Identify } from '@amplitude/unified'
 
 amplitude.setUserId(username)
 const identifyObj = new Identify()
 identifyObj.set('username', username)
 amplitude.identify(identifyObj)
-amplitude.track('user_logged_in', { username })
+amplitude.track('User Logged In', { username })
 ```
 
 ### Server-side tracking (src/utils/amplitude-server.ts)
@@ -74,14 +80,14 @@ amplitude.track('user_logged_in', { username })
 import { NodeClient, createInstance } from '@amplitude/analytics-node'
 
 const amplitude = getAmplitudeClient()
-amplitude.track('server_login', { username, source: 'api' }, { user_id: username })
+amplitude.track('Server Login Completed', { username, source: 'api' }, { user_id: username })
 await amplitude.flush()
 ```
 
 ### Event tracking (src/routes/burrito.tsx)
 
 ```typescript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: user.burritoConsiderations + 1,
   username: user.username,
 })
@@ -188,14 +194,10 @@ export default function Header() {
 ## src/contexts/AuthContext.tsx
 
 ```tsx
-import {
-  createContext,
-  useContext,
-  useState,
-  ReactNode,
-} from 'react'
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
+import { Identify } from '@amplitude/unified'
+import { createContext, useContext, useState } from 'react'
+import type { ReactNode } from 'react'
 
 interface User {
   username: string
@@ -263,7 +265,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         amplitude.identify(identifyObj)
 
         // Track login event
-        amplitude.track('user_logged_in', { username })
+        amplitude.track('User Logged In', { username })
 
         return true
       }
@@ -276,7 +278,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = () => {
     // Track logout event before resetting
-    amplitude.track('user_logged_out')
+    amplitude.track('User Logged Out')
     amplitude.reset()
 
     setUser(null)
@@ -341,7 +343,7 @@ export const getRouter = () => {
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
 import { TanStackDevtools } from '@tanstack/react-devtools'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
 import Header from '../components/Header'
 import { AuthProvider } from '../contexts/AuthContext'
@@ -349,7 +351,7 @@ import { AuthProvider } from '../contexts/AuthContext'
 import appCss from '../styles.css?url'
 
 if (typeof window !== 'undefined') {
-  amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
+  void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
 }
 
 export const Route = createRootRoute({
@@ -442,7 +444,7 @@ export const Route = createFileRoute('/api/auth/login')({
 
         // Capture server-side login event
         const amplitude = getAmplitudeClient()
-        amplitude.track('server_login', {
+        amplitude.track('Server Login Completed', {
           username,
           isNewUser,
           source: 'api',
@@ -482,7 +484,7 @@ export const Route = createFileRoute('/api/burrito/consider')({
         }
 
         const amplitude = getAmplitudeClient()
-        amplitude.track('burrito_considered', {
+        amplitude.track('Burrito Considered', {
           total_considerations: totalConsiderations,
           username,
           source: 'api',
@@ -505,7 +507,7 @@ export const Route = createFileRoute('/api/burrito/consider')({
 ```tsx
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 import { useAuth } from '../contexts/AuthContext'
 
 export const Route = createFileRoute('/burrito')({
@@ -539,7 +541,7 @@ function BurritoPage() {
     setHasConsidered(true)
     setTimeout(() => setHasConsidered(false), 2000)
 
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       total_considerations: user.burritoConsiderations + 1,
       username: user.username,
     })
@@ -786,11 +788,13 @@ function ProfilePage() {
 ## src/utils/amplitude-server.ts
 
 ```ts
-import { NodeClient, createInstance } from '@amplitude/analytics-node'
+import { createInstance } from '@amplitude/analytics-node'
 
-let amplitudeClient: NodeClient | null = null
+type AmplitudeNodeClient = ReturnType<typeof createInstance>
 
-export function getAmplitudeClient(): NodeClient {
+let amplitudeClient: AmplitudeNodeClient | null = null
+
+export function getAmplitudeClient(): AmplitudeNodeClient {
   if (!amplitudeClient) {
     const apiKey = process.env.VITE_PUBLIC_AMPLITUDE_API_KEY || import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY!
     amplitudeClient = createInstance()

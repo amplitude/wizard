@@ -73,11 +73,11 @@ The app tracks these events in Amplitude:
 
 | Event | Properties | Purpose |
 |-------|-----------|---------|
-| `todo_added` | `todo_id`, `todo_length`, `total_todos` | When user adds a new todo |
-| `todos_viewed` | `total_todos`, `completed_todos` | When user lists todos |
-| `todo_completed` | `todo_id`, `time_to_complete_hours` | When user completes a todo |
-| `todo_deleted` | `todo_id`, `was_completed` | When user deletes a todo |
-| `stats_viewed` | `total_todos`, `completed_todos`, `pending_todos` | When user views stats |
+| `Todo Added` | `todo_id`, `todo_length`, `total_todos` | When user adds a new todo |
+| `Todos Viewed` | `total_todos`, `completed_todos` | When user lists todos |
+| `Todo Completed` | `todo_id`, `time_to_complete_hours` | When user completes a todo |
+| `Todo Deleted` | `todo_id`, `was_completed` | When user deletes a todo |
+| `Stats Viewed` | `total_todos`, `completed_todos`, `pending_todos` | When user views stats |
 
 ## Code Structure
 
@@ -273,7 +273,7 @@ def cmd_add(args, client):
     print(f"Added todo #{todo['id']}: {todo['text']}")
 
     # Track the event
-    track_event(client, "todo_added", {
+    track_event(client, "Todo Added", {
         "todo_id": todo["id"],
         "todo_length": len(todo["text"]),
         "total_todos": len(data["todos"])
@@ -297,7 +297,7 @@ def cmd_list(args, client):
     print()
 
     # Track the event
-    track_event(client, "todos_viewed", {
+    track_event(client, "Todos Viewed", {
         "total_todos": len(data["todos"]),
         "completed_todos": sum(1 for t in data["todos"] if t["completed"])
     })
@@ -324,7 +324,7 @@ def cmd_complete(args, client):
     print(f"Completed todo #{todo['id']}: {todo['text']}")
 
     # Track the event
-    track_event(client, "todo_completed", {
+    track_event(client, "Todo Completed", {
         "todo_id": todo["id"],
         "time_to_complete_hours": (
             datetime.fromisoformat(todo["completed_at"]) -
@@ -349,7 +349,7 @@ def cmd_delete(args, client):
     print(f"Deleted todo #{args.id}")
 
     # Track the event
-    track_event(client, "todo_deleted", {
+    track_event(client, "Todo Deleted", {
         "todo_id": todo["id"],
         "was_completed": todo["completed"]
     })
@@ -371,7 +371,7 @@ def cmd_stats(args, client):
     print()
 
     # Track the event
-    track_event(client, "stats_viewed", {
+    track_event(client, "Stats Viewed", {
         "total_todos": total,
         "completed_todos": completed,
         "pending_todos": pending

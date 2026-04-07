@@ -5,7 +5,7 @@ description: >-
   file-based routing
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for React with TanStack Router (file-based)

@@ -9,11 +9,13 @@ Path: basics/sveltekit
 
 # SvelteKit Amplitude example
 
-This example demonstrates how to integrate Amplitude with a SvelteKit application, including:
+This example integrates Amplitude with SvelteKit: user identification and custom event tracking on the client, with optional server-side events.
 
-- Client-side Amplitude initialization using SvelteKit hooks
-- Server-side Amplitude tracking with the Node.js SDK
-- User identification and event tracking
+### Amplitude SDKs
+
+On the client, [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) is initialized with `initAll` from client hooks. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) describes that call as initializing every product bundled with Unified npm (Analytics, Session Replay, the **Feature Experiment** client, and Guides & Surveys as covered in the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm) overview). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for Amplitude’s [CDN unified script](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-script-cdn), not the Unified **npm** row—the `experiment` config here is `experiment-js-client`, not `experiment-tag`.
+
+For server-only events, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node) and keep `@amplitude/unified` in the browser.
 
 ## Getting started
 
@@ -81,27 +83,32 @@ src/
 Amplitude is initialized in the SvelteKit client hooks `init` function, which runs once when the app starts:
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
-import { PUBLIC_AMPLITUDE_API_KEY } from '$env/static/public';
+import * as amplitude from '@amplitude/unified';
+import { env } from '$env/dynamic/public';
 
 export async function init() {
-  amplitude.init(PUBLIC_AMPLITUDE_API_KEY);
+  void amplitude.initAll(env.PUBLIC_AMPLITUDE_API_KEY ?? '');
 }
 ```
+
+`$env/dynamic/public` avoids build failures when `PUBLIC_AMPLITUDE_API_KEY` is missing at build time (see [SvelteKit `$env/dynamic/public`](https://svelte.dev/docs/kit/$env-dynamic-public)).
 
 ### Server-side tracking (`src/lib/server/amplitude.ts`)
 
 A singleton pattern ensures one Amplitude client instance for server-side tracking:
 
 ```typescript
-import { NodeClient, createInstance } from '@amplitude/analytics-node';
+import { createInstance } from '@amplitude/analytics-node';
+import { env } from '$env/dynamic/public';
 
-let amplitudeClient: NodeClient | null = null;
+type AmplitudeNodeClient = ReturnType<typeof createInstance>;
 
-export function getAmplitudeClient(): NodeClient {
+let amplitudeClient: AmplitudeNodeClient | null = null;
+
+export function getAmplitudeClient(): AmplitudeNodeClient {
   if (!amplitudeClient) {
     amplitudeClient = createInstance();
-    amplitudeClient.init(PUBLIC_AMPLITUDE_API_KEY);
+    amplitudeClient.init(env.PUBLIC_AMPLITUDE_API_KEY ?? '');
   }
   return amplitudeClient;
 }
@@ -112,25 +119,25 @@ export function getAmplitudeClient(): NodeClient {
 When a user logs in, they are identified in Amplitude:
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 // On login
 amplitude.setUserId(username);
 const identifyObj = new Identify();
 identifyObj.set('username', username);
 amplitude.identify(identifyObj);
-amplitude.track('user_logged_in', { username });
+amplitude.track('User Logged In', { username });
 
 // On logout
-amplitude.track('user_logged_out');
+amplitude.track('User Logged Out');
 amplitude.reset();
 ```
 
 ### Event tracking
 
 ```typescript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: auth.user.burritoConsiderations,
   username: auth.user.username
 });
@@ -144,9 +151,9 @@ amplitude.track('burrito_considered', {
 
 ## Learn more
 
-- [Amplitude Documentation](https://amplitude.com/docs)
-- [Amplitude Browser SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2)
-- [Amplitude Node.js SDK](https://amplitude.com/docs/sdks/analytics/node)
+- [Browser Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk) — [npm & `initAll`](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm), [configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration)
+- [Browser SDK 2 (analytics)](https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2)
+- [Node.js SDK](https://amplitude.com/docs/sdks/analytics/node/node-js-sdk)
 - [SvelteKit documentation](https://svelte.dev/docs/kit)
 
 ---
@@ -214,12 +221,12 @@ export {};
 ## src/hooks.client.ts
 
 ```ts
-import * as amplitude from '@amplitude/analytics-browser';
-import { PUBLIC_AMPLITUDE_API_KEY } from '$env/static/public';
+import * as amplitude from '@amplitude/unified';
+import { env } from '$env/dynamic/public';
 
 // Initialize Amplitude when the app starts in the browser
 export async function init() {
-	amplitude.init(PUBLIC_AMPLITUDE_API_KEY);
+	void amplitude.initAll(env.PUBLIC_AMPLITUDE_API_KEY ?? '');
 }
 
 ```
@@ -243,8 +250,8 @@ export const handle: Handle = async ({ event, resolve }) => {
 
 ```ts
 import { getContext, setContext } from 'svelte';
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 import { browser } from '$app/environment';
 
 export interface User {
@@ -287,7 +294,7 @@ export class AuthState {
 					const identifyObj = new Identify();
 					identifyObj.set('username', username);
 					amplitude.identify(identifyObj);
-					amplitude.track('user_logged_in', { username });
+					amplitude.track('User Logged In', { username });
 				}
 
 				return true;
@@ -301,7 +308,7 @@ export class AuthState {
 
 	logout = (): void => {
 		if (browser) {
-			amplitude.track('user_logged_out');
+			amplitude.track('User Logged Out');
 			amplitude.reset();
 			localStorage.removeItem('currentUser');
 		}
@@ -373,15 +380,17 @@ export function getAuthContext(): AuthState {
 ## src/lib/server/amplitude.ts
 
 ```ts
-import { NodeClient, createInstance } from '@amplitude/analytics-node';
-import { PUBLIC_AMPLITUDE_API_KEY } from '$env/static/public';
+import { createInstance } from '@amplitude/analytics-node';
+import { env } from '$env/dynamic/public';
 
-let amplitudeClient: NodeClient | null = null;
+type AmplitudeNodeClient = ReturnType<typeof createInstance>;
 
-export function getAmplitudeClient(): NodeClient {
+let amplitudeClient: AmplitudeNodeClient | null = null;
+
+export function getAmplitudeClient(): AmplitudeNodeClient {
 	if (!amplitudeClient) {
 		amplitudeClient = createInstance();
-		amplitudeClient.init(PUBLIC_AMPLITUDE_API_KEY);
+		amplitudeClient.init(env.PUBLIC_AMPLITUDE_API_KEY ?? '');
 	}
 	return amplitudeClient;
 }
@@ -522,7 +531,7 @@ export const POST: RequestHandler = async ({ request }) => {
 
 	// Capture server-side login event with user context
 	const amplitude = getAmplitudeClient();
-	amplitude.track('server_login', { isNewUser, source: 'api' }, { user_id: username });
+	amplitude.track('Server Login Completed', { isNewUser, source: 'api' }, { user_id: username });
 
 	// Flush events to ensure they're sent
 	await amplitude.flush();
@@ -540,7 +549,7 @@ export const POST: RequestHandler = async ({ request }) => {
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { browser } from '$app/environment';
-	import * as amplitude from '@amplitude/analytics-browser';
+	import * as amplitude from '@amplitude/unified';
 	import { getAuthContext } from '$lib/auth.svelte';
 
 	const auth = getAuthContext();
@@ -562,7 +571,7 @@ export const POST: RequestHandler = async ({ request }) => {
 		setTimeout(() => (hasConsidered = false), 2000);
 
 		// Capture burrito consideration event with Amplitude
-		amplitude.track('burrito_considered', {
+		amplitude.track('Burrito Considered', {
 			total_considerations: auth.user.burritoConsiderations,
 			username: auth.user.username
 		});

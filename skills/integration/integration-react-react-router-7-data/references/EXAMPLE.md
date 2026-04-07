@@ -11,6 +11,12 @@ Path: basics/react-react-router-7-data
 
 This is a [React Router 7](https://reactrouter.com) Data Mode example demonstrating Amplitude integration with product analytics and event tracking.
 
+### Amplitude SDKs
+
+The browser uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with `initAll` in `index.tsx`. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) describes `initAll` as initializing every product bundled with Unified npm. Optional settings are in [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration). The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for Amplitude’s [CDN unified script](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-script-cdn), not the Unified **npm** row.
+
+For API or server-side events, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node).
+
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
@@ -68,28 +74,28 @@ index.tsx                    # App entry point with Amplitude initialization
 ### Client-side initialization (index.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 ```
 
 ### User identification (contexts/AuthContext.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 amplitude.setUserId(username);
 const identifyObj = new Identify();
 identifyObj.set('username', username);
 amplitude.identify(identifyObj);
-amplitude.track('user_logged_in', { username });
+amplitude.track('User Logged In', { username });
 ```
 
 ### Event tracking (routes/burrito.tsx)
 
 ```typescript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: updatedUser.burritoConsiderations,
   username: user.username,
 });
@@ -308,13 +314,13 @@ export namespace Route {
 ```tsx
 import { Link } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 export default function Header() {
   const { user, logout } = useAuth();
 
   const handleLogout = () => {
-    amplitude.track('user_logged_out');
+    amplitude.track('User Logged Out');
     amplitude.reset();
     logout();
   };
@@ -355,8 +361,8 @@ export default function Header() {
 ## app/contexts/AuthContext.tsx
 
 ```tsx
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 import { createContext, useContext, useState, type ReactNode } from 'react';
 
 interface User {
@@ -412,7 +418,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const identifyObj = new Identify();
     identifyObj.set('username', username);
     amplitude.identify(identifyObj);
-    amplitude.track('user_logged_in', { username });
+    amplitude.track('User Logged In', { username });
 
     return true;
   };
@@ -538,7 +544,7 @@ export const routes: RouteObject[] = [
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 export default function BurritoPage() {
   const { user, setUser } = useAuth();
@@ -566,7 +572,7 @@ export default function BurritoPage() {
     setTimeout(() => setHasConsidered(false), 2000);
 
     // Capture burrito consideration event
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       total_considerations: updatedUser.burritoConsiderations,
       username: user.username,
     });
@@ -770,9 +776,9 @@ import Home from "./app/routes/home";
 import Burrito from "./app/routes/burrito";
 import Profile from "./app/routes/profile";
 
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified'
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 
 const router = createBrowserRouter([
   {

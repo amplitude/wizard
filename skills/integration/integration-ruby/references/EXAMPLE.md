@@ -73,11 +73,11 @@ The app tracks these events in Amplitude:
 
 | Event | Properties | Purpose |
 |-------|-----------|---------|
-| `todo_added` | `todo_id`, `todo_length`, `total_todos` | When user adds a new todo |
-| `todos_viewed` | `total_todos`, `completed_todos` | When user lists todos |
-| `todo_completed` | `todo_id`, `time_to_complete_hours` | When user completes a todo |
-| `todo_deleted` | `todo_id`, `was_completed` | When user deletes a todo |
-| `stats_viewed` | `total_todos`, `completed_todos`, `pending_todos` | When user views stats |
+| `Todo Added` | `todo_id`, `todo_length`, `total_todos` | When user adds a new todo |
+| `Todos Viewed` | `total_todos`, `completed_todos` | When user lists todos |
+| `Todo Completed` | `todo_id`, `time_to_complete_hours` | When user completes a todo |
+| `Todo Deleted` | `todo_id`, `was_completed` | When user deletes a todo |
+| `Stats Viewed` | `total_todos`, `completed_todos`, `pending_todos` | When user views stats |
 
 ## Code Structure
 
@@ -241,7 +241,7 @@ def cmd_add(text, amplitude)
 
   puts "Added todo ##{todo['id']}: #{todo['text']}"
 
-  track_event(amplitude, 'todo_added', {
+  track_event(amplitude, 'Todo Added', {
     'todo_id' => todo['id'],
     'todo_length' => todo['text'].length,
     'total_todos' => data['todos'].length
@@ -266,7 +266,7 @@ def cmd_list(amplitude)
 
   puts
 
-  track_event(amplitude, 'todos_viewed', {
+  track_event(amplitude, 'Todos Viewed', {
     'total_todos' => data['todos'].length,
     'completed_todos' => data['todos'].count { |t| t['completed'] }
   })
@@ -296,7 +296,7 @@ def cmd_complete(id, amplitude)
 
   time_to_complete = (Time.parse(todo['completed_at']) - Time.parse(todo['created_at'])) / 3600.0
 
-  track_event(amplitude, 'todo_completed', {
+  track_event(amplitude, 'Todo Completed', {
     'todo_id' => todo['id'],
     'time_to_complete_hours' => time_to_complete
   })
@@ -318,7 +318,7 @@ def cmd_delete(id, amplitude)
 
   puts "Deleted todo ##{id}"
 
-  track_event(amplitude, 'todo_deleted', {
+  track_event(amplitude, 'Todo Deleted', {
     'todo_id' => todo['id'],
     'was_completed' => todo['completed']
   })
@@ -339,7 +339,7 @@ def cmd_stats(amplitude)
   puts "  Completion rate: #{total > 0 ? format('%.1f', completed.to_f / total * 100) : '0.0'}%"
   puts
 
-  track_event(amplitude, 'stats_viewed', {
+  track_event(amplitude, 'Stats Viewed', {
     'total_todos' => total,
     'completed_todos' => completed,
     'pending_todos' => pending

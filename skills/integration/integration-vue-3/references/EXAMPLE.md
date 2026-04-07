@@ -11,7 +11,9 @@ Path: basics/vue-3
 
 This is a [Vue 3](https://vuejs.org/) + [Vite](https://vitejs.dev/) example demonstrating Amplitude integration with product analytics and event tracking.
 
-It uses the `@amplitude/analytics-browser` SDK directly and shows how to:
+It uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) and `initAll` in `main.ts`. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) describes that call as initializing every product bundled with Unified npm; see [configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) for `analytics`, `sessionReplay`, `experiment`, and `engagement`. The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not Unified **npm** ([choose your installation method](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#choose-your-installation-method)).
+
+This sample shows how to:
 
 - Initialize Amplitude in `main.ts`
 - Identify users on login
@@ -57,28 +59,28 @@ Open [http://localhost:5173](http://localhost:5173) with your browser to see the
 ### Initialization (src/main.ts)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
-amplitude.init(import.meta.env.VITE_AMPLITUDE_API_KEY || '')
+void amplitude.initAll(import.meta.env.VITE_AMPLITUDE_API_KEY || '')
 ```
 
 ### User identification (src/views/Home.vue)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
+import { Identify } from '@amplitude/unified'
 
 amplitude.setUserId(username)
 const identifyObj = new Identify()
 identifyObj.set('username', username)
 amplitude.identify(identifyObj)
-amplitude.track('user_logged_in', { username })
+amplitude.track('User Logged In', { username })
 ```
 
 ### Event tracking (src/views/Burrito.vue)
 
 ```typescript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: updatedUser.burritoConsiderations,
   username: updatedUser.username
 })
@@ -87,7 +89,7 @@ amplitude.track('burrito_considered', {
 ### Session reset on logout (src/components/Header.vue)
 
 ```typescript
-amplitude.track('user_logged_out')
+amplitude.track('User Logged Out')
 amplitude.reset()
 ```
 
@@ -246,13 +248,13 @@ p {
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
 const authStore = useAuthStore()
 const router = useRouter()
 
 const handleLogout = () => {
-  amplitude.track('user_logged_out')
+  amplitude.track('User Logged Out')
   authStore.logout()
   amplitude.reset()
   router.push({ name: 'home' })
@@ -325,9 +327,9 @@ import { createPinia } from 'pinia'
 
 import App from './App.vue'
 import router from './router'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
-amplitude.init(import.meta.env.VITE_AMPLITUDE_API_KEY || '')
+void amplitude.initAll(import.meta.env.VITE_AMPLITUDE_API_KEY || '')
 
 const app = createApp(App)
 
@@ -502,7 +504,7 @@ export const useAuthStore = defineStore('auth', () => {
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
 const authStore = useAuthStore()
 const hasConsidered = ref(false)
@@ -522,7 +524,7 @@ const handleConsideration = () => {
   }, 2000)
 
   // Track burrito consideration event
-  amplitude.track('burrito_considered', {
+  amplitude.track('Burrito Considered', {
     total_considerations: updatedUser.burritoConsiderations,
     username: updatedUser.username
   })
@@ -629,8 +631,8 @@ h3 {
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useAuthStore } from '@/stores/auth'
-import * as amplitude from '@amplitude/analytics-browser'
-import { Identify } from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
+import { Identify } from '@amplitude/unified'
 
 const authStore = useAuthStore()
 const username = ref('')
@@ -653,7 +655,7 @@ const handleSubmit = async () => {
     const identifyObj = new Identify()
     identifyObj.set('username', username.value)
     amplitude.identify(identifyObj)
-    amplitude.track('user_logged_in', { username: username.value })
+    amplitude.track('User Logged In', { username: username.value })
 
     username.value = ''
     password.value = ''

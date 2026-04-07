@@ -87,7 +87,7 @@ All methods check `config('amplitude.disabled')` and return early if Amplitude i
 New users are identified and tracked on signup:
 ```php
 $amplitude->identify($user->email, $user->getAmplitudeProperties());
-$amplitude->capture($user->email, 'user_signed_up', [
+$amplitude->capture($user->email, 'User Signed Up', [
     'signup_method' => 'form',
 ]);
 ```
@@ -96,7 +96,7 @@ $amplitude->capture($user->email, 'user_signed_up', [
 Users are identified on login with their properties:
 ```php
 $amplitude->identify($user->email, $user->getAmplitudeProperties());
-$amplitude->capture($user->email, 'user_logged_in', [
+$amplitude->capture($user->email, 'User Logged In', [
     'login_method' => 'password',
 ]);
 ```
@@ -104,18 +104,18 @@ $amplitude->capture($user->email, 'user_logged_in', [
 ### Page View Tracking
 Dashboard and profile views are tracked:
 ```php
-$amplitude->capture($user->email, 'dashboard_viewed', [
+$amplitude->capture($user->email, 'Dashboard Viewed', [
     'is_staff' => $user->is_staff,
 ]);
 
-$amplitude->capture($user->email, 'profile_viewed');
+$amplitude->capture($user->email, 'Profile Viewed');
 ```
 
 ### Custom Event Tracking (`app/Http/Livewire/BurritoTracker.php`)
 The burrito tracker demonstrates custom event capture:
 ```php
 $amplitude->identify($user->email, $user->getAmplitudeProperties());
-$amplitude->capture($user->email, 'burrito_considered', [
+$amplitude->capture($user->email, 'Burrito Considered', [
     'total_considerations' => $this->burritoCount,
 ]);
 ```
@@ -124,11 +124,11 @@ $amplitude->capture($user->email, 'burrito_considered', [
 
 | Route | Component | Amplitude Events |
 |-------|-----------|-----------------|
-| `/` | Login | `user_logged_in` |
-| `/register` | Register | `user_signed_up` |
-| `/dashboard` | Dashboard | `dashboard_viewed` |
-| `/burrito` | BurritoTracker | `burrito_considered` |
-| `/profile` | Profile | `profile_viewed` |
+| `/` | Login | `User Logged In` |
+| `/register` | Register | `User Signed Up` |
+| `/dashboard` | Dashboard | `Dashboard Viewed` |
+| `/burrito` | BurritoTracker | `Burrito Considered` |
+| `/profile` | Profile | `Profile Viewed` |
 
 ## Project Structure
 
@@ -246,7 +246,7 @@ class BurritoController extends Controller
 
         // Amplitude: Track event
         $amplitude->identify($user->email, $user->getAmplitudeProperties());
-        $amplitude->capture($user->email, 'burrito_considered', [
+        $amplitude->capture($user->email, 'Burrito Considered', [
             'total_considerations' => $burritoCount,
         ]);
 
@@ -287,7 +287,7 @@ class ErrorTestController extends Controller
             if ($shouldCapture) {
                 // Capture error event in Amplitude
                 $amplitude->identify($user->email, $user->getAmplitudeProperties());
-                $amplitude->capture($user->email, 'error_occurred', [
+                $amplitude->capture($user->email, 'Error Occurred', [
                     'error_message' => $e->getMessage(),
                     'error_type' => get_class($e),
                 ]);
@@ -356,7 +356,7 @@ class Login extends Component
 
             // Amplitude: Identify and track login
             $amplitude->identify($user->email, $user->getAmplitudeProperties());
-            $amplitude->capture($user->email, 'user_logged_in', [
+            $amplitude->capture($user->email, 'User Logged In', [
                 'login_method' => 'password',
             ]);
 
@@ -414,7 +414,7 @@ class Register extends Component
 
         // Amplitude: Identify new user and track signup
         $amplitude->identify($user->email, $user->getAmplitudeProperties());
-        $amplitude->capture($user->email, 'user_signed_up', [
+        $amplitude->capture($user->email, 'User Signed Up', [
             'signup_method' => 'form',
         ]);
 
@@ -464,7 +464,7 @@ class BurritoTracker extends Component
         // Amplitude: Track burrito consideration
         $user = Auth::user();
         $amplitude->identify($user->email, $user->getAmplitudeProperties());
-        $amplitude->capture($user->email, 'burrito_considered', [
+        $amplitude->capture($user->email, 'Burrito Considered', [
             'total_considerations' => $this->burritoCount,
         ]);
 
@@ -500,7 +500,7 @@ class Dashboard extends Component
         $user = Auth::user();
 
         // Amplitude: Track dashboard view
-        $amplitude->capture($user->email, 'dashboard_viewed', [
+        $amplitude->capture($user->email, 'Dashboard Viewed', [
             'is_staff' => $user->is_staff,
         ]);
 
@@ -536,7 +536,7 @@ class Profile extends Component
         $user = Auth::user();
 
         // Amplitude: Track profile view
-        $amplitude->capture($user->email, 'profile_viewed');
+        $amplitude->capture($user->email, 'Profile Viewed');
     }
 
     public function render()
@@ -1854,13 +1854,13 @@ require __DIR__.'/../vendor/autoload.php';
         <p class="text-gray">When you sign up, the following Amplitude events are captured:</p>
         <ul class="text-gray" style="margin-top: 10px;">
             <li><code>identify()</code> - Associates your email with the user and sets properties</li>
-            <li><code>user_signed_up</code> event - Tracks the signup action</li>
+            <li><code>User Signed Up</code> event - Tracks the signup action</li>
         </ul>
 
         <h3 style="margin-top: 20px;">Code Example</h3>
         <pre>// After creating the user
 $amplitude->identify($user->email, $user->getAmplitudeProperties());
-$amplitude->capture($user->email, 'user_signed_up', [
+$amplitude->capture($user->email, 'User Signed Up', [
     'signup_method' => 'form'
 ]);</pre>
     </div>
@@ -1902,7 +1902,7 @@ public function considerBurrito(AmplitudeService $amplitude)
 
     $user = Auth::user();
     $amplitude->identify($user->email, $user->getAmplitudeProperties());
-    $amplitude->capture($user->email, 'burrito_considered', [
+    $amplitude->capture($user->email, 'Burrito Considered', [
         'total_considerations' => $this->burritoCount,
     ]);
 }</pre>
@@ -1928,7 +1928,7 @@ public function considerBurrito(AmplitudeService $amplitude)
 
         <h3 style="margin-top: 20px;">Code Example</h3>
         <pre>// Track dashboard view
-$amplitude->capture($user->email, 'dashboard_viewed', [
+$amplitude->capture($user->email, 'Dashboard Viewed', [
     'is_staff' => $user->is_staff,
 ]);
 
@@ -1967,7 +1967,7 @@ $amplitude->capture($user->email, 'dashboard_viewed', [
     <div class="card">
         <h3>Code Example</h3>
         <pre>// Track profile view
-$amplitude->capture($user->email, 'profile_viewed');</pre>
+$amplitude->capture($user->email, 'Profile Viewed');</pre>
     </div>
 </div>
 
@@ -2023,7 +2023,7 @@ Route::middleware('auth')->group(function () {
         $user = Auth::user();
 
         // Amplitude: Track logout
-        $amplitude->capture($user->email, 'user_logged_out');
+        $amplitude->capture($user->email, 'User Logged Out');
 
         Auth::logout();
         request()->session()->invalidate();

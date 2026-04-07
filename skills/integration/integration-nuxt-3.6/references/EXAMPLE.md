@@ -11,7 +11,13 @@ Path: basics/nuxt-3.6
 
 This is a [Nuxt 3.6](https://nuxt.com) example demonstrating Amplitude integration with product analytics and event tracking.
 
-Nuxt 3.0 - 3.6 **does not** support the `@amplitude/nuxt` package. You must use the `@amplitude/analytics-browser` and `@amplitude/analytics-node` packages directly instead.
+### Amplitude SDKs
+
+The browser uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): `@amplitude/unified` with `initAll` in [plugins/amplitude.client.ts](plugins/amplitude.client.ts). [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) documents one `initAll` call as initializing every product bundled with Unified npm; optional tuning is in [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) (`analytics`, `sessionReplay`, `experiment`, `engagement`, plus shared options).
+
+The `experiment` block configures **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not the Unified **npm** row.
+
+Nitro and API routes use `@amplitude/analytics-node`.
 
 ## Features
 
@@ -85,14 +91,14 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 ### Client-side initialization (plugins/amplitude.client.ts)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
 export default defineNuxtPlugin((nuxtApp) => {
   const runtimeConfig = useRuntimeConfig()
   const apiKey = runtimeConfig.public.amplitudeApiKey as string | undefined
 
   if (apiKey) {
-    amplitude.init(apiKey)
+    void amplitude.initAll(apiKey)
   }
 
   return {
@@ -106,7 +112,7 @@ export default defineNuxtPlugin((nuxtApp) => {
 ### User identification (pages/index.vue)
 
 ```typescript
-import { Identify } from '@amplitude/analytics-browser'
+import { Identify } from '@amplitude/unified'
 
 const { $amplitude: amplitude } = useNuxtApp()
 
@@ -118,7 +124,7 @@ const handleSubmit = async () => {
     identifyObj.set('username', username.value)
     amplitude.identify(identifyObj)
 
-    amplitude.track('user_logged_in', { username: username.value })
+    amplitude.track('User Logged In', { username: username.value })
   }
 }
 ```
@@ -128,7 +134,7 @@ const handleSubmit = async () => {
 ```typescript
 const { $amplitude: amplitude } = useNuxtApp()
 
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: response.user.burritoConsiderations,
   username: response.user.username,
 })
@@ -141,7 +147,7 @@ import { NodeClient, createInstance } from '@amplitude/analytics-node'
 
 const amplitudeClient: NodeClient = createInstance()
 amplitudeClient.init(apiKey)
-amplitudeClient.track('server_login', { username }, { user_id: username })
+amplitudeClient.track('Server Login Completed', { username }, { user_id: username })
 await amplitudeClient.flush()
 ```
 
@@ -157,7 +163,7 @@ amplitude.track('event_name', { property: 'value' })
 TypeScript types are provided via `types/nuxt-app.d.ts`:
 
 ```typescript
-import type * as amplitude from '@amplitude/analytics-browser'
+import type * as amplitude from '@amplitude/unified'
 
 declare module '#app' {
   interface NuxtApp {
@@ -235,7 +241,7 @@ const user = computed(() => auth.user.value)
 const { $amplitude: amplitude } = useNuxtApp()
 
 const handleLogout = () => {
-  amplitude?.track('user_logged_out')
+  amplitude?.track('User Logged Out')
   amplitude?.reset()
   auth.logout()
 }
@@ -408,7 +414,7 @@ const handleConsideration = async () => {
       hasConsidered.value = true
 
       // Client-side tracking (in addition to server-side tracking)
-      amplitude.track('burrito_considered', {
+      amplitude.track('Burrito Considered', {
         total_considerations: response.user.burritoConsiderations,
         username: response.user.username,
       })
@@ -478,7 +484,7 @@ const handleConsideration = async () => {
 </template>
 
 <script setup lang="ts">
-import { Identify } from '@amplitude/analytics-browser'
+import { Identify } from '@amplitude/unified'
 
 const auth = useAuth()
 const user = computed(() => auth.user.value)
@@ -499,7 +505,7 @@ const handleSubmit = async () => {
     amplitude.identify(identifyObj)
 
     // Capture login event
-    amplitude.track('user_logged_in', { username: username.value })
+    amplitude.track('User Logged In', { username: username.value })
 
     username.value = ''
     password.value = ''
@@ -570,14 +576,14 @@ watchEffect(() => {
 
 ```ts
 import { defineNuxtPlugin, useRuntimeConfig } from '#imports'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
 export default defineNuxtPlugin((nuxtApp) => {
   const runtimeConfig = useRuntimeConfig()
   const apiKey = runtimeConfig.public.amplitudeApiKey as string | undefined
 
   if (apiKey) {
-    amplitude.init(apiKey)
+    void amplitude.initAll(apiKey)
   }
 
   return {
@@ -605,7 +611,8 @@ Disallow:
 
 ```ts
 import { getOrCreateUser } from '~/server/utils/users'
-import { NodeClient, createInstance } from '@amplitude/analytics-node'
+import { createInstance } from '@amplitude/analytics-node'
+import type { NodeClient } from '@amplitude/analytics-core'
 import { useRuntimeConfig } from '#imports'
 
 export default defineEventHandler(async (event) => {
@@ -635,7 +642,7 @@ export default defineEventHandler(async (event) => {
   if (apiKey) {
     const amplitudeClient: NodeClient = createInstance()
     amplitudeClient.init(apiKey)
-    amplitudeClient.track('server_login', { username }, { user_id: username })
+    amplitudeClient.track('Server Login Completed', { username }, { user_id: username })
     await amplitudeClient.flush()
   }
 
@@ -653,7 +660,8 @@ export default defineEventHandler(async (event) => {
 
 ```ts
 import { users, incrementBurritoConsiderations } from '~/server/utils/users'
-import { NodeClient, createInstance } from '@amplitude/analytics-node'
+import { createInstance } from '@amplitude/analytics-node'
+import type { NodeClient } from '@amplitude/analytics-core'
 import { useRuntimeConfig } from '#imports'
 
 export default defineEventHandler(async (event) => {
@@ -690,7 +698,7 @@ export default defineEventHandler(async (event) => {
   if (apiKey) {
     const amplitudeClient: NodeClient = createInstance()
     amplitudeClient.init(apiKey)
-    amplitudeClient.track('burrito_considered', {
+    amplitudeClient.track('Burrito Considered', {
       total_considerations: user.burritoConsiderations,
       username,
     }, { user_id: username })
@@ -752,7 +760,7 @@ export function incrementBurritoConsiderations(username: string): User {
 ## types/nuxt-app.d.ts
 
 ```ts
-import type * as amplitude from '@amplitude/analytics-browser'
+import type * as amplitude from '@amplitude/unified'
 
 declare module '#app' {
   interface NuxtApp {

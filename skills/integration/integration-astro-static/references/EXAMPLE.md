@@ -9,21 +9,19 @@ Path: basics/astro-static
 
 # Amplitude Astro Static Example
 
-This is an [Astro](https://astro.build/) static site (SSG) example demonstrating Amplitude integration with product analytics, session replay, and error tracking.
+This is an [Astro](https://astro.build/) static site (SSG) example demonstrating Amplitude integration with product analytics.
 
-It uses the Amplitude web snippet directly and shows how to:
+### Amplitude SDKs
 
-- Initialize Amplitude in a static Astro site using a reusable component
-- Identify users after login
-- Track custom events from pages
-- Capture errors via `amplitude.captureException()`
-- Reset Amplitude state on logout
+This static site uses only the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm). [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) is bundled in `src/components/amplitude.astro`; `initAll` runs on the client. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) documents that call as initializing every product bundled with Unified npm. See [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) for `analytics`, `sessionReplay`, `experiment`, and `engagement`. The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the [CDN script](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-script-cdn), not Unified **npm**.
+
+There is no server SDK in this sample. For Node or API routes, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node) (see [astro-ssr](../astro-ssr)).
+
+The layout assigns the unified namespace to `window.amplitude` so `is:inline` scripts can call `track`, `setUserId`, and `reset` without importing the package on every page (see [accessing SDK features](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#access-sdk-features) in the official doc).
 
 ## Features
 
-- **Product analytics**: Track login and burrito consideration events
-- **Session replay**: Enabled via Amplitude snippet configuration
-- **Error tracking**: Manual error capture sent to Amplitude
+- **Product analytics**: Login and burrito consideration events
 - **Simple auth flow**: Demo login using localStorage
 
 ## Getting started
@@ -31,8 +29,6 @@ It uses the Amplitude web snippet directly and shows how to:
 ### 1. Install dependencies
 
 ```bash
-npm install
-# or
 pnpm install
 ```
 
@@ -41,17 +37,14 @@ pnpm install
 Create a `.env` file in the project root:
 
 ```bash
-PUBLIC_AMPLITUDE_API_KEY=your_amplitude_project_token
-PUBLIC_AMPLITUDE_API_KEY=https://us.i.amplitude.com
+PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
 ```
 
-Get your Amplitude project token from your project settings in Amplitude.
+`PUBLIC_` exposes the variable to the browser. Get your API key from [Amplitude project settings](https://app.amplitude.com).
 
 ### 3. Run the development server
 
 ```bash
-npm run dev
-# or
 pnpm dev
 ```
 
@@ -62,103 +55,78 @@ Open `http://localhost:4321` in your browser.
 ```text
 src/
   components/
-    amplitude.astro      # Amplitude snippet with is:inline directive
-    Header.astro       # Navigation + logout, calls amplitude.reset()
+    amplitude.astro      # initAll() + window.amplitude for inline scripts
+    Header.astro         # Logout; track + reset
   layouts/
-    AmplitudeLayout.astro # Root layout that includes Amplitude + Header
+    AmplitudeLayout.astro
   lib/
-    auth.ts            # Auth utilities (localStorage-based)
+    auth.ts
   pages/
-    index.astro        # Login form, identifies user + captures 'user_logged_in'
-    burrito.astro      # Burrito consideration demo, captures 'burrito_considered'
-    profile.astro      # Profile + error tracking demo
+    index.astro        # Login; setUserId + track('User Logged In')
+    burrito.astro      # track('Burrito Considered', …)
+    profile.astro
   styles/
-    global.css         # Global styles
+    global.css
 ```
 
 ## Key integration points
 
 ### Amplitude initialization (`src/components/amplitude.astro`)
 
-The Amplitude snippet is included as an inline script to prevent Astro from processing it:
-
 ```astro
-<script is:inline>
-  !function(t,e){...}(document,window.amplitude||[]);
-  amplitude.init('<ph_project_token>', {
-    api_host: 'https://us.i.amplitude.com',
-    defaults: '2026-01-30'
-  })
+<script>
+  import * as amplitude from "@amplitude/unified";
+
+  const apiKey = import.meta.env.PUBLIC_AMPLITUDE_API_KEY;
+  if (apiKey) {
+    void amplitude.initAll(apiKey);
+  }
+  window.amplitude = amplitude;
 </script>
 ```
 
-The `is:inline` directive is required to prevent TypeScript errors about `window.amplitude`.
+Session Replay, Experiment, and other products can be configured via the second argument to `initAll()` ([Browser Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk)).
 
 ### User identification (`src/pages/index.astro`)
 
-After a successful "login", the app identifies the user and captures a login event:
+After login, the demo sets the user id and tracks an event:
 
 ```javascript
-window.amplitude?.identify(username);
-window.amplitude?.capture("user_logged_in");
+window.amplitude?.setUserId(username);
+window.amplitude?.track("User Logged In");
 ```
-
-Identification happens **only on login**, all further requests will automatically use the same distinct ID.
 
 ### Event tracking (`src/pages/burrito.astro`)
 
-The burrito page tracks a custom event when a user "considers" the burrito:
-
 ```javascript
-window.amplitude?.capture("burrito_considered", {
+window.amplitude?.track("Burrito Considered", {
   total_considerations: newCount,
   username: currentUser,
 });
 ```
 
-This shows how to attach useful properties to events (e.g. counts, usernames).
+### Logout (`src/components/Header.astro`)
 
-### Error tracking (`src/pages/profile.astro`)
-
-The profile page includes a button to trigger a test error:
+On logout, the demo clears local state and resets Amplitude:
 
 ```javascript
-try {
-  throw new Error("Test error for Amplitude error tracking");
-} catch (err) {
-  window.amplitude?.captureException(err);
-}
-```
-
-### Logout and session reset (`src/components/Header.astro`)
-
-On logout, both the local auth state and Amplitude state are cleared:
-
-```javascript
-window.amplitude?.capture("user_logged_out");
+window.amplitude?.track("User Logged Out");
 localStorage.removeItem("currentUser");
+localStorage.removeItem("burritoConsiderations");
 window.amplitude?.reset();
 ```
-
-`amplitude.reset()` clears the current distinct ID and session so the next login starts a fresh identity.
 
 ## Scripts
 
 ```bash
-# Run dev server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
+pnpm dev
+pnpm build
+pnpm preview
 ```
 
 ## Learn more
 
-- [Amplitude documentation](https://amplitude.com/docs)
-- [Amplitude Astro guide](https://amplitude.com/docs/libraries/astro)
+- [Browser Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk) — [npm install & `initAll`](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm), [configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration)
 - [Astro documentation](https://docs.astro.build/)
 
 ---
@@ -187,13 +155,17 @@ export default defineConfig({});
 
 ```astro
 ---
-// Amplitude analytics snippet for client-side tracking
-// Uses is:inline to prevent Astro from processing the script
+// Client-side Amplitude: bundled @amplitude/unified (initAll).
+// Exposes the same namespace on window.amplitude for is:inline page scripts.
 ---
-<script is:inline define:vars={{ apiKey: import.meta.env.PUBLIC_AMPLITUDE_API_KEY }}>
-  !function(){"use strict";!function(e,t){var r=e.amplitude||{_q:[],_iq:{}};if(r.invoked)e.console&&console.error&&console.error("Amplitude snippet has been loaded.");else{r.invoked=!0;var n=t.createElement("script");n.type="text/javascript",n.integrity="sha384-x0ik2D45ZDEEEpYpEuDpmj05fY91P7EOZkgdKmVBAZoGtzwnlsHI9AqlBJmg+WT4",n.crossOrigin="anonymous",n.async=!0,n.src="https://cdn.amplitude.com/libs/analytics-browser-2.11.1-min.js.gz",n.onload=function(){e.amplitude.runQueuedFunctions||console.log("[Amplitude] Error: could not load SDK")};var s=t.getElementsByTagName("script")[0];function v(e,t){e.prototype[t]=function(){return this._q.push({name:t,args:Array.prototype.slice.call(arguments,0)}),this}}s.parentNode.insertBefore(n,s);for(var o=function(){return this._q=[],this},a=["add","append","clearAll","prepend","set","setOnce","unset","preInsert","postInsert","remove","getUserProperties"],c=0;c<a.length;c++)v(o,a[c]);r.Identify=o;for(var u=function(){return this._q=[],this},l=["getEventProperties","setProductId","setQuantity","setPrice","setRevenue","setRevenueType","setEventProperties"],p=0;p<l.length;p++)v(u,l[p]);r.Revenue=u;var d=["getDeviceId","setDeviceId","getSessionId","setSessionId","getUserId","setUserId","setOptOut","setTransport","reset","extendSession"],f=["init","add","remove","track","logEvent","identify","groupIdentify","setGroup","revenue","flush"];function m(e){function t(t,r){e[t]=function(){var n={promise:new Promise((r=>{e._q.push({name:t,args:Array.prototype.slice.call(arguments,0),resolve:r})}))};if(r)return n}}for(var r=0;r<d.length;r++)t(d[r],!1);for(var n=0;n<f.length;n++)t(f[n],!0)}m(r),r.getInstance=function(e){return e=(e&&e.length>0&&e||"$default_instance").toLowerCase(),Object.prototype.hasOwnProperty.call(r._iq,e)||(r._iq[e]={_q:[]},m(r._iq[e])),r._iq[e]},e.amplitude=r}}(window,document)}();
+<script>
+  import * as amplitude from "@amplitude/unified";
 
-  amplitude.init(apiKey || '');
+  const apiKey = import.meta.env.PUBLIC_AMPLITUDE_API_KEY;
+  if (apiKey) {
+    void amplitude.initAll(apiKey);
+  }
+  window.amplitude = amplitude;
 </script>
 
 ```
@@ -247,7 +219,7 @@ export default defineConfig({});
   function handleLogout() {
     const currentUser = localStorage.getItem('currentUser');
     if (currentUser) {
-      window.amplitude?.track('user_logged_out');
+      window.amplitude?.track('User Logged Out');
     }
     localStorage.removeItem('currentUser');
     localStorage.removeItem('burritoConsiderations');
@@ -318,6 +290,24 @@ export default defineConfig({});
     background-color: #c82333;
   }
 </style>
+
+```
+
+---
+
+## src/env.d.ts
+
+```ts
+/// <reference types="astro/client" />
+
+declare global {
+  interface Window {
+    amplitude?: typeof import("@amplitude/unified");
+    __amplitude_initialized?: boolean;
+  }
+}
+
+export {};
 
 ```
 
@@ -483,7 +473,7 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
     }, 2000);
 
     // Capture burrito consideration event in Amplitude
-    window.amplitude?.track('burrito_considered', {
+    window.amplitude?.track('Burrito Considered', {
       total_considerations: newCount,
       username: currentUser
     });
@@ -593,7 +583,7 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
 
     // Identify the user in Amplitude (once on login is enough)
     window.amplitude?.setUserId(username);
-    window.amplitude?.track('user_logged_in');
+    window.amplitude?.track('User Logged In');
 
     // Clear form
     document.getElementById('username').value = '';

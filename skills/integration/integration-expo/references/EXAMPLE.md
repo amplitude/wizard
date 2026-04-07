@@ -120,7 +120,7 @@ const apiKey = Constants.expoConfig?.extra?.amplitudeApiKey
 Events are tracked with properties:
 
 ```typescript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: count,
   username: user.username,
 })
@@ -143,7 +143,7 @@ Manual screen tracking with Expo Router:
 
 ```typescript
 useEffect(() => {
-  amplitude.track('screen_viewed', {
+  amplitude.track('Screen Viewed', {
     screen_name: pathname,
     previous_screen: previousPathname.current,
   })
@@ -305,7 +305,7 @@ export default function RootLayout() {
   // React Compiler will auto-optimize this effect
   useEffect(() => {
     if (previousPathname.current !== pathname) {
-      amplitude.track('screen_viewed', {
+      amplitude.track('Screen Viewed', {
         screen_name: pathname,
         previous_screen: previousPathname.current ?? null,
         // Include route params for analytics (filter sensitive data if needed)
@@ -387,7 +387,7 @@ export default function BurritoScreen() {
     setTimeout(() => setHasConsidered(false), 2000)
 
     // Capture custom event in Amplitude with properties
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       total_considerations: newCount,
       username: user.username,
     })
@@ -1019,7 +1019,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       identifyObj.set('username', username)
       amplitude.identify(identifyObj)
 
-      amplitude.track('user_logged_in', {
+      amplitude.track('User Logged In', {
         username,
         is_new_user: isNewUser,
       })
@@ -1032,7 +1032,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }
 
   const logout = async () => {
-    amplitude.track('user_logged_out')
+    amplitude.track('User Logged Out')
     amplitude.reset()
     await storage.removeCurrentUser()
     setUser(null)

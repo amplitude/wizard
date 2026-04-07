@@ -11,6 +11,12 @@ Path: basics/react-tanstack-router-file-based
 
 This is a React and [TanStack Router](https://tanstack.com/router) example demonstrating Amplitude integration with product analytics and event tracking. This example uses **file-based routing** where routes are auto-generated from the file system.
 
+### Amplitude SDKs
+
+The client uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with `initAll` once in `main.tsx`. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) documents that call as initializing every product bundled with Unified npm; see [configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration). The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the [CDN unified script](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-script-cdn), not Unified **npm**.
+
+When you add a backend or API, send events with [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node).
+
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
@@ -50,28 +56,28 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 ### Client-side initialization (main.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 ```
 
 ### User identification (contexts/AuthContext.tsx)
 
 ```typescript
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 amplitude.setUserId(username);
 const identifyObj = new Identify();
 identifyObj.set('username', username);
 amplitude.identify(identifyObj);
-amplitude.track('user_logged_in', { username });
+amplitude.track('User Logged In', { username });
 ```
 
 ### Event tracking (routes/burrito.tsx)
 
 ```typescript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: user.burritoConsiderations + 1,
   username: user.username,
 });
@@ -206,9 +212,10 @@ export default function Header() {
 ## src/contexts/AuthContext.tsx
 
 ```tsx
-import { createContext, useContext, useState, type ReactNode } from 'react';
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
+import { createContext, useContext, useState } from 'react';
+import type { ReactNode } from 'react';
 
 interface User {
   username: string;
@@ -241,21 +248,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return null;
   });
 
-  const login = async (username: string, password: string): Promise<boolean> => {
+  const login = (username: string, password: string): Promise<boolean> => {
     if (!username || !password) {
-      return false;
+      return Promise.resolve(false);
     }
 
     // Get or create user in local map
-    let user = users.get(username);
-    const isNewUser = !user;
+    let localUser = users.get(username);
+    const isNewUser = !localUser;
 
-    if (!user) {
-      user = { username, burritoConsiderations: 0 };
-      users.set(username, user);
+    if (!localUser) {
+      localUser = { username, burritoConsiderations: 0 };
+      users.set(username, localUser);
     }
 
-    setUser(user);
+    setUser(localUser);
     localStorage.setItem('currentUser', username);
 
     // Identify user in Amplitude using username as user ID
@@ -265,17 +272,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     amplitude.identify(identifyObj);
 
     // Capture login event
-    amplitude.track('user_logged_in', {
+    amplitude.track('User Logged In', {
       username,
       isNewUser,
     });
 
-    return true;
+    return Promise.resolve(true);
   };
 
   const logout = () => {
     // Capture logout event before resetting
-    amplitude.track('user_logged_out');
+    amplitude.track('User Logged Out');
     amplitude.reset();
 
     setUser(null);
@@ -315,7 +322,7 @@ export function useAuth() {
 import { StrictMode } from 'react'
 import ReactDOM from 'react-dom/client'
 import { RouterProvider, createRouter } from '@tanstack/react-router'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 
 // Import the generated route tree
 import { routeTree } from './routeTree.gen.ts'
@@ -324,7 +331,7 @@ import './styles.css'
 import reportWebVitals from './reportWebVitals.ts'
 
 // Initialize Amplitude
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY)
 
 // Create a new router instance
 const router = createRouter({
@@ -425,7 +432,7 @@ export const Route = createRootRoute({
 ```tsx
 import { useState } from 'react'
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import * as amplitude from '@amplitude/analytics-browser'
+import * as amplitude from '@amplitude/unified'
 import { useAuth } from '../contexts/AuthContext'
 
 export const Route = createFileRoute('/burrito')({
@@ -449,7 +456,7 @@ function BurritoPage() {
     setTimeout(() => setHasConsidered(false), 2000)
 
     // Capture burrito consideration event
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       total_considerations: user.burritoConsiderations + 1,
       username: user.username,
     })
@@ -637,12 +644,12 @@ function ProfilePage() {
 ## vite.config.ts
 
 ```ts
-import { defineConfig } from 'vite'
-import viteReact from '@vitejs/plugin-react'
-import tailwindcss from '@tailwindcss/vite'
+import { URL, fileURLToPath } from 'node:url'
 
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
-import { fileURLToPath, URL } from 'node:url'
+import tailwindcss from '@tailwindcss/vite'
+import { defineConfig } from 'vite'
+import viteReact from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
 export default defineConfig({

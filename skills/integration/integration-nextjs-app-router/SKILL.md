@@ -3,7 +3,7 @@ name: integration-nextjs-app-router
 description: Amplitude integration for Next.js App Router applications
 metadata:
   author: Amplitude
-  version: 1.2.0
+  version: 1.2.1
 ---
 
 # Amplitude integration for Next.js App Router

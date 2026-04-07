@@ -130,7 +130,7 @@ identify_event = Amplitude::IdentifyEvent.new(
 )
 amplitude.identify(identify_event)
 
-amplitude_track('user_logged_in',
+amplitude_track('User Logged In',
   user_id: user.amplitude_user_id,
   properties: { login_method: 'email' }
 )
@@ -139,7 +139,7 @@ amplitude_track('user_logged_in',
 ### Event tracking (app/controllers/burritos_controller.rb)
 
 ```ruby
-amplitude_track('burrito_considered',
+amplitude_track('Burrito Considered',
   user_id: user.amplitude_user_id,
   properties: { total_considerations: count }
 )
@@ -217,7 +217,7 @@ class BurritosController < ApplicationController
     user = current_user
 
     # Amplitude: Track custom event
-    amplitude_track('burrito_considered',
+    amplitude_track('Burrito Considered',
       user_id: user.amplitude_user_id,
       properties: { total_considerations: count }
     )
@@ -240,7 +240,7 @@ class DashboardController < ApplicationController
     user = current_user
 
     # Amplitude: Track dashboard view
-    amplitude_track('dashboard_viewed',
+    amplitude_track('Dashboard Viewed',
       user_id: user.amplitude_user_id,
       properties: { is_staff: user.is_staff }
     )
@@ -277,7 +277,7 @@ class ProfilesController < ApplicationController
 
   def show
     # Amplitude: Track profile view
-    amplitude_track('profile_viewed', user_id: current_user.amplitude_user_id)
+    amplitude_track('Profile Viewed', user_id: current_user.amplitude_user_id)
   end
 end
 
@@ -310,7 +310,7 @@ class RegistrationsController < ApplicationController
       )
       amplitude.identify(identify_event)
 
-      amplitude_track('user_signed_up',
+      amplitude_track('User Signed Up',
         user_id: user.amplitude_user_id,
         properties: { signup_method: 'form' }
       )
@@ -348,7 +348,7 @@ class SessionsController < ApplicationController
       )
       amplitude.identify(identify_event)
 
-      amplitude_track('user_logged_in',
+      amplitude_track('User Logged In',
         user_id: user.amplitude_user_id,
         properties: { login_method: 'email' }
       )
@@ -363,7 +363,7 @@ class SessionsController < ApplicationController
   def destroy
     if current_user
       # Amplitude: Track logout before session ends
-      amplitude_track('user_logged_out', user_id: current_user.amplitude_user_id)
+      amplitude_track('User Logged Out', user_id: current_user.amplitude_user_id)
     end
 
     session.delete(:user_id)
@@ -462,9 +462,9 @@ end
 
 <div class="card">
     <h3>How event tracking works</h3>
-    <p>Each time you click the button, a <code>burrito_considered</code> event is sent to Amplitude:</p>
+    <p>Each time you click the button, a <code>Burrito Considered</code> event is sent to Amplitude:</p>
     <pre style="background: #f3f4f6; padding: 15px; border-radius: 5px; overflow-x: auto; margin-top: 15px;"><code>amplitude.track(Amplitude::BaseEvent.new(
-  event_type: 'burrito_considered',
+  event_type: 'Burrito Considered',
   user_id: user.amplitude_user_id,
   event_properties: { total_considerations: count }
 ))</code></pre>

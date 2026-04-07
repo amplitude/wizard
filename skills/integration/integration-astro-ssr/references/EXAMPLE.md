@@ -9,176 +9,97 @@ Path: basics/astro-ssr
 
 # Amplitude Astro SSR Example
 
-This is an [Astro](https://astro.build/) server-side rendered (SSR) example demonstrating Amplitude integration with both client-side and server-side event tracking.
+This is an [Astro](https://astro.build/) server-rendered example with Amplitude on both the client and the server.
 
-It uses:
+### Amplitude SDKs
 
-- **Client-side**: Amplitude web snippet for browser analytics
-- **Server-side**: `@amplitude/analytics-node` for API route event tracking
+In the browser, use the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with `initAll` in `src/components/amplitude.astro`. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) describes `initAll` as initializing every product bundled with Unified npm. `window.amplitude` is set so inline scripts can call the SDK. Product sections are documented under [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration). The `experiment` block is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not Unified **npm**.
 
-This shows how to:
-
-- Initialize Amplitude on both client and server
-- Track events from API routes using `@amplitude/analytics-node`
-- Pass session IDs from client to server for unified sessions
-- Identify users on both client and server
-- Capture errors via `amplitude.captureException()`
-- Reset Amplitude state on logout
+On the server, API routes use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node) through `src/lib/amplitude-server.ts` (`track`, `identify`, and related APIs). Prefer the Node SDK there rather than `@amplitude/unified`.
 
 ## Features
 
-- **Server-side rendering**: Full SSR with `output: 'server'`
-- **API routes**: Server-side endpoints for auth and event tracking
-- **Dual tracking**: Events captured on both client and server
-- **Session continuity**: Session ID passed to server via headers
-- **Product analytics**: Track login and burrito consideration events
-- **Session replay**: Enabled via Amplitude snippet configuration
-- **Error tracking**: Manual error capture sent to Amplitude
-- **Simple auth flow**: Demo login using localStorage + server API
+- **SSR** with `output: 'server'` and `@astrojs/node`
+- **API routes** with server-side analytics
+- **Client tracking** via unified SDK + `window.amplitude`
 
 ## Getting started
 
 ### 1. Install dependencies
 
 ```bash
-npm install
-# or
 pnpm install
 ```
 
 ### 2. Configure environment variables
 
-Create a `.env` file in the project root:
-
 ```bash
-# Client-side (PUBLIC_ prefix exposes to browser)
-PUBLIC_AMPLITUDE_API_KEY=your_amplitude_project_token
-PUBLIC_AMPLITUDE_API_KEY=https://us.i.amplitude.com
+# Required in the browser (PUBLIC_ prefix)
+PUBLIC_AMPLITUDE_API_KEY=your_amplitude_api_key
 
-# Server-side (no PUBLIC_ prefix, server-only)
-AMPLITUDE_API_KEY=your_amplitude_project_token
-AMPLITUDE_API_KEY=https://us.i.amplitude.com
+# Server-only API routes (not exposed to client bundles)
+AMPLITUDE_API_KEY=your_amplitude_api_key
 ```
 
-Get your Amplitude project token from your project settings in Amplitude.
+Use the same project key for both unless you intentionally split projects.
 
 ### 3. Run the development server
 
 ```bash
-npm run dev
-# or
 pnpm dev
 ```
 
-Open `http://localhost:4321` in your browser.
-
-## Project structure
-
-```text
-src/
-  components/
-    amplitude.astro      # Amplitude snippet for client-side tracking
-    Header.astro       # Navigation + logout, calls amplitude.reset()
-  layouts/
-    AmplitudeLayout.astro # Root layout that includes Amplitude + Header
-  lib/
-    auth.ts            # Client-side auth utilities
-    amplitude-server.ts  # Server-side Amplitude client singleton
-  pages/
-    index.astro        # Login form, calls /api/auth/login
-    burrito.astro      # Burrito demo, calls /api/events/burrito
-    profile.astro      # Profile + error tracking demo
-    api/
-      auth/
-        login.ts       # Server-side login endpoint with Amplitude tracking
-      events/
-        burrito.ts     # Server-side event capture endpoint
-  styles/
-    global.css         # Global styles
-```
+Open `http://localhost:4321`.
 
 ## Key integration points
 
-### Server-side Amplitude client (`src/lib/amplitude-server.ts`)
+### Client (`src/components/amplitude.astro`)
 
-A singleton pattern ensures only one Amplitude client is created:
+```astro
+<script>
+  import * as amplitude from "@amplitude/unified";
+
+  const apiKey = import.meta.env.PUBLIC_AMPLITUDE_API_KEY;
+  if (apiKey) {
+    void amplitude.initAll(apiKey);
+  }
+  window.amplitude = amplitude;
+</script>
+```
+
+### Server client (`src/lib/amplitude-server.ts`)
 
 ```typescript
-import { Amplitude } from "@amplitude/analytics-node";
+import { init, flush } from "@amplitude/analytics-node";
+import type { NodeClient } from "@amplitude/analytics-core";
 
-let amplitudeClient: Amplitude | null = null;
+let amplitudeClient: NodeClient | null = null;
 
-export function getAmplitudeServer(): Amplitude {
+export function getAmplitudeServer(): NodeClient {
   if (!amplitudeClient) {
-    amplitudeClient = new Amplitude(import.meta.env.AMPLITUDE_API_KEY, {
-      host: import.meta.env.AMPLITUDE_API_KEY,
-      flushAt: 1,
-      flushInterval: 0,
-    });
+    amplitudeClient = init(import.meta.env.AMPLITUDE_API_KEY || "");
   }
   return amplitudeClient;
 }
 ```
 
-### API route with server-side tracking (`src/pages/api/auth/login.ts`)
+### API route (`src/pages/api/auth/login.ts`)
 
-```typescript
-import { getAmplitudeServer } from "../../../lib/amplitude-server";
+Server events use the Node SDK (`track`, `identify`, …) after `getAmplitudeServer()` initializes the instance.
 
-export const POST: APIRoute = async ({ request }) => {
-  const body = await request.json();
-  const { username } = body;
+### Client login (`src/pages/index.astro`)
 
-  // Get session ID from client
-  const sessionId = request.headers.get("X-Amplitude-Session-Id");
-
-  const amplitude = getAmplitudeServer();
-
-  // Capture server-side event
-  amplitude.capture({
-    distinctId: username,
-    event: "server_login",
-    properties: {
-      $session_id: sessionId || undefined,
-      source: "api",
-    },
-  });
-
-  return new Response(JSON.stringify({ success: true }));
-};
-```
-
-### Passing session ID to server (`src/pages/index.astro`)
+The login handler `POST`s to `/api/auth/login`, then sets the user and tracks on the client:
 
 ```javascript
-// Get the session ID from Amplitude to pass to the server
-const sessionId = window.amplitude?.get_session_id?.() || null;
-
-const response = await fetch("/api/auth/login", {
-  method: "POST",
-  headers: {
-    "Content-Type": "application/json",
-    "X-Amplitude-Session-Id": sessionId || "",
-  },
-  body: JSON.stringify({ username, password }),
-});
+window.amplitude?.setUserId(username);
+window.amplitude?.track("User Logged In");
 ```
 
-### Client-side identification (`src/pages/index.astro`)
-
-After server login succeeds, also identify on client:
+### Logout (`src/components/Header.astro`)
 
 ```javascript
-window.amplitude?.identify(username);
-window.amplitude?.capture("user_logged_in");
-```
-
-### Logout and session reset (`src/components/Header.astro`)
-
-On logout, both the local auth state and Amplitude state are cleared:
-
-```javascript
-window.amplitude?.capture("user_logged_out");
+window.amplitude?.track("User Logged Out");
 localStorage.removeItem("currentUser");
 window.amplitude?.reset();
 ```
@@ -186,22 +107,16 @@ window.amplitude?.reset();
 ## Scripts
 
 ```bash
-# Run dev server
-npm run dev
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
+pnpm dev
+pnpm build
+pnpm preview
 ```
 
 ## Learn more
 
-- [Amplitude documentation](https://amplitude.com/docs)
-- [Amplitude Astro guide](https://amplitude.com/docs/libraries/astro)
-- [Amplitude Node.js SDK](https://amplitude.com/docs/libraries/node)
-- [Astro SSR documentation](https://docs.astro.build/en/guides/server-side-rendering/)
+- [Browser Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk) — [npm](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm), [configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration)
+- [Node.js SDK](https://amplitude.com/docs/sdks/analytics/node/node-js-sdk)
+- [Astro SSR](https://docs.astro.build/en/guides/server-side-rendering/)
 
 ---
 
@@ -242,13 +157,17 @@ export default defineConfig({
 
 ```astro
 ---
-// Amplitude analytics snippet for client-side tracking
-// Uses is:inline to prevent Astro from processing the script
+// Client-side Amplitude: bundled @amplitude/unified (initAll).
+// Exposes the same namespace on window.amplitude for is:inline page scripts.
 ---
-<script is:inline define:vars={{ apiKey: import.meta.env.PUBLIC_AMPLITUDE_API_KEY }}>
-  !function(){"use strict";!function(e,t){var r=e.amplitude||{_q:[],_iq:{}};if(r.invoked)e.console&&console.error&&console.error("Amplitude snippet has been loaded.");else{r.invoked=!0;var n=t.createElement("script");n.type="text/javascript",n.integrity="sha384-x0ik2D45ZDEEEpYpEuDpmj05fY91P7EOZkgdKmVBAZoGtzwnlsHI9AqlBJmg+WT4",n.crossOrigin="anonymous",n.async=!0,n.src="https://cdn.amplitude.com/libs/analytics-browser-2.11.1-min.js.gz",n.onload=function(){e.amplitude.runQueuedFunctions||console.log("[Amplitude] Error: could not load SDK")};var s=t.getElementsByTagName("script")[0];function v(e,t){e.prototype[t]=function(){return this._q.push({name:t,args:Array.prototype.slice.call(arguments,0)}),this}}s.parentNode.insertBefore(n,s);for(var o=function(){return this._q=[],this},a=["add","append","clearAll","prepend","set","setOnce","unset","preInsert","postInsert","remove","getUserProperties"],c=0;c<a.length;c++)v(o,a[c]);r.Identify=o;for(var u=function(){return this._q=[],this},l=["getEventProperties","setProductId","setQuantity","setPrice","setRevenue","setRevenueType","setEventProperties"],p=0;p<l.length;p++)v(u,l[p]);r.Revenue=u;var d=["getDeviceId","setDeviceId","getSessionId","setSessionId","getUserId","setUserId","setOptOut","setTransport","reset","extendSession"],f=["init","add","remove","track","logEvent","identify","groupIdentify","setGroup","revenue","flush"];function m(e){function t(t,r){e[t]=function(){var n={promise:new Promise((r=>{e._q.push({name:t,args:Array.prototype.slice.call(arguments,0),resolve:r})}))};if(r)return n}}for(var r=0;r<d.length;r++)t(d[r],!1);for(var n=0;n<f.length;n++)t(f[n],!0)}m(r),r.getInstance=function(e){return e=(e&&e.length>0&&e||"$default_instance").toLowerCase(),Object.prototype.hasOwnProperty.call(r._iq,e)||(r._iq[e]={_q:[]},m(r._iq[e])),r._iq[e]},e.amplitude=r}}(window,document)}();
+<script>
+  import * as amplitude from "@amplitude/unified";
 
-  amplitude.init(apiKey || '');
+  const apiKey = import.meta.env.PUBLIC_AMPLITUDE_API_KEY;
+  if (apiKey) {
+    void amplitude.initAll(apiKey);
+  }
+  window.amplitude = amplitude;
 </script>
 
 ```
@@ -302,7 +221,7 @@ export default defineConfig({
   function handleLogout() {
     const currentUser = localStorage.getItem('currentUser');
     if (currentUser) {
-      window.amplitude?.track('user_logged_out');
+      window.amplitude?.track('User Logged Out');
     }
     localStorage.removeItem('currentUser');
     localStorage.removeItem('burritoConsiderations');
@@ -378,6 +297,24 @@ export default defineConfig({
 
 ---
 
+## src/env.d.ts
+
+```ts
+/// <reference types="astro/client" />
+
+declare global {
+  interface Window {
+    amplitude?: typeof import("@amplitude/unified");
+    __amplitude_initialized?: boolean;
+  }
+}
+
+export {};
+
+```
+
+---
+
 ## src/layouts/AmplitudeLayout.astro
 
 ```astro
@@ -417,7 +354,8 @@ const { title } = Astro.props;
 ## src/lib/amplitude-server.ts
 
 ```ts
-import { NodeClient, init, flush } from "@amplitude/analytics-node";
+import { init, flush } from "@amplitude/analytics-node";
+import type { NodeClient } from "@amplitude/analytics-core";
 
 let amplitudeClient: NodeClient | null = null;
 
@@ -540,7 +478,7 @@ export const POST: APIRoute = async ({ request }) => {
     getAmplitudeServer();
 
     // Capture server-side login event
-    track("server_login", {
+    track("Server Login Completed", {
       isNewUser,
       source: "api",
       timestamp: new Date().toISOString(),
@@ -598,7 +536,7 @@ export const POST: APIRoute = async ({ request }) => {
     getAmplitudeServer();
 
     // Capture server-side burrito consideration event
-    track("burrito_considered", {
+    track("Burrito Considered", {
       total_considerations: totalConsiderations,
       source: "api",
       timestamp: new Date().toISOString(),
@@ -694,7 +632,7 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
     }, 2000);
 
     // Client-side event tracking
-    window.amplitude?.track('burrito_considered', {
+    window.amplitude?.track('Burrito Considered', {
       total_considerations: newCount,
       username: currentUser,
       source: 'client'
@@ -837,7 +775,7 @@ import AmplitudeLayout from '../layouts/AmplitudeLayout.astro';
 
       // Also identify on the client side (for session continuity)
       window.amplitude?.setUserId(username);
-      window.amplitude?.track('user_logged_in');
+      window.amplitude?.track('User Logged In');
 
       // Clear form
       document.getElementById('username').value = '';

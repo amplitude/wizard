@@ -11,6 +11,12 @@ Path: basics/react-react-router-6
 
 This is a [React Router 6](https://reactrouter.com) example demonstrating Amplitude integration with product analytics and event tracking.
 
+### Amplitude SDKs
+
+The client uses the [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#unified-sdk-npm): [`@amplitude/unified`](https://www.npmjs.com/package/@amplitude/unified) with `initAll` in `main.jsx`. [Initialize the Unified SDK](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#initialize-the-unified-sdk) describes `initAll` as initializing every product bundled with Unified npm; see [Unified SDK configuration](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#configuration) for the `analytics`, `sessionReplay`, `experiment`, and `engagement` sections. The `experiment` section is **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not Unified **npm**.
+
+For server-only or API tracking, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node).
+
 ## Features
 
 - **Product Analytics**: Track user events and behaviors
@@ -69,29 +75,29 @@ src/
 ### Client-side initialization (main.jsx)
 
 ```javascript
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 ```
 
 ### User identification (routes/Home.jsx)
 
 ```javascript
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 amplitude.setUserId(username);
 const identifyObj = new Identify();
 identifyObj.set('username', username);
 amplitude.identify(identifyObj);
 
-amplitude.track('user_logged_in', { username });
+amplitude.track('User Logged In', { username });
 ```
 
 ### Event tracking (routes/Burrito.jsx)
 
 ```javascript
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: updatedUser.burritoConsiderations,
   username: user.username,
 });
@@ -100,7 +106,7 @@ amplitude.track('burrito_considered', {
 ### Logout (components/Header.jsx)
 
 ```javascript
-amplitude.track('user_logged_out', { username: user.username });
+amplitude.track('User Logged Out', { username: user.username });
 amplitude.reset();
 ```
 
@@ -147,14 +153,14 @@ VITE_PUBLIC_AMPLITUDE_API_KEY=
 ```jsx
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 export default function Header() {
   const { user, logout } = useAuth();
 
   const handleLogout = () => {
     if (user) {
-      amplitude.track('user_logged_out', {
+      amplitude.track('User Logged Out', {
         username: user.username,
       });
     }
@@ -255,6 +261,7 @@ export function AuthProvider({ children }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components -- useAuth is the companion hook for AuthProvider
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
@@ -281,10 +288,10 @@ import Home from './routes/Home';
 import Burrito from './routes/Burrito';
 import Profile from './routes/Profile';
 
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 // Initialize Amplitude
-amplitude.init(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
+void amplitude.initAll(import.meta.env.VITE_PUBLIC_AMPLITUDE_API_KEY);
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
@@ -313,7 +320,7 @@ ReactDOM.createRoot(root).render(
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
 
 export default function BurritoPage() {
   const { user, setUser } = useAuth();
@@ -338,7 +345,7 @@ export default function BurritoPage() {
     setUser(updatedUser);
     setHasConsidered(true);
     setTimeout(() => setHasConsidered(false), 2000);
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       total_considerations: updatedUser.burritoConsiderations,
       username: user.username,
     });
@@ -381,8 +388,8 @@ export default function BurritoPage() {
 ```jsx
 import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
-import * as amplitude from '@amplitude/analytics-browser';
-import { Identify } from '@amplitude/analytics-browser';
+import * as amplitude from '@amplitude/unified';
+import { Identify } from '@amplitude/unified';
 
 export default function Home() {
   const { user, login } = useAuth();
@@ -402,7 +409,7 @@ export default function Home() {
       identifyObj.set('username', username);
       amplitude.identify(identifyObj);
 
-      amplitude.track('user_logged_in', {
+      amplitude.track('User Logged In', {
         username: username,
       });
       setUsername('');

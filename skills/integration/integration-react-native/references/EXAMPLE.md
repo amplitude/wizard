@@ -226,7 +226,7 @@ import { amplitude } from './src/config/amplitude'
 onStateChange={() => {
   const currentRouteName = navigationRef.current?.getCurrentRoute()?.name
   if (previousRouteName !== currentRouteName && currentRouteName) {
-    amplitude.track('screen_viewed', {
+    amplitude.track('Screen Viewed', {
       screen_name: currentRouteName,
       previous_screen: previousRouteName,
     })
@@ -247,13 +247,13 @@ identifyObj.set('username', username)
 amplitude.identify(identifyObj)
 
 // Track login event
-amplitude.track('user_logged_in', {
+amplitude.track('User Logged In', {
   username,
   is_new_user: isNewUser,
 })
 
 // On logout - reset clears identity
-amplitude.track('user_logged_out')
+amplitude.track('User Logged Out')
 amplitude.reset()
 ```
 
@@ -262,7 +262,7 @@ amplitude.reset()
 ```typescript
 import { amplitude } from '../config/amplitude'
 
-amplitude.track('burrito_considered', {
+amplitude.track('Burrito Considered', {
   total_considerations: newCount,
   username: user.username,
 })
@@ -653,7 +653,7 @@ export default function App() {
 
           if (previousRouteName !== currentRouteName && currentRouteName) {
             // Track screen view event
-            amplitude.track('screen_viewed', {
+            amplitude.track('Screen Viewed', {
               screen_name: currentRouteName,
               previous_screen: previousRouteName,
             })
@@ -1285,7 +1285,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         amplitude.identify(identifyObj)
 
         // Track login event with properties
-        amplitude.track('user_logged_in', {
+        amplitude.track('User Logged In', {
           username,
           is_new_user: isNewUser,
         })
@@ -1301,7 +1301,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   const logout = useCallback(async () => {
     // Track logout event before reset
-    amplitude.track('user_logged_out')
+    amplitude.track('User Logged Out')
 
     // Reset Amplitude - clears the current user's identity
     amplitude.reset()
@@ -1490,7 +1490,7 @@ export default function BurritoScreen() {
     setTimeout(() => setHasConsidered(false), 2000)
 
     // Track custom event in Amplitude with properties
-    amplitude.track('burrito_considered', {
+    amplitude.track('Burrito Considered', {
       total_considerations: newCount,
       username: user.username,
     })
