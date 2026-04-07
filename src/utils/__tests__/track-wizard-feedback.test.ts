@@ -29,7 +29,7 @@ describe('trackWizardFeedback', () => {
     mockFlush.mockClear();
   });
 
-  it('initializes the Node client, tracks Wizard: Feedback Submitted, and flushes', async () => {
+  it('initializes the Node client, tracks wizard: feedback submitted, and flushes', async () => {
     await trackWizardFeedback('  hello  ');
 
     expect(mockCreateInstance).toHaveBeenCalledTimes(1);

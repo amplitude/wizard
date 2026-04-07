@@ -16,7 +16,7 @@ export const COMMANDS = [
   { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
   {
     cmd: '/feedback',
-    desc: 'Send product feedback (event: Wizard: Feedback Submitted)',
+    desc: 'Send product feedback (event: wizard: feedback submitted)',
   },
   { cmd: '/test', desc: 'Run a prompt-skill demo (confirm + choose)' },
   { cmd: '/snake', desc: 'Play Snake' },

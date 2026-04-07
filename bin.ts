@@ -791,7 +791,7 @@ void yargs(hideBin(process.argv))
   )
   .command(
     'feedback',
-    'Send product feedback (Amplitude event: Wizard: Feedback Submitted)',
+    'Send product feedback (Amplitude event: wizard: Feedback Submitted)',
     (yargs) => {
       return yargs.options({
         message: {

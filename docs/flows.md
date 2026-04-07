@@ -17,7 +17,7 @@ actions.
 | `/dashboard` | Create a new dashboard                                            |
 | `/taxonomy`  | Interact with the taxonomy agent                                  |
 | `/slack`     | Connect your Amplitude project to Slack                           |
-| `/feedback`  | Send product feedback (event `Wizard: Feedback Submitted`)        |
+| `/feedback`  | Send product feedback (event `wizard: feedback submitted`)        |
 | `/help`      | List available slash commands                                     |
 
 ---
@@ -37,7 +37,7 @@ flowchart TD
     CMD --> FEEDBACK["feedback"]
     CMD --> WIZARD["wizard (default)"]
 
-    FEEDBACK --> FEEDBACK_SEND["Track Wizard: Feedback Submitted via Node SDK"]
+    FEEDBACK --> FEEDBACK_SEND["Track wizard: feedback submitted via Node SDK"]
 
     LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
