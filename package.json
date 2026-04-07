@@ -108,7 +108,7 @@
     "prebuild": "pnpm clean",
     "build:watch": "pnpm tsc -w",
     "build": "pnpm tsc",
-    "postbuild": "chmod +x ./dist/bin.js && cp -r scripts/** dist && cp -r src/utils/rules dist/src/utils && cp src/ui/tui/package.json dist/src/ui/tui/package.json && pnpm test:smoke",
+    "postbuild": "chmod +x ./dist/bin.js && pnpm test:smoke",
     "test:smoke": "node -e \"require('./dist/bin.js')\" 2>&1 | head -5 | grep -q 'Amplitude Wizard' || (echo 'Smoke test failed: compiled binary crashed on load' && exit 1)",
     "lint": "pnpm lint:prettier && pnpm lint:eslint",
     "lint:prettier": "prettier --check \"{lib,src,test}/**/*.ts\"",
