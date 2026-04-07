@@ -14,13 +14,16 @@ import {
 } from './package-manager';
 import type { CloudRegion, WizardOptions } from './types';
 import { getPackageVersion } from './package-json';
-import { DEFAULT_HOST_URL, ISSUES_URL } from '../lib/constants';
+import {
+  DEFAULT_HOST_URL,
+  DEFAULT_AMPLITUDE_ZONE,
+  OUTBOUND_URLS,
+} from '../lib/constants';
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
 import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
 import { storeToken } from './ampli-settings';
-import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
 import { detectRegionFromToken } from './urls';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
@@ -188,7 +191,7 @@ export async function installPackage({
         `${chalk.red(
           'Encountered the following error during installation:',
         )}\n\n${e}\n\n${chalk.dim(
-          `The wizard has created a \`amplitude-wizard-installation-error-*.log\` file. If you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${ISSUES_URL}`,
+          `The wizard has created a \`amplitude-wizard-installation-error-*.log\` file. If you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${OUTBOUND_URLS.githubIssues}`,
         )}`,
       );
       await abort();
@@ -317,6 +320,73 @@ export function isUsingTypeScript({
 }
 
 /**
+ * Best-effort credentials for `--ci` when `--api-key` / AMPLITUDE_WIZARD_API_KEY
+ * is not set: project-local key (.env.local / keychain), then OAuth id token from
+ * ~/.ampli.json plus org/workspace from ampli.json (same resolution as interactive bootstrap).
+ */
+export async function tryResolveCredentialsForCi(installDir: string): Promise<{
+  host: string;
+  projectApiKey: string;
+  accessToken: string;
+  cloudRegion: CloudRegion;
+} | null> {
+  const { readApiKeyWithSource } = await import('./api-key-store.js');
+  const local = readApiKeyWithSource(installDir);
+  if (local) {
+    return {
+      host: DEFAULT_HOST_URL,
+      projectApiKey: local.key,
+      accessToken: local.key,
+      cloudRegion: 'us',
+    };
+  }
+
+  const { getStoredUser, getStoredToken } = await import('./ampli-settings.js');
+  const { readAmpliConfig } = await import('../lib/ampli-config.js');
+  const { getAPIKey } = await import('./get-api-key.js');
+  const { getHostFromRegion } = await import('./urls.js');
+
+  const storedUser = getStoredUser();
+  const realUser =
+    storedUser && storedUser.id !== 'pending' ? storedUser : null;
+  const projectConfig = readAmpliConfig(installDir);
+  const projectZone = projectConfig.ok ? projectConfig.config.Zone : undefined;
+  const zone = realUser?.zone ?? projectZone ?? DEFAULT_AMPLITUDE_ZONE;
+
+  const storedToken = realUser
+    ? getStoredToken(realUser.id, realUser.zone)
+    : getStoredToken(undefined, zone);
+
+  if (!storedToken?.idToken) {
+    return null;
+  }
+
+  const workspaceId = projectConfig.ok
+    ? projectConfig.config.WorkspaceId
+    : undefined;
+
+  const projectApiKey = await getAPIKey({
+    installDir,
+    idToken: storedToken.idToken,
+    zone,
+    workspaceId,
+  });
+
+  if (!projectApiKey) {
+    return null;
+  }
+
+  const cloudRegion: CloudRegion = zone === 'eu' ? 'eu' : 'us';
+
+  return {
+    host: getHostFromRegion(cloudRegion),
+    projectApiKey,
+    accessToken: storedToken.idToken,
+    cloudRegion,
+  };
+}
+
+/**
  * Get project data for the wizard via Amplitude OAuth or CI API key.
  *
  * Pass installDir to enable fresh-auth detection: when no local ampli.json
@@ -346,6 +416,44 @@ export async function getOrAskForProjectData(
       projectId: _options.projectId ?? 0,
       cloudRegion: 'us',
     };
+  }
+
+  if (_options.ci) {
+    const ciInstallDir = _options.installDir;
+    if (!ciInstallDir) {
+      getUI().log.error(
+        chalk.red(
+          'CI mode requires --install-dir (or AMPLITUDE_WIZARD_INSTALL_DIR).',
+        ),
+      );
+      await wizardAbort({
+        message: 'CI mode requires an install directory.',
+      });
+    } else {
+      const resolved = await tryResolveCredentialsForCi(ciInstallDir);
+      if (resolved) {
+        getUI().log.info(
+          chalk.dim('Resolved Amplitude API key non-interactively (CI mode).'),
+        );
+        return {
+          host: resolved.host,
+          projectApiKey: resolved.projectApiKey,
+          accessToken: resolved.accessToken,
+          projectId: _options.projectId ?? 0,
+          cloudRegion: resolved.cloudRegion,
+        };
+      }
+
+      getUI().log.error(
+        chalk.red(
+          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local / keychain), or ensure ~/.ampli.json has a valid OAuth session (and ampli.json includes WorkspaceId if needed).',
+        ),
+      );
+      await wizardAbort({
+        message:
+          'CI mode requires a project API key or resolvable Amplitude credentials.',
+      });
+    }
   }
 
   // Force fresh OAuth for projects that haven't been set up yet — no local

@@ -185,9 +185,14 @@ describe('CI mode validation', () => {
     vi.resetModules();
   });
 
-  test('requires --api-key when --ci is set', async () => {
+  test('invokes runWizard in CI mode without --api-key when --install-dir is set', async () => {
     await runCLI(['--ci', '--install-dir', '/tmp/test']);
-    expect(process.exit).toHaveBeenCalledWith(1);
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(mockRunWizard).toHaveBeenCalledWith(
+      expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
+    );
   });
 
   test('requires --install-dir when --ci is set', async () => {
@@ -798,10 +803,12 @@ describe.skip('CLI argument parsing', () => {
       expect(args.ci).toBe(true);
     });
 
-    test('requires --api-key when --ci is set', async () => {
+    test('invokes runWizard without --api-key when --ci and --install-dir are set', async () => {
       await runCLI(['--ci', '--install-dir', '/tmp/test']);
+      await waitFor(() => mockRunWizard.mock.calls.length > 0);
 
-      expect(process.exit).toHaveBeenCalledWith(1);
+      expect(process.exit).not.toHaveBeenCalled();
+      expect(mockRunWizard).toHaveBeenCalled();
     });
 
     test('requires --install-dir when --ci is set', async () => {

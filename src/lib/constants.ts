@@ -192,9 +192,6 @@ export const OUTBOUND_URLS = {
   githubIssues: 'https://github.com/amplitude/wizard/issues',
 };
 
-/** @deprecated Use OUTBOUND_URLS.githubIssues */
-export const ISSUES_URL = OUTBOUND_URLS.githubIssues;
-
 /** Placeholder embedded in generated code when the user skips key entry. */
 export const DUMMY_PROJECT_API_KEY = '_YOUR_AMPLITUDE_API_KEY_';
 

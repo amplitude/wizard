@@ -17,7 +17,7 @@ import { logToFile } from './debug.js';
 import {
   AMPLITUDE_ZONE_SETTINGS,
   DEFAULT_AMPLITUDE_ZONE,
-  ISSUES_URL,
+  OUTBOUND_URLS,
   OAUTH_PORT,
   type AmplitudeZone,
 } from '../lib/constants.js';
@@ -364,7 +364,7 @@ export async function performAmplitudeAuth(options: {
       getUI().log.error(
         `${chalk.red('Authorization failed:')}\n\n${
           error.message
-        }\n\n${chalk.dim(`File an issue:\n${ISSUES_URL}`)}`,
+        }\n\n${chalk.dim(`File an issue:\n${OUTBOUND_URLS.githubIssues}`)}`,
       );
     }
 

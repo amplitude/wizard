@@ -170,13 +170,6 @@ void yargs(hideBin(process.argv))
       if (options.ci) {
         // Use LoggingUI for CI mode (no dependencies, no prompts)
         setUI(new LoggingUI());
-        if (!options.apiKey) {
-          getUI().intro(chalk.inverse(`Amplitude Wizard`));
-          getUI().log.error(
-            'CI mode requires --api-key (Amplitude project API key)',
-          );
-          process.exit(1);
-        }
         if (!options.installDir) {
           getUI().intro(chalk.inverse(`Amplitude Wizard`));
           getUI().log.error(
@@ -194,7 +187,8 @@ void yargs(hideBin(process.argv))
             'It appears you are running in a non-interactive environment.\n' +
             'Please run the wizard in an interactive terminal.\n\n' +
             'For CI/CD environments, use --ci mode:\n' +
-            '  npx @amplitude/wizard --ci --api-key <your-key> --install-dir .',
+            '  npx @amplitude/wizard --ci --install-dir . [--api-key <your-key>]\n' +
+            '  (--api-key is optional when a key can be resolved from env or stored credentials.)',
         );
         process.exit(1);
       } else {
