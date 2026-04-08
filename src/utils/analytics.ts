@@ -2,6 +2,14 @@ import { createInstance } from '@amplitude/analytics-node';
 import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
+import {
+  initFeatureFlags,
+  refreshFlags,
+  getFlag,
+  getAllFlags,
+  isFlagEnabled,
+  FLAG_AGENT_ANALYTICS,
+} from '../lib/feature-flags';
 
 const DEFAULT_TELEMETRY_API_KEY = 'e5a2c9bdffe949f7da77e6b481e118fa';
 
@@ -115,8 +123,15 @@ export class Analytics {
    * All new wizard analytics should use this method instead of capture() directly.
    * Use lowercase with spaces for eventName (e.g. "agent started", "api key submitted")
    * per Amplitude quickstart taxonomy guidelines.
+   *
+   * Gated by the `wizard-agent-analytics` feature flag — when the flag is off,
+   * events are logged to debug but not sent to Amplitude.
    */
   wizardCapture(eventName: string, properties?: Record<string, unknown>): void {
+    if (!this.isFeatureFlagEnabled(FLAG_AGENT_ANALYTICS)) {
+      debug('wizardCapture (flag off):', eventName, properties);
+      return;
+    }
     this.capture(`wizard: ${eventName}`, properties);
   }
 
@@ -133,10 +148,32 @@ export class Analytics {
     }).promise;
   }
 
+  /**
+   * Initialize the Amplitude Experiment feature-flag client.
+   * Call once early in startup (e.g. after obtaining a user/device ID).
+   */
+  async initFlags(): Promise<void> {
+    await initFeatureFlags(this.distinctId, this.anonymousId);
+  }
+
+  /**
+   * Re-evaluate flags after the user identity changes (e.g. post-login).
+   */
+  async refreshFlags(): Promise<void> {
+    await refreshFlags(this.distinctId, this.anonymousId);
+    this.activeFlags = getAllFlags();
+  }
+
   // eslint-disable-next-line @typescript-eslint/require-await
   async getFeatureFlag(flagKey: string): Promise<string | boolean | undefined> {
-    debug('getFeatureFlag (noop):', flagKey);
-    return undefined;
+    return getFlag(flagKey);
+  }
+
+  /**
+   * Check if a flag is enabled (variant is 'on' or 'true').
+   */
+  isFeatureFlagEnabled(flagKey: string): boolean {
+    return isFlagEnabled(flagKey);
   }
 
   /**
@@ -149,7 +186,7 @@ export class Analytics {
     if (this.activeFlags !== null) {
       return this.activeFlags;
     }
-    this.activeFlags = {};
+    this.activeFlags = getAllFlags();
     return this.activeFlags;
   }
 

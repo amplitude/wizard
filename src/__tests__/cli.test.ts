@@ -116,6 +116,12 @@ vi.mock('../utils/environment', () => ({
 vi.mock('../utils/track-wizard-feedback.js', () => ({
   trackWizardFeedback: mockTrackWizardFeedback,
 }));
+vi.mock('../lib/feature-flags', () => ({
+  initFeatureFlags: vi.fn().mockResolvedValue(undefined),
+  isFlagEnabled: vi.fn().mockReturnValue(true),
+  FLAG_LLM_ANALYTICS: 'wizard-llm-analytics',
+  FLAG_AGENT_ANALYTICS: 'wizard-agent-analytics',
+}));
 vi.mock('../lib/detect-amplitude', () => ({
   detectAmplitudeInProject: vi.fn().mockReturnValue({ confidence: 'none' }),
 }));

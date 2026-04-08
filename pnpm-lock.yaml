@@ -14,6 +14,9 @@ importers:
       '@amplitude/analytics-node':
         specifier: ^1.5.51
         version: 1.5.51
+      '@amplitude/experiment-node-server':
+        specifier: ^1.13.4
+        version: 1.13.4
       '@anthropic-ai/claude-agent-sdk':
         specifier: 0.2.7
         version: 0.2.7(zod@4.3.6)
@@ -210,6 +213,15 @@ packages:
 
   '@amplitude/analytics-node@1.5.51':
     resolution: {integrity: sha512-KifouilAv65lR6w+HiTIgr+B03DY7JTAyrZht5U70WfTkLaKhmNQ7CdkBh0Fj8JQJPS7dLyK3j2t5Lq2Rw2yOg==}
+
+  '@amplitude/analytics-types@1.4.0':
+    resolution: {integrity: sha512-RiMPHBqdrJ8ktTqG+Wzj2htnN/PCG9jGZG0SXtTFnWwVvcAJYbYm55/nrP1TTyrx1OlLhvF2VG3lVUP/xGAU8w==}
+
+  '@amplitude/experiment-core@0.12.0':
+    resolution: {integrity: sha512-EiLLxcyJD8T3GFsMPxBfWx9n9fBw6rC0RJwccPXLzResE0HnGZZpVWF86ZndnYmEMD1lUUjWi41N1ymEzodI5w==}
+
+  '@amplitude/experiment-node-server@1.13.4':
+    resolution: {integrity: sha512-jrR31DjRMFN/WFXplenC68D1ptHMrDwVRT9Kc4kh5Q/oQ8r3GbLyQnKDOHfdn63gIM7fANAW9DogyiZjt0xQXw==}
 
   '@amplitude/plugin-autocapture-browser@1.23.2':
     resolution: {integrity: sha512-ES9AAac2jLsWobAHaImzPqhuBtrcizQEXYdj9u3peEoBujOUu80K9utpUGCmpRbSofksTlUuEbsXuIw9/fUbqQ==}
@@ -1950,6 +1962,10 @@ packages:
   eventemitter3@5.0.1:
     resolution: {integrity: sha512-GWkBvjiSZK87ELrYOSESUYeVIc9mvLLf/nXalMOS5dYrgZq9o5OVkbZAVM06CVxYsCwH9BDZFPlQTlPA1j4ahA==}
 
+  eventsource@2.0.2:
+    resolution: {integrity: sha512-IzUmBGPR3+oUG9dUeXynyNmf91/3zUSJg1lCktzKw47OXuhco54U3r9B7O4XX+Rb1Itm9OZ2b0RkTs10bICOxA==}
+    engines: {node: '>=12.0.0'}
+
   execa@8.0.1:
     resolution: {integrity: sha512-VyhnebXciFV2DESc+p6B+y0LjSm0krU4OgJN44qFAhBY0TJ+1V61tYD2+wHusZ6F9n5K+vl8k0sTy7PEfV4qpg==}
     engines: {node: '>=16.17'}
@@ -2300,6 +2316,9 @@ packages:
   istanbul-reports@3.2.0:
     resolution: {integrity: sha512-HGYWWS/ehqTV3xN10i23tkPkpH46MLCIMFNCaaKNavAXTF1RkqxawEPtnjnGZ6XKSInBKkiOA5BKS+aZiY3AvA==}
     engines: {node: '>=8'}
+
+  js-base64@3.7.8:
+    resolution: {integrity: sha512-hNngCeKxIUQiEUN3GPJOkz4wF/YvdUdbNL9hsBcMQTkKzboD7T/q3OYOuuPZLUE6dBxSGpwhk5mwuDud7JVAow==}
 
   js-tiktoken@1.0.19:
     resolution: {integrity: sha512-XC63YQeEcS47Y53gg950xiZ4IWmkfMe4p2V9OSaBt26q+p47WHn18izuXzSclCI73B7yGqtfRsT6jcZQI0y08g==}
@@ -3469,6 +3488,19 @@ snapshots:
     dependencies:
       '@amplitude/analytics-core': 2.44.0
       tslib: 2.8.1
+
+  '@amplitude/analytics-types@1.4.0': {}
+
+  '@amplitude/experiment-core@0.12.0':
+    dependencies:
+      js-base64: 3.7.8
+
+  '@amplitude/experiment-node-server@1.13.4':
+    dependencies:
+      '@amplitude/analytics-node': 1.5.51
+      '@amplitude/analytics-types': 1.4.0
+      '@amplitude/experiment-core': 0.12.0
+      eventsource: 2.0.2
 
   '@amplitude/plugin-autocapture-browser@1.23.2':
     dependencies:
@@ -5069,6 +5101,8 @@ snapshots:
 
   eventemitter3@5.0.1: {}
 
+  eventsource@2.0.2: {}
+
   execa@8.0.1:
     dependencies:
       cross-spawn: 7.0.6
@@ -5399,6 +5433,8 @@ snapshots:
     dependencies:
       html-escaper: 2.0.2
       istanbul-lib-report: 3.0.1
+
+  js-base64@3.7.8: {}
 
   js-tiktoken@1.0.19:
     dependencies:
