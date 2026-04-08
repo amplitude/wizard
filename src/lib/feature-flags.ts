@@ -71,7 +71,10 @@ export async function initFeatureFlags(
 
     debug('feature-flags: initialized with flags', cachedFlags);
   } catch (err) {
-    debug('feature-flags: initialization failed, defaulting all flags off', err);
+    debug(
+      'feature-flags: initialization failed, defaulting all flags off',
+      err,
+    );
     client = null;
   }
 }
