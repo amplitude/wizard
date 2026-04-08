@@ -165,7 +165,15 @@ export interface WizardSession {
   pendingOrgs: Array<{
     id: string;
     name: string;
-    workspaces: Array<{ id: string; name: string }>;
+    workspaces: Array<{
+      id: string;
+      name: string;
+      environments?: Array<{
+        name: string;
+        rank: number;
+        app: { id: string; apiKey?: string | null } | null;
+      }> | null;
+    }>;
   }> | null;
 
   /** OAuth id_token held during SUSI account-setup steps. */
