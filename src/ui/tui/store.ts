@@ -30,6 +30,7 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
+import { FLAG_LLM_ANALYTICS } from '../../lib/feature-flags.js';
 
 export {
   TaskStatus,
@@ -563,8 +564,17 @@ export class WizardStore {
   /**
    * Enable an additional feature: enqueue it for the stop hook
    * and set any feature-specific session flags.
+   * Respects Amplitude Experiment feature flags — if the corresponding
+   * flag is off the feature is silently skipped.
    */
   enableFeature(feature: AdditionalFeature): void {
+    // Gate LLM analytics behind the wizard-llm-analytics feature flag
+    if (feature === AdditionalFeature.LLM) {
+      if (!analytics.isFeatureFlagEnabled(FLAG_LLM_ANALYTICS)) {
+        return;
+      }
+    }
+
     if (!this.session.additionalFeatureQueue.includes(feature)) {
       this.session.additionalFeatureQueue.push(feature);
     }

@@ -17,6 +17,16 @@ vi.mock('uuid', () => ({
   v4: vi.fn(() => 'test-uuid'),
 }));
 
+vi.mock('../../lib/feature-flags', () => ({
+  initFeatureFlags: vi.fn().mockResolvedValue(undefined),
+  refreshFlags: vi.fn().mockResolvedValue(undefined),
+  getFlag: vi.fn().mockReturnValue(undefined),
+  getAllFlags: vi.fn().mockReturnValue({}),
+  isFlagEnabled: vi.fn().mockReturnValue(false),
+  FLAG_AGENT_ANALYTICS: 'wizard-agent-analytics',
+  FLAG_LLM_ANALYTICS: 'wizard-llm-analytics',
+}));
+
 import { v4 as uuidv4 } from 'uuid';
 
 import { Analytics } from '../analytics.js';
@@ -66,16 +76,22 @@ describe('Analytics', () => {
   });
 
   describe('getFeatureFlag', () => {
-    it('should return undefined (stub)', async () => {
+    it('should return undefined when flag is not set', async () => {
       const result = await analytics.getFeatureFlag('some-flag');
       expect(result).toBeUndefined();
     });
   });
 
   describe('getAllFlagsForWizard', () => {
-    it('should return empty object (stub)', async () => {
+    it('should return empty object when no flags are set', async () => {
       const result = await analytics.getAllFlagsForWizard();
       expect(result).toEqual({});
+    });
+  });
+
+  describe('isFeatureFlagEnabled', () => {
+    it('should return false when flag is not set', () => {
+      expect(analytics.isFeatureFlagEnabled('some-flag')).toBe(false);
     });
   });
 

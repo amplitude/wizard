@@ -454,6 +454,18 @@ void yargs(hideBin(process.argv))
 
             tui.store.session = session;
 
+            // Initialize Amplitude Experiment feature flags (non-blocking).
+            const { initFeatureFlags } = await import(
+              './src/lib/feature-flags.js'
+            );
+            await initFeatureFlags().catch(() => {
+              // Flag init failure is non-fatal — all flags default to off
+            });
+
+            // Apply SDK-level opt-out based on feature flags
+            const { analytics } = await import('./src/utils/analytics.js');
+            analytics.applyOptOut();
+
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );
@@ -662,22 +674,31 @@ void yargs(hideBin(process.argv))
                 }
 
                 // LLM SDK detection — sourced from Amplitude LLM analytics skill
-                const LLM_PACKAGES = [
-                  'openai',
-                  '@anthropic-ai/sdk',
-                  'ai',
-                  '@ai-sdk/openai',
-                  'langchain',
-                  '@langchain/openai',
-                  '@langchain/langgraph',
-                  '@google/generative-ai',
-                  '@google/genai',
-                  '@instructor-ai/instructor',
-                  '@mastra/core',
-                  'portkey-ai',
-                ];
-                if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
-                  tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
+                // Gated by the wizard-llm-analytics feature flag.
+                const { isFlagEnabled } = await import(
+                  './src/lib/feature-flags.js'
+                );
+                const { FLAG_LLM_ANALYTICS } = await import(
+                  './src/lib/feature-flags.js'
+                );
+                if (isFlagEnabled(FLAG_LLM_ANALYTICS)) {
+                  const LLM_PACKAGES = [
+                    'openai',
+                    '@anthropic-ai/sdk',
+                    'ai',
+                    '@ai-sdk/openai',
+                    'langchain',
+                    '@langchain/openai',
+                    '@langchain/langgraph',
+                    '@google/generative-ai',
+                    '@google/genai',
+                    '@instructor-ai/instructor',
+                    '@mastra/core',
+                    'portkey-ai',
+                  ];
+                  if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
+                    tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
+                  }
                 }
               } catch {
                 // No package.json or parse error — skip feature discovery
