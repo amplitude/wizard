@@ -109,6 +109,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   useEffect(() => {
     if (workspaceChosen && !selectedEnv && selectableEnvs.length === 1) {
       setSelectedEnv(selectableEnvs[0]);
+      store.setSelectedProjectName(selectableEnvs[0].name);
     }
   }, [workspaceChosen, selectedEnv, selectableEnvs.length]);
 
@@ -357,6 +358,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             onSelect={(value) => {
               const env = Array.isArray(value) ? value[0] : value;
               setSelectedEnv(env);
+              store.setSelectedProjectName(env.name);
             }}
           />
         </Box>

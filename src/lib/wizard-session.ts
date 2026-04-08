@@ -193,6 +193,9 @@ export interface WizardSession {
   selectedWorkspaceId: string | null;
   selectedWorkspaceName: string | null;
 
+  /** Project/environment selected during SUSI (displayed in TitleBar). */
+  selectedProjectName: string | null;
+
   /**
    * Notice shown on the API key entry step of AuthScreen.
    * Set when auto-fetch fails (e.g. user is not an org admin) so the user
@@ -333,6 +336,7 @@ export function buildSession(args: {
     selectedOrgName: null,
     selectedWorkspaceId: null,
     selectedWorkspaceName: null,
+    selectedProjectName: null,
     loginUrl: null,
     credentials: null,
     apiKeyNotice: null,

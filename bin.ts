@@ -337,6 +337,7 @@ void yargs(hideBin(process.argv))
                       if (envsWithKey.length === 1) {
                         // Single environment — auto-select as before
                         const apiKey = envsWithKey[0].app!.apiKey!;
+                        session.selectedProjectName = envsWithKey[0].name;
                         logToFile(
                           '[bin] single environment — auto-selecting API key',
                         );
@@ -897,6 +898,7 @@ void yargs(hideBin(process.argv))
             'Usage: amplitude-wizard feedback <message>  or  feedback --message <message>',
           );
           process.exit(1);
+          return;
         }
         try {
           const { trackWizardFeedback } = await import(
