@@ -4,9 +4,7 @@ import { Overlay, type WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen } from '../../src/ui/tui/flows.js';
 import type { WizardSession } from '../../src/lib/wizard-session.js';
 import {
-  COMMANDS,
   getWhoamiText,
-  getHelpText,
   parseFeedbackSlashInput,
 } from '../../src/ui/tui/console-commands.js';
 
@@ -153,23 +151,6 @@ Then('I should see my org, workspace, and region', function () {
     `Expected region in: ${text}`,
   );
 });
-
-// ── /help ─────────────────────────────────────────────────────────────────────
-
-Then(
-  'I should see a list of all available slash commands with descriptions',
-  function () {
-    const text = getHelpText();
-    assert.ok(text.length > 0, 'Expected non-empty help text');
-    for (const { cmd, desc } of COMMANDS) {
-      assert.ok(text.includes(cmd), `Expected ${cmd} in help text`);
-      assert.ok(
-        text.includes(desc),
-        `Expected description for ${cmd} in help text`,
-      );
-    }
-  },
-);
 
 Then(
   'the recorded slash feedback message should be {string}',

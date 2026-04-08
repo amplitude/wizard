@@ -21,7 +21,6 @@ export const COMMANDS = [
   { cmd: '/test', desc: 'Run a prompt-skill demo (confirm + choose)' },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
-  { cmd: '/help', desc: 'List available slash commands' },
 ];
 
 export const TEST_PROMPT: string =
@@ -40,12 +39,6 @@ export function getWhoamiText(
   return `org: ${session.selectedOrgName ?? '(none)'}  workspace: ${
     session.selectedWorkspaceName ?? '(none)'
   }  region: ${session.region ?? '(none)'}`;
-}
-
-/** Returns the feedback text for the /help command. */
-export function getHelpText(): string {
-  const maxCmd = Math.max(...COMMANDS.map((c) => c.cmd.length));
-  return COMMANDS.map((c) => `${c.cmd.padEnd(maxCmd)}  ${c.desc}`).join('\n');
 }
 
 /**

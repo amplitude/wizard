@@ -63,10 +63,11 @@ export const DataIngestionCheckScreen = ({
       return;
     }
     const zone = (region ?? 'us') as AmplitudeZone;
+    const idToken = credentials.idToken ?? credentials.accessToken;
 
     try {
       const status = await fetchProjectActivationStatus(
-        credentials.idToken ?? credentials.accessToken,
+        idToken,
         zone,
         appId,
         session.selectedOrgId,
@@ -76,6 +77,25 @@ export const DataIngestionCheckScreen = ({
       );
       if (status.hasAnyEvents) {
         store.setDataIngestionConfirmed();
+        return;
+      }
+
+      // The activation API only checks autocapture events (page_viewed,
+      // session_start, session_end). Custom track() calls won't appear there.
+      // Fall back to the event catalog which includes all event types.
+      if (session.selectedOrgId && session.selectedWorkspaceId) {
+        const catalogEvents = await fetchWorkspaceEventTypes(
+          idToken,
+          zone,
+          session.selectedOrgId,
+          session.selectedWorkspaceId,
+        );
+        logToFile(
+          `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
+        );
+        if (catalogEvents.length > 0) {
+          store.setDataIngestionConfirmed();
+        }
       }
     } catch (err) {
       logToFile(
@@ -87,7 +107,6 @@ export const DataIngestionCheckScreen = ({
 
       // Fetch cataloged event types from the data API as a proxy for "events arrived"
       if (session.selectedOrgId && session.selectedWorkspaceId) {
-        const idToken = credentials.idToken ?? credentials.accessToken;
         fetchWorkspaceEventTypes(
           idToken,
           zone,

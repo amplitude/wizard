@@ -31,7 +31,6 @@ import {
 import {
   COMMANDS,
   getWhoamiText,
-  getHelpText,
   parseFeedbackSlashInput,
   TEST_PROMPT,
 } from '../console-commands.js';
@@ -87,11 +86,11 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;
-    case '/help':
-      store.setCommandFeedback(getHelpText());
-      break;
     default:
-      if (cmd) store.setCommandFeedback(`Unknown command: ${cmd}. Type /help.`);
+      if (cmd)
+        store.setCommandFeedback(
+          `Unknown command: ${cmd}. Type / to see available commands.`,
+        );
   }
 }
 

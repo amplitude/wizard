@@ -50,11 +50,6 @@ Feature: Slash commands
     When I enter the slash command "/taxonomy"
     Then the taxonomy agent should start
 
-  Scenario: /help lists available commands
-    Given the wizard is active
-    When I enter the slash command "/help"
-    Then I should see a list of all available slash commands with descriptions
-
   Scenario: /feedback records the user message
     Given the wizard is active
     When I enter the slash command "/feedback love this tool"
