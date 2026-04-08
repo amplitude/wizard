@@ -124,11 +124,12 @@ export class Analytics {
    * Use lowercase with spaces for eventName (e.g. "agent started", "api key submitted")
    * per Amplitude quickstart taxonomy guidelines.
    *
-   * Gated by the `wizard-agent-analytics` feature flag — when the flag is off,
-   * events are logged to debug but not sent to Amplitude.
+   * Gated by the `wizard-agent-analytics` feature flag — defaults to ON.
+   * Only suppressed when the flag is explicitly set to 'off' or 'false'.
    */
   wizardCapture(eventName: string, properties?: Record<string, unknown>): void {
-    if (!this.isFeatureFlagEnabled(FLAG_AGENT_ANALYTICS)) {
+    const flagValue = getFlag(FLAG_AGENT_ANALYTICS);
+    if (flagValue === 'off' || flagValue === 'false') {
       debug('wizardCapture (flag off):', eventName, properties);
       return;
     }
