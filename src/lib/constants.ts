@@ -200,10 +200,6 @@ export const DUMMY_PROJECT_API_KEY = '_YOUR_AMPLITUDE_API_KEY_';
 /** Feature flag key whose value selects a variant from WIZARD_VARIANTS. */
 export const WIZARD_VARIANT_FLAG_KEY = 'wizard-variant';
 
-/** Feature flag: gates the LLM analytics additional-feature flow. */
-export { FLAG_LLM_ANALYTICS } from './feature-flags';
-/** Feature flag: gates agent-level analytics instrumented by the wizard. */
-export { FLAG_AGENT_ANALYTICS } from './feature-flags';
 /** Variant key -> metadata for wizard run (VARIANT flag selects which entry to use). */
 export const WIZARD_VARIANTS: Record<string, Record<string, string>> = {
   base: { VARIANT: 'base' },
