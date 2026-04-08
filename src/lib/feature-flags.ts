@@ -23,7 +23,7 @@ export const FLAG_AGENT_ANALYTICS = 'wizard-agent-analytics';
  * Server deployment key for local evaluation.
  * Override with `AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY` env var.
  */
-const DEFAULT_DEPLOYMENT_KEY = '5203666fda8d9e46e0d5e7ce0600e5ff';
+const DEFAULT_DEPLOYMENT_KEY = '';
 
 function resolveDeploymentKey(): string {
   const fromEnv = process.env.AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY;
