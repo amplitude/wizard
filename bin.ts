@@ -340,6 +340,10 @@ void yargs(hideBin(process.argv))
               // Flag init failure is non-fatal — all flags default to off
             });
 
+            // Apply SDK-level opt-out based on feature flags
+            const { analytics } = await import('./src/utils/analytics.js');
+            analytics.applyOptOut();
+
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );

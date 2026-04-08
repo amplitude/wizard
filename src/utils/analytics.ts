@@ -123,17 +123,22 @@ export class Analytics {
    * All new wizard analytics should use this method instead of capture() directly.
    * Use lowercase with spaces for eventName (e.g. "agent started", "api key submitted")
    * per Amplitude quickstart taxonomy guidelines.
-   *
-   * Gated by the `wizard-agent-analytics` feature flag — defaults to ON.
-   * Only suppressed when the flag is explicitly set to 'off' or 'false'.
    */
   wizardCapture(eventName: string, properties?: Record<string, unknown>): void {
-    const flagValue = getFlag(FLAG_AGENT_ANALYTICS);
-    if (flagValue === 'off' || flagValue === 'false') {
-      debug('wizardCapture (flag off):', eventName, properties);
-      return;
-    }
     this.capture(`wizard: ${eventName}`, properties);
+  }
+
+  /**
+   * Apply feature-flag–based opt-out to the Amplitude SDK.
+   * Defaults to ON — only opts out when `wizard-agent-analytics` is explicitly 'off'/'false'.
+   */
+  applyOptOut(): void {
+    const flagValue = getFlag(FLAG_AGENT_ANALYTICS);
+    const optOut = flagValue === 'off' || flagValue === 'false';
+    this.client.setOptOut(optOut);
+    if (optOut) {
+      debug('analytics: opted out via wizard-agent-analytics flag');
+    }
   }
 
   private ensureInitStarted(): void {

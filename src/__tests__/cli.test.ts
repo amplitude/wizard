@@ -119,8 +119,23 @@ vi.mock('../utils/track-wizard-feedback.js', () => ({
 vi.mock('../lib/feature-flags', () => ({
   initFeatureFlags: vi.fn().mockResolvedValue(undefined),
   isFlagEnabled: vi.fn().mockReturnValue(true),
+  getFlag: vi.fn().mockReturnValue(undefined),
+  getAllFlags: vi.fn().mockReturnValue({}),
   FLAG_LLM_ANALYTICS: 'wizard-llm-analytics',
   FLAG_AGENT_ANALYTICS: 'wizard-agent-analytics',
+}));
+vi.mock('../utils/analytics', () => ({
+  analytics: {
+    applyOptOut: vi.fn(),
+    capture: vi.fn(),
+    wizardCapture: vi.fn(),
+    setTag: vi.fn(),
+    setDistinctId: vi.fn(),
+    shutdown: vi.fn().mockResolvedValue(undefined),
+    isFeatureFlagEnabled: vi.fn().mockReturnValue(true),
+  },
+  sessionProperties: vi.fn(() => ({})),
+  sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 vi.mock('../lib/detect-amplitude', () => ({
   detectAmplitudeInProject: vi.fn().mockReturnValue({ confidence: 'none' }),
