@@ -37,6 +37,7 @@ _amplitude_wizard() {
     'login:Log in to your Amplitude account'
     'logout:Log out of your Amplitude account'
     'whoami:Show the currently logged-in Amplitude account'
+    'feedback:Send product feedback'
     'slack:Set up Amplitude Slack integration'
     'mcp:MCP server management commands'
     'completion:Print shell completion script'
@@ -85,6 +86,9 @@ _amplitude_wizard() {
         login)
           _arguments '--zone[Amplitude data center zone]:zone:(us eu)'
           ;;
+        feedback)
+          _arguments '--message[Feedback message]:message:' '-m[Feedback message]:message:'
+          ;;
         *)
           _arguments $global_opts $wizard_opts
           ;;
@@ -103,7 +107,7 @@ _amplitude_wizard_completions() {
   cur="${DB}COMP_WORDS[COMP_CWORD]}"
   prev="${DB}COMP_WORDS[COMP_CWORD-1]}"
 
-  local commands="login logout whoami slack mcp completion"
+  local commands="login logout whoami feedback slack mcp completion"
   local global_flags="--debug --verbose --signup --ci --api-key --project-id --local-mcp --help --version"
   local wizard_flags="--force-install --install-dir --integration --menu --benchmark"
   local integrations="nextjs vue react-router django flask fastapi javascript_web javascript_node python"
@@ -127,6 +131,9 @@ _amplitude_wizard_completions() {
       else
         COMPREPLY=($(compgen -W "--zone" -- "$cur"))
       fi
+      ;;
+    feedback)
+      COMPREPLY=($(compgen -W "--message -m" -- "$cur"))
       ;;
     *)
       if [[ "$prev" == "--integration" ]]; then

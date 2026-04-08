@@ -18,7 +18,7 @@ import { type WizardStore, McpOutcome, RunPhase } from '../store.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
-import { analytics } from '../../../utils/analytics.js';
+import { analytics, captureWizardError } from '../../../utils/analytics.js';
 
 export type McpMode = 'install' | 'remove';
 
@@ -87,7 +87,7 @@ export const McpScreen = ({
       try {
         const detected = await installer.detectClients();
         if (detected.length === 0) {
-          analytics.wizardCapture('mcp no clients detected', { mode });
+          analytics.wizardCapture('MCP No Clients Detected', { mode });
           setPhase(Phase.None);
           setTimeout(
             () =>
@@ -95,7 +95,7 @@ export const McpScreen = ({
             1500,
           );
         } else {
-          analytics.wizardCapture('mcp clients detected', {
+          analytics.wizardCapture('MCP Clients Detected', {
             mode,
             clients: detected.map((c) => c.name),
             count: detected.length,
@@ -104,7 +104,12 @@ export const McpScreen = ({
           setPhase(Phase.Ask);
         }
       } catch {
-        analytics.wizardCapture('mcp detection failed', { mode });
+        captureWizardError(
+          'MCP Client Detection',
+          'Editor client detection failed',
+          'McpScreen',
+          { mode },
+        );
         setPhase(Phase.None);
         setTimeout(
           () => markDone(store, McpOutcome.Failed, [], standalone, onComplete),
@@ -116,14 +121,14 @@ export const McpScreen = ({
 
   const handleConfirm = () => {
     if (isRemove) {
-      analytics.wizardCapture('mcp remove confirmed');
+      analytics.wizardCapture('MCP Remove Confirmed');
       void doRemove();
     } else if (clients.length === 1) {
       const names = clients.map((c) => c.name);
-      analytics.wizardCapture('mcp install confirmed', { clients: names });
+      analytics.wizardCapture('MCP Install Confirmed', { clients: names });
       void doInstall(names);
     } else {
-      analytics.wizardCapture('mcp client picker shown', {
+      analytics.wizardCapture('MCP Client Picker Shown', {
         available_clients: clients.map((c) => c.name),
       });
       setPhase(Phase.Pick);
@@ -131,7 +136,7 @@ export const McpScreen = ({
   };
 
   const handleSkip = () => {
-    analytics.wizardCapture('mcp skipped', { mode });
+    analytics.wizardCapture('MCP Skipped', { mode });
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
@@ -145,7 +150,7 @@ export const McpScreen = ({
       setResultClients([]);
     }
     const failed = names.filter((n) => !result.includes(n));
-    analytics.wizardCapture('mcp install complete', {
+    analytics.wizardCapture('MCP Install Complete', {
       installed: result,
       failed,
       attempted: names,
@@ -168,7 +173,7 @@ export const McpScreen = ({
     } catch {
       setResultClients([]);
     }
-    analytics.wizardCapture('mcp remove complete', { removed: result });
+    analytics.wizardCapture('MCP Remove Complete', { removed: result });
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
@@ -208,7 +213,7 @@ export const McpScreen = ({
               ]}
               onSelect={(value) => {
                 const runWizard = value === 'wizard';
-                analytics.wizardCapture('amplitude pre-detected choice', {
+                analytics.wizardCapture('Amplitude Pre-Detected Choice', {
                   run_wizard_anyway: runWizard,
                 });
                 store.resolvePreDetectedChoice(runWizard);
@@ -267,7 +272,7 @@ export const McpScreen = ({
                 onSelect={(selected) => {
                   const names = Array.isArray(selected) ? selected : [selected];
                   if (names.length === 0) return;
-                  analytics.wizardCapture('mcp clients selected', {
+                  analytics.wizardCapture('MCP Clients Selected', {
                     selected_clients: names,
                     available_clients: clients.map((c) => c.name),
                   });

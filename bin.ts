@@ -170,13 +170,6 @@ void yargs(hideBin(process.argv))
       if (options.ci) {
         // Use LoggingUI for CI mode (no dependencies, no prompts)
         setUI(new LoggingUI());
-        if (!options.apiKey) {
-          getUI().intro(chalk.inverse(`Amplitude Wizard`));
-          getUI().log.error(
-            'CI mode requires --api-key (Amplitude project API key)',
-          );
-          process.exit(1);
-        }
         if (!options.installDir) {
           getUI().intro(chalk.inverse(`Amplitude Wizard`));
           getUI().log.error(
@@ -194,7 +187,8 @@ void yargs(hideBin(process.argv))
             'It appears you are running in a non-interactive environment.\n' +
             'Please run the wizard in an interactive terminal.\n\n' +
             'For CI/CD environments, use --ci mode:\n' +
-            '  npx @amplitude/wizard --ci --api-key <your-key> --install-dir .',
+            '  npx @amplitude/wizard --ci --install-dir . [--api-key <your-key>]\n' +
+            '  (--api-key is optional when a key can be resolved from env or stored credentials.)',
         );
         process.exit(1);
       } else {
@@ -282,47 +276,132 @@ void yargs(hideBin(process.argv))
 
               // Skip Auth when we have a stored OAuth token — use it to fetch
               // (or look up) the project API key, then pre-populate credentials.
+              // When the workspace has multiple environments (projects), defer to
+              // AuthScreen so the user can pick which project to instrument.
               if (zone) {
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
 
                 if (storedToken) {
-                  logToFile(
-                    `[bin] getAPIKey: zone=${zone} hasWorkspaceId=${!!session.selectedWorkspaceId}`,
+                  // Check local storage first — if a key is already persisted
+                  // for this install dir, use it without fetching user data.
+                  const { readApiKeyWithSource } = await import(
+                    './src/utils/api-key-store.js'
                   );
-                  const projectApiKey = await getAPIKey({
-                    installDir,
-                    idToken: storedToken.idToken,
-                    zone,
-                    workspaceId: session.selectedWorkspaceId ?? undefined,
-                  });
-                  if (projectApiKey) {
-                    logToFile('[bin] getAPIKey: resolved project API key');
-                    persistApiKey(projectApiKey, installDir);
+                  const localKey = readApiKeyWithSource(installDir);
+
+                  if (localKey) {
+                    logToFile('[bin] using locally stored API key');
                     session.credentials = {
                       accessToken: storedToken.idToken,
                       idToken: storedToken.idToken,
-                      projectApiKey,
+                      projectApiKey: localKey.key,
                       host: getHostFromRegion(zone),
                       projectId: 0,
                     };
-                    // Pre-populate activationLevel so DataSetup is also skipped,
-                    // giving a single wipe from Intro → Run/Setup.
-                    // DataSetup would set 'none' anyway (projectId=0 prevents the
-                    // real check), so this is equivalent — just earlier.
                     session.activationLevel = 'none';
                     session.projectHasData = false;
                   } else {
-                    logToFile(
-                      '[bin] getAPIKey: returned null — showing apiKeyNotice',
+                    // Fetch user data to check how many environments are available.
+                    const { fetchAmplitudeUser } = await import(
+                      './src/lib/api.js'
                     );
-                    // Region is already pre-populated above; prompt for the
-                    // key manually with a hint about org-admin permissions.
-                    session.apiKeyNotice =
-                      "Your API key couldn't be fetched automatically. " +
-                      'Only organization admins can access project API keys — ' +
-                      'if you need one, ask an admin to share it with you.';
+                    try {
+                      const userInfo = await fetchAmplitudeUser(
+                        storedToken.idToken,
+                        zone,
+                      );
+                      const workspaceId =
+                        session.selectedWorkspaceId ?? undefined;
+
+                      // Find the relevant workspace and its environments
+                      let envsWithKey: Array<{
+                        name: string;
+                        rank: number;
+                        app: {
+                          id: string;
+                          apiKey?: string | null;
+                        } | null;
+                      }> = [];
+                      for (const org of userInfo.orgs) {
+                        const ws = workspaceId
+                          ? org.workspaces.find((w) => w.id === workspaceId)
+                          : org.workspaces[0];
+                        if (ws?.environments) {
+                          envsWithKey = ws.environments
+                            .filter((env) => env.app?.apiKey)
+                            .sort((a, b) => a.rank - b.rank);
+                          break;
+                        }
+                      }
+
+                      if (envsWithKey.length === 1) {
+                        // Single environment — auto-select as before
+                        const apiKey = envsWithKey[0].app!.apiKey!;
+                        session.selectedProjectName = envsWithKey[0].name;
+                        logToFile(
+                          '[bin] single environment — auto-selecting API key',
+                        );
+                        persistApiKey(apiKey, installDir);
+                        session.credentials = {
+                          accessToken: storedToken.idToken,
+                          idToken: storedToken.idToken,
+                          projectApiKey: apiKey,
+                          host: getHostFromRegion(zone),
+                          projectId: 0,
+                        };
+                        session.activationLevel = 'none';
+                        session.projectHasData = false;
+                      } else if (envsWithKey.length > 1) {
+                        // Multiple environments — show the project picker via
+                        // AuthScreen instead of auto-selecting.
+                        logToFile(
+                          `[bin] ${envsWithKey.length} environments found — deferring to project picker`,
+                        );
+                        session.pendingOrgs = userInfo.orgs;
+                        session.pendingAuthIdToken = storedToken.idToken;
+                        session.pendingAuthAccessToken = storedToken.idToken;
+                      } else {
+                        logToFile(
+                          '[bin] no environments with API keys — showing apiKeyNotice',
+                        );
+                        session.apiKeyNotice =
+                          "Your API key couldn't be fetched automatically. " +
+                          'Only organization admins can access project API keys — ' +
+                          'if you need one, ask an admin to share it with you.';
+                      }
+                    } catch (err) {
+                      logToFile(
+                        `[bin] fetchAmplitudeUser failed: ${
+                          err instanceof Error ? err.message : 'unknown'
+                        }`,
+                      );
+                      // Fall back to getAPIKey for backward compatibility
+                      const projectApiKey = await getAPIKey({
+                        installDir,
+                        idToken: storedToken.idToken,
+                        zone,
+                        workspaceId: session.selectedWorkspaceId ?? undefined,
+                      });
+                      if (projectApiKey) {
+                        persistApiKey(projectApiKey, installDir);
+                        session.credentials = {
+                          accessToken: storedToken.idToken,
+                          idToken: storedToken.idToken,
+                          projectApiKey,
+                          host: getHostFromRegion(zone),
+                          projectId: 0,
+                        };
+                        session.activationLevel = 'none';
+                        session.projectHasData = false;
+                      } else {
+                        session.apiKeyNotice =
+                          "Your API key couldn't be fetched automatically. " +
+                          'Only organization admins can access project API keys — ' +
+                          'if you need one, ask an admin to share it with you.';
+                      }
+                    }
                   }
                 }
               }
@@ -829,6 +908,50 @@ void yargs(hideBin(process.argv))
           );
         }
         process.exit(0);
+      })();
+    },
+  )
+  .command(
+    'feedback',
+    'Send product feedback (Amplitude event: wizard: Feedback Submitted)',
+    (yargs) => {
+      return yargs.options({
+        message: {
+          alias: 'm',
+          describe: 'Feedback message',
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        setUI(new LoggingUI());
+        const fromFlag =
+          typeof argv.message === 'string' ? argv.message.trim() : '';
+        const argvRest = (argv._ as string[]).slice(1).join(' ').trim();
+        const message = (fromFlag || argvRest).trim();
+        if (!message) {
+          getUI().log.error(
+            'Usage: amplitude-wizard feedback <message>  or  feedback --message <message>',
+          );
+          process.exit(1);
+          return;
+        }
+        try {
+          const { trackWizardFeedback } = await import(
+            './src/utils/track-wizard-feedback.js'
+          );
+          await trackWizardFeedback(message);
+          console.log(chalk.green('✔ Thanks — your feedback was sent.'));
+          process.exit(0);
+        } catch (e) {
+          console.error(
+            chalk.red(
+              `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
+            ),
+          );
+          process.exit(1);
+        }
       })();
     },
   )

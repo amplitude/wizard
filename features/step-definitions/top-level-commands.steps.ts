@@ -28,6 +28,7 @@ let commandOutput: {
   oauthTriggered: boolean;
   cleared: boolean;
   parsedArgs?: Record<string, unknown>;
+  feedbackMessage?: string;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -59,7 +60,11 @@ Before(function () {
   (this as Record<string, unknown>).tempConfigPath = tempConfigPath;
 
   scenarioUser = undefined;
-  commandOutput = { oauthTriggered: false, cleared: false };
+  commandOutput = {
+    oauthTriggered: false,
+    cleared: false,
+    feedbackMessage: undefined,
+  };
 });
 
 After(function () {
@@ -155,6 +160,19 @@ When('I run {string}', function (command: string) {
   if (command === 'amplitude-wizard logout') {
     clearStoredCredentials(tempConfigPath);
     commandOutput.cleared = true;
+    return;
+  }
+
+  const feedbackPrefix = 'amplitude-wizard feedback ';
+  if (command.startsWith(feedbackPrefix)) {
+    const rest = command.slice(feedbackPrefix.length);
+    if (rest.startsWith('--message ')) {
+      commandOutput.feedbackMessage = rest
+        .slice('--message '.length)
+        .replace(/^["']|["']$/g, '');
+    } else {
+      commandOutput.feedbackMessage = rest.replace(/^["']|["']$/g, '');
+    }
     return;
   }
 
@@ -263,6 +281,17 @@ Then('authentication should come from the provided arguments', function () {
     'Expected --api-key to be provided for CI authentication',
   );
 });
+
+Then(
+  'the feedback command should record message {string}',
+  function (expected: string) {
+    assert.strictEqual(
+      commandOutput.feedbackMessage,
+      expected,
+      'Expected feedback CLI to capture the user message',
+    );
+  },
+);
 
 Then('{string} should be cleared', function (_configPathLabel: string) {
   // Verify the temp config file has been cleared (empty object)

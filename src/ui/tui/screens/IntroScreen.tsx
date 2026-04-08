@@ -137,7 +137,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               ]}
               onSelect={(value) => {
                 const choice = Array.isArray(value) ? value[0] : value;
-                analytics.wizardCapture('intro action', {
+                analytics.wizardCapture('Intro Action', {
                   action: choice,
                   integration: session.integration,
                   detected_framework: session.detectedFrameworkLabel,
@@ -184,7 +184,7 @@ const FrameworkPicker = ({
       options={options}
       onSelect={(value) => {
         const integration = Array.isArray(value) ? value[0] : value;
-        analytics.wizardCapture('framework manually selected', { integration });
+        analytics.wizardCapture('Framework Manually Selected', { integration });
         void import('../../../lib/registry.js').then(
           ({ FRAMEWORK_REGISTRY }) => {
             const config = FRAMEWORK_REGISTRY[integration];

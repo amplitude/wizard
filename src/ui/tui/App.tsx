@@ -55,16 +55,29 @@ export const App = ({ store }: AppProps) => {
         justifyContent="flex-start"
       >
         <ConsoleView store={store} width={width} height={rows}>
-          <TitleBar version={store.version} width={innerWidth} />
+          <TitleBar
+            version={store.version}
+            width={innerWidth}
+            orgName={store.session.selectedOrgName}
+            projectName={store.session.selectedProjectName}
+          />
           <Box height={1} />
-          <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
+          <Box
+            flexDirection="column"
+            flexGrow={1}
+            paddingX={1}
+            overflow="hidden"
+          >
             <DissolveTransition
               transitionKey={store.currentScreen}
               width={contentAreaWidth}
               height={contentHeight}
               direction={direction}
             >
-              <ScreenErrorBoundary store={store} retryToken={store.screenErrorRetry}>
+              <ScreenErrorBoundary
+                store={store}
+                retryToken={store.screenErrorRetry}
+              >
                 {activeScreen}
               </ScreenErrorBoundary>
             </DissolveTransition>

@@ -70,7 +70,7 @@ export async function runPrettierStep({
 
     prettierSpinner.stop('Prettier has formatted your files.');
 
-    analytics.wizardCapture('ran prettier', {
+    analytics.wizardCapture('Prettier Ran', {
       integration,
     });
   });

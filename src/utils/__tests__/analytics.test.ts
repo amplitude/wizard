@@ -1,10 +1,25 @@
 import { type MockedFunction } from 'vitest';
-// TODO: Update analytics tests when Amplitude analytics is implemented.
-// The Amplitude-based analytics has been replaced with a stub.
-import { Analytics } from '../analytics';
+
+const { mockCreateInstance } = vi.hoisted(() => {
+  const mockCreateInstance = vi.fn(() => ({
+    init: vi.fn(() => ({ promise: Promise.resolve() })),
+    track: vi.fn(),
+    flush: vi.fn(() => ({ promise: Promise.resolve() })),
+  }));
+  return { mockCreateInstance };
+});
+
+vi.mock('@amplitude/analytics-node', () => ({
+  createInstance: mockCreateInstance,
+}));
+
+vi.mock('uuid', () => ({
+  v4: vi.fn(() => 'test-uuid'),
+}));
+
 import { v4 as uuidv4 } from 'uuid';
 
-vi.mock('uuid');
+import { Analytics } from '../analytics.js';
 
 const mockUuidv4 = uuidv4 as MockedFunction<typeof uuidv4>;
 

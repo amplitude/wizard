@@ -30,7 +30,7 @@ export const uploadEnvironmentVariablesStep = async (
   }
 
   if (!provider) {
-    analytics.wizardCapture('env upload skipped', {
+    analytics.wizardCapture('Env Upload Skipped', {
       reason: 'no environment provider found',
       integration,
     });
@@ -47,7 +47,7 @@ export const uploadEnvironmentVariablesStep = async (
     },
   );
 
-  analytics.wizardCapture('env uploaded', {
+  analytics.wizardCapture('Env Uploaded', {
     provider: provider.name,
     integration,
   });

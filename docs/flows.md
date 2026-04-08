@@ -17,6 +17,7 @@ actions.
 | `/dashboard` | Create a new dashboard                                            |
 | `/taxonomy`  | Interact with the taxonomy agent                                  |
 | `/slack`     | Connect your Amplitude project to Slack                           |
+| `/feedback`  | Send product feedback (event `wizard: feedback submitted`)        |
 | `/help`      | List available slash commands                                     |
 
 ---
@@ -33,7 +34,10 @@ flowchart TD
     CMD --> LOGIN["login"]
     CMD --> LOGOUT["logout"]
     CMD --> WHOAMI["whoami"]
+    CMD --> FEEDBACK["feedback"]
     CMD --> WIZARD["wizard (default)"]
+
+    FEEDBACK --> FEEDBACK_SEND["Track wizard: feedback submitted via Node SDK"]
 
     LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
@@ -175,11 +179,12 @@ flowchart TD
 
 ## Data Setup flow
 
-> **Partially implemented.** `DataSetupScreen` sets `activationLevel`
-> (none / partial / full). `DataIngestionCheckScreen` polls until events arrive.
-> `ChecklistScreen` offers first chart and first dashboard via browser deep-links.
-> Taxonomy agent and direct GraphQL chart/dashboard creation are planned.
-> See `features/05-data-setup-flow.feature` for the full target behaviour.
+> **Partially implemented.** `DataSetupScreen` sets `activationLevel` (none /
+> partial / full). `DataIngestionCheckScreen` polls until events arrive.
+> `ChecklistScreen` offers first chart and first dashboard via browser
+> deep-links. Taxonomy agent and direct GraphQL chart/dashboard creation are
+> planned. See `features/05-data-setup-flow.feature` for the full target
+> behaviour.
 
 ```mermaid
 ---

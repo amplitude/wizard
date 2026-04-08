@@ -11,7 +11,7 @@ import {
 } from '../utils/setup-utils';
 import type { PackageDotJson } from '../utils/package-json';
 import type { WizardOptions } from '../utils/types';
-import { analytics } from '../utils/analytics';
+import { analytics, captureWizardError } from '../utils/analytics';
 import { getUI } from '../ui';
 import {
   getAgent,
@@ -152,7 +152,7 @@ export async function runAgentWizard(
     analytics.setTag(`${config.metadata.integration}-version`, versionBucket);
   }
 
-  analytics.wizardCapture('agent started', {
+  analytics.wizardCapture('Agent Started', {
     integration: config.metadata.integration,
   });
 
@@ -309,9 +309,12 @@ export async function runAgentWizard(
 
   // Handle error cases detected in agent output
   if (agentResult.error === AgentErrorType.AUTH_ERROR) {
-    analytics.wizardCapture('agent auth error', {
-      integration: config.metadata.integration,
-    });
+    captureWizardError(
+      'Agent Authentication',
+      'Session expired or invalid during agent run',
+      'agent-runner',
+      { integration: config.metadata.integration },
+    );
     const authMessage = `Authentication failed\n\nYour Amplitude session has expired. Please run the wizard again to log in.`;
     session.credentials = null;
     session.outroData = {
@@ -355,11 +358,15 @@ export async function runAgentWizard(
     agentResult.error === AgentErrorType.RATE_LIMIT ||
     agentResult.error === AgentErrorType.API_ERROR
   ) {
-    analytics.wizardCapture('agent api error', {
-      integration: config.metadata.integration,
-      error_type: agentResult.error,
-      error_message: agentResult.message,
-    });
+    captureWizardError(
+      'Agent API',
+      agentResult.message ?? 'Unknown API error',
+      'agent-runner',
+      {
+        integration: config.metadata.integration,
+        error_type: agentResult.error,
+      },
+    );
 
     await wizardAbort({
       message: `API Error\n\n${
@@ -499,6 +506,7 @@ STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP se
    - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
 
 STEP 6: Add event tracking to this project using the instrumentation skills.
+   - Call load_skill_menu with category "taxonomy" and install **amplitude-quickstart-taxonomy-agent** using install_skill. Load its SKILL.md and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
    - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
    - Install the "add-analytics-instrumentation" skill using install_skill.
    - Load the installed skill's SKILL.md file to understand the workflow.

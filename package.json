@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/wizard",
-  "version": "1.0.0-beta.0",
+  "version": "1.0.0-beta.1",
   "homepage": "https://github.com/amplitude/wizard",
   "repository": "https://github.com/amplitude/wizard",
   "description": "The Amplitude wizard helps you to configure your project",
@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@amplitude/analytics-browser": "^2.0.0",
+    "@amplitude/analytics-node": "^1.5.51",
     "@anthropic-ai/claude-agent-sdk": "0.2.7",
     "@inkjs/ui": "^2.0.0",
     "@inquirer/prompts": "^8.3.0",

@@ -17,6 +17,7 @@ const {
   mockAmpliConfigExists,
   mockIsNonInteractiveEnvironment,
   mockHomedir,
+  mockTrackWizardFeedback,
 } = vi.hoisted(() => {
   const mockStore = {
     session: {} as Record<string, unknown>,
@@ -46,6 +47,7 @@ const {
     mockAmpliConfigExists: vi.fn(),
     mockIsNonInteractiveEnvironment: vi.fn().mockReturnValue(false),
     mockHomedir: vi.fn().mockReturnValue('/tmp'),
+    mockTrackWizardFeedback: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -110,6 +112,9 @@ vi.mock('../utils/get-api-key', () => ({
 }));
 vi.mock('../utils/environment', () => ({
   isNonInteractiveEnvironment: mockIsNonInteractiveEnvironment,
+}));
+vi.mock('../utils/track-wizard-feedback.js', () => ({
+  trackWizardFeedback: mockTrackWizardFeedback,
 }));
 vi.mock('../lib/detect-amplitude', () => ({
   detectAmplitudeInProject: vi.fn().mockReturnValue({ confidence: 'none' }),
@@ -185,9 +190,14 @@ describe('CI mode validation', () => {
     vi.resetModules();
   });
 
-  test('requires --api-key when --ci is set', async () => {
+  test('invokes runWizard in CI mode without --api-key when --install-dir is set', async () => {
     await runCLI(['--ci', '--install-dir', '/tmp/test']);
-    expect(process.exit).toHaveBeenCalledWith(1);
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(mockRunWizard).toHaveBeenCalledWith(
+      expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
+    );
   });
 
   test('requires --install-dir when --ci is set', async () => {
@@ -656,6 +666,64 @@ describe('whoami command', () => {
   });
 });
 
+// ── feedback command ──────────────────────────────────────────────────────────
+
+describe('feedback command', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+  const consoleSpy = vi
+    .spyOn(console, 'log')
+    .mockImplementation(() => undefined);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleSpy.mockClear();
+    mockTrackWizardFeedback.mockClear();
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+    vi.resetModules();
+  });
+
+  test('exits with error when no message is provided', async () => {
+    await runCLI(['feedback']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(1);
+    const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(allOutput).toMatch(/Usage:/);
+    expect(mockTrackWizardFeedback).not.toHaveBeenCalled();
+  });
+
+  test('sends positional message and exits 0', async () => {
+    await runCLI(['feedback', 'great', 'wizard']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(mockTrackWizardFeedback).toHaveBeenCalledWith('great wizard');
+    expect(process.exit).toHaveBeenCalledWith(0);
+    expect(consoleSpy).toHaveBeenCalledWith(
+      expect.stringContaining('feedback was sent'),
+    );
+  });
+
+  test('sends --message and exits 0', async () => {
+    await runCLI(['feedback', '--message', 'from flag']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(mockTrackWizardFeedback).toHaveBeenCalledWith('from flag');
+    expect(process.exit).toHaveBeenCalledWith(0);
+  });
+});
+
 // ── Legacy / argument parsing (kept for regression coverage) ──────────────────
 
 describe.skip('CLI argument parsing', () => {
@@ -798,10 +866,12 @@ describe.skip('CLI argument parsing', () => {
       expect(args.ci).toBe(true);
     });
 
-    test('requires --api-key when --ci is set', async () => {
+    test('invokes runWizard without --api-key when --ci and --install-dir are set', async () => {
       await runCLI(['--ci', '--install-dir', '/tmp/test']);
+      await waitFor(() => mockRunWizard.mock.calls.length > 0);
 
-      expect(process.exit).toHaveBeenCalledWith(1);
+      expect(process.exit).not.toHaveBeenCalled();
+      expect(mockRunWizard).toHaveBeenCalled();
     });
 
     test('requires --install-dir when --ci is set', async () => {
