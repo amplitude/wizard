@@ -78,14 +78,27 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   const pendingOrgs = session.pendingOrgs;
 
-  // Auto-select the org when there's only one
+  // Resolve org: user-picked > single-org auto-select > pre-populated from session
+  const prePopulatedOrg =
+    session.selectedOrgId && pendingOrgs
+      ? pendingOrgs.find((o) => o.id === session.selectedOrgId) ?? null
+      : null;
   const effectiveOrg: OrgEntry | null =
-    selectedOrg ?? (pendingOrgs?.length === 1 ? pendingOrgs[0] : null);
+    selectedOrg ??
+    (pendingOrgs?.length === 1 ? pendingOrgs[0] : null) ??
+    prePopulatedOrg;
 
-  // Auto-select workspace when org has only one
+  // Resolve workspace: user-picked > single-workspace auto-select > pre-populated from session
   const singleWorkspace =
     effectiveOrg?.workspaces.length === 1 ? effectiveOrg.workspaces[0] : null;
-  const effectiveWorkspace = selectedWorkspace ?? singleWorkspace ?? null;
+  const prePopulatedWorkspace =
+    session.selectedWorkspaceId && effectiveOrg
+      ? effectiveOrg.workspaces.find(
+          (ws) => ws.id === session.selectedWorkspaceId,
+        ) ?? null
+      : null;
+  const effectiveWorkspace =
+    selectedWorkspace ?? singleWorkspace ?? prePopulatedWorkspace ?? null;
 
   useEffect(() => {
     if (effectiveOrg && effectiveWorkspace && !session.selectedWorkspaceId) {
@@ -97,9 +110,12 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     }
   }, [effectiveOrg?.id, effectiveWorkspace?.id, session.selectedWorkspaceId]);
 
-  const workspaceChosen =
-    session.selectedWorkspaceId !== null ||
-    (effectiveOrg !== null && effectiveOrg.workspaces.length === 1);
+  // workspaceChosen requires the local workspace object (effectiveWorkspace)
+  // rather than just session.selectedWorkspaceId, because we need the
+  // environments list to drive the project picker. When selectedWorkspaceId is
+  // pre-populated from ampli.json but no workspace object exists yet,
+  // selectableEnvs would be empty and the picker would be bypassed.
+  const workspaceChosen = effectiveWorkspace !== null;
 
   // Environments available in the selected workspace
   const selectableEnvs = getSelectableEnvironments(effectiveWorkspace);
