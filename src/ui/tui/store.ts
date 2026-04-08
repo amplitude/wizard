@@ -219,6 +219,11 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSelectedProjectName(name: string | null): void {
+    this.$session.setKey('selectedProjectName', name);
+    this.emitChange();
+  }
+
   setFrameworkConfig(
     integration: WizardSession['integration'],
     config: WizardSession['frameworkConfig'],
