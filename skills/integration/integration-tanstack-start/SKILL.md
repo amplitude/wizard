@@ -3,7 +3,7 @@ name: integration-tanstack-start
 description: Amplitude integration for TanStack Start full-stack applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for TanStack Start

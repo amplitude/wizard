@@ -3,7 +3,7 @@ name: integration-fastapi
 description: Amplitude integration for FastAPI applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for FastAPI

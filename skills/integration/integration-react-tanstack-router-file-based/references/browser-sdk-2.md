@@ -1532,7 +1532,7 @@ To send data to Amplitude's EU servers, your organization must use the EU data s
                 <h3 class="font-medium text-amp-gray-900 text-sm m-0">
                     <a href="https://npmjs.com/package/@amplitude/analytics-browser" target="_blank">Package Information</a>
                     
-                        <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded" title="Fresh data (2026-04-07T19:59:54.900135Z)">Live</span>
+                        <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded" title="Fresh data (2026-04-09T17:34:37.498159Z)">Live</span>
                     
                 </h3>
             </div>
@@ -1544,11 +1544,11 @@ To send data to Amplitude's EU servers, your organization must use the EU data s
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="text-xs text-amp-gray-500 mb-1">Version</div>
-                        <div class="font-medium text-amp-gray-900">2.36.9</div>
+                        <div class="font-medium text-amp-gray-900">2.39.0</div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-amp-gray-500 mb-1">Size (gzip)</div>
-                        <div class="font-medium text-amp-gray-900">53.02 kB</div>
+                        <div class="font-medium text-amp-gray-900">54.92 kB</div>
                     </div>
                 </div>
             </div>
@@ -1984,7 +1984,7 @@ Amplitude tracks marketing attribution to identify your user's traffic source us
 </tr>
 <tr>
 <td><code>config.autocapture.attribution.excludeInternalReferrers</code></td>
-<td>@Experimental Optional. Type: <code>boolean</code> or <code>{ condition: 'always' | 'ifEmptyCampaign' }</code>. When enabled, the SDK does not track campaign information when the referrer and the current page are on the same domain (internal referrer). Set to <code>true</code> or <code>{ condition: 'always' }</code> to always skip campaign tracking for internal referrers. Set to <code>{ condition: 'ifEmptyCampaign' }</code> to always skip campaign tracking for internal referrers where there are no UTM parameters or click IDs (empty campaign).</td>
+<td>Optional. Type: <code>boolean</code> or <code>{ condition: 'always' | 'ifEmptyCampaign' }</code>. When enabled, the SDK does not track campaign information when the referrer and the current page are on the same domain (internal referrer). Set to <code>true</code> or <code>{ condition: 'always' }</code> to always skip campaign tracking for internal referrers. Set to <code>{ condition: 'ifEmptyCampaign' }</code> to always skip campaign tracking for internal referrers where there are no UTM parameters or click IDs (empty campaign).</td>
 </tr>
 <tr>
 <td><code>config.autocapture.attribution.initialEmptyValue</code></td>
@@ -2432,8 +2432,8 @@ When you enable element interactions for Autocapture, Amplitude sends two events
 <ul>
 <li><strong>Rage click</strong>: A user clicks the same element, within 50px, four times in under a second.</li>
 <li><strong>Dead click</strong>: A user clicks an interactable element, but no navigation change happens and the DOM doesn't change.</li>
-<li><strong>Error click</strong>: Experimental. A user clicks an element and a browser error occurs within two seconds of the click.</li>
-<li><strong>Thrashed cursor</strong>: Experimental. A user's cursor moves rapidly back and forth within a short time window, indicating potential frustration.</li>
+<li><strong>Error click</strong>: A user clicks an element and a browser error occurs within two seconds of the click.</li>
+<li><strong>Thrashed cursor</strong>: A user's cursor moves rapidly back and forth within a short time window, indicating potential frustration.</li>
 </ul>
 <p>Set <code>config.autocapture.frustrationInteractions</code> to <code>true</code> to enable capture of dead clicks and rage clicks.</p>
 <p>Set <code>config.autocapture.frustrationInteractions.rageClicks</code> to <code>true</code> to enable capture of rage clicks.</p>
@@ -2494,7 +2494,6 @@ When you enable element interactions for Autocapture, Amplitude sends two events
 </div>
 </details></p>
 <h4 id="track-error-clicks">Track error clicks<a href="#track-error-clicks" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h4>
-<p>Error clicks is experimental and must be explicitly enabled.</p>
 <p>Error click tracking captures when a user clicks an element and a browser error occurs within two seconds of the click. This helps you identify which user interactions may be triggering errors in your application.</p>
 <p>Enable error click tracking:</p>
 <pre><code class="language-ts">amplitude.init(AMPLITUDE_API_KEY, OPTIONAL_USER_ID, {
@@ -2516,7 +2515,6 @@ When you enable element interactions for Autocapture, Amplitude sends two events
 <li>Element properties from the clicked element (for example, <code>[Amplitude] Element Text</code>, <code>[Amplitude] Element Tag Name</code>).</li>
 </ul>
 <h4 id="track-thrashed-cursor">Track thrashed cursor<a href="#track-thrashed-cursor" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h4>
-<p>Thrashed cursor tracking is experimental and must be explicitly enabled.</p>
 <p>Thrashed cursor tracking captures when a user's cursor moves rapidly back and forth with multiple direction changes within a short time window. This helps identify areas where users may be experiencing frustration or confusion.</p>
 <p>Enable thrashed cursor tracking:</p>
 <pre><code class="language-ts">amplitude.init(AMPLITUDE_API_KEY, OPTIONAL_USER_ID, {
@@ -3462,7 +3460,7 @@ Network: it looks like blocked requests aren't listed. Not sure if it’s possib
 <p>You can track anonymous behavior across two different domains. Amplitude identifies anonymous users by their device IDs which must be passed between the domains. To maintain the same session and ensure a continuous user journey, also pass session IDs to the other domain.</p>
 <p>
 <div class="hint note"><h2 class="hint-title">Note</h2><div class="hint-content">
-Starting from <code>v2.8.0</code> the SDK supports getting the device ID from the URL paramter <code>ampDeviceId</code>. The SDK configuration, for example, <code>init('API_KEY', { deviceId: 'custom-device-id' })</code> still takes precedence over the URL parameter. Previous versions of the SDK supported the <code>deviceId</code> URL parameter, this option is still supported for backward compatibility but <code>ampDeviceId</code> will take precedence if both are set. You don't need to change your code if upgrade to versions higher than <code>v2.8.0</code> but it is recommended.</div></div>
+Starting from <code>v2.8.0</code> the SDK supports getting the device ID from the URL parameter <code>ampDeviceId</code>. The SDK configuration, for example, <code>init('API_KEY', { deviceId: 'custom-device-id' })</code> still takes precedence over the URL parameter. Previous versions of the SDK supported the <code>deviceId</code> URL parameter, this option is still supported for backward compatibility but <code>ampDeviceId</code> will take precedence if both are set. You don't need to change your code if upgrade to versions higher than <code>v2.8.0</code> but it is recommended.</div></div>
 </p>
 <p>For example:</p>
 <ul>
@@ -3745,7 +3743,7 @@ Setting <code>config.flushIntervalMillis</code> to a small value like <code>1</c
 <li>In the middle of the session, the referrer isn't excluded, not direct traffic, and campaign has any change.</li>
 </ul>
 <p><img src="/docs/output/img/sdk/isNewCampaign.drawio.svg" alt="Diagram of whether tracking a campaign on SDK initialization" /></p>
-<p>To debug, you can get the referrer by typing <code>document.referrer</code> in your Browser console and compare it with your <code>config.autocapture.attribution.excludeReferrers</code>. If <code>document.referrer</code> is empty, then it's considered as a direct traffic. You can get the session ID under <code>AMP_{last 10 digits of your API key}</code> on the &quot;Cookies&quot; tab of the <a href="/docs/data/chrome-extension-debug">Ampitude Chrome extension</a> and get the previous campaign stored under <code>AMP_MKTG_{last 10 digits of your API key}</code>.</p>
+<p>To debug, you can get the referrer by typing <code>document.referrer</code> in your Browser console and compare it with your <code>config.autocapture.attribution.excludeReferrers</code>. If <code>document.referrer</code> is empty, then it's considered as a direct traffic. You can get the session ID under <code>AMP_{last 10 digits of your API key}</code> on the &quot;Cookies&quot; tab of the <a href="/docs/data/chrome-extension-debug">Amplitude Chrome extension</a> and get the previous campaign stored under <code>AMP_MKTG_{last 10 digits of your API key}</code>.</p>
 <h5 id="processing-the-event">Processing the event<a href="#processing-the-event" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h5>
 <ul>
 <li>At the start of a session, the referrer isn't excluded, and campaign has any change.</li>
@@ -4181,7 +4179,7 @@ The top-level <code>fetchRemoteConfig</code> option is deprecated. Use <code>rem
                 <h3 class="font-medium text-amp-gray-900 text-sm m-0">
                     <a href="https://npmjs.com/package/@amplitude/analytics-browser" target="_blank">Package Information</a>
                     
-                        <span class="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded" title="Data from cache (2026-04-07T19:59:54.899904Z)">Cached</span>
+                        <span class="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded" title="Data from cache (2026-04-09T17:34:37.497980Z)">Cached</span>
                     
                 </h3>
             </div>
@@ -4193,11 +4191,11 @@ The top-level <code>fetchRemoteConfig</code> option is deprecated. Use <code>rem
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="text-xs text-amp-gray-500 mb-1">Version</div>
-                        <div class="font-medium text-amp-gray-900">2.36.9</div>
+                        <div class="font-medium text-amp-gray-900">2.39.0</div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-amp-gray-500 mb-1">Size (gzip)</div>
-                        <div class="font-medium text-amp-gray-900">53.02 kB</div>
+                        <div class="font-medium text-amp-gray-900">54.92 kB</div>
                     </div>
                 </div>
             </div>

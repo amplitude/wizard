@@ -3,7 +3,7 @@ name: integration-react-react-router-6
 description: Amplitude integration for React Router v6 applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for React Router v6

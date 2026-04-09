@@ -5,7 +5,7 @@ description: >-
   @amplitude/analytics-browser
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for JavaScript Web

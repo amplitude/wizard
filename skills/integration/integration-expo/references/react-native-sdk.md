@@ -2318,7 +2318,7 @@ IDFA is no longer recommended. You should consider using IDFV instead when possi
                 <h3 class="font-medium text-amp-gray-900 text-sm m-0">
                     <a href="https://npmjs.com/package/@amplitude/analytics-react-native" target="_blank">Package Information</a>
                     
-                        <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded" title="Fresh data (2026-04-07T20:01:40.685227Z)">Live</span>
+                        <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded" title="Fresh data (2026-04-09T17:36:37.871199Z)">Live</span>
                     
                 </h3>
             </div>

@@ -176,6 +176,20 @@ void amplitude.initAll(process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY!, {
 
 ---
 
+## next-env.d.ts
+
+```ts
+/// <reference types="next" />
+/// <reference types="next/image-types/global" />
+/// <reference path="./.next/types/routes.d.ts" />
+
+// NOTE: This file should not be edited
+// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.
+
+```
+
+---
+
 ## next.config.ts
 
 ```ts

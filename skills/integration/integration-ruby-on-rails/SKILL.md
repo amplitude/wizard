@@ -3,7 +3,7 @@ name: integration-ruby-on-rails
 description: Amplitude integration for Ruby on Rails applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Ruby on Rails

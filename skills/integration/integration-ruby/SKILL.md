@@ -3,7 +3,7 @@ name: integration-ruby
 description: Amplitude integration for any Ruby application using the Ruby SDK
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Ruby

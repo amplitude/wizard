@@ -5,7 +5,7 @@ description: >-
   code-based routing
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for React with TanStack Router (code-based)

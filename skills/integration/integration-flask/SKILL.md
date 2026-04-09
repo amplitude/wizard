@@ -3,7 +3,7 @@ name: integration-flask
 description: Amplitude integration for Flask applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Flask

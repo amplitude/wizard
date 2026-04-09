@@ -3,7 +3,7 @@ name: integration-android
 description: Amplitude integration for Android applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Android

@@ -3,7 +3,7 @@ name: integration-react-react-router-7-framework
 description: Amplitude integration for React Router v7 - Framework mode applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for React Router v7 - Framework mode

@@ -3,7 +3,7 @@ name: integration-expo
 description: Amplitude integration for Expo applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Expo

@@ -3,7 +3,7 @@ name: integration-laravel
 description: Amplitude integration for Laravel applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Laravel

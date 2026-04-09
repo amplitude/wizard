@@ -3,7 +3,7 @@ name: integration-react-native
 description: Amplitude integration for React Native applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for React Native

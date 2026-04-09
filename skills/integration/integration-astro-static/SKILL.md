@@ -3,7 +3,7 @@ name: integration-astro-static
 description: Amplitude integration for static Astro sites using SSG
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Astro (Static)

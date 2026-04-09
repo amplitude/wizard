@@ -3,7 +3,7 @@ name: integration-django
 description: Amplitude integration for Django applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Django

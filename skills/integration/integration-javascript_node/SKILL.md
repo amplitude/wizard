@@ -5,7 +5,7 @@ description: >-
   @amplitude/analytics-node
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for JavaScript Node

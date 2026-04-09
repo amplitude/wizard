@@ -3,7 +3,7 @@ name: integration-astro-view-transitions
 description: Amplitude integration for Astro with ClientRouter view transitions
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Astro (View Transitions)

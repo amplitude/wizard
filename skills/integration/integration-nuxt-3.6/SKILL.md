@@ -3,7 +3,7 @@ name: integration-nuxt-3.6
 description: Amplitude integration for Nuxt versions 3.0 to 3.6
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Nuxt 3.6

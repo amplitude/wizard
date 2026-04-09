@@ -3,7 +3,7 @@ name: integration-swift
 description: Amplitude integration for Swift iOS and macOS applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Swift (iOS/macOS)

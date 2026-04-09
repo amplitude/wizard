@@ -3,7 +3,7 @@ name: integration-angular
 description: Amplitude integration for Angular applications
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for Angular

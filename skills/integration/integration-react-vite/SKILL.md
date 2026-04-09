@@ -3,7 +3,7 @@ name: integration-react-vite
 description: Amplitude integration for React applications built with Vite (no router)
 metadata:
   author: Amplitude
-  version: 1.2.1
+  version: dev
 ---
 
 # Amplitude integration for React (Vite)
