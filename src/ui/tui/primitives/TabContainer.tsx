@@ -36,11 +36,11 @@ export const TabContainer = ({
     onTabConsumed?.();
   }, [requestedTab]);
 
-  useScreenInput((_input, key) => {
-    if (key.leftArrow) {
+  useScreenInput((input) => {
+    if (input === '[') {
       setActiveTab((prev) => Math.max(0, prev - 1));
     }
-    if (key.rightArrow) {
+    if (input === ']') {
       setActiveTab((prev) => Math.min(tabs.length - 1, prev + 1));
     }
   });
@@ -88,7 +88,7 @@ export const TabContainer = ({
           ))}
         </Box>
         <Text color={Colors.muted}>
-          ← → to browse tabs while the wizard runs
+          [ ] to browse tabs while the wizard runs
         </Text>
       </Box>
     </Box>

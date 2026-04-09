@@ -47,6 +47,9 @@ export const IS_DEV = ['test', 'development'].includes(
 );
 export const DEBUG = false;
 
+/** When set, limits the agent to at most 5 events for faster demo runs. */
+export const DEMO_MODE = process.env.DEMO_MODE_WIZARD === '1';
+
 // ── URLs ─────────────────────────────────────────────────────────────
 
 export const DEFAULT_URL = IS_DEV
