@@ -4,7 +4,7 @@
       "release-type": "node",
       "prerelease": true,
       "prerelease-type": "beta",
-      "versioning": "always-bump-patch"
+      "versioning": "prerelease"
     }
   }
 }
