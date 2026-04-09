@@ -1,11 +1,9 @@
 name: "Publish"
 
 on:
+  release:
+    types: [published]
   workflow_dispatch:
-    inputs:
-      disabled:
-        description: 'Publish is temporarily disabled'
-        required: false
 
 permissions:
   id-token: write
@@ -41,20 +39,23 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2
+        with:
+          version: 10.23.0
+          run_install: false
+
       - name: Set up Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      - name: Install pnpm
-        run: npm install -g pnpm
-
       - name: Install package.json dependencies with pnpm
         run: pnpm install --frozen-lockfile
 
       - name: Build the package
         run: pnpm build
-        
-      - name: Publish the package in the npm registry
-        run: pnpm publish --access public
+
+      - name: Publish the package to npm registry
+        run: pnpm publish --access public --provenance --no-git-checks

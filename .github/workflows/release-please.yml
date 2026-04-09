@@ -1,26 +1,19 @@
+name: release-please
+
 on:
   push:
     branches:
       - main
 
-name: release-please
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   release-please:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Placeholder
-        run: echo "Release implementation tbd"
-        
-
-# - name: Get app token
-#   id: app-token
-#   uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
-#   with:
-#     app-id: ${{ secrets.GH_APP_WIZARD_RELEASER_APP_ID }}
-#     private-key: ${{ secrets.GH_APP_WIZARD_RELEASER_PRIVATE_KEY }}
-
-# - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
-#   with:
-#     token: ${{ steps.app-token.outputs.token }}
-#     release-type: node
+      - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          release-type: node
