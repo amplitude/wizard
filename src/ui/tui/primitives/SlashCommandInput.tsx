@@ -62,6 +62,7 @@ export const SlashCommandInput = ({
     selectedIndex,
     Math.max(0, filtered.length - 1),
   );
+  const maxCmdLen = filtered.reduce((m, c) => Math.max(m, c.cmd.length), 0);
 
   useInput(
     (char, key) => {
@@ -128,21 +129,28 @@ export const SlashCommandInput = ({
       </Box>
       {isSlashMode && filtered.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          {filtered.map((c, i) => (
-            <Box key={c.cmd} gap={2}>
-              <Text
-                color={i === clampedIndex ? Colors.primary : undefined}
-                bold={i === clampedIndex}
-              >
-                {i === clampedIndex
-                  ? Icons.triangleSmallRight + ' ' + c.cmd
-                  : '  ' + c.cmd}
-              </Text>
-              <Text color={i !== clampedIndex ? Colors.muted : undefined}>
-                {c.desc}
-              </Text>
-            </Box>
-          ))}
+          {filtered.map((c, i) => {
+            const isFocused = i === clampedIndex;
+            return (
+              <Box key={c.cmd} gap={1}>
+                <Text
+                  color={isFocused ? Colors.primary : undefined}
+                  bold={isFocused}
+                >
+                  {isFocused ? Icons.triangleSmallRight : ' '}
+                </Text>
+                <Text
+                  color={isFocused ? Colors.primary : undefined}
+                  bold={isFocused}
+                >
+                  {c.cmd.padEnd(maxCmdLen)}
+                </Text>
+                <Text color={!isFocused ? Colors.muted : undefined}>
+                  {c.desc}
+                </Text>
+              </Box>
+            );
+          })}
         </Box>
       )}
     </Box>
