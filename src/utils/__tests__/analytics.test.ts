@@ -23,7 +23,7 @@ vi.mock('../../lib/feature-flags', () => ({
   getFlag: vi.fn().mockReturnValue(undefined),
   getAllFlags: vi.fn().mockReturnValue({}),
   isFlagEnabled: vi.fn().mockReturnValue(false),
-  FLAG_AGENT_ANALYTICS: 'wizard-agent-analytics',
+  FLAG_WIZARD_TELEMETRY: 'wizard-telemetry',
   FLAG_LLM_ANALYTICS: 'wizard-llm-analytics',
 }));
 

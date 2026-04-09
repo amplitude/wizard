@@ -8,7 +8,7 @@ import {
   getFlag,
   getAllFlags,
   isFlagEnabled,
-  FLAG_AGENT_ANALYTICS,
+  FLAG_WIZARD_TELEMETRY,
 } from '../lib/feature-flags';
 
 const DEFAULT_TELEMETRY_API_KEY = 'e5a2c9bdffe949f7da77e6b481e118fa';
@@ -129,15 +129,17 @@ export class Analytics {
   }
 
   /**
-   * Apply feature-flag–based opt-out to the Amplitude SDK.
-   * Defaults to ON — only opts out when `wizard-agent-analytics` is explicitly 'off'/'false'.
+   * Apply opt-out to the Amplitude SDK.
+   * Defaults to ON — opts out when the `wizard-telemetry` flag is explicitly
+   * 'off'/'false', or when `--no-telemetry` was passed on the CLI.
    */
-  applyOptOut(): void {
-    const flagValue = getFlag(FLAG_AGENT_ANALYTICS);
-    const optOut = flagValue === 'off' || flagValue === 'false';
+  applyOptOut(cliOptOut?: boolean): void {
+    const flagValue = getFlag(FLAG_WIZARD_TELEMETRY);
+    const optOut =
+      cliOptOut === true || flagValue === 'off' || flagValue === 'false';
     this.client.setOptOut(optOut);
     if (optOut) {
-      debug('analytics: opted out via wizard-agent-analytics flag');
+      debug('analytics: telemetry opted out');
     }
   }
 

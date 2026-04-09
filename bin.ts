@@ -117,6 +117,12 @@ void yargs(hideBin(process.argv))
         'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: AMPLITUDE_WIZARD_PROJECT_ID',
       type: 'string',
     },
+    telemetry: {
+      default: true,
+      describe:
+        'Send anonymous usage telemetry (disable with --no-telemetry)\nenv: AMPLITUDE_WIZARD_TELEMETRY',
+      type: 'boolean',
+    },
   })
   .command(
     ['$0'],
@@ -340,9 +346,9 @@ void yargs(hideBin(process.argv))
               // Flag init failure is non-fatal — all flags default to off
             });
 
-            // Apply SDK-level opt-out based on feature flags
+            // Apply SDK-level opt-out based on feature flags or --no-telemetry
             const { analytics } = await import('./src/utils/analytics.js');
-            analytics.applyOptOut();
+            analytics.applyOptOut(options.telemetry === false);
 
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'

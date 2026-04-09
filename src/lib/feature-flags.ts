@@ -14,8 +14,8 @@ import { debug } from '../utils/debug';
 /** Gate for the LLM analytics additional-feature flow. */
 export const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
-/** Gate for agent-level analytics / telemetry instrumented by the wizard. */
-export const FLAG_AGENT_ANALYTICS = 'wizard-agent-analytics';
+/** Gate for wizard telemetry (usage tracking events sent by the wizard itself). */
+export const FLAG_WIZARD_TELEMETRY = 'wizard-telemetry';
 
 // ── Deployment key ───────────────────────────────────────────────────
 
