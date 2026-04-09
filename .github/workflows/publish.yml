@@ -28,6 +28,7 @@ jobs:
   release:
     name: Publish release if new version
     runs-on: ubuntu-24.04
+    environment: npm-publish
     needs: check-package-version
     if: needs.check-package-version.outputs.is-new-version == 'true'
     env:
@@ -58,4 +59,4 @@ jobs:
         run: pnpm build
 
       - name: Publish the package to npm registry
-        run: pnpm publish --access public --provenance --no-git-checks
+        run: pnpm publish --access public --provenance --no-git-checks --tag beta

@@ -1,4 +1,5 @@
-./src/apple/* @philipphofmann @philprime
+# Source code
+src/ @amplitude/growth
 
 # Release pipeline and CI/CD
 .github/workflows/ @amplitude/growth
