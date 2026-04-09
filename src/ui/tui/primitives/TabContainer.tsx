@@ -49,47 +49,50 @@ export const TabContainer = ({
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Active tab content */}
-      <Box flexDirection="column" flexGrow={1}>
+      {/* Active tab content — overflow hidden so it never pushes the bar off */}
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {current?.component}
       </Box>
 
-      {/* Status bar */}
-      {statusMessage && (
-        <Box
-          borderStyle="single"
-          borderTop
-          borderBottom={false}
-          borderLeft={false}
-          borderRight={false}
-          borderColor={Colors.muted}
-          paddingX={1}
-          overflow="hidden"
-        >
+      {/* Bottom chrome — fixed height so it always stays visible */}
+      <Box flexDirection="column" flexShrink={0}>
+        {/* Status bar */}
+        {statusMessage && (
+          <Box
+            borderStyle="single"
+            borderTop
+            borderBottom={false}
+            borderLeft={false}
+            borderRight={false}
+            borderColor={Colors.muted}
+            paddingX={1}
+            overflow="hidden"
+          >
+            <Text color={Colors.muted}>
+              {Icons.diamondOpen} {statusMessage}
+            </Text>
+          </Box>
+        )}
+
+        {/* Tab bar */}
+        <Box height={1} />
+        <Box gap={1} paddingX={1} justifyContent="space-between">
+          <Box gap={1}>
+            {tabs.map((tab, i) => (
+              <Text
+                key={tab.id}
+                inverse={i === activeTab}
+                color={i === activeTab ? Colors.accent : Colors.muted}
+                bold={i === activeTab}
+              >
+                {` ${tab.label} `}
+              </Text>
+            ))}
+          </Box>
           <Text color={Colors.muted}>
-            {Icons.diamondOpen} {statusMessage}
+            [ ] to browse tabs while the wizard runs
           </Text>
         </Box>
-      )}
-
-      {/* Tab bar */}
-      <Box height={1} />
-      <Box gap={1} paddingX={1} justifyContent="space-between">
-        <Box gap={1}>
-          {tabs.map((tab, i) => (
-            <Text
-              key={tab.id}
-              inverse={i === activeTab}
-              color={i === activeTab ? Colors.accent : Colors.muted}
-              bold={i === activeTab}
-            >
-              {` ${tab.label} `}
-            </Text>
-          ))}
-        </Box>
-        <Text color={Colors.muted}>
-          [ ] to browse tabs while the wizard runs
-        </Text>
       </Box>
     </Box>
   );
