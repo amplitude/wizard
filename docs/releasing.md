@@ -40,7 +40,7 @@ All releases are currently published as beta prereleases (`1.0.0-beta.N`) under 
 
 This is configured in `release-please-config.json` and the `--tag beta` flag in the publish workflow.
 
-> **Note:** The `"versioning": "always-bump-patch"` setting in `release-please-config.json` ensures that all commits (`fix:`, `feat:`, etc.) only increment the beta number. When ready to move to a stable release, remove `prerelease`, `prerelease-type`, and `versioning` from the config.
+> **Note:** The `"versioning": "prerelease"` setting in `release-please-config.json` ensures that all commits (`fix:`, `feat:`, etc.) only increment the beta number (`1.0.0-beta.2` → `1.0.0-beta.3`). When ready to move to a stable release, remove `prerelease`, `prerelease-type`, and `versioning` from the config.
 
 ## Manual publish (emergency)
 
