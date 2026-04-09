@@ -3,7 +3,8 @@
     ".": {
       "release-type": "node",
       "prerelease": true,
-      "prerelease-type": "beta"
+      "prerelease-type": "beta",
+      "versioning": "prerelease"
     }
   }
 }
