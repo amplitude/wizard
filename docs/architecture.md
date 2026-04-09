@@ -371,11 +371,30 @@ OAuth PKCE flow
 | `build.yml` | Push / PR | Build, lint, unit tests (Node 20/22/24 matrix), Codecov |
 | `behavior-driven-tests.yml` | Push / PR | Cucumber BDD tests |
 | `pr-conventional-commit.yml` | PR | Validates PR title follows conventional commits |
-| `publish.yml` | Release | npm publish to `@amplitude/wizard` |
-| `release-please.yml` | Push to main | Automated release PRs via conventional commits |
+| `publish.yml` | Release / manual | npm publish with OIDC provenance under `beta` dist-tag; requires `npm-publish` environment approval |
+| `release-please.yml` | Push to main | Automated version bump, changelog, release PR, and publish via conventional commits |
 | `refresh-integration-skills.yml` | Schedule | Auto-update integration skill bundles |
 | `refresh-instrumentation-skills.yml` | Schedule | Auto-update instrumentation skill bundles |
 | `wizard-ci-trigger.yml` | Various | Downstream CI triggers |
+
+### Release process
+
+All releases are currently **beta prereleases** (`1.0.0-beta.N`) published under
+the `beta` npm dist-tag. The automated flow:
+
+```
+PR merged to main (conventional commit)
+  → release-please creates/updates a release PR (version bump + CHANGELOG)
+  → Merge the release PR → GitHub Release + tag created
+  → growth team approves the npm-publish environment
+  → Published to npm with OIDC provenance
+```
+
+Security controls: OIDC trusted publishing (no static npm tokens), `--provenance`
+supply-chain attestation, SHA-pinned actions, and CODEOWNERS requiring growth team
+review on workflow/manifest changes.
+
+See [`docs/releasing.md`](./releasing.md) for full details.
 
 ---
 
@@ -463,8 +482,13 @@ amplitude/wizard
 │   ├── flows.md                    Flow diagrams (source of truth for UX)
 │   ├── llm-proxy.md               Proxy architecture
 │   ├── mcp-installation.md         MCP editor installation
+│   ├── releasing.md                Release process and security controls
 │   └── architecture.md             This document
 ├── features/                       BDD test features (Cucumber)
 ├── e2e-tests/                      End-to-end tests
-└── .github/workflows/              CI/CD (8 workflows)
+├── .github/
+│   ├── workflows/                  CI/CD (8 workflows)
+│   └── CODEOWNERS                  Require growth team review on key files
+├── release-please-config.json      Beta prerelease configuration
+└── .release-please-manifest.json   Current version tracker
 ```
