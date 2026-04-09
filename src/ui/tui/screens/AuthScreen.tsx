@@ -257,7 +257,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     effectiveOrg !== null &&
     effectiveOrg.workspaces.length > 1 &&
     !selectedWorkspace;
-  const needsProjectPick = workspaceChosen && hasMultipleEnvs && !selectedEnv;
+  const needsProjectPick =
+    workspaceChosen && hasMultipleEnvs && !selectedEnv && !needsWorkspacePick;
   const needsApiKey =
     effectiveOrg !== null &&
     workspaceChosen &&
