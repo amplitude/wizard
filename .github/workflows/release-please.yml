@@ -8,13 +8,50 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  issues: write
+  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-24.04
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
     steps:
       - uses: googleapis/release-please-action@16a9c90856f42705d54a6fda1823352bdc62cf38 # v4.4.0
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-24.04
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    environment: npm-publish
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          run_install: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install package.json dependencies with pnpm
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the package
+        run: pnpm build
+
+      - name: Publish the package to npm registry
+        run: pnpm publish --access public --provenance --no-git-checks --tag beta
