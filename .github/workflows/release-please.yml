@@ -54,4 +54,4 @@ jobs:
         run: pnpm build
 
       - name: Publish the package to npm registry
-        run: pnpm publish --access public --provenance --no-git-checks --tag beta
+        run: pnpm publish --access public --no-git-checks --tag beta

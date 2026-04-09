@@ -56,7 +56,7 @@ If the automated flow fails, use the **Publish (manual)** workflow:
 | Control | Implementation |
 |---------|---------------|
 | **Authentication** | npm OIDC trusted publishing — no static tokens |
-| **Provenance** | `--provenance` flag generates npm supply-chain attestation |
+| **Provenance** | Disabled while repo is internal (see [Going public](#going-public) below) |
 | **Approval gate** | `npm-publish` GitHub environment requires growth team approval |
 | **SHA pinning** | All external actions pinned to full commit SHAs |
 | **CODEOWNERS** | Workflow and manifest changes require growth team review |
@@ -70,3 +70,12 @@ If the automated flow fails, use the **Publish (manual)** workflow:
 | `release-please-config.json` | Beta prerelease configuration |
 | `.release-please-manifest.json` | Current version tracker |
 | `.github/CODEOWNERS` | Review requirements |
+
+## Going public
+
+When the repo is made public, re-enable npm provenance attestation:
+
+1. Add `--provenance` back to the publish command in both workflows:
+   - `.github/workflows/release-please.yml`
+   - `.github/workflows/publish.yml`
+2. Update the security controls table above to reflect provenance is active
