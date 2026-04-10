@@ -90,7 +90,7 @@ export const TabContainer = ({
             ))}
           </Box>
           <Text color={Colors.muted}>
-            [ ] to browse tabs while the wizard runs
+            [/] to browse tabs while the wizard runs
           </Text>
         </Box>
       </Box>

@@ -214,8 +214,11 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
 
   useScreenInput((input, key) => {
     if (key.leftArrow) {
-      setPageIndex((prev) => (prev - 1 + TIP_PAGES.length) % TIP_PAGES.length);
-      setVisibleCount(TIP_PAGES[0].length);
+      setPageIndex((prev) => {
+        const next = (prev - 1 + TIP_PAGES.length) % TIP_PAGES.length;
+        setVisibleCount(TIP_PAGES[next].length);
+        return next;
+      });
       setTimerResetKey((k) => k + 1);
     }
     if (key.rightArrow) {
