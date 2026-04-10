@@ -1,9 +1,25 @@
 string,file,line,needs_review,notes,reason,suggested_replacement
+"debug with Claude",src/ui/tui/screens/ActivationOptionsScreen.tsx,81,true,Exposes the underlying LLM provider name,The wizard's LLM provider is an implementation detail. Naming Claude ties branding to a specific vendor and may confuse users who don't know what Claude is.,debug with AI
+"I'm blocked",src/ui/tui/screens/ActivationOptionsScreen.tsx,81,true,Hint says 'debug with Claude' — exposes LLM provider name in user-facing text,Same issue — the hint text on this menu item names Claude explicitly. Should be provider-agnostic since the proxy could change.,"I'm blocked" (keep label; change hint to 'get help debugging')
+"Claude/Anthropic services are experiencing issues.",src/ui/tui/screens/OutageScreen.tsx,32,true,Exposes LLM provider name (Claude/Anthropic) to users,Names the specific LLM vendor. Users shouldn't need to know which AI provider powers the wizard. Also creates a branding dependency on a third party.,AI services are experiencing issues.
+"Your project's .claude/settings.json sets:",src/ui/tui/screens/SettingsOverrideScreen.tsx,53,true,References '.claude/settings.json' — leaks internal agent tooling detail to user,Exposes the internal Claude Agent SDK config path. Most users won't know what .claude/settings.json is. If the underlying agent SDK changes this string becomes stale.,"A local configuration file is overriding the wizard's network settings."
+"Unify your data with Amplitude Activation",src/ui/tui/screens/RunScreen.tsx,117,true,Verify 'Amplitude Activation' is a current product name — may be deprecated or renamed,'Amplitude Activation' is not a well-known standalone product name on amplitude.com. The data routing product is typically 'Amplitude Data' or 'Amplitude CDP'. Using an incorrect product name misleads users.,Remove this tip entirely or replace with a verified product name from amplitude.com/products
+"Collect, clean, and route data to every tool in your stack. One SDK, one source of truth, zero data silos.",src/ui/tui/screens/RunScreen.tsx,119,true,Description depends on 'Amplitude Activation' being a real current product,Paired with the unverified product name above — if the product name is wrong the description is also misleading.,Remove or rewrite to match whatever the verified product name is
+"Extend your agents with the Skills Marketplace",src/ui/tui/screens/RunScreen.tsx,137,true,Verify 'Skills Marketplace' is a shipped/public Amplitude product name,No public 'Skills Marketplace' product exists on amplitude.com as of this audit. Advertising an unshipped or internal-only feature to external users is misleading.,Remove this tip entirely until the product is publicly launched
+"Browse and install pre-built skills that teach your agents new tricks — from anomaly detection to automated reporting. Build once, share across your org.",src/ui/tui/screens/RunScreen.tsx,139,true,Description depends on Skills Marketplace being a real shipped product,Same as above — describes a product users cannot access.,Remove alongside the Skills Marketplace tip
+"Meet your always-on analytics agent",src/ui/tui/screens/RunScreen.tsx,143,true,Verify this is a real shipped Amplitude product/feature,No publicly documented 'always-on analytics agent' product exists. This reads like aspirational marketing copy rather than a real feature users can try today.,Remove this tip or replace with a link to a verifiable shipped feature
+"Ask questions in Amplitude or in Slack and get instant answers backed by your data. One agent that works wherever your team already lives.",src/ui/tui/screens/RunScreen.tsx,145,true,Verify agent-in-Slack is a real shipped feature,Amplitude has Slack notifications but a persistent 'agent' that answers questions in Slack is not a documented GA feature. Claiming it exists misleads users.,Remove or rewrite to describe actual Slack integration capabilities (notifications and chart sharing)
+"Amplitude can also help you track your LLM costs",src/ui/tui/screens/RunScreen.tsx,165,true,Verify LLM cost tracking is a real shipped Amplitude feature,LLM cost tracking is gated behind a feature flag (FLAG_LLM_ANALYTICS) and may not be GA. Presenting a flag-gated beta feature as a general capability could confuse users if the flag is off.,Reword to 'Amplitude can help you track LLM usage' or gate this tip behind the same feature flag
+"From zero to first tracked event in 5 minutes.",src/ui/tui/screens/IntroScreen.tsx,85,true,Time claim may be inaccurate depending on project complexity,Unverifiable promise — complex projects (Django/Android/Unity) routinely exceed 5 minutes. Sets incorrect expectations.,"From zero to first tracked event, fast."
+"Go to Settings > Personal Settings > Profile and click ""Connect to Slack"".",src/ui/tui/screens/SlackScreen.tsx,186,true,Verify this navigation path is still accurate in current Amplitude UI,Amplitude's settings UI may have reorganized since this was written. If the path is wrong users will be stuck on a screen telling them to click something that doesn't exist.,"Verify path in production Amplitude UI. If changed, update to match. If unsure, simplify to 'Follow the instructions in the browser to connect Slack.'"
+"/feedback — Send product feedback (event: wizard: feedback submitted)",src/ui/tui/console-commands.ts,19,true,Leaks internal analytics event name to user,The parenthetical '(event: wizard: feedback submitted)' exposes the internal Amplitude event name used for telemetry. Users don't need to see this.,/feedback — Send product feedback
+"/test — Run a prompt-skill demo (confirm + choose)",src/ui/tui/console-commands.ts,21,true,Debug/dev command visible to end users — should be hidden or removed,This is a developer-only test command for exercising wizard-tools:confirm and wizard-tools:choose. Exposing it to end users is confusing. It serves no user purpose.,Remove from COMMANDS array entirely (or gate behind --debug flag)
+"Send product feedback (Amplitude event: wizard: Feedback Submitted)",bin.ts,937,true,Leaks internal analytics event name in CLI help text,The yargs command description includes the internal tracking event name. This is developer debug info that leaked into user-facing --help output.,Send product feedback
+"https://status.claude.com",src/lib/constants.ts,195,true,Claude status page URL exposed to users via OutageScreen,The status page link shown during outages points to status.claude.com which reinforces the Claude vendor leak. Should either be removed or replaced with a generic status page.,Remove or replace with a generic Amplitude status/support URL
 "Amplitude Wizard starting up",src/ui/tui/screens/IntroScreen.tsx,72,false,,,,
 "Amplitude Wizard",src/ui/tui/screens/IntroScreen.tsx,72,false,,,,
 "We'll use AI to analyze your project and integrate Amplitude.",src/ui/tui/screens/IntroScreen.tsx,79,false,,,,
 ".env* file contents will not leave your machine.",src/ui/tui/screens/IntroScreen.tsx,82,false,,,,
-"From zero to first tracked event in 5 minutes.",src/ui/tui/screens/IntroScreen.tsx,85,true,Time claim may be inaccurate depending on project complexity,Unverifiable promise — complex projects (Django/Android/Unity) routinely exceed 5 minutes. Sets incorrect expectations.,"From zero to first tracked event, fast."
 "Detecting project framework...",src/ui/tui/screens/IntroScreen.tsx,93,false,,,,
 "(detected)",src/ui/tui/screens/IntroScreen.tsx,126,false,,,,
 "[BETA]",src/ui/tui/screens/IntroScreen.tsx,127,false,,,,
@@ -44,8 +60,6 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "What would you like to do?",src/ui/tui/screens/ActivationOptionsScreen.tsx,70,false,,,,
 "Help me test locally",src/ui/tui/screens/ActivationOptionsScreen.tsx,78,false,,,,
 "run the setup agent",src/ui/tui/screens/ActivationOptionsScreen.tsx,79,false,,,,
-"I'm blocked",src/ui/tui/screens/ActivationOptionsScreen.tsx,81,true,Hint says 'debug with Claude' — exposes LLM provider name in user-facing text,The wizard's LLM provider is an implementation detail. Naming Claude ties branding to a specific vendor and may confuse users who don't know what Claude is.,"I'm blocked" (keep label; change hint to 'get help debugging')
-"debug with Claude",src/ui/tui/screens/ActivationOptionsScreen.tsx,81,true,Exposes the underlying LLM provider name,Same as above — the hint text explicitly names Claude. Should be provider-agnostic since the proxy could change.,debug with AI
 "Take me to the docs",src/ui/tui/screens/ActivationOptionsScreen.tsx,82,false,,,,
 "I'm done for now",src/ui/tui/screens/ActivationOptionsScreen.tsx,85,false,,,,
 "exit and resume later",src/ui/tui/screens/ActivationOptionsScreen.tsx,86,false,,,,
@@ -65,19 +79,12 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "Control who sees what, when. Roll out features gradually, kill switches instantly, and decouple deployment from release.",src/ui/tui/screens/RunScreen.tsx,105,false,,,,
 "Reach users in-product with Guides & Surveys",src/ui/tui/screens/RunScreen.tsx,111,false,,,,
 "Onboard new users, announce features, and collect feedback — all without a code deploy. Target the right audience using your Amplitude data.",src/ui/tui/screens/RunScreen.tsx,113,false,,,,
-"Unify your data with Amplitude Activation",src/ui/tui/screens/RunScreen.tsx,117,true,Verify 'Amplitude Activation' is a current product name — may be deprecated or renamed,"'Amplitude Activation' is not a well-known standalone product name on amplitude.com. The data routing product is typically called 'Amplitude Data' or 'Amplitude CDP'. Using an incorrect product name misleads users.",Remove this tip entirely or replace with a verified product name from amplitude.com/products
-"Collect, clean, and route data to every tool in your stack. One SDK, one source of truth, zero data silos.",src/ui/tui/screens/RunScreen.tsx,119,true,Description depends on 'Amplitude Activation' being a real current product,Paired with the unverified product name above — if the product name is wrong the description is also misleading.,Remove or rewrite to match whatever the verified product name is
 "Ask questions in plain English",src/ui/tui/screens/RunScreen.tsx,123,false,,,,
 "Amplitude AI lets anyone on your team ask data questions in natural language and get instant charts and insights — no SQL required.",src/ui/tui/screens/RunScreen.tsx,125,false,,,,
 "Give your AI agents analytics superpowers with Amplitude MCP",src/ui/tui/screens/RunScreen.tsx,131,false,,,,
 "Connect any AI agent to your Amplitude data via MCP. Your agents can query metrics, build charts, and act on insights — no dashboard required.",src/ui/tui/screens/RunScreen.tsx,133,false,,,,
-"Extend your agents with the Skills Marketplace",src/ui/tui/screens/RunScreen.tsx,137,true,Verify 'Skills Marketplace' is a shipped/public Amplitude product name,"No public 'Skills Marketplace' product exists on amplitude.com as of this audit. Advertising an unshipped or internal-only feature to external users is misleading.",Remove this tip entirely until the product is publicly launched
-"Browse and install pre-built skills that teach your agents new tricks — from anomaly detection to automated reporting. Build once, share across your org.",src/ui/tui/screens/RunScreen.tsx,139,true,Description depends on Skills Marketplace being a real shipped product,Same as above — describes a product users cannot access.,Remove alongside the Skills Marketplace tip
-"Meet your always-on analytics agent",src/ui/tui/screens/RunScreen.tsx,143,true,Verify this is a real shipped Amplitude product/feature,"No publicly documented 'always-on analytics agent' product exists. This reads like aspirational marketing copy rather than a real feature users can try today.",Remove this tip or replace with a link to a verifiable shipped feature
-"Ask questions in Amplitude or in Slack and get instant answers backed by your data. One agent that works wherever your team already lives.",src/ui/tui/screens/RunScreen.tsx,145,true,Verify agent-in-Slack is a real shipped feature,"Amplitude has Slack notifications but a persistent 'agent' that answers questions in Slack is not a documented GA feature. Claiming it exists misleads users.",Remove or rewrite to describe actual Slack integration capabilities (notifications and chart sharing)
 "You can track Stripe revenue with Amplitude",src/ui/tui/screens/RunScreen.tsx,157,false,,,,
 "Add Stripe as a data source while you wait:",src/ui/tui/screens/RunScreen.tsx,158,false,,,,
-"Amplitude can also help you track your LLM costs",src/ui/tui/screens/RunScreen.tsx,165,true,Verify LLM cost tracking is a real shipped Amplitude feature,"LLM cost tracking is gated behind a feature flag (FLAG_LLM_ANALYTICS) and may not be GA. Presenting a flag-gated beta feature as a general capability could confuse users if the flag is off.",Reword to 'Amplitude can help you track LLM usage' or gate this tip behind the same feature flag
 "LLM analytics setup queued next",src/ui/tui/screens/RunScreen.tsx,172,false,,,,
 "We detected LLM dependencies in your project.",src/ui/tui/screens/RunScreen.tsx,173,false,,,,
 "Status",src/ui/tui/screens/RunScreen.tsx,316,false,,,,
@@ -139,7 +146,6 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "Skip for now",src/ui/tui/screens/SlackScreen.tsx,169,false,,,,
 "Opening browser...",src/ui/tui/screens/SlackScreen.tsx,177,false,,,,
 "Browser opened to {settingsUrl}",src/ui/tui/screens/SlackScreen.tsx,183,false,,,,
-"Go to Settings > Personal Settings > Profile and click ""Connect to Slack"".",src/ui/tui/screens/SlackScreen.tsx,186,true,Verify this navigation path is still accurate in current Amplitude UI,"Amplitude's settings UI may have reorganized since this was written. If the path is wrong users will be stuck on a screen telling them to click something that doesn't exist.","Verify path in production Amplitude UI. If changed, update to match current nav. If unsure, simplify to 'Follow the instructions in the browser to connect Slack.'"
 "Connected to Slack?",src/ui/tui/screens/SlackScreen.tsx,191,false,,,,
 "Yes, connected",src/ui/tui/screens/SlackScreen.tsx,192,false,,,,
 "Slack connected! You'll get chart previews and notifications in Slack.",src/ui/tui/screens/SlackScreen.tsx,204,false,,,,
@@ -153,13 +159,11 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "Clear stored Amplitude credentials from ~/.ampli.json?",src/ui/tui/screens/LogoutScreen.tsx,44,false,,,,
 "Log out",src/ui/tui/screens/LogoutScreen.tsx,45,false,,,,
 "Logged out. Restart the wizard to re-authenticate.",src/ui/tui/screens/LogoutScreen.tsx,54,false,,,,
-"Claude/Anthropic services are experiencing issues.",src/ui/tui/screens/OutageScreen.tsx,32,true,Exposes LLM provider name (Claude/Anthropic) to users,"Names the specific LLM vendor. This is an implementation detail — users shouldn't need to know (or care) which AI provider powers the wizard. Also creates a branding dependency on a third party.",AI services are experiencing issues.
 "Status: {serviceStatus.description}",src/ui/tui/screens/OutageScreen.tsx,36,false,,,,
 "Status page: {serviceStatus.statusPageUrl}",src/ui/tui/screens/OutageScreen.tsx,39,false,,,,
 "The wizard may not work reliably while services are affected.",src/ui/tui/screens/OutageScreen.tsx,44,false,,,,
 "Continue anyway?",src/ui/tui/screens/OutageScreen.tsx,49,false,,,,
 "Settings Conflict",src/ui/tui/screens/SettingsOverrideScreen.tsx,48,false,,,,
-"Your project's .claude/settings.json sets:",src/ui/tui/screens/SettingsOverrideScreen.tsx,53,true,References '.claude/settings.json' — leaks internal agent tooling detail to user,"Exposes the internal Claude Agent SDK config path to end users. Most users won't know what .claude/settings.json is. If the underlying agent SDK changes, this string becomes stale and confusing.","A local configuration file is overriding the wizard's network settings."
 "These overrides prevent the Wizard from reaching the Amplitude LLM Gateway. We can back up the file and continue.",src/ui/tui/screens/SettingsOverrideScreen.tsx,66,false,,,,
 "Back up to .wizard-backup and continue?",src/ui/tui/screens/SettingsOverrideScreen.tsx,83,false,,,,
 "Backup & continue [Enter]",src/ui/tui/screens/SettingsOverrideScreen.tsx,84,false,,,,
@@ -195,14 +199,19 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "(No report found — the agent may still be running)",src/ui/tui/primitives/ReportViewer.tsx,50,false,,,,
 "↑↓ to scroll · {offset+visibleLines}/{lines.length} lines",src/ui/tui/primitives/ReportViewer.tsx,126,false,,,,
 "(No log file found)",src/ui/tui/primitives/LogViewer.tsx,34,false,,,,
+"Event plan",src/ui/tui/primitives/EventPlanViewer.tsx,16,false,,,,
+"Loading Kagi Small Web...",src/ui/tui/primitives/KagiSmallWebViewer.tsx,96,false,,,,
+"Could not load Kagi Small Web.",src/ui/tui/primitives/KagiSmallWebViewer.tsx,104,false,,,,
+"Kagi Small Web",src/ui/tui/primitives/KagiSmallWebViewer.tsx,112,false,,,,
+"{scrollOffset} more",src/ui/tui/primitives/PickerMenu.tsx,194,false,,,,
+"{remaining} more",src/ui/tui/primitives/PickerMenu.tsx,208,false,,,,
+"(space to toggle, enter to submit)",src/ui/tui/primitives/PickerMenu.tsx,339,false,,,,
 "/region — Switch data-center region (US or EU)",src/ui/tui/console-commands.ts,11,false,,,,
 "/login — Re-authenticate",src/ui/tui/console-commands.ts,12,false,,,,
 "/logout — Clear stored credentials",src/ui/tui/console-commands.ts,13,false,,,,
 "/whoami — Show current user, org, and project",src/ui/tui/console-commands.ts,14,false,,,,
 "/mcp — Install or remove the Amplitude MCP server",src/ui/tui/console-commands.ts,15,false,,,,
 "/slack — Set up Amplitude Slack integration",src/ui/tui/console-commands.ts,16,false,,,,
-"/feedback — Send product feedback (event: wizard: feedback submitted)",src/ui/tui/console-commands.ts,19,true,Leaks internal analytics event name to user,"The parenthetical '(event: wizard: feedback submitted)' exposes the internal Amplitude event name used for telemetry. Users don't need to see this — it looks like debug output left in by accident.","/feedback — Send product feedback"
-"/test — Run a prompt-skill demo (confirm + choose)",src/ui/tui/console-commands.ts,21,true,Debug/dev command visible to end users — should be hidden or removed,"This is a developer-only test command for exercising wizard-tools:confirm and wizard-tools:choose. Exposing it to end users is confusing and unprofessional. It serves no user purpose.",Remove from COMMANDS array entirely (or gate behind --debug flag)
 "/snake — Play Snake",src/ui/tui/console-commands.ts,22,false,,,,
 "/exit — Exit the wizard",src/ui/tui/console-commands.ts,23,false,,,,
 "org: {name}  workspace: {name}  region: {region}",src/ui/tui/console-commands.ts,39,false,,,,
@@ -226,6 +235,7 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "This installer requires an interactive terminal (TTY) to run.",bin.ts,186,false,,,,
 "For CI/CD environments, use --ci mode:",bin.ts,189,false,,,,
 "npx @amplitude/wizard --ci --install-dir . [--api-key <your-key>]",bin.ts,190,false,,,,
+"Amplitude wizard requires Node.js {range}. You are using Node.js {version}. Please upgrade your Node.js version.",bin.ts,43,false,,,,
 "Log in to your Amplitude account",bin.ts,798,false,,,,
 "Amplitude data center zone (us or eu)",bin.ts,802,false,,,,
 "Already logged in as {name} <{email}>",bin.ts,828,false,,,,
@@ -239,7 +249,6 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "Show the currently logged-in Amplitude account",bin.ts,907,false,,,,
 "Logged in as {name} <{email}>",bin.ts,919,false,,,,
 "Not logged in. Run `amplitude-wizard login` to authenticate.",bin.ts,927,false,,,,
-"Send product feedback (Amplitude event: wizard: Feedback Submitted)",bin.ts,937,true,Leaks internal analytics event name in CLI help text,"The yargs command description includes '(Amplitude event: wizard: Feedback Submitted)' which is the internal tracking event name. This is developer debug info that leaked into the user-facing --help output.",Send product feedback
 "Feedback message",bin.ts,942,false,,,,
 "Usage: amplitude-wizard feedback <message>  or  feedback --message <message>",bin.ts,956,false,,,,
 "Thanks — your feedback was sent.",bin.ts,966,false,,,,
@@ -258,3 +267,15 @@ string,file,line,needs_review,notes,reason,suggested_replacement
 "You must specify a subcommand (add or remove)",bin.ts,1188,false,,,,
 "Print shell completion script",bin.ts,1193,false,,,,
 "Your API key couldn't be fetched automatically. Only organization admins can access project API keys — if you need one, ask an admin to share it with you.",bin.ts,370,false,,,,
+"Using existing Amplitude session from ~/.ampli.json",src/utils/oauth.ts,252,false,,,,
+"Authorization failed.",src/utils/oauth.ts,350,false,,,,
+"Authorization timed out. Please try again.",src/utils/oauth.ts,356,false,,,,
+"Authorization was cancelled. Re-run the wizard to try again.",src/utils/oauth.ts,360,false,,,,
+"Authorization failed: {error.message}",src/utils/oauth.ts,365,false,,,,
+"Installing/Updating {package} with {manager}.",src/utils/setup-utils.ts,155,false,,,,
+"Installation failed.",src/utils/setup-utils.ts,189,false,,,,
+"Installed/Updated {package} with {manager}.",src/utils/setup-utils.ts,201,false,,,,
+"Could not find package.json. Make sure to run the wizard in the root of your app!",src/utils/setup-utils.ts,228,false,,,,
+"Unable to parse your package.json. Make sure it has a valid format!",src/utils/setup-utils.ts,240,false,,,,
+"API key cannot be empty",src/utils/setup-utils.ts,705,false,,,,
+"Added new {filename} file.",src/utils/setup-utils.ts,744,false,,,,
