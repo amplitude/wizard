@@ -21,7 +21,6 @@ import {
   ProgressList,
   LogViewer,
   EventPlanViewer,
-  KagiSmallWebViewer,
   SnakeGame,
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
@@ -334,11 +333,6 @@ export const RunScreen = ({ store }: RunScreenProps) => {
       id: 'logs',
       label: 'All logs',
       component: <LogViewer filePath={LOG_FILE} />,
-    },
-    {
-      id: 'smallweb',
-      label: 'Small Web',
-      component: <KagiSmallWebViewer />,
     },
     {
       id: 'snake',
