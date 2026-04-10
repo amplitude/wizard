@@ -188,12 +188,21 @@ const LOGO_MIN_COLS = 60;
 /** Delay (ms) between each tip appearing during a page transition. */
 const TIP_REVEAL_DELAY = 400;
 
+/** Module-level flag so the welcome splash only shows once per session. */
+let welcomeShownOnce = false;
+
 const TipsCard = ({ store }: { store: WizardStore }) => {
   const [columns] = useStdoutDimensions();
-  const [showWelcome, setShowWelcome] = useState(columns >= LOGO_MIN_COLS);
+  const [showWelcome, setShowWelcome] = useState(() => {
+    if (welcomeShownOnce || columns < LOGO_MIN_COLS) return false;
+    welcomeShownOnce = true;
+    return true;
+  });
   const [pageIndex, setPageIndex] = useState(0);
   /** Number of page tips currently visible (for staggered reveal). */
   const [visibleCount, setVisibleCount] = useState(TIP_PAGES[0].length);
+  /** Bumped on manual navigation to restart the auto-rotation timer. */
+  const [timerResetKey, setTimerResetKey] = useState(0);
 
   // Welcome splash fades away after WELCOME_DURATION
   useEffect(() => {
@@ -210,7 +219,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
       setVisibleCount(0);
     }, TIP_ROTATION_INTERVAL);
     return () => clearInterval(timer);
-  }, [showWelcome]);
+  }, [showWelcome, timerResetKey]);
 
   // Stagger reveal: increment visibleCount one at a time after each page change
   useEffect(() => {
@@ -224,7 +233,39 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
     return () => clearTimeout(timer);
   }, [showWelcome, pageIndex, visibleCount]);
 
-  useScreenInput((input) => {
+  useScreenInput((input, key) => {
+    // N / P to navigate tip pages
+    if (input === 'n' || input === 'N') {
+      setPageIndex((prev) => (prev + 1) % TIP_PAGES.length);
+      setVisibleCount(0);
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
+    if (input === 'p' || input === 'P') {
+      setPageIndex((prev) => {
+        const next = (prev - 1 + TIP_PAGES.length) % TIP_PAGES.length;
+        setVisibleCount(TIP_PAGES[next].length);
+        return next;
+      });
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
+    // Up/down arrows also navigate pages
+    if (key.upArrow) {
+      setPageIndex((prev) => {
+        const next = (prev - 1 + TIP_PAGES.length) % TIP_PAGES.length;
+        setVisibleCount(TIP_PAGES[next].length);
+        return next;
+      });
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
+    if (key.downArrow) {
+      setPageIndex((prev) => (prev + 1) % TIP_PAGES.length);
+      setVisibleCount(0);
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
     for (const tip of CONDITIONAL_TIPS) {
       if (
         tip.toggle &&
@@ -267,7 +308,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
         Learn about Amplitude
       </Text>
       <Text color={Colors.muted}>
-        {Icons.diamond} {pageIndex + 1}/{TIP_PAGES.length}
+        {Icons.diamond} {pageIndex + 1}/{TIP_PAGES.length} — N/P or ↑↓ to browse
       </Text>
       <Box height={1} />
 
