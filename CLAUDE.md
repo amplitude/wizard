@@ -87,6 +87,10 @@ Post-agent discrete steps: MCP server installation into editors, env var upload,
 
 OAuth flow, analytics tracking, env var handling, API key storage, debug logging, URL construction, package manager detection, shell completions, Anthropic status checks, custom headers.
 
+## Commit conventions
+
+This repo enforces **conventional commit** PR titles and commit messages. The type prefix must be one of: `feat`, `fix`, `docs`, `test`, `ci`, `refactor`, `perf`, `chore`, `revert`. Example: `feat: add org picker to auth flow`.
+
 ## Key conventions
 
 - **Screens are passive.** Screens observe session state and render accordingly. They do not own navigation logic — the router derives the active screen from session state.
