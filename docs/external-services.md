@@ -1,0 +1,404 @@
+# External Services & Runtime Dependencies
+
+Everything the wizard touches at runtime beyond its own source code: APIs, OAuth flows, status pages, file system locations, CLI tools, credential storage, and environment variables.
+
+> **Scope:** This document covers runtime dependencies only — not npm packages. For architecture details see [`architecture.md`](./architecture.md).
+
+---
+
+## Table of Contents
+
+- [Amplitude APIs](#amplitude-apis)
+- [OAuth Flow](#oauth-flow)
+- [LLM Gateway & Agent](#llm-gateway--agent)
+- [MCP Server](#mcp-server)
+- [Health Checks & Status Pages](#health-checks--status-pages)
+- [Telemetry](#telemetry)
+- [Feature Flags](#feature-flags)
+- [Credential Storage](#credential-storage)
+- [File System Touchpoints](#file-system-touchpoints)
+- [CLI Tools Invoked](#cli-tools-invoked)
+- [Environment Variables](#environment-variables)
+- [Outbound URLs (Browser)](#outbound-urls-browser)
+
+---
+
+## Amplitude APIs
+
+### Data API (GraphQL)
+
+The primary backend for user/org/workspace discovery after authentication.
+
+| Zone | Endpoint |
+|------|----------|
+| US | `https://data-api.amplitude.com/graphql` |
+| EU | `https://data-api.eu.amplitude.com/graphql` |
+
+**Auth:** `Authorization: Bearer <idToken>` (OAuth ID token).
+
+**Main query** — `orgs` (from `src/lib/api.ts`):
+
+```graphql
+query orgs {
+  orgs {
+    id
+    name
+    user { id firstName lastName email }
+    workspaces {
+      id
+      name
+      environments {
+        name
+        rank
+        app { id apiKey }
+      }
+    }
+  }
+}
+```
+
+Used to populate org/workspace/project pickers and resolve the API key for the selected project.
+
+### App API (Thunder GraphQL)
+
+Org-scoped endpoint for app-level operations (charts, dashboards, taxonomy).
+
+| Zone | Base URL |
+|------|----------|
+| US | `https://amplitude.com/graphql/org/<orgId>` |
+| EU | `https://amplitude.eu/graphql/org/<orgId>` |
+
+### Web App URLs
+
+Deep-links opened in the user's browser for chart creation, dashboard creation, and settings.
+
+| Zone | App Base | Overview Base |
+|------|----------|---------------|
+| US | `https://app.amplitude.com` | `https://app.amplitude.com` |
+| EU | `https://app.eu.amplitude.com` | `https://eu.amplitude.com` |
+
+Used to construct: `/chart/new`, `/dashboard/new`, `/settings/profile`, `/products?source=wizard`.
+
+---
+
+## OAuth Flow
+
+**Protocol:** OAuth 2.0 Authorization Code with PKCE.
+
+| Component | US | EU |
+|-----------|----|----|
+| Auth Host | `https://auth.amplitude.com` | `https://auth.eu.amplitude.com` |
+| Authorization URL | `<authHost>/oauth2/auth` | `<authHost>/oauth2/auth` |
+| Client ID | `0ac84169-c41c-4222-885b-31469c761cb0` | `110d04a1-8e60-4157-9c43-fcbe4e014a85` |
+| Local Redirect Port | `13222` | `13222` |
+
+**Overridable via env:** `OAUTH_HOST`, `OAUTH_CLIENT_ID`.
+
+**Flow:**
+1. Wizard starts a local HTTP server on port `13222`
+2. Opens the authorization URL in the user's default browser
+3. User authenticates on `auth.amplitude.com`
+4. Browser redirects back to `http://localhost:13222/callback` with the auth code
+5. Wizard exchanges the code for tokens (ID token + refresh token)
+6. Tokens are persisted to `~/.ampli.json` for session reuse
+
+**Token reuse:** On subsequent runs, the wizard reads `~/.ampli.json` and validates the stored ID token against the Data API before showing the auth screen.
+
+---
+
+## LLM Gateway & Agent
+
+The wizard routes all Claude API calls through Amplitude's Langley proxy service.
+
+| Environment | Gateway URL |
+|-------------|-------------|
+| Production | `https://gateway.us.amplitude.com` |
+| Local dev | Started via `pnpm proxy` (requires `aws-vault` with `us-prod-dev` profile) |
+
+**Liveness check:** `GET https://gateway.us.amplitude.com/_liveness` (5000ms timeout).
+
+**Auth:** The proxy validates Amplitude OAuth tokens. In local dev, `WIZARD_PROXY_DEV_BYPASS=1` skips OAuth — any token works.
+
+**Agent SDK:** `@anthropic-ai/claude-agent-sdk` — creates a persistent agent session with tool permissions, MCP server connections, and hook callbacks. The agent runs inside the wizard process.
+
+---
+
+## MCP Server
+
+Amplitude's remote MCP (Model Context Protocol) server provides the agent with Amplitude product tools.
+
+| Environment | Base URL |
+|-------------|----------|
+| Production | `https://mcp.amplitude.com` |
+| Local dev | `http://localhost:8787` |
+
+**Transport variants:**
+- SSE: `<base>/sse`
+- Streamable HTTP: `<base>/mcp`
+
+**Auth:** `Authorization: Bearer <apiKey>` (Amplitude project API key).
+
+**Feature filtering:** Optional query parameter `?features=dashboards,insights,experiments,...` limits which tool categories are exposed. All features are included by default when the param is omitted.
+
+**Health check:** `GET https://mcp.amplitude.com/` (5000ms timeout).
+
+### In-Process MCP Server (wizard-tools)
+
+The wizard also runs a local MCP server in-process (`src/lib/wizard-tools.ts`) providing 8 tools to the agent:
+
+| Tool | Purpose |
+|------|---------|
+| `check_env_keys` | Check which env vars are set in the project |
+| `set_env_values` | Write env vars to `.env.local` |
+| `detect_package_manager` | Detect npm/yarn/pnpm/bun/pip/etc. |
+| `load_skill_menu` | Fetch the skill menu for the detected framework |
+| `install_skill` | Download and install a skill from the remote registry |
+| `confirm` | Prompt the user for yes/no confirmation |
+| `choose` | Prompt the user to select from options |
+| `confirm_event_plan` | Present the event tracking plan for user approval before writing `track()` calls |
+
+---
+
+## Health Checks & Status Pages
+
+The wizard monitors 7+ external services via Statuspage.io v2 API and direct endpoint pings. Results are displayed in the `OutageOverlay` when degradation is detected.
+
+### Statuspage.io v2 API Checks
+
+All use `GET` with no auth. Response shape: `{ status: { indicator: "none" | "minor" | "major" | "critical" } }`.
+
+| Service | Status URL | Components URL |
+|---------|-----------|----------------|
+| Claude/Anthropic | `https://status.claude.com/api/v2/status.json` | — |
+| Amplitude | `https://www.amplitudestatus.com/api/v2/status.json` | `https://www.amplitudestatus.com/api/v2/summary.json` |
+| GitHub | `https://www.githubstatus.com/api/v2/status.json` | — |
+| npm | `https://status.npmjs.org/api/v2/status.json` | `https://status.npmjs.org/api/v2/summary.json` |
+| Cloudflare | `https://www.cloudflarestatus.com/api/v2/status.json` | `https://www.cloudflarestatus.com/api/v2/summary.json` |
+
+**Indicator mapping:**
+- `none` = Operational
+- `minor` = Degraded
+- `major` / `critical` = Down
+
+### Direct Endpoint Health Checks
+
+Both use a 5000ms timeout (`src/lib/health-checks/endpoints.ts`):
+
+| Service | URL | Method |
+|---------|-----|--------|
+| LLM Gateway | `https://gateway.us.amplitude.com/_liveness` | GET |
+| MCP Server | `https://mcp.amplitude.com/` | GET |
+
+---
+
+## Telemetry
+
+The wizard reports its own usage analytics to an internal Amplitude project.
+
+| Setting | Value |
+|---------|-------|
+| SDK | `@amplitude/analytics-node` |
+| Server URL | `https://api2.amplitude.com/2/httpapi` (configurable via `AMPLITUDE_SERVER_URL`) |
+| Default API Key | `e5a2c9bdffe949f7da77e6b481e118fa` (configurable via `AMPLITUDE_API_KEY`) |
+
+**Event namespace:** All events prefixed with `wizard: ` (e.g., `wizard: Session Ended`, `wizard: feedback submitted`, `wizard: error encountered`).
+
+**Session properties (full):** `integration`, `detected_framework`, `typescript`, `project_id`, `discovered_features`, `additional_features`, `run_phase`.
+
+**Session properties (compact, for high-volume events):** `integration`, `detected_framework`, `run_phase`, `project_id`.
+
+**Opt-out:** Controlled by the `FLAG_AGENT_ANALYTICS` feature flag.
+
+---
+
+## Feature Flags
+
+The wizard fetches feature flags from Amplitude Experiment at startup (`initFeatureFlags()` in `bin.ts`).
+
+Used to control:
+- Agent analytics opt-out (`FLAG_AGENT_ANALYTICS`)
+- LLM analytics SDK detection (`FLAG_LLM_ANALYTICS`)
+- Wizard variant selection (`FLAG_WIZARD_VARIANT`)
+
+Flags are refreshed during the session and all active flag values are attached to telemetry events.
+
+---
+
+## Credential Storage
+
+### API Key Storage
+
+Three-tier strategy, tried in order (`src/utils/api-key-store.ts`):
+
+| Tier | Platform | Mechanism | CLI Tool |
+|------|----------|-----------|----------|
+| 1 | macOS | Keychain Services | `security find-generic-password` / `security add-generic-password` |
+| 2 | Linux | GNOME Keyring / KWallet | `secret-tool lookup` / `secret-tool store` |
+| 3 | All | `.env.local` in project dir | File I/O (auto-adds to `.gitignore`) |
+
+**Scoping:** Keys are scoped by a SHA-1 hash of the install directory (first 12 hex chars), stored under the service name `amplitude-wizard`.
+
+### OAuth Token Storage
+
+| File | Contents |
+|------|----------|
+| `~/.ampli.json` | OAuth tokens (ID token, refresh token), user info, zone preference |
+
+This file is shared with the `ampli` CLI — the wizard intentionally uses the same port (`13222`) and storage location for session interoperability.
+
+---
+
+## File System Touchpoints
+
+### Files Read
+
+| Path | Purpose | Source |
+|------|---------|--------|
+| `~/.ampli.json` | Cached OAuth tokens + zone preference | `src/utils/ampli-settings.ts` |
+| `<project>/.env.local` | Fallback API key storage | `src/utils/api-key-store.ts` |
+| `<project>/package.json` | Framework detection, dependency scanning | Multiple detectors |
+| `<project>/pyproject.toml` | Python project detection | Framework detectors |
+| `<project>/requirements.txt` | Python dependency detection | Framework detectors |
+| `<project>/.vercel/project.json` | Vercel project linking detection | `src/steps/upload-environment-variables/providers/vercel.ts` |
+| `<project>/.amplitude-events.json` | Event plan generated by agent | Agent workflow |
+
+### Files Written
+
+| Path | Purpose | Source |
+|------|---------|--------|
+| `~/.ampli.json` | Persist OAuth tokens | `src/utils/ampli-settings.ts` |
+| `<project>/.env.local` | API key (fallback storage) | `src/utils/api-key-store.ts` |
+| `<project>/.gitignore` | Ensure `.env.local` is ignored | `src/utils/api-key-store.ts` |
+| `<project>/.amplitude-events.json` | Agent-generated event tracking plan | Agent workflow |
+
+### Editor Config Files Modified (MCP Server Installation)
+
+The wizard writes MCP server configuration to enable Amplitude tools in AI-powered editors (`src/steps/add-mcp-server-to-clients/`):
+
+| Editor | Config Path | Format |
+|--------|-------------|--------|
+| Cursor | `~/.cursor/mcp.json` | JSON with `mcpServers` key |
+| VS Code | `~/.vscode/mcp.json` | JSON with `mcpServers` key |
+| Claude Code | `~/.claude/mcp.json` | JSON (or via `claude mcp add` CLI) |
+| Zed | `~/.zed/mcp.json` | JSON with `mcpServers` key |
+
+---
+
+## CLI Tools Invoked
+
+The wizard shells out to these external CLI tools at runtime:
+
+### macOS Keychain (`security`)
+
+```bash
+# Read
+security find-generic-password -a "<hash>" -s "amplitude-wizard" -w
+# Write
+security add-generic-password -U -a "<hash>" -s "amplitude-wizard" -w "<key>"
+# Delete
+security delete-generic-password -a "<hash>" -s "amplitude-wizard"
+```
+
+### Linux Keyring (`secret-tool`)
+
+```bash
+# Read
+secret-tool lookup service "amplitude-wizard" account "<hash>"
+# Write
+printf '%s' "<key>" | secret-tool store --label="Amplitude API Key" service "amplitude-wizard" account "<hash>"
+# Delete
+secret-tool clear service "amplitude-wizard" account "<hash>"
+```
+
+### Claude Code CLI (`claude`)
+
+Search order: `~/.local/bin/claude`, `~/.claude/local/claude`, `/usr/local/bin/claude`, `/opt/homebrew/bin/claude`, then `$PATH`.
+
+```bash
+claude --version              # Version check
+claude mcp list               # List configured MCP servers
+claude mcp add --transport http <name> <url>  # Add MCP server
+claude mcp remove --scope user <name>         # Remove MCP server
+```
+
+### Vercel CLI (`vercel`)
+
+```bash
+vercel --version              # Detect CLI presence
+vercel whoami                 # Check authentication (run with CI=1)
+vercel env add <key> <env>    # Upload environment variable
+```
+
+### npx
+
+```bash
+npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
+# Used as transport proxy for editors that don't support HTTP MCP natively
+```
+
+---
+
+## Environment Variables
+
+### CLI Options (yargs prefix: `AMPLITUDE_WIZARD_`)
+
+| Variable | Flag | Description |
+|----------|------|-------------|
+| `AMPLITUDE_WIZARD_DEBUG` | `--debug` | Enable debug logging |
+| `AMPLITUDE_WIZARD_VERBOSE` | `--verbose` | Verbose output |
+| `AMPLITUDE_WIZARD_DEFAULT` | `--default` | Accept all defaults |
+| `AMPLITUDE_WIZARD_SIGNUP` | `--signup` | Force sign-up flow |
+| `AMPLITUDE_WIZARD_LOCAL_MCP` | `--local-mcp` | Use local MCP server |
+| `AMPLITUDE_WIZARD_CI` | `--ci` | CI mode (non-interactive) |
+| `AMPLITUDE_WIZARD_API_KEY` | `--api-key` | Pre-set API key |
+| `AMPLITUDE_WIZARD_PROJECT_ID` | `--project-id` | Pre-set project ID |
+| `AMPLITUDE_WIZARD_FORCE_INSTALL` | `--force-install` | Force reinstallation |
+| `AMPLITUDE_WIZARD_INSTALL_DIR` | `--install-dir` | Target directory |
+| `AMPLITUDE_WIZARD_INTEGRATION` | `--integration` | Force framework |
+| `AMPLITUDE_WIZARD_MENU` | `--menu` | Show framework menu |
+| `AMPLITUDE_WIZARD_BENCHMARK` | `--benchmark` | Enable benchmarking |
+
+### Runtime Configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `NODE_ENV` | — | `test`/`development` switches URLs to localhost |
+| `OAUTH_HOST` | Zone-specific | Override OAuth host |
+| `OAUTH_CLIENT_ID` | Zone-specific | Override OAuth client ID |
+| `AMPLITUDE_API_KEY` | `e5a2c9bdffe949f7da77e6b481e118fa` | Telemetry project API key |
+| `AMPLITUDE_SERVER_URL` | `https://api2.amplitude.com` | Telemetry server URL |
+| `WIZARD_PROXY_DEV_TOKEN` | — | LLM proxy auth token for local dev |
+| `WIZARD_PROXY_DEV_BYPASS` | — | Skip OAuth validation in proxy (dev only) |
+| `CI` | — | Non-interactive mode detection; also set to `1` when invoking Vercel CLI |
+
+### Framework-Specific SDK Environment Variables
+
+The agent writes these to `.env.local` depending on the detected framework:
+
+| Framework | Variable |
+|-----------|----------|
+| Next.js | `NEXT_PUBLIC_AMPLITUDE_API_KEY` |
+| Vite | `VITE_AMPLITUDE_API_KEY` |
+| Create React App | `REACT_APP_AMPLITUDE_API_KEY` |
+| Nuxt | `NUXT_PUBLIC_AMPLITUDE_API_KEY` |
+| SvelteKit / Astro | `PUBLIC_AMPLITUDE_API_KEY` |
+| Server-side (Node, Python, etc.) | `AMPLITUDE_API_KEY` |
+
+---
+
+## Outbound URLs (Browser)
+
+All URLs the wizard opens in the user's browser, defined in `OUTBOUND_URLS` (`src/lib/constants.ts`):
+
+| Purpose | URL Pattern |
+|---------|-------------|
+| OAuth login | `https://auth[.eu].amplitude.com/oauth2/auth` |
+| New chart | `https://app[.eu].amplitude.com/<orgId>/chart/new` |
+| New dashboard | `https://app[.eu].amplitude.com/<orgId>/dashboard/new` |
+| Slack settings | `https://[eu.]amplitude.com/<orgId>/settings/profile` |
+| Products page | `https://app[.eu].amplitude.com/products?source=wizard` |
+| SDK docs | `https://amplitude.com/docs/sdks` + per-framework variants |
+| Stripe data source | `https://app.amplitude.com/project/data-warehouse/new-source?kind=Stripe` |
+| Claude status | `https://status.claude.com` |
+| Amplitude status | `https://www.amplitudestatus.com` |
+| Bug reports | `https://github.com/amplitude/wizard/issues` |

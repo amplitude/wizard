@@ -8,6 +8,34 @@ chart, first dashboard, and Slack integration.
 
 ---
 
+## Table of contents
+
+- [The binary](#the-binary)
+- [Two operating modes: TUI vs CI](#two-operating-modes-tui-vs-ci)
+- [System diagram](#system-diagram)
+- [External dependencies](#external-dependencies-non-npm)
+- [Wizard flow (end-to-end)](#wizard-flow-end-to-end)
+- [Architectural layers](#architectural-layers)
+- [State management](#state-management)
+- [How the agent works](#how-the-agent-works)
+- [Authentication flow](#authentication-flow)
+- [The WizardUI interface](#the-wizardui-interface)
+- [TUI mode deep dive](#tui-mode-deep-dive)
+- [CI mode deep dive](#ci-mode-deep-dive)
+- [Screens reference](#screens-reference)
+- [Framework system](#framework-system)
+- [Skills system](#skills-system)
+- [Post-agent steps](#post-agent-steps)
+- [Middleware and benchmarking](#middleware-and-benchmarking)
+- [Health checks](#health-checks)
+- [Utilities reference](#utilities-reference)
+- [Testing](#testing)
+- [CI/CD](#cicd)
+- [Key constants](#key-constants)
+- [Directory map](#directory-map)
+
+---
+
 ## The binary
 
 ```
@@ -23,31 +51,119 @@ package.json → "bin": { "amplitude-wizard": "dist/bin.js" }
 | `logout` | Clear stored credentials |
 | `whoami` | Show current user, org, project, region |
 | `feedback` | Submit product feedback |
-| `slack` | Connect Amplitude project to Slack |
-| `region` | Switch data-center region (US / EU) |
+| `slack` | Connect Amplitude project to Slack (launches TUI SlackSetup flow) |
+| `region` | Switch data-center region (launches TUI RegionSelect flow) |
 | `mcp add` / `mcp remove` | Install or remove the Amplitude MCP server in editors |
 | `completion` | Generate shell completions (zsh/bash) |
 
-### Startup sequence (default wizard command)
+### Global CLI flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--debug` | `false` | Enable verbose logging |
+| `--verbose` | `false` | Print diagnostic info to the log |
+| `--default` | `true` | Use default options for all prompts |
+| `--signup` | `false` | Create a new Amplitude account |
+| `--local-mcp` | `false` | Use local MCP server at localhost:8787 |
+| `--ci` | `false` | CI mode — non-interactive, auto-approve |
+| `--api-key` | — | Amplitude API key (bypasses OAuth) |
+| `--project-id` | — | Amplitude project ID |
+
+### Default command flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--force-install` | `false` | Force install despite peer dep failures |
+| `--install-dir` | `process.cwd()` | Target directory |
+| `--integration` | — | Framework override (e.g., `nextjs`, `django`) |
+| `--menu` | `false` | Show manual framework picker |
+| `--benchmark` | `false` | Enable per-phase token tracking |
+
+All flags support env var override via `AMPLITUDE_WIZARD_` prefix (e.g., `AMPLITUDE_WIZARD_CI=true`).
+
+---
+
+## Two operating modes: TUI vs CI
+
+The wizard has two fundamentally different execution modes that share the same
+business logic but differ in user interaction.
+
+### Mode selection (bin.ts:166-194)
 
 ```
-bin.ts
- │
- ├─ Check Node.js >= 18.17.0
- ├─ Load .env via dotenv
- ├─ Initialize Amplitude telemetry (analytics-node)
- ├─ Initialize feature flags (experiment-node-server)
- ├─ Detect TTY → choose TUI (Ink) or LoggingUI (CI)
- ├─ Read stored OAuth token from ~/.ampli.json
- ├─ Fire concurrent:
- │   ├─ OAuth pre-check / refresh
- │   └─ Framework auto-detection (scan package.json, pyproject.toml, etc.)
- │
- └─ Call run.ts → runWizard(args, session)
+--ci flag?
+  ├─ YES → LoggingUI (CI mode)
+  │         Requires --install-dir
+  │
+  └─ NO
+      ├─ process.stdin.isTTY? → YES → InkUI (TUI mode)
+      │                                Launch Ink React app
       │
-      ├─ Call framework's gatherContext() if defined
-      └─ Call runAgentWizard() → spawn Claude agent
+      └─ NO → Error: "requires interactive terminal"
+               Suggests --ci flag
 ```
+
+### What is shared (both modes use these)
+
+| Layer | Files | Description |
+|-------|-------|-------------|
+| **UI contract** | `src/ui/wizard-ui.ts` | `WizardUI` interface — 28 methods both modes implement |
+| **UI singleton** | `src/ui/index.ts` | `getUI()` / `setUI()` — runtime polymorphism |
+| **Session** | `src/lib/wizard-session.ts` | `WizardSession` — all state, same structure in both modes |
+| **Agent runner** | `src/lib/agent-runner.ts` | `runAgentWizard()` — same orchestration |
+| **Agent interface** | `src/lib/agent-interface.ts` | Same Claude Agent SDK integration |
+| **Agent hooks** | `src/lib/agent-hooks.ts` | Same lifecycle callbacks |
+| **Commandments** | `src/lib/commandments.ts` | Same system prompt rules |
+| **Wizard tools** | `src/lib/wizard-tools.ts` | Same in-process MCP server |
+| **Framework configs** | `src/frameworks/` | Same detection, prompts, env vars |
+| **Skills** | `skills/` | Same bundled skill files |
+| **Steps** | `src/steps/` | Same post-agent operations |
+| **Utilities** | `src/utils/` | OAuth, analytics, API calls, etc. |
+| **Run orchestration** | `src/run.ts` | `runWizard()` — same entry, builds session, calls agent runner |
+
+The key insight: **all business logic calls `getUI()`**, never the TUI or logging
+implementation directly. This means the agent runner, wizard tools, framework
+detection, and post-agent steps are completely mode-agnostic.
+
+### What is NOT shared
+
+| Aspect | TUI mode (InkUI) | CI mode (LoggingUI) |
+|--------|-------------------|---------------------|
+| **Rendering** | Ink (React for terminals) with full-screen layout, tabs, colors | Simple `console.log` with Unicode markers (`┌ │ ✔ ▲ ✖`) |
+| **State management** | `WizardStore` with nanostores — reactive atoms, subscriptions, re-renders | No reactive state; session mutations are no-ops |
+| **Screen routing** | `WizardRouter` walks declarative flow pipelines | No screens, no routing, no transitions |
+| **Overlays** | Stack-based interrupts (outage, settings override, snake game) | Warnings printed to console, then continue |
+| **Slash commands** | `/region`, `/login`, `/logout`, `/whoami`, `/mcp`, `/slack`, `/feedback`, `/snake`, `/exit` — always available | None |
+| **Prompts** | Block the agent — user must respond (confirm, choose, approve event plan) | Auto-resolve: `promptConfirm` → `false`, `promptChoice` → `""`, `promptEventPlan` → `approved` |
+| **Error retry** | User presses R to retry; `setRunError()` blocks until user decides | `setRunError()` returns `false` immediately (no retry) |
+| **Heartbeat** | No-op (TUI shows live updates reactively) | Prints last N status messages every ~10 seconds |
+| **Task progress** | `ProgressList` component with status icons, animated transitions | Logs `[completed/total] current task` |
+| **Event plan** | Dedicated "Event plan" tab in RunScreen | Printed to console, auto-approved |
+| **Startup** | Concurrent: OAuth (browser popup) + framework detection + feature discovery, with TUI screens showing progress | Sequential: detect framework → run agent. Auth via `--api-key` flag or stored token |
+| **Tabs** | RunScreen has 5 tabs: Status, Event plan, All logs, Small Web, Snake | N/A |
+
+### Prompt behavior — the critical difference
+
+The `WizardUI` interface has three prompt methods that fundamentally differ between modes:
+
+```typescript
+// wizard-ui.ts
+promptConfirm(message: string): Promise<boolean>;
+promptChoice(message: string, options: string[]): Promise<string>;
+promptEventPlan(events: Array<{name, description}>): Promise<EventPlanDecision>;
+```
+
+**TUI mode**: These return Promises that block the agent until the user interacts.
+The store creates a `pendingPrompt` atom, the `ConsoleView` component renders the
+prompt UI, and the Promise resolves when the user responds.
+
+**CI mode**: These resolve immediately with defaults:
+- `promptConfirm` → `false` (skip)
+- `promptChoice` → `""` (skip)
+- `promptEventPlan` → `{ decision: 'approved' }` (auto-approve all events)
+
+This means in CI mode, the agent never pauses for user input — instrumentation
+plans are auto-approved and confirmations auto-skipped.
 
 ---
 
@@ -66,7 +182,7 @@ bin.ts
 │  │  │             │  │  + overlays) │  │ Setup · Run · MCP       │  │  │
 │  │  └──────┬──────┘  └──────────────┘  │ DataIngestion · Check-  │  │  │
 │  │         │                           │ list · Slack · Outro    │  │  │
-│  │         │                           │ + 5 overlays            │  │  │
+│  │         │                           │ + 7 overlays            │  │  │
 │  │         ▼                           └─────────────────────────┘  │  │
 │  │  ┌──────────────┐                                                │  │
 │  │  │WizardSession │  ◄── single source of truth for all state      │  │
@@ -113,7 +229,8 @@ bin.ts
 ## External dependencies (non-npm)
 
 These are **services and sibling repos** the wizard depends on at runtime or
-development time — not npm packages.
+development time — not npm packages. For the full inventory with URLs, auth details,
+and file system touchpoints, see [`external-services.md`](./external-services.md).
 
 ### Runtime services
 
@@ -184,8 +301,31 @@ OutroScreen                   Success / error / cancel + next steps
 ```
 
 **Overlays** can interrupt any screen without breaking flow:
-- `OutageScreen` — Claude API unavailable
-- `SettingsOverrideScreen` — `.claude/settings.json` has blocking keys
+- `Outage` — Claude API unavailable
+- `SettingsOverride` — `.claude/settings.json` has blocking keys
+- `Snake` — snake game (easter egg)
+- `Mcp` — MCP overlay (slash command)
+- `Slack` — Slack overlay (slash command)
+- `Logout` — logout confirmation
+- `Login` — token refresh
+
+### CI mode flow
+
+In CI mode, there are no screens. The flow is linear:
+
+```
+bin.ts (--ci)
+  → setUI(LoggingUI)
+  → Validate --install-dir is provided
+  → runWizard(args)
+    → detectAndResolveIntegration()
+      → Scan for framework (Integration enum order)
+      → If not found: fall back to generic
+    → runAgentWizard(config, session)
+      → All prompts auto-approved
+      → Status printed to console
+    → Exit
+```
 
 ---
 
@@ -196,18 +336,49 @@ OutroScreen                   Success / error / cancel + next steps
 Parses arguments, initializes services, builds `WizardSession`, and hands off to
 the TUI or CI runner. Owns the boundary between "CLI tool" and "wizard logic."
 
+**bin.ts responsibilities (TUI mode):**
+1. Check Node.js >= 18.17.0
+2. Install shell completions silently
+3. Import and call `startTUI()` — creates store, renders Ink app, swaps in InkUI
+4. Build session from CLI args via `buildSession()`
+5. Pre-populate credentials from `~/.ampli.json` for returning users (skips auth)
+6. Initialize feature flags (non-blocking)
+7. Kick off concurrent: OAuth task + framework detection task
+8. Wait for user to reach RunScreen (`store.onEnterScreen(Screen.Run)`)
+9. Check for pre-existing Amplitude installation → skip agent or run
+10. Call `runWizard(args, session)` → `runAgentWizard()`
+
+**bin.ts responsibilities (CI mode):**
+1. Check Node.js >= 18.17.0
+2. `setUI(new LoggingUI())`
+3. Validate `--install-dir` is set (required in CI)
+4. Call `runWizard(args)` — builds session internally
+
+**run.ts responsibilities:**
+1. Merge CLI args with environment variables
+2. Resolve install directory
+3. Build session if not provided
+4. Detect framework (CI mode does this here; TUI mode did it in bin.ts)
+5. Call `runAgentWizard(config, session)` in a retry loop
+6. On error: call `getUI().setRunError()` — TUI blocks for retry, CI returns false
+
 ### 2. TUI layer (`src/ui/tui/`)
 
 Built with **Ink** (React for terminals) and **nanostores** for reactive state.
 
 | Component | Purpose |
 |-----------|---------|
-| `WizardRouter` | Walks a declarative flow pipeline to resolve the active screen. Maintains an overlay stack for interruptions |
+| `start-tui.ts` | Entry point: creates store, renders Ink app, swaps in InkUI, forces dark terminal background |
+| `App.tsx` | Root Ink component — subscribes to store, resolves active screen via router, renders it |
+| `WizardRouter` (`router.ts`) | Walks a declarative flow pipeline to resolve the active screen. Maintains an overlay stack for interruptions |
 | `flows.ts` | Declares 5 flow pipelines (Wizard, McpAdd, McpRemove, SlackSetup, RegionSelect) as arrays of `{ screen, show, isComplete }` entries |
-| `WizardStore` | Nanostore atoms wrapping `WizardSession` — reactive setters trigger re-renders |
-| `screen-registry.tsx` | Maps `Screen` enum values to React components |
+| `WizardStore` (`store.ts`) | Nanostore atoms wrapping `WizardSession` — reactive setters trigger re-renders |
+| `screen-registry.tsx` | Maps `Screen` and `Overlay` enum values to React components |
 | `console-commands.ts` | Slash command definitions and dispatch |
 | `screens/` | 16 screen components, one file each |
+| `components/` | Shared UI components (ConsoleView, TitleBar, AmplitudeLogo) |
+| `primitives/` | Low-level building blocks (PickerMenu, ProgressList, TabContainer, LogViewer, etc.) |
+| `services/` | TUI-specific services (mcp-installer) |
 
 **Key rule**: Screens are passive. They read from the store and call store setters.
 The router derives the active screen from session state — screens never navigate
@@ -217,30 +388,16 @@ directly.
 
 | Component | Purpose |
 |-----------|---------|
-| `agent-runner.ts` | Orchestrates the full agent run: version check → status check → TS detection → spawn agent |
-| `agent-interface.ts` | Lazy-loads `@anthropic-ai/claude-agent-sdk`, resolves the `claude` CLI binary, defines `AgentSignals` |
-| `commandments.ts` | System prompt rules always appended: no hallucinated secrets, use wizard-tools MCP, read before write, call `confirm_event_plan` before instrumenting |
-| `wizard-tools.ts` | In-process MCP server exposing `check_env_keys`, `set_env_values`, `detect_package_manager`, `confirm_event_plan`, plus remote skill downloading |
+| `agent-runner.ts` | Orchestrates the full agent run: version check → status check → TS detection → build prompt → spawn agent → handle post-run |
+| `agent-interface.ts` | Lazy-loads `@anthropic-ai/claude-agent-sdk`, resolves the `claude` CLI binary, defines `AgentSignals`, manages permissions, streaming, stall detection |
+| `commandments.ts` | 9 system prompt rules always appended: no hallucinated secrets, use wizard-tools MCP, read before write, call `confirm_event_plan` before instrumenting, use TodoWrite for progress |
+| `wizard-tools.ts` | In-process MCP server: 8 tools (check_env_keys, set_env_values, detect_package_manager, confirm_event_plan, confirm, choose, load_skill_menu, install_skill) |
 | `safe-tools.ts` | Allowlist of ~100 linting/formatting tools the agent sandbox permits |
-| `agent-hooks.ts` | Lifecycle callbacks (stop, tool use, etc.) |
+| `agent-hooks.ts` | Lifecycle callbacks (stop hook with 3 phases: drain feature queue → collect remark → allow stop) |
 
 ### 4. Framework layer (`src/frameworks/`, `src/lib/framework-config.ts`, `src/lib/registry.ts`)
 
-Every supported framework implements the `FrameworkConfig<TContext>` interface:
-
-```typescript
-interface FrameworkConfig<TContext> {
-  integration: Integration;
-  displayName: string;
-  detect(dir: string): Promise<boolean>;     // auto-detection
-  gatherContext?(dir: string): Promise<TContext>; // pre-agent context
-  buildPrompt(ctx: TContext): string;         // agent system prompt
-  envKeys: string[];                          // required env vars
-  setupQuestions?: SetupQuestion[];           // disambiguation UI
-  // ... analytics, ui sections, etc.
-}
-```
-
+Every supported framework implements the `FrameworkConfig<TContext>` interface.
 `FRAMEWORK_REGISTRY` maps each `Integration` enum value to its config. The
 enum order in `constants.ts` controls detection priority (first match wins)
 and display order in the `--menu` picker.
@@ -260,21 +417,18 @@ and display order in the `--menu` picker.
 Post-agent discrete operations:
 
 - **MCP server installation** — detect editors, write config, handle 6 clients
-- **Environment variable upload** — push `.env` values to hosting providers
+- **Environment variable upload** — push `.env` values to hosting providers (Vercel)
 - **Prettier** — format code the agent touched
 
 ### 6. Skills (`skills/`)
 
 Bundled markdown instructions that the agent follows during runs:
 
-| Directory | Content | Count |
-|-----------|---------|-------|
-| `skills/integration/` | Per-framework SDK setup guides | 34 |
-| `skills/instrumentation/` | Event discovery and pattern matching | varies |
-| `skills/taxonomy/` | Quickstart taxonomy agent | 1 |
-
-Integration and instrumentation skills are auto-refreshed via GitHub Actions
-workflows (`pnpm skills:refresh`).
+| Directory | Content | Purpose |
+|-----------|---------|---------|
+| `skills/integration/` | Per-framework SDK setup guides (34 skills) | Step-by-step workflow files (1.0-begin, 1.1-edit, 1.2-revise, 1.3-conclude) |
+| `skills/instrumentation/` | Event discovery and pattern matching (5 skills) | Analyze code → discover surfaces → produce tracking plan |
+| `skills/taxonomy/` | Quickstart taxonomy agent (1 skill) | Event naming conventions, starter-kit scoping, business-outcome naming |
 
 ### 7. Utilities (`src/utils/`)
 
@@ -286,57 +440,226 @@ detection, URL construction, debug logging, shell completions, and more.
 
 ## State management
 
-```
-WizardSession (src/lib/wizard-session.ts)
-│
-├─ CLI args (framework, region, ci mode, flags)
-├─ Detection results (integration, typescript, features)
-├─ OAuth credentials (token, userId, orgId, workspaceId)
-├─ API key + region
-├─ Run tracking (runPhase: idle → running → completed/error)
-├─ Activation level (none / partial / full)
-├─ MCP outcome, Slack outcome
-├─ Feature discovery (Stripe, LLM packages)
-└─ Outro kind (success / error / cancel)
+### WizardSession (`src/lib/wizard-session.ts`)
 
-WizardStore (src/ui/tui/store.ts)
-│
-├─ Wraps WizardSession in Nanostore atoms
-├─ Provides typed setter methods
-├─ Subscribers are notified reactively
-└─ Router re-resolves active screen on every update
+The single source of truth for all wizard state. Every screen, step, and utility
+reads from and writes to this object.
+
 ```
+WizardSession
+│
+├─ CLI args
+│   debug, verbose, forceInstall, installDir, ci, signup, localMcp,
+│   apiKey, menu, benchmark, projectId
+│
+├─ Detection results
+│   integration, frameworkContext, frameworkConfig, typescript,
+│   detectedFrameworkLabel, detectionComplete, introConcluded
+│
+├─ OAuth / auth state
+│   pendingOrgs, pendingAuthIdToken, pendingAuthAccessToken,
+│   pendingAuthCloudRegion, selectedOrgId, selectedOrgName,
+│   selectedWorkspaceId, selectedWorkspaceName, selectedProjectName,
+│   apiKeyNotice
+│
+├─ Credentials (set when auth completes)
+│   credentials: { accessToken, idToken?, projectApiKey, host, projectId }
+│
+├─ Region
+│   region: null | 'us' | 'eu'
+│   regionForced: boolean (true when /region slash command invoked)
+│
+├─ Run lifecycle
+│   runPhase: Idle → Running → Completed | Error
+│   loginUrl, setupConfirmed
+│
+├─ Activation / data state
+│   projectHasData: null | true | false
+│   activationLevel: null | 'none' | 'partial' | 'full'
+│   activationOptionsComplete, snippetConfigured
+│   amplitudePreDetected, amplitudePreDetectedChoicePending
+│   dataIngestionConfirmed
+│
+├─ Feature discovery
+│   discoveredFeatures: DiscoveredFeature[] ('stripe' | 'llm')
+│   llmOptIn: boolean
+│   additionalFeatureQueue: AdditionalFeature[] ('llm')
+│
+├─ Post-agent state
+│   mcpComplete, mcpOutcome, mcpInstalledClients[]
+│   slackComplete, slackOutcome
+│   checklistChartComplete, checklistDashboardComplete, checklistComplete
+│
+├─ Service health
+│   serviceStatus: { description, statusPageUrl } | null
+│   settingsOverrideKeys: string[]
+│
+└─ Outro
+    outroData: { kind: Success|Error|Cancel, message?, changes?, docsUrl?,
+                 continueUrl?, promptLogin?, canRestart? }
+```
+
+**RunPhase enum:**
+- `Idle` — gathering input (intro, setup screens)
+- `Running` — agent is executing
+- `Completed` — agent finished successfully
+- `Error` — agent failed
+
+**buildSession(args)**: Factory function that initializes all fields from CLI args
+with sensible defaults. Used by both `bin.ts` (TUI) and `run.ts` (CI).
+
+### WizardStore (`src/ui/tui/store.ts`) — TUI only
+
+Wraps `WizardSession` in nanostore atoms for reactive rendering:
+
+- `$session` — the session object
+- `$statusMessages` — agent status log
+- `$tasks` — TodoWrite task items
+- `$eventPlan` — proposed events
+- `$commandMode` — slash command state
+- `$screenError` — error for retry banner
+- `$pendingPrompt` — blocking prompt from agent
+- `$version` — change counter for React sync
+
+40+ typed setter methods that update atoms and call `emitChange()`.
+React components subscribe via `useSyncExternalStore`.
 
 ---
 
 ## How the agent works
 
+### Agent initialization (`agent-interface.ts`)
+
 ```
-Agent Runner
- │
- ├─ Builds system prompt:
- │   ├─ Framework-specific prompt (from FrameworkConfig.buildPrompt)
- │   ├─ Commandments (always-on rules from commandments.ts)
- │   └─ Relevant skills (integration + instrumentation markdown)
- │
- ├─ Attaches MCP servers:
- │   ├─ wizard-tools (in-process) — env vars, package manager, event plan
- │   └─ filesystem tools (from safe-tools allowlist)
- │
- ├─ Spawns Claude Agent SDK subprocess:
- │   ├─ ANTHROPIC_BASE_URL = proxy URL
- │   ├─ ANTHROPIC_AUTH_TOKEN = user's OAuth token
- │   └─ claude CLI binary (resolved from SDK package)
- │
- └─ Agent execution:
-      1. Read project files to understand structure
-      2. Install Amplitude SDK + initialization code
-      3. Scan codebase for instrumentable locations
-      4. Call confirm_event_plan tool → user approves/edits event list
-      5. Write track() calls at approved locations
-      6. Detect features (Stripe, LLM) → show tips
-      7. Upload env vars to hosting if configured
+initializeAgent()
+│
+├─ Check .claude/settings.json for blocking overrides
+│   (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN)
+│   → If found: show SettingsOverride overlay or warning
+│
+├─ Determine auth method (priority order):
+│   1. Direct ANTHROPIC_API_KEY env var → bypass gateway entirely
+│   2. Amplitude LLM gateway (default) → set ANTHROPIC_BASE_URL + auth token
+│   3. Local claude CLI fallback → for development
+│
+├─ Ping gateway /health (8s timeout, fail-fast)
+│
+├─ Configure MCP servers:
+│   ├─ amplitude-wizard (remote, if token present)
+│   ├─ Additional framework-specific MCP servers
+│   └─ wizard-tools (in-process) — env vars, package detection, skills, prompts
+│
+└─ Return AgentRunConfig { workingDirectory, mcpServers, model, flags }
 ```
+
+### Agent execution (`agent-interface.ts` → `runAgent()`)
+
+```
+runAgent(config, prompt, options, spinner, runConfig, middleware?)
+│
+├─ Build system prompt: claude_code preset + wizard commandments
+│
+├─ Start streaming with Claude Agent SDK
+│   ├─ Stall detection: 20s timeout per message, up to 2 retries
+│   ├─ Permission hook: wizardCanUseTool() filters Bash commands
+│   └─ Stop hook: 3-phase (drain features → collect remark → allow stop)
+│
+├─ Message event loop:
+│   ├─ 'assistant' messages:
+│   │   ├─ Extract [STATUS] lines → push to UI
+│   │   ├─ Intercept TodoWrite tool_use → syncTodos() to UI
+│   │   └─ Pass to middleware.onMessage()
+│   │
+│   ├─ 'result' messages:
+│   │   ├─ Check is_error → extract error type
+│   │   └─ Accumulate result text
+│   │
+│   └─ Heartbeat every 10s: print last 3 STATUS messages
+│
+├─ Error detection in output:
+│   AUTH_ERROR, MCP_MISSING, RESOURCE_MISSING, RATE_LIMIT, API_ERROR
+│
+└─ Return { error?: AgentErrorType, message?: string }
+```
+
+### Agent runner (`agent-runner.ts` → `runAgentWizard()`)
+
+**Pre-agent:**
+1. Version check: detected vs minimum → show manual setup guide if too old
+2. Anthropic status check → show degraded notice
+3. Claude settings override check → backup/remove blocking overrides
+4. TypeScript detection
+5. Framework version detection + package.json check
+6. OAuth/credential establishment
+7. Cloud region determination
+8. Framework context gathering
+9. Analytics tags
+10. Prompt building (custom or MCP-skills default)
+
+**Agent run:**
+1. Evaluate all feature flags
+2. Build wizard metadata
+3. Determine MCP URL and skills URL
+4. Initialize agent (getAgent)
+5. Create benchmark middleware if enabled
+6. Call runAgent() with full config
+7. Handle errors (auth, MCP, rate limit, API)
+
+**Post-agent:**
+1. Build env vars from framework config
+2. Optional hosting upload (Vercel)
+3. Build outro data (success/error/cancel, changes list, docsUrl)
+4. Set session.outroData → OutroScreen renders
+
+### The 6-step integration prompt (`buildIntegrationPrompt()`)
+
+The prompt sent to the agent for MCP-skills-based frameworks:
+
+1. **STEP 1** — `load_skill_menu` from wizard-tools MCP → find matching integration skill
+2. **STEP 2** — `install_skill` to download/extract the skill
+3. **STEP 3** — Read the skill's `SKILL.md` for available references
+4. **STEP 4** — Follow numbered workflow files (1.0-begin → 1.1-edit → 1.2-revise → 1.3-conclude)
+5. **STEP 5** — Set up env vars via wizard-tools (`check_env_keys`, `set_env_values`)
+6. **STEP 6** — Add event tracking:
+   - Load taxonomy skill for naming conventions
+   - Load instrumentation skill for event discovery
+   - Follow instrumentation workflow
+   - Call `confirm_event_plan` before writing any `track()` calls
+
+### Wizard tools MCP server (`wizard-tools.ts`)
+
+In-process MCP server — secrets never leave the machine.
+
+| Tool | Purpose | Returns |
+|------|---------|---------|
+| `check_env_keys` | Check which env var keys exist in a .env file | `{ key: 'present'\|'missing' }` per key |
+| `set_env_values` | Create/update env vars, ensure .gitignore | "Updated N key(s) in filePath" |
+| `detect_package_manager` | Detect npm/yarn/pnpm/bun/pip/poetry/etc. | JSON with detected managers, install/run commands |
+| `load_skill_menu` | List available skills by category | Formatted list of skill IDs and names |
+| `install_skill` | Download and extract a skill to `.claude/skills/` | Install path confirmation |
+| `confirm` | Yes/no prompt to user | "true" or "false" |
+| `choose` | Multiple-choice prompt to user | Selected option or empty string |
+| `confirm_event_plan` | Show instrumentation plan for approval | "approved", "skipped", or "feedback: ..." |
+
+### Permission model (`wizardCanUseTool()`)
+
+The agent sandbox restricts what tools the Claude agent can call:
+
+**Allowed:**
+- Read, Write, Edit (except `.env` files — must use wizard-tools)
+- Glob, Grep
+- Bash with restrictions:
+  - Package manager commands (npm, pip, go, cargo, etc.)
+  - Safe scripts (build, install, test, typecheck, lint, etc.)
+  - Linting tools from `safe-tools.ts` allowlist
+  - Single pipe to `tail`/`head` only
+  - Stderr redirect `2>&1`
+- ListMcpResourcesTool, Skill
+
+**Blocked:**
+- Direct `.env` file operations
+- Dangerous shell operators (`;`, backticks, `$`, `(`, `)`)
+- Any tool not in the allowlist
 
 ---
 
@@ -346,21 +669,550 @@ Agent Runner
 User runs wizard
      │
      ├─ Check ~/.ampli.json for existing token
-     │   ├─ Valid → skip OAuth, auto-detect region from token
+     │   ├─ Valid token + stored API key → skip OAuth, auto-detect region
+     │   ├─ Valid token + single environment → auto-select API key
+     │   ├─ Valid token + multiple environments → defer to AuthScreen picker
      │   └─ Missing/expired → start OAuth
      │
      ▼
 OAuth PKCE flow
      │
+     ├─ Wait for region selection (US/EU determines OAuth endpoint)
      ├─ Open browser → core.amplitude.com/oauth2/authorize
      ├─ Local HTTP server on port 13222 receives callback
      ├─ Exchange code for token
      ├─ Store token + user info in ~/.ampli.json
-     └─ Auto-detect region (US/EU) from token claims
+     └─ Auto-detect region from token claims
            │
            ▼
      Org picker (if multiple) → Workspace picker (if multiple) → API key
 ```
+
+**CI mode auth:** Pass `--api-key <key>` on the command line. The wizard uses this
+directly without OAuth. If no key is provided, it checks `~/.ampli.json` for stored
+credentials.
+
+---
+
+## The WizardUI interface
+
+`src/ui/wizard-ui.ts` defines the contract both modes implement. Here's every
+method with its behavior in each mode:
+
+### Lifecycle
+
+| Method | TUI (InkUI) | CI (LoggingUI) |
+|--------|-------------|----------------|
+| `intro(msg)` | Push to status messages | `console.log("┌ msg")` |
+| `outro(msg)` | Set OutroData, advance RunPhase to Completed | `console.log("└ msg")` |
+| `cancel(msg, opts?)` | Set OutroData with Cancel kind, advance RunPhase to Error | `console.log("■ msg")` + docs URL |
+
+### Logging
+
+| Method | TUI | CI |
+|--------|-----|-----|
+| `log.info(msg)` | Push to status messages | `console.log("│ msg")` |
+| `log.warn(msg)` | Push to status messages | `console.log("▲ msg")` |
+| `log.error(msg)` | Push to status messages | `console.log("✖ msg")` |
+| `log.success(msg)` | Push to status messages | `console.log("✔ msg")` |
+| `log.step(msg)` | Push to status messages | `console.log("◇ msg")` |
+| `note(msg)` | Push to status messages | `console.log("│ msg")` |
+| `pushStatus(msg)` | Push to status messages | `console.log("◇ msg")` |
+| `heartbeat(statuses)` | **No-op** (TUI shows live updates) | Print statuses to stdout |
+
+### Spinner
+
+| Method | TUI | CI |
+|--------|-----|-----|
+| `spinner().start(msg)` | Push to status | Write to stdout (no newline) |
+| `spinner().stop(msg)` | Push to status | Overwrite spinner line with `●` |
+| `spinner().message(msg)` | Push to status | Overwrite spinner line |
+
+### Session state
+
+| Method | TUI | CI |
+|--------|-----|-----|
+| `startRun()` | Set RunPhase to Running | No-op |
+| `setRunError(error)` | Show error banner, **block until user presses R** → return `true` | Return `false` immediately (no retry) |
+| `setCredentials(creds)` | Update store → router advances past Auth | No-op |
+| `showServiceStatus(data)` | Push Outage overlay | Print warning to console |
+| `showSettingsOverride(keys, fix)` | **Block until user chooses** (backup or exit) | Print warning, resolve immediately |
+| `setDetectedFramework(label)` | Update store | `console.log("✔ Framework: label")` |
+| `onEnterScreen(screen, fn)` | Register callback in store | No-op |
+| `setLoginUrl(url)` | Update store | Print URL to console |
+| `setRegion(region)` | Update store → router advances past RegionSelect | No-op |
+| `setProjectHasData(value)` | Update store → router advances past DataSetup | No-op |
+
+### Prompts
+
+| Method | TUI | CI |
+|--------|-----|-----|
+| `promptConfirm(msg)` | **Block agent** until user responds Y/N | Return `false` (auto-skip) |
+| `promptChoice(msg, opts)` | **Block agent** until user selects | Return `""` (auto-skip) |
+| `promptEventPlan(events)` | **Block agent** — user can approve, skip, or give feedback | Return `{ decision: 'approved' }` (auto-approve) |
+
+### State sync
+
+| Method | TUI | CI |
+|--------|-----|-----|
+| `syncTodos(todos)` | Update $tasks atom → ProgressList re-renders | Log `[completed/total] current task` |
+| `setEventPlan(events)` | Update $eventPlan atom → EventPlanViewer shows | No-op |
+
+---
+
+## TUI mode deep dive
+
+### Startup sequence (`bin.ts` TUI branch)
+
+```
+1. startTUI(version)
+   ├─ Force dark terminal background (OSC escape sequences)
+   ├─ Create WizardStore(Flow.Wizard)
+   ├─ Create InkUI(store) → setUI(inkUI)
+   └─ render(App, { store }) via Ink
+
+2. Build session from CLI args → store.session = session
+
+3. Pre-populate credentials from ~/.ampli.json
+   ├─ Check stored user + zone
+   ├─ Check stored API key
+   ├─ If single environment → auto-select
+   ├─ If multiple → defer to AuthScreen picker
+   └─ Pre-populate org/workspace from ampli.json
+
+4. Initialize feature flags (non-blocking)
+
+5. Concurrent tasks (while user sees IntroScreen/AuthScreen):
+   ├─ authTask: Wait for region → OAuth → fetchAmplitudeUser → store.setOAuthComplete()
+   └─ detectionTask: detectIntegration() → gatherContext() → feature discovery → store.setDetectionComplete()
+
+6. await tui.waitForSetup()
+   └─ Blocks until onEnterScreen(Screen.Run) fires completeSetup()
+
+7. Check for pre-existing Amplitude → skip or run agent
+
+8. await runWizard(args, session)
+```
+
+### Flow router (`router.ts`)
+
+The router resolves the active screen by walking a declarative pipeline:
+
+```typescript
+resolve(session: WizardSession): ScreenName {
+  // Overlays take priority
+  if (this.overlays.length > 0) return top overlay;
+
+  // Cancel jumps directly to Outro
+  if (session.outroData?.kind === OutroKind.Cancel) return Screen.Outro;
+
+  // Walk flow entries
+  for (const entry of this.flow) {
+    if (entry.show && !entry.show(session)) continue;  // skip hidden
+    if (entry.isComplete && entry.isComplete(session)) continue;  // skip done
+    return entry.screen;  // first incomplete screen
+  }
+
+  // All done — show last screen (outro)
+  return this.flow[this.flow.length - 1].screen;
+}
+```
+
+### Flow pipelines (`flows.ts`)
+
+**Wizard flow** (main flow, 12 entries):
+
+| # | Screen | Show condition | Complete condition |
+|---|--------|---------------|-------------------|
+| 1 | Intro | always | `introConcluded` |
+| 2 | RegionSelect | `region === null \|\| regionForced` | `region !== null && !regionForced` |
+| 3 | Auth | `runPhase !== Error` | `credentials !== null` |
+| 4 | DataSetup | always | `projectHasData !== null` |
+| 5 | ActivationOptions | `activationLevel === 'partial'` | `activationOptionsComplete` |
+| 6 | Setup | `needsSetup() && activationLevel !== 'full'` | `!needsSetup()` |
+| 7 | Run | `activationLevel !== 'full'` | `runPhase === Completed \|\| Error` |
+| 8 | Mcp | `runPhase !== Error` | `mcpComplete` |
+| 9 | DataIngestionCheck | `runPhase !== Error && activationLevel !== 'full'` | `dataIngestionConfirmed` |
+| 10 | Checklist | `runPhase !== Error` | `checklistComplete` |
+| 11 | Slack | `runPhase !== Error` | `slackComplete` |
+| 12 | Outro | always | — |
+
+**Other flows:** McpAdd (2 entries), McpRemove (2 entries), SlackSetup (2 entries), RegionSelect (1 entry).
+
+### Slash commands (`console-commands.ts`)
+
+Available at any time in TUI mode:
+
+| Command | Action |
+|---------|--------|
+| `/region` | Push RegionSelect overlay |
+| `/login` | Push Login overlay (token refresh) |
+| `/logout` | Push Logout overlay (clear credentials) |
+| `/whoami` | Display current user, org, project, region |
+| `/mcp` | Push MCP overlay |
+| `/slack` | Push Slack overlay |
+| `/feedback <msg>` | Submit product feedback event |
+| `/test` | Run agent health checks |
+| `/snake` | Push Snake game overlay |
+| `/exit` | Exit the wizard |
+
+### ConsoleView component (`components/ConsoleView.tsx`)
+
+The root container for all screens. Handles:
+- Slash command input bar (activated with `/` or Tab)
+- Free-text queries to Claude (conversation mode)
+- Prompt rendering (confirm, choice, event plan)
+- Screen error display
+- Command feedback display
+
+---
+
+## CI mode deep dive
+
+### What CI mode does differently
+
+1. **No screens**: No router, no store, no Ink rendering. Just `console.log`.
+2. **No interactive prompts**: All prompts auto-resolve with defaults.
+3. **No concurrent startup**: Framework detection happens sequentially in `run.ts`.
+4. **No retry on error**: `setRunError()` returns `false` → `wizardAbort()`.
+5. **Requires `--install-dir`**: Must specify target directory explicitly.
+6. **Heartbeat active**: Prints status summaries every ~10 seconds.
+
+### CI mode usage
+
+```bash
+# Minimal
+npx @amplitude/wizard --ci --install-dir .
+
+# With API key (skips OAuth entirely)
+npx @amplitude/wizard --ci --install-dir . --api-key <YOUR_KEY>
+
+# With framework override
+npx @amplitude/wizard --ci --install-dir . --integration nextjs
+
+# With project ID
+npx @amplitude/wizard --ci --install-dir . --api-key <KEY> --project-id 12345
+```
+
+### CI output format
+
+```
+┌  Welcome to the Amplitude setup wizard
+│  Running in CI mode
+✔  Framework: Next.js
+◌  Writing your Amplitude setup...
+│  [STATUS] Checking project structure
+│  [STATUS] Verifying Amplitude dependencies
+?  Instrumentation plan (auto-approved in CI):
+│  - Page Viewed: User views a page
+│  - Button Clicked: User clicks a CTA button
+◌  [3/7] Implementing event tracking
+●  Writing your Amplitude setup...
+└  Done
+```
+
+---
+
+## Screens reference
+
+### Main flow screens
+
+| Screen | File | Reads from session | Writes to session | Key behavior |
+|--------|------|-------------------|-------------------|-------------|
+| **IntroScreen** | `screens/IntroScreen.tsx` | `detectionComplete`, `frameworkConfig`, `detectedFrameworkLabel` | `introConcluded` (via `concludeIntro()`) | Shows detected framework, user confirms or picks manually. Three states: detecting (spinner), failed (auto-Generic), succeeded (menu) |
+| **RegionSelectScreen** | `screens/RegionSelectScreen.tsx` | `region`, `regionForced` | `region` (via `setRegion()`) | US/EU picker. Skipped for returning users |
+| **AuthScreen** | `screens/AuthScreen.tsx` | `pendingOrgs`, tokens, `selectedOrgId`, `selectedWorkspaceId`, `credentials` | Org/workspace selection, `credentials`, `region` | Multi-step SUSI flow with org → workspace → environment pickers |
+| **DataSetupScreen** | `screens/DataSetupScreen.tsx` | `projectHasData` | `activationLevel`, `snippetConfigured` | Checks activation via API. Routes: none→setup, partial→options, full→skip |
+| **ActivationOptionsScreen** | `screens/ActivationOptionsScreen.tsx` | `snippetConfigured` | `outroData` | Help test locally, debug, docs, or exit |
+| **SetupScreen** | `screens/SetupScreen.tsx` | Framework questions | `frameworkContext[key]` | Auto-detects answers, shows picker for unresolved questions |
+| **RunScreen** | `screens/RunScreen.tsx` | `tasks`, `eventPlan`, `statusMessages`, `discoveredFeatures` | `requestedTab` (clear) | Observational: 5 tabs (Status, Event plan, Logs, Small Web, Snake). Shows ProgressList + TipsCard |
+| **McpScreen** | `screens/McpScreen.tsx` | `runPhase`, `amplitudePreDetected` | `mcpComplete`, `mcpOutcome`, `mcpInstalledClients` | Detect editors → confirm → pick → install. Also handles pre-detected choice |
+| **DataIngestionCheckScreen** | `screens/DataIngestionCheckScreen.tsx` | `region`, org/project IDs | `dataIngestionConfirmed` | Polls activation API every 30s. Exit with q/Esc |
+| **ChecklistScreen** | `screens/ChecklistScreen.tsx` | `checklistChartComplete`, `checklistDashboardComplete` | `checklistComplete` | First chart → first dashboard. Dashboard locked until chart done |
+| **SlackScreen** | `screens/SlackScreen.tsx` | `selectedOrgName`, `selectedOrgId`, `region` | `slackComplete`, `slackOutcome` | 4 phases: prompt → opening → waiting → done |
+| **OutroScreen** | `screens/OutroScreen.tsx` | `outroData` | — | Success: picker (view report, open dashboard, exit). Error/cancel: any key exits |
+
+### Overlay screens
+
+| Overlay | File | Purpose |
+|---------|------|---------|
+| **OutageScreen** | `screens/OutageScreen.tsx` | Claude API unavailable. Continue or exit |
+| **SettingsOverrideScreen** | `screens/SettingsOverrideScreen.tsx` | Blocking .claude/settings.json keys. Backup or exit |
+| **LoginScreen** | `screens/LoginScreen.tsx` | Silent token refresh. Auto-exits |
+| **LogoutScreen** | `screens/LogoutScreen.tsx` | Clear credentials confirmation |
+| **SnakeGame** | via `primitives/SnakeGame.tsx` | Easter egg |
+
+---
+
+## Framework system
+
+### FrameworkConfig<TContext> interface
+
+```typescript
+interface FrameworkConfig<TContext> {
+  metadata: {
+    name: string;                          // "Next.js"
+    integration: Integration;              // Integration.nextjs
+    docsUrl: string;                       // SDK docs URL
+    unsupportedVersionDocsUrl?: string;    // For old versions
+    beta?: boolean;                        // Shows beta notice
+    preRunNotice?: string;                 // Warning before agent (e.g., Xcode)
+    gatherContext?(opts): Promise<TContext>; // Pre-agent context gathering
+    additionalMcpServers?: McpServer[];    // Extra MCP servers
+    setup?: { questions: SetupQuestion[] }; // Disambiguation questions
+  };
+
+  detection: {
+    packageName: string;                   // "next"
+    packageDisplayName: string;            // "Next.js"
+    getVersion(pkg): string | undefined;   // Extract version from package.json
+    getVersionBucket?(v): string;          // Normalize "15.x" for analytics
+    usesPackageJson?: boolean;             // Default true; false for Python/Go
+    minimumVersion?: string;               // Enforce version check
+    getInstalledVersion?(): Promise<string>; // Runtime version check
+    detect(opts): Promise<boolean>;        // Is this framework present?
+    detectPackageManager: PackageManagerDetector;
+  };
+
+  environment: {
+    uploadToHosting: boolean;              // Push to Vercel?
+    getEnvVars(apiKey, host): Record<string, string>;
+  };
+
+  analytics: {
+    getTags(context): Record<string, string>;
+    getEventProperties?(context): Record<string, string>;
+  };
+
+  prompts: {
+    buildPrompt?(context): string;         // Custom prompt (overrides default)
+    getAdditionalContextLines?(context): string[];
+    projectTypeDetection: string;          // How to detect project type
+    packageInstallation?: string;          // Override install instructions
+  };
+
+  ui: {
+    successMessage: string;
+    estimatedDurationMinutes: number;
+    getOutroChanges(context): string[];    // "What the agent did" bullets
+    getOutroNextSteps(context): string[];  // "Next steps" bullets
+  };
+}
+```
+
+### Detection order
+
+Defined by `Integration` enum in `constants.ts`. First match wins:
+
+```
+nextjs → vue → reactRouter → django → flask → fastapi → swift →
+reactNative → android → flutter → go → java → unreal → unity →
+javascript_web → python → javascriptNode → generic
+```
+
+### Adding a new framework
+
+Use the `adding-framework-support` skill (`.claude/skills/adding-framework-support/SKILL.md`).
+The process:
+1. Add enum value to `Integration` in `constants.ts` (position matters)
+2. Create `src/frameworks/<name>/<name>-wizard-agent.ts` exporting a `FrameworkConfig`
+3. Register in `src/lib/registry.ts`
+4. Add integration skill in `skills/integration/`
+5. Add docs URL to `OUTBOUND_URLS.frameworkDocs` in `constants.ts`
+
+---
+
+## Skills system
+
+Skills are bundled markdown instructions that the Claude agent follows during runs.
+They provide structured, step-by-step workflows with reference documentation.
+
+### Integration skills (`skills/integration/`)
+
+Each skill has:
+```
+skills/integration/<skill-id>/
+├── SKILL.md              # Entry point — lists available references
+└── references/
+    ├── basic-integration-1.0-begin.md     # Step 1: Analyze project, create event plan
+    ├── basic-integration-1.1-edit.md      # Step 2: Implement tracking code
+    ├── basic-integration-1.2-revise.md    # Step 3: Fix errors, run linter
+    ├── basic-integration-1.3-conclude.md  # Step 4: Verify env vars, create dashboard, write report
+    ├── EXAMPLE.md                         # Reference implementation
+    ├── amplitude-quickstart.md            # SDK quickstart docs
+    └── browser-sdk-2.md (etc.)            # SDK reference docs
+```
+
+### Instrumentation skills (`skills/instrumentation/`)
+
+| Skill | Purpose |
+|-------|---------|
+| `add-analytics-instrumentation` | End-to-end orchestrator: intent → discovery → plan |
+| `discover-event-surfaces` | Find instrumentable locations in code |
+| `discover-analytics-patterns` | Identify existing tracking patterns |
+| `instrument-events` | Write actual tracking code |
+| `diff-intake` | Analyze PR/branch diffs for instrumentation |
+
+### Taxonomy skill (`skills/taxonomy/`)
+
+`amplitude-quickstart-taxonomy-agent` — enforces naming conventions:
+- Business-outcome event naming
+- Small property sets
+- No redundant pageview events
+- Funnel-friendly linkage
+
+### Skill loading flow
+
+```
+Agent prompt says: "Call load_skill_menu"
+  → wizard-tools MCP returns skill list
+Agent says: "Call install_skill('integration-nextjs-app-router')"
+  → wizard-tools copies from skills/ to .claude/skills/
+Agent reads: .claude/skills/integration-nextjs-app-router/SKILL.md
+  → Follows workflow files in sequence
+```
+
+---
+
+## Post-agent steps
+
+### MCP server installation (`src/steps/add-mcp-server-to-clients/`)
+
+Installs the Amplitude MCP server into supported editors:
+
+| Client | Config location | Format |
+|--------|-----------------|--------|
+| VS Code | `~/Library/Application Support/Code/User/mcp.json` | `servers` object |
+| Zed | `~/.config/zed/settings.json` | `context_servers` object |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` object |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `mcpServers` via SSE |
+| Claude Code | CLI (`claude mcp add`) | streamable-http |
+| Codex | CLI (`codex mcp add`) | streamable-http |
+
+Server URLs: `https://mcp.amplitude.com/mcp` (US), `https://mcp.eu.amplitude.com/mcp` (EU).
+
+### Environment variable upload (`src/steps/upload-environment-variables/`)
+
+Pushes `.env` values to hosting providers. Currently supports Vercel.
+
+### Prettier (`src/steps/run-prettier.ts`)
+
+Formats files the agent created or modified.
+
+---
+
+## Middleware and benchmarking
+
+The middleware system (`src/lib/middleware/`) provides pluggable observability for agent runs.
+
+### Pipeline architecture
+
+```typescript
+interface Middleware {
+  readonly name: string;
+  onInit?(ctx): void;
+  onMessage?(message, ctx, store): void;
+  onPhaseTransition?(from, to, ctx, store): void;
+  onFinalize?(result, durationMs, ctx, store): unknown;
+}
+```
+
+### Benchmark trackers
+
+When `--benchmark` is passed, these trackers are enabled:
+
+| Tracker | What it measures |
+|---------|-----------------|
+| Token tracker | Input/output token counts per phase |
+| Cache tracker | Cache read/creation token counts |
+| Cost tracker | USD cost estimation |
+| Duration tracker | Wall-clock time per phase |
+| Turn counter | Number of agent turns |
+| Compaction tracker | Context compaction events |
+| Context size tracker | Context window usage |
+| Summary | Human-readable summary |
+| JSON writer | Machine-readable `.benchmark.json` output |
+
+Output: `BenchmarkData` with per-step breakdowns and totals.
+
+---
+
+## Health checks
+
+`src/lib/health-checks/` monitors external service health before and during runs.
+
+### Services monitored
+
+| Service | Source | Blocking? |
+|---------|--------|-----------|
+| Anthropic (Claude) | status.claude.com | Down or degraded blocks run |
+| Amplitude | amplitudestatus.com | Down blocks run |
+| npm | npmjs.org status | Down blocks run |
+| GitHub | githubstatus.com | Not blocking |
+| Cloudflare | cloudflarestatus.com | Not blocking |
+| LLM Gateway | Direct endpoint ping | Down blocks run |
+| MCP Server | Direct endpoint ping | Down blocks run |
+
+### Readiness evaluation
+
+```typescript
+enum WizardReadiness { Yes, No, YesWithWarnings }
+```
+
+Default blocking config:
+- **Down blocks run:** anthropic, amplitudeOverall, npmOverall, llmGateway, mcp
+- **Degraded blocks run:** anthropic
+
+---
+
+## Utilities reference
+
+| File | Purpose |
+|------|---------|
+| `oauth.ts` | OAuth PKCE flow: browser redirect, local HTTP server on port 13222, token exchange |
+| `analytics.ts` | Amplitude telemetry: `resolveTelemetryApiKey()`, `sessionProperties()`, `captureWizardError()` |
+| `ampli-settings.ts` | `~/.ampli.json` credential store: `readCredentials()`, `storeToken()`, `clearCredentials()` |
+| `api-key-store.ts` | Per-project API key persistence (alongside package.json) |
+| `api.ts` | Amplitude REST/GraphQL API calls: `fetchAmplitudeUser()` |
+| `urls.ts` | URL builders: `getLlmGatewayUrlFromHost()`, `buildMCPUrl()`, `detectRegionFromToken()`, `getHostFromRegion()` |
+| `debug.ts` | File logging: `logToFile()`, `enableDebugLogs()`, `getLogFilePath()` |
+| `logging.ts` | CLI color output helpers |
+| `environment.ts` | Read env vars: `readEnvironment()`, `isNonInteractiveEnvironment()` |
+| `bash.ts` | Shell execution: `runCommand()`, `runCommandQuiet()` |
+| `file-utils.ts` | File I/O helpers |
+| `get-api-key.ts` | API key retrieval and validation |
+| `package-json.ts` | `getPackageVersion()`, `hasPackageInstalled()` |
+| `package-manager.ts` | `detectAllPackageManagers()` |
+| `semver.ts` | `fulfillsVersionRange()` |
+| `string.ts` | Case conversion, formatting |
+| `shell-completions.ts` | zsh/bash completion generation and silent installation |
+| `anthropic-status.ts` | `checkAnthropicStatus()` |
+| `custom-headers.ts` | `createCustomHeaders()` for telemetry |
+| `track-wizard-feedback.ts` | Product feedback submission |
+| `wizard-abort.ts` | Graceful shutdown: `wizardAbort()`, `WizardError` class |
+| `setup-utils.ts` | `tryGetPackageJson()`, `isUsingTypeScript()`, `getOrAskForProjectData()`, `performAmplitudeAuth()` |
+
+---
+
+## Testing
+
+### Unit tests (`pnpm test`)
+
+Located in `src/**/__tests__/`. Run with vitest.
+
+### BDD tests (`pnpm test:bdd`)
+
+Located in `features/*.feature` + `features/step-definitions/`. Run with Cucumber.js.
+Gherkin scenarios test user-visible behavior.
+
+### E2E tests (`pnpm test:e2e`)
+
+Located in `e2e-tests/`. Build the wizard, run against test applications in
+`e2e-tests/test-applications/`.
+
+### Proxy tests (`pnpm test:proxy`)
+
+Validate LLM proxy connectivity, model availability, streaming.
 
 ---
 
@@ -371,8 +1223,8 @@ OAuth PKCE flow
 | `build.yml` | Push / PR | Build, lint, unit tests (Node 20/22/24 matrix), Codecov |
 | `behavior-driven-tests.yml` | Push / PR | Cucumber BDD tests |
 | `pr-conventional-commit.yml` | PR | Validates PR title follows conventional commits |
-| `publish.yml` | Release / manual | npm publish with OIDC provenance under `beta` dist-tag; requires `npm-publish` environment approval |
-| `release-please.yml` | Push to main | Automated version bump, changelog, release PR, and publish via conventional commits |
+| `publish.yml` | Release / manual | npm publish with OIDC provenance under `beta` dist-tag |
+| `release-please.yml` | Push to main | Automated version bump, changelog, release PR |
 | `refresh-integration-skills.yml` | Schedule | Auto-update integration skill bundles |
 | `refresh-instrumentation-skills.yml` | Schedule | Auto-update instrumentation skill bundles |
 | `wizard-ci-trigger.yml` | Various | Downstream CI triggers |
@@ -394,8 +1246,6 @@ Security controls: OIDC trusted publishing (no static npm tokens), `--provenance
 supply-chain attestation, SHA-pinned actions, and CODEOWNERS requiring growth team
 review on workflow/manifest changes.
 
-See [`docs/releasing.md`](./releasing.md) for full details.
-
 ---
 
 ## Key constants
@@ -411,6 +1261,8 @@ See [`docs/releasing.md`](./releasing.md) for full details.
 | MCP server (EU) | `https://mcp.eu.amplitude.com/mcp` | `src/steps/.../defaults.ts` |
 | Node.js minimum | `18.17.0` | `bin.ts` |
 | Credential store | `~/.ampli.json` | `src/utils/ampli-settings.ts` |
+| Detection timeout | `10,000ms` | `src/lib/constants.ts` |
+| Stall detection | `20,000ms` per message | `src/lib/agent-interface.ts` |
 
 ---
 
@@ -423,27 +1275,57 @@ amplitude/wizard
 │   ├── run.ts                      Main wizard orchestration
 │   ├── lib/
 │   │   ├── wizard-session.ts       Session state (single source of truth)
-│   │   ├── agent-runner.ts         Agent orchestration
+│   │   ├── agent-runner.ts         Agent orchestration (runAgentWizard)
 │   │   ├── agent-interface.ts      Claude Agent SDK integration
 │   │   ├── agent-hooks.ts          Agent lifecycle callbacks
-│   │   ├── commandments.ts         Always-on system prompt rules
-│   │   ├── framework-config.ts     FrameworkConfig interface
+│   │   ├── commandments.ts         Always-on system prompt rules (9 rules)
+│   │   ├── framework-config.ts     FrameworkConfig<T> interface
 │   │   ├── registry.ts             FRAMEWORK_REGISTRY (18 frameworks)
 │   │   ├── constants.ts            Integration enum, URLs, env flags
-│   │   ├── wizard-tools.ts         In-process MCP server + skill loader
+│   │   ├── wizard-tools.ts         In-process MCP server (8 tools)
 │   │   ├── safe-tools.ts           Agent tool allowlist (~100 tools)
-│   │   └── feature-flags.ts        Amplitude Experiment flags
-│   ├── ui/tui/
-│   │   ├── App.tsx                 Root Ink component
-│   │   ├── router.ts              Declarative flow router + overlay stack
-│   │   ├── flows.ts               Flow pipeline definitions (5 flows)
-│   │   ├── store.ts               Nanostore reactive state
-│   │   ├── screen-registry.tsx    Screen → component mapping
-│   │   ├── console-commands.ts    Slash command definitions
-│   │   ├── screens/               16 screen components
-│   │   ├── components/            Shared UI components
-│   │   ├── primitives/            Low-level UI building blocks
-│   │   └── services/              TUI service modules
+│   │   ├── feature-flags.ts        Amplitude Experiment flags
+│   │   ├── detect-amplitude.ts     Pre-existing SDK detection
+│   │   ├── api.ts                  Amplitude API client
+│   │   ├── ampli-config.ts         .ampli.json project config
+│   │   ├── package-manager-detection.ts  Cross-ecosystem PM detection
+│   │   ├── middleware/             Benchmark pipeline (9 trackers)
+│   │   └── health-checks/         Service status monitoring
+│   ├── ui/
+│   │   ├── index.ts                UI singleton (getUI/setUI)
+│   │   ├── wizard-ui.ts            WizardUI interface (28 methods)
+│   │   ├── logging-ui.ts           CI mode: console output, auto-approve
+│   │   └── tui/
+│   │       ├── start-tui.ts        TUI bootstrap: store, InkUI, Ink render
+│   │       ├── App.tsx             Root Ink component
+│   │       ├── ink-ui.ts           TUI mode: delegates to WizardStore
+│   │       ├── router.ts           Flow cursor + overlay stack
+│   │       ├── flows.ts            5 flow pipelines (Screen/Flow enums)
+│   │       ├── store.ts            Nanostore reactive state (40+ setters)
+│   │       ├── screen-registry.tsx  Screen → component mapping
+│   │       ├── console-commands.ts  Slash command definitions
+│   │       ├── screens/            16 screen components
+│   │       │   ├── IntroScreen.tsx
+│   │       │   ├── RegionSelectScreen.tsx
+│   │       │   ├── AuthScreen.tsx
+│   │       │   ├── DataSetupScreen.tsx
+│   │       │   ├── ActivationOptionsScreen.tsx
+│   │       │   ├── SetupScreen.tsx
+│   │       │   ├── RunScreen.tsx
+│   │       │   ├── McpScreen.tsx
+│   │       │   ├── DataIngestionCheckScreen.tsx
+│   │       │   ├── ChecklistScreen.tsx
+│   │       │   ├── SlackScreen.tsx
+│   │       │   ├── OutroScreen.tsx
+│   │       │   ├── OutageScreen.tsx
+│   │       │   ├── SettingsOverrideScreen.tsx
+│   │       │   ├── LoginScreen.tsx
+│   │       │   └── LogoutScreen.tsx
+│   │       ├── components/         Shared: ConsoleView, TitleBar, Logo
+│   │       ├── primitives/         15+ primitives: PickerMenu, ProgressList,
+│   │       │                       TabContainer, LogViewer, ReportViewer,
+│   │       │                       EventPlanViewer, SnakeGame, etc.
+│   │       └── services/           mcp-installer
 │   ├── frameworks/                 18 framework integrations
 │   │   ├── nextjs/
 │   │   ├── vue/
@@ -465,7 +1347,8 @@ amplitude/wizard
 │   │   └── generic/
 │   ├── steps/                      Post-agent steps
 │   │   ├── add-mcp-server-to-clients/  MCP installation (6 editors)
-│   │   ├── upload-environment-variables/
+│   │   ├── upload-environment-variables/  Vercel env push
+│   │   ├── add-or-update-environment-variables.ts
 │   │   └── run-prettier.ts
 │   └── utils/                      ~27 utility modules
 │       ├── oauth.ts                OAuth PKCE flow
@@ -473,14 +1356,15 @@ amplitude/wizard
 │       ├── api-key-store.ts        API key persistence
 │       ├── ampli-settings.ts       ~/.ampli.json management
 │       ├── urls.ts                 Regional URL construction
+│       ├── debug.ts                File logging
 │       └── ...
 ├── skills/
 │   ├── integration/                Per-framework SDK guides (34)
-│   ├── instrumentation/            Event discovery skills
-│   └── taxonomy/                   Taxonomy agent skills
+│   ├── instrumentation/            Event discovery skills (5)
+│   └── taxonomy/                   Taxonomy agent skills (1)
 ├── docs/
 │   ├── flows.md                    Flow diagrams (source of truth for UX)
-│   ├── llm-proxy.md               Proxy architecture
+│   ├── llm-proxy.md                Proxy architecture
 │   ├── mcp-installation.md         MCP editor installation
 │   ├── releasing.md                Release process and security controls
 │   └── architecture.md             This document
