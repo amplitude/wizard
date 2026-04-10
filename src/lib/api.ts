@@ -591,6 +591,23 @@ export async function fetchHasAnyEventsMcp(
   }
   if (!sessionId) return NONE;
 
+  // Step 2: Send notifications/initialized — required by the MCP spec before any tool calls.
+  // This is a fire-and-forget notification (no response body expected).
+  try {
+    const notifRes = await fetch(MCP_URL, {
+      method: 'POST',
+      headers: { ...headers, 'Mcp-Session-Id': sessionId },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      }),
+    });
+    await notifRes.body?.cancel().catch(() => undefined);
+  } catch {
+    // Non-fatal — some servers tolerate skipping this, but log it for visibility.
+    logToFile('[MCP] notifications/initialized failed (continuing)');
+  }
+
   /** Call a single MCP tool and return the parsed text content, or null on error. */
   const callTool = async (
     id: number,
