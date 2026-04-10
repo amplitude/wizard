@@ -190,16 +190,13 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
   const [pageIndex, setPageIndex] = useState(0);
   /** Number of page tips currently visible (for staggered reveal). */
   const [visibleCount, setVisibleCount] = useState(TIP_PAGES[0].length);
-  /** Bumped on manual navigation to restart the auto-rotation timer. */
-  const [timerResetKey, setTimerResetKey] = useState(0);
-
   useEffect(() => {
     const timer = setInterval(() => {
       setPageIndex((prev) => (prev + 1) % TIP_PAGES.length);
       setVisibleCount(0);
     }, TIP_ROTATION_INTERVAL);
     return () => clearInterval(timer);
-  }, [timerResetKey]);
+  }, []);
 
   // Stagger reveal: increment visibleCount one at a time after each page change
   useEffect(() => {
@@ -212,20 +209,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
     return () => clearTimeout(timer);
   }, [pageIndex, visibleCount]);
 
-  useScreenInput((input, key) => {
-    if (key.leftArrow) {
-      setPageIndex((prev) => {
-        const next = (prev - 1 + TIP_PAGES.length) % TIP_PAGES.length;
-        setVisibleCount(TIP_PAGES[next].length);
-        return next;
-      });
-      setTimerResetKey((k) => k + 1);
-    }
-    if (key.rightArrow) {
-      setPageIndex((prev) => (prev + 1) % TIP_PAGES.length);
-      setVisibleCount(0);
-      setTimerResetKey((k) => k + 1);
-    }
+  useScreenInput((input) => {
     for (const tip of CONDITIONAL_TIPS) {
       if (
         tip.toggle &&
@@ -251,7 +235,7 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
         Learn about Amplitude
       </Text>
       <Text color={Colors.muted}>
-        {Icons.diamond} {pageIndex + 1}/{TIP_PAGES.length} — ← → to browse
+        {Icons.diamond} {pageIndex + 1}/{TIP_PAGES.length}
       </Text>
       <Box height={1} />
 
