@@ -16,7 +16,6 @@ export { EventPlanViewer } from './EventPlanViewer.js';
 export { ScreenErrorBoundary } from './ScreenErrorBoundary.js';
 export { TabContainer } from './TabContainer.js';
 export type { TabDefinition } from './TabContainer.js';
-export { KagiSmallWebViewer } from './KagiSmallWebViewer.js';
 export { SnakeGame } from './SnakeGame.js';
 export { DissolveTransition } from './DissolveTransition.js';
 export type { WipeDirection } from './DissolveTransition.js';
