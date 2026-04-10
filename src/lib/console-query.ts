@@ -62,9 +62,16 @@ export function buildSessionContext(session: WizardSession): string {
   if (session.detectedFrameworkLabel)
     lines.push(`Framework: ${session.detectedFrameworkLabel}`);
   if (session.integration) lines.push(`Integration: ${session.integration}`);
-  if (session.selectedOrgName) lines.push(`Org: ${session.selectedOrgName}`);
-  if (session.selectedWorkspaceName)
-    lines.push(`Workspace: ${session.selectedWorkspaceName}`);
+  if (session.selectedOrgName)
+    lines.push(
+      `Org: ${session.selectedOrgName}${
+        session.selectedOrgId ? ` (ID: ${session.selectedOrgId})` : ''
+      }`,
+    );
+  if (session.selectedProjectName)
+    lines.push(`Project: ${session.selectedProjectName}`);
+  if (session.selectedWorkspaceId)
+    lines.push(`Workspace ID: ${session.selectedWorkspaceId}`);
   if (session.credentials?.projectId)
     lines.push(`Project ID: ${session.credentials.projectId}`);
 

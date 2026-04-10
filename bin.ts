@@ -304,9 +304,7 @@ void yargs(hideBin(process.argv))
                     session.projectHasData = false;
                   } else {
                     // Fetch user data to check how many environments are available.
-                    const { fetchAmplitudeUser } = await import(
-                      './src/lib/api.js'
-                    );
+                    // fetchAmplitudeUser is already in scope from the Promise.all above.
                     try {
                       const userInfo = await fetchAmplitudeUser(
                         storedToken.idToken,
@@ -324,11 +322,19 @@ void yargs(hideBin(process.argv))
                           apiKey?: string | null;
                         } | null;
                       }> = [];
+                      let matchedOrg:
+                        | (typeof userInfo.orgs)[number]
+                        | undefined;
+                      let matchedWs:
+                        | (typeof userInfo.orgs)[number]['workspaces'][number]
+                        | undefined;
                       for (const org of userInfo.orgs) {
                         const ws = workspaceId
                           ? org.workspaces.find((w) => w.id === workspaceId)
                           : org.workspaces[0];
                         if (ws?.environments) {
+                          matchedOrg = org;
+                          matchedWs = ws;
                           envsWithKey = ws.environments
                             .filter((env) => env.app?.apiKey)
                             .sort((a, b) => a.rank - b.rank);
@@ -340,6 +346,15 @@ void yargs(hideBin(process.argv))
                         // Single environment — auto-select as before
                         const apiKey = envsWithKey[0].app!.apiKey!;
                         session.selectedProjectName = envsWithKey[0].name;
+                        // Capture org/workspace info from the already-fetched data
+                        if (matchedOrg) {
+                          session.selectedOrgId = matchedOrg.id;
+                          session.selectedOrgName = matchedOrg.name;
+                        }
+                        if (matchedWs) {
+                          session.selectedWorkspaceId = matchedWs.id;
+                          session.selectedWorkspaceName = matchedWs.name;
+                        }
                         logToFile(
                           '[bin] single environment — auto-selecting API key',
                         );
@@ -409,18 +424,28 @@ void yargs(hideBin(process.argv))
 
               // Pre-populate org/workspace from ampli.json so activation checks
               // (DataSetupScreen, DataIngestionCheckScreen) have the IDs they need
-              // even when the SUSI flow was skipped.
-              if (projectConfig.ok && projectConfig.config.OrgId) {
+              // even when the SUSI flow was skipped. Only overwrite if not already
+              // set by the single-env auto-select path above.
+              if (
+                projectConfig.ok &&
+                projectConfig.config.OrgId &&
+                !session.selectedOrgId
+              ) {
                 session.selectedOrgId = String(projectConfig.config.OrgId);
               }
-              if (projectConfig.ok && projectConfig.config.WorkspaceId) {
+              if (
+                projectConfig.ok &&
+                projectConfig.config.WorkspaceId &&
+                !session.selectedWorkspaceId
+              ) {
                 session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
               }
 
               // Resolve org/workspace display names so /whoami shows them.
+              // Skip if the single-env auto-select path already resolved names.
               // Uses the stored token to fetch user info — fire-and-forget so it
               // doesn't block startup.
-              if (zone && session.selectedOrgId) {
+              if (zone && session.selectedOrgId && !session.selectedOrgName) {
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);

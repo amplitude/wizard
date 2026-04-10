@@ -32,12 +32,18 @@ export const TEST_PROMPT: string =
 export function getWhoamiText(
   session: Pick<
     WizardSession,
-    'selectedOrgName' | 'selectedWorkspaceName' | 'region'
+    | 'selectedOrgName'
+    | 'selectedWorkspaceName'
+    | 'selectedProjectName'
+    | 'region'
   >,
 ): string {
-  return `org: ${session.selectedOrgName ?? '(none)'}  workspace: ${
-    session.selectedWorkspaceName ?? '(none)'
-  }  region: ${session.region ?? '(none)'}`;
+  const org = session.selectedOrgName ?? '(none)';
+  const project =
+    session.selectedProjectName ?? session.selectedWorkspaceName ?? '(none)';
+  return `org: ${org}  project: ${project}  region: ${
+    session.region ?? '(none)'
+  }`;
 }
 
 /**
