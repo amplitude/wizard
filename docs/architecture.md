@@ -228,6 +228,10 @@ plans are auto-approved and confirmations auto-skipped.
 
 ## External dependencies (non-npm)
 
+These are **services and sibling repos** the wizard depends on at runtime or
+development time — not npm packages. For the full inventory with URLs, auth details,
+and file system touchpoints, see [`external-services.md`](./external-services.md).
+
 ### Runtime services
 
 | Dependency | Role | How the wizard talks to it |
@@ -246,7 +250,7 @@ plans are auto-approved and confirmations auto-skipped.
 |-----------|------|
 | **amplitude/javascript** repo (sibling) | The local LLM proxy (`pnpm proxy`) loads proxy code from `../javascript`. Override with `JS_REPO=` env var |
 | **aws-sso** (`us-prod-dev` profile) | Credentials for the local proxy to reach GCP |
-| **~/.ampli.json** | Shared credential store with the `ampli` CLI |
+| **~/.ampli.json** | Shared credential store with the `ampli` CLI (amplitude/ampli repo) |
 
 ---
 
