@@ -12,9 +12,15 @@ Feature: Data Setup flow
     Given I am on the DataIngestionCheck screen
     Then I should be on the DataIngestionCheck screen
 
-  Scenario: DataIngestionCheck advances when events are detected
+  Scenario: DataIngestionCheck shows event preview when events are detected
     Given I am on the DataIngestionCheck screen
     When events are detected in the project
+    Then I should still be on the DataIngestionCheck screen
+
+  Scenario: DataIngestionCheck advances after user confirms events
+    Given I am on the DataIngestionCheck screen
+    When events are detected in the project
+    And I press Enter to confirm events
     Then I should be on the Checklist screen
 
   Scenario: User exits from DataIngestionCheck

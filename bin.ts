@@ -441,6 +441,7 @@ void yargs(hideBin(process.argv))
               await resolveCredentials(session);
 
               // Resolve org/workspace display names so /whoami shows them.
+              // Also extracts the numeric analytics project ID for MCP event detection.
               // Fire-and-forget so it doesn't block startup.
               if (session.region && session.selectedOrgId) {
                 const { getStoredUser, getStoredToken } = await import(
@@ -454,6 +455,11 @@ void yargs(hideBin(process.argv))
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
+                logToFile(
+                  `[bin] fire-and-forget: storedToken=${
+                    storedToken ? 'found' : 'null'
+                  }`,
+                );
                 if (storedToken) {
                   fetchAmplitudeUser(storedToken.idToken, zone)
                     .then((userInfo) => {
@@ -466,6 +472,13 @@ void yargs(hideBin(process.argv))
                         const org = userInfo.orgs.find(
                           (o) => o.id === session.selectedOrgId,
                         );
+                        logToFile(
+                          `[bin] fire-and-forget: orgs=${userInfo.orgs
+                            .map((o) => o.id)
+                            .join(',')}, looking for ${
+                            session.selectedOrgId
+                          }, found=${org ? 'yes' : 'no'}`,
+                        );
                         if (org) {
                           session.selectedOrgName = org.name;
                           changed = true;
@@ -476,6 +489,23 @@ void yargs(hideBin(process.argv))
                             : undefined;
                           if (ws) {
                             session.selectedWorkspaceName = ws.name;
+                            // Extract the analytics project ID from the lowest-rank
+                            // environment so DataIngestionCheckScreen can use query_dataset.
+                            const projectId =
+                              ws.environments
+                                ?.slice()
+                                .sort((a, b) => a.rank - b.rank)
+                                .find((e) => e.app?.id)?.app?.id ?? null;
+                            logToFile(
+                              `[bin] project ID resolution: environments=${
+                                ws.environments?.length ?? 'null'
+                              }, projectId=${projectId}`,
+                            );
+                            session.selectedProjectId = projectId;
+                          } else {
+                            logToFile(
+                              `[bin] project ID resolution: workspace ${session.selectedWorkspaceId} not found in org ${session.selectedOrgId} (org has ${org.workspaces.length} workspaces)`,
+                            );
                           }
                         }
                       }
@@ -483,8 +513,12 @@ void yargs(hideBin(process.argv))
                         tui.store.emitChange();
                       }
                     })
-                    .catch(() => {
-                      // Non-fatal — /whoami will just show (none)
+                    .catch((err: unknown) => {
+                      logToFile(
+                        `[bin] fire-and-forget fetchAmplitudeUser failed: ${
+                          err instanceof Error ? err.message : String(err)
+                        }`,
+                      );
                     });
                 }
               }
@@ -1221,6 +1255,7 @@ void yargs(hideBin(process.argv))
           if (storedToken) {
             session.credentials = {
               accessToken: storedToken.accessToken,
+              idToken: storedToken.idToken,
               projectApiKey: '',
               host: getHostFromRegion(zone),
               projectId: 0,

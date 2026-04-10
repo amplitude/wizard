@@ -242,6 +242,13 @@ export interface WizardSession {
   selectedProjectName: string | null;
 
   /**
+   * Numeric analytics project ID for the selected workspace (e.g. "769610").
+   * Sourced from workspace.environments[*].app.id at project selection time.
+   * Used by DataIngestionCheckScreen to call query_dataset via MCP.
+   */
+  selectedProjectId: string | null;
+
+  /**
    * Notice shown on the API key entry step of AuthScreen.
    * Set when auto-fetch fails (e.g. user is not an org admin) so the user
    * understands why manual entry is required.
@@ -407,6 +414,7 @@ export function buildSession(args: {
     selectedWorkspaceId: null,
     selectedWorkspaceName: null,
     selectedProjectName: null,
+    selectedProjectId: null,
     loginUrl: null,
     credentials: null,
     apiKeyNotice: null,

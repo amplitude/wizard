@@ -323,7 +323,21 @@ Then('I should be on the DataIngestionCheck screen', function () {
 });
 
 When('events are detected in the project', function () {
+  // Events found by MCP — the screen shows a preview table but dataIngestionConfirmed
+  // is still false. The router stays on DataIngestionCheck until the user presses Enter.
+});
+
+When('I press Enter to confirm events', function () {
   session.dataIngestionConfirmed = true;
+});
+
+Then('I should still be on the DataIngestionCheck screen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataIngestionCheck,
+    `Expected DataIngestionCheck but got ${screen}`,
+  );
 });
 
 Then('I should be on the Checklist screen', function () {

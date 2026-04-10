@@ -118,7 +118,7 @@ flowchart TD
 
     POST --> MCP_SCREEN["McpScreen<br/>(install MCP server · skipped on error)"]
     ERR --> OUTRO["See: Outro flow"]
-    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls activation API every 30s · skipped on error)<br/>full users pass immediately · user can exit and resume later<br/>Shows rotating coaching tips while waiting<br/>On success: celebration animation with explicit 'continue' prompt"]
+    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls MCP first, then activation API every 30s · full users pass immediately · user can exit and resume later)<br/>BrailleSpinner + coaching tips while waiting · celebration with event preview on success<br/>press Enter to continue"]
     DATA_INGESTION --> CHECKLIST["ChecklistScreen<br/>(first chart · first dashboard · taxonomy @todo)<br/>dashboard unlocks after chart · user can skip any item"]
     CHECKLIST --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
     SLACK_SCREEN --> OUTRO
