@@ -294,7 +294,7 @@ void yargs(hideBin(process.argv))
                   if (localKey) {
                     logToFile('[bin] using locally stored API key');
                     session.credentials = {
-                      accessToken: storedToken.idToken,
+                      accessToken: storedToken.accessToken,
                       idToken: storedToken.idToken,
                       projectApiKey: localKey.key,
                       host: getHostFromRegion(zone),
@@ -345,7 +345,7 @@ void yargs(hideBin(process.argv))
                         );
                         persistApiKey(apiKey, installDir);
                         session.credentials = {
-                          accessToken: storedToken.idToken,
+                          accessToken: storedToken.accessToken,
                           idToken: storedToken.idToken,
                           projectApiKey: apiKey,
                           host: getHostFromRegion(zone),
@@ -387,7 +387,7 @@ void yargs(hideBin(process.argv))
                       if (projectApiKey) {
                         persistApiKey(projectApiKey, installDir);
                         session.credentials = {
-                          accessToken: storedToken.idToken,
+                          accessToken: storedToken.accessToken,
                           idToken: storedToken.idToken,
                           projectApiKey,
                           host: getHostFromRegion(zone),
@@ -1092,7 +1092,7 @@ void yargs(hideBin(process.argv))
           const storedToken = getStoredToken(storedUser?.id, zone);
           if (storedToken) {
             session.credentials = {
-              accessToken: storedToken.idToken,
+              accessToken: storedToken.accessToken,
               projectApiKey: '',
               host: getHostFromRegion(zone),
               projectId: 0,
