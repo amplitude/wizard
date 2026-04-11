@@ -113,7 +113,7 @@ const TIP_PAGES: Tip[][] = [
     },
     {
       id: 'activation',
-      title: 'Unify your data with Amplitude Activation',
+      title: 'Unify your data with Amplitude Data',
       description:
         'Collect, clean, and route data to every tool in your stack. One SDK, one source of truth, zero data silos.',
     },
@@ -133,15 +133,10 @@ const TIP_PAGES: Tip[][] = [
     },
     {
       id: 'skills-marketplace',
-      title: 'Extend your agents with the Skills Marketplace',
+      title: 'Extend your agents with Builder Skills',
       description:
         'Browse and install pre-built skills that teach your agents new tricks — from anomaly detection to automated reporting. Build once, share across your org.',
-    },
-    {
-      id: 'global-agent',
-      title: 'Meet your always-on analytics agent',
-      description:
-        'Ask questions in Amplitude or in Slack and get instant answers backed by your data. One agent that works wherever your team already lives.',
+      url: 'https://amplitude.com/builder-skills',
     },
   ],
 ];

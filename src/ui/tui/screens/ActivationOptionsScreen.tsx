@@ -78,7 +78,11 @@ export const ActivationOptionsScreen = ({
               label: 'Help me test locally',
               hint: 'run the setup agent',
             },
-            { value: 'debug', label: "I'm blocked", hint: 'debug with Claude' },
+            {
+              value: 'debug',
+              label: "I'm blocked",
+              hint: 'get help debugging',
+            },
             { value: 'docs', label: 'Take me to the docs', hint: DOCS_URL },
             {
               value: 'exit',

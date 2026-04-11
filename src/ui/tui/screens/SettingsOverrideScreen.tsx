@@ -50,7 +50,8 @@ export const SettingsOverrideScreen = ({
         </Box>
 
         <Text>
-          Your project&apos;s <Text bold>.claude/settings.json</Text> sets:
+          A local settings file is overriding the wizard&apos;s network
+          configuration:
         </Text>
         <Box flexDirection="column" marginY={1} paddingLeft={2}>
           {keys.map((key) => (
