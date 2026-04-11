@@ -11,7 +11,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 
 interface LoginScreenProps {
@@ -96,7 +96,7 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         )}
 
         {phase === Phase.Success && (
-          <Text color="green">{'\u2714'} Credentials refreshed.</Text>
+          <Text color="green">{Icons.check} Credentials refreshed.</Text>
         )}
 
         {phase === Phase.NoToken && (

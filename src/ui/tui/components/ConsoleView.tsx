@@ -167,13 +167,15 @@ export const ConsoleView = ({
         store.clearScreenError();
         return;
       }
-      if (char === '/') {
-        activate('/');
-      } else if (key.tab) {
-        activate('');
+      if (!isIntro) {
+        if (char === '/') {
+          activate('/');
+        } else if (key.tab) {
+          activate('');
+        }
       }
     },
-    { isActive: !inputActive && !isIntro },
+    { isActive: !inputActive },
   );
 
   const handleSubmit = (value: string) => {

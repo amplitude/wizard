@@ -17,7 +17,7 @@ import { useState, useEffect, useSyncExternalStore } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { LoadingBox, PickerMenu } from '../primitives/index.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import {
   DEFAULT_HOST_URL,
   type AmplitudeZone,
@@ -304,7 +304,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         </Text>
         {session.detectedFrameworkLabel && (
           <Text>
-            <Text color="green">{'✔'} </Text>
+            <Text color="green">{Icons.check} </Text>
             <Text>Framework: {session.detectedFrameworkLabel}</Text>
           </Text>
         )}
@@ -402,7 +402,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           {apiKeyError && <Text color="red">{apiKeyError}</Text>}
           {savedKeySource && (
             <Text color="green">
-              {'✔ '}
+              {`${Icons.check} `}
               {savedKeySource === 'keychain'
                 ? 'API key saved to system keychain'
                 : 'API key saved to .env.local'}

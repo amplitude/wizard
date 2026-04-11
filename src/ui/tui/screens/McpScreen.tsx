@@ -16,7 +16,7 @@ import { useState, useEffect } from 'react';
 import { useSyncExternalStore } from 'react';
 import { type WizardStore, McpOutcome, RunPhase } from '../store.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
 
@@ -189,8 +189,8 @@ export const McpScreen = ({
         <Box marginBottom={1}>
           <Text color="green" bold>
             {amplitudePreDetected
-              ? '\u2714 Amplitude is already configured in this project!'
-              : '\u2714 Data setup complete!'}
+              ? `${Icons.check} Amplitude is already configured in this project!`
+              : `${Icons.check} Data setup complete!`}
           </Text>
         </Box>
       )}
@@ -292,13 +292,13 @@ export const McpScreen = ({
                 {resultClients.length > 0 ? (
                   <>
                     <Text color="green" bold>
-                      {'\u2714'} MCP server{' '}
+                      {Icons.check} MCP server{' '}
                       {isRemove ? 'removed from' : 'installed for'}:
                     </Text>
                     {resultClients.map((name, i) => (
                       <Text key={i}>
                         {' '}
-                        {'\u2022'} {name}
+                        {Icons.bullet} {name}
                       </Text>
                     ))}
                   </>

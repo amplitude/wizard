@@ -18,7 +18,7 @@ import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface IntroScreenProps {
@@ -80,10 +80,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
         {showDescription && (
           <Box flexDirection="column" alignItems="center" marginTop={1}>
-            <Text color={Colors.muted}>
+            <Text color={Colors.muted} wrap="truncate-end">
               We'll use AI to analyze your project and integrate Amplitude.
             </Text>
-            <Text color={Colors.muted}>
+            <Text color={Colors.muted} wrap="truncate-end">
               .env* file contents will not leave your machine.
             </Text>
             <Box marginTop={1}>
@@ -114,7 +114,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         <Box flexDirection="column">
           <Text>
             <Text>
-              Directory <Text color="green">{'\u2714'}</Text>{' '}
+              Directory <Text color="green">{Icons.check}</Text>{' '}
             </Text>
             <Text>
               {'/'}
@@ -124,7 +124,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           {frameworkLabel && (
             <Text>
               <Text>
-                Framework <Text color="green">{'\u2714'}</Text>{' '}
+                Framework <Text color="green">{Icons.check}</Text>{' '}
               </Text>
               <Text>
                 {frameworkLabel}

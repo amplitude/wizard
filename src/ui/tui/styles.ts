@@ -32,4 +32,6 @@ export const Icons = {
   triangleRight: '\u25B6',
   triangleSmallRight: '\u25B8',
   bullet: '\u2022',
+  cross: '\u2718',
+  stop: '\u25A0',
 } as const;

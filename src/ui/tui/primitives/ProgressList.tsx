@@ -28,7 +28,7 @@ export const ProgressList = ({ items, title }: ProgressListProps) => {
       {title && (
         <>
           <Text bold>{title}</Text>
-          <Text> </Text>
+          <Box height={1} />
         </>
       )}
       {items.length === 0 && <LoadingBox message="Analyzing project..." />}

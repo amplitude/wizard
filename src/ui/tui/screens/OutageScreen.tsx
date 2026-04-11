@@ -31,7 +31,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
         <Text color="yellow" bold>
           {'\u26A0'} Claude/Anthropic services are experiencing issues.
         </Text>
-        <Text> </Text>
+        <Box height={1} />
         <Text>
           <Text color="yellow">Status:</Text> {serviceStatus.description}
         </Text>
@@ -39,7 +39,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
           <Text color="yellow">Status page:</Text>{' '}
           <Text color="cyan">{serviceStatus.statusPageUrl}</Text>
         </Text>
-        <Text> </Text>
+        <Box height={1} />
         <Text color={Colors.muted}>
           The wizard may not work reliably while services are affected.
         </Text>

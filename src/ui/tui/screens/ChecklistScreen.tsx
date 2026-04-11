@@ -122,8 +122,6 @@ export const ChecklistScreen = ({ store }: ChecklistScreenProps) => {
       value: 'dashboard' as const,
       label: checklistDashboardComplete
         ? `${Icons.check} First dashboard — done`
-        : checklistChartComplete
-        ? `${Icons.squareOpen} Create your first dashboard`
         : `${Icons.squareOpen} Create your first dashboard`,
       hint: checklistDashboardComplete
         ? undefined
