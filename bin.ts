@@ -361,7 +361,8 @@ void yargs(hideBin(process.argv))
                         );
                         session.pendingOrgs = userInfo.orgs;
                         session.pendingAuthIdToken = storedToken.idToken;
-                        session.pendingAuthAccessToken = storedToken.idToken;
+                        session.pendingAuthAccessToken =
+                          storedToken.accessToken;
                       } else {
                         logToFile(
                           '[bin] no environments with API keys — showing apiKeyNotice',

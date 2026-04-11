@@ -75,7 +75,7 @@ export const AMPLITUDE_ZONE_SETTINGS = {
       process.env.OAUTH_CLIENT_ID ?? '0ac84169-c41c-4222-885b-31469c761cb0',
     dataApiUrl: 'https://data-api.amplitude.com/graphql',
     /** Thunder GraphQL endpoint — org-scoped. Append the numeric orgId. */
-    appApiUrlBase: 'https://amplitude.com/graphql/org/',
+    appApiUrlBase: 'https://core.amplitude.com/t/graphql/org/',
     webUrl: 'https://data.amplitude.com',
   },
   eu: {
@@ -84,7 +84,7 @@ export const AMPLITUDE_ZONE_SETTINGS = {
       process.env.OAUTH_CLIENT_ID ?? '110d04a1-8e60-4157-9c43-fcbe4e014a85',
     dataApiUrl: 'https://data-api.eu.amplitude.com/graphql',
     /** Thunder GraphQL endpoint — org-scoped. Append the numeric orgId. */
-    appApiUrlBase: 'https://amplitude.eu/graphql/org/',
+    appApiUrlBase: 'https://core.amplitude.eu/t/graphql/org/',
     webUrl: 'https://data.eu.amplitude.com',
   },
 } as const;
