@@ -34,6 +34,7 @@ reports/
 plugins
 
 .eslintcache
+.mcp.json
 .vscode/launch.json
 .env
 .vercel
