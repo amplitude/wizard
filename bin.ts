@@ -994,7 +994,7 @@ void yargs(hideBin(process.argv))
           const { readAmpliConfig } = cjs(
             await import('./src/lib/ampli-config.js'),
           );
-          const { fetchSlackInstallUrl } = cjs(
+          const { fetchSlackInstallUrl, fetchSlackConnectionStatus } = cjs(
             await import('./src/lib/api.js'),
           );
           const { OUTBOUND_URLS } = cjs(await import('./src/lib/constants.js'));
@@ -1016,6 +1016,20 @@ void yargs(hideBin(process.argv))
               'No Amplitude session found. Run `npx @amplitude/wizard` first to log in and set up your project.',
             );
             process.exit(1);
+          }
+
+          // Check if Slack is already connected before prompting install.
+          const isConnected = await fetchSlackConnectionStatus(
+            accessToken,
+            zone,
+            orgId,
+          );
+          if (isConnected) {
+            setUI(new LoggingUI());
+            getUI().log.info(
+              'Slack is already connected to your Amplitude workspace.',
+            );
+            process.exit(0);
           }
 
           const settingsUrl = OUTBOUND_URLS.slackSettings(zone, orgId);
