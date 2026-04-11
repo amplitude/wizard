@@ -464,9 +464,9 @@ function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
-  return `You have access to the Amplitude MCP server which provides skills to integrate Amplitude into this ${
+  return `You are setting up Amplitude analytics in this ${
     config.metadata.name
-  } project.
+  } project. Use the wizard-tools MCP server to load and install skills.
 
 Project context:
 - Amplitude Project ID: ${context.projectId}
