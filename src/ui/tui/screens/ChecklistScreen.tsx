@@ -63,9 +63,10 @@ export const ChecklistScreen = ({ store }: ChecklistScreenProps) => {
     } = store.session;
     if (!credentials || !selectedOrgId) return;
     if (checklistChartComplete && checklistDashboardComplete) return;
-    const idToken = credentials.idToken ?? credentials.accessToken;
+    // Thunder uses access_token (Hydra-validated), not id_token.
+    const accessToken = credentials.accessToken;
     const sessionZone = (store.session.region ?? 'us') as AmplitudeZone;
-    fetchOwnedDashboards(idToken, sessionZone, selectedOrgId)
+    fetchOwnedDashboards(accessToken, sessionZone, selectedOrgId)
       .then(({ hasCharts, hasDashboards }) => {
         if (hasCharts) store.setChecklistChartComplete();
         if (hasDashboards) store.setChecklistDashboardComplete();

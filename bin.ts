@@ -1003,13 +1003,14 @@ void yargs(hideBin(process.argv))
           const storedUser = getStoredUser();
           const zone = storedUser?.zone ?? 'us';
           const storedToken = getStoredToken(storedUser?.id, zone);
-          const idToken = storedToken?.idToken;
+          // Thunder validates access_tokens via Hydra, not id_tokens.
+          const accessToken = storedToken?.accessToken;
 
           // Read orgId from project-level ampli.json
           const ampliConfig = readAmpliConfig(process.cwd());
           const orgId = ampliConfig.ok ? ampliConfig.config.OrgId : undefined;
 
-          if (!idToken || !orgId) {
+          if (!accessToken || !orgId) {
             setUI(new LoggingUI());
             getUI().log.info(
               'No Amplitude session found. Run `npx @amplitude/wizard` first to log in and set up your project.',
@@ -1022,7 +1023,7 @@ void yargs(hideBin(process.argv))
 
           // Try to get the direct Slack OAuth URL from Thunder.
           const directUrl = await fetchSlackInstallUrl(
-            idToken,
+            accessToken,
             zone,
             orgId,
             settingsUrl,

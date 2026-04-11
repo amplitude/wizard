@@ -77,7 +77,6 @@ export const SlackScreen = ({
   // Fetch org name and check if Slack is already connected on mount.
   useEffect(() => {
     const credentials = store.session.credentials;
-    const token = credentials?.idToken ?? credentials?.accessToken;
     const orgId = store.session.selectedOrgId;
 
     logToFile(
@@ -89,7 +88,9 @@ export const SlackScreen = ({
     // Resolve org name if missing (returning users, standalone /slack command).
     if (!resolvedOrgName && credentials) {
       logToFile(`[SlackScreen] fetching org name via API`);
-      void fetchAmplitudeUser(token!, region as AmplitudeZone)
+      // Data API uses id_token (raw JWT).
+      const idToken = credentials.idToken ?? credentials.accessToken;
+      void fetchAmplitudeUser(idToken, region as AmplitudeZone)
         .then((info) => {
           const name = info.orgs[0]?.name ?? null;
           logToFile(
@@ -109,9 +110,11 @@ export const SlackScreen = ({
     }
 
     // Check if Slack is already connected — auto-complete if so.
-    if (token && orgId) {
+    // Thunder uses access_token (Hydra-validated), not id_token.
+    const accessToken = credentials?.accessToken;
+    if (accessToken && orgId) {
       void fetchSlackConnectionStatus(
-        token,
+        accessToken,
         region as AmplitudeZone,
         orgId,
       ).then((isConnected) => {
@@ -142,10 +145,11 @@ export const SlackScreen = ({
 
     const credentials = store.session.credentials;
     const orgId = store.session.selectedOrgId;
-    const token = credentials?.idToken ?? credentials?.accessToken;
+    // Thunder uses access_token (Hydra-validated), not id_token.
+    const accessToken = credentials?.accessToken;
 
-    if (token && orgId) {
-      void fetchSlackInstallUrl(token, zone, orgId, settingsUrl).then(
+    if (accessToken && orgId) {
+      void fetchSlackInstallUrl(accessToken, zone, orgId, settingsUrl).then(
         (directUrl) => {
           const urlToOpen = directUrl ?? settingsUrl;
           setOpenedUrl(urlToOpen);

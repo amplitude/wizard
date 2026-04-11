@@ -63,11 +63,14 @@ export const DataIngestionCheckScreen = ({
       return;
     }
     const zone = (region ?? 'us') as AmplitudeZone;
-    const idToken = credentials.idToken ?? credentials.accessToken;
+    // Thunder uses access_token (Hydra-validated); data API uses id_token.
+    // fetchProjectActivationStatus routes to Thunder when orgId is present,
+    // so always pass access_token — the function handles the fallback.
+    const token = credentials.accessToken;
 
     try {
       const status = await fetchProjectActivationStatus(
-        idToken,
+        token,
         zone,
         appId,
         session.selectedOrgId,
@@ -85,7 +88,7 @@ export const DataIngestionCheckScreen = ({
       // Fall back to the event catalog which includes all event types.
       if (session.selectedOrgId && session.selectedWorkspaceId) {
         const catalogEvents = await fetchWorkspaceEventTypes(
-          idToken,
+          token,
           zone,
           session.selectedOrgId,
           session.selectedWorkspaceId,
@@ -108,7 +111,7 @@ export const DataIngestionCheckScreen = ({
       // Fetch cataloged event types from the data API as a proxy for "events arrived"
       if (session.selectedOrgId && session.selectedWorkspaceId) {
         fetchWorkspaceEventTypes(
-          idToken,
+          token,
           zone,
           session.selectedOrgId,
           session.selectedWorkspaceId,
