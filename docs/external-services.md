@@ -61,12 +61,23 @@ Used to populate org/workspace/project pickers and resolve the API key for the s
 
 ### App API (Thunder GraphQL)
 
-Org-scoped endpoint for app-level operations (charts, dashboards, taxonomy).
+Org-scoped endpoint for app-level operations (charts, dashboards, Slack, activation status).
 
 | Zone | Base URL |
 |------|----------|
-| US | `https://amplitude.com/graphql/org/<orgId>` |
-| EU | `https://amplitude.eu/graphql/org/<orgId>` |
+| US | `https://core.amplitude.com/t/graphql/org/<orgId>` |
+| EU | `https://core.amplitude.eu/t/graphql/org/<orgId>` |
+
+**Auth:** `Authorization: Bearer <accessToken>` (OAuth access token).
+
+**Queries used** (from `src/lib/api.ts`):
+
+| Query | Purpose |
+|-------|---------|
+| `OwnedDashboards` | Fetch user's dashboards and chart IDs (ChecklistScreen) |
+| `hasAnyDefaultEventTrackingSourceAndEvents` | Project activation status (DataSetupScreen) |
+| `SlackInstallUrl` | Direct Slack OAuth install URL (SlackScreen) |
+| `SlackConnectionStatus` | Check if Slack is already connected (SlackScreen) |
 
 ### Web App URLs
 
@@ -369,6 +380,8 @@ npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
 | `AMPLITUDE_SERVER_URL` | `https://api2.amplitude.com` | Telemetry server URL |
 | `WIZARD_PROXY_DEV_TOKEN` | — | LLM proxy auth token for local dev |
 | `WIZARD_PROXY_DEV_BYPASS` | — | Skip OAuth validation in proxy (dev only) |
+| `WIZARD_PROXY_THUNDER_URL` | — | Override Thunder GraphQL base URL (local dev) |
+| `DEMO_MODE_WIZARD` | — | When `1`, limits agent to 5 events for demo runs |
 | `CI` | — | Non-interactive mode detection; also set to `1` when invoking Vercel CLI |
 
 ### Framework-Specific SDK Environment Variables
@@ -395,7 +408,7 @@ All URLs the wizard opens in the user's browser, defined in `OUTBOUND_URLS` (`sr
 | OAuth login | `https://auth[.eu].amplitude.com/oauth2/auth` |
 | New chart | `https://app[.eu].amplitude.com/<orgId>/chart/new` |
 | New dashboard | `https://app[.eu].amplitude.com/<orgId>/dashboard/new` |
-| Slack settings | `https://[eu.]amplitude.com/<orgId>/settings/profile` |
+| Slack settings | `https://app[.eu].amplitude.com/analytics/org/<orgId>/settings/profile` |
 | Products page | `https://app[.eu].amplitude.com/products?source=wizard` |
 | SDK docs | `https://amplitude.com/docs/sdks` + per-framework variants |
 | Stripe data source | `https://app.amplitude.com/project/data-warehouse/new-source?kind=Stripe` |

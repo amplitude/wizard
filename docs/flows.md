@@ -8,17 +8,16 @@ actions.
 
 | Command      | Description                                                       |
 | ------------ | ----------------------------------------------------------------- |
-| `/region`    | Switch the data-center region (US or EU) — re-triggers data setup |
+| `/region`    | Switch data-center region (US or EU)                              |
 | `/login`     | Re-authenticate                                                   |
-| `/logout`    | Clear credentials                                                 |
+| `/logout`    | Clear stored credentials                                          |
 | `/whoami`    | Show current user, org, and project                               |
-| `/overview`  | Open the project overview in the browser                          |
-| `/chart`     | Set up a new chart                                                |
-| `/dashboard` | Create a new dashboard                                            |
-| `/taxonomy`  | Interact with the taxonomy agent                                  |
-| `/slack`     | Connect your Amplitude project to Slack                           |
+| `/mcp`       | Install or remove the Amplitude MCP server                        |
+| `/slack`     | Set up Amplitude Slack integration                                |
 | `/feedback`  | Send product feedback (event `wizard: feedback submitted`)        |
-| `/help`      | List available slash commands                                     |
+| `/test`      | Run a prompt-skill demo (confirm + choose)                        |
+| `/snake`     | Play Snake                                                        |
+| `/exit`      | Exit the wizard                                                   |
 
 ---
 
@@ -35,6 +34,10 @@ flowchart TD
     CMD --> LOGOUT["logout"]
     CMD --> WHOAMI["whoami"]
     CMD --> FEEDBACK["feedback"]
+    CMD --> SLACK_CMD["slack"]
+    CMD --> REGION_CMD["region"]
+    CMD --> MCP_CMD["mcp add / mcp remove"]
+    CMD --> COMPLETION["completion"]
     CMD --> WIZARD["wizard (default)"]
 
     FEEDBACK --> FEEDBACK_SEND["Track wizard: feedback submitted via Node SDK"]
@@ -48,6 +51,11 @@ flowchart TD
     WHOAMI --> CHECK_TOKEN{Token exists?}
     CHECK_TOKEN -->|yes| SHOW_USER["Show name, email, zone"]
     CHECK_TOKEN -->|no| NOT_LOGGED_IN["Not logged in"]
+
+    SLACK_CMD --> SLACK_TUI["Launch TUI SlackSetup flow"]
+    REGION_CMD --> REGION_TUI["Launch TUI RegionSelect flow"]
+    MCP_CMD --> MCP_INSTALL["Install/remove MCP server in editors"]
+    COMPLETION --> SHELL_COMP["Generate zsh/bash completions"]
 
     WIZARD --> MODE{Mode?}
     MODE -->|--ci| CI["CI mode (--org, --project, --api-key, --install-dir)"]
