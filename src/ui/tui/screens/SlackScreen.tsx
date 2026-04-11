@@ -126,24 +126,24 @@ export const SlackScreen = ({
     // Thunder uses access_token (Hydra-validated), not id_token.
     const accessToken = credentials?.accessToken;
 
-    // Open the settings URL immediately so the user sees browser activity.
-    logToFile(`[SlackScreen] opening settings URL`);
-    opn(settingsUrl, { wait: false }).catch(() => {});
-    setTimeout(() => setPhase(Phase.Waiting), 800);
+    // Try the direct Slack OAuth URL first; fall back to settings page.
+    const open = (url: string) => {
+      setOpenedUrl(url);
+      logToFile(
+        `[SlackScreen] opening ${
+          url === settingsUrl ? 'settings fallback' : 'direct Slack OAuth URL'
+        }`,
+      );
+      opn(url, { wait: false }).catch(() => {});
+      setTimeout(() => setPhase(Phase.Waiting), 800);
+    };
 
-    // In parallel, attempt to fetch a direct Slack OAuth URL.
-    // If available, open it as an upgrade (user gets both tabs — settings
-    // as fallback, direct OAuth as primary).
     if (accessToken && orgId) {
       void fetchSlackInstallUrl(accessToken, zone, orgId, settingsUrl).then(
-        (directUrl) => {
-          if (directUrl) {
-            setOpenedUrl(directUrl);
-            logToFile(`[SlackScreen] opening direct Slack OAuth URL`);
-            opn(directUrl, { wait: false }).catch(() => {});
-          }
-        },
+        (directUrl) => open(directUrl ?? settingsUrl),
       );
+    } else {
+      open(settingsUrl);
     }
   };
 
@@ -185,8 +185,8 @@ export const SlackScreen = ({
         {phase === Phase.Prompt && (
           <Box marginTop={1}>
             <ConfirmationInput
-              message={`Open Amplitude Settings to connect the "${appName}" Slack app?`}
-              confirmLabel="Open settings"
+              message={`Connect the "${appName}" Slack app to your workspace?`}
+              confirmLabel="Connect"
               cancelLabel="Skip for now"
               onConfirm={handleConnect}
               onCancel={handleSkip}
@@ -200,19 +200,27 @@ export const SlackScreen = ({
 
         {phase === Phase.Waiting && (
           <Box flexDirection="column" marginTop={1}>
-            <Text>
-              Browser opened to <Text color="cyan">{openedUrl}</Text>
-            </Text>
-            {openedUrl === settingsUrl && (
-              <Text color={Colors.muted}>
-                Go to Settings &gt; Personal Settings &gt; Profile and click
-                &quot;Connect to Slack&quot;.
-              </Text>
-            )}
-            {openedUrl !== settingsUrl && (
-              <Text color={Colors.muted}>
-                Authorize the {appName} app in Slack to complete the connection.
-              </Text>
+            {openedUrl === settingsUrl ? (
+              <>
+                <Text>
+                  Browser opened to <Text color="cyan">{settingsUrl}</Text>
+                </Text>
+                <Text color={Colors.muted}>
+                  Go to Settings &gt; Personal Settings &gt; Profile and click
+                  &quot;Connect to Slack&quot;.
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text>
+                  Browser opened to <Text color="cyan">Slack</Text> for
+                  authorization.
+                </Text>
+                <Text color={Colors.muted}>
+                  Authorize the {appName} app in Slack to complete the
+                  connection.
+                </Text>
+              </>
             )}
             <Box marginTop={1}>
               <ConfirmationInput
