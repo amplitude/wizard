@@ -179,28 +179,51 @@ interface RunScreenProps {
   store: WizardStore;
 }
 
-/** Min terminal width to show the logo in the TipsCard. */
-const LOGO_MIN_COLS = 100;
+/** Duration (ms) the welcome logo is shown before transitioning to tips. */
+const WELCOME_DURATION = 5_000;
+
+/** Min terminal width to show the logo in the welcome splash. */
+const LOGO_MIN_COLS = 60;
 
 /** Delay (ms) between each tip appearing during a page transition. */
 const TIP_REVEAL_DELAY = 400;
 
+/** Module-level flag so the welcome splash only shows once per session. */
+let welcomeShownOnce = false;
+
 const TipsCard = ({ store }: { store: WizardStore }) => {
   const [columns] = useStdoutDimensions();
+  const [showWelcome, setShowWelcome] = useState(() => {
+    if (welcomeShownOnce || columns < LOGO_MIN_COLS) return false;
+    welcomeShownOnce = true;
+    return true;
+  });
   const [pageIndex, setPageIndex] = useState(0);
   /** Number of page tips currently visible (for staggered reveal). */
   const [visibleCount, setVisibleCount] = useState(TIP_PAGES[0].length);
+  /** Bumped on manual navigation to restart the auto-rotation timer. */
+  const [timerResetKey, setTimerResetKey] = useState(0);
 
+  // Welcome splash fades away after WELCOME_DURATION
   useEffect(() => {
+    if (!showWelcome) return;
+    const timer = setTimeout(() => setShowWelcome(false), WELCOME_DURATION);
+    return () => clearTimeout(timer);
+  }, [showWelcome]);
+
+  // Auto-rotate tip pages (only starts after welcome ends)
+  useEffect(() => {
+    if (showWelcome) return;
     const timer = setInterval(() => {
       setPageIndex((prev) => (prev + 1) % TIP_PAGES.length);
       setVisibleCount(0);
     }, TIP_ROTATION_INTERVAL);
     return () => clearInterval(timer);
-  }, []);
+  }, [showWelcome, timerResetKey]);
 
   // Stagger reveal: increment visibleCount one at a time after each page change
   useEffect(() => {
+    if (showWelcome) return;
     const pageLen = TIP_PAGES[pageIndex].length;
     if (visibleCount >= pageLen) return;
     const timer = setTimeout(
@@ -208,9 +231,41 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
       visibleCount === 0 ? 100 : TIP_REVEAL_DELAY,
     );
     return () => clearTimeout(timer);
-  }, [pageIndex, visibleCount]);
+  }, [showWelcome, pageIndex, visibleCount]);
 
-  useScreenInput((input) => {
+  useScreenInput((input, key) => {
+    // N / P to navigate tip pages
+    if (input === 'n' || input === 'N') {
+      setPageIndex((prev) => (prev + 1) % TIP_PAGES.length);
+      setVisibleCount(0);
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
+    if (input === 'p' || input === 'P') {
+      setPageIndex((prev) => {
+        const next = (prev - 1 + TIP_PAGES.length) % TIP_PAGES.length;
+        setVisibleCount(TIP_PAGES[next].length);
+        return next;
+      });
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
+    // Up/down arrows also navigate pages
+    if (key.upArrow) {
+      setPageIndex((prev) => {
+        const next = (prev - 1 + TIP_PAGES.length) % TIP_PAGES.length;
+        setVisibleCount(TIP_PAGES[next].length);
+        return next;
+      });
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
+    if (key.downArrow) {
+      setPageIndex((prev) => (prev + 1) % TIP_PAGES.length);
+      setVisibleCount(0);
+      setTimerResetKey((k) => k + 1);
+      return;
+    }
     for (const tip of CONDITIONAL_TIPS) {
       if (
         tip.toggle &&
@@ -223,6 +278,24 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
     }
   });
 
+  // Welcome splash — animated logo centered in the panel
+  if (showWelcome) {
+    return (
+      <Box
+        flexDirection="column"
+        alignItems="center"
+        justifyContent="center"
+        flexGrow={1}
+        paddingX={1}
+      >
+        <AnimatedAmplitudeLogo />
+        <Text bold color={Colors.accent}>
+          Setting up your project...
+        </Text>
+      </Box>
+    );
+  }
+
   const pageTips = TIP_PAGES[pageIndex].slice(0, visibleCount);
   const visibleConditional = CONDITIONAL_TIPS.filter(
     (tip) => !tip.visible || tip.visible(store),
@@ -231,12 +304,11 @@ const TipsCard = ({ store }: { store: WizardStore }) => {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      {columns >= LOGO_MIN_COLS && <AnimatedAmplitudeLogo />}
       <Text bold color={Colors.accent}>
         Learn about Amplitude
       </Text>
       <Text color={Colors.muted}>
-        {Icons.diamond} {pageIndex + 1}/{TIP_PAGES.length}
+        {Icons.diamond} {pageIndex + 1}/{TIP_PAGES.length} — N/P or ↑↓ to browse
       </Text>
       <Box height={1} />
 
@@ -320,7 +392,7 @@ export const RunScreen = ({ store }: RunScreenProps) => {
         />
       ),
     },
-    ...(store.eventPlan.length > 0
+    ...(store.eventPlan.some((e) => e.name)
       ? [
           {
             id: 'events',

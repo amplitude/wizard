@@ -1,3 +1,5 @@
+import { DEMO_MODE } from './constants.js';
+
 /**
  * Wizard-wide commandments that are always appended as a system prompt.
  *
@@ -24,6 +26,12 @@ const WIZARD_COMMANDMENTS = [
   'Use the TodoWrite tool to track your progress. Create a todo list at the start describing the high-level areas of work, mark each as in_progress when you begin it, and completed when done.',
 
   'After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.',
+
+  ...(DEMO_MODE
+    ? [
+        'DEMO MODE: This is a demo run. Limit the instrumentation plan to at most 5 events. Pick the 5 most impactful, representative events for the project. Be concise and fast — skip non-essential analysis.',
+      ]
+    : []),
 ].join('\n');
 
 export function getWizardCommandments(): string {

@@ -645,10 +645,17 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         .describe('The list of events you plan to instrument'),
     },
     async (args: { events: Array<{ name: string; description: string }> }) => {
-      logToFile(`confirm_event_plan: ${args.events.length} events`);
-      const decision: EventPlanDecision = await getUI().promptEventPlan(
-        args.events,
+      const { DEMO_MODE } = await import('./constants.js');
+      const events =
+        DEMO_MODE && args.events.length > 5
+          ? args.events.slice(0, 5)
+          : args.events;
+      logToFile(
+        `confirm_event_plan: ${events.length} events${
+          DEMO_MODE ? ' (demo mode)' : ''
+        }`,
       );
+      const decision: EventPlanDecision = await getUI().promptEventPlan(events);
       let text: string;
       if (decision.decision === 'revised') {
         text = `feedback: ${decision.feedback}`;

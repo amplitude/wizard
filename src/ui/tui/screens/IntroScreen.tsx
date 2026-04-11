@@ -162,6 +162,30 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   );
 };
 
+/**
+ * Popularity-ordered list for the manual framework picker.
+ * Excludes `generic` — the wizard auto-selects it when detection fails.
+ */
+const PICKER_ORDER: Integration[] = [
+  Integration.nextjs,
+  Integration.reactRouter,
+  Integration.vue,
+  Integration.reactNative,
+  Integration.python,
+  Integration.django,
+  Integration.flask,
+  Integration.fastapi,
+  Integration.javascript_web,
+  Integration.javascriptNode,
+  Integration.swift,
+  Integration.android,
+  Integration.flutter,
+  Integration.go,
+  Integration.java,
+  Integration.unity,
+  Integration.unreal,
+];
+
 /** Framework picker shown when auto-detection fails. */
 const FrameworkPicker = ({
   store,
@@ -170,16 +194,26 @@ const FrameworkPicker = ({
   store: WizardStore;
   onComplete?: () => void;
 }) => {
-  // Build options from the framework registry (loaded dynamically to avoid circular deps)
-  const options = Object.values(Integration).map((value) => ({
-    label: value,
-    value,
-  }));
+  const [options, setOptions] = useState<
+    { label: string; value: Integration }[]
+  >([]);
+
+  useEffect(() => {
+    void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
+      setOptions(
+        PICKER_ORDER.map((integration) => ({
+          label: FRAMEWORK_REGISTRY[integration].metadata.name,
+          value: integration,
+        })),
+      );
+    });
+  }, []);
+
+  if (options.length === 0) return null;
 
   return (
     <PickerMenu<Integration>
       centered
-      columns={2}
       message="Select your framework"
       options={options}
       onSelect={(value) => {
