@@ -113,7 +113,7 @@ const TIP_PAGES: Tip[][] = [
     },
     {
       id: 'activation',
-      title: 'Unify your data with Amplitude Activation',
+      title: 'Unify your data with Amplitude CDP',
       description:
         'Collect, clean, and route data to every tool in your stack. One SDK, one source of truth, zero data silos.',
     },
@@ -136,6 +136,7 @@ const TIP_PAGES: Tip[][] = [
       title: 'Extend your agents with the Skills Marketplace',
       description:
         'Browse and install pre-built skills that teach your agents new tricks — from anomaly detection to automated reporting. Build once, share across your org.',
+      url: 'https://github.com/amplitude/mcp-marketplace',
     },
     {
       id: 'global-agent',

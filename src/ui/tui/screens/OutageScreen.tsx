@@ -29,7 +29,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text color="yellow" bold>
-          {'\u26A0'} Claude/Anthropic services are experiencing issues.
+          {'\u26A0'} AI services are experiencing issues.
         </Text>
         <Text> </Text>
         <Text>
