@@ -50,4 +50,20 @@ export class ClaudeMCPClient extends DefaultMCPClient {
 
     throw new Error(`Unsupported platform: ${process.platform}`);
   }
+
+  async addServer(
+    apiKey?: string,
+    selectedFeatures?: string[],
+    local?: boolean,
+  ): Promise<{ success: boolean }> {
+    // Claude Desktop config uses stdio transport, so we need mcp-remote
+    // to bridge to the remote streamable-http server. Use 'streamable-http'
+    // type so the URL points to /mcp (the documented endpoint), not /sse.
+    return this._addServerType(
+      apiKey,
+      'streamable-http',
+      selectedFeatures,
+      local,
+    );
+  }
 }

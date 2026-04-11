@@ -31,7 +31,14 @@ export class CursorMCPClient extends DefaultMCPClient {
     selectedFeatures?: string[],
     local?: boolean,
   ): MCPServerConfig {
-    return getNativeHTTPServerConfig(apiKey, type, selectedFeatures, local);
+    const config = getNativeHTTPServerConfig(
+      apiKey,
+      type,
+      selectedFeatures,
+      local,
+    );
+    // Cursor requires an explicit transport field to use streamable-http
+    return { ...config, transport: 'streamable-http' };
   }
 
   async addServer(

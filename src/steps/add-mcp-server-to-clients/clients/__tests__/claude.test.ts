@@ -40,7 +40,7 @@ describe('ClaudeMCPClient', () => {
   const mockApiKey = 'test-api-key';
   const mockServerConfig = {
     command: 'npx',
-    args: ['-y', 'mcp-remote@latest'],
+    args: ['-y', 'mcp-remote@latest', 'https://mcp.amplitude.com/mcp'],
     env: { AMPLITUDE_AUTH_HEADER: `Bearer ${mockApiKey}` },
   };
 
@@ -329,14 +329,14 @@ describe('ClaudeMCPClient', () => {
       );
     });
 
-    it('should call getDefaultServerConfig with the provided API key', async () => {
+    it('should use streamable-http transport so URL points to /mcp endpoint', async () => {
       existsSyncMock.mockReturnValue(false);
 
       await client.addServer(mockApiKey);
 
       expect(getDefaultServerConfigMock).toHaveBeenCalledWith(
         mockApiKey,
-        'sse',
+        'streamable-http',
         undefined,
         undefined,
       );
@@ -349,7 +349,7 @@ describe('ClaudeMCPClient', () => {
 
       expect(getDefaultServerConfigMock).toHaveBeenCalledWith(
         undefined,
-        'sse',
+        'streamable-http',
         undefined,
         undefined,
       );
