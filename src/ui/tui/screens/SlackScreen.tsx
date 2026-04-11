@@ -16,7 +16,6 @@ import { type WizardStore, SlackOutcome } from '../store.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import {
-  fetchAmplitudeUser,
   fetchSlackInstallUrl,
   fetchSlackConnectionStatus,
 } from '../../../lib/api.js';
@@ -66,16 +65,15 @@ export const SlackScreen = ({
   );
 
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
-  const [resolvedOrgName, setResolvedOrgName] = useState<string | null>(
-    store.session.selectedOrgName,
-  );
 
   const region = store.session.region ?? 'us';
   const isEu = region === 'eu';
   const appName = isEu ? 'Amplitude - EU' : 'Amplitude';
 
-  // Fetch org name and check if Slack is already connected on mount.
+  // Check if Slack is already connected on mount — auto-complete if so.
   useEffect(() => {
+    let cancelled = false;
+
     const credentials = store.session.credentials;
     const orgId = store.session.selectedOrgId;
 
@@ -85,31 +83,6 @@ export const SlackScreen = ({
       } credentials=${credentials ? 'present' : 'null'} region=${region}`,
     );
 
-    // Resolve org name if missing (returning users, standalone /slack command).
-    if (!resolvedOrgName && credentials) {
-      logToFile(`[SlackScreen] fetching org name via API`);
-      // Data API uses id_token (raw JWT).
-      const idToken = credentials.idToken ?? credentials.accessToken;
-      void fetchAmplitudeUser(idToken, region as AmplitudeZone)
-        .then((info) => {
-          const name = info.orgs[0]?.name ?? null;
-          logToFile(
-            `[SlackScreen] API returned orgs=${JSON.stringify(
-              info.orgs.map((o) => o.name),
-            )} using=${name}`,
-          );
-          setResolvedOrgName(name);
-        })
-        .catch((err: unknown) => {
-          logToFile(
-            `[SlackScreen] API fetch failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        });
-    }
-
-    // Check if Slack is already connected — auto-complete if so.
     // Thunder uses access_token (Hydra-validated), not id_token.
     const accessToken = credentials?.accessToken;
     if (accessToken && orgId) {
@@ -118,17 +91,22 @@ export const SlackScreen = ({
         region as AmplitudeZone,
         orgId,
       ).then((isConnected) => {
+        if (cancelled) return;
         logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
         if (isConnected) {
           setPhase(Phase.Done);
-          setTimeout(
-            () =>
-              markDone(store, SlackOutcome.Configured, standalone, onComplete),
-            1500,
-          );
+          setTimeout(() => {
+            if (!cancelled) {
+              markDone(store, SlackOutcome.Configured, standalone, onComplete);
+            }
+          }, 1500);
         }
       });
     }
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const zone = (region ?? 'us') as AmplitudeZone;
@@ -148,24 +126,24 @@ export const SlackScreen = ({
     // Thunder uses access_token (Hydra-validated), not id_token.
     const accessToken = credentials?.accessToken;
 
+    // Open the settings URL immediately so the user sees browser activity.
+    logToFile(`[SlackScreen] opening settings URL`);
+    opn(settingsUrl, { wait: false }).catch(() => {});
+    setTimeout(() => setPhase(Phase.Waiting), 800);
+
+    // In parallel, attempt to fetch a direct Slack OAuth URL.
+    // If available, open it as an upgrade (user gets both tabs — settings
+    // as fallback, direct OAuth as primary).
     if (accessToken && orgId) {
       void fetchSlackInstallUrl(accessToken, zone, orgId, settingsUrl).then(
         (directUrl) => {
-          const urlToOpen = directUrl ?? settingsUrl;
-          setOpenedUrl(urlToOpen);
-          logToFile(
-            `[SlackScreen] opening ${
-              directUrl ? 'direct Slack OAuth URL' : 'settings fallback'
-            }`,
-          );
-          opn(urlToOpen, { wait: false }).catch(() => {});
-          setTimeout(() => setPhase(Phase.Waiting), 800);
+          if (directUrl) {
+            setOpenedUrl(directUrl);
+            logToFile(`[SlackScreen] opening direct Slack OAuth URL`);
+            opn(directUrl, { wait: false }).catch(() => {});
+          }
         },
       );
-    } else {
-      logToFile(`[SlackScreen] no token/orgId — opening settings fallback`);
-      opn(settingsUrl, { wait: false }).catch(() => {});
-      setTimeout(() => setPhase(Phase.Waiting), 800);
     }
   };
 
