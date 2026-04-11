@@ -63,21 +63,21 @@ export const DataIngestionCheckScreen = ({
       return;
     }
     const zone = (region ?? 'us') as AmplitudeZone;
-    // Thunder uses access_token (Hydra-validated); data API uses id_token.
-    // fetchProjectActivationStatus routes to Thunder when orgId is present,
-    // so always pass access_token — the function handles the fallback.
-    const token = credentials.accessToken;
     // Data API (fetchWorkspaceEventTypes) expects a raw JWT id_token.
     const dataApiToken = credentials.idToken ?? credentials.accessToken;
 
+    if (!session.selectedOrgId) {
+      setApiUnavailable(true);
+      return;
+    }
+
     try {
-      const status = await fetchProjectActivationStatus(
-        token,
+      const status = await fetchProjectActivationStatus({
+        accessToken: credentials.accessToken,
         zone,
         appId,
-        session.selectedOrgId,
-        dataApiToken,
-      );
+        orgId: session.selectedOrgId,
+      });
       logToFile(
         `[DataIngestionCheck] poll result: hasAnyEvents=${status.hasAnyEvents} hasDetSource=${status.hasDetSource}`,
       );

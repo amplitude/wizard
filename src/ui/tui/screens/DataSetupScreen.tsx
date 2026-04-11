@@ -58,14 +58,12 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       } reason=${localDetection.reason ?? 'none'}`,
     );
 
-    // Thunder uses access_token (Hydra-validated), not id_token.
-    void fetchProjectActivationStatus(
-      credentials.accessToken,
+    void fetchProjectActivationStatus({
+      accessToken: credentials.accessToken,
       zone,
       appId,
-      selectedOrgId,
-      credentials.idToken ?? credentials.accessToken,
-    )
+      orgId: selectedOrgId,
+    })
       .then((status) => {
         logToFile(`[DataSetup] activation status: ${JSON.stringify(status)}`);
         store.setSnippetConfigured(status.hasDetSource);

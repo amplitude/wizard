@@ -547,32 +547,28 @@ query hasAnyDefaultEventTrackingSourceAndEvents($appId: ID!) {
  * Checks whether an Amplitude project has ingested any events and whether
  * the SDK snippet is configured.
  *
- * The query lives in Thunder (the main Amplitude app GraphQL server), served
- * at /graphql/org/:orgId.  orgId is required to construct the endpoint URL.
+ * Always routes to Thunder (the main Amplitude app GraphQL server) at
+ * /t/graphql/org/:orgId using a Bearer access_token.
  */
-export async function fetchProjectActivationStatus(
-  token: string,
-  zone: AmplitudeZone,
-  appId: number | string,
-  orgId?: string | null,
-  /** Optional id_token for the Data API fallback path. When omitted, `token` is used. */
-  dataApiToken?: string,
-): Promise<ProjectActivationStatus> {
-  const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
-  // Use the Thunder org-scoped endpoint when orgId is available; fall back to
-  // the data API (which may not expose this field for all users).
-  // Thunder validates access_tokens via Hydra; data API accepts id_tokens.
-  const isThunder = !!orgId;
-  const url = isThunder
-    ? thunderUrl(zone, orgId, 'hasAnyDefaultEventTrackingSourceAndEvents')
-    : dataApiUrl;
+export async function fetchProjectActivationStatus(opts: {
+  accessToken: string;
+  zone: AmplitudeZone;
+  appId: number | string;
+  orgId: string;
+}): Promise<ProjectActivationStatus> {
+  const { accessToken, zone, appId, orgId } = opts;
+  const url = thunderUrl(
+    zone,
+    orgId,
+    'hasAnyDefaultEventTrackingSourceAndEvents',
+  );
   try {
     const response = await axios.post(
       url,
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
         headers: {
-          Authorization: isThunder ? `Bearer ${token}` : dataApiToken ?? token,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
