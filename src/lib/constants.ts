@@ -178,6 +178,9 @@ export const OUTBOUND_URLS = {
 
   // ── Tips ──────────────────────────────────────────────────────────────────
 
+  /** Skills Marketplace — shown as a tip in the RunScreen. */
+  skillsMarketplace: 'https://github.com/amplitude/mcp-marketplace',
+
   /** Stripe data-source deep-link — shown as a tip in the RunScreen. */
   stripeDataSource:
     'https://app.amplitude.com/project/data-warehouse/new-source?kind=Stripe',

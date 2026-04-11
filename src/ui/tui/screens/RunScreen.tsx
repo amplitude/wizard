@@ -136,7 +136,7 @@ const TIP_PAGES: Tip[][] = [
       title: 'Extend your agents with the Skills Marketplace',
       description:
         'Browse and install pre-built skills that teach your agents new tricks — from anomaly detection to automated reporting. Build once, share across your org.',
-      url: 'https://github.com/amplitude/mcp-marketplace',
+      url: OUTBOUND_URLS.skillsMarketplace,
     },
     {
       id: 'global-agent',
