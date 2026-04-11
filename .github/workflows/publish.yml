@@ -52,6 +52,13 @@ jobs:
       - name: Install package.json dependencies with pnpm
         run: pnpm install --frozen-lockfile
 
+      - name: Refresh bundled skills
+        run: |
+          bash scripts/refresh-integration-skills.sh
+          bash scripts/refresh-instrumentation-skills.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build the package
         run: pnpm build
 
