@@ -1009,19 +1009,25 @@ void yargs(hideBin(process.argv))
           const ampliConfig = readAmpliConfig(process.cwd());
           const orgId = ampliConfig.ok ? ampliConfig.config.OrgId : undefined;
 
+          if (!idToken || !orgId) {
+            setUI(new LoggingUI());
+            getUI().log.info(
+              'No Amplitude session found. Run `npx @amplitude/wizard` first to log in and set up your project.',
+            );
+            process.exit(1);
+          }
+
           const settingsUrl = OUTBOUND_URLS.slackSettings(zone, orgId);
           let url = settingsUrl;
 
           // Try to get the direct Slack OAuth URL from Thunder.
-          if (idToken && orgId) {
-            const directUrl = await fetchSlackInstallUrl(
-              idToken,
-              zone,
-              orgId,
-              settingsUrl,
-            );
-            if (directUrl) url = directUrl;
-          }
+          const directUrl = await fetchSlackInstallUrl(
+            idToken,
+            zone,
+            orgId,
+            settingsUrl,
+          );
+          if (directUrl) url = directUrl;
 
           setUI(new LoggingUI());
           getUI().log.info(`Opening Slack integration: ${url}`);

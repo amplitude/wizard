@@ -599,7 +599,7 @@ export async function fetchSlackInstallUrl(
       url,
       {
         query: SLACK_INSTALL_URL_QUERY,
-        variables: { action: 'direct_install', originalPath },
+        variables: { action: 'profile', originalPath },
       },
       {
         headers: {
