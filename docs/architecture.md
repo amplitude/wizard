@@ -140,7 +140,7 @@ detection, and post-agent steps are completely mode-agnostic.
 | **Task progress** | `ProgressList` component with status icons, animated transitions | Logs `[completed/total] current task` |
 | **Event plan** | Dedicated "Event plan" tab in RunScreen | Printed to console, auto-approved |
 | **Startup** | Concurrent: OAuth (browser popup) + framework detection + feature discovery, with TUI screens showing progress | Sequential: detect framework → run agent. Auth via `--api-key` flag or stored token |
-| **Tabs** | RunScreen has 5 tabs: Status, Event plan, All logs, Small Web, Snake | N/A |
+| **Tabs** | RunScreen has 3–4 tabs: Status, Event plan (conditional), All logs, Snake | N/A |
 
 ### Prompt behavior — the critical difference
 
@@ -390,7 +390,7 @@ directly.
 |-----------|---------|
 | `agent-runner.ts` | Orchestrates the full agent run: version check → status check → TS detection → build prompt → spawn agent → handle post-run |
 | `agent-interface.ts` | Lazy-loads `@anthropic-ai/claude-agent-sdk`, resolves the `claude` CLI binary, defines `AgentSignals`, manages permissions, streaming, stall detection |
-| `commandments.ts` | 9 system prompt rules always appended: no hallucinated secrets, use wizard-tools MCP, read before write, call `confirm_event_plan` before instrumenting, use TodoWrite for progress |
+| `commandments.ts` | 9 system prompt rules always appended (10 in demo mode via `DEMO_MODE_WIZARD=1`): no hallucinated secrets, use wizard-tools MCP, read before write, call `confirm_event_plan` before instrumenting, use TodoWrite for progress |
 | `wizard-tools.ts` | In-process MCP server: 8 tools (check_env_keys, set_env_values, detect_package_manager, confirm_event_plan, confirm, choose, load_skill_menu, install_skill) |
 | `safe-tools.ts` | Allowlist of ~100 linting/formatting tools the agent sandbox permits |
 | `agent-hooks.ts` | Lifecycle callbacks (stop hook with 3 phases: drain feature queue → collect remark → allow stop) |
@@ -925,7 +925,7 @@ npx @amplitude/wizard --ci --install-dir . --api-key <KEY> --project-id 12345
 | **DataSetupScreen** | `screens/DataSetupScreen.tsx` | `projectHasData` | `activationLevel`, `snippetConfigured` | Checks activation via API. Routes: none→setup, partial→options, full→skip |
 | **ActivationOptionsScreen** | `screens/ActivationOptionsScreen.tsx` | `snippetConfigured` | `outroData` | Help test locally, debug, docs, or exit |
 | **SetupScreen** | `screens/SetupScreen.tsx` | Framework questions | `frameworkContext[key]` | Auto-detects answers, shows picker for unresolved questions |
-| **RunScreen** | `screens/RunScreen.tsx` | `tasks`, `eventPlan`, `statusMessages`, `discoveredFeatures` | `requestedTab` (clear) | Observational: 5 tabs (Status, Event plan, Logs, Small Web, Snake). Shows ProgressList + TipsCard |
+| **RunScreen** | `screens/RunScreen.tsx` | `tasks`, `eventPlan`, `statusMessages`, `discoveredFeatures` | `requestedTab` (clear) | Observational: 3–4 tabs (Status, Event plan (conditional), All logs, Snake). Shows ProgressList + TipsCard |
 | **McpScreen** | `screens/McpScreen.tsx` | `runPhase`, `amplitudePreDetected` | `mcpComplete`, `mcpOutcome`, `mcpInstalledClients` | Detect editors → confirm → pick → install. Also handles pre-detected choice |
 | **DataIngestionCheckScreen** | `screens/DataIngestionCheckScreen.tsx` | `region`, org/project IDs | `dataIngestionConfirmed` | Polls activation API every 30s. Exit with q/Esc |
 | **ChecklistScreen** | `screens/ChecklistScreen.tsx` | `checklistChartComplete`, `checklistDashboardComplete` | `checklistComplete` | First chart → first dashboard. Dashboard locked until chart done |
@@ -1278,7 +1278,7 @@ amplitude/wizard
 │   │   ├── agent-runner.ts         Agent orchestration (runAgentWizard)
 │   │   ├── agent-interface.ts      Claude Agent SDK integration
 │   │   ├── agent-hooks.ts          Agent lifecycle callbacks
-│   │   ├── commandments.ts         Always-on system prompt rules (9 rules)
+│   │   ├── commandments.ts         Always-on system prompt rules (9 rules, 10 in demo mode)
 │   │   ├── framework-config.ts     FrameworkConfig<T> interface
 │   │   ├── registry.ts             FRAMEWORK_REGISTRY (18 frameworks)
 │   │   ├── constants.ts            Integration enum, URLs, env flags

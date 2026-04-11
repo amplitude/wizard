@@ -467,11 +467,6 @@ or is clipped without warning.
 - Shade characters (░▒▓█) depend on terminal font support; some terminals
   render them as boxes.
 
-### KagiSmallWebViewer
-- Feed is shuffled randomly. Users may expect chronological order.
-- Silent network failures. No retry.
-- Number shortcuts [1]-[0] not documented in help text.
-
 ---
 
 ## CI mode findings

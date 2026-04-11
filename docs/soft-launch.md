@@ -1,5 +1,10 @@
 # Soft Launch — Scope & Implementation Plan
 
+> **Status: COMPLETED** — All features described as "temporarily disabled" below
+> have been re-enabled. McpScreen, SlackScreen, and ChecklistScreen are live in
+> the wizard flow with their standard `show` predicates. The `/mcp` and `/slack`
+> slash commands are available. This document is retained for historical context.
+
 What needs to work, what gets temporarily disabled, and how to cut scope with
 minimal code changes.
 
