@@ -980,42 +980,57 @@ void yargs(hideBin(process.argv))
     'slack',
     'Set up Amplitude Slack integration',
     (y) => y,
-    (argv) => {
+    (_argv) => {
       void (async () => {
+        // Dynamic imports may land named exports on `.default` under tsx
+        // CJS/ESM interop. This helper normalises that.
+        const cjs = <T>(mod: T & { default?: T }): T =>
+          (mod.default ?? mod) as T;
+
         try {
-          const { startTUI } = await import('./src/ui/tui/start-tui.js');
-          const { buildSession } = await import('./src/lib/wizard-session.js');
-          const { Flow } = await import('./src/ui/tui/router.js');
-          const { getStoredUser, getStoredToken } = await import(
-            './src/utils/ampli-settings.js'
+          const { getStoredUser, getStoredToken } = cjs(
+            await import('./src/utils/ampli-settings.js'),
           );
-          const { getHostFromRegion } = await import('./src/utils/urls.js');
+          const { readAmpliConfig } = cjs(
+            await import('./src/lib/ampli-config.js'),
+          );
+          const { fetchSlackInstallUrl } = cjs(
+            await import('./src/lib/api.js'),
+          );
+          const { OUTBOUND_URLS } = cjs(await import('./src/lib/constants.js'));
+          const opn = (await import('opn')).default;
 
-          const session = buildSession({
-            debug:
-              typeof argv['debug'] === 'boolean' ? argv['debug'] : undefined,
-          });
-
-          // Pre-populate credentials from ~/.ampli.json so SlackScreen can
-          // resolve the org name via fetchAmplitudeUser.
           const storedUser = getStoredUser();
           const zone = storedUser?.zone ?? 'us';
           const storedToken = getStoredToken(storedUser?.id, zone);
-          if (storedToken) {
-            session.region = zone;
-            session.credentials = {
-              accessToken: storedToken.idToken,
-              projectApiKey: '',
-              host: getHostFromRegion(zone),
-              projectId: 0,
-            };
+          const idToken = storedToken?.idToken;
+
+          // Read orgId from project-level ampli.json
+          const ampliConfig = readAmpliConfig(process.cwd());
+          const orgId = ampliConfig.ok ? ampliConfig.config.OrgId : undefined;
+
+          const settingsUrl = OUTBOUND_URLS.slackSettings(zone, orgId);
+          let url = settingsUrl;
+
+          // Try to get the direct Slack OAuth URL from Thunder.
+          if (idToken && orgId) {
+            const directUrl = await fetchSlackInstallUrl(
+              idToken,
+              zone,
+              orgId,
+              settingsUrl,
+            );
+            if (directUrl) url = directUrl;
           }
 
-          // Pass the pre-populated session so it's available before the first render.
-          startTUI(WIZARD_VERSION, Flow.SlackSetup, session);
+          setUI(new LoggingUI());
+          getUI().log.info(`Opening Slack integration: ${url}`);
+          await opn(url, { wait: false });
         } catch {
           setUI(new LoggingUI());
-          const { getCloudUrlFromRegion } = await import('./src/utils/urls.js');
+          const { getCloudUrlFromRegion } = cjs(
+            await import('./src/utils/urls.js'),
+          );
           const opn = (await import('opn')).default;
           const url = `${getCloudUrlFromRegion(
             'us',
