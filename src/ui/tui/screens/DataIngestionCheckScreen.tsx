@@ -67,6 +67,8 @@ export const DataIngestionCheckScreen = ({
     // fetchProjectActivationStatus routes to Thunder when orgId is present,
     // so always pass access_token — the function handles the fallback.
     const token = credentials.accessToken;
+    // Data API (fetchWorkspaceEventTypes) expects a raw JWT id_token.
+    const dataApiToken = credentials.idToken ?? credentials.accessToken;
 
     try {
       const status = await fetchProjectActivationStatus(
@@ -88,7 +90,7 @@ export const DataIngestionCheckScreen = ({
       // Fall back to the event catalog which includes all event types.
       if (session.selectedOrgId && session.selectedWorkspaceId) {
         const catalogEvents = await fetchWorkspaceEventTypes(
-          token,
+          dataApiToken,
           zone,
           session.selectedOrgId,
           session.selectedWorkspaceId,
@@ -111,7 +113,7 @@ export const DataIngestionCheckScreen = ({
       // Fetch cataloged event types from the data API as a proxy for "events arrived"
       if (session.selectedOrgId && session.selectedWorkspaceId) {
         fetchWorkspaceEventTypes(
-          token,
+          dataApiToken,
           zone,
           session.selectedOrgId,
           session.selectedWorkspaceId,
