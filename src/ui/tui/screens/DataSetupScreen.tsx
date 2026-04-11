@@ -64,6 +64,7 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       zone,
       appId,
       selectedOrgId,
+      credentials.idToken ?? credentials.accessToken,
     )
       .then((status) => {
         logToFile(`[DataSetup] activation status: ${JSON.stringify(status)}`);

@@ -550,12 +550,13 @@ export async function fetchProjectActivationStatus(
   zone: AmplitudeZone,
   appId: number | string,
   orgId?: string | null,
+  /** Optional id_token for the Data API fallback path. When omitted, `token` is used. */
+  dataApiToken?: string,
 ): Promise<ProjectActivationStatus> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   // Use the Thunder org-scoped endpoint when orgId is available; fall back to
   // the data API (which may not expose this field for all users).
   // Thunder validates access_tokens via Hydra; data API accepts id_tokens.
-  // Callers should pass the access_token — it works for both paths.
   const isThunder = !!orgId;
   const url = isThunder ? thunderUrl(zone, orgId) : dataApiUrl;
   try {
@@ -564,7 +565,7 @@ export async function fetchProjectActivationStatus(
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
         headers: {
-          Authorization: isThunder ? `Bearer ${token}` : token,
+          Authorization: isThunder ? `Bearer ${token}` : dataApiToken ?? token,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },

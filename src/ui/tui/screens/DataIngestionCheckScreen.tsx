@@ -76,6 +76,7 @@ export const DataIngestionCheckScreen = ({
         zone,
         appId,
         session.selectedOrgId,
+        dataApiToken,
       );
       logToFile(
         `[DataIngestionCheck] poll result: hasAnyEvents=${status.hasAnyEvents} hasDetSource=${status.hasDetSource}`,
