@@ -17,6 +17,7 @@ import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { Colors } from '../styles.js';
 import { analytics } from '../../../utils/analytics.js';
 
@@ -30,6 +31,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     () => store.getSnapshot(),
   );
 
+  const [, termRows] = useStdoutDimensions();
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
 
@@ -55,6 +57,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
   const showDescription = showContinue;
+  const showLogo = termRows >= 25;
 
   return (
     <Box
@@ -64,9 +67,11 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       justifyContent="center"
     >
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        <Box flexDirection="row" gap={2} alignItems="center">
-          <AmplitudeTextLogo />
-        </Box>
+        {showLogo && (
+          <Box flexDirection="row" gap={2} alignItems="center">
+            <AmplitudeTextLogo />
+          </Box>
+        )}
         <Box marginBottom={1}></Box>
         <Text bold>
           {detecting ? 'Amplitude Wizard starting up' : 'Amplitude Wizard'}
