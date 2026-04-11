@@ -1,6 +1,7 @@
 import axios, { AxiosError } from 'axios';
 import { z } from 'zod';
 import { analytics } from '../utils/analytics.js';
+import { logToFile } from '../utils/debug.js';
 import {
   AMPLITUDE_ZONE_SETTINGS,
   WIZARD_USER_AGENT,
@@ -610,9 +611,22 @@ export async function fetchSlackInstallUrl(
         timeout: 10_000,
       },
     );
+    logToFile(
+      `[fetchSlackInstallUrl] response status=${
+        response.status
+      } data=${JSON.stringify(response.data)}`,
+    );
     const parsed = SlackInstallUrlSchema.parse(response.data);
     return parsed.data.slackInstallUrl.installUrl;
-  } catch {
+  } catch (err) {
+    const detail = axios.isAxiosError(err)
+      ? `status=${err.response?.status} data=${JSON.stringify(
+          err.response?.data,
+        )}`
+      : err instanceof Error
+      ? err.message
+      : String(err);
+    logToFile(`[fetchSlackInstallUrl] failed: ${detail}`);
     return null;
   }
 }
