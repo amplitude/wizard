@@ -141,11 +141,11 @@ export const OUTBOUND_URLS = {
 
   /** Slack integration settings — opened from the Slack screen. */
   slackSettings: (zone: AmplitudeZone, orgId?: string | null): string => {
-    const base = OUTBOUND_URLS.overview[zone];
+    const base = OUTBOUND_URLS.app[zone];
     if (orgId) {
-      return `${base}/${orgId}/settings/profile`;
+      return `${base}/analytics/org/${orgId}/settings/profile`;
     }
-    return `${base}/settings/profile`;
+    return `${base}/analytics/settings/profile`;
   },
 
   /** Products page — shown in the Outro for sign-up users. */

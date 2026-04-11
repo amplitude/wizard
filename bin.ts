@@ -1017,7 +1017,9 @@ void yargs(hideBin(process.argv))
           setUI(new LoggingUI());
           const { getCloudUrlFromRegion } = await import('./src/utils/urls.js');
           const opn = (await import('opn')).default;
-          const url = `${getCloudUrlFromRegion('us')}/settings/profile`;
+          const url = `${getCloudUrlFromRegion(
+            'us',
+          )}/analytics/settings/profile`;
           getUI().log.info(
             `Opening Amplitude Settings to connect Slack: ${url}`,
           );
