@@ -16,7 +16,11 @@ import {
  * `WIZARD_PROXY_THUNDER_URL=http://localhost:3030/` routes Thunder
  * traffic to a local server.
  */
-function thunderUrl(zone: AmplitudeZone, orgId: string): string {
+function thunderUrl(
+  zone: AmplitudeZone,
+  orgId: string,
+  queryName?: string,
+): string {
   const base =
     process.env.WIZARD_PROXY_THUNDER_URL ??
     AMPLITUDE_ZONE_SETTINGS[zone].appApiUrlBase;
@@ -24,7 +28,8 @@ function thunderUrl(zone: AmplitudeZone, orgId: string): string {
   const graphqlBase = base.endsWith('/graphql/org/')
     ? base
     : `${base.replace(/\/$/, '')}/graphql/org/`;
-  return `${graphqlBase}${orgId}`;
+  const url = `${graphqlBase}${orgId}`;
+  return queryName ? `${url}?q=${queryName}` : url;
 }
 
 // ── Amplitude GraphQL types ───────────────────────────────────────────
@@ -364,7 +369,7 @@ export async function fetchOwnedDashboards(
   zone: AmplitudeZone,
   orgId: string,
 ): Promise<{ hasCharts: boolean; hasDashboards: boolean }> {
-  const url = thunderUrl(zone, orgId);
+  const url = thunderUrl(zone, orgId, 'OwnedDashboards');
   try {
     const response = await axios.post(
       url,
@@ -558,7 +563,9 @@ export async function fetchProjectActivationStatus(
   // the data API (which may not expose this field for all users).
   // Thunder validates access_tokens via Hydra; data API accepts id_tokens.
   const isThunder = !!orgId;
-  const url = isThunder ? thunderUrl(zone, orgId) : dataApiUrl;
+  const url = isThunder
+    ? thunderUrl(zone, orgId, 'hasAnyDefaultEventTrackingSourceAndEvents')
+    : dataApiUrl;
   try {
     const response = await axios.post(
       url,
@@ -615,7 +622,7 @@ export async function fetchSlackInstallUrl(
   orgId: string,
   originalPath: string,
 ): Promise<string | null> {
-  const url = thunderUrl(zone, orgId);
+  const url = thunderUrl(zone, orgId, 'SlackInstallUrl');
   try {
     const response = await axios.post(
       url,
@@ -678,7 +685,7 @@ export async function fetchSlackConnectionStatus(
   zone: AmplitudeZone,
   orgId: string,
 ): Promise<boolean | null> {
-  const url = thunderUrl(zone, orgId);
+  const url = thunderUrl(zone, orgId, 'SlackConnectionStatus');
   try {
     const response = await axios.post(
       url,
