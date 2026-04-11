@@ -15,7 +15,11 @@ import { useSyncExternalStore } from 'react';
 import { type WizardStore, SlackOutcome } from '../store.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
-import { fetchAmplitudeUser } from '../../../lib/api.js';
+import {
+  fetchAmplitudeUser,
+  fetchSlackInstallUrl,
+  fetchSlackConnectionStatus,
+} from '../../../lib/api.js';
 import { OUTBOUND_URLS, type AmplitudeZone } from '../../../lib/constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import opn from 'opn';
@@ -70,60 +74,95 @@ export const SlackScreen = ({
   const isEu = region === 'eu';
   const appName = isEu ? 'Amplitude - EU' : 'Amplitude';
 
-  // Fetch org name from the API if it wasn't populated during the SUSI flow
-  // (e.g. returning users, or the standalone `slack` command).
+  // Fetch org name and check if Slack is already connected on mount.
   useEffect(() => {
+    const credentials = store.session.credentials;
+    const token = credentials?.idToken ?? credentials?.accessToken;
+    const orgId = store.session.selectedOrgId;
+
     logToFile(
       `[SlackScreen] selectedOrgName=${
         store.session.selectedOrgName ?? ''
-      } credentials=${
-        store.session.credentials ? 'present' : 'null'
-      } region=${region}`,
+      } credentials=${credentials ? 'present' : 'null'} region=${region}`,
     );
-    if (resolvedOrgName) {
-      logToFile(`[SlackScreen] using existing orgName=${resolvedOrgName}`);
-      return;
+
+    // Resolve org name if missing (returning users, standalone /slack command).
+    if (!resolvedOrgName && credentials) {
+      logToFile(`[SlackScreen] fetching org name via API`);
+      void fetchAmplitudeUser(token!, region as AmplitudeZone)
+        .then((info) => {
+          const name = info.orgs[0]?.name ?? null;
+          logToFile(
+            `[SlackScreen] API returned orgs=${JSON.stringify(
+              info.orgs.map((o) => o.name),
+            )} using=${name}`,
+          );
+          setResolvedOrgName(name);
+        })
+        .catch((err: unknown) => {
+          logToFile(
+            `[SlackScreen] API fetch failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        });
     }
-    const credentials = store.session.credentials;
-    if (!credentials) {
-      logToFile(`[SlackScreen] no credentials — falling back to base URL`);
-      return;
-    }
-    logToFile(`[SlackScreen] fetching org name via API`);
-    void fetchAmplitudeUser(
-      credentials.idToken ?? credentials.accessToken,
-      region as AmplitudeZone,
-    )
-      .then((info) => {
-        const name = info.orgs[0]?.name ?? null;
-        logToFile(
-          `[SlackScreen] API returned orgs=${JSON.stringify(
-            info.orgs.map((o) => o.name),
-          )} using=${name}`,
-        );
-        setResolvedOrgName(name);
-      })
-      .catch((err: unknown) => {
-        logToFile(
-          `[SlackScreen] API fetch failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
+
+    // Check if Slack is already connected — auto-complete if so.
+    if (token && orgId) {
+      void fetchSlackConnectionStatus(
+        token,
+        region as AmplitudeZone,
+        orgId,
+      ).then((isConnected) => {
+        logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
+        if (isConnected) {
+          setPhase(Phase.Done);
+          setTimeout(
+            () =>
+              markDone(store, SlackOutcome.Configured, standalone, onComplete),
+            1500,
+          );
+        }
       });
+    }
   }, []);
 
+  const zone = (region ?? 'us') as AmplitudeZone;
+
   const settingsUrl = OUTBOUND_URLS.slackSettings(
-    (region ?? 'us') as AmplitudeZone,
+    zone,
     store.session.selectedOrgId,
-    resolvedOrgName,
   );
+
+  const [openedUrl, setOpenedUrl] = useState(settingsUrl);
 
   const handleConnect = () => {
     setPhase(Phase.Opening);
-    opn(settingsUrl, { wait: false }).catch(() => {
-      /* fire-and-forget */
-    });
-    setTimeout(() => setPhase(Phase.Waiting), 800);
+
+    const credentials = store.session.credentials;
+    const orgId = store.session.selectedOrgId;
+    const token = credentials?.idToken ?? credentials?.accessToken;
+
+    if (token && orgId) {
+      void fetchSlackInstallUrl(token, zone, orgId, settingsUrl).then(
+        (directUrl) => {
+          const urlToOpen = directUrl ?? settingsUrl;
+          setOpenedUrl(urlToOpen);
+          logToFile(
+            `[SlackScreen] opening ${
+              directUrl ? 'direct Slack OAuth URL' : 'settings fallback'
+            }`,
+          );
+          opn(urlToOpen, { wait: false }).catch(() => {});
+          setTimeout(() => setPhase(Phase.Waiting), 800);
+        },
+      );
+    } else {
+      logToFile(`[SlackScreen] no token/orgId — opening settings fallback`);
+      opn(settingsUrl, { wait: false }).catch(() => {});
+      setTimeout(() => setPhase(Phase.Waiting), 800);
+    }
   };
 
   const handleSkip = () => {
@@ -180,12 +219,19 @@ export const SlackScreen = ({
         {phase === Phase.Waiting && (
           <Box flexDirection="column" marginTop={1}>
             <Text>
-              Browser opened to <Text color="cyan">{settingsUrl}</Text>
+              Browser opened to <Text color="cyan">{openedUrl}</Text>
             </Text>
-            <Text color={Colors.muted}>
-              Go to Settings &gt; Personal Settings &gt; Profile and click
-              &quot;Connect to Slack&quot;.
-            </Text>
+            {openedUrl === settingsUrl && (
+              <Text color={Colors.muted}>
+                Go to Settings &gt; Personal Settings &gt; Profile and click
+                &quot;Connect to Slack&quot;.
+              </Text>
+            )}
+            {openedUrl !== settingsUrl && (
+              <Text color={Colors.muted}>
+                Authorize the {appName} app in Slack to complete the connection.
+              </Text>
+            )}
             <Box marginTop={1}>
               <ConfirmationInput
                 message="Connected to Slack?"

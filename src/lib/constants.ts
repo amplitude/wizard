@@ -140,17 +140,8 @@ export const OUTBOUND_URLS = {
   // ── Post-setup ────────────────────────────────────────────────────────────
 
   /** Slack integration settings — opened from the Slack screen. */
-  slackSettings: (
-    zone: AmplitudeZone,
-    orgId?: string | null,
-    orgName?: string | null,
-  ): string => {
+  slackSettings: (zone: AmplitudeZone, orgId?: string | null): string => {
     const base = OUTBOUND_URLS.overview[zone];
-    if (orgName) {
-      return `${base}/analytics/${encodeURIComponent(
-        orgName,
-      )}/settings/profile`;
-    }
     if (orgId) {
       return `${base}/${orgId}/settings/profile`;
     }

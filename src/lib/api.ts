@@ -562,6 +562,109 @@ export async function fetchProjectActivationStatus(
   }
 }
 
+// ── Slack install URL ─────────────────────────────────────────────────────
+
+const SlackInstallUrlSchema = z.object({
+  data: z.object({
+    slackInstallUrl: z.object({
+      installUrl: z.string().url(),
+    }),
+  }),
+});
+
+const SLACK_INSTALL_URL_QUERY = `
+query SlackInstallUrl($action: SlackInstallUrlAction!, $originalPath: String) {
+  slackInstallUrl(action: $action, originalPath: $originalPath) {
+    installUrl
+  }
+}`;
+
+/**
+ * Fetches the direct Slack OAuth install URL from Thunder.
+ * This lets the wizard open the Slack authorization page directly instead of
+ * routing through Amplitude Settings.
+ *
+ * Returns `null` on any error so callers can fall back to the settings page.
+ */
+export async function fetchSlackInstallUrl(
+  idToken: string,
+  zone: AmplitudeZone,
+  orgId: string,
+  originalPath: string,
+): Promise<string | null> {
+  const { appApiUrlBase } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const url = `${appApiUrlBase}${orgId}`;
+  try {
+    const response = await axios.post(
+      url,
+      {
+        query: SLACK_INSTALL_URL_QUERY,
+        variables: { action: 'direct_install', originalPath },
+      },
+      {
+        headers: {
+          Authorization: idToken,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+        timeout: 10_000,
+      },
+    );
+    const parsed = SlackInstallUrlSchema.parse(response.data);
+    return parsed.data.slackInstallUrl.installUrl;
+  } catch {
+    return null;
+  }
+}
+
+// ── Slack connection status ───────────────────────────────────────────────
+
+const SlackConnectionStatusSchema = z.object({
+  data: z.object({
+    slackConnectionStatus: z.object({
+      isConnected: z.boolean(),
+    }),
+  }),
+});
+
+const SLACK_CONNECTION_STATUS_QUERY = `
+query SlackConnectionStatus {
+  slackConnectionStatus {
+    isConnected
+  }
+}`;
+
+/**
+ * Checks whether the authenticated user already has Slack connected.
+ * Returns `null` on any error so callers treat it as unknown.
+ */
+export async function fetchSlackConnectionStatus(
+  idToken: string,
+  zone: AmplitudeZone,
+  orgId: string,
+): Promise<boolean | null> {
+  const { appApiUrlBase } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const url = `${appApiUrlBase}${orgId}`;
+  try {
+    const response = await axios.post(
+      url,
+      { query: SLACK_CONNECTION_STATUS_QUERY },
+      {
+        headers: {
+          Authorization: idToken,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+        timeout: 10_000,
+      },
+    );
+    const parsed = SlackConnectionStatusSchema.parse(response.data);
+    return parsed.data.slackConnectionStatus.isConnected;
+  } catch {
+    return null;
+  }
+}
+
 function handleApiError(error: unknown, operation: string): ApiError {
   if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError<{
