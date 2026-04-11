@@ -209,6 +209,9 @@ export const SlackScreen = ({
                   Go to Settings &gt; Personal Settings &gt; Profile and click
                   &quot;Connect to Slack&quot;.
                 </Text>
+                <Text color={Colors.muted}>
+                  Docs: <Text color="cyan">https://amplitude.com/docs/analytics/integrate-slack</Text>
+                </Text>
               </>
             ) : (
               <>
@@ -219,6 +222,9 @@ export const SlackScreen = ({
                 <Text color={Colors.muted}>
                   Authorize the {appName} app in Slack to complete the
                   connection.
+                </Text>
+                <Text color={Colors.muted}>
+                  Docs: <Text color="cyan">https://amplitude.com/docs/analytics/integrate-slack</Text>
                 </Text>
               </>
             )}
