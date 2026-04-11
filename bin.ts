@@ -294,7 +294,7 @@ void yargs(hideBin(process.argv))
                   if (localKey) {
                     logToFile('[bin] using locally stored API key');
                     session.credentials = {
-                      accessToken: storedToken.idToken,
+                      accessToken: storedToken.accessToken,
                       idToken: storedToken.idToken,
                       projectApiKey: localKey.key,
                       host: getHostFromRegion(zone),
@@ -345,7 +345,7 @@ void yargs(hideBin(process.argv))
                         );
                         persistApiKey(apiKey, installDir);
                         session.credentials = {
-                          accessToken: storedToken.idToken,
+                          accessToken: storedToken.accessToken,
                           idToken: storedToken.idToken,
                           projectApiKey: apiKey,
                           host: getHostFromRegion(zone),
@@ -361,7 +361,8 @@ void yargs(hideBin(process.argv))
                         );
                         session.pendingOrgs = userInfo.orgs;
                         session.pendingAuthIdToken = storedToken.idToken;
-                        session.pendingAuthAccessToken = storedToken.idToken;
+                        session.pendingAuthAccessToken =
+                          storedToken.accessToken;
                       } else {
                         logToFile(
                           '[bin] no environments with API keys — showing apiKeyNotice',
@@ -387,7 +388,7 @@ void yargs(hideBin(process.argv))
                       if (projectApiKey) {
                         persistApiKey(projectApiKey, installDir);
                         session.credentials = {
-                          accessToken: storedToken.idToken,
+                          accessToken: storedToken.accessToken,
                           idToken: storedToken.idToken,
                           projectApiKey,
                           host: getHostFromRegion(zone),
@@ -980,44 +981,82 @@ void yargs(hideBin(process.argv))
     'slack',
     'Set up Amplitude Slack integration',
     (y) => y,
-    (argv) => {
+    (_argv) => {
       void (async () => {
+        // Dynamic imports may land named exports on `.default` under tsx
+        // CJS/ESM interop. This helper normalises that.
+        const cjs = <T>(mod: T & { default?: T }): T =>
+          (mod.default ?? mod) as T;
+
         try {
-          const { startTUI } = await import('./src/ui/tui/start-tui.js');
-          const { buildSession } = await import('./src/lib/wizard-session.js');
-          const { Flow } = await import('./src/ui/tui/router.js');
-          const { getStoredUser, getStoredToken } = await import(
-            './src/utils/ampli-settings.js'
+          const { getStoredUser, getStoredToken } = cjs(
+            await import('./src/utils/ampli-settings.js'),
           );
-          const { getHostFromRegion } = await import('./src/utils/urls.js');
+          const { readAmpliConfig } = cjs(
+            await import('./src/lib/ampli-config.js'),
+          );
+          const { fetchSlackInstallUrl, fetchSlackConnectionStatus } = cjs(
+            await import('./src/lib/api.js'),
+          );
+          const { OUTBOUND_URLS } = cjs(await import('./src/lib/constants.js'));
+          const opn = (await import('opn')).default;
 
-          const session = buildSession({
-            debug:
-              typeof argv['debug'] === 'boolean' ? argv['debug'] : undefined,
-          });
-
-          // Pre-populate credentials from ~/.ampli.json so SlackScreen can
-          // resolve the org name via fetchAmplitudeUser.
           const storedUser = getStoredUser();
           const zone = storedUser?.zone ?? 'us';
           const storedToken = getStoredToken(storedUser?.id, zone);
-          if (storedToken) {
-            session.region = zone;
-            session.credentials = {
-              accessToken: storedToken.idToken,
-              projectApiKey: '',
-              host: getHostFromRegion(zone),
-              projectId: 0,
-            };
+          // Thunder validates access_tokens via Hydra, not id_tokens.
+          const accessToken = storedToken?.accessToken;
+
+          // Read orgId from project-level ampli.json
+          const ampliConfig = readAmpliConfig(process.cwd());
+          const orgId = ampliConfig.ok ? ampliConfig.config.OrgId : undefined;
+
+          if (!accessToken || !orgId) {
+            setUI(new LoggingUI());
+            getUI().log.info(
+              'No Amplitude session found. Run `npx @amplitude/wizard` first to log in and set up your project.',
+            );
+            process.exit(1);
           }
 
-          // Pass the pre-populated session so it's available before the first render.
-          startTUI(WIZARD_VERSION, Flow.SlackSetup, session);
+          // Check if Slack is already connected before prompting install.
+          const isConnected = await fetchSlackConnectionStatus(
+            accessToken,
+            zone,
+            orgId,
+          );
+          if (isConnected) {
+            setUI(new LoggingUI());
+            getUI().log.info(
+              'Slack is already connected to your Amplitude workspace.',
+            );
+            process.exit(0);
+          }
+
+          const settingsUrl = OUTBOUND_URLS.slackSettings(zone, orgId);
+          let url = settingsUrl;
+
+          // Try to get the direct Slack OAuth URL from Thunder.
+          const directUrl = await fetchSlackInstallUrl(
+            accessToken,
+            zone,
+            orgId,
+            settingsUrl,
+          );
+          if (directUrl) url = directUrl;
+
+          setUI(new LoggingUI());
+          getUI().log.info(`Opening Slack integration: ${url}`);
+          await opn(url, { wait: false });
         } catch {
           setUI(new LoggingUI());
-          const { getCloudUrlFromRegion } = await import('./src/utils/urls.js');
+          const { getCloudUrlFromRegion } = cjs(
+            await import('./src/utils/urls.js'),
+          );
           const opn = (await import('opn')).default;
-          const url = `${getCloudUrlFromRegion('us')}/settings/profile`;
+          const url = `${getCloudUrlFromRegion(
+            'us',
+          )}/analytics/settings/profile`;
           getUI().log.info(
             `Opening Amplitude Settings to connect Slack: ${url}`,
           );
@@ -1054,7 +1093,7 @@ void yargs(hideBin(process.argv))
           const storedToken = getStoredToken(storedUser?.id, zone);
           if (storedToken) {
             session.credentials = {
-              accessToken: storedToken.idToken,
+              accessToken: storedToken.accessToken,
               projectApiKey: '',
               host: getHostFromRegion(zone),
               projectId: 0,

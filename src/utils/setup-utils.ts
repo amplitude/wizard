@@ -381,7 +381,7 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
   return {
     host: getHostFromRegion(cloudRegion),
     projectApiKey,
-    accessToken: storedToken.idToken,
+    accessToken: storedToken.accessToken,
     cloudRegion,
   };
 }
@@ -660,7 +660,7 @@ async function askForWizardLogin(
   }
 
   return {
-    accessToken: auth.idToken,
+    accessToken: auth.accessToken,
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',

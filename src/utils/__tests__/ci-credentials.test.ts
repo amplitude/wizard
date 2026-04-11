@@ -110,7 +110,7 @@ describe('tryResolveCredentialsForCi', () => {
     const r = await tryResolveCredentialsForCi('/tmp/proj');
 
     expect(r?.projectApiKey).toBe('fetched-key');
-    expect(r?.accessToken).toBe('idtok');
+    expect(r?.accessToken).toBe('at');
     expect(getAPIKey).toHaveBeenCalledWith({
       installDir: '/tmp/proj',
       idToken: 'idtok',

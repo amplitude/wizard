@@ -58,12 +58,12 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       } reason=${localDetection.reason ?? 'none'}`,
     );
 
-    void fetchProjectActivationStatus(
-      credentials.idToken ?? credentials.accessToken,
+    void fetchProjectActivationStatus({
+      accessToken: credentials.accessToken,
       zone,
       appId,
-      selectedOrgId,
-    )
+      orgId: selectedOrgId,
+    })
       .then((status) => {
         logToFile(`[DataSetup] activation status: ${JSON.stringify(status)}`);
         store.setSnippetConfigured(status.hasDetSource);

@@ -1,11 +1,36 @@
 import axios, { AxiosError } from 'axios';
 import { z } from 'zod';
 import { analytics } from '../utils/analytics.js';
+import { logToFile } from '../utils/debug.js';
 import {
   AMPLITUDE_ZONE_SETTINGS,
   WIZARD_USER_AGENT,
   type AmplitudeZone,
 } from './constants.js';
+
+// ── Thunder URL helper ────────────────────────────────────────────────
+
+/**
+ * Builds the Thunder GraphQL endpoint for the given zone and orgId.
+ * Respects `WIZARD_PROXY_THUNDER_URL` for local development — e.g.
+ * `WIZARD_PROXY_THUNDER_URL=http://localhost:3030/` routes Thunder
+ * traffic to a local server.
+ */
+function thunderUrl(
+  zone: AmplitudeZone,
+  orgId: string,
+  queryName?: string,
+): string {
+  const base =
+    process.env.WIZARD_PROXY_THUNDER_URL ??
+    AMPLITUDE_ZONE_SETTINGS[zone].appApiUrlBase;
+  // Ensure the base ends with /graphql/org/ so we can append orgId.
+  const graphqlBase = base.endsWith('/graphql/org/')
+    ? base
+    : `${base.replace(/\/$/, '')}/graphql/org/`;
+  const url = `${graphqlBase}${orgId}`;
+  return queryName ? `${url}?q=${queryName}` : url;
+}
 
 // ── Amplitude GraphQL types ───────────────────────────────────────────
 
@@ -340,19 +365,18 @@ query OwnedDashboards {
  * checklist falls back to the default empty state rather than crashing.
  */
 export async function fetchOwnedDashboards(
-  idToken: string,
+  accessToken: string,
   zone: AmplitudeZone,
   orgId: string,
 ): Promise<{ hasCharts: boolean; hasDashboards: boolean }> {
-  const { appApiUrlBase } = AMPLITUDE_ZONE_SETTINGS[zone];
-  const url = `${appApiUrlBase}${orgId}`;
+  const url = thunderUrl(zone, orgId, 'OwnedDashboards');
   try {
     const response = await axios.post(
       url,
       { query: OWNED_DASHBOARDS_QUERY },
       {
         headers: {
-          Authorization: idToken,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -523,26 +547,28 @@ query hasAnyDefaultEventTrackingSourceAndEvents($appId: ID!) {
  * Checks whether an Amplitude project has ingested any events and whether
  * the SDK snippet is configured.
  *
- * The query lives in Thunder (the main Amplitude app GraphQL server), served
- * at /graphql/org/:orgId.  orgId is required to construct the endpoint URL.
+ * Always routes to Thunder (the main Amplitude app GraphQL server) at
+ * /t/graphql/org/:orgId using a Bearer access_token.
  */
-export async function fetchProjectActivationStatus(
-  idToken: string,
-  zone: AmplitudeZone,
-  appId: number | string,
-  orgId?: string | null,
-): Promise<ProjectActivationStatus> {
-  const { appApiUrlBase, dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
-  // Use the Thunder org-scoped endpoint when orgId is available; fall back to
-  // the data API (which may not expose this field for all users).
-  const url = orgId ? `${appApiUrlBase}${orgId}` : dataApiUrl;
+export async function fetchProjectActivationStatus(opts: {
+  accessToken: string;
+  zone: AmplitudeZone;
+  appId: number | string;
+  orgId: string;
+}): Promise<ProjectActivationStatus> {
+  const { accessToken, zone, appId, orgId } = opts;
+  const url = thunderUrl(
+    zone,
+    orgId,
+    'hasAnyDefaultEventTrackingSourceAndEvents',
+  );
   try {
     const response = await axios.post(
       url,
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
         headers: {
-          Authorization: idToken,
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -559,6 +585,120 @@ export async function fetchProjectActivationStatus(
     const apiError = handleApiError(error, 'fetch project activation status');
     analytics.captureException(apiError, { endpoint: url });
     throw apiError;
+  }
+}
+
+// ── Slack install URL ─────────────────────────────────────────────────────
+
+const SlackInstallUrlSchema = z.object({
+  data: z.object({
+    slackInstallUrl: z.object({
+      installUrl: z.string().url(),
+    }),
+  }),
+});
+
+const SLACK_INSTALL_URL_QUERY = `
+query SlackInstallUrl($action: SlackInstallUrlAction!, $originalPath: String) {
+  slackInstallUrl(action: $action, originalPath: $originalPath) {
+    installUrl
+  }
+}`;
+
+/**
+ * Fetches the direct Slack OAuth install URL from Thunder.
+ * This lets the wizard open the Slack authorization page directly instead of
+ * routing through Amplitude Settings.
+ *
+ * Returns `null` on any error so callers can fall back to the settings page.
+ */
+export async function fetchSlackInstallUrl(
+  accessToken: string,
+  zone: AmplitudeZone,
+  orgId: string,
+  originalPath: string,
+): Promise<string | null> {
+  const url = thunderUrl(zone, orgId, 'SlackInstallUrl');
+  try {
+    const response = await axios.post(
+      url,
+      {
+        query: SLACK_INSTALL_URL_QUERY,
+        variables: { action: 'profile', originalPath },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+        timeout: 10_000,
+      },
+    );
+    logToFile(
+      `[fetchSlackInstallUrl] response status=${
+        response.status
+      } data=${JSON.stringify(response.data)}`,
+    );
+    const parsed = SlackInstallUrlSchema.parse(response.data);
+    return parsed.data.slackInstallUrl.installUrl;
+  } catch (err) {
+    const detail = axios.isAxiosError(err)
+      ? `status=${err.response?.status} data=${JSON.stringify(
+          err.response?.data,
+        )}`
+      : err instanceof Error
+      ? err.message
+      : String(err);
+    logToFile(`[fetchSlackInstallUrl] failed: ${detail}`);
+    return null;
+  }
+}
+
+// ── Slack connection status ───────────────────────────────────────────────
+
+const SlackConnectionStatusSchema = z.object({
+  data: z.object({
+    slackConnectionStatus: z.object({
+      isConnected: z.boolean(),
+    }),
+  }),
+});
+
+const SLACK_CONNECTION_STATUS_QUERY = `
+query SlackConnectionStatus {
+  slackConnectionStatus {
+    isConnected
+  }
+}`;
+
+/**
+ * Checks whether the authenticated user already has Slack connected.
+ * Returns `null` on any error so callers treat it as unknown.
+ */
+export async function fetchSlackConnectionStatus(
+  accessToken: string,
+  zone: AmplitudeZone,
+  orgId: string,
+): Promise<boolean | null> {
+  const url = thunderUrl(zone, orgId, 'SlackConnectionStatus');
+  try {
+    const response = await axios.post(
+      url,
+      { query: SLACK_CONNECTION_STATUS_QUERY },
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+        timeout: 10_000,
+      },
+    );
+    const parsed = SlackConnectionStatusSchema.parse(response.data);
+    return parsed.data.slackConnectionStatus.isConnected;
+  } catch {
+    return null;
   }
 }
 

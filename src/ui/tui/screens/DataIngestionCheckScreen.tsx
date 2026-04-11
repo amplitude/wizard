@@ -63,15 +63,21 @@ export const DataIngestionCheckScreen = ({
       return;
     }
     const zone = (region ?? 'us') as AmplitudeZone;
-    const idToken = credentials.idToken ?? credentials.accessToken;
+    // Data API (fetchWorkspaceEventTypes) expects a raw JWT id_token.
+    const dataApiToken = credentials.idToken ?? credentials.accessToken;
+
+    if (!session.selectedOrgId) {
+      setApiUnavailable(true);
+      return;
+    }
 
     try {
-      const status = await fetchProjectActivationStatus(
-        idToken,
+      const status = await fetchProjectActivationStatus({
+        accessToken: credentials.accessToken,
         zone,
         appId,
-        session.selectedOrgId,
-      );
+        orgId: session.selectedOrgId,
+      });
       logToFile(
         `[DataIngestionCheck] poll result: hasAnyEvents=${status.hasAnyEvents} hasDetSource=${status.hasDetSource}`,
       );
@@ -85,7 +91,7 @@ export const DataIngestionCheckScreen = ({
       // Fall back to the event catalog which includes all event types.
       if (session.selectedOrgId && session.selectedWorkspaceId) {
         const catalogEvents = await fetchWorkspaceEventTypes(
-          idToken,
+          dataApiToken,
           zone,
           session.selectedOrgId,
           session.selectedWorkspaceId,
@@ -108,7 +114,7 @@ export const DataIngestionCheckScreen = ({
       // Fetch cataloged event types from the data API as a proxy for "events arrived"
       if (session.selectedOrgId && session.selectedWorkspaceId) {
         fetchWorkspaceEventTypes(
-          idToken,
+          dataApiToken,
           zone,
           session.selectedOrgId,
           session.selectedWorkspaceId,
