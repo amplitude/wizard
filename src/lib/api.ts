@@ -353,7 +353,7 @@ export async function fetchOwnedDashboards(
       { query: OWNED_DASHBOARDS_QUERY },
       {
         headers: {
-          Authorization: idToken,
+          Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -536,14 +536,15 @@ export async function fetchProjectActivationStatus(
   const { appApiUrlBase, dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   // Use the Thunder org-scoped endpoint when orgId is available; fall back to
   // the data API (which may not expose this field for all users).
-  const url = orgId ? `${appApiUrlBase}${orgId}` : dataApiUrl;
+  const isThunder = !!orgId;
+  const url = isThunder ? `${appApiUrlBase}${orgId}` : dataApiUrl;
   try {
     const response = await axios.post(
       url,
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
         headers: {
-          Authorization: idToken,
+          Authorization: isThunder ? `Bearer ${idToken}` : idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -604,7 +605,7 @@ export async function fetchSlackInstallUrl(
       },
       {
         headers: {
-          Authorization: idToken,
+          Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -665,7 +666,7 @@ export async function fetchSlackConnectionStatus(
       { query: SLACK_CONNECTION_STATUS_QUERY },
       {
         headers: {
-          Authorization: idToken,
+          Authorization: `Bearer ${idToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
