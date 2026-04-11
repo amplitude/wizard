@@ -81,7 +81,7 @@ export const ActivationOptionsScreen = ({
             {
               value: 'debug',
               label: "I'm blocked",
-              hint: 'get help debugging',
+              hint: 'debug with AI',
             },
             { value: 'docs', label: 'Take me to the docs', hint: DOCS_URL },
             {

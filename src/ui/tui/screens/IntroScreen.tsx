@@ -82,7 +82,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               .env* file contents will not leave your machine.
             </Text>
             <Box marginTop={1}>
-              <Text>From zero to first tracked event, fast.</Text>
+              <Text>Painlessly takes you from zero to tracking events</Text>
             </Box>
           </Box>
         )}
