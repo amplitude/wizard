@@ -25,7 +25,7 @@ wizard
 | VS Code | `~/Library/Application Support/Code/User/mcp.json` (Mac) | `servers` | streamable-http |
 | Zed | `~/.config/zed/settings.json` | `context_servers` | streamable-http |
 | Cursor | `~/.cursor/mcp.json` | `mcpServers` | streamable-http |
-| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) | `mcpServers` | SSE via `npx mcp-remote` |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) | `mcpServers` | streamable-http via `npx mcp-remote` |
 | Claude Code | CLI — `claude mcp add` | — | streamable-http |
 | Codex | CLI — `codex mcp add` | — | streamable-http |
 
