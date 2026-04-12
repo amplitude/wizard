@@ -250,6 +250,7 @@ void yargs(hideBin(process.argv))
                 { getHostFromRegion },
                 { logToFile },
                 { fetchAmplitudeUser },
+                { resolveOrgByApiKey, resolveEnvsWithKey },
               ] = await Promise.all([
                 import('./src/utils/ampli-settings.js'),
                 import('./src/lib/ampli-config.js'),
@@ -257,6 +258,7 @@ void yargs(hideBin(process.argv))
                 import('./src/utils/urls.js'),
                 import('./src/utils/debug.js'),
                 import('./src/lib/api.js'),
+                import('./src/lib/org-resolution.js'),
               ]);
 
               const isDebug =
@@ -330,25 +332,19 @@ void yargs(hideBin(process.argv))
                         storedToken.idToken,
                         zone,
                       );
-                      // Match API key to find the right org/workspace/env
-                      for (const org of userInfo.orgs) {
-                        for (const ws of org.workspaces) {
-                          const env = ws.environments?.find(
-                            (e) => e.app?.apiKey === localKey.key,
-                          );
-                          if (env) {
-                            session.selectedOrgId = org.id;
-                            session.selectedOrgName = org.name;
-                            session.selectedWorkspaceId = ws.id;
-                            session.selectedWorkspaceName = ws.name;
-                            session.selectedProjectName = env.name;
-                            logToFile(
-                              `[bin] resolved org/ws for local key: org="${org.name}", ws="${ws.name}", env="${env.name}"`,
-                            );
-                            break;
-                          }
-                        }
-                        if (session.selectedOrgName) break;
+                      const resolved = resolveOrgByApiKey(
+                        userInfo.orgs,
+                        localKey.key,
+                      );
+                      if (resolved) {
+                        session.selectedOrgId = resolved.orgId;
+                        session.selectedOrgName = resolved.orgName;
+                        session.selectedWorkspaceId = resolved.workspaceId;
+                        session.selectedWorkspaceName = resolved.workspaceName;
+                        session.selectedProjectName = resolved.projectName;
+                        logToFile(
+                          `[bin] resolved org/ws for local key: org="${resolved.orgName}", ws="${resolved.workspaceName}", env="${resolved.projectName}"`,
+                        );
                       }
                     } catch {
                       logToFile(
@@ -382,51 +378,24 @@ void yargs(hideBin(process.argv))
                         session.selectedWorkspaceId ?? undefined;
 
                       // Find the relevant workspace and its environments
-                      let envsWithKey: Array<{
-                        name: string;
-                        rank: number;
-                        app: {
-                          id: string;
-                          apiKey?: string | null;
-                        } | null;
-                      }> = [];
-                      let matchedOrg:
-                        | (typeof userInfo.orgs)[number]
-                        | undefined;
-                      let matchedWs:
-                        | (typeof userInfo.orgs)[number]['workspaces'][number]
-                        | undefined;
-                      for (const org of userInfo.orgs) {
-                        const ws = workspaceId
-                          ? org.workspaces.find((w) => w.id === workspaceId)
-                          : org.workspaces[0];
-                        if (ws?.environments) {
-                          matchedOrg = org;
-                          matchedWs = ws;
-                          envsWithKey = ws.environments
-                            .filter((env) => env.app?.apiKey)
-                            .sort((a, b) => a.rank - b.rank);
-                          break;
-                        }
-                      }
+                      const envsWithKey = resolveEnvsWithKey(
+                        userInfo.orgs,
+                        workspaceId,
+                      );
 
                       if (envsWithKey.length === 1) {
                         // Single environment — auto-select as before
-                        const apiKey = envsWithKey[0].app!.apiKey!;
-                        session.selectedProjectName = envsWithKey[0].name;
-                        // Capture org/workspace info from the already-fetched data
-                        if (matchedOrg) {
-                          session.selectedOrgId = matchedOrg.id;
-                          session.selectedOrgName = matchedOrg.name;
-                        }
-                        if (matchedWs) {
-                          session.selectedWorkspaceId = matchedWs.id;
-                          session.selectedWorkspaceName = matchedWs.name;
-                        }
+                        const env = envsWithKey[0];
+                        const apiKey = env.apiKey;
+                        session.selectedProjectName = env.name;
+                        session.selectedOrgId = env.orgId;
+                        session.selectedOrgName = env.orgName;
+                        session.selectedWorkspaceId = env.workspaceId;
+                        session.selectedWorkspaceName = env.workspaceName;
                         logToFile(
                           `[bin] single environment — auto-selecting API key. ` +
-                            `orgName=${matchedOrg?.name}, wsName=${matchedWs?.name}, ` +
-                            `projectName=${envsWithKey[0].name}`,
+                            `orgName=${env.orgName}, wsName=${env.workspaceName}, ` +
+                            `projectName=${env.name}`,
                         );
                         persistApiKey(apiKey, installDir);
                         session.credentials = {
