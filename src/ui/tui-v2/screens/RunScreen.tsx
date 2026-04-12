@@ -173,21 +173,34 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     });
   }
 
-  const currentFile = extractCurrentFile(store.statusMessages);
+  const rawFile = extractCurrentFile(store.statusMessages);
+  const lastFileRef = useRef<string | null>(null);
+  if (rawFile) lastFileRef.current = rawFile;
+  const currentFile = lastFileRef.current;
+
+  const completed = progressItems.filter(
+    (t) => t.status === 'completed',
+  ).length;
+  const total = progressItems.length;
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
-      {/* Header bar: elapsed time + currently editing */}
-      <Box marginBottom={1}>
-        <Box flexGrow={1}>
+      {/* Header bar: progress count + elapsed + currently editing */}
+      <Box marginBottom={1} justifyContent="space-between">
+        <Box gap={1}>
+          <BrailleSpinner color={Colors.active} />
+          <Text color={Colors.body} bold>
+            {total > 0
+              ? `${completed}/${total} tasks complete`
+              : 'Agent running'}
+          </Text>
           <Text color={Colors.muted}>
-            <BrailleSpinner color={Colors.active} /> Agent running {Icons.dot}{' '}
-            {formatElapsed(elapsed)}
+            {Icons.dot} {formatElapsed(elapsed)}
           </Text>
         </Box>
         {currentFile && (
-          <Text color={Colors.secondary}>
-            Editing: <Text color={Colors.body}>{currentFile}</Text>
+          <Text color={Colors.muted} wrap="truncate-end">
+            {currentFile}
           </Text>
         )}
       </Box>

@@ -2,7 +2,7 @@
  * ConsoleView v2 — Full-screen wrapper without outer border.
  *
  * Layout: content area + separator + console input with ❯ prompt.
- * Handles slash commands, Claude queries, pending prompts, and error banners.
+ * Handles slash commands, AI queries, pending prompts, and error banners.
  * KeyHintBar integrated above the input line.
  */
 
@@ -307,6 +307,9 @@ export const ConsoleView = ({
               />
             ) : (
               <Box flexDirection="column" gap={1}>
+                <Text color={Colors.muted}>
+                  The AI has proposed the following events for your app:
+                </Text>
                 <Text color={Colors.heading} bold>
                   Instrumentation Plan
                 </Text>
@@ -344,11 +347,12 @@ export const ConsoleView = ({
             flexGrow={1}
             paddingX={Layout.paddingX}
             paddingY={1}
+            overflow="hidden"
           >
-            <Box justifyContent="flex-end">
+            <Text color={Colors.accent}>{response}</Text>
+            <Box marginTop={1}>
               <Text color={Colors.muted}>[Q / Esc] close</Text>
             </Box>
-            <Text color={Colors.accent}>{response}</Text>
           </Box>
         ) : (
           children
@@ -417,15 +421,23 @@ export const ConsoleView = ({
       {/* Key hints + console input */}
       <KeyHintBar hints={screenHints} width={innerWidth} />
       <Box paddingX={Layout.paddingX}>
-        <Text color={Colors.accent}>{Icons.prompt} </Text>
-        <SlashCommandInput
-          key={inputKey}
-          commands={COMMANDS}
-          isActive={inputActive}
-          initialValue={initialValue}
-          onSubmit={handleSubmit}
-          onDeactivate={deactivate}
-        />
+        <Text color={inputActive ? Colors.accent : Colors.muted}>
+          {Icons.prompt}{' '}
+        </Text>
+        {inputActive ? (
+          <SlashCommandInput
+            key={inputKey}
+            commands={COMMANDS}
+            isActive={inputActive}
+            initialValue={initialValue}
+            onSubmit={handleSubmit}
+            onDeactivate={deactivate}
+          />
+        ) : (
+          <Text color={Colors.disabled}>
+            Press / for commands or Tab to ask a question
+          </Text>
+        )}
       </Box>
     </Box>
   );

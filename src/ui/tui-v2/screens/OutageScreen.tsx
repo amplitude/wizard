@@ -29,7 +29,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text color={Colors.warning} bold>
-          {Icons.diamond} Our AI services are experiencing issues.
+          {Icons.diamond} AI services are experiencing issues.
         </Text>
         <Text> </Text>
         <Text color={Colors.body}>

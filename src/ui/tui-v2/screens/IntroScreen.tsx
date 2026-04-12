@@ -62,7 +62,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       flexDirection="column"
       flexGrow={1}
       alignItems="center"
-      justifyContent="center"
+      justifyContent="flex-start"
+      paddingTop={2}
     >
       {/* Heading */}
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
@@ -70,6 +71,9 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           Amplitude Wizard
         </Text>
         <Text color={Colors.muted}>AI-powered analytics setup in minutes</Text>
+        <Text color={Colors.secondary}>
+          Installs the SDK, adds events, and verifies data is flowing.
+        </Text>
       </Box>
 
       {/* Detection spinner */}
@@ -125,8 +129,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               <PickerMenu
                 options={[
                   { label: 'Continue', value: 'continue' },
-                  { label: 'Change framework', value: 'framework' },
-                  { label: 'Cancel', value: 'cancel' },
+                  {
+                    label: 'Change framework',
+                    value: 'framework',
+                    hint: 'pick manually',
+                  },
+                  { label: 'Cancel', value: 'cancel', hint: 'exit wizard' },
                 ]}
                 onSelect={(value) => {
                   const choice = Array.isArray(value) ? value[0] : value;

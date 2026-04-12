@@ -64,6 +64,8 @@ export const DataIngestionCheckScreen = ({
   const [eventTypes, setEventTypes] = useState<string[] | null>(null);
   const [celebrating, setCelebrating] = useState(false);
   const [arrivedEvents, setArrivedEvents] = useState<string[]>([]);
+  const [lastChecked, setLastChecked] = useState<number | null>(null);
+  const [secondsSince, setSecondsSince] = useState(0);
 
   /** Confirm ingestion with a brief celebration before advancing. */
   function confirmWithCelebration(events?: string[]) {
@@ -100,6 +102,7 @@ export const DataIngestionCheckScreen = ({
         appId,
         orgId: session.selectedOrgId,
       });
+      setLastChecked(Date.now());
       logToFile(
         `[DataIngestionCheck] poll result: hasAnyEvents=${status.hasAnyEvents} hasDetSource=${status.hasDetSource}`,
       );
@@ -170,6 +173,16 @@ export const DataIngestionCheckScreen = ({
       }
     };
   }, []);
+
+  // Update seconds-since counter
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (lastChecked) {
+        setSecondsSince(Math.floor((Date.now() - lastChecked) / 1000));
+      }
+    }, 1000);
+    return () => clearInterval(id);
+  }, [lastChecked]);
 
   useScreenInput((_char, key) => {
     if (celebrating) return; // don't interrupt celebration
@@ -258,6 +271,9 @@ export const DataIngestionCheckScreen = ({
           <BrailleSpinner color={Colors.accent} />
           <Text color={Colors.secondary}>
             Listening for events{Icons.ellipsis}
+            {lastChecked && (
+              <Text color={Colors.muted}> (checked {secondsSince}s ago)</Text>
+            )}
           </Text>
         </Box>
       )}
@@ -304,30 +320,26 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* Key hints */}
-      <Box marginTop={2} flexDirection="column">
+      {/* Key hints — unified bracket format */}
+      <Box marginTop={2} gap={2}>
         {apiUnavailable && (
-          <Text color={Colors.muted}>
-            Press{' '}
-            <Text bold color={Colors.secondary}>
+          <Box>
+            <Text color={Colors.muted}>[</Text>
+            <Text color={Colors.body} bold>
               Enter
-            </Text>{' '}
-            {eventTypes && eventTypes.length > 0
-              ? 'to continue'
-              : 'once you see events in your Amplitude dashboard'}
-          </Text>
+            </Text>
+            <Text color={Colors.muted}>
+              ] {eventTypes && eventTypes.length > 0 ? 'Continue' : 'Confirm'}
+            </Text>
+          </Box>
         )}
-        <Text color={Colors.muted}>
-          Press{' '}
-          <Text bold color={Colors.secondary}>
+        <Box>
+          <Text color={Colors.muted}>[</Text>
+          <Text color={Colors.body} bold>
             q
-          </Text>{' '}
-          or{' '}
-          <Text bold color={Colors.secondary}>
-            Esc
-          </Text>{' '}
-          to exit and resume later
-        </Text>
+          </Text>
+          <Text color={Colors.muted}>] Exit and resume later</Text>
+        </Box>
       </Box>
     </Box>
   );

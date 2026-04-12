@@ -1,11 +1,12 @@
 /**
  * HeaderBar — minimal header line.
  *
- * "Amplitude Wizard" left, org/project right. Text only, no background.
+ * "Amplitude Wizard" left, org/project right with dot separator.
+ * Version moved to /whoami — not needed in-flow.
  */
 
 import { Box, Text } from 'ink';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 
 interface HeaderBarProps {
   version: string;
@@ -14,33 +15,26 @@ interface HeaderBarProps {
   projectName?: string | null;
 }
 
-export const HeaderBar = ({
-  version,
-  width,
-  orgName,
-  projectName,
-}: HeaderBarProps) => {
-  const left = 'Amplitude Wizard';
-
+export const HeaderBar = ({ width, orgName, projectName }: HeaderBarProps) => {
   const contextParts: string[] = [];
   if (orgName) contextParts.push(orgName);
   if (projectName) contextParts.push(projectName);
   const context = contextParts.join(' / ');
 
-  const versionStr = `v${version}`;
-
   return (
     <Box width={width} paddingX={1}>
-      <Box flexGrow={1}>
+      <Box flexShrink={0}>
         <Text color={Colors.heading} bold>
-          {left}
+          Amplitude Wizard
         </Text>
-        <Text color={Colors.disabled}> {versionStr}</Text>
       </Box>
       {context && (
-        <Text color={Colors.secondary} wrap="truncate-end">
-          {context}
-        </Text>
+        <Box flexGrow={1} justifyContent="flex-end" overflow="hidden">
+          <Text color={Colors.muted}> {Icons.dot} </Text>
+          <Text color={Colors.secondary} wrap="truncate-end">
+            {context}
+          </Text>
+        </Box>
       )}
     </Box>
   );

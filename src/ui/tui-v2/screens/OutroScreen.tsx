@@ -86,8 +86,18 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
           <Text color={Colors.success} bold>
-            {Icons.checkmark} Amplitude is live
+            {Icons.checkmark} Amplitude is live!
           </Text>
+          {store.eventPlan.length > 0 && (
+            <Text color={Colors.body}>
+              {store.eventPlan.length} event
+              {store.eventPlan.length !== 1 ? 's' : ''} instrumented
+              {store.session.selectedProjectName
+                ? ` in ${store.session.selectedProjectName}`
+                : ''}
+              .
+            </Text>
+          )}
 
           {/* Changes summary */}
           {outroData.changes && outroData.changes.length > 0 && (

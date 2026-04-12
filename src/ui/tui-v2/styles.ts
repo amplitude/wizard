@@ -13,7 +13,8 @@ export const Brand = {
   blueOnDark: '#4083FF', // primary accent on dark backgrounds
   lilac: '#6980FF', // secondary accent, completed states
   violet: '#A373FF', // in-progress, active highlights
-  pink: '#FF7D78', // warnings (sparingly)
+  pink: '#FF7D78', // decorative only
+  amber: '#F59E0B', // warnings — visually distinct from red
   red: '#F23845', // errors only
 
   gray100: '#13171A', // terminal background
@@ -49,7 +50,7 @@ export const Colors = {
   // Status
   success: Brand.success,
   error: Brand.red,
-  warning: Brand.pink,
+  warning: Brand.amber,
 
   // Surfaces
   background: Brand.gray100,

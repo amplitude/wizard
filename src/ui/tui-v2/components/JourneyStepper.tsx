@@ -119,7 +119,9 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
               </Text>
             )}
             {i < steps.length - 1 && (
-              <Text color={Colors.muted}>{showLabels ? '  ' : ' '}</Text>
+              <Text color={Colors.border}>
+                {showLabels ? ` ${Icons.dash} ` : ` ${Icons.dot} `}
+              </Text>
             )}
           </Box>
         );
