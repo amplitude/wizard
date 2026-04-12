@@ -13,8 +13,9 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
@@ -27,10 +28,7 @@ interface DataSetupScreenProps {
 }
 
 export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   useEffect(() => {
     if (store.session.projectHasData !== null) return;

@@ -6,8 +6,8 @@
  */
 
 import { Box, Text } from 'ink';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
@@ -23,10 +23,7 @@ const DOCS_URL = OUTBOUND_URLS.sdkDocs;
 export const ActivationOptionsScreen = ({
   store,
 }: ActivationOptionsScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { snippetConfigured } = store.session;
 

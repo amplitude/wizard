@@ -9,7 +9,6 @@ import { Box, Text } from 'ink';
 import { Colors, Icons } from '../styles.js';
 
 interface HeaderBarProps {
-  version: string;
   width: number;
   orgName?: string | null;
   projectName?: string | null;

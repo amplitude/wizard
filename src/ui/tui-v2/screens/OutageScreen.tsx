@@ -4,8 +4,8 @@
  */
 
 import { Box, Text } from 'ink';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 
@@ -14,10 +14,7 @@ interface OutageScreenProps {
 }
 
 export const OutageScreen = ({ store }: OutageScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const serviceStatus = store.session.serviceStatus;
 

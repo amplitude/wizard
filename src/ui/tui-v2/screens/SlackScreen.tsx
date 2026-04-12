@@ -10,9 +10,10 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { SlackOutcome } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import {
@@ -59,12 +60,17 @@ export const SlackScreen = ({
   standalone = false,
   onComplete,
 }: SlackScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const region = store.session.region ?? 'us';
   const isEu = region === 'eu';
@@ -95,7 +101,7 @@ export const SlackScreen = ({
         logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
         if (isConnected) {
           setPhase(Phase.Done);
-          setTimeout(() => {
+          timerRef.current = setTimeout(() => {
             if (!cancelled) {
               markDone(store, SlackOutcome.Configured, standalone, onComplete);
             }
@@ -135,7 +141,7 @@ export const SlackScreen = ({
         }`,
       );
       opn(url, { wait: false }).catch(() => {});
-      setTimeout(() => setPhase(Phase.Waiting), 800);
+      timerRef.current = setTimeout(() => setPhase(Phase.Waiting), 800);
     };
 
     if (accessToken && orgId) {
@@ -153,7 +159,7 @@ export const SlackScreen = ({
 
   const handleDone = () => {
     setPhase(Phase.Done);
-    setTimeout(
+    timerRef.current = setTimeout(
       () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
       1500,
     );

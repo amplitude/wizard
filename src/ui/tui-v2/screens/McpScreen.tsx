@@ -12,9 +12,10 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
@@ -65,12 +66,17 @@ export const McpScreen = ({
   standalone = false,
   onComplete,
 }: McpScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const isRemove = mode === 'remove';
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
   const { runPhase, amplitudePreDetected, amplitudePreDetectedChoicePending } =
     store.session;
   const dataSetupComplete = runPhase === RunPhase.Completed;
@@ -89,7 +95,7 @@ export const McpScreen = ({
         if (detected.length === 0) {
           analytics.wizardCapture('MCP No Clients Detected', { mode });
           setPhase(Phase.None);
-          setTimeout(
+          timerRef.current = setTimeout(
             () =>
               markDone(store, McpOutcome.NoClients, [], standalone, onComplete),
             1500,
@@ -111,7 +117,7 @@ export const McpScreen = ({
           { mode },
         );
         setPhase(Phase.None);
-        setTimeout(
+        timerRef.current = setTimeout(
           () => markDone(store, McpOutcome.Failed, [], standalone, onComplete),
           1500,
         );
@@ -158,7 +164,7 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    setTimeout(
+    timerRef.current = setTimeout(
       () => markDone(store, outcome, result, standalone, onComplete),
       2000,
     );
@@ -177,7 +183,7 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    setTimeout(
+    timerRef.current = setTimeout(
       () => markDone(store, outcome, result, standalone, onComplete),
       2000,
     );

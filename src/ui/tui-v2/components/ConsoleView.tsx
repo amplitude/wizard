@@ -8,13 +8,14 @@
 
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { SlashCommandInput } from '../primitives/index.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons, Layout } from '../styles.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Overlay } from '../router.js';
 import {
   queryConsole,
@@ -119,10 +120,7 @@ export const ConsoleView = ({
   const [planFeedbackText, setPlanFeedbackText] = useState('');
   const [planCursorVisible, setPlanCursorVisible] = useState(true);
 
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const activate = (seed = '') => {
     setInitialValue(seed);
@@ -195,7 +193,7 @@ export const ConsoleView = ({
       .then((text) => {
         setResponse(text);
         setHistory((h) => [
-          ...h,
+          ...h.slice(-8),
           { role: 'user', content: value },
           { role: 'assistant', content: text },
         ]);

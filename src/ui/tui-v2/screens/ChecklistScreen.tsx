@@ -11,8 +11,9 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { PickerMenu } from '../primitives/index.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
@@ -28,10 +29,7 @@ interface ChecklistScreenProps {
 type ChecklistAction = 'chart' | 'dashboard' | 'taxonomy' | 'continue';
 
 export const ChecklistScreen = ({ store }: ChecklistScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { session } = store;
   const {

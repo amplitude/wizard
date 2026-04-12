@@ -12,8 +12,9 @@
 
 import path from 'path';
 import { Box, Text } from 'ink';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu } from '../primitives/index.js';
@@ -26,10 +27,7 @@ interface IntroScreenProps {
 }
 
 export const IntroScreen = ({ store }: IntroScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);

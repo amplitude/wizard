@@ -4,8 +4,9 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors, Icons, Layout } from '../styles.js';
 
@@ -16,10 +17,7 @@ interface SettingsOverrideScreenProps {
 export const SettingsOverrideScreen = ({
   store,
 }: SettingsOverrideScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const [feedback, setFeedback] = useState<string | null>(null);
   const keys = store.session.settingsOverrideKeys;

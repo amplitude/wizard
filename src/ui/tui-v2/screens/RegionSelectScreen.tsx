@@ -13,8 +13,8 @@
  */
 
 import { Box, Text } from 'ink';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
@@ -37,10 +37,7 @@ const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
 ];
 
 export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { session } = store;
 

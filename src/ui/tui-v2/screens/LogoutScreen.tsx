@@ -6,7 +6,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { clearStoredCredentials } from '../../../utils/ampli-settings.js';
@@ -24,12 +24,20 @@ enum Phase {
 
 export const LogoutScreen = ({ onComplete, installDir }: LogoutScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Confirm);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const handleConfirm = () => {
     clearStoredCredentials();
     clearApiKey(installDir);
     setPhase(Phase.Done);
-    setTimeout(onComplete, 1500);
+    timerRef.current = setTimeout(onComplete, 1500);
   };
 
   return (

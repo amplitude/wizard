@@ -11,7 +11,7 @@
  * No outer border. Full terminal width (capped at 120). Spacious.
  */
 
-import { useMemo, useSyncExternalStore, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import { Box, Text } from 'ink';
 import type { WizardStore } from './store.js';
 import { createScreens, createServices } from './screen-registry.js';
@@ -20,6 +20,7 @@ import { ConsoleView } from './components/ConsoleView.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
+import { useWizardStore } from './hooks/useWizardStore.js';
 import { DissolveTransition } from './primitives/index.js';
 import { ScreenErrorBoundary } from './primitives/index.js';
 import { Colors, Layout } from './styles.js';
@@ -44,10 +45,7 @@ export const App = ({ store }: AppProps) => {
     [store, services],
   );
 
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const width = getContentWidth(columns);
   const contentHeight = Math.max(5, rows - CHROME_HEIGHT);
@@ -72,7 +70,6 @@ export const App = ({ store }: AppProps) => {
 
           {/* Header bar */}
           <HeaderBar
-            version={store.version}
             width={width}
             orgName={store.session.selectedOrgName}
             projectName={store.session.selectedProjectName}

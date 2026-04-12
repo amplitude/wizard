@@ -12,14 +12,9 @@
  */
 
 import { Box, Text } from 'ink';
-import {
-  useState,
-  useEffect,
-  useRef,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react';
+import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import type { WizardStore } from '../store.js';
 import {
   TabContainer,
@@ -218,10 +213,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 };
 
 export const RunScreen = ({ store }: RunScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const lastStatus =
     store.statusMessages.length > 0

@@ -12,8 +12,9 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
@@ -52,14 +53,14 @@ interface DataIngestionCheckScreenProps {
 export const DataIngestionCheckScreen = ({
   store,
 }: DataIngestionCheckScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { session } = store;
   const { credentials, region, activationLevel } = session;
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [eventTypes, setEventTypes] = useState<string[] | null>(null);
   const [celebrating, setCelebrating] = useState(false);
@@ -72,7 +73,7 @@ export const DataIngestionCheckScreen = ({
     if (pollingRef.current !== null) clearInterval(pollingRef.current);
     setCelebrating(true);
     if (events && events.length > 0) setArrivedEvents(events);
-    setTimeout(() => {
+    celebrationTimerRef.current = setTimeout(() => {
       store.setDataIngestionConfirmed();
     }, CELEBRATION_DELAY_MS);
   }
@@ -170,6 +171,9 @@ export const DataIngestionCheckScreen = ({
     return () => {
       if (pollingRef.current !== null) {
         clearInterval(pollingRef.current);
+      }
+      if (celebrationTimerRef.current !== null) {
+        clearTimeout(celebrationTimerRef.current);
       }
     };
   }, []);

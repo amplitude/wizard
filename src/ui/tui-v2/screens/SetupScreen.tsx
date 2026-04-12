@@ -7,8 +7,9 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { SetupQuestion } from '../../../lib/framework-config.js';
@@ -18,10 +19,7 @@ interface SetupScreenProps {
 }
 
 export const SetupScreen = ({ store }: SetupScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const config = store.session.frameworkConfig;
   const questions = config?.metadata.setup?.questions ?? [];

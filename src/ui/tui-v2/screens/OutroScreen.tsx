@@ -12,8 +12,9 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Colors, Icons } from '../styles.js';
 import { PickerMenu, ReportViewer } from '../primitives/index.js';
@@ -31,10 +32,7 @@ interface OutroScreenProps {
 }
 
 export const OutroScreen = ({ store }: OutroScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const [showReport, setShowReport] = useState(false);
 
