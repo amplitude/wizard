@@ -161,6 +161,11 @@ void yargs(hideBin(process.argv))
             'Run in benchmark mode with per-phase token tracking\nenv: AMPLITUDE_WIZARD_BENCHMARK',
           type: 'boolean',
         },
+        'tui-v2': {
+          default: false,
+          describe: 'Use experimental v2 TUI\nenv: AMPLITUDE_TUI_V2',
+          type: 'boolean',
+        },
       });
     },
     (argv) => {
@@ -201,7 +206,11 @@ void yargs(hideBin(process.argv))
           installCompletions();
 
           try {
-            const { startTUI } = await import('./src/ui/tui/start-tui.js');
+            const tuiModule =
+              options.tuiV2 || process.env.AMPLITUDE_TUI_V2
+                ? './src/ui/tui-v2/start-tui.js'
+                : './src/ui/tui/start-tui.js';
+            const { startTUI } = await import(tuiModule);
             const { buildSession } = await import(
               './src/lib/wizard-session.js'
             );
@@ -1072,7 +1081,10 @@ void yargs(hideBin(process.argv))
     (argv) => {
       void (async () => {
         try {
-          const { startTUI } = await import('./src/ui/tui/start-tui.js');
+          const tuiModule = process.env.AMPLITUDE_TUI_V2
+            ? './src/ui/tui-v2/start-tui.js'
+            : './src/ui/tui/start-tui.js';
+          const { startTUI } = await import(tuiModule);
           const { buildSession } = await import('./src/lib/wizard-session.js');
           const { Flow } = await import('./src/ui/tui/router.js');
           const { getStoredUser, getStoredToken, updateStoredUserZone } =
@@ -1157,7 +1169,10 @@ void yargs(hideBin(process.argv))
           const options = { ...argv };
           void (async () => {
             try {
-              const { startTUI } = await import('./src/ui/tui/start-tui.js');
+              const tuiModule = process.env.AMPLITUDE_TUI_V2
+                ? './src/ui/tui-v2/start-tui.js'
+                : './src/ui/tui/start-tui.js';
+              const { startTUI } = await import(tuiModule);
               const { buildSession } = await import(
                 './src/lib/wizard-session.js'
               );
@@ -1199,7 +1214,10 @@ void yargs(hideBin(process.argv))
           const options = { ...argv };
           void (async () => {
             try {
-              const { startTUI } = await import('./src/ui/tui/start-tui.js');
+              const tuiModule = process.env.AMPLITUDE_TUI_V2
+                ? './src/ui/tui-v2/start-tui.js'
+                : './src/ui/tui/start-tui.js';
+              const { startTUI } = await import(tuiModule);
               const { buildSession } = await import(
                 './src/lib/wizard-session.js'
               );

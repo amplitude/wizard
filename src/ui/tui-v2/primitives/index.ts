@@ -1,0 +1,20 @@
+/** Re-export v1 primitives — v2 can replace individual ones over time. */
+export { CardLayout } from '../../tui/primitives/CardLayout.js';
+export { SplitView } from '../../tui/primitives/SplitView.js';
+export { LoadingBox } from '../../tui/primitives/LoadingBox.js';
+export { ProgressList } from '../../tui/primitives/ProgressList.js';
+export type { ProgressItem } from '../../tui/primitives/ProgressList.js';
+export { PromptLabel } from '../../tui/primitives/PromptLabel.js';
+export { PickerMenu } from '../../tui/primitives/PickerMenu.js';
+export { ConfirmationInput } from '../../tui/primitives/ConfirmationInput.js';
+export { LogViewer } from '../../tui/primitives/LogViewer.js';
+export { ReportViewer } from '../../tui/primitives/ReportViewer.js';
+export { EventPlanViewer } from '../../tui/primitives/EventPlanViewer.js';
+export { ScreenErrorBoundary } from '../../tui/primitives/ScreenErrorBoundary.js';
+export { TabContainer } from '../../tui/primitives/TabContainer.js';
+export type { TabDefinition } from '../../tui/primitives/TabContainer.js';
+export { SnakeGame } from '../../tui/primitives/SnakeGame.js';
+export { DissolveTransition } from '../../tui/primitives/DissolveTransition.js';
+export type { WipeDirection } from '../../tui/primitives/DissolveTransition.js';
+export { SlashCommandInput } from '../../tui/primitives/SlashCommandInput.js';
+export type { SlashCommand } from '../../tui/primitives/SlashCommandInput.js';
