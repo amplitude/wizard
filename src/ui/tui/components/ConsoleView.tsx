@@ -22,6 +22,7 @@ import { SlashCommandInput } from '../primitives/SlashCommandInput.js';
 import { PickerMenu } from '../primitives/PickerMenu.js';
 import { Colors, Icons } from '../styles.js';
 import { Overlay } from '../router.js';
+import { Screen } from '../flows.js';
 import {
   queryConsole,
   resolveConsoleCredentials,
@@ -138,6 +139,7 @@ export const ConsoleView = ({
     store.setCommandMode(false);
   };
 
+  const isIntro = store.currentScreen === Screen.Intro;
   const feedback = store.commandFeedback;
   const screenError = store.screenError;
   const showResponse = loading || !!response;
@@ -165,10 +167,12 @@ export const ConsoleView = ({
         store.clearScreenError();
         return;
       }
-      if (char === '/') {
-        activate('/');
-      } else if (key.tab) {
-        activate('');
+      if (!isIntro) {
+        if (char === '/') {
+          activate('/');
+        } else if (key.tab) {
+          activate('');
+        }
       }
     },
     { isActive: !inputActive },
@@ -380,40 +384,44 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Console input area */}
-      <Text color={Colors.muted}>{separator}</Text>
-      {showFeedback && (
-        <Box paddingX={1}>
-          <Text color={Colors.accent} bold>
-            {' '}
-          </Text>
-          <Text color={Colors.muted}>{feedback}</Text>
-        </Box>
-      )}
-      {showResponse && !responseIsLong && (
-        <Box paddingX={1} paddingY={1} gap={1} flexDirection="column">
-          {loading ? (
-            <Spinner />
-          ) : (
-            <Text color={Colors.primary}>{response}</Text>
+      {/* Console input area — hidden on the Intro screen */}
+      {!isIntro && (
+        <>
+          <Text color={Colors.muted}>{separator}</Text>
+          {showFeedback && (
+            <Box paddingX={1}>
+              <Text color={Colors.accent} bold>
+                {' '}
+              </Text>
+              <Text color={Colors.muted}>{feedback}</Text>
+            </Box>
           )}
-        </Box>
+          {showResponse && !responseIsLong && (
+            <Box paddingX={1} paddingY={1} gap={1} flexDirection="column">
+              {loading ? (
+                <Spinner />
+              ) : (
+                <Text color={Colors.primary}>{response}</Text>
+              )}
+            </Box>
+          )}
+          {loading && responseIsLong && (
+            <Box paddingX={1}>
+              <Spinner />
+            </Box>
+          )}
+          <Box paddingX={1}>
+            <SlashCommandInput
+              key={inputKey}
+              commands={COMMANDS}
+              isActive={inputActive}
+              initialValue={initialValue}
+              onSubmit={handleSubmit}
+              onDeactivate={deactivate}
+            />
+          </Box>
+        </>
       )}
-      {loading && responseIsLong && (
-        <Box paddingX={1}>
-          <Spinner />
-        </Box>
-      )}
-      <Box paddingX={1}>
-        <SlashCommandInput
-          key={inputKey}
-          commands={COMMANDS}
-          isActive={inputActive}
-          initialValue={initialValue}
-          onSubmit={handleSubmit}
-          onDeactivate={deactivate}
-        />
-      </Box>
     </Box>
   );
 };

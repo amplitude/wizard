@@ -10,7 +10,7 @@ import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import { PickerMenu, ReportViewer } from '../primitives/index.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
@@ -77,7 +77,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
           <Text color="green" bold>
-            {'\u2714'} Successfully installed Amplitude!
+            {Icons.check} Successfully installed Amplitude!
           </Text>
 
           <Box marginTop={1}>
@@ -94,7 +94,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
               {outroData.changes.map((change, i) => (
                 <Text key={i}>
-                  {'\u2022'} {change}
+                  {Icons.bullet} {change}
                 </Text>
               ))}
             </Box>
@@ -107,7 +107,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
               {store.eventPlan.map((event) => (
                 <Text key={event.name}>
-                  {'\u2022'} <Text bold>{event.name}</Text>
+                  {Icons.bullet} <Text bold>{event.name}</Text>
                   <Text color={Colors.muted}> {event.description}</Text>
                 </Text>
               ))}
@@ -148,7 +148,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       {outroData.kind === OutroKind.Error && (
         <Box flexDirection="column">
           <Text color="red" bold>
-            {'\u2718'} {outroData.message || 'An error occurred'}
+            {Icons.cross} {outroData.message || 'An error occurred'}
           </Text>
         </Box>
       )}
@@ -156,7 +156,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       {outroData.kind === OutroKind.Cancel && (
         <Box flexDirection="column">
           <Text color="yellow" bold>
-            {'\u25A0'} {outroData.message || 'Cancelled'}
+            {Icons.stop} {outroData.message || 'Cancelled'}
           </Text>
           {outroData.docsUrl && (
             <Box marginTop={1}>

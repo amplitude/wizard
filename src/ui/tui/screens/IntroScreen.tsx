@@ -17,7 +17,8 @@ import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { PickerMenu, LoadingBox } from '../primitives/index.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
-import { Colors } from '../styles.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
+import { Colors, Icons } from '../styles.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface IntroScreenProps {
@@ -30,6 +31,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     () => store.getSnapshot(),
   );
 
+  const [, termRows] = useStdoutDimensions();
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
 
@@ -55,6 +57,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
   const showDescription = showContinue;
+  const showLogo = termRows >= 25;
 
   return (
     <Box
@@ -64,9 +67,11 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       justifyContent="center"
     >
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        <Box flexDirection="row" gap={2} alignItems="center">
-          <AmplitudeTextLogo />
-        </Box>
+        {showLogo && (
+          <Box flexDirection="row" gap={2} alignItems="center">
+            <AmplitudeTextLogo />
+          </Box>
+        )}
         <Box marginBottom={1}></Box>
         <Text bold>
           {detecting ? 'Amplitude Wizard starting up' : 'Amplitude Wizard'}
@@ -75,10 +80,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
         {showDescription && (
           <Box flexDirection="column" alignItems="center" marginTop={1}>
-            <Text color={Colors.muted}>
+            <Text color={Colors.muted} wrap="truncate-end">
               We'll use AI to analyze your project and integrate Amplitude.
             </Text>
-            <Text color={Colors.muted}>
+            <Text color={Colors.muted} wrap="truncate-end">
               .env* file contents will not leave your machine.
             </Text>
             <Box marginTop={1}>
@@ -109,7 +114,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         <Box flexDirection="column">
           <Text>
             <Text>
-              Directory <Text color="green">{'\u2714'}</Text>{' '}
+              Directory <Text color="green">{Icons.check}</Text>{' '}
             </Text>
             <Text>
               {'/'}
@@ -119,7 +124,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           {frameworkLabel && (
             <Text>
               <Text>
-                Framework <Text color="green">{'\u2714'}</Text>{' '}
+                Framework <Text color="green">{Icons.check}</Text>{' '}
               </Text>
               <Text>
                 {frameworkLabel}

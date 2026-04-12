@@ -14,7 +14,7 @@ import { useState, useEffect } from 'react';
 import { useSyncExternalStore } from 'react';
 import { type WizardStore, SlackOutcome } from '../store.js';
 import { ConfirmationInput } from '../primitives/index.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import {
   fetchSlackInstallUrl,
   fetchSlackConnectionStatus,
@@ -243,7 +243,7 @@ export const SlackScreen = ({
         {phase === Phase.Done && (
           <Box flexDirection="column" marginTop={1}>
             <Text color="green" bold>
-              {'\u2714'} Slack connected! You&apos;ll get chart previews and
+              {Icons.check} Slack connected! You&apos;ll get chart previews and
               notifications in Slack.
             </Text>
           </Box>
