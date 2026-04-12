@@ -20,6 +20,7 @@ type NDJSONEventType =
   | 'error';
 
 interface NDJSONEvent {
+  v: 1;
   '@timestamp': string;
   type: NDJSONEventType;
   message: string;
@@ -32,9 +33,10 @@ interface NDJSONEvent {
 function emit(
   type: NDJSONEventType,
   message: string,
-  extra?: Omit<NDJSONEvent, '@timestamp' | 'type' | 'message'>,
+  extra?: Omit<NDJSONEvent, 'v' | '@timestamp' | 'type' | 'message'>,
 ): void {
   const event: NDJSONEvent = {
+    v: 1,
     '@timestamp': new Date().toISOString(),
     type,
     message,
@@ -127,13 +129,15 @@ export class AgentUI implements WizardUI {
     emit('lifecycle', 'run_started', { data: { event: 'start_run' } });
   }
 
+  // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     emit('error', error.message, {
-      data: { name: error.name, stack: error.stack },
+      data: { name: error.name },
     });
     return Promise.resolve(false);
   }
 
+  // Security: accessToken and projectApiKey intentionally redacted from NDJSON output
   setCredentials(credentials: {
     accessToken: string;
     projectApiKey: string;

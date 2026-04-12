@@ -135,6 +135,7 @@ export class WizardStore {
 
   set session(value: WizardSession) {
     this.$session.set(value);
+    this.emitChange();
   }
 
   get commandMode(): boolean {
@@ -556,7 +557,10 @@ export class WizardStore {
 
   addDiscoveredFeature(feature: DiscoveredFeature): void {
     if (!this.session.discoveredFeatures.includes(feature)) {
-      this.session.discoveredFeatures.push(feature);
+      this.$session.setKey('discoveredFeatures', [
+        ...this.session.discoveredFeatures,
+        feature,
+      ]);
       this.emitChange();
     }
   }
@@ -576,11 +580,14 @@ export class WizardStore {
     }
 
     if (!this.session.additionalFeatureQueue.includes(feature)) {
-      this.session.additionalFeatureQueue.push(feature);
+      this.$session.setKey('additionalFeatureQueue', [
+        ...this.session.additionalFeatureQueue,
+        feature,
+      ]);
     }
     // Feature-specific flags
     if (feature === AdditionalFeature.LLM) {
-      this.session.llmOptIn = true;
+      this.$session.setKey('llmOptIn', true);
     }
     analytics.wizardCapture('Feature Enabled', { feature });
     this.emitChange();

@@ -163,7 +163,7 @@ void yargs(hideBin(process.argv))
         },
         'tui-v2': {
           default: false,
-          describe: 'Use experimental v2 TUI\nenv: AMPLITUDE_TUI_V2',
+          describe: 'Use the redesigned TUI (v2)\nenv: AMPLITUDE_TUI_V2',
           type: 'boolean',
         },
         agent: {

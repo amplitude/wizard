@@ -114,8 +114,9 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
             </Text>
             {showLabels && (
               <Text color={color} bold={step.state === 'active'}>
-                {' '}
-                {step.label}
+                {step.state === 'active'
+                  ? ` ${step.label} ←`
+                  : ` ${step.label}`}
               </Text>
             )}
             {i < steps.length - 1 && (

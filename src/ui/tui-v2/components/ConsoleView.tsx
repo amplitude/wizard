@@ -305,9 +305,7 @@ export const ConsoleView = ({
               />
             ) : (
               <Box flexDirection="column" gap={1}>
-                <Text color={Colors.muted}>
-                  The AI has proposed the following events for your app:
-                </Text>
+                <Text color={Colors.muted}>Suggested events for your app:</Text>
                 <Text color={Colors.heading} bold>
                   Instrumentation Plan
                 </Text>

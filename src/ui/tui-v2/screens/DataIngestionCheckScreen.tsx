@@ -29,7 +29,7 @@ import { logToFile } from '../../../utils/debug.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
-const CELEBRATION_DELAY_MS = 1_500;
+const CELEBRATION_DELAY_MS = 3_000;
 
 /** Framework-specific hints for what the user should do to generate events. */
 const FRAMEWORK_HINTS: Partial<Record<Integration, string>> = {
@@ -64,17 +64,20 @@ export const DataIngestionCheckScreen = ({
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [eventTypes, setEventTypes] = useState<string[] | null>(null);
   const [celebrating, setCelebrating] = useState(false);
+  const [celebrationReady, setCelebrationReady] = useState(false);
   const [arrivedEvents, setArrivedEvents] = useState<string[]>([]);
   const [lastChecked, setLastChecked] = useState<number | null>(null);
   const [secondsSince, setSecondsSince] = useState(0);
+  const [pollingStartTime] = useState(() => Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
-  /** Confirm ingestion with a brief celebration before advancing. */
+  /** Confirm ingestion with a celebration, then wait for user to press Enter. */
   function confirmWithCelebration(events?: string[]) {
     if (pollingRef.current !== null) clearInterval(pollingRef.current);
     setCelebrating(true);
     if (events && events.length > 0) setArrivedEvents(events);
     celebrationTimerRef.current = setTimeout(() => {
-      store.setDataIngestionConfirmed();
+      setCelebrationReady(true);
     }, CELEBRATION_DELAY_MS);
   }
 
@@ -178,18 +181,25 @@ export const DataIngestionCheckScreen = ({
     };
   }, []);
 
-  // Update seconds-since counter
+  // Update seconds-since counter and elapsed timer
   useEffect(() => {
     const id = setInterval(() => {
       if (lastChecked) {
         setSecondsSince(Math.floor((Date.now() - lastChecked) / 1000));
       }
+      setElapsedSeconds(Math.floor((Date.now() - pollingStartTime) / 1000));
     }, 1000);
     return () => clearInterval(id);
-  }, [lastChecked]);
+  }, [lastChecked, pollingStartTime]);
 
   useScreenInput((_char, key) => {
-    if (celebrating) return; // don't interrupt celebration
+    // During celebration, wait for Enter to advance
+    if (celebrating) {
+      if (celebrationReady && key.return) {
+        store.setDataIngestionConfirmed();
+      }
+      return;
+    }
     if (key.escape || _char === 'q') {
       if (pollingRef.current !== null) clearInterval(pollingRef.current);
       store.setOutroData({
@@ -238,7 +248,17 @@ export const DataIngestionCheckScreen = ({
           </Box>
         )}
         <Box marginTop={1}>
-          <Text color={Colors.body}>Continuing{Icons.ellipsis}</Text>
+          {celebrationReady ? (
+            <Box gap={1}>
+              <Text color={Colors.muted}>[</Text>
+              <Text color={Colors.body} bold>
+                Enter
+              </Text>
+              <Text color={Colors.muted}>] Continue</Text>
+            </Box>
+          ) : (
+            <Text color={Colors.body}>Verifying{Icons.ellipsis}</Text>
+          )}
         </Box>
       </Box>
     );
@@ -279,6 +299,26 @@ export const DataIngestionCheckScreen = ({
               <Text color={Colors.muted}> (checked {secondsSince}s ago)</Text>
             )}
           </Text>
+        </Box>
+      )}
+
+      {/* Progressive coaching tips after extended wait */}
+      {!apiUnavailable && !celebrating && elapsedSeconds >= 60 && (
+        <Box flexDirection="column" marginTop={1} marginLeft={2}>
+          <Text color={Colors.secondary}>
+            {Icons.arrowRight} Make sure your dev server is running
+          </Text>
+          {elapsedSeconds >= 90 && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Try visiting your app and clicking around
+            </Text>
+          )}
+          {elapsedSeconds >= 120 && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Check your terminal for errors — the SDK may
+              not have initialized
+            </Text>
+          )}
         </Box>
       )}
 

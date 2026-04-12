@@ -13,6 +13,7 @@
  */
 
 import { useEffect, useRef, type DependencyList } from 'react';
+import { logToFile } from '../../../utils/debug.js';
 
 export function useAsyncEffect(
   effect: (signal: AbortSignal) => Promise<void>,
@@ -30,7 +31,9 @@ export function useAsyncEffect(
       if (err instanceof Error && err.message.includes('abort')) return;
       // Log other errors but don't crash — screen error boundary handles display
 
-      console.error('[useAsyncEffect]', err);
+      logToFile(
+        `[useAsyncEffect] ${err instanceof Error ? err.message : String(err)}`,
+      );
     });
     return () => controller.abort();
   }, deps);

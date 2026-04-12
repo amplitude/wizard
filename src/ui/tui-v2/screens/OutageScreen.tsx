@@ -26,7 +26,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text color={Colors.warning} bold>
-          {Icons.diamond} AI services are experiencing issues.
+          {Icons.diamond} The setup agent is temporarily unavailable.
         </Text>
         <Text> </Text>
         <Text color={Colors.body}>

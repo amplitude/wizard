@@ -50,7 +50,12 @@ function writeConfig(
   data: Record<string, unknown>,
   configPath = AMPLI_CONFIG_PATH,
 ): void {
-  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
+  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
+  // Ensure permissions are restricted even if the file already existed
+  fs.chmodSync(configPath, 0o600);
 }
 
 function userKey(userId: string, zone: AmplitudeZone): string {
