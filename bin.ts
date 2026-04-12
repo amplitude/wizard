@@ -259,6 +259,15 @@ void yargs(hideBin(process.argv))
                 import('./src/lib/api.js'),
               ]);
 
+              const isDebug =
+                session.debug ||
+                !!process.env.DEBUG ||
+                !!process.env.AMPLITUDE_WIZARD_DEBUG;
+              /** Log only when --debug / AMPLITUDE_WIZARD_DEBUG is set. */
+              const debugLog = (...args: unknown[]) => {
+                if (isDebug) logToFile(...args);
+              };
+
               // Zone: prefer a real (non-pending) stored user, fall back to
               // the Zone field in the project-level ampli.json.
               const storedUser = getStoredUser();
@@ -270,8 +279,8 @@ void yargs(hideBin(process.argv))
                 : undefined;
               const zone = realUser?.zone ?? projectZone ?? null;
 
-              logToFile(
-                `[bin][DEBUG] returning-user path: realUser=${!!realUser}, zone=${zone}, projectZone=${projectZone}`,
+              debugLog(
+                `[bin] returning-user path: realUser=${!!realUser}, zone=${zone}, projectZone=${projectZone}`,
               );
 
               if (zone) {
@@ -288,17 +297,15 @@ void yargs(hideBin(process.argv))
                   : getStoredToken(undefined, zone);
 
                 if (storedToken) {
-                  logToFile(
-                    '[bin][DEBUG] storedToken found, checking local key',
-                  );
+                  debugLog('[bin] storedToken found, checking local key');
                   // Check local storage first — if a key is already persisted
                   // for this install dir, use it without fetching user data.
                   const { readApiKeyWithSource } = await import(
                     './src/utils/api-key-store.js'
                   );
                   const localKey = readApiKeyWithSource(installDir);
-                  logToFile(
-                    `[bin][DEBUG] localKey=${
+                  debugLog(
+                    `[bin] localKey=${
                       localKey
                         ? `found (source=${localKey.source})`
                         : 'not found'
@@ -356,25 +363,19 @@ void yargs(hideBin(process.argv))
                         storedToken.idToken,
                         zone,
                       );
-                      // DEBUG: log the raw org/workspace structure
-                      logToFile(
-                        `[bin][DEBUG] userInfo.orgs: ${JSON.stringify(
+                      debugLog(
+                        '[bin] userInfo.orgs:',
+                        JSON.stringify(
                           userInfo.orgs.map((o) => ({
                             orgId: o.id,
                             orgName: o.name,
                             workspaces: o.workspaces.map((w) => ({
                               wsId: w.id,
                               wsName: w.name,
-                              envs: w.environments?.map((e) => ({
-                                envName: e.name,
-                                rank: e.rank,
-                                hasKey: !!e.app?.apiKey,
-                              })),
+                              envCount: w.environments?.length ?? 0,
                             })),
                           })),
-                          null,
-                          2,
-                        )}`,
+                        ),
                       );
 
                       const workspaceId =
@@ -643,11 +644,19 @@ void yargs(hideBin(process.argv))
                 // Zone was already selected by the user before OAuth started.
                 const cloudRegion = zone;
 
-                const { logToFile: logDebug } = await import(
+                const { logToFile: _logAuth } = await import(
                   './src/utils/debug.js'
                 );
-                logDebug(
-                  '[bin][DEBUG] authTask: about to fetchAmplitudeUser, zone=',
+                const authDebug =
+                  session.debug ||
+                  !!process.env.DEBUG ||
+                  !!process.env.AMPLITUDE_WIZARD_DEBUG;
+                const logAuth = (...a: unknown[]) => {
+                  if (authDebug) _logAuth(...a);
+                };
+
+                logAuth(
+                  '[bin] authTask: fetchAmplitudeUser, zone=',
                   cloudRegion,
                 );
                 let userInfo;
@@ -656,12 +665,9 @@ void yargs(hideBin(process.argv))
                     auth.idToken,
                     cloudRegion,
                   );
-                  logDebug(
-                    '[bin][DEBUG] authTask: fetchAmplitudeUser succeeded',
-                  );
                 } catch (fetchErr) {
-                  logDebug(
-                    '[bin][DEBUG] authTask: fetchAmplitudeUser failed (1st attempt):',
+                  logAuth(
+                    '[bin] authTask: fetchAmplitudeUser failed (1st attempt):',
                     fetchErr instanceof Error
                       ? fetchErr.message
                       : String(fetchErr),
@@ -693,10 +699,6 @@ void yargs(hideBin(process.argv))
                 );
 
                 // Signal AuthScreen — triggers org/workspace/API key pickers
-                logDebug(
-                  '[bin][DEBUG] setOAuthComplete — orgs:',
-                  JSON.stringify(userInfo.orgs, null, 2),
-                );
                 tui.store.setOAuthComplete({
                   accessToken: auth.accessToken,
                   idToken: auth.idToken,
@@ -705,16 +707,11 @@ void yargs(hideBin(process.argv))
                 });
               } catch (err) {
                 // Auth failure is non-fatal here — agent-runner will retry/handle it
-                const { logToFile: logErr } = await import(
-                  './src/utils/debug.js'
-                );
-                logErr(
-                  '[bin][DEBUG] authTask OUTER CATCH:',
-                  err instanceof Error
-                    ? `${err.message}\n${err.stack}`
-                    : String(err),
-                );
-                if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                if (
+                  session.debug ||
+                  process.env.DEBUG ||
+                  process.env.AMPLITUDE_WIZARD_DEBUG
+                ) {
                   console.error('OAuth setup error:', err);
                 }
               }

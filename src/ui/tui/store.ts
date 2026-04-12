@@ -479,10 +479,9 @@ export class WizardStore {
     cloudRegion: WizardSession['pendingAuthCloudRegion'];
     orgs: WizardSession['pendingOrgs'];
   }): void {
-    logToFile(
-      '[store][DEBUG] setOAuthComplete — orgs:',
-      JSON.stringify(data.orgs, null, 2),
-    );
+    if (this.$session.get().debug) {
+      logToFile('[store] setOAuthComplete — orgCount:', data.orgs?.length ?? 0);
+    }
     this.$session.setKey('pendingAuthAccessToken', data.accessToken);
     this.$session.setKey('pendingAuthIdToken', data.idToken);
     this.$session.setKey('pendingAuthCloudRegion', data.cloudRegion);
@@ -503,12 +502,11 @@ export class WizardStore {
     workspace: { id: string; name: string },
     installDir: string,
   ): void {
-    logToFile(
-      '[store][DEBUG] setOrgAndWorkspace — org:',
-      JSON.stringify(org),
-      'workspace:',
-      JSON.stringify(workspace),
-    );
+    if (this.$session.get().debug) {
+      logToFile(
+        `[store] setOrgAndWorkspace — org: ${org.name} (${org.id}), ws: ${workspace.name} (${workspace.id})`,
+      );
+    }
     this.$session.setKey('selectedOrgId', org.id);
     this.$session.setKey('selectedOrgName', org.name);
     this.$session.setKey('selectedWorkspaceId', workspace.id);

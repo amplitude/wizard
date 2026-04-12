@@ -516,8 +516,8 @@ async function askForWizardLogin(
     // Could not fetch user info — warn and continue without it
     const { logToFile } = await import('./debug.js');
     logToFile(
-      `[setup-utils][DEBUG] fetchAmplitudeUser failed: ${
-        err instanceof Error ? `${err.message}\n${err.stack}` : String(err)
+      `[setup-utils] fetchAmplitudeUser failed: ${
+        err instanceof Error ? err.message : String(err)
       }`,
     );
     getUI().log.warn(

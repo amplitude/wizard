@@ -69,7 +69,7 @@ export const TitleBar = ({
   const padding = ' '.repeat(gap);
 
   return (
-    <Box width={width}>
+    <Box width={width} overflow="hidden">
       <Text backgroundColor={Colors.accent} color="white" bold>
         {title}
       </Text>
