@@ -166,13 +166,39 @@ void yargs(hideBin(process.argv))
           describe: 'Use experimental v2 TUI\nenv: AMPLITUDE_TUI_V2',
           type: 'boolean',
         },
+        agent: {
+          default: false,
+          describe:
+            'Run in agent mode with structured JSON output\nenv: AMPLITUDE_WIZARD_AGENT',
+          type: 'boolean',
+        },
+        yes: {
+          alias: 'y',
+          default: false,
+          describe: 'Skip all prompts and use defaults (same as --ci)',
+          type: 'boolean',
+        },
       });
     },
     (argv) => {
       const options = { ...argv };
 
       // CI mode validation and TTY check
-      if (options.ci) {
+      if (options.agent || process.env.AMPLITUDE_WIZARD_AGENT) {
+        // Agent mode: structured JSON output, same requirements as CI
+        void (async () => {
+          const { AgentUI } = await import('./src/ui/agent-ui.js');
+          setUI(new AgentUI());
+          if (!options.installDir) {
+            getUI().intro(chalk.inverse(`Amplitude Wizard`));
+            getUI().log.error(
+              'Agent mode requires --install-dir (directory to install Amplitude in)',
+            );
+            process.exit(1);
+          }
+          await runWizard(options as Parameters<typeof runWizard>[0]);
+        })();
+      } else if (options.ci || options.yes) {
         // Use LoggingUI for CI mode (no dependencies, no prompts)
         setUI(new LoggingUI());
         if (!options.installDir) {
@@ -1269,6 +1295,13 @@ void yargs(hideBin(process.argv))
       process.exit(0);
     },
   )
+  .example('$0', 'Run the interactive setup wizard')
+  .example('$0 --ci --api-key <key> --install-dir .', 'Run in CI mode')
+  .example('$0 --agent', 'Run with structured JSON output for automation')
+  .epilogue(
+    'Docs: https://amplitude.com/docs/wizard\nFeedback: wizard@amplitude.com',
+  )
+  .recommendCommands()
   .help()
   .alias('help', 'h')
   .version()
