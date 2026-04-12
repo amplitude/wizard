@@ -2,7 +2,7 @@
  * KeyHintBar — context-sensitive keyboard shortcut display.
  *
  * Each screen declares its available keys; the bar renders them.
- * Always shows / and Tab hints so users discover commands + Claude query.
+ * Always shows / and Tab hints so users discover commands + AI query.
  */
 
 import { Box, Text } from 'ink';
@@ -21,7 +21,7 @@ interface KeyHintBarProps {
 
 const DEFAULT_HINTS: KeyHint[] = [
   { key: '/', label: 'Commands' },
-  { key: 'Tab', label: 'Ask Claude' },
+  { key: 'Tab', label: 'Ask AI' },
 ];
 
 export const KeyHintBar = ({

@@ -207,7 +207,7 @@ void yargs(hideBin(process.argv))
 
           try {
             const tuiModule =
-              options.tuiV2 || process.env.AMPLITUDE_TUI_V2
+              options.tuiV2 || process.env.AMPLITUDE_TUI_V2 === '1'
                 ? './src/ui/tui-v2/start-tui.js'
                 : './src/ui/tui/start-tui.js';
             const { startTUI } = await import(tuiModule);
@@ -1081,12 +1081,16 @@ void yargs(hideBin(process.argv))
     (argv) => {
       void (async () => {
         try {
-          const tuiModule = process.env.AMPLITUDE_TUI_V2
+          const useV2 = process.env.AMPLITUDE_TUI_V2 === '1';
+          const tuiModule = useV2
             ? './src/ui/tui-v2/start-tui.js'
             : './src/ui/tui/start-tui.js';
           const { startTUI } = await import(tuiModule);
           const { buildSession } = await import('./src/lib/wizard-session.js');
-          const { Flow } = await import('./src/ui/tui/router.js');
+          const routerModule = useV2
+            ? './src/ui/tui-v2/router.js'
+            : './src/ui/tui/router.js';
+          const { Flow } = await import(routerModule);
           const { getStoredUser, getStoredToken, updateStoredUserZone } =
             await import('./src/utils/ampli-settings.js');
           const { getHostFromRegion } = await import('./src/utils/urls.js');
@@ -1169,7 +1173,8 @@ void yargs(hideBin(process.argv))
           const options = { ...argv };
           void (async () => {
             try {
-              const tuiModule = process.env.AMPLITUDE_TUI_V2
+              const useV2 = process.env.AMPLITUDE_TUI_V2 === '1';
+              const tuiModule = useV2
                 ? './src/ui/tui-v2/start-tui.js'
                 : './src/ui/tui/start-tui.js';
               const { startTUI } = await import(tuiModule);
@@ -1177,7 +1182,10 @@ void yargs(hideBin(process.argv))
                 './src/lib/wizard-session.js'
               );
 
-              const { Flow } = await import('./src/ui/tui/router.js');
+              const routerModule = useV2
+                ? './src/ui/tui-v2/router.js'
+                : './src/ui/tui/router.js';
+              const { Flow } = await import(routerModule);
               const tui = startTUI(WIZARD_VERSION, Flow.McpAdd);
               const session = buildSession({
                 debug: options.debug,
@@ -1214,7 +1222,8 @@ void yargs(hideBin(process.argv))
           const options = { ...argv };
           void (async () => {
             try {
-              const tuiModule = process.env.AMPLITUDE_TUI_V2
+              const useV2 = process.env.AMPLITUDE_TUI_V2 === '1';
+              const tuiModule = useV2
                 ? './src/ui/tui-v2/start-tui.js'
                 : './src/ui/tui/start-tui.js';
               const { startTUI } = await import(tuiModule);
@@ -1222,7 +1231,10 @@ void yargs(hideBin(process.argv))
                 './src/lib/wizard-session.js'
               );
 
-              const { Flow } = await import('./src/ui/tui/router.js');
+              const routerModule = useV2
+                ? './src/ui/tui-v2/router.js'
+                : './src/ui/tui/router.js';
+              const { Flow } = await import(routerModule);
               const tui = startTUI(WIZARD_VERSION, Flow.McpRemove);
               const session = buildSession({
                 debug: options.debug,

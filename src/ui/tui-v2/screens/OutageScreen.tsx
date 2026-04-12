@@ -1,5 +1,5 @@
 /**
- * OutageScreen — Shown when Claude/Anthropic services are degraded (v2).
+ * OutageScreen — Shown when AI services are degraded (v2).
  * Reads session.serviceStatus and provides a ConfirmationInput to continue or exit.
  */
 
@@ -29,7 +29,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text color={Colors.warning} bold>
-          {Icons.diamond} Claude/Anthropic services are experiencing issues.
+          {Icons.diamond} Our AI services are experiencing issues.
         </Text>
         <Text> </Text>
         <Text color={Colors.body}>
