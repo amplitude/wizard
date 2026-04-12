@@ -16,6 +16,7 @@ import type { WizardStore } from '../store.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
+import { analytics } from '../../../utils/analytics.js';
 
 interface RegionSelectScreenProps {
   store: WizardStore;
@@ -63,6 +64,11 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
         options={REGIONS}
         onSelect={(value) => {
           const region = Array.isArray(value) ? value[0] : value;
+          analytics.wizardCapture('Region Selected', {
+            region,
+            is_forced: session.regionForced,
+            previous_region: session.region ?? null,
+          });
           store.setRegion(region);
         }}
       />

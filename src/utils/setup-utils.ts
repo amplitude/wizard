@@ -512,8 +512,14 @@ async function askForWizardLogin(
       auth.idToken,
       cloudRegion as typeof auth.zone,
     );
-  } catch {
+  } catch (err) {
     // Could not fetch user info — warn and continue without it
+    const { logToFile } = await import('./debug.js');
+    logToFile(
+      `[setup-utils][DEBUG] fetchAmplitudeUser failed: ${
+        err instanceof Error ? `${err.message}\n${err.stack}` : String(err)
+      }`,
+    );
     getUI().log.warn(
       chalk.yellow(
         'Could not fetch user info from Amplitude. Continuing without it.',

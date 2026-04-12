@@ -37,6 +37,7 @@ import {
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
+import { getStoredUser } from '../../../utils/ampli-settings.js';
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -51,9 +52,14 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/logout':
       store.showLogoutOverlay();
       break;
-    case '/whoami':
-      store.setCommandFeedback(getWhoamiText(store.session), 10_000);
+    case '/whoami': {
+      const user = getStoredUser();
+      store.setCommandFeedback(
+        getWhoamiText(store.session, { email: user?.email }),
+        10_000,
+      );
       break;
+    }
     case '/slack':
       store.showSlackOverlay();
       break;
@@ -180,9 +186,13 @@ export const ConsoleView = ({
 
   const handleSubmit = (value: string) => {
     const isSlashCommand = value.startsWith('/');
+    const commandName = isSlashCommand
+      ? value.trim().split(/\s+/)[0] ?? null
+      : null;
     analytics.wizardCapture('Agent Message Sent', {
       message_length: value.length,
       is_slash_command: isSlashCommand,
+      ...(commandName ? { command_name: commandName } : {}),
     });
     if (isSlashCommand) {
       setResponse(null);

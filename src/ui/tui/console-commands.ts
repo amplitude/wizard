@@ -5,6 +5,7 @@
  * pulling in React / Ink / store dependencies.
  */
 
+import { OUTBOUND_URLS } from '../../lib/constants.js';
 import type { WizardSession } from '../../lib/wizard-session.js';
 
 export const COMMANDS = [
@@ -32,18 +33,35 @@ export const TEST_PROMPT: string =
 export function getWhoamiText(
   session: Pick<
     WizardSession,
+    | 'selectedOrgId'
     | 'selectedOrgName'
     | 'selectedWorkspaceName'
     | 'selectedProjectName'
     | 'region'
   >,
+  opts?: { email?: string },
 ): string {
-  const org = session.selectedOrgName ?? '(none)';
+  const orgName = session.selectedOrgName ?? '(none)';
+  const orgUrl =
+    session.selectedOrgId && session.region
+      ? `${OUTBOUND_URLS.app[session.region]}/analytics/org/${
+          session.selectedOrgId
+        }`
+      : null;
+  const org = orgUrl
+    ? `\u001B]8;;${orgUrl}\u0007${orgName}\u001B]8;;\u0007`
+    : orgName;
   const project =
     session.selectedProjectName ?? session.selectedWorkspaceName ?? '(none)';
-  return `org: ${org}  project: ${project}  region: ${
-    session.region ?? '(none)'
-  }`;
+  const parts = [
+    opts?.email ? `user: ${opts.email}` : null,
+    `org: ${org}`,
+    `project: ${project}`,
+    `region: ${session.region ?? '(none)'}`,
+  ]
+    .filter(Boolean)
+    .join('  ');
+  return parts;
 }
 
 /**

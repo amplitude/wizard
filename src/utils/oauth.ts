@@ -282,6 +282,11 @@ export async function performAmplitudeAuth(options: {
 
   getUI().setLoginUrl(authUrl.toString());
 
+  analytics.wizardCapture('Login Initiated', {
+    zone,
+    force_fresh: options.forceFresh ?? false,
+  });
+
   if (process.env.NODE_ENV !== 'test') {
     opn(authUrl.toString(), { wait: false }).catch(() => {
       // No browser — user will copy-paste the URL shown by the TUI

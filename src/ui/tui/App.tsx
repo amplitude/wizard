@@ -8,6 +8,7 @@ import { TitleBar } from './components/TitleBar.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
 import { DissolveTransition } from './primitives/DissolveTransition.js';
 import { ScreenErrorBoundary } from './primitives/ScreenErrorBoundary.js';
+import { OUTBOUND_URLS } from '../../lib/constants.js';
 
 const MIN_WIDTH = 80;
 const MAX_WIDTH = 120;
@@ -45,6 +46,13 @@ export const App = ({ store }: AppProps) => {
   const direction = store.lastNavDirection === 'pop' ? 'right' : 'left';
   const activeScreen: ReactNode = screens[store.currentScreen] ?? null;
 
+  const { selectedOrgId, selectedOrgName, selectedProjectName, region } =
+    store.session;
+  const orgUrl =
+    selectedOrgId && region
+      ? `${OUTBOUND_URLS.app[region]}/analytics/org/${selectedOrgId}`
+      : null;
+
   return (
     <CommandModeContext.Provider value={store.commandMode}>
       <Box
@@ -58,8 +66,9 @@ export const App = ({ store }: AppProps) => {
           <TitleBar
             version={store.version}
             width={innerWidth}
-            orgName={store.session.selectedOrgName}
-            projectName={store.session.selectedProjectName}
+            orgName={selectedOrgName}
+            orgUrl={orgUrl}
+            projectName={selectedProjectName}
           />
           <Box height={1} />
           <Box

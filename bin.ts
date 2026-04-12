@@ -270,6 +270,10 @@ void yargs(hideBin(process.argv))
                 : undefined;
               const zone = realUser?.zone ?? projectZone ?? null;
 
+              logToFile(
+                `[bin][DEBUG] returning-user path: realUser=${!!realUser}, zone=${zone}, projectZone=${projectZone}`,
+              );
+
               if (zone) {
                 session.region = zone;
               }
@@ -284,12 +288,22 @@ void yargs(hideBin(process.argv))
                   : getStoredToken(undefined, zone);
 
                 if (storedToken) {
+                  logToFile(
+                    '[bin][DEBUG] storedToken found, checking local key',
+                  );
                   // Check local storage first — if a key is already persisted
                   // for this install dir, use it without fetching user data.
                   const { readApiKeyWithSource } = await import(
                     './src/utils/api-key-store.js'
                   );
                   const localKey = readApiKeyWithSource(installDir);
+                  logToFile(
+                    `[bin][DEBUG] localKey=${
+                      localKey
+                        ? `found (source=${localKey.source})`
+                        : 'not found'
+                    }`,
+                  );
 
                   if (localKey) {
                     logToFile('[bin] using locally stored API key');
@@ -302,6 +316,38 @@ void yargs(hideBin(process.argv))
                     };
                     session.activationLevel = 'none';
                     session.projectHasData = false;
+
+                    // Fetch org/workspace names so /whoami and title bar work.
+                    try {
+                      const userInfo = await fetchAmplitudeUser(
+                        storedToken.idToken,
+                        zone,
+                      );
+                      // Match API key to find the right org/workspace/env
+                      for (const org of userInfo.orgs) {
+                        for (const ws of org.workspaces) {
+                          const env = ws.environments?.find(
+                            (e) => e.app?.apiKey === localKey.key,
+                          );
+                          if (env) {
+                            session.selectedOrgId = org.id;
+                            session.selectedOrgName = org.name;
+                            session.selectedWorkspaceId = ws.id;
+                            session.selectedWorkspaceName = ws.name;
+                            session.selectedProjectName = env.name;
+                            logToFile(
+                              `[bin] resolved org/ws for local key: org="${org.name}", ws="${ws.name}", env="${env.name}"`,
+                            );
+                            break;
+                          }
+                        }
+                        if (session.selectedOrgName) break;
+                      }
+                    } catch {
+                      logToFile(
+                        '[bin] could not resolve org data for local key — continuing without names',
+                      );
+                    }
                   } else {
                     // Fetch user data to check how many environments are available.
                     // fetchAmplitudeUser is already in scope from the Promise.all above.
@@ -310,6 +356,27 @@ void yargs(hideBin(process.argv))
                         storedToken.idToken,
                         zone,
                       );
+                      // DEBUG: log the raw org/workspace structure
+                      logToFile(
+                        `[bin][DEBUG] userInfo.orgs: ${JSON.stringify(
+                          userInfo.orgs.map((o) => ({
+                            orgId: o.id,
+                            orgName: o.name,
+                            workspaces: o.workspaces.map((w) => ({
+                              wsId: w.id,
+                              wsName: w.name,
+                              envs: w.environments?.map((e) => ({
+                                envName: e.name,
+                                rank: e.rank,
+                                hasKey: !!e.app?.apiKey,
+                              })),
+                            })),
+                          })),
+                          null,
+                          2,
+                        )}`,
+                      );
+
                       const workspaceId =
                         session.selectedWorkspaceId ?? undefined;
 
@@ -356,7 +423,9 @@ void yargs(hideBin(process.argv))
                           session.selectedWorkspaceName = matchedWs.name;
                         }
                         logToFile(
-                          '[bin] single environment — auto-selecting API key',
+                          `[bin] single environment — auto-selecting API key. ` +
+                            `orgName=${matchedOrg?.name}, wsName=${matchedWs?.name}, ` +
+                            `projectName=${envsWithKey[0].name}`,
                         );
                         persistApiKey(apiKey, installDir);
                         session.credentials = {
@@ -442,38 +511,36 @@ void yargs(hideBin(process.argv))
               }
 
               // Resolve org/workspace display names so /whoami shows them.
-              // Skip if the single-env auto-select path already resolved names.
-              // Uses the stored token to fetch user info — fire-and-forget so it
-              // doesn't block startup.
+              // Skip if already resolved by the local-key or single-env paths above.
               if (zone && session.selectedOrgId && !session.selectedOrgName) {
-                const storedToken = realUser
+                const nameToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
-                if (storedToken) {
-                  fetchAmplitudeUser(storedToken.idToken, zone)
-                    .then((userInfo) => {
-                      const org = userInfo.orgs.find(
-                        (o) => o.id === session.selectedOrgId,
-                      );
-                      if (org) {
-                        session.selectedOrgName = org.name;
-                        const ws = session.selectedWorkspaceId
-                          ? org.workspaces.find(
-                              (w) => w.id === session.selectedWorkspaceId,
-                            )
-                          : undefined;
-                        if (ws) {
-                          session.selectedWorkspaceName = ws.name;
-                        }
-                        // Update the store if it's already been assigned
-                        if (tui.store.session === session) {
-                          tui.store.emitChange();
-                        }
+                if (nameToken) {
+                  try {
+                    const userInfo = await fetchAmplitudeUser(
+                      nameToken.idToken,
+                      zone,
+                    );
+                    const org = userInfo.orgs.find(
+                      (o) => o.id === session.selectedOrgId,
+                    );
+                    if (org) {
+                      session.selectedOrgName = org.name;
+                      const ws = session.selectedWorkspaceId
+                        ? org.workspaces.find(
+                            (w) => w.id === session.selectedWorkspaceId,
+                          )
+                        : undefined;
+                      if (ws) {
+                        session.selectedWorkspaceName = ws.name;
                       }
-                    })
-                    .catch(() => {
-                      // Non-fatal — /whoami will just show (none)
-                    });
+                    }
+                  } catch {
+                    logToFile(
+                      '[bin] name resolution failed — continuing without org names',
+                    );
+                  }
                 }
               }
             }
@@ -576,13 +643,29 @@ void yargs(hideBin(process.argv))
                 // Zone was already selected by the user before OAuth started.
                 const cloudRegion = zone;
 
+                const { logToFile: logDebug } = await import(
+                  './src/utils/debug.js'
+                );
+                logDebug(
+                  '[bin][DEBUG] authTask: about to fetchAmplitudeUser, zone=',
+                  cloudRegion,
+                );
                 let userInfo;
                 try {
                   userInfo = await fetchAmplitudeUser(
                     auth.idToken,
                     cloudRegion,
                   );
-                } catch {
+                  logDebug(
+                    '[bin][DEBUG] authTask: fetchAmplitudeUser succeeded',
+                  );
+                } catch (fetchErr) {
+                  logDebug(
+                    '[bin][DEBUG] authTask: fetchAmplitudeUser failed (1st attempt):',
+                    fetchErr instanceof Error
+                      ? fetchErr.message
+                      : String(fetchErr),
+                  );
                   // Token may be expired — re-open the browser for a fresh login
                   tui.store.setLoginUrl(null);
                   auth = await performAmplitudeAuth({ zone, forceFresh: true });
@@ -610,6 +693,10 @@ void yargs(hideBin(process.argv))
                 );
 
                 // Signal AuthScreen — triggers org/workspace/API key pickers
+                logDebug(
+                  '[bin][DEBUG] setOAuthComplete — orgs:',
+                  JSON.stringify(userInfo.orgs, null, 2),
+                );
                 tui.store.setOAuthComplete({
                   accessToken: auth.accessToken,
                   idToken: auth.idToken,
@@ -618,6 +705,15 @@ void yargs(hideBin(process.argv))
                 });
               } catch (err) {
                 // Auth failure is non-fatal here — agent-runner will retry/handle it
+                const { logToFile: logErr } = await import(
+                  './src/utils/debug.js'
+                );
+                logErr(
+                  '[bin][DEBUG] authTask OUTER CATCH:',
+                  err instanceof Error
+                    ? `${err.message}\n${err.stack}`
+                    : String(err),
+                );
                 if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
                   console.error('OAuth setup error:', err);
                 }
@@ -671,6 +767,14 @@ void yargs(hideBin(process.argv))
                 if (!session.detectedFrameworkLabel) {
                   tui.store.setDetectedFramework(config.metadata.name);
                 }
+
+                const { analytics: _binAnalytics } = await import(
+                  './src/utils/analytics.js'
+                );
+                _binAnalytics.wizardCapture('Framework Detected', {
+                  integration: detectedIntegration,
+                  detected_label: config.metadata.name,
+                });
               }
 
               // Feature discovery — deterministic scan of package.json deps
