@@ -44,7 +44,9 @@ export function createScreens(
     // Overlays
     [Overlay.Outage]: <OutageScreen store={store} />,
     [Overlay.SettingsOverride]: <SettingsOverrideScreen store={store} />,
-    [Overlay.Snake]: <SnakeGame onExit={() => store.hideSnakeOverlay()} />,
+    [Overlay.Snake]: (
+      <SnakeGame onExit={() => store.hideSnakeOverlay()} music={false} />
+    ),
     [Overlay.Mcp]: (
       <McpScreen
         store={store}
