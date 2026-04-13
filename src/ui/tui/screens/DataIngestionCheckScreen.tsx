@@ -190,14 +190,14 @@ export const DataIngestionCheckScreen = ({
     };
   }, []);
 
-  // Update seconds-since counter and elapsed timer
+  // Update seconds-since counter and elapsed timer — every 5s to reduce re-renders
   useEffect(() => {
     const id = setInterval(() => {
       if (lastChecked) {
         setSecondsSince(Math.floor((Date.now() - lastChecked) / 1000));
       }
       setElapsedSeconds(Math.floor((Date.now() - pollingStartTime) / 1000));
-    }, 1000);
+    }, 5000);
     return () => clearInterval(id);
   }, [lastChecked, pollingStartTime]);
 

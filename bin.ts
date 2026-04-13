@@ -859,8 +859,22 @@ void yargs(hideBin(process.argv))
               }
             });
 
-            // Save checkpoint on unexpected termination
+            // Save checkpoint on unexpected termination (Ctrl+C).
+            // First Ctrl+C saves checkpoint and exits promptly.
+            // Second Ctrl+C within the grace window force-kills immediately.
+            let sigintReceived = false;
             process.on('SIGINT', () => {
+              if (sigintReceived) {
+                // Second Ctrl+C — force-kill without waiting
+                process.exit(130);
+              }
+              sigintReceived = true;
+
+              // Force-kill after 1 second if checkpoint save hangs
+              const forceTimer = setTimeout(() => process.exit(130), 1_000);
+              // Unref so it doesn't keep the event loop alive
+              if (forceTimer.unref) forceTimer.unref();
+
               try {
                 saveCheckpoint(tui.store.session);
               } catch {

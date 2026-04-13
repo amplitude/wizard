@@ -107,7 +107,7 @@ export const SPINNER_FRAMES = [
   '⠏',
 ] as const;
 
-export const SPINNER_INTERVAL = 80;
+export const SPINNER_INTERVAL = 200;
 
 // ── Layout constants ────────────────────────────────────────────────
 

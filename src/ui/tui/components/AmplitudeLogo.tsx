@@ -64,21 +64,21 @@ export const AmplitudeLogo = ({ color = '#0c19df' }: { color?: string }) => (
 
 /** AmplitudeLogo with a colour wave (vertical) and a horizontal dissolve wave. */
 export const AnimatedAmplitudeLogo = () => {
-  // Vertical colour wave — advances every 110 ms
+  // Vertical colour wave — advances every 250 ms (was 110 ms)
   const [colorFrame, setColorFrame] = useState(0);
-  // Horizontal dissolve wave — tick advances every 50 ms
+  // Horizontal dissolve wave — tick advances every 120 ms (was 50 ms)
   const [waveTick, setWaveTick] = useState(0);
 
   useEffect(() => {
     const id = setInterval(
       () => setColorFrame((f) => (f + 1) % WAVE_COLORS.length),
-      110,
+      250,
     );
     return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setWaveTick((t) => t + 1), 50);
+    const id = setInterval(() => setWaveTick((t) => t + 1), 120);
     return () => clearInterval(id);
   }, []);
 

@@ -48,7 +48,7 @@ export const DissolveTransition = ({
   height,
   children,
   direction = 'left',
-  duration = 2,
+  duration = 32,
 }: DissolveTransitionProps) => {
   const [phase, setPhase] = useState<TransitionPhase>(TransitionPhase.Idle);
   const [tick, setTick] = useState(0);

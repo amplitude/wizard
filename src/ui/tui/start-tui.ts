@@ -51,8 +51,10 @@ export function startTUI(
   const inkUI = new InkUI(store);
   setUI(inkUI);
 
-  // Render the App
-  const { unmount: inkUnmount } = render(createElement(App, { store }));
+  // Render the App — exitOnCtrlC lets Ink translate Ctrl+C into process.exit()
+  const { unmount: inkUnmount } = render(createElement(App, { store }), {
+    exitOnCtrlC: true,
+  });
 
   // Reset terminal colors on exit
   const cleanup = () => {
