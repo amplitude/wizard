@@ -537,14 +537,17 @@ void yargs(hideBin(process.argv))
                   fetchAmplitudeUser(storedToken.idToken, zone)
                     .then((userInfo) => {
                       // Populate email for /whoami (may not exist in stored profile)
+                      let changed = false;
                       if (userInfo.email && !session.userEmail) {
                         session.userEmail = userInfo.email;
+                        changed = true;
                       }
                       const org = userInfo.orgs.find(
                         (o) => o.id === session.selectedOrgId,
                       );
                       if (org) {
                         session.selectedOrgName = org.name;
+                        changed = true;
                         const ws = session.selectedWorkspaceId
                           ? org.workspaces.find(
                               (w) => w.id === session.selectedWorkspaceId,
@@ -553,10 +556,10 @@ void yargs(hideBin(process.argv))
                         if (ws) {
                           session.selectedWorkspaceName = ws.name;
                         }
-                        // Update the store if it's already been assigned
-                        if (tui.store.session === session) {
-                          tui.store.emitChange();
-                        }
+                      }
+                      // Notify the store so /whoami picks up email + org names
+                      if (changed && tui.store.session === session) {
+                        tui.store.emitChange();
                       }
                     })
                     .catch(() => {
