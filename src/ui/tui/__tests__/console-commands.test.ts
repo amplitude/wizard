@@ -33,6 +33,7 @@ describe('getWhoamiText', () => {
       selectedWorkspaceName: null,
       region: null,
       credentials: null,
+      userEmail: null,
     });
     expect(result).toBe('Not logged in. Run /login to authenticate.');
   });
@@ -43,11 +44,12 @@ describe('getWhoamiText', () => {
       selectedWorkspaceName: null,
       region: null,
       credentials: undefined as never,
+      userEmail: null,
     });
     expect(result).toBe('Not logged in. Run /login to authenticate.');
   });
 
-  it('shows org/workspace/region when authenticated', () => {
+  it('shows email + org/workspace/region when authenticated', () => {
     const result = getWhoamiText({
       selectedOrgName: 'Acme Corp',
       selectedWorkspaceName: 'Production',
@@ -58,10 +60,28 @@ describe('getWhoamiText', () => {
         host: 'https://api.amplitude.com',
         projectId: 1,
       },
+      userEmail: 'ada@example.com',
     });
-    expect(result).toContain('org: Acme Corp');
-    expect(result).toContain('workspace: Production');
-    expect(result).toContain('region: us');
+    expect(result).toBe(
+      'ada@example.com  org: Acme Corp  workspace: Production  region: us',
+    );
+  });
+
+  it('shows org/workspace/region without email when email is null', () => {
+    const result = getWhoamiText({
+      selectedOrgName: 'Acme Corp',
+      selectedWorkspaceName: 'Production',
+      region: 'us',
+      credentials: {
+        accessToken: 'tok',
+        projectApiKey: 'key',
+        host: 'https://api.amplitude.com',
+        projectId: 1,
+      },
+      userEmail: null,
+    });
+    expect(result).toBe('org: Acme Corp  workspace: Production  region: us');
+    expect(result).not.toContain('ada');
   });
 
   it('shows (none) for missing org/workspace when partially authenticated', () => {
@@ -75,19 +95,21 @@ describe('getWhoamiText', () => {
         host: 'https://api.eu.amplitude.com',
         projectId: 0,
       },
+      userEmail: 'ada@example.com',
     });
+    expect(result).toContain('ada@example.com');
     expect(result).toContain('org: Acme Corp');
     expect(result).toContain('workspace: (none)');
     expect(result).toContain('region: eu');
   });
 
   it('shows org info even without credentials if org name exists', () => {
-    // Edge case: pre-populated from ampli.json but no active credentials
     const result = getWhoamiText({
       selectedOrgName: 'Acme Corp',
       selectedWorkspaceName: null,
       region: 'us',
       credentials: null,
+      userEmail: null,
     });
     expect(result).toContain('org: Acme Corp');
     expect(result).not.toContain('Not logged in');

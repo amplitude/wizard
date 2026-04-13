@@ -317,6 +317,9 @@ export interface WizardSession {
    */
   checklistComplete: boolean;
 
+  /** Email address of the authenticated user (from ~/.ampli.json stored profile). */
+  userEmail: string | null;
+
   /**
    * Set to true by bin.ts when a crash-recovery checkpoint is loaded.
    * IntroScreen checks this to show a "Resume where you left off" prompt
@@ -417,6 +420,7 @@ export function buildSession(args: {
     checklistDashboardComplete: false,
     checklistComplete: false,
 
+    userEmail: null,
     _restoredFromCheckpoint: false,
   };
 }

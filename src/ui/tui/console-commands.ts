@@ -32,7 +32,11 @@ export const TEST_PROMPT: string =
 export function getWhoamiText(
   session: Pick<
     WizardSession,
-    'selectedOrgName' | 'selectedWorkspaceName' | 'region' | 'credentials'
+    | 'selectedOrgName'
+    | 'selectedWorkspaceName'
+    | 'region'
+    | 'credentials'
+    | 'userEmail'
   >,
 ): string {
   const loggedIn =
@@ -40,9 +44,12 @@ export function getWhoamiText(
   if (!loggedIn && !session.selectedOrgName) {
     return 'Not logged in. Run /login to authenticate.';
   }
-  return `org: ${session.selectedOrgName ?? '(none)'}  workspace: ${
-    session.selectedWorkspaceName ?? '(none)'
-  }  region: ${session.region ?? '(none)'}`;
+  const parts: string[] = [];
+  if (session.userEmail) parts.push(session.userEmail);
+  parts.push(`org: ${session.selectedOrgName ?? '(none)'}`);
+  parts.push(`workspace: ${session.selectedWorkspaceName ?? '(none)'}`);
+  parts.push(`region: ${session.region ?? '(none)'}`);
+  return parts.join('  ');
 }
 
 /**

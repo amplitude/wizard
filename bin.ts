@@ -315,6 +315,11 @@ void yargs(hideBin(process.argv))
               const storedUser = getStoredUser();
               const realUser =
                 storedUser && storedUser.id !== 'pending' ? storedUser : null;
+
+              // Populate user email for /whoami display
+              if (realUser?.email) {
+                session.userEmail = realUser.email;
+              }
               const projectConfig = readAmpliConfig(installDir);
               const projectZone = projectConfig.ok
                 ? projectConfig.config.Zone
@@ -668,6 +673,9 @@ void yargs(hideBin(process.argv))
                     expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
                   },
                 );
+
+                // Populate user email for /whoami display
+                session.userEmail = userInfo.email;
 
                 // Signal AuthScreen — triggers org/workspace/API key pickers
                 tui.store.setOAuthComplete({
