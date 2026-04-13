@@ -37,7 +37,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   useWizardStore(store);
 
   const [cols, rows] = useStdoutDimensions();
-  const showLogo = cols >= LOGO_MIN_COLS && rows >= LOGO_MIN_ROWS;
 
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
@@ -52,6 +51,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const detecting = !session.detectionComplete;
   const needsFrameworkPick =
     session.detectionComplete && !session.frameworkConfig;
+
+  // Hide logo when framework picker is open — the long list overlaps in Ink.
+  const pickerVisible =
+    pickingFramework || (session.menu && needsFrameworkPick);
+  const showLogo =
+    cols >= LOGO_MIN_COLS && rows >= LOGO_MIN_ROWS && !pickerVisible;
 
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
