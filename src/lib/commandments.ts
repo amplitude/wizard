@@ -28,10 +28,10 @@ const WIZARD_COMMANDMENTS = [
   `After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.
 
 CRITICAL — confirm_event_plan format:
-  name: MUST be a short Title Case label (2-5 words). Examples: "User Signed Up", "Product Added to Cart", "Search Performed", "Checkout Started", "Auth Error".
+  name: MUST be a short lowercase label using spaces for separators (2-5 words). Examples: "user signed up", "product added to cart", "search performed", "checkout started", "auth error".
   description: Put ALL details here — when it fires, properties, file paths.
   WRONG name: "Fires on the product detail page after product data loads"
-  RIGHT name: "Product Viewed"
+  RIGHT name: "product viewed"
   Names longer than 40 characters will be automatically truncated.`,
 
   ...(DEMO_MODE

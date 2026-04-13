@@ -2,7 +2,6 @@
  * HeaderBar — minimal header line.
  *
  * "Amplitude Wizard" left, org/project right with dot separator.
- * Version moved to /whoami — not needed in-flow.
  */
 
 import { Box, Text } from 'ink';

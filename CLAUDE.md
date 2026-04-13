@@ -207,9 +207,6 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/flows.md`](./docs/flows.md) — flow diagrams (source of truth for UX)
 - [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
 - [`docs/llm-proxy.md`](./docs/llm-proxy.md) — LLM proxy architecture and configuration
-- [`docs/tui-migration-record.md`](./docs/tui-migration-record.md) — historical record of the TUI redesign migration
 - [`docs/dual-mode-architecture.md`](./docs/dual-mode-architecture.md) — TUI + agent + CI mode architecture
 - [`docs/critical-files.md`](./docs/critical-files.md) — files ranked by blast radius
 - [`docs/engineering-patterns.md`](./docs/engineering-patterns.md) — async safety, retry, error classification patterns
-- [`docs/reliability-improvements.md`](./docs/reliability-improvements.md) — reliability improvement plan and status
-- [`docs/error-prone-code.md`](./docs/error-prone-code.md) — known race conditions and edge cases

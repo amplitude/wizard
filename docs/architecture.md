@@ -93,7 +93,7 @@ All flags support env var override via `AMPLITUDE_WIZARD_` prefix (e.g., `AMPLIT
 | 2 | `INVALID_ARGS` | Missing or invalid CLI arguments |
 | 3 | `AUTH_REQUIRED` | Authentication failed or required |
 | 4 | `NETWORK_ERROR` | Network connectivity issue |
-| 10 | `AGENT_FAILED` | Claude agent run failed |
+| 10 | `AGENT_FAILED` | Agent run failed |
 | 130 | `USER_CANCELLED` | User cancelled the wizard |
 
 Defined in `src/lib/exit-codes.ts`.

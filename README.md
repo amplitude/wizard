@@ -214,5 +214,3 @@ Or `pnpm dev` to run both in one terminal.
 | [Architecture](./docs/architecture.md) | System design |
 | [Dual-mode architecture](./docs/dual-mode-architecture.md) | TUI, agent, and CI mode |
 | [Engineering patterns](./docs/engineering-patterns.md) | Async safety, retry, error classification |
-| [Migration guide](./docs/tui-migration-guide.md) | What changed in the TUI redesign |
-| [Migration record](./docs/tui-migration-record.md) | Historical record of the migration |
