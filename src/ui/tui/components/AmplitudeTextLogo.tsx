@@ -9,49 +9,22 @@ const LOGO_LINES = [
   '╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═════╝ ╚══════╝',
 ];
 
-export const AMP_DEEP_PURPLE = '#311b8e';
-export const AMP_BRIGHT_BLUE = '#0c19df';
-
-function lerpColor(a: string, b: string, t: number): string {
-  const ar = parseInt(a.slice(1, 3), 16),
-    ag = parseInt(a.slice(3, 5), 16),
-    ab = parseInt(a.slice(5, 7), 16);
-  const br = parseInt(b.slice(1, 3), 16),
-    bg = parseInt(b.slice(3, 5), 16),
-    bb = parseInt(b.slice(5, 7), 16);
-  const r = Math.round(ar + (br - ar) * t)
-    .toString(16)
-    .padStart(2, '0');
-  const g = Math.round(ag + (bg - ag) * t)
-    .toString(16)
-    .padStart(2, '0');
-  const bv = Math.round(ab + (bb - ab) * t)
-    .toString(16)
-    .padStart(2, '0');
-  return `#${r}${g}${bv}`;
-}
+/** Brand gradient: deep purple → bright blue, one color per line. */
+const LINE_COLORS = [
+  '#311b8e',
+  '#2a1da0',
+  '#2020b2',
+  '#1522c4',
+  '#0c19df',
+  '#0c19df',
+];
 
 export const AmplitudeTextLogo = () => (
   <Box flexDirection="column" marginBottom={1}>
-    {LOGO_LINES.map((line, i) => {
-      const chars = line.split('');
-      const last = chars.length - 1;
-      return (
-        <Box key={i} flexDirection="row" alignItems="flex-start">
-          {chars.map((char, j) => (
-            <Text
-              key={j}
-              color={lerpColor(
-                AMP_DEEP_PURPLE,
-                AMP_BRIGHT_BLUE,
-                last > 0 ? j / last : 0,
-              )}
-            >
-              {char}
-            </Text>
-          ))}
-        </Box>
-      );
-    })}
+    {LOGO_LINES.map((line, i) => (
+      <Text key={i} color={LINE_COLORS[i]}>
+        {line}
+      </Text>
+    ))}
   </Box>
 );
