@@ -24,7 +24,7 @@ Think like a **Software Architect** reviewing a PR: you care about consistency
 with existing patterns, minimal footprint, and properties that actually power
 dashboards — not vanity fields nobody queries.
 
-Read the `taxonomy` skill at `../taxonomy/SKILL.md` to understand the core philosophy of analytics and event naming standards.
+Read the `taxonomy` skill at `../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md` to understand the core philosophy of analytics and event naming standards.
 
 ---
 
