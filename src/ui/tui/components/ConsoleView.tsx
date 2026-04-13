@@ -332,14 +332,22 @@ export const ConsoleView = ({
                 <Text color={Colors.heading} bold>
                   Instrumentation Plan
                 </Text>
-                {pendingPrompt.events.map((e) => (
-                  <Box key={e.name} flexDirection="column">
-                    <Text color={Colors.accent} bold>
-                      {e.name}
-                    </Text>
-                    <Text color={Colors.secondary}>{e.description}</Text>
-                  </Box>
-                ))}
+                {(() => {
+                  // Prefer store.eventPlan (from the JSON file the agent writes)
+                  // which has proper event names. Fall back to prompt events.
+                  const planEvents =
+                    store.eventPlan.length > 0
+                      ? store.eventPlan
+                      : pendingPrompt.events;
+                  return planEvents.map((e) => (
+                    <Box key={e.name} flexDirection="column">
+                      <Text color={Colors.accent} bold>
+                        {e.name}
+                      </Text>
+                      <Text color={Colors.secondary}>{e.description}</Text>
+                    </Box>
+                  ));
+                })()}
                 {planInputMode === 'feedback' ? (
                   <Box gap={1}>
                     <Text color={Colors.muted}>Feedback: </Text>

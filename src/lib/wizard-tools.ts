@@ -652,50 +652,16 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
     async (args: { events: Array<{ name: string; description: string }> }) => {
       const { DEMO_MODE } = await import('./constants.js');
-      // The agent frequently ignores the schema and puts full descriptions
-      // in the name field. Detect this and fix it at runtime.
-      const normalizedEvents = args.events.map((e) => {
-        let name = e.name.trim();
-        let description = e.description?.trim() || '';
-
-        // If name looks like a description (>40 chars, or starts with common
-        // description patterns), move it to description and generate a name.
-        const looksLikeDescription =
-          name.length > 40 ||
-          /^(fires|already|tracks|captures|triggered|called|sends|logs|records|implements)/i.test(
-            name,
-          );
-
-        if (looksLikeDescription) {
-          // If description is empty/short, the "name" IS the description
-          if (!description || description.length < name.length) {
-            description = name;
-          }
-          // Generate a name from the description by finding the action/event
-          // Look for patterns like "signUp", "addToCart", "search", etc.
-          const camelMatch = description.match(
-            /\b(sign[A-Z]\w+|add[A-Z]\w+|remove[A-Z]\w+|search\w*|checkout|order|auth\w*|login|logout|view\w*|click\w*|submit\w*|create\w*|delete\w*|update\w*)\b/i,
-          );
-          if (camelMatch) {
-            // Convert camelCase to Title Case: "signUp" -> "Sign Up"
-            name = camelMatch[1]
-              .replace(/([a-z])([A-Z])/g, '$1 $2')
-              .replace(/^./, (c) => c.toUpperCase());
-          } else {
-            // Fallback: extract key nouns from the description
-            const actionMatch = description.match(
-              /\b(sign[- ]?up|sign[- ]?in|sign[- ]?out|add(?:ed)? to cart|remove(?:d)? from cart|search(?:ed)?|checkout|order|auth|error|page ?view|product ?view)\b/i,
-            );
-            name = actionMatch
-              ? actionMatch[1]
-                  .replace(/^./, (c) => c.toUpperCase())
-                  .replace(/\b[a-z]/g, (c) => c.toUpperCase())
-              : name.slice(0, 35) + '…';
-          }
-        }
-
-        return { name, description };
-      });
+      // Light normalization — truncate overly long names but don't try to
+      // extract names from descriptions. The UI reads proper event names
+      // from store.eventPlan (populated from the JSON file the agent writes).
+      const normalizedEvents = args.events.map((e) => ({
+        name:
+          e.name.trim().length > 50
+            ? e.name.trim().slice(0, 45) + '…'
+            : e.name.trim(),
+        description: e.description?.trim() || '',
+      }));
       const events =
         DEMO_MODE && normalizedEvents.length > 5
           ? normalizedEvents.slice(0, 5)
