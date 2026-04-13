@@ -125,6 +125,16 @@ void yargs(hideBin(process.argv))
         'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: AMPLITUDE_WIZARD_PROJECT_ID',
       type: 'string',
     },
+    org: {
+      describe:
+        'Amplitude org name to use (for multi-org accounts)\nenv: AMPLITUDE_WIZARD_ORG',
+      type: 'string',
+    },
+    env: {
+      describe:
+        'Environment name to use (e.g. "Production", "Development")\nenv: AMPLITUDE_WIZARD_ENV',
+      type: 'string',
+    },
   })
   .command(
     ['$0'],
@@ -238,10 +248,32 @@ void yargs(hideBin(process.argv))
             // Resolve credentials from stored OAuth tokens
             const { resolveCredentials, resolveEnvironmentSelection } =
               await import('./src/lib/credential-resolution.js');
-            await resolveCredentials(session, { requireOrgId: false });
+            await resolveCredentials(session, {
+              requireOrgId: false,
+              org: options.org,
+              env: options.env,
+            });
 
-            // If multiple environments, prompt over NDJSON
+            // If multiple environments and no --env flag, list them and exit
             if (session.pendingOrgs && !session.credentials) {
+              const envList: string[] = [];
+              for (const org of session.pendingOrgs) {
+                for (const ws of org.workspaces) {
+                  for (const env of ws.environments ?? []) {
+                    if (env.app?.apiKey) {
+                      envList.push(
+                        `  --env "${env.name}"  (${org.name} / ${ws.name})`,
+                      );
+                    }
+                  }
+                }
+              }
+              getUI().log.info(
+                `Multiple environments found. Re-run with one of:\n${envList.join(
+                  '\n',
+                )}`,
+              );
+              // Auto-select first as fallback
               const selection = await agentUI.promptEnvironmentSelection(
                 session.pendingOrgs,
               );
@@ -250,10 +282,6 @@ void yargs(hideBin(process.argv))
                 selection,
               );
               if (!resolved) {
-                getUI().log.error(
-                  'Could not resolve the selected environment. ' +
-                    'Please check the org, workspace, and environment names.',
-                );
                 process.exit(ExitCode.AUTH_REQUIRED);
               }
             }
@@ -262,9 +290,21 @@ void yargs(hideBin(process.argv))
             if (!session.credentials) {
               getUI().log.error(
                 'Could not resolve credentials. ' +
-                  'Please log in first by running: npx @amplitude/wizard',
+                  'Please log in first by running: amplitude-wizard login',
               );
               process.exit(ExitCode.AUTH_REQUIRED);
+            }
+          }
+
+          // Log what was resolved so the caller can report it
+          if (session.credentials) {
+            const parts = [
+              session.selectedOrgName,
+              session.selectedWorkspaceName,
+              session.selectedProjectName,
+            ].filter(Boolean);
+            if (parts.length > 0) {
+              getUI().log.info(`Using: ${parts.join(' / ')}`);
             }
           }
 
@@ -314,7 +354,11 @@ void yargs(hideBin(process.argv))
             const { resolveCredentials } = await import(
               './src/lib/credential-resolution.js'
             );
-            await resolveCredentials(session, { requireOrgId: false });
+            await resolveCredentials(session, {
+              requireOrgId: false,
+              org: options.org,
+              env: options.env,
+            });
 
             // CI mode: auto-select first environment if multiple exist
             if (session.pendingOrgs && !session.credentials) {
@@ -397,9 +441,31 @@ void yargs(hideBin(process.argv))
           } else {
             const { resolveCredentials, resolveEnvironmentSelection } =
               await import('./src/lib/credential-resolution.js');
-            await resolveCredentials(session, { requireOrgId: false });
+            await resolveCredentials(session, {
+              requireOrgId: false,
+              org: options.org,
+              env: options.env,
+            });
 
             if (session.pendingOrgs && !session.credentials) {
+              const envList: string[] = [];
+              for (const org of session.pendingOrgs) {
+                for (const ws of org.workspaces) {
+                  for (const e of ws.environments ?? []) {
+                    if (e.app?.apiKey) {
+                      envList.push(
+                        `  --env "${e.name}"  (${org.name} / ${ws.name})`,
+                      );
+                    }
+                  }
+                }
+              }
+              getUI().log.info(
+                `Multiple environments found. Re-run with one of:\n${envList.join(
+                  '\n',
+                )}`,
+              );
+              // Auto-select first as fallback
               const selection = await agentUI.promptEnvironmentSelection(
                 session.pendingOrgs,
               );
@@ -408,9 +474,6 @@ void yargs(hideBin(process.argv))
                 selection,
               );
               if (!resolved) {
-                getUI().log.error(
-                  'Could not resolve the selected environment.',
-                );
                 process.exit(ExitCode.AUTH_REQUIRED);
               }
             }
@@ -421,6 +484,17 @@ void yargs(hideBin(process.argv))
                   'Please log in first by running: amplitude-wizard login',
               );
               process.exit(ExitCode.AUTH_REQUIRED);
+            }
+          }
+
+          if (session.credentials) {
+            const parts = [
+              session.selectedOrgName,
+              session.selectedWorkspaceName,
+              session.selectedProjectName,
+            ].filter(Boolean);
+            if (parts.length > 0) {
+              getUI().log.info(`Using: ${parts.join(' / ')}`);
             }
           }
 
