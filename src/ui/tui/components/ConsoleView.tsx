@@ -143,7 +143,19 @@ export const ConsoleView = ({
   // Watch for activation keys while the input is dormant
   useInput(
     (char, key) => {
-      if (key.escape || char === 'q' || char === 'Q') {
+      if (key.escape) {
+        if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
+          store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
+          return;
+        }
+        if (responseIsLong) {
+          setResponse(null);
+          return;
+        }
+        // Nothing to dismiss — exit the wizard
+        process.exit(130);
+      }
+      if (char === 'q' || char === 'Q') {
         if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
           return;
