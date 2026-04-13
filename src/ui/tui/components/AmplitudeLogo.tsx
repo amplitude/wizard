@@ -64,29 +64,28 @@ export const AmplitudeLogo = ({ color = '#0c19df' }: { color?: string }) => (
 
 /** AmplitudeLogo with a colour wave (vertical) and a horizontal dissolve wave. */
 export const AnimatedAmplitudeLogo = () => {
-  // Vertical colour wave — advances every 250 ms (was 110 ms)
+  // Vertical colour wave — advances every 200ms (~5 renders/sec)
   const [colorFrame, setColorFrame] = useState(0);
-  // Horizontal dissolve wave — tick advances every 120 ms (was 50 ms)
+  // Horizontal dissolve wave — tick advances every 80ms (~12.5 renders/sec)
   const [waveTick, setWaveTick] = useState(0);
 
   useEffect(() => {
     const id = setInterval(
       () => setColorFrame((f) => (f + 1) % WAVE_COLORS.length),
-      250,
+      200,
     );
     return () => clearInterval(id);
   }, []);
 
   useEffect(() => {
-    const id = setInterval(() => setWaveTick((t) => t + 1), 120);
+    const id = setInterval(() => setWaveTick((t) => t + 1), 80);
     return () => clearInterval(id);
   }, []);
 
-  // One dissolve wave every 4 s (80 ticks). The wave travels for the first
-  // 36 ticks (~1.8 s), sweeping from left edge to right edge; the remaining
-  // 44 ticks the logo rests at full resolution.
-  const TICKS_PER_CYCLE = 80;
-  const ACTIVE_TICKS = 54; // extra ticks to cover diagonal travel + right overshoot
+  // One dissolve sweep every ~3.2s (40 ticks at 80ms). The wave travels for
+  // the first 28 ticks (~2.2s), then rests at full resolution for ~1s.
+  const TICKS_PER_CYCLE = 40;
+  const ACTIVE_TICKS = 28;
   const frameInCycle = waveTick % TICKS_PER_CYCLE;
   const waveX =
     frameInCycle < ACTIVE_TICKS

@@ -25,6 +25,8 @@ import {
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { AmplitudeLogo } from '../components/AmplitudeLogo.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
   AdditionalFeature,
@@ -125,7 +127,13 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
 };
 
 /** The main Progress tab content. */
+const MIN_COLS_FOR_LOGO = 90;
+const MIN_ROWS_FOR_LOGO = 22;
+
 const ProgressTab = ({ store }: { store: WizardStore }) => {
+  const [cols, rows] = useStdoutDimensions();
+  const showLogo = cols >= MIN_COLS_FOR_LOGO && rows >= MIN_ROWS_FOR_LOGO;
+
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(Date.now());
 
@@ -179,35 +187,45 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const total = progressItems.length;
 
   return (
-    <Box flexDirection="column" flexGrow={1} paddingX={1}>
-      {/* Header bar: progress count + elapsed + currently editing */}
-      <Box marginBottom={1} justifyContent="space-between">
-        <Box gap={1}>
-          <BrailleSpinner color={Colors.active} />
-          <Text color={Colors.body} bold>
-            {total > 0
-              ? `${completed}/${total} tasks complete`
-              : 'Agent running'}
-          </Text>
-          <Text color={Colors.muted}>
-            {Icons.dot} {formatElapsed(elapsed)}
-          </Text>
+    <Box flexDirection="row" flexGrow={1}>
+      {/* Left: tasks and status (takes all remaining width) */}
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} paddingX={1}>
+        {/* Header bar: progress count + elapsed + currently editing */}
+        <Box marginBottom={1} justifyContent="space-between">
+          <Box gap={1}>
+            <BrailleSpinner color={Colors.active} />
+            <Text color={Colors.body} bold>
+              {total > 0
+                ? `${completed}/${total} tasks complete`
+                : 'Agent running'}
+            </Text>
+            <Text color={Colors.muted}>
+              {Icons.dot} {formatElapsed(elapsed)}
+            </Text>
+          </Box>
+          {currentFile && (
+            <Text color={Colors.muted} wrap="truncate-end">
+              {currentFile}
+            </Text>
+          )}
         </Box>
-        {currentFile && (
-          <Text color={Colors.muted} wrap="truncate-end">
-            {currentFile}
-          </Text>
-        )}
+
+        {/* Tasks — the hero */}
+        <ProgressList items={progressItems} title="Tasks" />
+
+        {/* Inline event plan */}
+        <InlineEventPlan store={store} />
+
+        {/* Compact conditional tips */}
+        <ConditionalTips store={store} />
       </Box>
 
-      {/* Tasks — the hero */}
-      <ProgressList items={progressItems} title="Tasks" />
-
-      {/* Inline event plan */}
-      <InlineEventPlan store={store} />
-
-      {/* Compact conditional tips */}
-      <ConditionalTips store={store} />
+      {/* Right: static logo (hidden on small terminals) */}
+      {showLogo && (
+        <Box flexShrink={0} marginTop={1} marginRight={1}>
+          <AmplitudeLogo />
+        </Box>
+      )}
     </Box>
   );
 };
