@@ -109,9 +109,16 @@ export async function resolveCredentials(
             ...storedToken,
             accessToken: refreshResult.accessToken,
             expiresAt: new Date(refreshResult.expiresAt).toISOString(),
+            // Persist rotated refresh token if the server issued one
+            ...(refreshResult.refreshToken
+              ? { refreshToken: refreshResult.refreshToken }
+              : {}),
           });
         }
         storedToken.accessToken = refreshResult.accessToken;
+        if (refreshResult.refreshToken) {
+          storedToken.refreshToken = refreshResult.refreshToken;
+        }
         logToFile(
           '[credential-resolution] silently refreshed expired access token',
         );

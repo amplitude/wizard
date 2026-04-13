@@ -28,7 +28,8 @@ export function useAsyncEffect(
     void effectRef.current(controller.signal).catch((err: unknown) => {
       // Silently ignore abort errors — they're expected on cleanup
       if (err instanceof DOMException && err.name === 'AbortError') return;
-      if (err instanceof Error && err.message.includes('abort')) return;
+      if (err instanceof Error && err.name === 'AbortError') return;
+      if (controller.signal.aborted) return;
       // Log other errors but don't crash — screen error boundary handles display
 
       logToFile(
