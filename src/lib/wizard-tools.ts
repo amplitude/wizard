@@ -652,10 +652,21 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
     async (args: { events: Array<{ name: string; description: string }> }) => {
       const { DEMO_MODE } = await import('./constants.js');
+      // Ensure event names are short labels, not descriptions.
+      // If the agent sends a long name, extract the first few words.
+      const normalizedEvents = args.events.map((e) => {
+        let name = e.name.trim();
+        if (name.length > 40) {
+          // Try to extract a title-case prefix before any punctuation/description
+          const match = name.match(/^([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})/);
+          name = match ? match[1] : name.slice(0, 35) + '…';
+        }
+        return { name, description: e.description };
+      });
       const events =
-        DEMO_MODE && args.events.length > 5
-          ? args.events.slice(0, 5)
-          : args.events;
+        DEMO_MODE && normalizedEvents.length > 5
+          ? normalizedEvents.slice(0, 5)
+          : normalizedEvents;
       logToFile(
         `confirm_event_plan: ${events.length} events${
           DEMO_MODE ? ' (demo mode)' : ''
