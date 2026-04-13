@@ -188,7 +188,7 @@ function defaultAuthMocks() {
  */
 function simulateRegionSelect(region: 'us' | 'eu') {
   (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
-    mockStore.session = { ...mockStore.session, region };
+    mockStore.session = { ...mockStore.session, region, introConcluded: true };
     setTimeout(cb, 0);
     return vi.fn();
   });
@@ -308,8 +308,12 @@ describe('TUI auth task: region determines OAuth zone', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
 
-    // Simulate the user picking a region
-    mockStore.session = { ...mockStore.session, region: 'us' };
+    // Simulate the user dismissing intro and picking a region
+    mockStore.session = {
+      ...mockStore.session,
+      region: 'us',
+      introConcluded: true,
+    };
     (storedCallback as (() => void) | null)?.();
 
     await cliPromise;

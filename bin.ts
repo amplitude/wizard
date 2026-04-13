@@ -629,16 +629,22 @@ void yargs(hideBin(process.argv))
 
                 const forceFresh = !ampliConfigExists(installDir);
 
-                // Wait for the user to pick a region (or for it to be pre-populated
-                // from ~/.ampli.json for returning users) before opening the OAuth URL,
-                // since the auth endpoint differs between US and EU.
+                // Wait for the user to dismiss the welcome screen AND pick a
+                // region before opening the OAuth URL. This ensures the logo
+                // and intro are visible before the browser opens.
                 await new Promise<void>((resolve) => {
-                  if (tui.store.session.region !== null) {
+                  if (
+                    tui.store.session.introConcluded &&
+                    tui.store.session.region !== null
+                  ) {
                     resolve();
                     return;
                   }
                   const unsub = tui.store.subscribe(() => {
-                    if (tui.store.session.region !== null) {
+                    if (
+                      tui.store.session.introConcluded &&
+                      tui.store.session.region !== null
+                    ) {
                       unsub();
                       resolve();
                     }
