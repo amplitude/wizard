@@ -10,8 +10,49 @@
  * Business logic reads from the session. Never calls a prompt.
  */
 
+import { z } from 'zod';
+
 import type { Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
+
+/**
+ * Zod schema for CLI args passed to `buildSession()`.
+ * Coerces `projectId` from string to positive integer.
+ * All boolean flags default to false; `installDir` defaults to cwd.
+ */
+export const CliArgsSchema = z.object({
+  projectId: z
+    .union([z.string(), z.number()])
+    .optional()
+    .transform((v) => {
+      if (v === undefined || v === '') return undefined;
+      const n = Number(v);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    }),
+  installDir: z.string().default(process.cwd()),
+  debug: z.boolean().default(false),
+  verbose: z.boolean().default(false),
+  ci: z.boolean().default(false),
+  forceInstall: z.boolean().default(false),
+  signup: z.boolean().default(false),
+  localMcp: z.boolean().default(false),
+  menu: z.boolean().default(false),
+  benchmark: z.boolean().default(false),
+  apiKey: z.string().optional(),
+  integration: z.string().optional(),
+});
+
+/**
+ * Zod schema for validated Amplitude credentials.
+ * Exported for incremental adoption at credential-construction sites.
+ */
+export const CredentialsSchema = z.object({
+  accessToken: z.string().min(1, 'accessToken is required'),
+  idToken: z.string().optional(),
+  projectApiKey: z.string().min(1, 'projectApiKey is required'),
+  host: z.string().url('host must be a valid URL'),
+  projectId: z.number(),
+});
 
 function parseProjectIdArg(value: string | undefined): number | undefined {
   if (value === undefined || value === '') return undefined;
@@ -294,6 +335,16 @@ export function buildSession(args: {
   benchmark?: boolean;
   projectId?: string;
 }): WizardSession {
+  // Validate CLI args via Zod — warn on bad input but fall back to defaults
+  const parsed = CliArgsSchema.safeParse(args);
+  if (!parsed.success) {
+    console.warn(
+      `[wizard] Invalid CLI args (falling back to defaults): ${parsed.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join(', ')}`,
+    );
+  }
+
   return {
     debug: args.debug ?? false,
     verbose: args.verbose ?? false,
