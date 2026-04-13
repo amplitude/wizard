@@ -37,14 +37,22 @@ export function getWhoamiText(
 ): string {
   const loggedIn =
     session.credentials !== null && session.credentials !== undefined;
-  if (!loggedIn && !session.selectedOrgName && !session.selectedOrgId) {
+  const hasAnyIdentity =
+    loggedIn ||
+    session.userEmail ||
+    session.selectedOrgName ||
+    session.selectedOrgId;
+  if (!hasAnyIdentity) {
     return 'Not logged in. Run /login to authenticate.';
   }
   const parts: string[] = [];
   if (session.userEmail) parts.push(session.userEmail);
 
-  const orgLabel = session.selectedOrgName ?? session.selectedOrgId ?? '(none)';
-  parts.push(`org: ${orgLabel}`);
+  if (session.selectedOrgName || session.selectedOrgId) {
+    const orgLabel =
+      session.selectedOrgName ?? session.selectedOrgId ?? '(none)';
+    parts.push(`org: ${orgLabel}`);
+  }
 
   // Show project (Amplitude calls this "workspace" internally, but users
   // think of it as their project). Then show environment name + numeric ID.
@@ -65,7 +73,9 @@ export function getWhoamiText(
     parts.push(`env: ${envId}`);
   }
 
-  parts.push(`region: ${session.region ?? '(none)'}`);
+  if (session.region) {
+    parts.push(`region: ${session.region}`);
+  }
 
   // Show masked API key so the user knows which key is active
   if (session.credentials?.projectApiKey) {
@@ -73,6 +83,11 @@ export function getWhoamiText(
     const masked =
       key.length > 8 ? key.slice(0, 4) + '…' + key.slice(-4) : '****';
     parts.push(`key: ${masked}`);
+  }
+
+  // If we have some identity but no credentials yet, hint that setup is in progress
+  if (!loggedIn && parts.length > 0) {
+    parts.push('(authenticating…)');
   }
 
   return parts.join('  ');

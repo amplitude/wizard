@@ -104,13 +104,24 @@ describe('getWhoamiText', () => {
     expect(result).not.toContain('(0)');
   });
 
-  it('shows org info even without credentials if org name exists', () => {
+  it('shows org info with authenticating hint when no credentials yet', () => {
     const result = getWhoamiText({
       ...base,
       selectedOrgName: 'Acme Corp',
       region: 'us',
     });
     expect(result).toContain('org: Acme Corp');
+    expect(result).toContain('(authenticating…)');
     expect(result).not.toContain('Not logged in');
+  });
+
+  it('shows email with authenticating hint during auth flow', () => {
+    const result = getWhoamiText({
+      ...base,
+      userEmail: 'ada@example.com',
+      region: 'us',
+    });
+    expect(result).toContain('ada@example.com');
+    expect(result).toContain('(authenticating…)');
   });
 });
