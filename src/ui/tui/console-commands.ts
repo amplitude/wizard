@@ -28,8 +28,6 @@ export function getWhoamiText(
     WizardSession,
     | 'selectedOrgId'
     | 'selectedOrgName'
-    | 'selectedWorkspaceId'
-    | 'selectedWorkspaceName'
     | 'selectedProjectName'
     | 'region'
     | 'credentials'
@@ -45,14 +43,22 @@ export function getWhoamiText(
   if (session.userEmail) parts.push(session.userEmail);
 
   const orgLabel = session.selectedOrgName ?? session.selectedOrgId ?? '(none)';
-  const wsLabel =
-    session.selectedWorkspaceName ?? session.selectedWorkspaceId ?? '(none)';
   parts.push(`org: ${orgLabel}`);
-  parts.push(`workspace: ${wsLabel}`);
 
-  if (session.selectedProjectName) {
-    parts.push(`project: ${session.selectedProjectName}`);
+  // Show project name + numeric ID, or just the name/ID
+  const projectName = session.selectedProjectName;
+  const projectId =
+    session.credentials?.projectId && session.credentials.projectId !== 0
+      ? String(session.credentials.projectId)
+      : null;
+  if (projectName && projectId) {
+    parts.push(`project: ${projectName} (${projectId})`);
+  } else if (projectName) {
+    parts.push(`project: ${projectName}`);
+  } else if (projectId) {
+    parts.push(`project: ${projectId}`);
   }
+
   parts.push(`region: ${session.region ?? '(none)'}`);
 
   // Show masked API key so the user knows which key is active
