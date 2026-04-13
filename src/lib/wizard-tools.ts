@@ -652,16 +652,49 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
     async (args: { events: Array<{ name: string; description: string }> }) => {
       const { DEMO_MODE } = await import('./constants.js');
-      // Ensure event names are short labels, not descriptions.
-      // If the agent sends a long name, extract the first few words.
+      // The agent frequently ignores the schema and puts full descriptions
+      // in the name field. Detect this and fix it at runtime.
       const normalizedEvents = args.events.map((e) => {
         let name = e.name.trim();
-        if (name.length > 40) {
-          // Try to extract a title-case prefix before any punctuation/description
-          const match = name.match(/^([A-Z][a-z]+(?:\s+[A-Za-z]+){0,4})/);
-          name = match ? match[1] : name.slice(0, 35) + '…';
+        let description = e.description?.trim() || '';
+
+        // If name looks like a description (>40 chars, or starts with common
+        // description patterns), move it to description and generate a name.
+        const looksLikeDescription =
+          name.length > 40 ||
+          /^(fires|already|tracks|captures|triggered|called|sends|logs|records|implements)/i.test(
+            name,
+          );
+
+        if (looksLikeDescription) {
+          // If description is empty/short, the "name" IS the description
+          if (!description || description.length < name.length) {
+            description = name;
+          }
+          // Generate a name from the description by finding the action/event
+          // Look for patterns like "signUp", "addToCart", "search", etc.
+          const camelMatch = description.match(
+            /\b(sign[A-Z]\w+|add[A-Z]\w+|remove[A-Z]\w+|search\w*|checkout|order|auth\w*|login|logout|view\w*|click\w*|submit\w*|create\w*|delete\w*|update\w*)\b/i,
+          );
+          if (camelMatch) {
+            // Convert camelCase to Title Case: "signUp" -> "Sign Up"
+            name = camelMatch[1]
+              .replace(/([a-z])([A-Z])/g, '$1 $2')
+              .replace(/^./, (c) => c.toUpperCase());
+          } else {
+            // Fallback: extract key nouns from the description
+            const actionMatch = description.match(
+              /\b(sign[- ]?up|sign[- ]?in|sign[- ]?out|add(?:ed)? to cart|remove(?:d)? from cart|search(?:ed)?|checkout|order|auth|error|page ?view|product ?view)\b/i,
+            );
+            name = actionMatch
+              ? actionMatch[1]
+                  .replace(/^./, (c) => c.toUpperCase())
+                  .replace(/\b[a-z]/g, (c) => c.toUpperCase())
+              : name.slice(0, 35) + '…';
+          }
         }
-        return { name, description: e.description };
+
+        return { name, description };
       });
       const events =
         DEMO_MODE && normalizedEvents.length > 5
