@@ -315,6 +315,10 @@ void yargs(hideBin(process.argv))
                 // Apply recoverable fields — credentials are intentionally
                 // excluded by session-checkpoint.ts
                 Object.assign(session, checkpoint);
+                // Always reset introConcluded so IntroScreen shows its
+                // resume picker (Resume / Start fresh / Cancel). The screen
+                // itself calls concludeIntro() when the user selects "Resume".
+                session.introConcluded = false;
                 session._restoredFromCheckpoint = true;
                 logToFile(
                   '[bin] restored session from crash-recovery checkpoint',
@@ -1034,12 +1038,16 @@ void yargs(hideBin(process.argv))
           './src/utils/ampli-settings.js'
         );
         const { clearApiKey } = await import('./src/utils/api-key-store.js');
+        const { clearCheckpoint } = await import(
+          './src/lib/session-checkpoint.js'
+        );
         const installDir =
           (argv.installDir as string | undefined) ?? process.cwd();
         const user = getStoredUser();
         try {
           clearStoredCredentials();
           clearApiKey(installDir);
+          clearCheckpoint(installDir);
           if (user) {
             console.log(chalk.green(`✔ Logged out ${user.email}`));
           } else {

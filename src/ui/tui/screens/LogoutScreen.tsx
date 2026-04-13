@@ -11,6 +11,7 @@ import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { clearStoredCredentials } from '../../../utils/ampli-settings.js';
 import { clearApiKey } from '../../../utils/api-key-store.js';
+import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 
 interface LogoutScreenProps {
   onComplete: () => void;
@@ -36,6 +37,7 @@ export const LogoutScreen = ({ onComplete, installDir }: LogoutScreenProps) => {
   const handleConfirm = () => {
     clearStoredCredentials();
     clearApiKey(installDir);
+    clearCheckpoint(installDir);
     setPhase(Phase.Done);
     timerRef.current = setTimeout(onComplete, 1500);
   };
