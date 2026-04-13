@@ -32,9 +32,14 @@ export const TEST_PROMPT: string =
 export function getWhoamiText(
   session: Pick<
     WizardSession,
-    'selectedOrgName' | 'selectedWorkspaceName' | 'region'
+    'selectedOrgName' | 'selectedWorkspaceName' | 'region' | 'credentials'
   >,
 ): string {
+  const loggedIn =
+    session.credentials !== null && session.credentials !== undefined;
+  if (!loggedIn && !session.selectedOrgName) {
+    return 'Not logged in. Run /login to authenticate.';
+  }
   return `org: ${session.selectedOrgName ?? '(none)'}  workspace: ${
     session.selectedWorkspaceName ?? '(none)'
   }  region: ${session.region ?? '(none)'}`;
