@@ -1283,14 +1283,39 @@ export async function runAgent(
           }
         }
 
-        // Clean completion — exit the retry loop
+        // Check if the agent hit a transient API error (e.g. Vertex 400)
+        // that warrants a retry rather than immediately giving up.
         clearTimeout(staleTimer);
+        const partialOutput = collectedText.join('\n');
+        const hitTransientApiError =
+          !receivedSuccessResult &&
+          !authErrorDetected &&
+          partialOutput.includes('API Error: 400') &&
+          attempt < MAX_RETRIES;
+
+        if (hitTransientApiError) {
+          logToFile(
+            `Retrying after API 400 error (next attempt: ${attempt + 2} of ${
+              MAX_RETRIES + 1
+            })`,
+          );
+          analytics.wizardCapture('Agent API Error Retry', {
+            attempt,
+            error: 'api_400',
+          });
+          collectedText.length = 0;
+          recentStatuses.length = 0;
+          signalDone();
+          continue;
+        }
+
+        // Clean completion — exit the retry loop
         break;
       } catch (innerError) {
         clearTimeout(staleTimer);
         signalDone(); // unblock the prompt stream for this attempt
 
-        // Stall-aborted with retries remaining — try again
+        // Stall-aborted or API error with retries remaining — try again
         if (controller.signal.aborted && attempt < MAX_RETRIES) {
           logToFile(
             `Retrying after stall (next attempt: ${attempt + 2} of ${
