@@ -272,9 +272,10 @@ export const ConsoleView = ({
         return;
       }
 
-      // options mode
+      // options mode — require explicit Y to approve (Enter alone is too easy
+      // to hit accidentally while the plan is pending in the background)
       const lc = char.toLowerCase();
-      if (lc === 'y' || key.return) {
+      if (lc === 'y') {
         store.resolveEventPlan({ decision: 'approved' });
       } else if (lc === 's') {
         store.resolveEventPlan({ decision: 'skipped' });
