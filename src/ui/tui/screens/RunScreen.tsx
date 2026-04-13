@@ -26,7 +26,7 @@ import {
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
+import { AmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
   AdditionalFeature,
@@ -224,7 +224,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
       {/* Right: animated logo (responsive — hidden on small terminals) */}
       {showLogo && (
         <Box marginLeft={2} alignItems="flex-start" flexShrink={0}>
-          <AnimatedAmplitudeLogo />
+          <AmplitudeLogo />
         </Box>
       )}
     </Box>
