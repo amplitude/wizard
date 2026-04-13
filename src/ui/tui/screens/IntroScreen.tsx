@@ -13,7 +13,7 @@
 
 import path from 'path';
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
@@ -22,6 +22,7 @@ import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { analytics } from '../../../utils/analytics.js';
@@ -45,14 +46,19 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     () => store.session._restoredFromCheckpoint,
   );
 
-  // Hold the intro visible for a minimum duration so users can see the logo
-  // and orient before the continue prompt appears.
-  const INTRO_MIN_MS = 1500;
+  // User must press Enter to dismiss the welcome screen before the
+  // continue picker appears. This ensures the logo and tagline are seen.
   const [introReady, setIntroReady] = useState(false);
-  useEffect(() => {
-    const timer = setTimeout(() => setIntroReady(true), INTRO_MIN_MS);
-    return () => clearTimeout(timer);
-  }, []);
+  useScreenInput(
+    useCallback(
+      (_input, key) => {
+        if (!introReady && key.return) {
+          setIntroReady(true);
+        }
+      },
+      [introReady],
+    ),
+  );
 
   const { session } = store;
   const config = session.frameworkConfig;
@@ -190,8 +196,21 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         </Text>
       </Box>
 
+      {/* "Press Enter" gate — shown until user dismisses the welcome */}
+      {!introReady && !showResume && (
+        <Box marginTop={1}>
+          <Text color={Colors.muted}>
+            Press{' '}
+            <Text bold color={Colors.body}>
+              Enter
+            </Text>{' '}
+            to continue
+          </Text>
+        </Box>
+      )}
+
       {/* Detection spinner */}
-      {detecting && (
+      {introReady && detecting && (
         <Box marginY={1} gap={1}>
           <BrailleSpinner />
           <Text color={Colors.secondary}>
@@ -201,22 +220,23 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       )}
 
       {/* Pre-run notice from framework config */}
-      {config?.metadata.preRunNotice && (
+      {introReady && config?.metadata.preRunNotice && (
         <Box marginBottom={1}>
           <Text color={Colors.warning}>{config.metadata.preRunNotice}</Text>
         </Box>
       )}
 
       {/* Framework picker (when auto-detection fails or user requests change) */}
-      {(pickingFramework || (session.menu && needsFrameworkPick)) && (
-        <FrameworkPicker
-          store={store}
-          onComplete={() => setPickingFramework(false)}
-        />
-      )}
+      {introReady &&
+        (pickingFramework || (session.menu && needsFrameworkPick)) && (
+          <FrameworkPicker
+            store={store}
+            onComplete={() => setPickingFramework(false)}
+          />
+        )}
 
       {/* Detection results + continue menu */}
-      {!detecting && !pickingFramework && (
+      {introReady && !detecting && !pickingFramework && (
         <Box flexDirection="column" alignItems="flex-start">
           <Text>
             <Text color={Colors.body}>Directory </Text>
