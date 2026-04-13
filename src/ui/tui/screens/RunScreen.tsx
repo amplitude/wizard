@@ -1,5 +1,5 @@
 /**
- * RunScreen (v2) — Agent dashboard focused on tasks and progress.
+ * RunScreen — Agent dashboard focused on tasks and progress.
  *
  * Tabs:
  *   - Progress (default): full-width ProgressList, elapsed timer, currently

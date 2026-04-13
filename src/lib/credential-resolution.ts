@@ -171,7 +171,7 @@ export async function resolveCredentials(
           }
 
           // If --env flag was provided, try to match across all orgs/workspaces
-          if (options?.env && envsWithKey.length > 0) {
+          if (options?.env) {
             const envMatch = options.env.toLowerCase();
             const orgFilter = options.org?.toLowerCase();
 
