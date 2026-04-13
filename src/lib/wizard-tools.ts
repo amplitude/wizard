@@ -13,7 +13,10 @@ import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
-import type { EventPlanDecision } from '../ui/wizard-ui';
+import type {
+  EventPlanDecision,
+  IdentifyPlanDecision,
+} from '../ui/wizard-ui';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -683,6 +686,56 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
   );
 
+  // -- confirm_identify_plan ------------------------------------------------
+
+  const confirmIdentifyPlan = tool(
+    'confirm_identify_plan',
+    `Present the proposed user identification plan to the user for review BEFORE writing any identify code.
+Call this tool AFTER event instrumentation is complete, but BEFORE writing any setUserId(), identify(), or reset() calls.
+The user can approve the plan, skip it, or give feedback.
+If the user gives feedback, revise your plan and call this tool again — loop until approved or skipped.
+If skipped, do not add any identify calls.
+Returns: "approved", "skipped", or "feedback: <user message>"`,
+    {
+      identifyCalls: z
+        .array(
+          z.object({
+            location: z
+              .string()
+              .describe(
+                'Where this call will be added — file path and function/handler name, e.g. "src/auth/login.ts — handleLogin()"',
+              ),
+            description: z
+              .string()
+              .describe(
+                'What this call does — e.g. "Call setUserId(user.id) and identify() with email and plan properties after successful login"',
+              ),
+          }),
+        )
+        .min(1)
+        .describe(
+          'The list of setUserId/identify/reset calls you plan to add',
+        ),
+    },
+    async (args: {
+      identifyCalls: Array<{ location: string; description: string }>;
+    }) => {
+      logToFile(
+        `confirm_identify_plan: ${args.identifyCalls.length} identify calls`,
+      );
+      const decision: IdentifyPlanDecision =
+        await getUI().promptIdentifyPlan(args.identifyCalls);
+      let text: string;
+      if (decision.decision === 'revised') {
+        text = `feedback: ${decision.feedback}`;
+      } else {
+        text = decision.decision; // 'approved' or 'skipped'
+      }
+      logToFile(`confirm_identify_plan result: ${text}`);
+      return { content: [{ type: 'text' as const, text }] };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   return createSdkMcpServer({
@@ -697,6 +750,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       confirm,
       choose,
       confirmEventPlan,
+      confirmIdentifyPlan,
     ],
   });
 }
@@ -711,4 +765,5 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:confirm`,
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
+  `${SERVER_NAME}:confirm_identify_plan`,
 ];

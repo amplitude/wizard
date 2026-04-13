@@ -11,7 +11,11 @@
  */
 
 import { atom, map } from 'nanostores';
-import { TaskStatus, type EventPlanDecision } from '../wizard-ui.js';
+import {
+  TaskStatus,
+  type EventPlanDecision,
+  type IdentifyPlanDecision,
+} from '../wizard-ui.js';
 import {
   type WizardSession,
   type OutroData,
@@ -59,6 +63,11 @@ export interface PlannedEvent {
   description: string;
 }
 
+export interface PlannedIdentifyCall {
+  location: string;
+  description: string;
+}
+
 export type PendingPrompt =
   | { kind: 'confirm'; message: string; resolve: (value: boolean) => void }
   | {
@@ -71,6 +80,11 @@ export type PendingPrompt =
       kind: 'event-plan';
       events: PlannedEvent[];
       resolve: (value: EventPlanDecision) => void;
+    }
+  | {
+      kind: 'identify-plan';
+      identifyCalls: PlannedIdentifyCall[];
+      resolve: (value: IdentifyPlanDecision) => void;
     };
 
 export class WizardStore {
@@ -326,7 +340,12 @@ export class WizardStore {
   /** Resolve a confirm or choice pending prompt. */
   resolvePrompt(answer: boolean | string): void {
     const prompt = this.$pendingPrompt.get();
-    if (!prompt || prompt.kind === 'event-plan') return;
+    if (
+      !prompt ||
+      prompt.kind === 'event-plan' ||
+      prompt.kind === 'identify-plan'
+    )
+      return;
     analytics.wizardCapture('Prompt Response', {
       prompt_kind: prompt.kind,
       response: String(answer),
@@ -354,6 +373,33 @@ export class WizardStore {
     if (!prompt || prompt.kind !== 'event-plan') return;
     analytics.wizardCapture('Prompt Response', {
       prompt_kind: 'event-plan',
+      response: typeof decision === 'object' ? 'feedback' : String(decision),
+    });
+    this.$pendingPrompt.set(null);
+    this.$version.set(this.$version.get() + 1);
+    prompt.resolve(decision);
+  }
+
+  /** Show an identify-plan confirmation. Resolves when the user approves, skips, or gives feedback. */
+  promptIdentifyPlan(
+    identifyCalls: PlannedIdentifyCall[],
+  ): Promise<IdentifyPlanDecision> {
+    return new Promise((resolve) => {
+      this.$pendingPrompt.set({
+        kind: 'identify-plan',
+        identifyCalls,
+        resolve,
+      });
+      this.$version.set(this.$version.get() + 1);
+    });
+  }
+
+  /** Resolve the pending identify-plan prompt. */
+  resolveIdentifyPlan(decision: IdentifyPlanDecision): void {
+    const prompt = this.$pendingPrompt.get();
+    if (!prompt || prompt.kind !== 'identify-plan') return;
+    analytics.wizardCapture('Prompt Response', {
+      prompt_kind: 'identify-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
     this.$pendingPrompt.set(null);

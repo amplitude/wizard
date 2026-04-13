@@ -13,6 +13,11 @@ export type EventPlanDecision =
   | { decision: 'approved' | 'skipped' }
   | { decision: 'revised'; feedback: string };
 
+/** Result returned by the confirm_identify_plan tool to the agent. */
+export type IdentifyPlanDecision =
+  | { decision: 'approved' | 'skipped' }
+  | { decision: 'revised'; feedback: string };
+
 export enum TaskStatus {
   Pending = 'pending',
   InProgress = 'in_progress',
@@ -117,6 +122,19 @@ export interface WizardUI {
   promptEventPlan(
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision>;
+
+  /**
+   * Show the user identification plan for user approval.
+   * Called by the confirm_identify_plan wizard tool AFTER event instrumentation.
+   * The agent shows where it will add setUserId/identify/reset calls;
+   * the user can approve, skip, or give feedback.
+   */
+  promptIdentifyPlan(
+    identifyCalls: Array<{
+      location: string;
+      description: string;
+    }>,
+  ): Promise<IdentifyPlanDecision>;
 
   // ── Todo tracking from SDK TodoWrite events ───────────────────────
   syncTodos(
