@@ -449,6 +449,29 @@ void yargs(hideBin(process.argv))
                         // Single environment — auto-select as before
                         const apiKey = envsWithKey[0].app!.apiKey!;
                         session.selectedProjectName = envsWithKey[0].name;
+
+                        // Populate org/workspace names from the fetched data
+                        // so /whoami doesn't show (none).
+                        for (const org of userInfo.orgs) {
+                          const ws = workspaceId
+                            ? org.workspaces.find((w) => w.id === workspaceId)
+                            : org.workspaces[0];
+                          if (
+                            ws?.environments?.some(
+                              (e) => e.app?.apiKey === apiKey,
+                            )
+                          ) {
+                            session.selectedOrgId = org.id;
+                            session.selectedOrgName = org.name;
+                            session.selectedWorkspaceId = ws.id;
+                            session.selectedWorkspaceName = ws.name;
+                            break;
+                          }
+                        }
+                        if (!session.userEmail && userInfo.email) {
+                          session.userEmail = userInfo.email;
+                        }
+
                         logToFile(
                           '[bin] single environment — auto-selecting API key',
                         );
@@ -528,8 +551,9 @@ void yargs(hideBin(process.argv))
 
               // Resolve org/workspace display names so /whoami shows them.
               // Uses the stored token to fetch user info — fire-and-forget so it
-              // doesn't block startup.
-              if (zone && session.selectedOrgId) {
+              // doesn't block startup. Runs even without selectedOrgId so that
+              // the localKey path (which skips user fetch) can still populate names.
+              if (zone) {
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
@@ -542,18 +566,27 @@ void yargs(hideBin(process.argv))
                         session.userEmail = userInfo.email;
                         changed = true;
                       }
-                      const org = userInfo.orgs.find(
-                        (o) => o.id === session.selectedOrgId,
-                      );
+                      // Find the org — by ID if available, otherwise first org
+                      const org = session.selectedOrgId
+                        ? userInfo.orgs.find(
+                            (o) => o.id === session.selectedOrgId,
+                          )
+                        : userInfo.orgs[0];
                       if (org) {
+                        if (!session.selectedOrgId) {
+                          session.selectedOrgId = org.id;
+                        }
                         session.selectedOrgName = org.name;
                         changed = true;
                         const ws = session.selectedWorkspaceId
                           ? org.workspaces.find(
                               (w) => w.id === session.selectedWorkspaceId,
                             )
-                          : undefined;
+                          : org.workspaces[0];
                         if (ws) {
+                          if (!session.selectedWorkspaceId) {
+                            session.selectedWorkspaceId = ws.id;
+                          }
                           session.selectedWorkspaceName = ws.name;
                         }
                       }
