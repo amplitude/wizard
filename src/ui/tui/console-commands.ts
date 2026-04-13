@@ -22,12 +22,6 @@ export const COMMANDS = [
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
 
-export const TEST_PROMPT: string =
-  'Demo the wizard prompt tools. ' +
-  'First, use the wizard-tools:confirm tool to ask if I want to continue. ' +
-  'Then use the wizard-tools:choose tool to let me pick my favorite color from: Red, Blue, Green, Purple. ' +
-  'Finally, summarize what I chose in one sentence.';
-
 /** Returns the feedback text for the /whoami command. */
 export function getWhoamiText(
   session: Pick<
