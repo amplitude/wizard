@@ -333,12 +333,14 @@ export const ConsoleView = ({
                   Instrumentation Plan
                 </Text>
                 {pendingPrompt.events.map((e, i) => (
-                  <Box key={e.name || i} flexDirection="column">
+                  <Text key={e.name || i} wrap="wrap">
                     <Text color={Colors.accent} bold>
-                      {e.name}
+                      {Icons.bullet} {e.name}
                     </Text>
-                    <Text color={Colors.secondary}>{e.description}</Text>
-                  </Box>
+                    {e.description ? (
+                      <Text color={Colors.secondary}> — {e.description}</Text>
+                    ) : null}
+                  </Text>
                 ))}
                 {planInputMode === 'feedback' ? (
                   <Box gap={1}>
