@@ -356,17 +356,79 @@ void yargs(hideBin(process.argv))
         // Classic mode: interactive prompts without the rich TUI
         void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
       } else if (isNonInteractiveEnvironment()) {
-        // Non-interactive non-CI: error out
-        getUI().intro(chalk.inverse(`Amplitude Wizard`));
-        getUI().log.error(
-          'This installer requires an interactive terminal (TTY) to run.\n' +
-            'It appears you are running in a non-interactive environment.\n' +
-            'Please run the wizard in an interactive terminal.\n\n' +
-            'For CI/CD environments, use --ci mode:\n' +
-            '  npx @amplitude/wizard --ci --install-dir . [--api-key <your-key>]\n' +
-            '  (--api-key is optional when a key can be resolved from env or stored credentials.)',
-        );
-        process.exit(1);
+        // No TTY and no explicit mode flag — auto-switch to agent mode
+        // so callers like Claude Code don't need to know about --agent.
+        options.agent = true;
+        void (async () => {
+          const { AgentUI } = await import('./src/ui/agent-ui.js');
+          const agentUI = new AgentUI();
+          setUI(agentUI);
+          if (!options.installDir) {
+            options.installDir = process.cwd();
+          }
+
+          const { buildSession } = await import('./src/lib/wizard-session.js');
+          const session = buildSession({
+            debug: options.debug as boolean | undefined,
+            verbose: options.verbose as boolean | undefined,
+            forceInstall: options.forceInstall as boolean | undefined,
+            installDir: options.installDir as string | undefined,
+            ci: false,
+            signup: options.signup as boolean | undefined,
+            localMcp: options.localMcp as boolean | undefined,
+            apiKey: options.apiKey as string | undefined,
+            menu: options.menu as boolean | undefined,
+            integration: options.integration as Parameters<
+              typeof buildSession
+            >[0]['integration'],
+            benchmark: options.benchmark as boolean | undefined,
+            projectId: options.projectId as string | undefined,
+          });
+
+          if (session.apiKey) {
+            const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
+            session.credentials = {
+              accessToken: session.apiKey,
+              projectApiKey: session.apiKey,
+              host: DEFAULT_HOST_URL,
+              projectId: session.projectId ?? 0,
+            };
+            session.projectHasData = false;
+          } else {
+            const { resolveCredentials, resolveEnvironmentSelection } =
+              await import('./src/lib/credential-resolution.js');
+            await resolveCredentials(session, { requireOrgId: false });
+
+            if (session.pendingOrgs && !session.credentials) {
+              const selection = await agentUI.promptEnvironmentSelection(
+                session.pendingOrgs,
+              );
+              const resolved = await resolveEnvironmentSelection(
+                session,
+                selection,
+              );
+              if (!resolved) {
+                getUI().log.error(
+                  'Could not resolve the selected environment.',
+                );
+                process.exit(ExitCode.AUTH_REQUIRED);
+              }
+            }
+
+            if (!session.credentials) {
+              getUI().log.error(
+                'Could not resolve credentials. ' +
+                  'Please log in first by running: amplitude-wizard login',
+              );
+              process.exit(ExitCode.AUTH_REQUIRED);
+            }
+          }
+
+          await lazyRunWizard(
+            options as Parameters<typeof lazyRunWizard>[0],
+            session,
+          );
+        })();
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
