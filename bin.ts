@@ -801,14 +801,20 @@ void yargs(hideBin(process.argv))
               tui.store.completeSetup(),
             );
 
-            // Session checkpointing — save before agent starts, clear on
-            // successful completion so stale checkpoints don't linger.
+            // Session checkpointing — save at key transitions so crash
+            // recovery can skip already-completed steps.
             const { saveCheckpoint, clearCheckpoint } = await import(
               './src/lib/session-checkpoint.js'
             );
+            // After auth completes (most expensive step to repeat)
+            tui.store.onEnterScreen(Screen.DataSetup, () => {
+              saveCheckpoint(tui.store.session);
+            });
+            // Before agent starts (captures all setup state)
             tui.store.onEnterScreen(Screen.Run, () => {
               saveCheckpoint(tui.store.session);
             });
+            // Clear on successful completion
             tui.store.onEnterScreen(Screen.Outro, () => {
               clearCheckpoint();
             });

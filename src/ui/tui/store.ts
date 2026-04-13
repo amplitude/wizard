@@ -253,6 +253,21 @@ export class WizardStore {
   setRegion(region: string): void {
     this.$session.setKey('region', region as WizardSession['region']);
     this.$session.setKey('regionForced', false);
+
+    // Persist region to project-level ampli.json so next run uses the right zone.
+    // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
+    // would create a partial config).
+    const session = this.$session.get();
+    if (session.selectedOrgId && session.selectedWorkspaceId) {
+      void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
+        writeAmpliConfig(session.installDir, {
+          OrgId: session.selectedOrgId!,
+          WorkspaceId: session.selectedWorkspaceId!,
+          Zone: region as 'us' | 'eu',
+        });
+      });
+    }
+
     this.emitChange();
   }
 
@@ -504,9 +519,14 @@ export class WizardStore {
     this.$session.setKey('selectedWorkspaceId', workspace.id);
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
-    // Write ampli.json to the project directory
+    // Write ampli.json to the project directory.
+    // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)
+    // so that /region changes are respected.
     void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-      const zone = this.$session.get().pendingAuthCloudRegion ?? 'us';
+      const zone =
+        this.$session.get().region ??
+        this.$session.get().pendingAuthCloudRegion ??
+        'us';
       writeAmpliConfig(installDir, {
         OrgId: org.id,
         WorkspaceId: workspace.id,
