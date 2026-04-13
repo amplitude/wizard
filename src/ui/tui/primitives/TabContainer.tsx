@@ -36,25 +36,18 @@ export const TabContainer = ({
     onTabConsumed?.();
   }, [requestedTab]);
 
-  // Track whether the active tab needs exclusive arrow key control (e.g. Snake game).
-  // When a tab captures arrows, use number keys for tab switching instead.
-  const activeTabId = tabs[activeTab]?.id;
-  const arrowsCaptured = activeTabId === 'snake';
-
   useScreenInput((input, key) => {
-    // Arrow key tab switching — disabled when active tab captures arrows
-    if (!arrowsCaptured) {
-      if (key.leftArrow) {
-        setActiveTab((prev) => Math.max(0, prev - 1));
-        return;
-      }
-      if (key.rightArrow) {
-        setActiveTab((prev) => Math.min(tabs.length - 1, prev + 1));
-        return;
-      }
+    // Arrow keys always switch tabs (Snake uses WASD for movement)
+    if (key.leftArrow) {
+      setActiveTab((prev) => Math.max(0, prev - 1));
+      return;
+    }
+    if (key.rightArrow) {
+      setActiveTab((prev) => Math.min(tabs.length - 1, prev + 1));
+      return;
     }
 
-    // Number keys always work for tab switching (1-indexed)
+    // Number keys also work for tab switching (1-indexed)
     const num = parseInt(input, 10);
     if (!isNaN(num) && num >= 1 && num <= tabs.length) {
       setActiveTab(num - 1);
@@ -105,11 +98,7 @@ export const TabContainer = ({
               </Text>
             ))}
           </Box>
-          <Text color={Colors.muted}>
-            {arrowsCaptured
-              ? '1-' + tabs.length + ' to switch tabs'
-              : '← → to switch tabs'}
-          </Text>
+          <Text color={Colors.muted}>← → to switch tabs</Text>
         </Box>
       </Box>
     </Box>
