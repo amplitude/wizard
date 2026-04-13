@@ -251,7 +251,7 @@ export const RunScreen = ({ store }: RunScreenProps) => {
     },
     {
       id: 'snake',
-      label: 'Snake',
+      label: 'Snake (WASD)',
       component: (
         <SnakeGame
           music={false}
