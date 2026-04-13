@@ -27,7 +27,6 @@ import {
   COMMANDS,
   getWhoamiText,
   parseFeedbackSlashInput,
-  TEST_PROMPT,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
@@ -71,8 +70,6 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         });
       break;
     }
-    case '/test':
-      return TEST_PROMPT;
     case '/mcp':
       store.showMcpOverlay();
       break;

@@ -352,18 +352,23 @@ export function buildSession(args: {
     );
   }
 
+  // Use Zod-validated data (with coerced projectId and defaults) when available
+  const validated = parsed.success ? parsed.data : args;
+
   return {
-    debug: args.debug ?? false,
-    verbose: args.verbose ?? false,
-    forceInstall: args.forceInstall ?? false,
-    installDir: args.installDir ?? process.cwd(),
-    ci: args.ci ?? false,
-    signup: args.signup ?? false,
-    localMcp: args.localMcp ?? false,
-    apiKey: args.apiKey,
-    menu: args.menu ?? false,
-    benchmark: args.benchmark ?? false,
-    projectId: parseProjectIdArg(args.projectId),
+    debug: validated.debug ?? false,
+    verbose: validated.verbose ?? false,
+    forceInstall: validated.forceInstall ?? false,
+    installDir: validated.installDir ?? process.cwd(),
+    ci: validated.ci ?? false,
+    signup: validated.signup ?? false,
+    localMcp: validated.localMcp ?? false,
+    apiKey: validated.apiKey,
+    menu: validated.menu ?? false,
+    benchmark: validated.benchmark ?? false,
+    projectId: parsed.success
+      ? parsed.data.projectId
+      : parseProjectIdArg(args.projectId),
 
     setupConfirmed: false,
     integration: args.integration ?? null,

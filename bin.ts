@@ -54,6 +54,7 @@ import {
   BASH_COMPLETION_SCRIPT,
 } from './src/utils/shell-completions';
 import { persistApiKey } from './src/utils/api-key-store';
+import { ExitCode } from './src/lib/exit-codes';
 
 if (process.env.NODE_ENV === 'test') {
   void (async () => {
@@ -184,7 +185,7 @@ void yargs(hideBin(process.argv))
       const options = { ...argv };
 
       // CI mode validation and TTY check
-      if (options.agent || process.env.AMPLITUDE_WIZARD_AGENT) {
+      if (options.agent || process.env.AMPLITUDE_WIZARD_AGENT === '1') {
         // Agent mode: structured JSON output, same requirements as CI
         void (async () => {
           const { AgentUI } = await import('./src/ui/agent-ui.js');
@@ -194,7 +195,7 @@ void yargs(hideBin(process.argv))
             getUI().log.error(
               'Agent mode requires --install-dir (directory to install Amplitude in)',
             );
-            process.exit(1);
+            process.exit(ExitCode.INVALID_ARGS);
           }
           await runWizard(options as Parameters<typeof runWizard>[0]);
         })();

@@ -56,7 +56,7 @@ export const DataIngestionCheckScreen = ({
   useWizardStore(store);
 
   const { session } = store;
-  const { credentials, region, activationLevel } = session;
+  const { activationLevel } = session;
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -82,29 +82,36 @@ export const DataIngestionCheckScreen = ({
   }
 
   async function checkIngestion() {
-    if (!credentials) {
+    // Read from store.session at call time to avoid stale closures
+    const currentSession = store.session;
+    const currentCredentials = currentSession.credentials;
+    const currentRegion = currentSession.region;
+
+    if (!currentCredentials) {
       setApiUnavailable(true);
       return;
     }
-    const appId = credentials.projectId || session.selectedWorkspaceId;
+    const appId =
+      currentCredentials.projectId || currentSession.selectedWorkspaceId;
     if (!appId) {
       setApiUnavailable(true);
       return;
     }
-    const zone = (region ?? 'us') as AmplitudeZone;
-    const dataApiToken = credentials.idToken ?? credentials.accessToken;
+    const zone = (currentRegion ?? 'us') as AmplitudeZone;
+    const dataApiToken =
+      currentCredentials.idToken ?? currentCredentials.accessToken;
 
-    if (!session.selectedOrgId) {
+    if (!currentSession.selectedOrgId) {
       setApiUnavailable(true);
       return;
     }
 
     try {
       const status = await fetchProjectActivationStatus({
-        accessToken: credentials.accessToken,
+        accessToken: currentCredentials.accessToken,
         zone,
         appId,
-        orgId: session.selectedOrgId,
+        orgId: currentSession.selectedOrgId,
       });
       setLastChecked(Date.now());
       logToFile(
@@ -117,12 +124,12 @@ export const DataIngestionCheckScreen = ({
 
       // Activation API only checks autocapture events. Fall back to the
       // event catalog which includes all event types.
-      if (session.selectedOrgId && session.selectedWorkspaceId) {
+      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
         const catalogEvents = await fetchWorkspaceEventTypes(
           dataApiToken,
           zone,
-          session.selectedOrgId,
-          session.selectedWorkspaceId,
+          currentSession.selectedOrgId,
+          currentSession.selectedWorkspaceId,
         );
         logToFile(
           `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
@@ -137,15 +144,20 @@ export const DataIngestionCheckScreen = ({
           err instanceof Error ? err.message : String(err)
         }`,
       );
+      // Clear the polling interval so it stops firing against the failing API
+      if (pollingRef.current !== null) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
       setApiUnavailable(true);
 
       // Fetch cataloged event types as a proxy for "events arrived"
-      if (session.selectedOrgId && session.selectedWorkspaceId) {
+      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
         fetchWorkspaceEventTypes(
           dataApiToken,
           zone,
-          session.selectedOrgId,
-          session.selectedWorkspaceId,
+          currentSession.selectedOrgId,
+          currentSession.selectedWorkspaceId,
         )
           .then((names) => {
             setEventTypes(names);
