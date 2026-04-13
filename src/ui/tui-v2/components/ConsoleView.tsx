@@ -46,7 +46,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       store.showLogoutOverlay();
       break;
     case '/whoami':
-      store.setCommandFeedback(getWhoamiText(store.session));
+      store.setCommandFeedback(getWhoamiText(store.session), 30_000);
       break;
     case '/slack':
       store.showSlackOverlay();

@@ -517,6 +517,10 @@ void yargs(hideBin(process.argv))
                 if (storedToken) {
                   fetchAmplitudeUser(storedToken.idToken, zone)
                     .then((userInfo) => {
+                      // Populate email for /whoami (may not exist in stored profile)
+                      if (userInfo.email && !session.userEmail) {
+                        session.userEmail = userInfo.email;
+                      }
                       const org = userInfo.orgs.find(
                         (o) => o.id === session.selectedOrgId,
                       );
