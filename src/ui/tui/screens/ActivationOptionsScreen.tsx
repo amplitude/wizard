@@ -1,15 +1,15 @@
 /**
- * ActivationOptionsScreen — "What would you like to do?" prompt.
+ * ActivationOptionsScreen — "What would you like to do?" prompt (v2).
  *
  * Shown when the user has the SDK installed but hasn't fully activated yet
- * (1–49 events). Offers next-step options without forcing a full re-run.
+ * (1-49 events). Offers next-step options without forcing a full re-run.
  */
 
 import { Box, Text } from 'ink';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import opn from 'opn';
@@ -23,10 +23,7 @@ const DOCS_URL = OUTBOUND_URLS.sdkDocs;
 export const ActivationOptionsScreen = ({
   store,
 }: ActivationOptionsScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { snippetConfigured } = store.session;
 
@@ -58,16 +55,16 @@ export const ActivationOptionsScreen = ({
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Text bold color={Colors.accent}>
-        Your SDK is{snippetConfigured ? ' installed' : ' partially set up'} —
-        waiting for events
+        Your SDK is{snippetConfigured ? ' installed' : ' partially set up'}{' '}
+        {Icons.dash} waiting for events
       </Text>
 
       <Box marginTop={1} flexDirection="column">
-        <Text color={Colors.muted}>
+        <Text color={Colors.secondary}>
           We can see your project is configured but hasn&apos;t received many
           events yet.
         </Text>
-        <Text color={Colors.muted}>What would you like to do?</Text>
+        <Text color={Colors.body}>What would you like to do?</Text>
       </Box>
 
       <Box marginTop={1}>

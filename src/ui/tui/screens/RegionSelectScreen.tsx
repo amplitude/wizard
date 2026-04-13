@@ -1,5 +1,5 @@
 /**
- * RegionSelectScreen — Choose Amplitude data-center region (US or EU).
+ * RegionSelectScreen v2 — Choose Amplitude data-center region (US or EU).
  *
  * Appears as the very first screen so the correct OAuth URL is known
  * before the browser is opened. Skipped for returning users whose
@@ -8,13 +8,15 @@
  * Also re-shown when the /region slash command sets regionForced.
  *
  * US is focused by default — pressing Enter selects it without navigating.
+ *
+ * v2: uses v2 color tokens, cleaner layout with data residency hint.
  */
 
 import { Box, Text } from 'ink';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
 
 interface RegionSelectScreenProps {
@@ -24,7 +26,7 @@ interface RegionSelectScreenProps {
 const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
   {
     label: 'United States',
-    hint: 'app.amplitude.com · default',
+    hint: 'app.amplitude.com',
     value: 'us',
   },
   {
@@ -35,28 +37,27 @@ const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
 ];
 
 export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { session } = store;
 
+  const heading = session.regionForced
+    ? 'Switch data-center region'
+    : 'Select your data region';
+
+  const hint = session.regionForced
+    ? `Current: ${session.region?.toUpperCase() ?? 'US'} ${
+        Icons.dash
+      } pick a new region below`
+    : 'Choose where your Amplitude data is stored. This determines which data center receives your events.';
+
   return (
-    <Box flexDirection="column" flexGrow={1} paddingTop={1}>
+    <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.accent}>
-          {session.regionForced
-            ? 'Switch data-center region'
-            : 'Where is your Amplitude organization?'}
+        <Text bold color={Colors.heading}>
+          {heading}
         </Text>
-        <Text color={Colors.muted}>
-          {session.regionForced
-            ? `Current: ${
-                session.region?.toUpperCase() ?? 'US'
-              } — pick a new region below`
-            : 'Press Enter to use US (default), or select EU if your org is on the EU data center.'}
-        </Text>
+        <Text color={Colors.muted}>{hint}</Text>
       </Box>
 
       <PickerMenu<CloudRegion>
@@ -66,6 +67,14 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
           store.setRegion(region);
         }}
       />
+
+      <Box marginTop={1}>
+        <Text color={Colors.muted}>
+          {Icons.dot} Data residency affects API endpoints and compliance. You
+          can change this later with{' '}
+          <Text color={Colors.secondary}>/region</Text>.
+        </Text>
+      </Box>
     </Box>
   );
 };

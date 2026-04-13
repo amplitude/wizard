@@ -26,7 +26,8 @@
     "features/**/*",
     "src/**/__tests__/**/*",
     "src/**/*.test.ts",
-    "src/**/*.spec.ts"
+    "src/**/*.spec.ts",
+    "src/ui/tui-archived/**/*"
   ],
   "ts-node": {
     "files": true

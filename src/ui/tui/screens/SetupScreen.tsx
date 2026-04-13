@@ -1,5 +1,5 @@
 /**
- * SetupScreen — Generic framework disambiguation.
+ * SetupScreen — Generic framework disambiguation (v2).
  *
  * Iterates unresolved setup questions from the FrameworkConfig
  * and renders a PickerMenu for each. If all questions are auto-resolved,
@@ -8,10 +8,10 @@
 
 import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 import type { SetupQuestion } from '../../../lib/framework-config.js';
 
 interface SetupScreenProps {
@@ -19,10 +19,7 @@ interface SetupScreenProps {
 }
 
 export const SetupScreen = ({ store }: SetupScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const config = store.session.frameworkConfig;
   const questions = config?.metadata.setup?.questions ?? [];
@@ -59,7 +56,9 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
   if (resolving) {
     return (
       <Box flexDirection="column" flexGrow={1}>
-        <Text color={Colors.muted}>Detecting project configuration...</Text>
+        <Text color={Colors.active}>
+          Detecting project configuration{Icons.ellipsis}
+        </Text>
       </Box>
     );
   }
@@ -84,7 +83,7 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
           Project Setup
         </Text>
         {config && (
-          <Text color={Colors.muted}>
+          <Text color={Colors.secondary}>
             Configuring {config.metadata.name} integration
           </Text>
         )}

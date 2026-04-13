@@ -1,13 +1,14 @@
 /**
  * SettingsOverrideScreen — Modal when .claude/settings.json contains env overrides
- * that block the Wizard from reaching the Amplitude LLM Gateway.
+ * that block the Wizard from reaching the Amplitude LLM Gateway (v2).
  */
 
 import { Box, Text } from 'ink';
-import { useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput } from '../primitives/index.js';
-import { Colors, Icons } from '../styles.js';
+import { Colors, Icons, Layout } from '../styles.js';
 
 interface SettingsOverrideScreenProps {
   store: WizardStore;
@@ -16,10 +17,7 @@ interface SettingsOverrideScreenProps {
 export const SettingsOverrideScreen = ({
   store,
 }: SettingsOverrideScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const [feedback, setFeedback] = useState<string | null>(null);
   const keys = store.session.settingsOverrideKeys;
@@ -38,45 +36,49 @@ export const SettingsOverrideScreen = ({
       <Box
         flexDirection="column"
         borderStyle="round"
-        borderColor="red"
+        borderColor={Colors.error}
         paddingX={3}
         paddingY={1}
         width={64}
       >
         <Box justifyContent="center" marginBottom={1}>
-          <Text color="red" bold>
-            {Icons.warning} Settings Conflict
+          <Text color={Colors.error} bold>
+            {Icons.diamond} Settings Conflict
           </Text>
         </Box>
 
-        <Text>
-          Your project&apos;s <Text bold>.claude/settings.json</Text> sets:
+        <Text color={Colors.body}>
+          Your project&apos;s{' '}
+          <Text bold color={Colors.heading}>
+            .claude/settings.json
+          </Text>{' '}
+          sets:
         </Text>
         <Box flexDirection="column" marginY={1} paddingLeft={2}>
           {keys.map((key) => (
-            <Text key={key}>
+            <Text key={key} color={Colors.body}>
               {Icons.bullet}{' '}
-              <Text color="yellow" bold>
+              <Text color={Colors.warning} bold>
                 {key}
               </Text>
             </Text>
           ))}
         </Box>
-        <Text color={Colors.muted}>
+        <Text color={Colors.secondary}>
           These overrides prevent the Wizard from reaching the Amplitude LLM
           Gateway. We can back up the file and continue.
         </Text>
 
         {feedback && (
           <Box marginTop={1}>
-            <Text color="yellow">
-              {Icons.warning} {feedback}
+            <Text color={Colors.warning}>
+              {Icons.diamond} {feedback}
             </Text>
           </Box>
         )}
 
         <Box marginY={1}>
-          <Text color={Colors.muted}>{'─'.repeat(56)}</Text>
+          <Text color={Colors.border}>{Layout.separatorChar.repeat(56)}</Text>
         </Box>
 
         <ConfirmationInput

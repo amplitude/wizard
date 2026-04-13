@@ -1,5 +1,5 @@
 /**
- * AuthScreen — Multi-step authentication and account setup (SUSI flow).
+ * AuthScreen v2 — Multi-step authentication and account setup (SUSI flow).
  *
  * Steps:
  *   1. OAuth waiting — spinner + login URL while browser auth happens
@@ -10,14 +10,19 @@
  *
  * The screen drives itself from session.pendingOrgs + session.credentials.
  * When credentials are set the router resolves past this screen.
+ *
+ * v2: uses v2 color tokens, removes redundant header (App already shows it),
+ * cleaner section transitions between the 5 steps.
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
-import { LoadingBox, PickerMenu } from '../primitives/index.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
+import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import {
   DEFAULT_HOST_URL,
   type AmplitudeZone,
@@ -57,10 +62,7 @@ function getSelectableEnvironments(
 }
 
 export const AuthScreen = ({ store }: AuthScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { session } = store;
 
@@ -77,6 +79,24 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   >(null);
 
   const pendingOrgs = session.pendingOrgs;
+
+  // Validate pre-populated org/workspace IDs against live data.
+  // If the user's access changed (removed from org, switched accounts),
+  // stale IDs from ./ampli.json could silently select the wrong project.
+  useEffect(() => {
+    if (!pendingOrgs || pendingOrgs.length === 0) return;
+    if (
+      session.selectedOrgId &&
+      !pendingOrgs.some((o) => o.id === session.selectedOrgId)
+    ) {
+      // Stale org — clear pre-populated values so the picker shows
+      store.setOrgAndWorkspace(
+        { id: '', name: '' },
+        { id: '', name: '' },
+        session.installDir,
+      );
+    }
+  }, [pendingOrgs]);
 
   // Resolve org: user-picked > single-org auto-select > pre-populated from session
   const prePopulatedOrg =
@@ -295,89 +315,122 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     });
   };
 
+  // Completed-step indicators shown above the active step
+  const completedSteps: Array<{ label: string }> = [];
+  if (session.detectedFrameworkLabel) {
+    completedSteps.push({
+      label: `Framework: ${session.detectedFrameworkLabel}`,
+    });
+  }
+  if (effectiveOrg && !needsOrgPick) {
+    completedSteps.push({ label: `Organization: ${effectiveOrg.name}` });
+  }
+  if (effectiveWorkspace && !needsWorkspacePick) {
+    completedSteps.push({ label: `Workspace: ${effectiveWorkspace.name}` });
+  }
+  if (selectedEnv && !needsProjectPick) {
+    completedSteps.push({ label: `Project: ${selectedEnv.name}` });
+  }
+
   return (
     <Box flexDirection="column" flexGrow={1}>
-      {/* Header */}
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.accent}>
-          Amplitude Setup Wizard
-        </Text>
-        {session.detectedFrameworkLabel && (
-          <Text>
-            <Text color="green">{Icons.check} </Text>
-            <Text>Framework: {session.detectedFrameworkLabel}</Text>
-          </Text>
-        )}
-      </Box>
+      {/* Completed steps */}
+      {completedSteps.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          {completedSteps.map((step, i) => (
+            <Text key={i}>
+              <Text color={Colors.success}>{Icons.checkmark} </Text>
+              <Text color={Colors.body}>{step.label}</Text>
+            </Text>
+          ))}
+        </Box>
+      )}
 
       {/* Step 1: waiting for OAuth browser redirect */}
       {pendingOrgs === null && (
-        <>
-          <LoadingBox message="Waiting for authentication..." />
+        <Box flexDirection="column">
+          <Box gap={1}>
+            <BrailleSpinner color={Colors.accent} />
+            <Text color={Colors.body}>
+              Waiting for authentication{Icons.ellipsis}
+            </Text>
+          </Box>
           {session.loginUrl && (
             <Box marginTop={1} flexDirection="column">
               <Text color={Colors.muted}>
                 If the browser didn't open, copy and paste this URL:
               </Text>
-              <Text color="cyan">{session.loginUrl}</Text>
+              <Text color={Colors.accent}>{session.loginUrl}</Text>
             </Box>
           )}
-        </>
+        </Box>
       )}
 
       {/* Step 2: org picker (multiple orgs only) */}
       {needsOrgPick && pendingOrgs && (
         <Box flexDirection="column">
-          <Text color={Colors.muted}>Select your Amplitude organization:</Text>
-          <PickerMenu<OrgEntry>
-            options={pendingOrgs.map((org) => ({
-              label: org.name,
-              value: org,
-            }))}
-            onSelect={(value) => {
-              const org = Array.isArray(value) ? value[0] : value;
-              setSelectedOrg(org);
-            }}
-          />
+          <Text bold color={Colors.heading}>
+            Select your organization
+          </Text>
+          <Box marginTop={1}>
+            <PickerMenu<OrgEntry>
+              options={pendingOrgs.map((org) => ({
+                label: org.name,
+                value: org,
+              }))}
+              onSelect={(value) => {
+                const org = Array.isArray(value) ? value[0] : value;
+                setSelectedOrg(org);
+              }}
+            />
+          </Box>
         </Box>
       )}
 
       {/* Step 3: workspace picker (multiple workspaces only) */}
       {needsWorkspacePick && effectiveOrg && (
         <Box flexDirection="column">
-          <Text color={Colors.muted}>
-            Select a workspace in <Text color="white">{effectiveOrg.name}</Text>
-            :
+          <Text bold color={Colors.heading}>
+            Select a workspace
           </Text>
-          <PickerMenu<OrgEntry['workspaces'][number]>
-            options={effectiveOrg.workspaces.map((ws) => ({
-              label: ws.name,
-              value: ws,
-            }))}
-            onSelect={(value) => {
-              const ws = Array.isArray(value) ? value[0] : value;
-              setSelectedWorkspace(ws);
-              store.setOrgAndWorkspace(effectiveOrg, ws, session.installDir);
-            }}
-          />
+          <Text color={Colors.secondary}>
+            in <Text color={Colors.body}>{effectiveOrg.name}</Text>
+          </Text>
+          <Box marginTop={1}>
+            <PickerMenu<OrgEntry['workspaces'][number]>
+              options={effectiveOrg.workspaces.map((ws) => ({
+                label: ws.name,
+                value: ws,
+              }))}
+              onSelect={(value) => {
+                const ws = Array.isArray(value) ? value[0] : value;
+                setSelectedWorkspace(ws);
+                store.setOrgAndWorkspace(effectiveOrg, ws, session.installDir);
+              }}
+            />
+          </Box>
         </Box>
       )}
 
       {/* Step 4: project/environment picker (multiple environments only) */}
       {needsProjectPick && (
         <Box flexDirection="column">
-          <Text color={Colors.muted}>Select a project:</Text>
-          <PickerMenu<EnvironmentEntry>
-            options={selectableEnvs.map((env) => ({
-              label: env.name,
-              value: env,
-            }))}
-            onSelect={(value) => {
-              const env = Array.isArray(value) ? value[0] : value;
-              setSelectedEnv(env);
-              store.setSelectedProjectName(env.name);
-            }}
-          />
+          <Text bold color={Colors.heading}>
+            Select a project
+          </Text>
+          <Box marginTop={1}>
+            <PickerMenu<EnvironmentEntry>
+              options={selectableEnvs.map((env) => ({
+                label: env.name,
+                value: env,
+              }))}
+              onSelect={(value) => {
+                const env = Array.isArray(value) ? value[0] : value;
+                setSelectedEnv(env);
+                store.setSelectedProjectName(env.name);
+              }}
+            />
+          </Box>
         </Box>
       )}
 
@@ -385,24 +438,27 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {needsApiKey && (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column">
-            <Text>
-              Enter your Amplitude project <Text bold>API Key</Text>
+            <Text bold color={Colors.heading}>
+              Enter your project API key
             </Text>
             <Text color={Colors.muted}>
-              Amplitude → Settings → Projects → [your project] → API Keys
+              Amplitude {Icons.arrowRight} Settings {Icons.arrowRight} Projects{' '}
+              {Icons.arrowRight} [your project] {Icons.arrowRight} API Keys
             </Text>
             {session.apiKeyNotice && (
-              <Text color="yellow">{session.apiKeyNotice}</Text>
+              <Box marginTop={1}>
+                <Text color={Colors.warning}>{session.apiKeyNotice}</Text>
+              </Box>
             )}
           </Box>
           <TextInput
-            placeholder="Paste API key here…"
+            placeholder="Paste API key here..."
             onSubmit={handleApiKeySubmit}
           />
-          {apiKeyError && <Text color="red">{apiKeyError}</Text>}
+          {apiKeyError && <Text color={Colors.error}>{apiKeyError}</Text>}
           {savedKeySource && (
-            <Text color="green">
-              {`${Icons.check} `}
+            <Text color={Colors.success}>
+              {Icons.checkmark}{' '}
               {savedKeySource === 'keychain'
                 ? 'API key saved to system keychain'
                 : 'API key saved to .env.local'}

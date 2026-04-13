@@ -1,20 +1,21 @@
 /**
- * McpScreen — MCP server install/remove flow.
+ * McpScreen — MCP server install/remove flow (v2).
  *
  * Uses an McpInstaller service (passed via props) instead of
  * importing business logic directly. Testable, no dynamic imports.
  *
  * Supports two modes via the `mode` prop:
- *   - 'install': detect clients → confirm → install
- *   - 'remove': detect installed clients → confirm → remove
+ *   - 'install': detect clients -> confirm -> install
+ *   - 'remove': detect installed clients -> confirm -> remove
  *
  * When done, calls store.setMcpComplete(). The router resolves to outro.
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
-import { useSyncExternalStore } from 'react';
-import { type WizardStore, McpOutcome, RunPhase } from '../store.js';
+import { useState, useEffect, useRef } from 'react';
+import type { WizardStore } from '../store.js';
+import { McpOutcome, RunPhase } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
@@ -65,12 +66,17 @@ export const McpScreen = ({
   standalone = false,
   onComplete,
 }: McpScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const isRemove = mode === 'remove';
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
   const { runPhase, amplitudePreDetected, amplitudePreDetectedChoicePending } =
     store.session;
   const dataSetupComplete = runPhase === RunPhase.Completed;
@@ -89,7 +95,7 @@ export const McpScreen = ({
         if (detected.length === 0) {
           analytics.wizardCapture('MCP No Clients Detected', { mode });
           setPhase(Phase.None);
-          setTimeout(
+          timerRef.current = setTimeout(
             () =>
               markDone(store, McpOutcome.NoClients, [], standalone, onComplete),
             1500,
@@ -111,7 +117,7 @@ export const McpScreen = ({
           { mode },
         );
         setPhase(Phase.None);
-        setTimeout(
+        timerRef.current = setTimeout(
           () => markDone(store, McpOutcome.Failed, [], standalone, onComplete),
           1500,
         );
@@ -158,7 +164,7 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    setTimeout(
+    timerRef.current = setTimeout(
       () => markDone(store, outcome, result, standalone, onComplete),
       2000,
     );
@@ -177,7 +183,7 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    setTimeout(
+    timerRef.current = setTimeout(
       () => markDone(store, outcome, result, standalone, onComplete),
       2000,
     );
@@ -187,16 +193,17 @@ export const McpScreen = ({
     <Box flexDirection="column" flexGrow={1}>
       {dataSetupComplete && (
         <Box marginBottom={1}>
-          <Text color="green" bold>
+          <Text color={Colors.success} bold>
+            {Icons.checkmark}{' '}
             {amplitudePreDetected
-              ? `${Icons.check} Amplitude is already configured in this project!`
-              : `${Icons.check} Data setup complete!`}
+              ? 'Amplitude is already configured in this project!'
+              : 'Data setup complete!'}
           </Text>
         </Box>
       )}
       {amplitudePreDetectedChoicePending && !isRemove && (
         <Box marginBottom={1} flexDirection="column">
-          <Text color={Colors.muted}>
+          <Text color={Colors.secondary}>
             The installer skipped the automated setup step because Amplitude is
             already present. You can continue to editor MCP setup, or run the
             full setup wizard if you want to review or change the integration.
@@ -230,19 +237,21 @@ export const McpScreen = ({
 
           <Box marginTop={1} flexDirection="column">
             {phase === Phase.Detecting && (
-              <Text color={Colors.muted}>Detecting supported editors...</Text>
+              <Text color={Colors.muted}>
+                Detecting supported editors{Icons.ellipsis}
+              </Text>
             )}
 
             {phase === Phase.None && (
               <Text color={Colors.muted}>
                 No {isRemove ? 'installed' : 'supported'} MCP clients detected.
-                Skipping...
+                Skipping{Icons.ellipsis}
               </Text>
             )}
 
             {phase === Phase.Ask && (
               <>
-                <Text color={Colors.muted}>
+                <Text color={Colors.secondary}>
                   Detected: {clients.map((c) => c.name).join(', ')}
                 </Text>
                 <Box marginTop={1}>
@@ -282,8 +291,9 @@ export const McpScreen = ({
             )}
 
             {phase === Phase.Working && (
-              <Text color={Colors.muted}>
-                {isRemove ? 'Removing' : 'Installing'} MCP server...
+              <Text color={Colors.active}>
+                {isRemove ? 'Removing' : 'Installing'} MCP server
+                {Icons.ellipsis}
               </Text>
             )}
 
@@ -291,12 +301,12 @@ export const McpScreen = ({
               <Box flexDirection="column">
                 {resultClients.length > 0 ? (
                   <>
-                    <Text color="green" bold>
-                      {Icons.check} MCP server{' '}
+                    <Text color={Colors.success} bold>
+                      {Icons.checkmark} MCP server{' '}
                       {isRemove ? 'removed from' : 'installed for'}:
                     </Text>
                     {resultClients.map((name, i) => (
-                      <Text key={i}>
+                      <Text key={i} color={Colors.body}>
                         {' '}
                         {Icons.bullet} {name}
                       </Text>

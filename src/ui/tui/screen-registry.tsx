@@ -1,12 +1,5 @@
 /**
- * Screen registry — maps screen names to React components.
- *
- * Adding a new screen:
- *   1. Create the component in screens/
- *   2. Add an entry here
- *   3. Add the screen name to the router flow (router.ts)
- *
- * App.tsx never needs to change.
+ * Screen registry v2 — maps screen names to v2 React components.
  */
 
 import type { ReactNode } from 'react';
@@ -31,7 +24,7 @@ import { LoginScreen } from './screens/LoginScreen.js';
 import { OutroScreen } from './screens/OutroScreen.js';
 import { createMcpInstaller } from './services/mcp-installer.js';
 import type { McpInstaller } from './services/mcp-installer.js';
-import { SnakeGame } from './primitives/SnakeGame.js';
+import { SnakeGame } from './primitives/index.js';
 
 export interface ScreenServices {
   mcpInstaller: McpInstaller;
@@ -99,7 +92,7 @@ export function createScreens(
       />
     ),
 
-    // Slack integration (in-wizard step and standalone flow)
+    // Slack integration
     [Screen.Slack]: <SlackScreen store={store} />,
     [Screen.SlackSetup]: <SlackScreen store={store} standalone />,
   };

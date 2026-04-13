@@ -162,11 +162,6 @@ void yargs(hideBin(process.argv))
             'Run in benchmark mode with per-phase token tracking\nenv: AMPLITUDE_WIZARD_BENCHMARK',
           type: 'boolean',
         },
-        'tui-v2': {
-          default: false,
-          describe: 'Use the redesigned TUI (v2)\nenv: AMPLITUDE_TUI_V2',
-          type: 'boolean',
-        },
         agent: {
           default: false,
           describe:
@@ -233,11 +228,7 @@ void yargs(hideBin(process.argv))
           installCompletions();
 
           try {
-            const tuiModule =
-              options.tuiV2 || process.env.AMPLITUDE_TUI_V2 === '1'
-                ? './src/ui/tui-v2/start-tui.js'
-                : './src/ui/tui/start-tui.js';
-            const { startTUI } = await import(tuiModule);
+            const { startTUI } = await import('./src/ui/tui/start-tui.js');
             const { buildSession } = await import(
               './src/lib/wizard-session.js'
             );
@@ -1197,16 +1188,9 @@ void yargs(hideBin(process.argv))
     (argv) => {
       void (async () => {
         try {
-          const useV2 = process.env.AMPLITUDE_TUI_V2 === '1';
-          const tuiModule = useV2
-            ? './src/ui/tui-v2/start-tui.js'
-            : './src/ui/tui/start-tui.js';
-          const { startTUI } = await import(tuiModule);
+          const { startTUI } = await import('./src/ui/tui/start-tui.js');
           const { buildSession } = await import('./src/lib/wizard-session.js');
-          const routerModule = useV2
-            ? './src/ui/tui-v2/router.js'
-            : './src/ui/tui/router.js';
-          const { Flow } = await import(routerModule);
+          const { Flow } = await import('./src/ui/tui/router.js');
           const { getStoredUser, getStoredToken, updateStoredUserZone } =
             await import('./src/utils/ampli-settings.js');
           const { getHostFromRegion } = await import('./src/utils/urls.js');
@@ -1289,19 +1273,12 @@ void yargs(hideBin(process.argv))
           const options = { ...argv };
           void (async () => {
             try {
-              const useV2 = process.env.AMPLITUDE_TUI_V2 === '1';
-              const tuiModule = useV2
-                ? './src/ui/tui-v2/start-tui.js'
-                : './src/ui/tui/start-tui.js';
-              const { startTUI } = await import(tuiModule);
+              const { startTUI } = await import('./src/ui/tui/start-tui.js');
               const { buildSession } = await import(
                 './src/lib/wizard-session.js'
               );
 
-              const routerModule = useV2
-                ? './src/ui/tui-v2/router.js'
-                : './src/ui/tui/router.js';
-              const { Flow } = await import(routerModule);
+              const { Flow } = await import('./src/ui/tui/router.js');
               const tui = startTUI(WIZARD_VERSION, Flow.McpAdd);
               const session = buildSession({
                 debug: options.debug,
@@ -1338,19 +1315,12 @@ void yargs(hideBin(process.argv))
           const options = { ...argv };
           void (async () => {
             try {
-              const useV2 = process.env.AMPLITUDE_TUI_V2 === '1';
-              const tuiModule = useV2
-                ? './src/ui/tui-v2/start-tui.js'
-                : './src/ui/tui/start-tui.js';
-              const { startTUI } = await import(tuiModule);
+              const { startTUI } = await import('./src/ui/tui/start-tui.js');
               const { buildSession } = await import(
                 './src/lib/wizard-session.js'
               );
 
-              const routerModule = useV2
-                ? './src/ui/tui-v2/router.js'
-                : './src/ui/tui/router.js';
-              const { Flow } = await import(routerModule);
+              const { Flow } = await import('./src/ui/tui/router.js');
               const tui = startTUI(WIZARD_VERSION, Flow.McpRemove);
               const session = buildSession({
                 debug: options.debug,
@@ -1386,7 +1356,6 @@ void yargs(hideBin(process.argv))
     },
   )
   .example('$0', 'Run the interactive setup wizard')
-  .example('$0 --tui-v2', 'Run with the redesigned TUI')
   .example('$0 --ci --api-key <key> --install-dir .', 'Run in CI mode')
   .example(
     '$0 --agent --install-dir .',

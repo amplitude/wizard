@@ -1,5 +1,5 @@
 /**
- * LoginScreen — Silent token refresh overlay for the /login slash command.
+ * LoginScreen — Silent token refresh overlay for the /login slash command (v2).
  *
  * On mount, reads the stored refresh token from ~/.ampli.json and exchanges
  * it for a new access token via the Amplitude OAuth2 token endpoint.
@@ -9,9 +9,9 @@
 
 import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
-import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { Colors, Icons } from '../styles.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 
 interface LoginScreenProps {
@@ -90,17 +90,21 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
       <Box marginTop={1} flexDirection="column">
         {phase === Phase.Refreshing && (
           <Box gap={1}>
-            <Spinner />
-            <Text color={Colors.muted}>Refreshing credentials...</Text>
+            <BrailleSpinner />
+            <Text color={Colors.active}>
+              Refreshing credentials{Icons.ellipsis}
+            </Text>
           </Box>
         )}
 
         {phase === Phase.Success && (
-          <Text color="green">{Icons.check} Credentials refreshed.</Text>
+          <Text color={Colors.success}>
+            {Icons.checkmark} Credentials refreshed.
+          </Text>
         )}
 
         {phase === Phase.NoToken && (
-          <Text color={Colors.muted}>
+          <Text color={Colors.secondary}>
             No stored credentials found. Restart the wizard to re-authenticate.
           </Text>
         )}
@@ -108,7 +112,7 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         {phase === Phase.Error && (
           <Box flexDirection="column">
             <Text color={Colors.error}>Refresh failed: {errorMsg}</Text>
-            <Text color={Colors.muted}>
+            <Text color={Colors.secondary}>
               Restart the wizard to re-authenticate.
             </Text>
           </Box>

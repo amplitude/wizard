@@ -1,17 +1,24 @@
 /**
- * OutroScreen — Summary after the agent run.
+ * OutroScreen (v2) — Summary after the agent run.
+ *
  * Reads store.session.outroData to render success, error, or cancel view.
  * Keeps the process alive until the user presses a key to exit.
+ *
+ * v2 changes:
+ *   - Success: bold green heading, compact changes + events list, PickerMenu
+ *   - Error: red heading with error message and suggested fixes
+ *   - Cancel: clean warning-colored cancel message
+ *   - Removed verbose LLM-agent disclaimer; single-line "review changes" note
  */
 
 import { Box, Text } from 'ink';
 import { useState } from 'react';
-import { useScreenInput } from '../hooks/useScreenInput.js';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Colors, Icons } from '../styles.js';
 import { PickerMenu, ReportViewer } from '../primitives/index.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import opn from 'opn';
@@ -25,17 +32,14 @@ interface OutroScreenProps {
 }
 
 export const OutroScreen = ({ store }: OutroScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const [showReport, setShowReport] = useState(false);
 
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
 
-  // Any-key-to-exit only for non-success states; success uses a picker.
-  useScreenInput((input, key) => {
+  // Any-key-to-exit for non-success states; success uses the picker.
+  useScreenInput((_input, key) => {
     if (!isSuccess) process.exit(0);
     if (showReport && key.escape) setShowReport(false);
   });
@@ -45,22 +49,22 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   if (!outroData) {
     return (
       <Box flexDirection="column" flexGrow={1}>
-        <Text color={Colors.muted}>Finishing up...</Text>
+        <Text color={Colors.muted}>Finishing up{Icons.ellipsis}</Text>
       </Box>
     );
   }
 
-  // installDir comes from --install-dir CLI flag (defaults to process.cwd()).
-  // REPORT_FILE is a compile-time constant with no path separators, so string
-  // concatenation is safe and avoids path.join/path.resolve on user-supplied input.
+  // Build the report file path from the install directory.
   const installDir = store.session.installDir;
   const reportPath = installDir.endsWith(path.sep)
     ? `${installDir}${REPORT_FILE}`
     : `${installDir}${path.sep}${REPORT_FILE}`;
 
+  // ── Report sub-view ──────────────────────────────────────────────────
+
   if (showReport) {
     return (
-      <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
         <Box marginBottom={1}>
           <Text bold color={Colors.accent}>
             Setup Report
@@ -72,103 +76,117 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     );
   }
 
+  // ── Main outro views ─────────────────────────────────────────────────
+
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+      {/* ── Success ───────────────────────────────────────────────────── */}
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
-          <Text color="green" bold>
-            {Icons.check} Successfully installed Amplitude!
+          <Text color={Colors.success} bold>
+            {Icons.checkmark} Amplitude is live!
           </Text>
-
-          <Box marginTop={1}>
-            <Text>
-              Check <Text bold>./amplitude-setup-report.md</Text> for details
-              about your integration
+          {store.eventPlan.length > 0 && (
+            <Text color={Colors.body}>
+              {store.eventPlan.length} event
+              {store.eventPlan.length !== 1 ? 's' : ''} instrumented
+              {store.session.selectedProjectName
+                ? ` in ${store.session.selectedProjectName}`
+                : ''}
+              .
             </Text>
-          </Box>
+          )}
 
+          {/* Changes summary */}
           {outroData.changes && outroData.changes.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="cyan" bold>
-                What the agent did:
-              </Text>
               {outroData.changes.map((change, i) => (
-                <Text key={i}>
+                <Text key={i} color={Colors.body}>
                   {Icons.bullet} {change}
                 </Text>
               ))}
             </Box>
           )}
 
+          {/* Events added */}
           {store.eventPlan.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
-              <Text color="cyan" bold>
-                Events added:
+              <Text color={Colors.secondary} bold>
+                Events
               </Text>
               {store.eventPlan.map((event) => (
-                <Text key={event.name}>
-                  {Icons.bullet} <Text bold>{event.name}</Text>
+                <Text key={event.name} color={Colors.body}>
+                  {Icons.diamond} <Text bold>{event.name}</Text>
                   <Text color={Colors.muted}> {event.description}</Text>
                 </Text>
               ))}
             </Box>
           )}
 
-          {outroData.docsUrl && (
-            <Box marginTop={1}>
-              <Text>
-                Learn more: <Text color="cyan">{outroData.docsUrl}</Text>
-              </Text>
-            </Box>
-          )}
-
-          {outroData.continueUrl && (
-            <Box>
-              <Text>
-                Continue onboarding:{' '}
-                <Text color="cyan">{outroData.continueUrl}</Text>
-              </Text>
-            </Box>
-          )}
-
+          {/* Single-line review note */}
           <Box marginTop={1}>
             <Text color={Colors.muted}>
-              Note: This wizard uses an LLM agent to analyze and modify your
-              project. Please review the changes made.
-            </Text>
-          </Box>
-          <Box>
-            <Text color={Colors.muted}>
-              How did this work for you? Drop us a line: wizard@amplitude.com
+              Review changes in{' '}
+              <Text bold color={Colors.secondary}>
+                ./amplitude-setup-report.md
+              </Text>
             </Text>
           </Box>
         </Box>
       )}
 
+      {/* ── Error ─────────────────────────────────────────────────────── */}
       {outroData.kind === OutroKind.Error && (
         <Box flexDirection="column">
-          <Text color="red" bold>
-            {Icons.cross} {outroData.message || 'An error occurred'}
+          <Text color={Colors.error} bold>
+            {Icons.cross} Setup failed
           </Text>
+          {outroData.message && (
+            <Box marginTop={1}>
+              <Text color={Colors.body}>{outroData.message}</Text>
+            </Box>
+          )}
+          <Box marginTop={1} flexDirection="column">
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Check your API key and network connection
+            </Text>
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Run the wizard again with{' '}
+              <Text bold>--debug</Text> for more detail
+            </Text>
+            {outroData.docsUrl && (
+              <Text color={Colors.secondary}>
+                {Icons.arrowRight} Docs:{' '}
+                <Text color={Colors.accent}>{outroData.docsUrl}</Text>
+              </Text>
+            )}
+          </Box>
         </Box>
       )}
 
+      {/* ── Cancel ────────────────────────────────────────────────────── */}
       {outroData.kind === OutroKind.Cancel && (
         <Box flexDirection="column">
-          <Text color="yellow" bold>
-            {Icons.stop} {outroData.message || 'Cancelled'}
+          <Text color={Colors.warning} bold>
+            {Icons.dash} Setup cancelled
           </Text>
+          {outroData.message && (
+            <Box marginTop={1}>
+              <Text color={Colors.body}>{outroData.message}</Text>
+            </Box>
+          )}
           {outroData.docsUrl && (
             <Box marginTop={1}>
-              <Text>
-                Manual setup guide:{' '}
-                <Text color="cyan">{outroData.docsUrl}</Text>
+              <Text color={Colors.secondary}>
+                Manual setup:{' '}
+                <Text color={Colors.accent}>{outroData.docsUrl}</Text>
               </Text>
             </Box>
           )}
         </Box>
       )}
 
+      {/* ── Actions ───────────────────────────────────────────────────── */}
       <Box marginTop={1}>
         {isSuccess ? (
           <PickerMenu

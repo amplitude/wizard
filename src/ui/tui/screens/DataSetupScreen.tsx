@@ -1,19 +1,23 @@
 /**
- * DataSetupScreen — Checks whether the connected Amplitude project has event data.
+ * DataSetupScreen v2 — Checks whether the connected Amplitude project has event data.
  *
  * Calls the Amplitude Data API to determine the project's activation level:
- *   'full'    — 50+ events / well-established data → Options menu
- *   'partial' — snippet installed but few events   → ActivationOptions screen
- *   'none'    — no events, no snippet              → Framework Detection
+ *   'full'    — 50+ events / well-established data
+ *   'partial' — snippet installed but few events
+ *   'none'    — no events, no snippet
  *
  * The router's isComplete predicate (projectHasData !== null) advances past
  * this screen automatically once the value is set.
+ *
+ * v2: uses v2 color tokens and BrailleSpinner.
  */
 
-import { Box } from 'ink';
-import { useEffect, useSyncExternalStore } from 'react';
+import { Box, Text } from 'ink';
+import { useEffect } from 'react';
 import type { WizardStore } from '../store.js';
-import { LoadingBox } from '../primitives/index.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
+import { Colors, Icons } from '../styles.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
 import { detectAmplitudeInProject } from '../../../lib/detect-amplitude.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
@@ -24,10 +28,7 @@ interface DataSetupScreenProps {
 }
 
 export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   useEffect(() => {
     if (store.session.projectHasData !== null) return;
@@ -107,7 +108,22 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <LoadingBox message="Checking project setup…" />
+      <Box flexDirection="column">
+        <Text bold color={Colors.heading}>
+          Checking project setup
+        </Text>
+        <Box marginTop={1} gap={1}>
+          <BrailleSpinner color={Colors.accent} />
+          <Text color={Colors.body}>
+            Analyzing your Amplitude project{Icons.ellipsis}
+          </Text>
+        </Box>
+        <Box marginTop={1}>
+          <Text color={Colors.muted}>
+            Looking for existing SDK installation and event data
+          </Text>
+        </Box>
+      </Box>
     </Box>
   );
 };

@@ -1,5 +1,5 @@
 /**
- * SlackScreen — Amplitude Slack integration setup.
+ * SlackScreen — Amplitude Slack integration setup (v2).
  *
  * Guides the user to connect their Slack workspace to Amplitude.
  * Since the OAuth handshake happens in the browser (Amplitude Settings),
@@ -10,9 +10,10 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
-import { useSyncExternalStore } from 'react';
-import { type WizardStore, SlackOutcome } from '../store.js';
+import { useState, useEffect, useRef } from 'react';
+import type { WizardStore } from '../store.js';
+import { SlackOutcome } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import {
@@ -59,12 +60,17 @@ export const SlackScreen = ({
   standalone = false,
   onComplete,
 }: SlackScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear any pending timer on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const region = store.session.region ?? 'us';
   const isEu = region === 'eu';
@@ -95,7 +101,7 @@ export const SlackScreen = ({
         logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
         if (isConnected) {
           setPhase(Phase.Done);
-          setTimeout(() => {
+          timerRef.current = setTimeout(() => {
             if (!cancelled) {
               markDone(store, SlackOutcome.Configured, standalone, onComplete);
             }
@@ -135,7 +141,7 @@ export const SlackScreen = ({
         }`,
       );
       opn(url, { wait: false }).catch(() => {});
-      setTimeout(() => setPhase(Phase.Waiting), 800);
+      timerRef.current = setTimeout(() => setPhase(Phase.Waiting), 800);
     };
 
     if (accessToken && orgId) {
@@ -153,7 +159,7 @@ export const SlackScreen = ({
 
   const handleDone = () => {
     setPhase(Phase.Done);
-    setTimeout(
+    timerRef.current = setTimeout(
       () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
       1500,
     );
@@ -166,16 +172,16 @@ export const SlackScreen = ({
       </Text>
 
       <Box marginTop={1} flexDirection="column">
-        <Text color={Colors.muted}>
+        <Text color={Colors.secondary}>
           Connect Amplitude to Slack for chart previews, dashboard sharing,
         </Text>
-        <Text color={Colors.muted}>
+        <Text color={Colors.secondary}>
           and real-time tracking plan notifications.
         </Text>
 
         {isEu && (
           <Box marginTop={1}>
-            <Text color="yellow">
+            <Text color={Colors.warning}>
               EU region: install the &quot;Amplitude - EU&quot; app from the
               Slack App Directory.
             </Text>
@@ -195,36 +201,44 @@ export const SlackScreen = ({
         )}
 
         {phase === Phase.Opening && (
-          <Text color={Colors.muted}>Opening browser...</Text>
+          <Text color={Colors.active}>Opening browser{Icons.ellipsis}</Text>
         )}
 
         {phase === Phase.Waiting && (
           <Box flexDirection="column" marginTop={1}>
             {openedUrl === settingsUrl ? (
               <>
-                <Text>
-                  Browser opened to <Text color="cyan">{settingsUrl}</Text>
+                <Text color={Colors.body}>
+                  Browser opened to{' '}
+                  <Text color={Colors.accent}>{settingsUrl}</Text>
+                </Text>
+                <Text color={Colors.secondary}>
+                  Go to Settings {Icons.chevronRight} Personal Settings{' '}
+                  {Icons.chevronRight} Profile and click &quot;Connect to
+                  Slack&quot;.
                 </Text>
                 <Text color={Colors.muted}>
-                  Go to Settings &gt; Personal Settings &gt; Profile and click
-                  &quot;Connect to Slack&quot;.
-                </Text>
-                <Text color={Colors.muted}>
-                  Docs: <Text color="cyan">https://amplitude.com/docs/analytics/integrate-slack</Text>
+                  Docs:{' '}
+                  <Text color={Colors.accent}>
+                    https://amplitude.com/docs/analytics/integrate-slack
+                  </Text>
                 </Text>
               </>
             ) : (
               <>
-                <Text>
-                  Browser opened to <Text color="cyan">Slack</Text> for
+                <Text color={Colors.body}>
+                  Browser opened to <Text color={Colors.accent}>Slack</Text> for
                   authorization.
                 </Text>
-                <Text color={Colors.muted}>
+                <Text color={Colors.secondary}>
                   Authorize the {appName} app in Slack to complete the
                   connection.
                 </Text>
                 <Text color={Colors.muted}>
-                  Docs: <Text color="cyan">https://amplitude.com/docs/analytics/integrate-slack</Text>
+                  Docs:{' '}
+                  <Text color={Colors.accent}>
+                    https://amplitude.com/docs/analytics/integrate-slack
+                  </Text>
                 </Text>
               </>
             )}
@@ -242,9 +256,9 @@ export const SlackScreen = ({
 
         {phase === Phase.Done && (
           <Box flexDirection="column" marginTop={1}>
-            <Text color="green" bold>
-              {Icons.check} Slack connected! You&apos;ll get chart previews and
-              notifications in Slack.
+            <Text color={Colors.success} bold>
+              {Icons.checkmark} Slack connected! You&apos;ll get chart previews
+              and notifications in Slack.
             </Text>
           </Box>
         )}
