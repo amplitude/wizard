@@ -104,11 +104,6 @@ Proceed to Step 2 with the YAML you built.
 
 ### Step 2: discover-event-surfaces
 
-Before generating candidates, load **`amplitude-quickstart-taxonomy-agent`**
-from the **`taxonomy`** category (`load_skill_menu` → `install_skill`) and
-apply its rules for event names, funnel linkage, property caps, and
-autocapture-friendly scoping.
-
 Invoke the `discover-event-surfaces` skill, passing the `change_brief` YAML
 from step 1.
 
