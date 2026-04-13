@@ -15,6 +15,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import type { WizardStore } from '../store.js';
 import {
   TabContainer,
@@ -25,6 +26,7 @@ import {
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
   AdditionalFeature,
@@ -124,10 +126,15 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
   );
 };
 
+/** Minimum terminal size to show the animated logo. */
+const MIN_COLS_FOR_LOGO = 80;
+const MIN_ROWS_FOR_LOGO = 20;
+
 /** The main Progress tab content. */
 const ProgressTab = ({ store }: { store: WizardStore }) => {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(Date.now());
+  const [cols, rows] = useStdoutDimensions();
 
   // Elapsed time counter
   useEffect(() => {
@@ -178,36 +185,48 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   ).length;
   const total = progressItems.length;
 
+  const showLogo = cols >= MIN_COLS_FOR_LOGO && rows >= MIN_ROWS_FOR_LOGO;
+
   return (
-    <Box flexDirection="column" flexGrow={1} paddingX={1}>
-      {/* Header bar: progress count + elapsed + currently editing */}
-      <Box marginBottom={1} justifyContent="space-between">
-        <Box gap={1}>
-          <BrailleSpinner color={Colors.active} />
-          <Text color={Colors.body} bold>
-            {total > 0
-              ? `${completed}/${total} tasks complete`
-              : 'Agent running'}
-          </Text>
-          <Text color={Colors.muted}>
-            {Icons.dot} {formatElapsed(elapsed)}
-          </Text>
+    <Box flexDirection="row" flexGrow={1} paddingX={1}>
+      {/* Left: task list and tips */}
+      <Box flexDirection="column" flexGrow={1}>
+        {/* Header bar: progress count + elapsed + currently editing */}
+        <Box marginBottom={1} justifyContent="space-between">
+          <Box gap={1}>
+            <BrailleSpinner color={Colors.active} />
+            <Text color={Colors.body} bold>
+              {total > 0
+                ? `${completed}/${total} tasks complete`
+                : 'Agent running'}
+            </Text>
+            <Text color={Colors.muted}>
+              {Icons.dot} {formatElapsed(elapsed)}
+            </Text>
+          </Box>
+          {currentFile && (
+            <Text color={Colors.muted} wrap="truncate-end">
+              {currentFile}
+            </Text>
+          )}
         </Box>
-        {currentFile && (
-          <Text color={Colors.muted} wrap="truncate-end">
-            {currentFile}
-          </Text>
-        )}
+
+        {/* Tasks — the hero */}
+        <ProgressList items={progressItems} title="Tasks" />
+
+        {/* Inline event plan */}
+        <InlineEventPlan store={store} />
+
+        {/* Compact conditional tips */}
+        <ConditionalTips store={store} />
       </Box>
 
-      {/* Tasks — the hero */}
-      <ProgressList items={progressItems} title="Tasks" />
-
-      {/* Inline event plan */}
-      <InlineEventPlan store={store} />
-
-      {/* Compact conditional tips */}
-      <ConditionalTips store={store} />
+      {/* Right: animated logo (responsive — hidden on small terminals) */}
+      {showLogo && (
+        <Box marginLeft={2} alignItems="flex-start" flexShrink={0}>
+          <AnimatedAmplitudeLogo />
+        </Box>
+      )}
     </Box>
   );
 };

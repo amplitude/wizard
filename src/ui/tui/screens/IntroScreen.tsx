@@ -7,7 +7,7 @@
  *   2. Detection failed: auto-selects Generic, then continue/cancel
  *   3. Detection succeeded: show result, then continue/cancel
  *
- * No ASCII art — compact heading, one-line tagline, inline detection results.
+ * Shows the AmplitudeTextLogo when terminal is wide/tall enough (>=75x20).
  * Calls store.concludeIntro() to advance past this screen.
  */
 
@@ -22,14 +22,22 @@ import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
+import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface IntroScreenProps {
   store: WizardStore;
 }
 
+const LOGO_MIN_COLS = 75;
+const LOGO_MIN_ROWS = 20;
+
 export const IntroScreen = ({ store }: IntroScreenProps) => {
   useWizardStore(store);
+
+  const [cols, rows] = useStdoutDimensions();
+  const showLogo = cols >= LOGO_MIN_COLS && rows >= LOGO_MIN_ROWS;
 
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
@@ -73,6 +81,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         justifyContent="flex-start"
         paddingTop={2}
       >
+        {showLogo && <AmplitudeTextLogo />}
         <Box flexDirection="column" alignItems="center" marginBottom={1}>
           <Text bold color={Colors.heading}>
             Amplitude Wizard
@@ -155,6 +164,9 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       justifyContent="flex-start"
       paddingTop={2}
     >
+      {/* Logo (responsive — hidden when terminal is too small) */}
+      {showLogo && <AmplitudeTextLogo />}
+
       {/* Heading */}
       <Box flexDirection="column" alignItems="center" marginBottom={1}>
         <Text bold color={Colors.heading}>
