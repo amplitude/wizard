@@ -137,11 +137,11 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(Date.now());
 
-  // Elapsed time counter — update every 5s to reduce re-renders
+  // Elapsed time counter
   useEffect(() => {
     const id = setInterval(() => {
       setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
-    }, 5000);
+    }, 1000);
     return () => clearInterval(id);
   }, []);
 
