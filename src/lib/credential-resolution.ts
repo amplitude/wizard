@@ -48,15 +48,13 @@ export async function resolveCredentials(
     { getAPIKey },
     { getHostFromRegion },
     { logToFile },
-    { persistApiKey },
-    { readApiKeyWithSource },
+    { persistApiKey, readApiKeyWithSource },
   ] = await Promise.all([
     import('../utils/ampli-settings.js'),
     import('./ampli-config.js'),
     import('../utils/get-api-key.js'),
     import('../utils/urls.js'),
     import('../utils/debug.js'),
-    import('../utils/api-key-store.js'),
     import('../utils/api-key-store.js'),
   ]);
 
