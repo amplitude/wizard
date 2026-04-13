@@ -52,7 +52,6 @@ import {
   ZSH_COMPLETION_SCRIPT,
   BASH_COMPLETION_SCRIPT,
 } from './src/utils/shell-completions';
-import { persistApiKey } from './src/utils/api-key-store';
 import { ExitCode } from './src/lib/exit-codes';
 
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
@@ -198,7 +197,8 @@ void yargs(hideBin(process.argv))
         // Agent mode: structured JSON output, same requirements as CI
         void (async () => {
           const { AgentUI } = await import('./src/ui/agent-ui.js');
-          setUI(new AgentUI());
+          const agentUI = new AgentUI();
+          setUI(agentUI);
           if (!options.installDir) {
             getUI().intro(chalk.inverse(`Amplitude Wizard`));
             getUI().log.error(
@@ -206,7 +206,74 @@ void yargs(hideBin(process.argv))
             );
             process.exit(ExitCode.INVALID_ARGS);
           }
-          await lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
+
+          // Build session and resolve credentials (same logic as TUI)
+          const { buildSession } = await import('./src/lib/wizard-session.js');
+          const session = buildSession({
+            debug: options.debug as boolean | undefined,
+            verbose: options.verbose as boolean | undefined,
+            forceInstall: options.forceInstall as boolean | undefined,
+            installDir: options.installDir as string | undefined,
+            ci: false,
+            signup: options.signup as boolean | undefined,
+            localMcp: options.localMcp as boolean | undefined,
+            apiKey: options.apiKey as string | undefined,
+            menu: options.menu as boolean | undefined,
+            integration: options.integration as Parameters<
+              typeof buildSession
+            >[0]['integration'],
+            benchmark: options.benchmark as boolean | undefined,
+            projectId: options.projectId as string | undefined,
+          });
+
+          // If --api-key was provided, skip OAuth entirely
+          if (session.apiKey) {
+            const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
+            session.credentials = {
+              accessToken: session.apiKey,
+              projectApiKey: session.apiKey,
+              host: DEFAULT_HOST_URL,
+              projectId: session.projectId ?? 0,
+            };
+            session.projectHasData = false;
+          } else {
+            // Resolve credentials from stored OAuth tokens
+            const { resolveCredentials, resolveEnvironmentSelection } =
+              await import('./src/lib/credential-resolution.js');
+            await resolveCredentials(session, { requireOrgId: false });
+
+            // If multiple environments, prompt over NDJSON
+            if (session.pendingOrgs && !session.credentials) {
+              const selection = await agentUI.promptEnvironmentSelection(
+                session.pendingOrgs,
+              );
+              const resolved = await resolveEnvironmentSelection(
+                session,
+                selection,
+              );
+              if (!resolved) {
+                getUI().log.error(
+                  'Could not resolve the selected environment. ' +
+                    'Please check the org, workspace, and environment names.',
+                );
+                process.exit(ExitCode.AUTH_REQUIRED);
+              }
+            }
+
+            // If we still don't have credentials, auth is required
+            if (!session.credentials) {
+              getUI().log.error(
+                'Could not resolve credentials. ' +
+                  'Please log in first by running: npx @amplitude/wizard',
+              );
+              process.exit(ExitCode.AUTH_REQUIRED);
+            }
+          }
+
+          await lazyRunWizard(
+            options as Parameters<typeof lazyRunWizard>[0],
+            session,
+          );
         })();
       } else if (options.ci || options.yes) {
         // Use LoggingUI for CI mode (no dependencies, no prompts)
@@ -219,7 +286,74 @@ void yargs(hideBin(process.argv))
           process.exit(1);
         }
 
-        void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
+        // Build session and resolve credentials for CI mode
+        void (async () => {
+          const { buildSession } = await import('./src/lib/wizard-session.js');
+          const session = buildSession({
+            debug: options.debug as boolean | undefined,
+            verbose: options.verbose as boolean | undefined,
+            forceInstall: options.forceInstall as boolean | undefined,
+            installDir: options.installDir as string | undefined,
+            ci: true,
+            signup: options.signup as boolean | undefined,
+            localMcp: options.localMcp as boolean | undefined,
+            apiKey: options.apiKey as string | undefined,
+            menu: options.menu as boolean | undefined,
+            integration: options.integration as Parameters<
+              typeof buildSession
+            >[0]['integration'],
+            benchmark: options.benchmark as boolean | undefined,
+            projectId: options.projectId as string | undefined,
+          });
+
+          if (session.apiKey) {
+            const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
+            session.credentials = {
+              accessToken: session.apiKey,
+              projectApiKey: session.apiKey,
+              host: DEFAULT_HOST_URL,
+              projectId: session.projectId ?? 0,
+            };
+            session.projectHasData = false;
+          } else {
+            const { resolveCredentials } = await import(
+              './src/lib/credential-resolution.js'
+            );
+            await resolveCredentials(session, { requireOrgId: false });
+
+            // CI mode: auto-select first environment if multiple exist
+            if (session.pendingOrgs && !session.credentials) {
+              const { resolveEnvironmentSelection } = await import(
+                './src/lib/credential-resolution.js'
+              );
+              // Pick the first org/workspace/environment with an API key
+              for (const org of session.pendingOrgs) {
+                for (const ws of org.workspaces) {
+                  const env = (ws.environments ?? [])
+                    .filter((e) => e.app?.apiKey)
+                    .sort((a, b) => a.rank - b.rank)[0];
+                  if (env) {
+                    await resolveEnvironmentSelection(session, {
+                      orgId: org.id,
+                      workspaceId: ws.id,
+                      env: env.name,
+                    });
+                    getUI().log.info(
+                      `Resolved Amplitude API key non-interactively (CI mode): ${org.name} / ${ws.name} / ${env.name}`,
+                    );
+                    break;
+                  }
+                }
+                if (session.credentials) break;
+              }
+            }
+          }
+
+          await lazyRunWizard(
+            options as Parameters<typeof lazyRunWizard>[0],
+            session,
+          );
+        })();
       } else if (
         options.classic ||
         process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
@@ -286,25 +420,8 @@ void yargs(hideBin(process.argv))
               };
               session.projectHasData = false;
             } else {
-              // Pre-populate region + credentials from all available sources for
-              // returning users. This skips RegionSelect and Auth without requiring
-              // a persisted OAuth token.
-              const installDir = session.installDir;
-              const [
-                { getStoredUser, getStoredToken },
-                { readAmpliConfig },
-                { getAPIKey },
-                { getHostFromRegion },
-                { logToFile },
-                { fetchAmplitudeUser },
-              ] = await Promise.all([
-                import('./src/utils/ampli-settings.js'),
-                import('./src/lib/ampli-config.js'),
-                import('./src/utils/get-api-key.js'),
-                import('./src/utils/urls.js'),
-                import('./src/utils/debug.js'),
-                import('./src/lib/api.js'),
-              ]);
+              // Pre-populate region + credentials from stored OAuth tokens.
+              const { logToFile } = await import('./src/utils/debug.js');
 
               // Check for crash-recovery checkpoint
               const { loadCheckpoint } = await import(
@@ -312,12 +429,7 @@ void yargs(hideBin(process.argv))
               );
               const checkpoint = loadCheckpoint(session.installDir);
               if (checkpoint) {
-                // Apply recoverable fields — credentials are intentionally
-                // excluded by session-checkpoint.ts
                 Object.assign(session, checkpoint);
-                // Always reset introConcluded so IntroScreen shows its
-                // resume picker (Resume / Start fresh / Cancel). The screen
-                // itself calls concludeIntro() when the user selects "Resume".
                 session.introConcluded = false;
                 session._restoredFromCheckpoint = true;
                 logToFile(
@@ -325,263 +437,35 @@ void yargs(hideBin(process.argv))
                 );
               }
 
-              // Zone: prefer a real (non-pending) stored user, fall back to
-              // the Zone field in the project-level ampli.json.
-              const storedUser = getStoredUser();
-              const realUser =
-                storedUser && storedUser.id !== 'pending' ? storedUser : null;
-
-              // Populate user email for /whoami display
-              if (realUser?.email) {
-                session.userEmail = realUser.email;
-              }
-              const projectConfig = readAmpliConfig(installDir);
-              const projectZone = projectConfig.ok
-                ? projectConfig.config.Zone
-                : undefined;
-              // Checkpoint region wins (user explicitly changed via /region),
-              // then project config, then global user zone.
-              const zone =
-                (session._restoredFromCheckpoint ? session.region : null) ??
-                projectZone ??
-                realUser?.zone ??
-                null;
-
-              if (zone) {
-                session.region = zone;
-              }
-
-              // Skip Auth when we have a stored OAuth token — use it to fetch
-              // (or look up) the project API key, then pre-populate credentials.
-              // When the workspace has multiple environments (projects), defer to
-              // AuthScreen so the user can pick which project to instrument.
-              if (zone) {
-                const storedToken = realUser
-                  ? getStoredToken(realUser.id, realUser.zone)
-                  : getStoredToken(undefined, zone);
-
-                if (storedToken) {
-                  // Silent token refresh — avoids browser re-auth when access
-                  // token is expired but refresh token is still valid (365-day
-                  // window).
-                  const { tryRefreshToken } = await import(
-                    './src/utils/token-refresh.js'
-                  );
-                  const expiresAtMs = new Date(storedToken.expiresAt).getTime();
-                  const refreshResult = await tryRefreshToken(
-                    {
-                      accessToken: storedToken.accessToken,
-                      refreshToken: storedToken.refreshToken,
-                      expiresAt: expiresAtMs,
-                    },
-                    zone,
-                  );
-                  if (refreshResult) {
-                    const { storeToken } = await import(
-                      './src/utils/ampli-settings.js'
-                    );
-                    if (realUser) {
-                      storeToken(realUser, {
-                        ...storedToken,
-                        accessToken: refreshResult.accessToken,
-                        expiresAt: new Date(
-                          refreshResult.expiresAt,
-                        ).toISOString(),
-                      });
-                    }
-                    storedToken.accessToken = refreshResult.accessToken;
-                    logToFile('[bin] silently refreshed expired access token');
-                  }
-
-                  // Check local storage first — if a key is already persisted
-                  // for this install dir, use it without fetching user data.
-                  const { readApiKeyWithSource } = await import(
-                    './src/utils/api-key-store.js'
-                  );
-                  const localKey = readApiKeyWithSource(installDir);
-
-                  if (localKey) {
-                    logToFile('[bin] using locally stored API key');
-                    session.credentials = {
-                      accessToken: storedToken.accessToken,
-                      idToken: storedToken.idToken,
-                      projectApiKey: localKey.key,
-                      host: getHostFromRegion(zone),
-                      projectId: 0,
-                    };
-                    session.activationLevel = 'none';
-                    session.projectHasData = false;
-                  } else {
-                    // Fetch user data to check how many environments are available.
-                    const { fetchAmplitudeUser } = await import(
-                      './src/lib/api.js'
-                    );
-                    try {
-                      const userInfo = await fetchAmplitudeUser(
-                        storedToken.idToken,
-                        zone,
-                      );
-                      const workspaceId =
-                        session.selectedWorkspaceId ?? undefined;
-
-                      // Find the relevant workspace and its environments
-                      let envsWithKey: Array<{
-                        name: string;
-                        rank: number;
-                        app: {
-                          id: string;
-                          apiKey?: string | null;
-                        } | null;
-                      }> = [];
-                      for (const org of userInfo.orgs) {
-                        const ws = workspaceId
-                          ? org.workspaces.find((w) => w.id === workspaceId)
-                          : org.workspaces[0];
-                        if (ws?.environments) {
-                          envsWithKey = ws.environments
-                            .filter((env) => env.app?.apiKey)
-                            .sort((a, b) => a.rank - b.rank);
-                          break;
-                        }
-                      }
-
-                      if (envsWithKey.length === 1) {
-                        // Single environment — auto-select as before
-                        const apiKey = envsWithKey[0].app!.apiKey!;
-                        session.selectedProjectName = envsWithKey[0].name;
-
-                        // Populate org/workspace names from the fetched data
-                        // so /whoami doesn't show (none).
-                        for (const org of userInfo.orgs) {
-                          const ws = workspaceId
-                            ? org.workspaces.find((w) => w.id === workspaceId)
-                            : org.workspaces[0];
-                          if (
-                            ws?.environments?.some(
-                              (e) => e.app?.apiKey === apiKey,
-                            )
-                          ) {
-                            session.selectedOrgId = org.id;
-                            session.selectedOrgName = org.name;
-                            session.selectedWorkspaceId = ws.id;
-                            session.selectedWorkspaceName = ws.name;
-                            break;
-                          }
-                        }
-                        if (!session.userEmail && userInfo.email) {
-                          session.userEmail = userInfo.email;
-                        }
-
-                        logToFile(
-                          '[bin] single environment — auto-selecting API key',
-                        );
-                        persistApiKey(apiKey, installDir);
-                        session.credentials = {
-                          accessToken: storedToken.accessToken,
-                          idToken: storedToken.idToken,
-                          projectApiKey: apiKey,
-                          host: getHostFromRegion(zone),
-                          projectId: 0,
-                        };
-                        session.activationLevel = 'none';
-                        session.projectHasData = false;
-                      } else if (envsWithKey.length > 1) {
-                        // Multiple environments — show the project picker via
-                        // AuthScreen instead of auto-selecting.
-                        logToFile(
-                          `[bin] ${envsWithKey.length} environments found — deferring to project picker`,
-                        );
-                        session.pendingOrgs = userInfo.orgs;
-                        session.pendingAuthIdToken = storedToken.idToken;
-                        session.pendingAuthAccessToken =
-                          storedToken.accessToken;
-                      } else {
-                        logToFile(
-                          '[bin] no environments with API keys — showing apiKeyNotice',
-                        );
-                        session.apiKeyNotice =
-                          "Your API key couldn't be fetched automatically. " +
-                          'Only organization admins can access project API keys — ' +
-                          'if you need one, ask an admin to share it with you.';
-                      }
-                    } catch (err) {
-                      logToFile(
-                        `[bin] fetchAmplitudeUser failed: ${
-                          err instanceof Error ? err.message : 'unknown'
-                        }`,
-                      );
-                      // Fall back to getAPIKey for backward compatibility
-                      const projectApiKey = await getAPIKey({
-                        installDir,
-                        idToken: storedToken.idToken,
-                        zone,
-                        workspaceId: session.selectedWorkspaceId ?? undefined,
-                      });
-                      if (projectApiKey) {
-                        persistApiKey(projectApiKey, installDir);
-                        session.credentials = {
-                          accessToken: storedToken.accessToken,
-                          idToken: storedToken.idToken,
-                          projectApiKey,
-                          host: getHostFromRegion(zone),
-                          projectId: 0,
-                        };
-                        session.activationLevel = 'none';
-                        session.projectHasData = false;
-                      } else {
-                        session.apiKeyNotice =
-                          "Your API key couldn't be fetched automatically. " +
-                          'Only organization admins can access project API keys — ' +
-                          'if you need one, ask an admin to share it with you.';
-                      }
-                    }
-                  }
-                }
-              }
-
-              // Pre-populate org/workspace from ampli.json so activation checks
-              // (DataSetupScreen, DataIngestionCheckScreen) have the IDs they need
-              // even when the SUSI flow was skipped.
-              if (projectConfig.ok && projectConfig.config.OrgId) {
-                session.selectedOrgId = String(projectConfig.config.OrgId);
-              }
-              if (projectConfig.ok && projectConfig.config.WorkspaceId) {
-                session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
-              }
-
-              // Safety check: if we have credentials but no org/workspace ID,
-              // the wizard would proceed to RunScreen without context. Clear
-              // credentials so AuthScreen shows and forces org/workspace selection.
-              if (
-                session.credentials !== null &&
-                !session.selectedOrgId &&
-                !session.pendingOrgs
-              ) {
-                logToFile(
-                  '[bin] credentials set but no org/workspace — clearing to force AuthScreen',
-                );
-                session.credentials = null;
-              }
+              // Resolve credentials using shared logic (token refresh,
+              // env auto-select, pendingOrgs population)
+              const { resolveCredentials } = await import(
+                './src/lib/credential-resolution.js'
+              );
+              await resolveCredentials(session);
 
               // Resolve org/workspace display names so /whoami shows them.
-              // Uses the stored token to fetch user info — fire-and-forget so it
-              // doesn't block startup.
-              if (zone && session.selectedOrgId) {
+              // Fire-and-forget so it doesn't block startup.
+              if (session.region && session.selectedOrgId) {
+                const { getStoredUser, getStoredToken } = await import(
+                  './src/utils/ampli-settings.js'
+                );
+                const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+                const storedUser = getStoredUser();
+                const realUser =
+                  storedUser && storedUser.id !== 'pending' ? storedUser : null;
+                const zone = session.region;
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
                 if (storedToken) {
                   fetchAmplitudeUser(storedToken.idToken, zone)
                     .then((userInfo) => {
-                      // Populate email for /whoami (may not exist in stored profile)
                       let changed = false;
                       if (userInfo.email && !session.userEmail) {
                         session.userEmail = userInfo.email;
                         changed = true;
                       }
-                      // Only resolve names when we have an explicit org ID —
-                      // never guess by picking the first org, as the user may
-                      // belong to multiple orgs and we'd land on the wrong one.
                       if (session.selectedOrgId) {
                         const org = userInfo.orgs.find(
                           (o) => o.id === session.selectedOrgId,
@@ -599,7 +483,6 @@ void yargs(hideBin(process.argv))
                           }
                         }
                       }
-                      // Notify the store so /whoami picks up email + org names
                       if (changed && tui.store.session === session) {
                         tui.store.emitChange();
                       }

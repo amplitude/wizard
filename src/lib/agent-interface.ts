@@ -1071,10 +1071,13 @@ export async function runAgent(
       }, 1000);
     }
 
-    // Retry loop: if the agent stalls (no message for STALL_TIMEOUT_MS), abort and
-    // re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES retries.
-    const MAX_RETRIES = 2;
-    const STALL_TIMEOUT_MS = 20_000;
+    // Retry loop: if the agent stalls (no message for the configured timeout), abort
+    // and re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES.
+    const MAX_RETRIES = 3;
+    // Cold-start timeout: subprocess spawn + MCP server connections + first LLM response
+    const INITIAL_STALL_TIMEOUT_MS = 60_000;
+    // Mid-run timeout: between consecutive messages during active work
+    const STALL_TIMEOUT_MS = 30_000;
 
     // Tracks whether an authentication failure was detected in the current attempt.
     // Passed to createStopHook so it can skip reflection when auth is broken.
@@ -1110,21 +1113,32 @@ export async function runAgent(
       // AbortController lets us cancel a stalled query so we can retry
       const controller = new AbortController();
       let staleTimer: ReturnType<typeof setTimeout> | undefined;
+      let receivedFirstMessage = false;
+      let lastMessageType = 'none';
+      let lastMessageTime = Date.now();
 
       const resetStaleTimer = () => {
         if (staleTimer) clearTimeout(staleTimer);
+        const timeoutMs = receivedFirstMessage
+          ? STALL_TIMEOUT_MS
+          : INITIAL_STALL_TIMEOUT_MS;
         staleTimer = setTimeout(() => {
+          const elapsed = Math.round((Date.now() - lastMessageTime) / 1000);
           logToFile(
-            `Agent stalled — no message for ${
-              STALL_TIMEOUT_MS / 1000
-            }s (attempt ${attempt + 1})`,
+            `Agent stalled — no message for ${elapsed}s (attempt ${
+              attempt + 1
+            }, last message: ${lastMessageType}, phase: ${
+              receivedFirstMessage ? 'active' : 'cold-start'
+            })`,
           );
           analytics.wizardCapture('Agent Stall Detected', {
             attempt: attempt + 1,
-            stall_timeout_ms: STALL_TIMEOUT_MS,
+            stall_timeout_ms: timeoutMs,
+            last_message_type: lastMessageType,
+            phase: receivedFirstMessage ? 'active' : 'cold-start',
           });
           controller.abort('stall');
-        }, STALL_TIMEOUT_MS);
+        }, timeoutMs);
       };
 
       try {
@@ -1191,6 +1205,11 @@ export async function runAgent(
 
         // Process the async generator — validate each message at the boundary
         for await (const rawMessage of response) {
+          receivedFirstMessage = true;
+          lastMessageTime = Date.now();
+          lastMessageType =
+            (rawMessage as Record<string, unknown>)?.type?.toString() ??
+            'unknown';
           resetStaleTimer();
           const parsed = safeParseSDKMessage(rawMessage);
           if (!parsed.ok) {

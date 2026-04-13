@@ -5,6 +5,7 @@
  */
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
+import { createInterface } from 'readline';
 
 // ── NDJSON event types ──────────────────────────────────────────────
 
@@ -248,4 +249,127 @@ export class AgentUI implements WizardUI {
       data: { event: 'event_plan_set', events },
     });
   }
+
+  /**
+   * Prompt the agent caller to select an environment from pendingOrgs.
+   *
+   * Emits an NDJSON `prompt` event with all available orgs/workspaces/environments,
+   * then reads one JSON line from stdin with the selection.
+   *
+   * Expected stdin response:
+   * ```json
+   * { "orgId": "...", "workspaceId": "...", "env": "Production" }
+   * ```
+   *
+   * Falls back to auto-selecting the first environment if stdin is closed
+   * or no response is received within 60 seconds.
+   */
+  async promptEnvironmentSelection(
+    orgs: Array<{
+      id: string;
+      name: string;
+      workspaces: Array<{
+        id: string;
+        name: string;
+        environments?: Array<{
+          name: string;
+          rank: number;
+          app: { id: string; apiKey?: string | null } | null;
+        }> | null;
+      }>;
+    }>,
+  ): Promise<{ orgId: string; workspaceId: string; env: string }> {
+    // Build a sanitized view (no API keys exposed)
+    const sanitizedOrgs = orgs.map((org) => ({
+      id: org.id,
+      name: org.name,
+      workspaces: org.workspaces.map((ws) => ({
+        id: ws.id,
+        name: ws.name,
+        environments: (ws.environments ?? [])
+          .filter((e) => e.app?.apiKey)
+          .sort((a, b) => a.rank - b.rank)
+          .map((e) => ({ name: e.name, rank: e.rank })),
+      })),
+    }));
+
+    emit('prompt', 'Select an environment', {
+      data: {
+        promptType: 'environment_selection',
+        orgs: sanitizedOrgs,
+      },
+    });
+
+    // Read one line from stdin
+    try {
+      const line = await readStdinLine(60_000);
+      if (line) {
+        const parsed = JSON.parse(line) as {
+          orgId?: string;
+          workspaceId?: string;
+          env?: string;
+        };
+        if (parsed.orgId && parsed.workspaceId && parsed.env) {
+          return {
+            orgId: parsed.orgId,
+            workspaceId: parsed.workspaceId,
+            env: parsed.env,
+          };
+        }
+      }
+    } catch {
+      // Stdin closed, timeout, or invalid JSON — fall through to auto-select
+    }
+
+    // Fallback: auto-select the first environment
+    for (const org of orgs) {
+      for (const ws of org.workspaces) {
+        const env = (ws.environments ?? [])
+          .filter((e) => e.app?.apiKey)
+          .sort((a, b) => a.rank - b.rank)[0];
+        if (env) {
+          emit(
+            'log',
+            `Auto-selected environment: ${org.name} / ${ws.name} / ${env.name}`,
+            {
+              level: 'warn',
+            },
+          );
+          return { orgId: org.id, workspaceId: ws.id, env: env.name };
+        }
+      }
+    }
+
+    throw new Error('No environments with API keys found');
+  }
+}
+
+/**
+ * Read a single line from stdin with a timeout.
+ * Returns null if stdin is not readable or times out.
+ */
+function readStdinLine(timeoutMs: number): Promise<string | null> {
+  return new Promise((resolve) => {
+    if (!process.stdin.readable) {
+      resolve(null);
+      return;
+    }
+
+    const rl = createInterface({ input: process.stdin });
+    const timer = setTimeout(() => {
+      rl.close();
+      resolve(null);
+    }, timeoutMs);
+
+    rl.once('line', (line) => {
+      clearTimeout(timer);
+      rl.close();
+      resolve(line.trim());
+    });
+
+    rl.once('close', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+  });
 }

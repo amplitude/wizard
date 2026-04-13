@@ -85,6 +85,7 @@ vi.mock('../lib/constants', () => ({
   DETECTION_TIMEOUT_MS: 100,
   IS_DEV: true,
   DEFAULT_AMPLITUDE_ZONE: 'us',
+  DEFAULT_HOST_URL: 'https://api.amplitude.com',
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
@@ -109,6 +110,10 @@ vi.mock('../utils/api-key-store', () => ({
 }));
 vi.mock('../utils/get-api-key', () => ({
   getAPIKey: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../lib/credential-resolution', () => ({
+  resolveCredentials: vi.fn().mockResolvedValue(undefined),
+  resolveEnvironmentSelection: vi.fn().mockResolvedValue(false),
 }));
 vi.mock('../utils/environment', () => ({
   isNonInteractiveEnvironment: mockIsNonInteractiveEnvironment,
@@ -218,6 +223,7 @@ describe('CI mode validation', () => {
     expect(process.exit).not.toHaveBeenCalled();
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
+      expect.anything(),
     );
   });
 
@@ -234,7 +240,10 @@ describe('CI mode validation', () => {
       '--install-dir',
       '/tmp/test',
     ]);
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+    // CI mode now builds a session with apiKey and passes it as second arg
     expect(mockRunWizard).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'phx_test_key' }),
       expect.objectContaining({ apiKey: 'phx_test_key' }),
     );
   });
