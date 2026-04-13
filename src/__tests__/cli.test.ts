@@ -227,9 +227,11 @@ describe('CI mode validation', () => {
     );
   });
 
-  test('requires --install-dir when --ci is set', async () => {
+  test('defaults --install-dir to cwd when --ci is set without it', async () => {
     await runCLI(['--ci', '--api-key', 'phx_test']);
-    expect(process.exit).toHaveBeenCalledWith(1);
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(mockRunWizard).toHaveBeenCalled();
   });
 
   test('passes --api-key to runWizard in CI mode', async () => {

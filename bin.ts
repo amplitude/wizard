@@ -199,12 +199,10 @@ void yargs(hideBin(process.argv))
           const { AgentUI } = await import('./src/ui/agent-ui.js');
           const agentUI = new AgentUI();
           setUI(agentUI);
+          // Default --install-dir to cwd in agent mode so callers
+          // don't need to pass it explicitly.
           if (!options.installDir) {
-            getUI().intro(chalk.inverse(`Amplitude Wizard`));
-            getUI().log.error(
-              'Agent mode requires --install-dir (directory to install Amplitude in)',
-            );
-            process.exit(ExitCode.INVALID_ARGS);
+            options.installDir = process.cwd();
           }
 
           // Build session and resolve credentials (same logic as TUI)
@@ -278,12 +276,9 @@ void yargs(hideBin(process.argv))
       } else if (options.ci || options.yes) {
         // Use LoggingUI for CI mode (no dependencies, no prompts)
         setUI(new LoggingUI());
+        // Default --install-dir to cwd in CI mode
         if (!options.installDir) {
-          getUI().intro(chalk.inverse(`Amplitude Wizard`));
-          getUI().log.error(
-            'CI mode requires --install-dir (directory to install Amplitude in)',
-          );
-          process.exit(1);
+          options.installDir = process.cwd();
         }
 
         // Build session and resolve credentials for CI mode
