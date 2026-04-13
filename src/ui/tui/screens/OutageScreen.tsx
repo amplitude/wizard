@@ -29,9 +29,9 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text color="yellow" bold>
-          {'\u26A0'} AI services are experiencing issues.
+          {'\u26A0'} The setup agent is temporarily unavailable.
         </Text>
-        <Box height={1} />
+        <Text> </Text>
         <Text>
           <Text color="yellow">Status:</Text> {serviceStatus.description}
         </Text>
@@ -39,7 +39,7 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
           <Text color="yellow">Status page:</Text>{' '}
           <Text color="cyan">{serviceStatus.statusPageUrl}</Text>
         </Text>
-        <Box height={1} />
+        <Text> </Text>
         <Text color={Colors.muted}>
           The wizard may not work reliably while services are affected.
         </Text>

@@ -18,7 +18,7 @@
 
 All tests pass.
 
-- **Unit**: 45 test files, **812 passed**, 17 skipped (1 file skipped entirely: `setup-utils.test.ts`)
+- **Unit**: 45 test files, **818 passed**, 17 skipped (1 file skipped entirely: `setup-utils.test.ts`)
 - **BDD**: 10 feature files, **95 scenarios**, **397 steps** -- all pass
 
 ---

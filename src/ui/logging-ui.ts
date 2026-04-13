@@ -114,7 +114,7 @@ export class LoggingUI implements WizardUI {
     description: string;
     statusPageUrl: string;
   }): void {
-    console.log(`▲  Claude/Anthropic services are experiencing issues.`);
+    console.log(`▲  The setup agent is temporarily unavailable.`);
     console.log(`│  Status: ${data.description}`);
     console.log(`│  Status page: ${data.statusPageUrl}`);
     console.log(
