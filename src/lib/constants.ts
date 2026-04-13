@@ -87,7 +87,7 @@ export const AMPLITUDE_ZONE_SETTINGS = {
       process.env.OAUTH_CLIENT_ID ?? '110d04a1-8e60-4157-9c43-fcbe4e014a85',
     dataApiUrl: 'https://data-api.eu.amplitude.com/graphql',
     /** Thunder GraphQL endpoint — org-scoped. Append the numeric orgId. */
-    appApiUrlBase: 'https://core.amplitude.eu/t/graphql/org/',
+    appApiUrlBase: 'https://core.eu.amplitude.com/t/graphql/org/',
     webUrl: 'https://data.eu.amplitude.com',
   },
 } as const;
