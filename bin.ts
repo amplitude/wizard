@@ -294,6 +294,21 @@ void yargs(hideBin(process.argv))
                 import('./src/lib/api.js'),
               ]);
 
+              // Check for crash-recovery checkpoint
+              const { loadCheckpoint } = await import(
+                './src/lib/session-checkpoint.js'
+              );
+              const checkpoint = loadCheckpoint(session.installDir);
+              if (checkpoint) {
+                // Apply recoverable fields — credentials are intentionally
+                // excluded by session-checkpoint.ts
+                Object.assign(session, checkpoint);
+                session._restoredFromCheckpoint = true;
+                logToFile(
+                  '[bin] restored session from crash-recovery checkpoint',
+                );
+              }
+
               // Zone: prefer a real (non-pending) stored user, fall back to
               // the Zone field in the project-level ampli.json.
               const storedUser = getStoredUser();
@@ -321,6 +336,38 @@ void yargs(hideBin(process.argv))
                   : getStoredToken(undefined, zone);
 
                 if (storedToken) {
+                  // Silent token refresh — avoids browser re-auth when access
+                  // token is expired but refresh token is still valid (365-day
+                  // window).
+                  const { tryRefreshToken } = await import(
+                    './src/utils/token-refresh.js'
+                  );
+                  const expiresAtMs = new Date(storedToken.expiresAt).getTime();
+                  const refreshResult = await tryRefreshToken(
+                    {
+                      accessToken: storedToken.accessToken,
+                      refreshToken: storedToken.refreshToken,
+                      expiresAt: expiresAtMs,
+                    },
+                    zone,
+                  );
+                  if (refreshResult) {
+                    const { storeToken } = await import(
+                      './src/utils/ampli-settings.js'
+                    );
+                    if (realUser) {
+                      storeToken(realUser, {
+                        ...storedToken,
+                        accessToken: refreshResult.accessToken,
+                        expiresAt: new Date(
+                          refreshResult.expiresAt,
+                        ).toISOString(),
+                      });
+                    }
+                    storedToken.accessToken = refreshResult.accessToken;
+                    logToFile('[bin] silently refreshed expired access token');
+                  }
+
                   // Check local storage first — if a key is already persisted
                   // for this install dir, use it without fetching user data.
                   const { readApiKeyWithSource } = await import(
@@ -752,6 +799,28 @@ void yargs(hideBin(process.argv))
             tui.store.onEnterScreen(Screen.Run, () =>
               tui.store.completeSetup(),
             );
+
+            // Session checkpointing — save before agent starts, clear on
+            // successful completion so stale checkpoints don't linger.
+            const { saveCheckpoint, clearCheckpoint } = await import(
+              './src/lib/session-checkpoint.js'
+            );
+            tui.store.onEnterScreen(Screen.Run, () => {
+              saveCheckpoint(tui.store.session);
+            });
+            tui.store.onEnterScreen(Screen.Outro, () => {
+              clearCheckpoint();
+            });
+
+            // Save checkpoint on unexpected termination
+            process.on('SIGINT', () => {
+              try {
+                saveCheckpoint(tui.store.session);
+              } catch {
+                // Best-effort — don't block exit
+              }
+              process.exit(130);
+            });
 
             // Wait for auth and framework detection to finish concurrently.
             await Promise.all([authTask, detectionTask]);

@@ -1,7 +1,8 @@
 /**
  * IntroScreen (v2) — Clean, minimal welcome with framework detection.
  *
- * Three states:
+ * Four states:
+ *   0. Checkpoint restored: resume / start fresh / cancel picker
  *   1. Detecting: spinner while bin.ts runs detection
  *   2. Detection failed: auto-selects Generic, then continue/cancel
  *   3. Detection succeeded: show result, then continue/cancel
@@ -17,6 +18,7 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
+import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -31,6 +33,9 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
+  const [showResume, setShowResume] = useState(
+    () => store.session._restoredFromCheckpoint,
+  );
 
   const { session } = store;
   const config = session.frameworkConfig;
@@ -43,17 +48,104 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
   useEffect(() => {
-    if (needsFrameworkPick && !session.menu) {
+    if (needsFrameworkPick && !session.menu && !showResume) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.setFrameworkConfig(Integration.generic, genericConfig);
         store.setDetectedFramework(genericConfig.metadata.name);
       });
     }
-  }, [needsFrameworkPick, session.menu]);
+  }, [needsFrameworkPick, session.menu, showResume]);
 
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
+
+  // ── Resume-from-checkpoint prompt ─────────────────────────────────
+  if (showResume) {
+    const orgLabel =
+      session.selectedOrgName ?? session.selectedWorkspaceName ?? null;
+
+    return (
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        alignItems="center"
+        justifyContent="flex-start"
+        paddingTop={2}
+      >
+        <Box flexDirection="column" alignItems="center" marginBottom={1}>
+          <Text bold color={Colors.heading}>
+            Amplitude Wizard
+          </Text>
+        </Box>
+
+        <Box flexDirection="column" alignItems="flex-start">
+          <Text color={Colors.body}>A previous session was interrupted.</Text>
+
+          {frameworkLabel && (
+            <Text>
+              <Text color={Colors.body}> Framework: </Text>
+              <Text color={Colors.secondary}>{frameworkLabel}</Text>
+            </Text>
+          )}
+
+          {orgLabel && (
+            <Text>
+              <Text color={Colors.body}> Organization: </Text>
+              <Text color={Colors.secondary}>{orgLabel}</Text>
+            </Text>
+          )}
+
+          <Box marginTop={1}>
+            <PickerMenu
+              options={[
+                { label: 'Resume where you left off', value: 'resume' },
+                { label: 'Start fresh', value: 'fresh' },
+                { label: 'Cancel', value: 'cancel', hint: 'exit wizard' },
+              ]}
+              onSelect={(value) => {
+                const choice = Array.isArray(value) ? value[0] : value;
+                analytics.wizardCapture('Checkpoint Resume Action', {
+                  action: choice,
+                  integration: session.integration,
+                  detected_framework: session.detectedFrameworkLabel,
+                });
+
+                if (choice === 'resume') {
+                  store.concludeIntro();
+                } else if (choice === 'fresh') {
+                  // Clear checkpoint and reset restored flag so normal flow takes over
+                  clearCheckpoint();
+                  store.session = {
+                    ...store.session,
+                    _restoredFromCheckpoint: false,
+                    introConcluded: false,
+                    detectionComplete: false,
+                    detectedFrameworkLabel: null,
+                    integration: null,
+                    frameworkConfig: null,
+                    frameworkContext: {},
+                    region: null,
+                    selectedOrgId: null,
+                    selectedOrgName: null,
+                    selectedWorkspaceId: null,
+                    selectedWorkspaceName: null,
+                    selectedProjectName: null,
+                  };
+                  setShowResume(false);
+                } else {
+                  store.setOutroData({
+                    kind: OutroKind.Cancel,
+                    message: 'Setup cancelled.',
+                  });
+                }
+              }}
+            />
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box

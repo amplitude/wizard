@@ -316,6 +316,13 @@ export interface WizardSession {
    * or they chose to continue without completing everything).
    */
   checklistComplete: boolean;
+
+  /**
+   * Set to true by bin.ts when a crash-recovery checkpoint is loaded.
+   * IntroScreen checks this to show a "Resume where you left off" prompt
+   * instead of the normal detection flow.
+   */
+  _restoredFromCheckpoint: boolean;
 }
 
 /**
@@ -404,5 +411,7 @@ export function buildSession(args: {
     checklistChartComplete: false,
     checklistDashboardComplete: false,
     checklistComplete: false,
+
+    _restoredFromCheckpoint: false,
   };
 }
