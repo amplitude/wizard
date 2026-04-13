@@ -25,7 +25,14 @@ const WIZARD_COMMANDMENTS = [
 
   'Use the TodoWrite tool to track your progress. Create a todo list at the start describing the high-level areas of work, mark each as in_progress when you begin it, and completed when done.',
 
-  'After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.',
+  `After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.
+
+CRITICAL — confirm_event_plan format:
+  name: MUST be a short lowercase label using spaces for separators (2-5 words). Examples: "user signed up", "product added to cart", "search performed", "checkout started", "auth error".
+  description: Put ALL details here — when it fires, properties, file paths.
+  WRONG name: "Fires on the product detail page after product data loads"
+  RIGHT name: "product viewed"
+  Names longer than 50 characters will be automatically truncated.`,
 
   ...(DEMO_MODE
     ? [

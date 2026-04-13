@@ -13,7 +13,7 @@
  */
 
 import type { WizardSession } from '../../lib/wizard-session.js';
-import { OutroKind } from '../../lib/wizard-session.js';
+import { OutroKind } from './session-constants.js';
 import { FLOWS, Screen, Flow, type FlowEntry } from './flows.js';
 
 // Re-export so existing imports from './router.js' keep working

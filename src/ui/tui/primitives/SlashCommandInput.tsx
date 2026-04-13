@@ -129,28 +129,62 @@ export const SlashCommandInput = ({
       </Box>
       {isSlashMode && filtered.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
-          {filtered.map((c, i) => {
-            const isFocused = i === clampedIndex;
+          {(() => {
+            // Show at most MAX_VISIBLE commands, scrolling to keep selection visible
+            const MAX_VISIBLE = 6;
+            const total = filtered.length;
+            let startIdx = 0;
+            if (total > MAX_VISIBLE) {
+              // Keep selected item in the middle of the visible window
+              startIdx = Math.max(
+                0,
+                Math.min(
+                  clampedIndex - Math.floor(MAX_VISIBLE / 2),
+                  total - MAX_VISIBLE,
+                ),
+              );
+            }
+            const visible = filtered.slice(startIdx, startIdx + MAX_VISIBLE);
+            const hasMore = total > MAX_VISIBLE;
+
             return (
-              <Box key={c.cmd} gap={1}>
-                <Text
-                  color={isFocused ? Colors.primary : undefined}
-                  bold={isFocused}
-                >
-                  {isFocused ? Icons.triangleSmallRight : ' '}
-                </Text>
-                <Text
-                  color={isFocused ? Colors.primary : undefined}
-                  bold={isFocused}
-                >
-                  {c.cmd.padEnd(maxCmdLen)}
-                </Text>
-                <Text color={!isFocused ? Colors.muted : undefined}>
-                  {c.desc}
-                </Text>
-              </Box>
+              <>
+                {hasMore && startIdx > 0 && (
+                  <Text color={Colors.muted}>
+                    {'  '}↑ {startIdx} more
+                  </Text>
+                )}
+                {visible.map((c, vi) => {
+                  const i = startIdx + vi;
+                  const isFocused = i === clampedIndex;
+                  return (
+                    <Box key={c.cmd} gap={1}>
+                      <Text
+                        color={isFocused ? Colors.primary : undefined}
+                        bold={isFocused}
+                      >
+                        {isFocused ? Icons.triangleSmallRight : ' '}
+                      </Text>
+                      <Text
+                        color={isFocused ? Colors.primary : undefined}
+                        bold={isFocused}
+                      >
+                        {c.cmd.padEnd(maxCmdLen)}
+                      </Text>
+                      <Text color={!isFocused ? Colors.muted : undefined}>
+                        {c.desc}
+                      </Text>
+                    </Box>
+                  );
+                })}
+                {hasMore && startIdx + MAX_VISIBLE < total && (
+                  <Text color={Colors.muted}>
+                    {'  '}↓ {total - startIdx - MAX_VISIBLE} more
+                  </Text>
+                )}
+              </>
             );
-          })}
+          })()}
         </Box>
       )}
     </Box>

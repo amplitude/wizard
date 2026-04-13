@@ -1,39 +1,48 @@
 /**
- * IntroScreen — Welcome, framework detection, and continue/cancel prompt.
+ * IntroScreen (v2) — Clean, minimal welcome with framework detection.
  *
- * Three states:
+ * Four states:
+ *   0. Checkpoint restored: resume / start fresh / cancel picker
  *   1. Detecting: spinner while bin.ts runs detection
  *   2. Detection failed: auto-selects Generic, then continue/cancel
  *   3. Detection succeeded: show result, then continue/cancel
  *
- * Calls store.completeSetup() which unblocks bin.ts to start runWizard.
+ * Shows the AmplitudeTextLogo when terminal is wide/tall enough (>=75x20).
+ * Calls store.concludeIntro() to advance past this screen.
  */
 
 import path from 'path';
 import { Box, Text } from 'ink';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect } from 'react';
 import type { WizardStore } from '../store.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
+import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
-import { PickerMenu, LoadingBox } from '../primitives/index.js';
+import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
+import { PickerMenu } from '../primitives/index.js';
+import { Colors, Icons } from '../styles.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
-import { Colors, Icons } from '../styles.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface IntroScreenProps {
   store: WizardStore;
 }
 
-export const IntroScreen = ({ store }: IntroScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+const LOGO_MIN_COLS = 75;
+const LOGO_MIN_ROWS = 20;
 
-  const [, termRows] = useStdoutDimensions();
+export const IntroScreen = ({ store }: IntroScreenProps) => {
+  useWizardStore(store);
+
+  const [cols, rows] = useStdoutDimensions();
+
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
+  const [showResume, setShowResume] = useState(
+    () => store.session._restoredFromCheckpoint,
+  );
 
   const { session } = store;
   const config = session.frameworkConfig;
@@ -43,66 +52,155 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const needsFrameworkPick =
     session.detectionComplete && !session.frameworkConfig;
 
+  // Hide logo when framework picker is open — the long list overlaps in Ink.
+  const pickerVisible =
+    pickingFramework || (session.menu && needsFrameworkPick);
+  const showLogo =
+    cols >= LOGO_MIN_COLS && rows >= LOGO_MIN_ROWS && !pickerVisible;
+
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
   useEffect(() => {
-    if (needsFrameworkPick && !session.menu) {
+    if (needsFrameworkPick && !session.menu && !showResume) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.setFrameworkConfig(Integration.generic, genericConfig);
         store.setDetectedFramework(genericConfig.metadata.name);
       });
     }
-  }, [needsFrameworkPick, session.menu]);
+  }, [needsFrameworkPick, session.menu, showResume]);
+
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
-  const showDescription = showContinue;
-  const showLogo = termRows >= 25;
+
+  // ── Resume-from-checkpoint prompt ─────────────────────────────────
+  if (showResume) {
+    const orgLabel =
+      session.selectedOrgName ?? session.selectedWorkspaceName ?? null;
+
+    return (
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        alignItems="center"
+        justifyContent="flex-start"
+        paddingTop={2}
+      >
+        {showLogo && <AmplitudeTextLogo />}
+        <Box flexDirection="column" alignItems="center" marginBottom={1}>
+          <Text bold color={Colors.heading}>
+            Amplitude Wizard
+          </Text>
+        </Box>
+
+        <Box flexDirection="column" alignItems="flex-start">
+          <Text color={Colors.body}>A previous session was interrupted.</Text>
+
+          {frameworkLabel && (
+            <Text>
+              <Text color={Colors.body}> Framework: </Text>
+              <Text color={Colors.secondary}>{frameworkLabel}</Text>
+            </Text>
+          )}
+
+          {orgLabel && (
+            <Text>
+              <Text color={Colors.body}> Organization: </Text>
+              <Text color={Colors.secondary}>{orgLabel}</Text>
+            </Text>
+          )}
+
+          <Box marginTop={1}>
+            <PickerMenu
+              options={[
+                { label: 'Resume where you left off', value: 'resume' },
+                { label: 'Start fresh', value: 'fresh' },
+                { label: 'Cancel', value: 'cancel', hint: 'exit wizard' },
+              ]}
+              onSelect={(value) => {
+                const choice = Array.isArray(value) ? value[0] : value;
+                analytics.wizardCapture('Checkpoint Resume Action', {
+                  action: choice,
+                  integration: session.integration,
+                  detected_framework: session.detectedFrameworkLabel,
+                });
+
+                if (choice === 'resume') {
+                  store.concludeIntro();
+                } else if (choice === 'fresh') {
+                  // Clear checkpoint and reset restored flag so normal flow takes over
+                  clearCheckpoint(store.session.installDir);
+                  store.session = {
+                    ...store.session,
+                    _restoredFromCheckpoint: false,
+                    introConcluded: false,
+                    detectionComplete: false,
+                    detectedFrameworkLabel: null,
+                    integration: null,
+                    frameworkConfig: null,
+                    frameworkContext: {},
+                    region: null,
+                    selectedOrgId: null,
+                    selectedOrgName: null,
+                    selectedWorkspaceId: null,
+                    selectedWorkspaceName: null,
+                    selectedProjectName: null,
+                  };
+                  setShowResume(false);
+                } else {
+                  store.setOutroData({
+                    kind: OutroKind.Cancel,
+                    message: 'Setup cancelled.',
+                  });
+                }
+              }}
+            />
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box
       flexDirection="column"
       flexGrow={1}
       alignItems="center"
-      justifyContent="center"
+      justifyContent="flex-start"
+      paddingTop={2}
     >
-      <Box flexDirection="column" alignItems="center" marginBottom={1}>
-        {showLogo && (
-          <Box flexDirection="row" gap={2} alignItems="center">
-            <AmplitudeTextLogo />
-          </Box>
-        )}
-        <Box marginBottom={1}></Box>
-        <Text bold>
-          {detecting ? 'Amplitude Wizard starting up' : 'Amplitude Wizard'}
-        </Text>
-        <Box marginBottom={1}></Box>
+      {/* Logo (responsive — hidden when terminal is too small) */}
+      {showLogo && <AmplitudeTextLogo />}
 
-        {showDescription && (
-          <Box flexDirection="column" alignItems="center" marginTop={1}>
-            <Text color={Colors.muted} wrap="truncate-end">
-              We'll use AI to analyze your project and integrate Amplitude.
-            </Text>
-            <Text color={Colors.muted} wrap="truncate-end">
-              .env* file contents will not leave your machine.
-            </Text>
-            <Box marginTop={1}>
-              <Text>Painlessly takes you from zero to tracking events</Text>
-            </Box>
-          </Box>
-        )}
+      {/* Heading */}
+      <Box flexDirection="column" alignItems="center" marginBottom={1}>
+        <Text bold color={Colors.heading}>
+          Amplitude Wizard
+        </Text>
+        <Text color={Colors.muted}>AI-powered analytics setup in minutes</Text>
+        <Text color={Colors.secondary}>
+          Installs the SDK, adds events, and verifies data is flowing.
+        </Text>
       </Box>
 
+      {/* Detection spinner */}
       {detecting && (
-        <Box marginY={1}>
-          <LoadingBox message="Detecting project framework..." />
+        <Box marginY={1} gap={1}>
+          <BrailleSpinner />
+          <Text color={Colors.secondary}>
+            Detecting project framework{Icons.ellipsis}
+          </Text>
         </Box>
       )}
 
+      {/* Pre-run notice from framework config */}
       {config?.metadata.preRunNotice && (
-        <Text color="yellow">{config.metadata.preRunNotice}</Text>
+        <Box marginBottom={1}>
+          <Text color={Colors.warning}>{config.metadata.preRunNotice}</Text>
+        </Box>
       )}
 
+      {/* Framework picker (when auto-detection fails or user requests change) */}
       {(pickingFramework || (session.menu && needsFrameworkPick)) && (
         <FrameworkPicker
           store={store}
@@ -110,56 +208,62 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         />
       )}
 
+      {/* Detection results + continue menu */}
       {!detecting && !pickingFramework && (
-        <Box flexDirection="column">
+        <Box flexDirection="column" alignItems="flex-start">
           <Text>
-            <Text>
-              Directory <Text color="green">{Icons.check}</Text>{' '}
+            <Text color={Colors.body}>Directory </Text>
+            <Text color={Colors.secondary}>
+              /{path.basename(session.installDir)}
             </Text>
-            <Text>
-              {'/'}
-              {path.basename(session.installDir)}{' '}
-            </Text>
+            <Text color={Colors.success}> {Icons.checkmark}</Text>
           </Text>
+
           {frameworkLabel && (
             <Text>
-              <Text>
-                Framework <Text color="green">{Icons.check}</Text>{' '}
-              </Text>
-              <Text>
+              <Text color={Colors.body}>Framework </Text>
+              <Text color={Colors.secondary}>
                 {frameworkLabel}
-                {!manuallySelected && ' (detected)'}{' '}
-                {config?.metadata.beta && '[BETA]'}
+                {!manuallySelected && ' (detected)'}
+                {config?.metadata.beta && ' [BETA]'}
               </Text>
+              <Text color={Colors.success}> {Icons.checkmark}</Text>
             </Text>
           )}
+
           {showContinue && (
-            <PickerMenu
-              options={[
-                { label: 'Continue', value: 'continue' },
-                { label: 'Change framework', value: 'framework' },
-                { label: 'Cancel', value: 'cancel' },
-              ]}
-              onSelect={(value) => {
-                const choice = Array.isArray(value) ? value[0] : value;
-                analytics.wizardCapture('Intro Action', {
-                  action: choice,
-                  integration: session.integration,
-                  detected_framework: session.detectedFrameworkLabel,
-                });
-                if (choice === 'cancel') {
-                  store.setOutroData({
-                    kind: OutroKind.Cancel,
-                    message: 'Setup cancelled.',
+            <Box marginTop={1}>
+              <PickerMenu
+                options={[
+                  { label: 'Continue', value: 'continue' },
+                  {
+                    label: 'Change framework',
+                    value: 'framework',
+                    hint: 'pick manually',
+                  },
+                  { label: 'Cancel', value: 'cancel', hint: 'exit wizard' },
+                ]}
+                onSelect={(value) => {
+                  const choice = Array.isArray(value) ? value[0] : value;
+                  analytics.wizardCapture('Intro Action', {
+                    action: choice,
+                    integration: session.integration,
+                    detected_framework: session.detectedFrameworkLabel,
                   });
-                } else if (choice === 'framework') {
-                  setPickingFramework(true);
-                  setManuallySelected(true);
-                } else {
-                  store.concludeIntro();
-                }
-              }}
-            />
+                  if (choice === 'cancel') {
+                    store.setOutroData({
+                      kind: OutroKind.Cancel,
+                      message: 'Setup cancelled.',
+                    });
+                  } else if (choice === 'framework') {
+                    setPickingFramework(true);
+                    setManuallySelected(true);
+                  } else {
+                    store.concludeIntro();
+                  }
+                }}
+              />
+            </Box>
           )}
         </Box>
       )}

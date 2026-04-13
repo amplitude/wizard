@@ -16,6 +16,7 @@ import {
   type AmplitudeZone,
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
+import { atomicWriteJSON } from './atomic-write.js';
 
 export const AMPLI_CONFIG_PATH = path.join(os.homedir(), '.ampli.json');
 
@@ -50,7 +51,8 @@ function writeConfig(
   data: Record<string, unknown>,
   configPath = AMPLI_CONFIG_PATH,
 ): void {
-  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), 'utf-8');
+  // Atomic write: temp file + rename prevents corruption if process dies mid-write
+  atomicWriteJSON(configPath, data, 0o600);
 }
 
 function userKey(userId: string, zone: AmplitudeZone): string {
@@ -74,15 +76,23 @@ const UserEntrySchema = z
   })
   .passthrough();
 
-/** Returns the first stored user, or undefined if none. */
+/** Returns the first real (non-pending) stored user, or undefined if none. */
 export function getStoredUser(configPath?: string): StoredUser | undefined {
   const config = readConfig(configPath);
+  let fallback: StoredUser | undefined;
   for (const [key, value] of Object.entries(config)) {
     if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
     const entry = UserEntrySchema.safeParse(value);
-    if (entry.success && entry.data.User) return entry.data.User as StoredUser;
+    if (!entry.success || !entry.data.User) continue;
+    const user = entry.data.User as StoredUser;
+    // Skip the "pending" placeholder — prefer a real user with an actual ID
+    if (user.id === 'pending') {
+      fallback = fallback ?? user;
+      continue;
+    }
+    return user;
   }
-  return undefined;
+  return fallback;
 }
 
 /** Returns a valid (non-expired) stored token, or undefined. */

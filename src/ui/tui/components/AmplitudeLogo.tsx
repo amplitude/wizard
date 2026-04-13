@@ -15,17 +15,17 @@ const LINES = [
 
 const TEXT = LINES.join('\n');
 
-/** Amplitude blue gradient — bright core fading to dim. */
+/** Amplitude brand gradient — deep purple to bright blue (from brand guide). */
 const WAVE_COLORS = [
-  '#6b9af7', // light blue
-  '#4478f2', // mid blue
-  '#1e61f0', // Amplitude blue (brand)
-  '#1a55d4', // deeper blue
-  '#1549b8', // deep blue
-  '#1a55d4', // deeper blue
-  '#1e61f0', // Amplitude blue
-  '#4478f2', // mid blue
-  '#6b9af7', // light blue
+  '#311b8e', // deep purple (brand)
+  '#2a1da0', // mid purple-blue
+  '#2020b2', // transitional
+  '#1522c4', // mid blue
+  '#0c19df', // bright blue (brand)
+  '#1522c4', // mid blue
+  '#2020b2', // transitional
+  '#2a1da0', // mid purple-blue
+  '#311b8e', // deep purple
 ];
 
 /**
@@ -56,7 +56,7 @@ function applyHorizWave(line: string, rowWaveX: number): string {
     .join('');
 }
 
-export const AmplitudeLogo = ({ color = 'white' }: { color?: string }) => (
+export const AmplitudeLogo = ({ color = '#0c19df' }: { color?: string }) => (
   <Box marginBottom={1}>
     <Text color={color}>{TEXT}</Text>
   </Box>
@@ -64,9 +64,9 @@ export const AmplitudeLogo = ({ color = 'white' }: { color?: string }) => (
 
 /** AmplitudeLogo with a colour wave (vertical) and a horizontal dissolve wave. */
 export const AnimatedAmplitudeLogo = () => {
-  // Vertical colour wave — advances every 110 ms
+  // Vertical colour wave — advances every 110ms
   const [colorFrame, setColorFrame] = useState(0);
-  // Horizontal dissolve wave — tick advances every 50 ms
+  // Horizontal dissolve wave — tick advances every 50ms
   const [waveTick, setWaveTick] = useState(0);
 
   useEffect(() => {
@@ -82,11 +82,10 @@ export const AnimatedAmplitudeLogo = () => {
     return () => clearInterval(id);
   }, []);
 
-  // One dissolve wave every 4 s (80 ticks). The wave travels for the first
-  // 36 ticks (~1.8 s), sweeping from left edge to right edge; the remaining
-  // 44 ticks the logo rests at full resolution.
+  // One dissolve sweep every 4s (80 ticks at 50ms). The wave travels for
+  // the first 54 ticks (~2.7s), then rests at full resolution for ~1.3s.
   const TICKS_PER_CYCLE = 80;
-  const ACTIVE_TICKS = 54; // extra ticks to cover diagonal travel + right overshoot
+  const ACTIVE_TICKS = 54;
   const frameInCycle = waveTick % TICKS_PER_CYCLE;
   const waveX =
     frameInCycle < ACTIVE_TICKS

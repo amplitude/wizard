@@ -13,7 +13,7 @@ import type {
 } from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
 import { Overlay } from './router.js';
-import { RunPhase, OutroKind } from '../../lib/wizard-session.js';
+import { RunPhase, OutroKind } from './session-constants.js';
 
 // Strip ANSI escape codes (chalk formatting) from strings
 // eslint-disable-next-line no-control-regex

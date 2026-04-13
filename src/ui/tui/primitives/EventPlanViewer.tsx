@@ -1,10 +1,12 @@
 /**
- * EventPlanViewer — Renders a table of planned analytics events.
+ * EventPlanViewer — Renders a list of planned analytics events.
+ *
+ * Each event shows as: ● event name — description
  */
 
 import { Box, Text } from 'ink';
 import type { PlannedEvent } from '../store.js';
-import { Colors } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 
 interface EventPlanViewerProps {
   events: PlannedEvent[];
@@ -28,10 +30,13 @@ export const EventPlanViewer = ({ events }: EventPlanViewerProps) => {
       <Text bold>Event plan</Text>
       <Box height={1} />
       {events.map((event) => (
-        <Box key={event.name}>
-          <Text bold>{event.name}</Text>
-          <Text color={Colors.muted}> {event.description}</Text>
-        </Box>
+        <Text key={event.name} color={Colors.muted}>
+          {Icons.bullet}{' '}
+          <Text color={Colors.accent} bold>
+            {event.name}
+          </Text>
+          {event.description ? ` — ${event.description}` : ''}
+        </Text>
       ))}
     </Box>
   );

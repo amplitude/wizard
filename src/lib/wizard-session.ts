@@ -10,8 +10,49 @@
  * Business logic reads from the session. Never calls a prompt.
  */
 
+import { z } from 'zod';
+
 import type { Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
+
+/**
+ * Zod schema for CLI args passed to `buildSession()`.
+ * Coerces `projectId` from string to positive integer.
+ * All boolean flags default to false; `installDir` defaults to cwd.
+ */
+export const CliArgsSchema = z.object({
+  projectId: z
+    .union([z.string(), z.number()])
+    .optional()
+    .transform((v) => {
+      if (v === undefined || v === '') return undefined;
+      const n = Number(v);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    }),
+  installDir: z.string().default(process.cwd()),
+  debug: z.boolean().default(false),
+  verbose: z.boolean().default(false),
+  ci: z.boolean().default(false),
+  forceInstall: z.boolean().default(false),
+  signup: z.boolean().default(false),
+  localMcp: z.boolean().default(false),
+  menu: z.boolean().default(false),
+  benchmark: z.boolean().default(false),
+  apiKey: z.string().optional(),
+  integration: z.string().optional(),
+});
+
+/**
+ * Zod schema for validated Amplitude credentials.
+ * Exported for incremental adoption at credential-construction sites.
+ */
+export const CredentialsSchema = z.object({
+  accessToken: z.string().min(1, 'accessToken is required'),
+  idToken: z.string().optional(),
+  projectApiKey: z.string().min(1, 'projectApiKey is required'),
+  host: z.string().url('host must be a valid URL'),
+  projectId: z.number(),
+});
 
 function parseProjectIdArg(value: string | undefined): number | undefined {
   if (value === undefined || value === '') return undefined;
@@ -21,7 +62,11 @@ function parseProjectIdArg(value: string | undefined): number | undefined {
 
 export type CloudRegion = 'us' | 'eu';
 
-/** Lifecycle phase of the main work (agent run, MCP install, etc.) */
+/**
+ * Lifecycle phase of the main work (agent run, MCP install, etc.)
+ * NOTE: Duplicated in src/ui/tui/session-constants.ts (ESM/CJS workaround).
+ * If you change these values, update that file too — a test enforces sync.
+ */
 export const RunPhase = {
   /** Still gathering input (intro, setup screens) */
   Idle: 'idle',
@@ -275,6 +320,16 @@ export interface WizardSession {
    * or they chose to continue without completing everything).
    */
   checklistComplete: boolean;
+
+  /** Email address of the authenticated user (from ~/.ampli.json stored profile). */
+  userEmail: string | null;
+
+  /**
+   * Set to true by bin.ts when a crash-recovery checkpoint is loaded.
+   * IntroScreen checks this to show a "Resume where you left off" prompt
+   * instead of the normal detection flow.
+   */
+  _restoredFromCheckpoint: boolean;
 }
 
 /**
@@ -294,21 +349,36 @@ export function buildSession(args: {
   benchmark?: boolean;
   projectId?: string;
 }): WizardSession {
+  // Validate CLI args via Zod — warn on bad input but fall back to defaults
+  const parsed = CliArgsSchema.safeParse(args);
+  if (!parsed.success) {
+    console.warn(
+      `[wizard] Invalid CLI args (falling back to defaults): ${parsed.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join(', ')}`,
+    );
+  }
+
+  // Use Zod-validated data (with coerced projectId and defaults) when available
+  const validated = parsed.success ? parsed.data : args;
+
   return {
-    debug: args.debug ?? false,
-    verbose: args.verbose ?? false,
-    forceInstall: args.forceInstall ?? false,
-    installDir: args.installDir ?? process.cwd(),
-    ci: args.ci ?? false,
-    signup: args.signup ?? false,
-    localMcp: args.localMcp ?? false,
-    apiKey: args.apiKey,
-    menu: args.menu ?? false,
-    benchmark: args.benchmark ?? false,
-    projectId: parseProjectIdArg(args.projectId),
+    debug: validated.debug ?? false,
+    verbose: validated.verbose ?? false,
+    forceInstall: validated.forceInstall ?? false,
+    installDir: validated.installDir ?? process.cwd(),
+    ci: validated.ci ?? false,
+    signup: validated.signup ?? false,
+    localMcp: validated.localMcp ?? false,
+    apiKey: validated.apiKey,
+    menu: validated.menu ?? false,
+    benchmark: validated.benchmark ?? false,
+    projectId: parsed.success
+      ? parsed.data.projectId
+      : parseProjectIdArg(args.projectId),
 
     setupConfirmed: false,
-    integration: args.integration ?? null,
+    integration: (validated.integration as Integration) ?? null,
     frameworkContext: {},
     typescript: false,
     detectedFrameworkLabel: null,
@@ -353,5 +423,8 @@ export function buildSession(args: {
     checklistChartComplete: false,
     checklistDashboardComplete: false,
     checklistComplete: false,
+
+    userEmail: null,
+    _restoredFromCheckpoint: false,
   };
 }

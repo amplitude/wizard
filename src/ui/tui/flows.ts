@@ -9,7 +9,8 @@
  * to resolve which screen to show.
  */
 
-import { type WizardSession, RunPhase } from '../../lib/wizard-session.js';
+import type { WizardSession } from '../../lib/wizard-session.js';
+import { RunPhase } from './session-constants.js';
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
 

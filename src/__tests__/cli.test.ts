@@ -85,6 +85,7 @@ vi.mock('../lib/constants', () => ({
   DETECTION_TIMEOUT_MS: 100,
   IS_DEV: true,
   DEFAULT_AMPLITUDE_ZONE: 'us',
+  DEFAULT_HOST_URL: 'https://api.amplitude.com',
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
@@ -109,6 +110,10 @@ vi.mock('../utils/api-key-store', () => ({
 }));
 vi.mock('../utils/get-api-key', () => ({
   getAPIKey: vi.fn().mockResolvedValue(null),
+}));
+vi.mock('../lib/credential-resolution', () => ({
+  resolveCredentials: vi.fn().mockResolvedValue(undefined),
+  resolveEnvironmentSelection: vi.fn().mockResolvedValue(false),
 }));
 vi.mock('../utils/environment', () => ({
   isNonInteractiveEnvironment: mockIsNonInteractiveEnvironment,
@@ -188,7 +193,7 @@ function defaultAuthMocks() {
  */
 function simulateRegionSelect(region: 'us' | 'eu') {
   (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
-    mockStore.session = { ...mockStore.session, region };
+    mockStore.session = { ...mockStore.session, region, introConcluded: true };
     setTimeout(cb, 0);
     return vi.fn();
   });
@@ -218,12 +223,15 @@ describe('CI mode validation', () => {
     expect(process.exit).not.toHaveBeenCalled();
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
+      expect.anything(),
     );
   });
 
-  test('requires --install-dir when --ci is set', async () => {
+  test('defaults --install-dir to cwd when --ci is set without it', async () => {
     await runCLI(['--ci', '--api-key', 'phx_test']);
-    expect(process.exit).toHaveBeenCalledWith(1);
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+    expect(process.exit).not.toHaveBeenCalled();
+    expect(mockRunWizard).toHaveBeenCalled();
   });
 
   test('passes --api-key to runWizard in CI mode', async () => {
@@ -234,7 +242,10 @@ describe('CI mode validation', () => {
       '--install-dir',
       '/tmp/test',
     ]);
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+    // CI mode now builds a session with apiKey and passes it as second arg
     expect(mockRunWizard).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'phx_test_key' }),
       expect.objectContaining({ apiKey: 'phx_test_key' }),
     );
   });
@@ -308,8 +319,12 @@ describe('TUI auth task: region determines OAuth zone', () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
 
-    // Simulate the user picking a region
-    mockStore.session = { ...mockStore.session, region: 'us' };
+    // Simulate the user dismissing intro and picking a region
+    mockStore.session = {
+      ...mockStore.session,
+      region: 'us',
+      introConcluded: true,
+    };
     (storedCallback as (() => void) | null)?.();
 
     await cliPromise;

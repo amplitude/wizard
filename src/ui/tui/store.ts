@@ -16,12 +16,14 @@ import {
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
+  buildSession,
+} from '../../lib/wizard-session.js';
+import {
   AdditionalFeature,
   McpOutcome,
   SlackOutcome,
   RunPhase,
-  buildSession,
-} from '../../lib/wizard-session.js';
+} from './session-constants.js';
 import {
   WizardRouter,
   type ScreenName,
@@ -30,7 +32,8 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
-import { FLAG_LLM_ANALYTICS } from '../../lib/feature-flags.js';
+// Inlined to avoid tsx ESM resolution bug with dynamic import().
+const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
 export {
   TaskStatus,
@@ -135,6 +138,7 @@ export class WizardStore {
 
   set session(value: WizardSession) {
     this.$session.set(value);
+    this.emitChange();
   }
 
   get commandMode(): boolean {
@@ -252,6 +256,21 @@ export class WizardStore {
   setRegion(region: string): void {
     this.$session.setKey('region', region as WizardSession['region']);
     this.$session.setKey('regionForced', false);
+
+    // Persist region to project-level ampli.json so next run uses the right zone.
+    // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
+    // would create a partial config).
+    const session = this.$session.get();
+    if (session.selectedOrgId && session.selectedWorkspaceId) {
+      void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
+        writeAmpliConfig(session.installDir, {
+          OrgId: session.selectedOrgId!,
+          WorkspaceId: session.selectedWorkspaceId!,
+          Zone: region as 'us' | 'eu',
+        });
+      });
+    }
+
     this.emitChange();
   }
 
@@ -503,9 +522,14 @@ export class WizardStore {
     this.$session.setKey('selectedWorkspaceId', workspace.id);
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
-    // Write ampli.json to the project directory
+    // Write ampli.json to the project directory.
+    // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)
+    // so that /region changes are respected.
     void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-      const zone = this.$session.get().pendingAuthCloudRegion ?? 'us';
+      const zone =
+        this.$session.get().region ??
+        this.$session.get().pendingAuthCloudRegion ??
+        'us';
       writeAmpliConfig(installDir, {
         OrgId: org.id,
         WorkspaceId: workspace.id,
@@ -556,7 +580,10 @@ export class WizardStore {
 
   addDiscoveredFeature(feature: DiscoveredFeature): void {
     if (!this.session.discoveredFeatures.includes(feature)) {
-      this.session.discoveredFeatures.push(feature);
+      this.$session.setKey('discoveredFeatures', [
+        ...this.session.discoveredFeatures,
+        feature,
+      ]);
       this.emitChange();
     }
   }
@@ -576,11 +603,14 @@ export class WizardStore {
     }
 
     if (!this.session.additionalFeatureQueue.includes(feature)) {
-      this.session.additionalFeatureQueue.push(feature);
+      this.$session.setKey('additionalFeatureQueue', [
+        ...this.session.additionalFeatureQueue,
+        feature,
+      ]);
     }
     // Feature-specific flags
     if (feature === AdditionalFeature.LLM) {
-      this.session.llmOptIn = true;
+      this.$session.setKey('llmOptIn', true);
     }
     analytics.wizardCapture('Feature Enabled', { feature });
     this.emitChange();

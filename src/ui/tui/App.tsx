@@ -1,22 +1,36 @@
-import { useMemo, useSyncExternalStore, type ReactNode } from 'react';
-import { Box } from 'ink';
+/**
+ * App — Root component.
+ *
+ * Layout (top to bottom):
+ *   1. JourneyStepper (1 line) — progress through the flow
+ *   2. HeaderBar (1 line) — title + org/project context
+ *   3. Separator
+ *   4. Content area (flex grow) — active screen
+ *   5. ConsoleView bottom area — separator + hints + input
+ *
+ * No outer border. Full terminal width (capped at 120).
+ */
+
+import { useMemo, type ReactNode } from 'react';
+import { Box, Text } from 'ink';
 import type { WizardStore } from './store.js';
 import { createScreens, createServices } from './screen-registry.js';
 import { CommandModeContext } from './context/CommandModeContext.js';
 import { ConsoleView } from './components/ConsoleView.js';
-import { TitleBar } from './components/TitleBar.js';
+import { HeaderBar } from './components/HeaderBar.js';
+import { JourneyStepper } from './components/JourneyStepper.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
-import { DissolveTransition } from './primitives/DissolveTransition.js';
-import { ScreenErrorBoundary } from './primitives/ScreenErrorBoundary.js';
+import { useWizardStore } from './hooks/useWizardStore.js';
+import { DissolveTransition } from './primitives/index.js';
+import { ScreenErrorBoundary } from './primitives/index.js';
+import { Colors, Layout } from './styles.js';
 
-const MIN_WIDTH = 80;
-const MAX_WIDTH = 120;
-/** Height reserved for separator + response line + input + up to 5 picker items. */
-const CONSOLE_INPUT_HEIGHT = 8;
+/** Height reserved for stepper + header + separators + hint bar + input. */
+const CHROME_HEIGHT = 8;
 
 function getContentWidth(terminalColumns: number): number {
-  if (terminalColumns < MIN_WIDTH) return terminalColumns;
-  return Math.min(MAX_WIDTH, terminalColumns);
+  if (terminalColumns < Layout.minWidth) return terminalColumns;
+  return Math.min(Layout.maxWidth, terminalColumns);
 }
 
 interface AppProps {
@@ -31,19 +45,15 @@ export const App = ({ store }: AppProps) => {
     [store, services],
   );
 
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const width = getContentWidth(columns);
-  const innerWidth = width - 2;
-  // border(2) + titlebar(1) + gap(1) + console input area
-  const contentHeight = Math.max(5, rows - 4 - CONSOLE_INPUT_HEIGHT);
-  // innerWidth minus paddingX(1) on each side
-  const contentAreaWidth = Math.max(10, innerWidth - 2);
+  const contentHeight = Math.max(5, rows - CHROME_HEIGHT);
+  const contentAreaWidth = Math.max(10, width - Layout.paddingX * 2);
   const direction = store.lastNavDirection === 'pop' ? 'right' : 'left';
   const activeScreen: ReactNode = screens[store.currentScreen] ?? null;
+
+  const separator = Layout.separatorChar.repeat(Math.max(0, width - 2));
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>
@@ -54,18 +64,29 @@ export const App = ({ store }: AppProps) => {
         alignItems="center"
         justifyContent="flex-start"
       >
-        <ConsoleView store={store} width={width} height={rows}>
-          <TitleBar
-            version={store.version}
-            width={innerWidth}
+        <Box flexDirection="column" width={width}>
+          {/* Journey stepper */}
+          <JourneyStepper store={store} width={width} />
+
+          {/* Header bar */}
+          <HeaderBar
+            width={width}
             orgName={store.session.selectedOrgName}
             projectName={store.session.selectedProjectName}
           />
-          <Box height={1} />
+
+          {/* Top separator */}
+          <Box paddingX={1}>
+            <Text color={Colors.border}>{separator}</Text>
+          </Box>
+        </Box>
+
+        {/* Content + console input */}
+        <ConsoleView store={store} width={width} height={rows - 3}>
           <Box
             flexDirection="column"
             flexGrow={1}
-            paddingX={1}
+            paddingX={Layout.paddingX}
             overflow="hidden"
           >
             <DissolveTransition

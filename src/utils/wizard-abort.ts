@@ -67,5 +67,11 @@ export async function wizardAbort(
   getUI().cancel(message);
 
   // 5. Exit (fires 'exit' event so TUI cleanup runs)
-  return process.exit(exitCode);
+  // In agent mode, always exit 0 — errors are communicated via NDJSON output,
+  // not exit codes. A non-zero exit makes callers (like Claude Code) show
+  // ugly red error banners when the error is already reported in the output.
+  const isAgentMode =
+    process.env.AMPLITUDE_WIZARD_AGENT === '1' ||
+    process.argv.includes('--agent');
+  return process.exit(isAgentMode ? 0 : exitCode);
 }

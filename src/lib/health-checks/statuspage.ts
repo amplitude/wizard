@@ -120,8 +120,12 @@ async function fetchStatuspageSummary(
 // Individual statuspage-backed checks
 // ---------------------------------------------------------------------------
 
+/** Model provider health — no-op, wizard uses Vertex AI via proxy. */
 export const checkAnthropicHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator('https://status.claude.com/api/v2/status.json');
+  Promise.resolve({
+    status: ServiceHealthStatus.Healthy,
+    pageUrl: '',
+  });
 
 export const checkAmplitudeOverallHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator(

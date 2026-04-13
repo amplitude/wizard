@@ -1,28 +1,22 @@
 /**
- * ConsoleView — Full-screen bordered box.
+ * ConsoleView — Full-screen wrapper without outer border.
  *
- * Renders arbitrary children in the content area, with a persistent
- * slash-command / Claude-query input at the bottom.
- *
- * The input is dormant by default. Activation:
- *   - "/" → activate in slash-command mode
- *   - Tab → activate for free-text Claude query
- * Deactivation: Enter (submit) or Escape. Backspacing to empty also deactivates.
- *
- * While active, commandMode=true on the store disables all useScreenInput handlers.
+ * Layout: content area + separator + console input with ❯ prompt.
+ * Handles slash commands, AI queries, pending prompts, and error banners.
+ * KeyHintBar integrated above the input line.
  */
 
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
-import { useState, useEffect, useSyncExternalStore } from 'react';
+import { useState, useEffect } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
-import { SlashCommandInput } from '../primitives/SlashCommandInput.js';
-import { PickerMenu } from '../primitives/PickerMenu.js';
-import { Colors, Icons } from '../styles.js';
+import { OutroKind } from '../session-constants.js';
+import { SlashCommandInput } from '../primitives/index.js';
+import { PickerMenu } from '../primitives/index.js';
+import { Colors, Icons, Layout } from '../styles.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Overlay } from '../router.js';
-import { Screen } from '../flows.js';
 import {
   queryConsole,
   resolveConsoleCredentials,
@@ -33,10 +27,10 @@ import {
   COMMANDS,
   getWhoamiText,
   parseFeedbackSlashInput,
-  TEST_PROMPT,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
+import { KeyHintBar, type KeyHint } from './KeyHintBar.js';
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -52,7 +46,28 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       store.showLogoutOverlay();
       break;
     case '/whoami':
-      store.setCommandFeedback(getWhoamiText(store.session));
+      // Show current data immediately, then refresh from API
+      store.setCommandFeedback(getWhoamiText(store.session), 30_000);
+      if (store.session.credentials?.idToken && store.session.region) {
+        void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) => {
+          fetchAmplitudeUser(
+            store.session.credentials!.idToken!,
+            store.session.region!,
+          )
+            .then((userInfo) => {
+              if (userInfo.email) store.session.userEmail = userInfo.email;
+              const orgId = store.session.selectedOrgId;
+              if (orgId) {
+                const org = userInfo.orgs.find((o) => o.id === orgId);
+                if (org) store.session.selectedOrgName = org.name;
+              }
+              store.setCommandFeedback(getWhoamiText(store.session), 30_000);
+            })
+            .catch(() => {
+              // Non-fatal — keep showing what we have
+            });
+        });
+      }
       break;
     case '/slack':
       store.showSlackOverlay();
@@ -76,8 +91,6 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         });
       break;
     }
-    case '/test':
-      return TEST_PROMPT;
     case '/mcp':
       store.showMcpOverlay();
       break;
@@ -99,6 +112,8 @@ interface ConsoleViewProps {
   store: WizardStore;
   width: number;
   height: number;
+  /** Extra key hints from the active screen. */
+  screenHints?: KeyHint[];
   children?: ReactNode;
 }
 
@@ -106,6 +121,7 @@ export const ConsoleView = ({
   store,
   width,
   height,
+  screenHints,
   children,
 }: ConsoleViewProps) => {
   const [inputActive, setInputActive] = useState(false);
@@ -122,14 +138,11 @@ export const ConsoleView = ({
   const [planFeedbackText, setPlanFeedbackText] = useState('');
   const [planCursorVisible, setPlanCursorVisible] = useState(true);
 
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const activate = (seed = '') => {
     setInitialValue(seed);
-    setInputKey((k) => k + 1); // remount so initialValue takes effect
+    setInputKey((k) => k + 1);
     setInputActive(true);
     store.setCommandMode(true);
   };
@@ -139,20 +152,18 @@ export const ConsoleView = ({
     store.setCommandMode(false);
   };
 
-  const isIntro = store.currentScreen === Screen.Intro;
   const feedback = store.commandFeedback;
   const screenError = store.screenError;
   const showResponse = loading || !!response;
   const showFeedback = !showResponse && !!feedback;
-  const innerWidth = width - 2;
-  const separator = '─'.repeat(Math.max(0, innerWidth));
+  const innerWidth = width;
+  const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
   const responseIsLong = !!response && response.split('\n').length > 3;
   const pendingPrompt = store.pendingPrompt;
 
   // Watch for activation keys while the input is dormant
   useInput(
     (char, key) => {
-      // Escape or Q dismisses overlays: pending prompt (skip) or long response
       if (key.escape || char === 'q' || char === 'Q') {
         if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
@@ -167,12 +178,14 @@ export const ConsoleView = ({
         store.clearScreenError();
         return;
       }
-      if (!isIntro) {
-        if (char === '/') {
-          activate('/');
-        } else if (key.tab) {
-          activate('');
-        }
+      if (char === '/') {
+        activate('/');
+      } else if (
+        key.tab &&
+        store.session.credentials !== null &&
+        store.session.introConcluded
+      ) {
+        activate('');
       }
     },
     { isActive: !inputActive },
@@ -202,7 +215,7 @@ export const ConsoleView = ({
       .then((text) => {
         setResponse(text);
         setHistory((h) => [
-          ...h,
+          ...h.slice(-8),
           { role: 'user', content: value },
           { role: 'assistant', content: text },
         ]);
@@ -221,7 +234,7 @@ export const ConsoleView = ({
     return () => clearInterval(id);
   }, [planInputMode]);
 
-  // Reset plan input state when the prompt clears (agent got the answer)
+  // Reset plan input state when the prompt clears
   useEffect(() => {
     if (!pendingPrompt) {
       setPlanInputMode('options');
@@ -259,9 +272,10 @@ export const ConsoleView = ({
         return;
       }
 
-      // options mode
+      // options mode — require explicit Y to approve (Enter alone is too easy
+      // to hit accidentally while the plan is pending in the background)
       const lc = char.toLowerCase();
-      if (lc === 'y' || key.return) {
+      if (lc === 'y') {
         store.resolveEventPlan({ decision: 'approved' });
       } else if (lc === 's') {
         store.resolveEventPlan({ decision: 'skipped' });
@@ -275,8 +289,7 @@ export const ConsoleView = ({
     },
   );
 
-  // Show the latest status message when an overlay is active — RunScreen's
-  // own TabContainer handles this for the non-overlay case.
+  // Show the latest status message when an overlay is active
   const overlayValues: string[] = Object.values(Overlay);
   const isOverlay = overlayValues.includes(store.currentScreen);
   const lastStatus =
@@ -285,17 +298,16 @@ export const ConsoleView = ({
       : null;
 
   return (
-    <Box
-      width={width}
-      height={height}
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={Colors.muted}
-    >
-      {/* Content area — screens render here, prompt overlay, or long response */}
+    <Box width={width} height={height} flexDirection="column">
+      {/* Content area */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {pendingPrompt ? (
-          <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
+          <Box
+            flexDirection="column"
+            flexGrow={1}
+            paddingX={Layout.paddingX}
+            paddingY={1}
+          >
             {pendingPrompt.kind === 'confirm' ? (
               <PickerMenu
                 message={pendingPrompt.message}
@@ -316,16 +328,19 @@ export const ConsoleView = ({
               />
             ) : (
               <Box flexDirection="column" gap={1}>
-                <Text color={Colors.primary} bold>
+                <Text color={Colors.muted}>Suggested events for your app:</Text>
+                <Text color={Colors.heading} bold>
                   Instrumentation Plan
                 </Text>
-                {pendingPrompt.events.map((e) => (
-                  <Box key={e.name} flexDirection="column">
+                {pendingPrompt.events.map((e, i) => (
+                  <Text key={e.name || i} wrap="wrap">
                     <Text color={Colors.accent} bold>
-                      {e.name}
+                      {Icons.bullet} {e.name}
                     </Text>
-                    <Text color={Colors.muted}>{e.description}</Text>
-                  </Box>
+                    {e.description ? (
+                      <Text color={Colors.secondary}> — {e.description}</Text>
+                    ) : null}
+                  </Text>
                 ))}
                 {planInputMode === 'feedback' ? (
                   <Box gap={1}>
@@ -348,20 +363,26 @@ export const ConsoleView = ({
             )}
           </Box>
         ) : responseIsLong ? (
-          <Box flexDirection="column" flexGrow={1} paddingX={1} paddingY={1}>
-            <Box justifyContent="flex-end">
+          <Box
+            flexDirection="column"
+            flexGrow={1}
+            paddingX={Layout.paddingX}
+            paddingY={1}
+            overflow="hidden"
+          >
+            <Text color={Colors.accent}>{response}</Text>
+            <Box marginTop={1}>
               <Text color={Colors.muted}>[Q / Esc] close</Text>
             </Box>
-            <Text color={Colors.primary}>{response}</Text>
           </Box>
         ) : (
           children
         )}
       </Box>
 
-      {/* Status ticker — shown when an overlay is active (RunScreen handles its own) */}
+      {/* Status ticker — shown when an overlay is active */}
       {lastStatus && (
-        <Box paddingX={1} overflow="hidden">
+        <Box paddingX={Layout.paddingX} overflow="hidden">
           <Text color={Colors.muted}>{Icons.diamondOpen} </Text>
           <Text color={Colors.muted} wrap="truncate-end">
             {lastStatus}
@@ -369,11 +390,11 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Error banner — shown when a screen crashes or the agent fails to start */}
+      {/* Error banner */}
       {screenError && (
-        <Box paddingX={1} gap={1}>
+        <Box paddingX={Layout.paddingX} gap={1}>
           <Text color={Colors.error} bold>
-            ⚠
+            {Icons.cross}
           </Text>
           <Box flexGrow={1} overflow="hidden">
             <Text color={Colors.error} wrap="truncate-end">
@@ -384,44 +405,69 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Console input area — hidden on the Intro screen */}
-      {!isIntro && (
-        <>
-          <Text color={Colors.muted}>{separator}</Text>
-          {showFeedback && (
-            <Box paddingX={1}>
-              <Text color={Colors.accent} bold>
-                {' '}
-              </Text>
-              <Text color={Colors.muted}>{feedback}</Text>
-            </Box>
-          )}
-          {showResponse && !responseIsLong && (
-            <Box paddingX={1} paddingY={1} gap={1} flexDirection="column">
-              {loading ? (
-                <Spinner />
-              ) : (
-                <Text color={Colors.primary}>{response}</Text>
-              )}
-            </Box>
-          )}
-          {loading && responseIsLong && (
-            <Box paddingX={1}>
-              <Spinner />
-            </Box>
-          )}
-          <Box paddingX={1}>
-            <SlashCommandInput
-              key={inputKey}
-              commands={COMMANDS}
-              isActive={inputActive}
-              initialValue={initialValue}
-              onSubmit={handleSubmit}
-              onDeactivate={deactivate}
-            />
-          </Box>
-        </>
+      {/* Separator */}
+      <Box paddingX={1}>
+        <Text color={Colors.border}>{separator}</Text>
+      </Box>
+
+      {/* Feedback line */}
+      {showFeedback && (
+        <Box paddingX={Layout.paddingX}>
+          <Text color={Colors.accent}>{Icons.prompt} </Text>
+          <Text color={Colors.secondary}>{feedback}</Text>
+        </Box>
       )}
+
+      {/* Response line */}
+      {showResponse && !responseIsLong && (
+        <Box
+          paddingX={Layout.paddingX}
+          paddingY={1}
+          gap={1}
+          flexDirection="column"
+        >
+          {loading ? (
+            <Spinner />
+          ) : (
+            <Text color={Colors.accent}>{response}</Text>
+          )}
+        </Box>
+      )}
+      {loading && responseIsLong && (
+        <Box paddingX={Layout.paddingX}>
+          <Spinner />
+        </Box>
+      )}
+
+      {/* Key hints + console input */}
+      <KeyHintBar
+        hints={screenHints}
+        width={innerWidth}
+        showAskHint={
+          store.session.credentials !== null && store.session.introConcluded
+        }
+      />
+      <Box paddingX={Layout.paddingX}>
+        <Text color={inputActive ? Colors.accent : Colors.muted}>
+          {Icons.prompt}{' '}
+        </Text>
+        {inputActive ? (
+          <SlashCommandInput
+            key={inputKey}
+            commands={COMMANDS}
+            isActive={inputActive}
+            initialValue={initialValue}
+            onSubmit={handleSubmit}
+            onDeactivate={deactivate}
+          />
+        ) : (
+          <Text color={Colors.disabled}>
+            {store.session.credentials !== null && store.session.introConcluded
+              ? 'Press / for commands or Tab to ask a question'
+              : 'Press / for commands'}
+          </Text>
+        )}
+      </Box>
     </Box>
   );
 };

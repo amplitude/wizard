@@ -22,22 +22,75 @@ export const COMMANDS = [
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
 
-export const TEST_PROMPT: string =
-  'Demo the wizard prompt tools. ' +
-  'First, use the wizard-tools:confirm tool to ask if I want to continue. ' +
-  'Then use the wizard-tools:choose tool to let me pick my favorite color from: Red, Blue, Green, Purple. ' +
-  'Finally, summarize what I chose in one sentence.';
-
 /** Returns the feedback text for the /whoami command. */
 export function getWhoamiText(
   session: Pick<
     WizardSession,
-    'selectedOrgName' | 'selectedWorkspaceName' | 'region'
+    | 'selectedOrgId'
+    | 'selectedOrgName'
+    | 'selectedWorkspaceName'
+    | 'selectedProjectName'
+    | 'region'
+    | 'credentials'
+    | 'userEmail'
   >,
 ): string {
-  return `org: ${session.selectedOrgName ?? '(none)'}  workspace: ${
-    session.selectedWorkspaceName ?? '(none)'
-  }  region: ${session.region ?? '(none)'}`;
+  const loggedIn =
+    session.credentials !== null && session.credentials !== undefined;
+  const hasAnyIdentity =
+    loggedIn ||
+    session.userEmail ||
+    session.selectedOrgName ||
+    session.selectedOrgId;
+  if (!hasAnyIdentity) {
+    return 'Not logged in. Run /login to authenticate.';
+  }
+  const parts: string[] = [];
+  if (session.userEmail) parts.push(session.userEmail);
+
+  if (session.selectedOrgName || session.selectedOrgId) {
+    const orgLabel =
+      session.selectedOrgName ?? session.selectedOrgId ?? '(none)';
+    parts.push(`org: ${orgLabel}`);
+  }
+
+  // Show project (Amplitude calls this "workspace" internally, but users
+  // think of it as their project). Then show environment name + numeric ID.
+  if (session.selectedWorkspaceName) {
+    parts.push(`project: ${session.selectedWorkspaceName}`);
+  }
+
+  const envName = session.selectedProjectName;
+  const envId =
+    session.credentials?.projectId && session.credentials.projectId !== 0
+      ? String(session.credentials.projectId)
+      : null;
+  if (envName && envId) {
+    parts.push(`env: ${envName} (${envId})`);
+  } else if (envName) {
+    parts.push(`env: ${envName}`);
+  } else if (envId) {
+    parts.push(`env: ${envId}`);
+  }
+
+  if (session.region) {
+    parts.push(`region: ${session.region}`);
+  }
+
+  // Show masked API key so the user knows which key is active
+  if (session.credentials?.projectApiKey) {
+    const key = session.credentials.projectApiKey;
+    const masked =
+      key.length > 8 ? key.slice(0, 4) + '…' + key.slice(-4) : '****';
+    parts.push(`key: ${masked}`);
+  }
+
+  // If we have some identity but no credentials yet, hint that setup is in progress
+  if (!loggedIn && parts.length > 0) {
+    parts.push('(authenticating…)');
+  }
+
+  return parts.join('  ');
 }
 
 /**

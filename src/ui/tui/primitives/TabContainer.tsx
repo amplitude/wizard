@@ -36,12 +36,21 @@ export const TabContainer = ({
     onTabConsumed?.();
   }, [requestedTab]);
 
-  useScreenInput((_input, key) => {
+  useScreenInput((input, key) => {
+    // Arrow keys always switch tabs (Snake uses WASD for movement)
     if (key.leftArrow) {
       setActiveTab((prev) => Math.max(0, prev - 1));
+      return;
     }
     if (key.rightArrow) {
       setActiveTab((prev) => Math.min(tabs.length - 1, prev + 1));
+      return;
+    }
+
+    // Number keys also work for tab switching (1-indexed)
+    const num = parseInt(input, 10);
+    if (!isNaN(num) && num >= 1 && num <= tabs.length) {
+      setActiveTab(num - 1);
     }
   });
 

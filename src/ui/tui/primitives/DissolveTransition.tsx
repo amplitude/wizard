@@ -14,7 +14,7 @@ import { useState, useEffect, useRef, type ReactNode } from 'react';
 /** Shade characters in build-up order (light → solid). */
 const SHADES = ['░', '▒', '▓', '█'] as const;
 /** How many ticks each shade character displays before advancing. */
-const TICKS_PER_SHADE = 2;
+const TICKS_PER_SHADE = 1;
 /** Total ticks a column needs to complete its shade cycle. */
 const SHADE_CYCLE_TICKS = SHADES.length * TICKS_PER_SHADE;
 
@@ -48,7 +48,7 @@ export const DissolveTransition = ({
   height,
   children,
   direction = 'left',
-  duration = 2,
+  duration = 16,
 }: DissolveTransitionProps) => {
   const [phase, setPhase] = useState<TransitionPhase>(TransitionPhase.Idle);
   const [tick, setTick] = useState(0);
@@ -83,9 +83,8 @@ export const DissolveTransition = ({
     return () => clearInterval(timer);
   }, [phase, duration]);
 
-  // Easer steps = width: roughly one column activates per tick.
-  // This keeps the sweep front tight (only a few columns in-flight at once).
-  const easerSteps = width;
+  // Easer steps = width / 3: ~3 columns activate per tick for a fast sweep.
+  const easerSteps = Math.max(Math.ceil(width / 3), 10);
 
   // A phase ends when the easer has completed AND all columns have finished their shade cycle.
   const maxTicks = easerSteps + SHADE_CYCLE_TICKS;

@@ -1,37 +1,47 @@
 /**
- * DataIngestionCheckScreen — "Waiting for your events..." polling screen.
+ * DataIngestionCheckScreen — "Start your app and trigger some actions" polling screen.
  *
  * Shown after MCP setup. Polls the activation API every 30 seconds until the
  * project starts receiving events, then auto-advances to the Checklist.
  *
- * For users who were already fully activated (activationLevel === 'full') when
- * the wizard started, this screen confirms immediately on mount without polling.
- *
- * The user can exit and come back later — next time through, DataSetupScreen
- * will re-check activation and this screen will confirm immediately if events
- * have arrived.
- *
- * When the activation API is unavailable (e.g. external users hitting Thunder
- * endpoints that require browser session auth), the screen falls back to showing
- * cataloged event types from the data API so the user can verify events arrived,
- * then manually confirms with Enter.
+ * Active guidance as prominent instruction with framework-aware hint.
+ * BrailleSpinner while waiting. Success celebration when events arrive.
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
   fetchProjectActivationStatus,
   fetchWorkspaceEventTypes,
 } from '../../../lib/api.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
+import { Integration } from '../../../lib/constants.js';
+import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
-import { useScreenInput } from '../hooks/useScreenInput.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
+const CELEBRATION_DELAY_MS = 3_000;
+
+/** Framework-specific hints for what the user should do to generate events. */
+const FRAMEWORK_HINTS: Partial<Record<Integration, string>> = {
+  [Integration.nextjs]: 'Visit localhost:3000 and click around',
+  [Integration.vue]: 'Visit localhost:5173 and interact with your app',
+  [Integration.reactRouter]: 'Visit localhost:3000 and navigate between pages',
+  [Integration.django]: 'Visit localhost:8000 and browse a few pages',
+  [Integration.flask]: 'Visit localhost:5000 and trigger some requests',
+  [Integration.fastapi]: 'Visit localhost:8000/docs and try some endpoints',
+  [Integration.reactNative]:
+    'Open your app on a device or emulator and tap around',
+  [Integration.swift]: 'Build and run your app, then interact with it',
+  [Integration.android]: 'Build and run your app, then interact with it',
+  [Integration.flutter]: 'Run your app and navigate through a few screens',
+};
 
 interface DataIngestionCheckScreenProps {
   store: WizardStore;
@@ -40,67 +50,89 @@ interface DataIngestionCheckScreenProps {
 export const DataIngestionCheckScreen = ({
   store,
 }: DataIngestionCheckScreenProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   const { session } = store;
-  const { credentials, region, activationLevel } = session;
+  const { activationLevel } = session;
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [eventTypes, setEventTypes] = useState<string[] | null>(null);
+  const [celebrating, setCelebrating] = useState(false);
+  const [celebrationReady, setCelebrationReady] = useState(false);
+  const [arrivedEvents, setArrivedEvents] = useState<string[]>([]);
+  const [lastChecked, setLastChecked] = useState<number | null>(null);
+  const [secondsSince, setSecondsSince] = useState(0);
+  const [pollingStartTime] = useState(() => Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  /** Confirm ingestion with a celebration, then wait for user to press Enter. */
+  function confirmWithCelebration(events?: string[]) {
+    if (pollingRef.current !== null) clearInterval(pollingRef.current);
+    setCelebrating(true);
+    if (events && events.length > 0) setArrivedEvents(events);
+    celebrationTimerRef.current = setTimeout(() => {
+      setCelebrationReady(true);
+    }, CELEBRATION_DELAY_MS);
+  }
 
   async function checkIngestion() {
-    if (!credentials) {
+    // Read from store.session at call time to avoid stale closures
+    const currentSession = store.session;
+    const currentCredentials = currentSession.credentials;
+    const currentRegion = currentSession.region;
+
+    if (!currentCredentials) {
       setApiUnavailable(true);
       return;
     }
-    // credentials.projectId is 0 for OAuth users; fall back to workspace UUID
-    const appId = credentials.projectId || session.selectedWorkspaceId;
+    const appId =
+      currentCredentials.projectId || currentSession.selectedWorkspaceId;
     if (!appId) {
       setApiUnavailable(true);
       return;
     }
-    const zone = (region ?? 'us') as AmplitudeZone;
-    // Data API (fetchWorkspaceEventTypes) expects a raw JWT id_token.
-    const dataApiToken = credentials.idToken ?? credentials.accessToken;
+    const zone = (currentRegion ?? 'us') as AmplitudeZone;
+    const dataApiToken =
+      currentCredentials.idToken ?? currentCredentials.accessToken;
 
-    if (!session.selectedOrgId) {
+    if (!currentSession.selectedOrgId) {
       setApiUnavailable(true);
       return;
     }
 
     try {
       const status = await fetchProjectActivationStatus({
-        accessToken: credentials.accessToken,
+        accessToken: currentCredentials.accessToken,
         zone,
         appId,
-        orgId: session.selectedOrgId,
+        orgId: currentSession.selectedOrgId,
       });
+      setLastChecked(Date.now());
       logToFile(
         `[DataIngestionCheck] poll result: hasAnyEvents=${status.hasAnyEvents} hasDetSource=${status.hasDetSource}`,
       );
       if (status.hasAnyEvents) {
-        store.setDataIngestionConfirmed();
+        confirmWithCelebration();
         return;
       }
 
-      // The activation API only checks autocapture events (page_viewed,
-      // session_start, session_end). Custom track() calls won't appear there.
-      // Fall back to the event catalog which includes all event types.
-      if (session.selectedOrgId && session.selectedWorkspaceId) {
+      // Activation API only checks autocapture events. Fall back to the
+      // event catalog which includes all event types.
+      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
         const catalogEvents = await fetchWorkspaceEventTypes(
           dataApiToken,
           zone,
-          session.selectedOrgId,
-          session.selectedWorkspaceId,
+          currentSession.selectedOrgId,
+          currentSession.selectedWorkspaceId,
         );
         logToFile(
           `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
         );
         if (catalogEvents.length > 0) {
-          store.setDataIngestionConfirmed();
+          confirmWithCelebration(catalogEvents);
         }
       }
     } catch (err) {
@@ -109,15 +141,20 @@ export const DataIngestionCheckScreen = ({
           err instanceof Error ? err.message : String(err)
         }`,
       );
+      // Clear the polling interval so it stops firing against the failing API
+      if (pollingRef.current !== null) {
+        clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
       setApiUnavailable(true);
 
-      // Fetch cataloged event types from the data API as a proxy for "events arrived"
-      if (session.selectedOrgId && session.selectedWorkspaceId) {
+      // Fetch cataloged event types as a proxy for "events arrived"
+      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
         fetchWorkspaceEventTypes(
           dataApiToken,
           zone,
-          session.selectedOrgId,
-          session.selectedWorkspaceId,
+          currentSession.selectedOrgId,
+          currentSession.selectedWorkspaceId,
         )
           .then((names) => {
             setEventTypes(names);
@@ -138,7 +175,6 @@ export const DataIngestionCheckScreen = ({
       return;
     }
 
-    // Run once immediately, then set up the interval
     void checkIngestion();
     pollingRef.current = setInterval(() => {
       void checkIngestion();
@@ -148,16 +184,37 @@ export const DataIngestionCheckScreen = ({
       if (pollingRef.current !== null) {
         clearInterval(pollingRef.current);
       }
+      if (celebrationTimerRef.current !== null) {
+        clearTimeout(celebrationTimerRef.current);
+      }
     };
   }, []);
 
+  // Update seconds-since counter and elapsed timer — every 5s to reduce re-renders
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (lastChecked) {
+        setSecondsSince(Math.floor((Date.now() - lastChecked) / 1000));
+      }
+      setElapsedSeconds(Math.floor((Date.now() - pollingStartTime) / 1000));
+    }, 5000);
+    return () => clearInterval(id);
+  }, [lastChecked, pollingStartTime]);
+
   useScreenInput((_char, key) => {
+    // During celebration, wait for Enter to advance
+    if (celebrating) {
+      if (celebrationReady && key.return) {
+        store.setDataIngestionConfirmed();
+      }
+      return;
+    }
     if (key.escape || _char === 'q') {
       if (pollingRef.current !== null) clearInterval(pollingRef.current);
       store.setOutroData({
         kind: OutroKind.Cancel,
         message:
-          'Come back once your app is running and sending events. Your SDK is installed — you just need to trigger some actions.',
+          'Come back once your app is running and sending events. Your SDK is installed — just trigger some actions.',
       });
       return;
     }
@@ -168,94 +225,174 @@ export const DataIngestionCheckScreen = ({
     }
   });
 
+  // Derive framework-specific hint
+  const frameworkHint = session.integration
+    ? FRAMEWORK_HINTS[session.integration]
+    : undefined;
+
   const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
   const overflow = (eventTypes?.length ?? 0) - MAX_EVENTS_SHOWN;
 
+  // ── Celebration state ──────────────────────────────────────────────────
+
+  if (celebrating) {
+    return (
+      <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+        <Text bold color={Colors.success}>
+          {Icons.checkmark} Events detected!
+        </Text>
+        {arrivedEvents.length > 0 && (
+          <Box flexDirection="column" marginTop={1} marginLeft={2}>
+            {arrivedEvents.slice(0, MAX_EVENTS_SHOWN).map((name) => (
+              <Text key={name} color={Colors.success}>
+                {Icons.diamond} {name}
+              </Text>
+            ))}
+            {arrivedEvents.length > MAX_EVENTS_SHOWN && (
+              <Text color={Colors.muted}>
+                {Icons.ellipsis} and {arrivedEvents.length - MAX_EVENTS_SHOWN}{' '}
+                more
+              </Text>
+            )}
+          </Box>
+        )}
+        <Box marginTop={1}>
+          {celebrationReady ? (
+            <Box gap={1}>
+              <Text color={Colors.muted}>[</Text>
+              <Text color={Colors.body} bold>
+                Enter
+              </Text>
+              <Text color={Colors.muted}>] Continue</Text>
+            </Box>
+          ) : (
+            <Text color={Colors.body}>Verifying{Icons.ellipsis}</Text>
+          )}
+        </Box>
+      </Box>
+    );
+  }
+
+  // ── Waiting state ──────────────────────────────────────────────────────
+
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+      {/* Primary instruction */}
       <Box marginBottom={1}>
-        <Text bold color={Colors.accent}>
-          Waiting for your events
+        <Text bold color={Colors.heading}>
+          Start your app and trigger some user actions
         </Text>
       </Box>
 
-      <Box flexDirection="column" gap={1} marginBottom={2}>
-        <Text>
-          Your SDK is installed. Once you run your app and trigger some actions,
-          events will start flowing into Amplitude.
-        </Text>
-        {!apiUnavailable && (
-          <Text color={Colors.muted}>
-            Checking every 30 seconds — this screen will advance automatically.
+      {/* Framework-specific hint */}
+      {frameworkHint && (
+        <Box marginBottom={1}>
+          <Text color={Colors.accent}>
+            {Icons.arrowRight} {frameworkHint}
           </Text>
-        )}
-      </Box>
-
-      {apiUnavailable && eventTypes === null && (
-        <Box gap={2} alignItems="center">
-          <Text color={Colors.accent}>{Icons.diamond}</Text>
-          <Text color={Colors.muted}>Checking your event catalog...</Text>
         </Box>
       )}
 
+      <Text color={Colors.body}>
+        Your SDK is installed. Once you interact with your app, events will
+        start flowing into Amplitude.
+      </Text>
+
+      {/* Spinner / polling indicator */}
+      {!apiUnavailable && (
+        <Box marginTop={1} gap={1} alignItems="center">
+          <BrailleSpinner color={Colors.accent} />
+          <Text color={Colors.secondary}>
+            Listening for events{Icons.ellipsis}
+            {lastChecked && (
+              <Text color={Colors.muted}> (checked {secondsSince}s ago)</Text>
+            )}
+          </Text>
+        </Box>
+      )}
+
+      {/* Progressive coaching tips after extended wait */}
+      {!apiUnavailable && !celebrating && elapsedSeconds >= 60 && (
+        <Box flexDirection="column" marginTop={1} marginLeft={2}>
+          <Text color={Colors.secondary}>
+            {Icons.arrowRight} Make sure your dev server is running
+          </Text>
+          {elapsedSeconds >= 90 && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Try visiting your app and clicking around
+            </Text>
+          )}
+          {elapsedSeconds >= 120 && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Check your terminal for errors — the SDK may
+              not have initialized
+            </Text>
+          )}
+        </Box>
+      )}
+
+      {/* API unavailable: checking catalog */}
+      {apiUnavailable && eventTypes === null && (
+        <Box marginTop={1} gap={1} alignItems="center">
+          <BrailleSpinner color={Colors.accent} />
+          <Text color={Colors.secondary}>
+            Checking your event catalog{Icons.ellipsis}
+          </Text>
+        </Box>
+      )}
+
+      {/* API unavailable: show cataloged events */}
       {apiUnavailable && eventTypes !== null && eventTypes.length > 0 && (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color={Colors.muted} dimColor>
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={Colors.secondary}>
             Events cataloged in your workspace:
           </Text>
           <Box flexDirection="column" marginTop={1} marginLeft={2}>
             {shown.map((name) => (
-              <Box key={name} gap={2}>
-                <Text color={Colors.accent}>{Icons.diamond}</Text>
-                <Text>{name}</Text>
+              <Box key={name} gap={1}>
+                <Text color={Colors.success}>{Icons.diamond}</Text>
+                <Text color={Colors.body}>{name}</Text>
               </Box>
             ))}
             {overflow > 0 && (
-              <Text color={Colors.muted} dimColor>
-                ... and {overflow} more
+              <Text color={Colors.muted}>
+                {Icons.ellipsis} and {overflow} more
               </Text>
             )}
           </Box>
         </Box>
       )}
 
+      {/* API unavailable: no events yet */}
       {apiUnavailable && eventTypes !== null && eventTypes.length === 0 && (
-        <Box gap={2} alignItems="center" marginBottom={1}>
-          <Text color={Colors.accent}>{Icons.diamond}</Text>
-          <Text color={Colors.muted}>Waiting for your events...</Text>
-        </Box>
-      )}
-
-      {!apiUnavailable && (
-        <Box gap={2} alignItems="center">
-          <Text color={Colors.accent}>{Icons.diamond}</Text>
-          <Text color={Colors.muted}>Waiting for your events...</Text>
-        </Box>
-      )}
-
-      <Box marginTop={2} flexDirection="column" gap={1}>
-        {apiUnavailable && (
-          <Text color={Colors.muted} dimColor>
-            Press{' '}
-            <Text bold color={Colors.muted}>
-              Enter
-            </Text>{' '}
-            {eventTypes && eventTypes.length > 0
-              ? 'to continue'
-              : 'once you see events in your Amplitude dashboard'}
+        <Box marginTop={1} gap={1} alignItems="center">
+          <BrailleSpinner color={Colors.accent} />
+          <Text color={Colors.secondary}>
+            Waiting for events{Icons.ellipsis}
           </Text>
+        </Box>
+      )}
+
+      {/* Key hints — unified bracket format */}
+      <Box marginTop={2} gap={2}>
+        {apiUnavailable && (
+          <Box>
+            <Text color={Colors.muted}>[</Text>
+            <Text color={Colors.body} bold>
+              Enter
+            </Text>
+            <Text color={Colors.muted}>
+              ] {eventTypes && eventTypes.length > 0 ? 'Continue' : 'Confirm'}
+            </Text>
+          </Box>
         )}
-        <Text color={Colors.muted} dimColor>
-          Press{' '}
-          <Text bold color={Colors.muted}>
+        <Box>
+          <Text color={Colors.muted}>[</Text>
+          <Text color={Colors.body} bold>
             q
-          </Text>{' '}
-          or{' '}
-          <Text bold color={Colors.muted}>
-            Esc
-          </Text>{' '}
-          to exit and resume later
-        </Text>
+          </Text>
+          <Text color={Colors.muted}>] Exit and resume later</Text>
+        </Box>
       </Box>
     </Box>
   );

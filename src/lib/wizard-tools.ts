@@ -635,10 +635,16 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       events: z
         .array(
           z.object({
-            name: z.string().describe('Event name, e.g. "Button Clicked"'),
+            name: z
+              .string()
+              .describe(
+                'Short lowercase event name using spaces for separators, e.g. "user signed up", "product added to cart", "search performed". This is displayed as a bold label — keep it concise (2-5 words). Do NOT put descriptions or file paths here.',
+              ),
             description: z
               .string()
-              .describe('When this event fires and what it tracks'),
+              .describe(
+                'When this event fires, what properties it includes, and where it will be placed (file path + function/component).',
+              ),
           }),
         )
         .min(1)
@@ -646,10 +652,20 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
     async (args: { events: Array<{ name: string; description: string }> }) => {
       const { DEMO_MODE } = await import('./constants.js');
+      // Light normalization — truncate overly long names but don't try to
+      // extract names from descriptions. The UI reads proper event names
+      // from store.eventPlan (populated from the JSON file the agent writes).
+      const normalizedEvents = args.events.map((e) => ({
+        name:
+          e.name.trim().length > 50
+            ? e.name.trim().slice(0, 45) + '…'
+            : e.name.trim(),
+        description: e.description?.trim() || '',
+      }));
       const events =
-        DEMO_MODE && args.events.length > 5
-          ? args.events.slice(0, 5)
-          : args.events;
+        DEMO_MODE && normalizedEvents.length > 5
+          ? normalizedEvents.slice(0, 5)
+          : normalizedEvents;
       logToFile(
         `confirm_event_plan: ${events.length} events${
           DEMO_MODE ? ' (demo mode)' : ''

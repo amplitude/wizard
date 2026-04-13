@@ -8,6 +8,17 @@ import * as fs from 'node:fs';
 
 vi.mock('node:fs');
 
+// Mock atomic-write to use the same in-memory fs store as the node:fs mock.
+// atomicWriteJSON calls writeFileSync + renameSync under the hood, but since
+// we mock node:fs globally, renameSync has no default impl. Instead, mock
+// the module directly to write to our in-memory store.
+vi.mock('../atomic-write.js', () => ({
+  atomicWriteJSON: (_path: string, data: unknown, _mode?: number) => {
+    // Delegate to the mocked writeFileSync so the in-memory fsStore updates
+    fs.writeFileSync(_path, JSON.stringify(data, null, 2) + '\n');
+  },
+}));
+
 // Re-import after mock is in place
 import {
   getStoredUser,

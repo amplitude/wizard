@@ -203,11 +203,12 @@ describe('readApiKeyWithSource', () => {
     expect(result).toEqual({ key: 'envkey', source: 'env' });
   });
 
-  it('reads from AMPLITUDE_API_KEY env var when no file exists', () => {
+  it('does NOT fall back to AMPLITUDE_API_KEY env var (prevents cross-project leakage)', () => {
     setPlatform('win32');
     process.env.AMPLITUDE_API_KEY = 'envvarkey';
     const result = readApiKeyWithSource(tmpDir);
-    expect(result).toEqual({ key: 'envvarkey', source: 'env' });
+    // Shell-level env vars would leak across projects — only .env.local is project-scoped
+    expect(result).toBeNull();
   });
 
   it('returns null when no key is found anywhere', () => {

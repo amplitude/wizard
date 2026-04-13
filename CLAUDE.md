@@ -24,24 +24,36 @@ The flows cover:
 
 ### Entry points
 
-- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=18.17.0 required)
+- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=18.17.0 required). Supports `--agent` (NDJSON machine output), `--ci`/`--yes` (non-interactive)
 - `src/run.ts` — main wizard orchestration, ties TUI to session
+- `src/ui/agent-ui.ts` — `AgentUI` — NDJSON `WizardUI` implementation for `--agent` mode. Auto-approves prompts, emits structured JSON events to stdout, redacts secrets from output
 
 ### TUI layer (`src/ui/tui/`)
 
-Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanostores for reactive state.
+Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanostores for reactive state. Features journey stepper, keyboard hint bar, dissolve transitions, error boundaries, and resilience utilities.
 
-| File | Role |
-|------|------|
+| File / Dir | Role |
+|------------|------|
+| `App.tsx` | Root component — layout, screen resolution, `DissolveTransition`, `ScreenErrorBoundary` |
+| `start-tui.ts` | Entry point — OSC terminal color detection, Ink app bootstrap |
+| `ink-ui.ts` | `InkUI` — TUI `WizardUI` implementation, delegates to `WizardStore` |
+| `store.ts` | `WizardStore`, `Screen`, `Overlay`, `Flow` — nanostore-backed reactive state |
 | `router.ts` | `WizardRouter` — resolves active screen from session state via flow pipeline; manages overlay stack |
-| `flows.ts` | Declarative flow pipelines (`Screen` + `Flow` enums, `FlowEntry` arrays). Owns `Screen` and `Flow` enums |
-| `store.ts` | Nanostore-backed reactive store, synced to React via `useSyncExternalStore` |
-| `screens/` | One file per screen (16 screens total: Intro, Auth, Setup, Run, Outro, etc.) |
-| `components/` | Shared UI components |
-| `primitives/` | Low-level UI building blocks |
+| `flows.ts` | Declarative flow pipelines (`Screen` + `Flow` enums, `FlowEntry` arrays) |
+| `screen-registry.tsx` | Maps all 23 screen/overlay names to React components |
+| `screens/` | 16 screen components (Auth, Run, Outro, MCP, Slack, etc.) |
+| `components/` | `ConsoleView`, `JourneyStepper`, `HeaderBar`, `KeyHintBar`, `AmplitudeLogo`, `BrailleSpinner` |
+| `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useStdoutDimensions` |
+| `utils/` | `withTimeout`, `withRetry`, `classifyError`, `diagnostics` (flow evaluation + sanitized snapshots) |
+| `styles.ts` | Design tokens and color palette |
 | `console-commands.ts` | Slash command registration and dispatch |
-| `screen-registry.tsx` | Maps `Screen`/`Overlay` names to React components |
+| `context/` | React context providers |
+| `primitives/` | Low-level UI building blocks |
 | `services/` | TUI-specific service modules |
+
+### Agent mode (`--agent`)
+
+Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses `AgentUI` (`src/ui/agent-ui.ts`) which implements `WizardUI` via NDJSON streaming to stdout. All prompts auto-approve. Stack traces and credentials are redacted from output. See `src/lib/mode-config.ts` for mode resolution logic and `src/lib/exit-codes.ts` for structured exit codes.
 
 ### Core business logic (`src/lib/`)
 
@@ -60,6 +72,9 @@ Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanosto
 | `middleware/` | Benchmark pipeline, message schemas |
 | `health-checks/` | Runtime health check utilities |
 | `package-manager-detection.ts` | Detects npm/yarn/pnpm/bun/pip/etc. |
+| `mode-config.ts` | `resolveMode()` — determines `ExecutionMode` (`interactive` / `ci` / `agent`) from CLI flags and TTY state |
+| `exit-codes.ts` | `ExitCode` enum — structured exit codes (0 success, 2 invalid args, 3 auth, 4 network, 10 agent failed, 130 cancelled) |
+| `session-checkpoint.ts` | Session checkpointing — saves/loads sanitized wizard state to a temp file for crash recovery. Zod-validated, 24-hour TTL, scoped per install directory |
 
 ### Framework integrations (`src/frameworks/`)
 
@@ -87,6 +102,28 @@ Post-agent discrete steps: MCP server installation into editors, env var upload,
 
 OAuth flow, analytics tracking, env var handling, API key storage, debug logging, URL construction, package manager detection, shell completions, Anthropic status checks, custom headers.
 
+Key additions:
+- `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used by session checkpointing and config persistence.
+- `token-refresh.ts` — silent OAuth token refresh using stored refresh tokens. Proactively refreshes 5 minutes before expiry, falls back to full browser auth on failure.
+
+## Session storage
+
+The wizard persists state across four layers, each with different scope and lifetime:
+
+| Layer | File / Location | Scope | Lifetime | Contents |
+|-------|----------------|-------|----------|----------|
+| **OAuth tokens** | `~/.ampli.json` | Per user | Until expiry (silent refresh via `token-refresh.ts`) | Access token, refresh token, expiry timestamp. Written with `atomicWriteJSON()`. |
+| **API key store** | `~/.ampli.json` + project `.env.local` | Per project | Persistent | API key, org/workspace/project selection, region |
+| **Session checkpoint** | `$TMPDIR/amplitude-wizard-checkpoint.json` | Per install directory | 24 hours | Intro state, region, org/workspace selection, framework detection. Zod-validated on load. No credentials. |
+| **In-memory store** | `WizardStore` (nanostores) | Per run | Process lifetime | Full session state, tasks, prompts, overlays, UI state |
+
+**Security invariants:**
+- Credential files use `0o600` permissions (owner read/write only)
+- All file writes use `atomicWriteJSON()` (temp-file + rename) to prevent corruption on crash
+- Checkpoint files never contain tokens, API keys, or access tokens
+- Config scoping validates org ID against live data to prevent cross-project leakage
+- Zone priority: CLI flag > env var > stored config (prevents env var pollution across projects)
+
 ## Commit conventions
 
 This repo enforces **conventional commit** PR titles and commit messages. The type prefix must be one of: `feat`, `fix`, `docs`, `test`, `ci`, `refactor`, `perf`, `chore`, `revert`. Example: `feat: add org picker to auth flow`.
@@ -97,7 +134,7 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 - **Session is the single source of truth.** All state lives in `WizardSession`. Screens and steps read from and write to the session; they do not communicate directly.
 - **Flows are declarative.** Each flow is a pipeline of `{ screen, show, isComplete }` entries. Navigation advances automatically when `isComplete` returns true.
 - **Overlays interrupt without breaking flow.** `OutageScreen` and `SettingsOverrideScreen` are pushed onto an overlay stack and popped when resolved, resuming the flow where it left off. Overlay enum: `Outage`, `SettingsOverride`, `Snake`, `Mcp`, `Slack`, `Logout`, `Login`.
-- **Slash commands are always available.** `/org`, `/project`, `/region`, `/login`, `/logout`, `/whoami`, `/chart`, `/dashboard`, `/taxonomy`, `/slack`, `/feedback`, `/help` must be interceptable at any point in the session.
+- **Slash commands are always available.** `/org`, `/project`, `/region`, `/login`, `/logout`, `/whoami`, `/chart`, `/dashboard`, `/taxonomy`, `/slack`, `/feedback`, `/help`, `/debug` must be interceptable at any point in the session.
 - **Framework configs are data-driven.** No switch statements or per-framework routing. Everything goes through `FrameworkConfig` + `FRAMEWORK_REGISTRY`. The universal runner handles all shared behavior.
 - **Agent commandments** (`src/lib/commandments.ts`) are always injected as system prompt. Key rules: never hardcode secrets, always use `wizard-tools` MCP for env vars and package manager detection, must call `confirm_event_plan` before writing `track()` calls.
 - **Detection order matters.** The `Integration` enum order in `constants.ts` controls both auto-detection priority (first match wins) and display order in the CLI select menu.
@@ -106,6 +143,8 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 
 ```bash
 pnpm try           # run the wizard locally (from source, no build needed)
+pnpm try --agent   # run in agent mode (NDJSON output, auto-approve)
+pnpm try --yes     # run in CI mode (alias for --ci, non-interactive)
 pnpm build         # compile TypeScript
 pnpm test          # run unit tests (vitest)
 pnpm test:watch    # run unit tests in watch mode
@@ -146,6 +185,7 @@ token value works locally (e.g. `WIZARD_PROXY_DEV_TOKEN=dev-token`).
 ## Testing
 
 - **Unit tests:** `src/**/__tests__/` — vitest, run with `pnpm test`
+- **Router + flow tests:** `src/ui/tui/__tests__/router.test.ts` — parameterized router resolution tests. `src/ui/tui/__tests__/flow-invariants.test.ts` — fast-check property-based tests verifying flow invariants (24 tests: no backward navigation, unauthenticated users never see Run, error state skips post-success screens, etc.)
 - **BDD tests:** `features/*.feature` + `features/step-definitions/` — Cucumber.js, run with `pnpm test:bdd`
 - **E2e tests:** `e2e-tests/` — build + run against test applications in `e2e-tests/test-applications/`
 - **Proxy tests:** `vitest.config.proxy.ts` — validate LLM proxy connectivity
@@ -167,3 +207,6 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/flows.md`](./docs/flows.md) — flow diagrams (source of truth for UX)
 - [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
 - [`docs/llm-proxy.md`](./docs/llm-proxy.md) — LLM proxy architecture and configuration
+- [`docs/dual-mode-architecture.md`](./docs/dual-mode-architecture.md) — TUI + agent + CI mode architecture
+- [`docs/critical-files.md`](./docs/critical-files.md) — files ranked by blast radius
+- [`docs/engineering-patterns.md`](./docs/engineering-patterns.md) — async safety, retry, error classification patterns

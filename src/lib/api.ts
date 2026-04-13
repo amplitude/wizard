@@ -376,7 +376,7 @@ export async function fetchOwnedDashboards(
       { query: OWNED_DASHBOARDS_QUERY },
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -568,7 +568,7 @@ export async function fetchProjectActivationStatus(opts: {
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -628,7 +628,7 @@ export async function fetchSlackInstallUrl(
       },
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
@@ -688,7 +688,7 @@ export async function fetchSlackConnectionStatus(
       { query: SLACK_CONNECTION_STATUS_QUERY },
       {
         headers: {
-          Authorization: `Bearer ${accessToken}`,
+          'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
