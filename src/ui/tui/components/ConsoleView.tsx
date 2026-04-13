@@ -165,7 +165,7 @@ export const ConsoleView = ({
   useInput(
     (char, key) => {
       if (key.escape || char === 'q' || char === 'Q') {
-        if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
+        if (pendingPrompt && pendingPrompt.kind !== 'event-plan' && pendingPrompt.kind !== 'identify-plan') {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
           return;
         }
@@ -245,13 +245,17 @@ export const ConsoleView = ({
   // Keyboard handling for event-plan prompt
   useInput(
     (char, key) => {
-      if (!pendingPrompt || pendingPrompt.kind !== 'event-plan') return;
+      if (!pendingPrompt || (pendingPrompt.kind !== 'event-plan' && pendingPrompt.kind !== 'identify-plan')) return;
 
       if (planInputMode === 'feedback') {
         if (key.return) {
           const text = planFeedbackText.trim();
           if (text) {
-            store.resolveEventPlan({ decision: 'revised', feedback: text });
+            if (pendingPrompt.kind === 'identify-plan') {
+              store.resolveIdentifyPlan({ decision: 'revised', feedback: text });
+            } else {
+              store.resolveEventPlan({ decision: 'revised', feedback: text });
+            }
             setPlanFeedbackText('');
             setPlanInputMode('options');
           }
@@ -276,16 +280,24 @@ export const ConsoleView = ({
       // to hit accidentally while the plan is pending in the background)
       const lc = char.toLowerCase();
       if (lc === 'y') {
-        store.resolveEventPlan({ decision: 'approved' });
+        if (pendingPrompt.kind === 'identify-plan') {
+          store.resolveIdentifyPlan({ decision: 'approved' });
+        } else {
+          store.resolveEventPlan({ decision: 'approved' });
+        }
       } else if (lc === 's') {
-        store.resolveEventPlan({ decision: 'skipped' });
+        if (pendingPrompt.kind === 'identify-plan') {
+          store.resolveIdentifyPlan({ decision: 'skipped' });
+        } else {
+          store.resolveEventPlan({ decision: 'skipped' });
+        }
       } else if (lc === 'f') {
         setPlanInputMode('feedback');
       }
     },
     {
       isActive:
-        !inputActive && !!pendingPrompt && pendingPrompt.kind === 'event-plan',
+        !inputActive && !!pendingPrompt && (pendingPrompt.kind === 'event-plan' || pendingPrompt.kind === 'identify-plan'),
     },
   );
 
@@ -326,6 +338,37 @@ export const ConsoleView = ({
                 }))}
                 onSelect={(v) => store.resolvePrompt(v as string)}
               />
+            ) : pendingPrompt.kind === 'identify-plan' ? (
+              <Box flexDirection="column" gap={1}>
+                <Text color={Colors.muted}>Proposed user identification calls:</Text>
+                <Text color={Colors.heading} bold>
+                  Identify Plan
+                </Text>
+                {pendingPrompt.identifyCalls.map((c, i) => (
+                  <Text key={c.location || i} wrap="wrap">
+                    <Text color={Colors.accent} bold>
+                      {Icons.bullet} {c.location}
+                    </Text>
+                    {c.description ? (
+                      <Text color={Colors.secondary}> — {c.description}</Text>
+                    ) : null}
+                  </Text>
+                ))}
+                {planInputMode === 'feedback' ? (
+                  <Box gap={1}>
+                    <Text color={Colors.muted}>Feedback: </Text>
+                    <Text>
+                      {planFeedbackText}
+                      {planCursorVisible ? '▎' : ' '}
+                    </Text>
+                    <Text color={Colors.muted}>[Enter] send [Esc] cancel</Text>
+                  </Box>
+                ) : (
+                  <Text color={Colors.muted}>
+                    [Y] approve [S] skip [F] give feedback
+                  </Text>
+                )}
+              </Box>
             ) : (
               <Box flexDirection="column" gap={1}>
                 <Text color={Colors.muted}>Suggested events for your app:</Text>
@@ -358,7 +401,7 @@ export const ConsoleView = ({
                 )}
               </Box>
             )}
-            {pendingPrompt.kind !== 'event-plan' && (
+            {pendingPrompt.kind !== 'event-plan' && pendingPrompt.kind !== 'identify-plan' && (
               <Text color={Colors.muted}> [Q / Esc] skip</Text>
             )}
           </Box>
