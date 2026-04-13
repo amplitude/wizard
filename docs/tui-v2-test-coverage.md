@@ -149,11 +149,11 @@ All tests pass.
 
 ### No unit tests exist for:
 
-1. **TUI v2 screens** (`src/ui/tui-v2/screens/`) -- 14 screen components with zero test files. These are the new Ink/React screen implementations (IntroScreen, AuthScreen, RunScreen, OutroScreen, etc.)
-2. **TUI v2 components** (`src/ui/tui-v2/components/`) -- AmplitudeLogo, BrailleSpinner, HeaderBar, KeyHintBar, JourneyStepper, ConsoleView
-3. **TUI v2 hooks** (`src/ui/tui-v2/hooks/`) -- useScreenInput, useStdoutDimensions, useWizardStore, useAsyncEffect
-4. **TUI v2 utilities** (`src/ui/tui-v2/utils/`) -- diagnostics, with-retry, with-timeout, classify-error
-5. **TUI v2 store/router/flows** (`src/ui/tui-v2/`) -- store.ts, router.ts, flows.ts (note: the v1 equivalents ARE tested)
+1. **TUI v2 screens** (`src/ui/tui/screens/`) -- 14 screen components with zero test files. These are the new Ink/React screen implementations (IntroScreen, AuthScreen, RunScreen, OutroScreen, etc.)
+2. **TUI v2 components** (`src/ui/tui/components/`) -- AmplitudeLogo, BrailleSpinner, HeaderBar, KeyHintBar, JourneyStepper, ConsoleView
+3. **TUI v2 hooks** (`src/ui/tui/hooks/`) -- useScreenInput, useStdoutDimensions, useWizardStore, useAsyncEffect
+4. **TUI v2 utilities** (`src/ui/tui/utils/`) -- diagnostics, with-retry, with-timeout, classify-error
+5. **TUI v2 store/router/flows** (`src/ui/tui/`) -- store.ts, router.ts, flows.ts (note: the v1 equivalents ARE tested)
 6. **AgentUI** (`src/ui/agent-ui.ts`) -- the `--agent` mode JSON-line output handler
 7. **Session checkpoint** (`src/lib/session-checkpoint.ts`) -- save/load/clear checkpoint, Zod validation, staleness, directory matching
 8. **Token refresh** (`src/utils/` or `src/lib/`) -- silent OAuth token refresh logic

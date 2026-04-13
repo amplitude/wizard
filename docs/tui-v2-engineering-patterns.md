@@ -376,15 +376,15 @@ CLI flag (--region) > env var (AMPLITUDE_ZONE) > stored config (~/.ampli.json)
 
 The following changes have been made to implement these patterns:
 
-1. **`src/ui/tui-v2/utils/with-timeout.ts`** — Timeout wrapper for all API calls
-2. **`src/ui/tui-v2/utils/with-retry.ts`** — Retry with bail-on-4xx for transient failures
-3. **`src/ui/tui-v2/hooks/useAsyncEffect.ts`** — AbortController-based async effect hook
-4. **`src/ui/tui-v2/utils/diagnostics.ts`** — Flow evaluation + diagnostic snapshot for `/debug`
+1. **`src/ui/tui/utils/with-timeout.ts`** — Timeout wrapper for all API calls
+2. **`src/ui/tui/utils/with-retry.ts`** — Retry with bail-on-4xx for transient failures
+3. **`src/ui/tui/hooks/useAsyncEffect.ts`** — AbortController-based async effect hook
+4. **`src/ui/tui/utils/diagnostics.ts`** — Flow evaluation + diagnostic snapshot for `/debug`
 5. **Store patches** — Capped status messages, cancellable feedback timer
 6. **`src/utils/atomic-write.ts`** — Crash-safe JSON writes via temp-file + rename
 7. **`src/utils/token-refresh.ts`** — Silent OAuth token refresh with 5-minute proactive buffer
 8. **`src/lib/session-checkpoint.ts`** — Zod-validated session checkpointing with 24-hour TTL
 9. **`src/lib/mode-config.ts`** — Execution mode resolution (interactive/ci/agent)
 10. **`src/lib/exit-codes.ts`** — Structured exit codes for CI/agent consumers
-11. **`src/ui/tui-v2/utils/classify-error.ts`** — Network error classification with actionable messages
+11. **`src/ui/tui/utils/classify-error.ts`** — Network error classification with actionable messages
 12. **`src/ui/agent-ui.ts`** — NDJSON WizardUI for agent mode (security-hardened, credential-redacted)

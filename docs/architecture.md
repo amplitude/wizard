@@ -79,7 +79,6 @@ package.json → "bin": { "amplitude-wizard": "dist/bin.js" }
 | `--integration` | — | Framework override (e.g., `nextjs`, `django`) |
 | `--menu` | `false` | Show manual framework picker |
 | `--benchmark` | `false` | Enable per-phase token tracking |
-| `--tui-v2` | `false` | Use the redesigned TUI |
 | `--agent` | `false` | Agent mode — structured NDJSON output, auto-approve |
 | `--yes` / `-y` | `false` | Skip all prompts, same as `--ci` |
 
@@ -122,7 +121,6 @@ differ in user interaction.
       │   └─ NO
       │       ├─ process.stdin.isTTY? → YES → InkUI (TUI mode)
       │       │                                Launch Ink React app
-      │       │                                --tui-v2 selects redesigned TUI
       │       │
       │       └─ NO → Error: "requires interactive terminal"
       │                Suggests --ci flag
@@ -1360,13 +1358,6 @@ amplitude/wizard
 │   │   ├── wizard-ui.ts            WizardUI interface (28 methods)
 │   │   ├── logging-ui.ts           CI mode: console output, auto-approve
 │   │   ├── agent-ui.ts             Agent mode: NDJSON output, auto-approve
-│   │   ├── tui-v2/                 Redesigned TUI (--tui-v2)
-│   │   │   ├── start-tui.ts        TUI v2 bootstrap
-│   │   │   ├── App.tsx             Root component with JourneyStepper, transitions
-│   │   │   ├── styles.ts           Design tokens
-│   │   │   ├── screens/            Screen components (mirrors tui/)
-│   │   │   ├── components/         HeaderBar, JourneyStepper, KeyHintBar, ConsoleView
-│   │   │   └── screen-registry.tsx Screen/overlay → component mapping
 │   │   └── tui/
 │   │       ├── start-tui.ts        TUI bootstrap: store, InkUI, Ink render
 │   │       ├── App.tsx             Root Ink component

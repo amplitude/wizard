@@ -13,7 +13,7 @@ Three execution modes, one business logic layer:
 ```
 bin.ts (yargs)
   │
-  ├─ --tui-v2 ──→ InkUI (TUI v2)     → Rich interactive screens
+  ├─ (default) ─→ InkUI (TUI)         → Rich interactive screens
   ├─ --agent ───→ AgentUI (NDJSON)    → Structured JSON streaming
   └─ --ci ──────→ LoggingUI (plain)   → Human-readable non-interactive
 ```
@@ -132,12 +132,12 @@ Zone/region priority prevents cross-project pollution: CLI flag > env var > stor
 | `src/lib/session-checkpoint.ts` | Session checkpointing for crash recovery |
 | `src/utils/token-refresh.ts` | Silent OAuth token refresh |
 | `src/utils/atomic-write.ts` | Crash-safe file writes |
-| `src/ui/tui-v2/utils/classify-error.ts` | Network error classification |
-| `src/ui/tui-v2/utils/with-timeout.ts` | Timeout wrapper for API calls |
-| `src/ui/tui-v2/utils/with-retry.ts` | Retry with exponential backoff |
-| `src/ui/tui-v2/hooks/useAsyncEffect.ts` | AbortController-based async effects |
-| `src/ui/tui-v2/hooks/useWizardStore.ts` | Stable store subscription hook |
-| `src/ui/tui-v2/utils/diagnostics.ts` | Flow evaluation + diagnostic snapshots |
+| `src/ui/tui/utils/classify-error.ts` | Network error classification |
+| `src/ui/tui/utils/with-timeout.ts` | Timeout wrapper for API calls |
+| `src/ui/tui/utils/with-retry.ts` | Retry with exponential backoff |
+| `src/ui/tui/hooks/useAsyncEffect.ts` | AbortController-based async effects |
+| `src/ui/tui/hooks/useWizardStore.ts` | Stable store subscription hook |
+| `src/ui/tui/utils/diagnostics.ts` | Flow evaluation + diagnostic snapshots |
 | `src/ui/tui/__tests__/router.test.ts` | Router unit tests |
 | `src/ui/tui/__tests__/flow-invariants.test.ts` | fast-check property tests (24 tests) |
-| `bin.ts` | --agent flag, --tui-v2 flag, help improvements, --yes alias |
+| `bin.ts` | --agent flag, help improvements, --yes alias |

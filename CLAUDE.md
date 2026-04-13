@@ -24,29 +24,13 @@ The flows cover:
 
 ### Entry points
 
-- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=18.17.0 required). Supports `--tui-v2` (parallel TUI), `--agent` (NDJSON machine output), `--ci` / `--yes` (non-interactive)
+- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=18.17.0 required). Supports `--agent` (NDJSON machine output), `--ci` / `--yes` (non-interactive)
 - `src/run.ts` — main wizard orchestration, ties TUI to session
 - `src/ui/agent-ui.ts` — `AgentUI` — NDJSON `WizardUI` implementation for `--agent` mode. Auto-approves prompts, emits structured JSON events to stdout, redacts secrets from output
 
-### TUI layer (`src/ui/tui/`) — v1
+### TUI layer (`src/ui/tui/`)
 
-Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanostores for reactive state. This is the default TUI; v2 runs in parallel behind the `--tui-v2` flag (see below).
-
-| File | Role |
-|------|------|
-| `router.ts` | `WizardRouter` — resolves active screen from session state via flow pipeline; manages overlay stack |
-| `flows.ts` | Declarative flow pipelines (`Screen` + `Flow` enums, `FlowEntry` arrays). Owns `Screen` and `Flow` enums |
-| `store.ts` | Nanostore-backed reactive store, synced to React via `useSyncExternalStore` |
-| `screens/` | One file per screen (16 screens total: Intro, Auth, Setup, Run, Outro, etc.) |
-| `components/` | Shared UI components |
-| `primitives/` | Low-level UI building blocks |
-| `console-commands.ts` | Slash command registration and dispatch |
-| `screen-registry.tsx` | Maps `Screen`/`Overlay` names to React components |
-| `services/` | TUI-specific service modules |
-
-### TUI layer (`src/ui/tui-v2/`) — v2 (parallel pipeline, `--tui-v2`)
-
-Redesigned TUI with improved UX: journey stepper, keyboard hint bar, dissolve transitions, error boundaries, and resilience utilities. Currently behind the `--tui-v2` flag. Re-exports `store.ts`, `router.ts`, and `flows.ts` from v1 as bridge files; owns its own screens, components, hooks, and utilities. See [`docs/tui-v1-to-v2-migration.md`](./docs/tui-v1-to-v2-migration.md) for the plan to make v2 the default and eventually remove v1.
+Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanostores for reactive state. This is the default (and only) TUI. Features journey stepper, keyboard hint bar, dissolve transitions, error boundaries, and resilience utilities.
 
 | File / Dir | Role |
 |------------|------|
@@ -159,7 +143,6 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 
 ```bash
 pnpm try           # run the wizard locally (from source, no build needed)
-pnpm try --tui-v2  # run with the v2 TUI (parallel pipeline, new UX)
 pnpm try --agent   # run in agent mode (NDJSON output, auto-approve)
 pnpm try --yes     # run in CI mode (alias for --ci, non-interactive)
 pnpm build         # compile TypeScript
@@ -224,7 +207,7 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/flows.md`](./docs/flows.md) — flow diagrams (source of truth for UX)
 - [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
 - [`docs/llm-proxy.md`](./docs/llm-proxy.md) — LLM proxy architecture and configuration
-- [`docs/tui-v1-to-v2-migration.md`](./docs/tui-v1-to-v2-migration.md) — migration plan for making v2 the default TUI and removing v1
+- [`docs/tui-v1-to-v2-migration.md`](./docs/tui-v1-to-v2-migration.md) — TUI v1-to-v2 migration record (migration is complete; v2 is now the only TUI)
 - [`docs/tui-v2-dual-mode-architecture.md`](./docs/tui-v2-dual-mode-architecture.md) — TUI + agent + CI mode architecture
 - [`docs/tui-v2-critical-files.md`](./docs/tui-v2-critical-files.md) — files ranked by blast radius
 - [`docs/tui-v2-engineering-patterns.md`](./docs/tui-v2-engineering-patterns.md) — async safety, retry, error classification patterns

@@ -23,11 +23,10 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 **Why #2:** The 1200-line entry point that wires everything together. OAuth, framework detection, credential pre-population, and TUI startup all happen here. A bug in bin.ts means the wizard never starts or starts with corrupt state.
 
-**What breaks:** Pre-populated credentials, framework detection results, region selection, the `--tui-v2` conditional import, and the `setupComplete` promise that gates agent execution.
+**What breaks:** Pre-populated credentials, framework detection results, region selection, TUI startup, and the `setupComplete` promise that gates agent execution.
 
 **Risk factors:**
-- Dynamic imports (`await import(tuiModule)`) mean v1/v2 switching is a string comparison — typos cause silent failure.
-- 4 separate `startTUI` import sites must stay in sync.
+- Dynamic imports for TUI startup — typos in import paths cause silent failure.
 - Concurrent OAuth + framework detection creates timing hazards (see error-prone doc).
 
 ---
@@ -56,7 +55,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ---
 
-### 5. `src/ui/tui-v2/App.tsx`
+### 5. `src/ui/tui/App.tsx`
 
 **Why #5:** Root component that orchestrates all v2 rendering. Owns the layout, screen resolution from registry, `DissolveTransition`, and `ScreenErrorBoundary`. If App.tsx crashes, the terminal goes blank.
 
@@ -70,7 +69,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ## Tier 2: Feature-Breaking (Specific flow broken, workarounds exist)
 
-### 6. `src/ui/tui-v2/screens/AuthScreen.tsx`
+### 6. `src/ui/tui/screens/AuthScreen.tsx`
 
 **Why:** The credential gatekeeper. Until credentials are set, no downstream screen works. Has the most complex async logic in the codebase: 5-step resolution chain (OAuth wait → org pick → workspace pick → env pick → API key).
 
@@ -78,7 +77,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ---
 
-### 7. `src/ui/tui-v2/components/ConsoleView.tsx`
+### 7. `src/ui/tui/components/ConsoleView.tsx`
 
 **Why:** Manages slash commands, AI queries, pending prompts (confirm/choice/event-plan), error banners, and the keyboard input router. The mode-switching logic (dormant → slash → query → feedback) is the most stateful component.
 
@@ -86,7 +85,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ---
 
-### 8. `src/ui/tui-v2/screens/RunScreen.tsx`
+### 8. `src/ui/tui/screens/RunScreen.tsx`
 
 **Why:** The screen users spend the most time on. Displays real-time progress, elapsed timer, current file indicator, and inline event plan. Timer and file extraction have edge cases (see error-prone doc).
 
@@ -94,7 +93,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ---
 
-### 9. `src/ui/tui-v2/screens/DataIngestionCheckScreen.tsx`
+### 9. `src/ui/tui/screens/DataIngestionCheckScreen.tsx`
 
 **Why:** Polling screen that gates advancement to Checklist. If polling breaks or never resolves, the user is stuck. Has both automatic (API polling) and manual (Enter key) confirmation paths.
 
@@ -102,7 +101,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ---
 
-### 10. `src/ui/tui-v2/screen-registry.tsx`
+### 10. `src/ui/tui/screen-registry.tsx`
 
 **Why:** Factory that maps all 23 screen/overlay names to React components. If any import fails or a screen constructor throws, the entire registry returns incomplete.
 
@@ -112,23 +111,23 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ## Tier 3: UX-Degrading (Wrong info shown, but wizard still works)
 
-### 11. `src/ui/tui-v2/components/JourneyStepper.tsx`
+### 11. `src/ui/tui/components/JourneyStepper.tsx`
 
 Incorrect progress indication if `STEP_SCREENS` mapping is incomplete. Doesn't break flow, but confuses users.
 
-### 12. `src/ui/tui-v2/styles.ts`
+### 12. `src/ui/tui/styles.ts`
 
 Design tokens affect all visual presentation. Wrong colors don't break functionality but degrade the brand experience.
 
-### 13. `src/ui/tui-v2/components/KeyHintBar.tsx`
+### 13. `src/ui/tui/components/KeyHintBar.tsx`
 
 Wrong hints don't break the wizard but cause users to press wrong keys.
 
-### 14. `src/ui/tui-v2/components/HeaderBar.tsx`
+### 14. `src/ui/tui/components/HeaderBar.tsx`
 
 Cosmetic. Truncation of long org/project names is the main edge case.
 
-### 15. `src/ui/tui-v2/start-tui.ts`
+### 15. `src/ui/tui/start-tui.ts`
 
 Entry point. If OSC terminal color codes fail on an unsupported terminal, colors are wrong but wizard still works.
 

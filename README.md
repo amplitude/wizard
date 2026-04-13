@@ -64,7 +64,6 @@ npx @amplitude/wizard
 ```
 
 Rich terminal UI with screens, progress indicators, and slash commands.
-Pass `--tui-v2` (or set `AMPLITUDE_TUI_V2=1`) for the redesigned TUI.
 
 ### CI mode
 
@@ -106,7 +105,6 @@ Requires `--install-dir`. See [`docs/tui-v2-dual-mode-architecture.md`](./docs/t
 | Flag | Env var | Description |
 |------|---------|-------------|
 | `--install-dir <dir>` | `AMPLITUDE_WIZARD_INSTALL_DIR` | Directory to install Amplitude in (required for CI/agent) |
-| `--tui-v2` | `AMPLITUDE_TUI_V2` | Use the redesigned TUI |
 | `--agent` | `AMPLITUDE_WIZARD_AGENT` | Structured JSON output mode |
 | `--yes` / `-y` | — | Skip all prompts, same as `--ci` |
 | `--integration <name>` | — | Force a specific integration (`nextjs`, `vue`, `react-router`, `django`, `flask`, `fastapi`, `javascript_web`, `javascript_node`, `python`) |

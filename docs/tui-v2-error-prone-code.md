@@ -8,7 +8,7 @@ Every known race condition, silent failure, and edge case — with fix suggestio
 
 ### 1. AuthScreen async credential resolution race
 
-**File:** `src/ui/tui-v2/screens/AuthScreen.tsx` (lines ~137-252)
+**File:** `src/ui/tui/screens/AuthScreen.tsx` (lines ~137-252)
 
 **Status: MITIGATED** — `useAsyncEffect` hook now provides AbortController-based cancellation for async effects. Screens that adopt `useAsyncEffect` get automatic stale-write prevention. However, AuthScreen's 5-step resolution chain has not yet been fully migrated to use `useAsyncEffect` throughout.
 
@@ -28,7 +28,7 @@ useAsyncEffect(async (signal) => {
 
 ### 2. DataSetupScreen frozen on API hang
 
-**File:** `src/ui/tui-v2/screens/DataSetupScreen.tsx`
+**File:** `src/ui/tui/screens/DataSetupScreen.tsx`
 
 **The bug:** `fetchProjectActivationStatus()` has no timeout. If the API hangs (network partition, DNS failure), the screen shows a spinner forever with no error message.
 
@@ -47,7 +47,7 @@ On timeout, show: "Could not reach Amplitude. Check your connection and try agai
 
 ### 3. ConsoleView conversation history grows without bounds
 
-**File:** `src/ui/tui-v2/components/ConsoleView.tsx` (line ~113)
+**File:** `src/ui/tui/components/ConsoleView.tsx` (line ~113)
 
 **The bug:** `history` state array grows with every AI query. Each new query sends the full history to the API. Over a long session, this causes increasing memory usage and network payload.
 
@@ -62,7 +62,7 @@ setHistory((h) => [...h.slice(-8), { role: 'user', content: value }, { role: 'as
 
 ### 4. DataIngestionCheckScreen polling continues after network failure
 
-**File:** `src/ui/tui-v2/screens/DataIngestionCheckScreen.tsx`
+**File:** `src/ui/tui/screens/DataIngestionCheckScreen.tsx`
 
 **The bug:** When `fetchProjectActivationStatus` fails, `apiUnavailable` is set to true, but the polling interval continues running. Each poll hits the same failing API, wasting resources and showing no error.
 
@@ -83,7 +83,7 @@ catch (err) {
 
 ### 5. RunScreen timer jumps on error recovery remount
 
-**File:** `src/ui/tui-v2/screens/RunScreen.tsx` (ProgressTab ~lines 134-143)
+**File:** `src/ui/tui/screens/RunScreen.tsx` (ProgressTab ~lines 134-143)
 
 **The bug:** `startRef` initializes to `Date.now()` on component mount. If `ScreenErrorBoundary` catches an error and remounts the component, `startRef` resets to the new mount time, making the elapsed timer jump backward to 0.
 
@@ -98,7 +98,7 @@ if (!runStartTime) runStartTime = Date.now();
 
 ### 6. MCP detection error indistinguishable from no-clients
 
-**File:** `src/ui/tui-v2/screens/McpScreen.tsx` (lines ~106-118)
+**File:** `src/ui/tui/screens/McpScreen.tsx` (lines ~106-118)
 
 **The bug:** When `installer.detectClients()` throws, the catch block shows "No supported MCP clients detected" — identical to the legitimate no-clients case.
 
@@ -116,7 +116,7 @@ catch {
 
 ### 7. MCP screen frozen in remove mode with pre-detection pending
 
-**File:** `src/ui/tui-v2/screens/McpScreen.tsx` (lines ~83-85, ~197)
+**File:** `src/ui/tui/screens/McpScreen.tsx` (lines ~83-85, ~197)
 
 **The bug:** If `amplitudePreDetectedChoicePending` is true and mode is `remove`, the detection useEffect returns early (line 84), but the choice UI only renders when `!isRemove` (line 197). Screen renders nothing actionable.
 
@@ -131,7 +131,7 @@ if (amplitudePreDetectedChoicePending && !isRemove) {
 
 ### 8. ConsoleView event-plan prompt mode race
 
-**File:** `src/ui/tui-v2/components/ConsoleView.tsx` (lines ~226-269)
+**File:** `src/ui/tui/components/ConsoleView.tsx` (lines ~226-269)
 
 **The bug:** If the pending prompt clears from the store while the user is typing feedback, there's a brief window where keyboard input is processed in 'feedback' mode but the prompt no longer exists.
 
@@ -150,7 +150,7 @@ useInput((char, key) => {
 
 ### 9. Stale org/workspace from prior session
 
-**File:** `src/ui/tui-v2/screens/AuthScreen.tsx` (lines ~82-89)
+**File:** `src/ui/tui/screens/AuthScreen.tsx` (lines ~82-89)
 
 **Status: FIXED** — Cross-project config scoping fixes now validate org ID against live data. Zone priority (CLI flag > env var > stored config) prevents env var pollution. Org validation clears stale IDs when they don't match the current org list.
 

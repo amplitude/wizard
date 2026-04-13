@@ -98,13 +98,13 @@ Multiple screens make API calls that can hang indefinitely. When they fail, erro
 
 **7. Wrap all API calls in a timeout utility** -- IMPLEMENTED
 
-Implemented in `src/ui/tui-v2/utils/with-timeout.ts` as `withTimeout<T>(promise, ms, label)`. Uses a dedicated `TimeoutError` class and properly clears the timer in a `finally` block. Available for all v2 screens.
+Implemented in `src/ui/tui/utils/with-timeout.ts` as `withTimeout<T>(promise, ms, label)`. Uses a dedicated `TimeoutError` class and properly clears the timer in a `finally` block. Available for all v2 screens.
 
 Apply to: `fetchProjectActivationStatus`, `fetchWorkspaceEventTypes`, `fetchOwnedDashboards`, `fetchSlackConnectionStatus`, `fetchSlackInstallUrl`, `getAPIKey`, `installer.detectClients`.
 
 **8. Add retry with backoff for transient failures** -- IMPLEMENTED
 
-Implemented in `src/ui/tui-v2/utils/with-retry.ts` as `withRetry<T>(fn, opts)`. Uses exponential backoff (`baseDelayMs * 2^attempt`). Bails immediately on 4xx client errors (except 429 rate limiting) since retrying won't help.
+Implemented in `src/ui/tui/utils/with-retry.ts` as `withRetry<T>(fn, opts)`. Uses exponential backoff (`baseDelayMs * 2^attempt`). Bails immediately on 4xx client errors (except 429 rate limiting) since retrying won't help.
 
 **9. Show explicit error states, never silent fallthrough**
 
@@ -127,7 +127,7 @@ OAuth, framework detection, API key resolution, and polling all run concurrently
 
 **10. Use abort controllers for all async effects** -- IMPLEMENTED
 
-Implemented as the `useAsyncEffect` hook in `src/ui/tui-v2/hooks/useAsyncEffect.ts`. Wraps the pattern in a reusable hook that automatically creates an AbortController, passes the signal to the effect function, and aborts on cleanup/re-run. Silently ignores `AbortError` exceptions.
+Implemented as the `useAsyncEffect` hook in `src/ui/tui/hooks/useAsyncEffect.ts`. Wraps the pattern in a reusable hook that automatically creates an AbortController, passes the signal to the effect function, and aborts on cleanup/re-run. Silently ignores `AbortError` exceptions.
 
 ```ts
 // Usage in v2 screens:
