@@ -143,19 +143,7 @@ export const ConsoleView = ({
   // Watch for activation keys while the input is dormant
   useInput(
     (char, key) => {
-      if (key.escape) {
-        if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
-          store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
-          return;
-        }
-        if (responseIsLong) {
-          setResponse(null);
-          return;
-        }
-        // Nothing to dismiss — exit the wizard
-        process.exit(130);
-      }
-      if (char === 'q' || char === 'Q') {
+      if (key.escape || char === 'q' || char === 'Q') {
         if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
           return;
@@ -171,7 +159,11 @@ export const ConsoleView = ({
       }
       if (char === '/') {
         activate('/');
-      } else if (key.tab && store.session.credentials !== null) {
+      } else if (
+        key.tab &&
+        store.session.credentials !== null &&
+        store.session.introConcluded
+      ) {
         activate('');
       }
     },
@@ -427,7 +419,9 @@ export const ConsoleView = ({
       <KeyHintBar
         hints={screenHints}
         width={innerWidth}
-        showAskHint={store.session.credentials !== null}
+        showAskHint={
+          store.session.credentials !== null && store.session.introConcluded
+        }
       />
       <Box paddingX={Layout.paddingX}>
         <Text color={inputActive ? Colors.accent : Colors.muted}>
@@ -444,7 +438,7 @@ export const ConsoleView = ({
           />
         ) : (
           <Text color={Colors.disabled}>
-            {store.session.credentials !== null
+            {store.session.credentials !== null && store.session.introConcluded
               ? 'Press / for commands or Tab to ask a question'
               : 'Press / for commands'}
           </Text>

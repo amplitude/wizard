@@ -566,28 +566,24 @@ void yargs(hideBin(process.argv))
                         session.userEmail = userInfo.email;
                         changed = true;
                       }
-                      // Find the org — by ID if available, otherwise first org
-                      const org = session.selectedOrgId
-                        ? userInfo.orgs.find(
-                            (o) => o.id === session.selectedOrgId,
-                          )
-                        : userInfo.orgs[0];
-                      if (org) {
-                        if (!session.selectedOrgId) {
-                          session.selectedOrgId = org.id;
-                        }
-                        session.selectedOrgName = org.name;
-                        changed = true;
-                        const ws = session.selectedWorkspaceId
-                          ? org.workspaces.find(
-                              (w) => w.id === session.selectedWorkspaceId,
-                            )
-                          : org.workspaces[0];
-                        if (ws) {
-                          if (!session.selectedWorkspaceId) {
-                            session.selectedWorkspaceId = ws.id;
+                      // Only resolve names when we have an explicit org ID —
+                      // never guess by picking the first org, as the user may
+                      // belong to multiple orgs and we'd land on the wrong one.
+                      if (session.selectedOrgId) {
+                        const org = userInfo.orgs.find(
+                          (o) => o.id === session.selectedOrgId,
+                        );
+                        if (org) {
+                          session.selectedOrgName = org.name;
+                          changed = true;
+                          const ws = session.selectedWorkspaceId
+                            ? org.workspaces.find(
+                                (w) => w.id === session.selectedWorkspaceId,
+                              )
+                            : undefined;
+                          if (ws) {
+                            session.selectedWorkspaceName = ws.name;
                           }
-                          session.selectedWorkspaceName = ws.name;
                         }
                       }
                       // Notify the store so /whoami picks up email + org names
