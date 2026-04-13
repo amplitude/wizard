@@ -17,19 +17,25 @@ interface KeyHintBarProps {
   hints?: KeyHint[];
   width: number;
   showDefaults?: boolean;
+  /** When false, hides the "Tab → Ask a question" hint (e.g. before auth). */
+  showAskHint?: boolean;
 }
 
-const DEFAULT_HINTS: KeyHint[] = [
-  { key: '/', label: 'Commands' },
-  { key: 'Tab', label: 'Ask a question' },
-];
+const COMMANDS_HINT: KeyHint = { key: '/', label: 'Commands' };
+const ASK_HINT: KeyHint = { key: 'Tab', label: 'Ask a question' };
 
 export const KeyHintBar = ({
   hints = [],
   width,
   showDefaults = true,
+  showAskHint = true,
 }: KeyHintBarProps) => {
-  const allHints = [...hints, ...(showDefaults ? DEFAULT_HINTS : [])];
+  const defaults = showDefaults
+    ? showAskHint
+      ? [COMMANDS_HINT, ASK_HINT]
+      : [COMMANDS_HINT]
+    : [];
+  const allHints = [...hints, ...defaults];
 
   return (
     <Box width={width} paddingX={1} gap={2}>

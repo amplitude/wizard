@@ -159,7 +159,7 @@ export const ConsoleView = ({
       }
       if (char === '/') {
         activate('/');
-      } else if (key.tab) {
+      } else if (key.tab && store.session.credentials !== null) {
         activate('');
       }
     },
@@ -412,7 +412,11 @@ export const ConsoleView = ({
       )}
 
       {/* Key hints + console input */}
-      <KeyHintBar hints={screenHints} width={innerWidth} />
+      <KeyHintBar
+        hints={screenHints}
+        width={innerWidth}
+        showAskHint={store.session.credentials !== null}
+      />
       <Box paddingX={Layout.paddingX}>
         <Text color={inputActive ? Colors.accent : Colors.muted}>
           {Icons.prompt}{' '}
@@ -428,7 +432,9 @@ export const ConsoleView = ({
           />
         ) : (
           <Text color={Colors.disabled}>
-            Press / for commands or Tab to ask a question
+            {store.session.credentials !== null
+              ? 'Press / for commands or Tab to ask a question'
+              : 'Press / for commands'}
           </Text>
         )}
       </Box>
