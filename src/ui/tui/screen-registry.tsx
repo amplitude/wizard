@@ -1,5 +1,5 @@
 /**
- * Screen registry v2 — maps screen names to v2 React components.
+ * Screen registry — maps screen names to React components.
  */
 
 import type { ReactNode } from 'react';

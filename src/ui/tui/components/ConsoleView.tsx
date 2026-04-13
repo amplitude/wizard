@@ -1,5 +1,5 @@
 /**
- * ConsoleView v2 — Full-screen wrapper without outer border.
+ * ConsoleView — Full-screen wrapper without outer border.
  *
  * Layout: content area + separator + console input with ❯ prompt.
  * Handles slash commands, AI queries, pending prompts, and error banners.

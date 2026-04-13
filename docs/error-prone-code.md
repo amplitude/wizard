@@ -1,4 +1,4 @@
-# TUI v2: Error-Prone Code Analysis
+# TUI: Error-Prone Code Analysis
 
 Every known race condition, silent failure, and edge case — with fix suggestions.
 

@@ -1,5 +1,5 @@
 /**
- * DataSetupScreen v2 — Checks whether the connected Amplitude project has event data.
+ * DataSetupScreen — Checks whether the connected Amplitude project has event data.
  *
  * Calls the Amplitude Data API to determine the project's activation level:
  *   'full'    — 50+ events / well-established data
@@ -8,8 +8,6 @@
  *
  * The router's isComplete predicate (projectHasData !== null) advances past
  * this screen automatically once the value is set.
- *
- * v2: uses v2 color tokens and BrailleSpinner.
  */
 
 import { Box, Text } from 'ink';

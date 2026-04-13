@@ -1,14 +1,12 @@
 /**
- * OutroScreen (v2) — Summary after the agent run.
+ * OutroScreen — Summary after the agent run.
  *
  * Reads store.session.outroData to render success, error, or cancel view.
  * Keeps the process alive until the user presses a key to exit.
  *
- * v2 changes:
- *   - Success: bold green heading, compact changes + events list, PickerMenu
- *   - Error: red heading with error message and suggested fixes
- *   - Cancel: clean warning-colored cancel message
- *   - Removed verbose LLM-agent disclaimer; single-line "review changes" note
+ * Success: bold green heading, compact changes + events list, PickerMenu.
+ * Error: red heading with error message and suggested fixes.
+ * Cancel: clean warning-colored cancel message.
  */
 
 import { Box, Text } from 'ink';

@@ -1,4 +1,4 @@
-# TUI v2: Reliability Improvement Plan
+# TUI: Reliability Improvement Plan
 
 How to ensure every run gets expected outcomes, only correct screens show, data is always fresh, and users are never confused.
 
@@ -98,7 +98,7 @@ Multiple screens make API calls that can hang indefinitely. When they fail, erro
 
 **7. Wrap all API calls in a timeout utility** -- IMPLEMENTED
 
-Implemented in `src/ui/tui/utils/with-timeout.ts` as `withTimeout<T>(promise, ms, label)`. Uses a dedicated `TimeoutError` class and properly clears the timer in a `finally` block. Available for all v2 screens.
+Implemented in `src/ui/tui/utils/with-timeout.ts` as `withTimeout<T>(promise, ms, label)`. Uses a dedicated `TimeoutError` class and properly clears the timer in a `finally` block. Available for all screens.
 
 Apply to: `fetchProjectActivationStatus`, `fetchWorkspaceEventTypes`, `fetchOwnedDashboards`, `fetchSlackConnectionStatus`, `fetchSlackInstallUrl`, `getAPIKey`, `installer.detectClients`.
 
@@ -130,7 +130,7 @@ OAuth, framework detection, API key resolution, and polling all run concurrently
 Implemented as the `useAsyncEffect` hook in `src/ui/tui/hooks/useAsyncEffect.ts`. Wraps the pattern in a reusable hook that automatically creates an AbortController, passes the signal to the effect function, and aborts on cleanup/re-run. Silently ignores `AbortError` exceptions.
 
 ```ts
-// Usage in v2 screens:
+// Usage in screens:
 useAsyncEffect(async (signal) => {
   const result = await fetchWithAbort(url, { signal });
   if (!signal.aborted) store.setActivationLevel(result.level);
@@ -252,7 +252,7 @@ This lets CI pipelines distinguish between recoverable and unrecoverable failure
 | 1 | Ready guards on async screens | MEDIUM | LOW | TODO |
 | 5 | API key validation on startup | MEDIUM | LOW | TODO |
 | 12 | Clear polling on all exit paths | MEDIUM | LOW | TODO |
-| 13 | Three-question audit | MEDIUM | LOW | DONE (JourneyStepper + KeyHintBar in v2) |
+| 13 | Three-question audit | MEDIUM | LOW | DONE (JourneyStepper + KeyHintBar) |
 | 3 | State machines for complex screens | MEDIUM | MEDIUM | TODO |
 | 15 | Show "why" for skipped screens | LOW | LOW | TODO |
 | 8 | Retry with backoff | LOW | LOW | DONE (`with-retry.ts`) |

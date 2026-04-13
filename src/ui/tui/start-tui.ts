@@ -1,7 +1,6 @@
 /**
- * start-tui.ts v2 — Sets up the v2 Ink TUI renderer.
+ * start-tui.ts — Sets up the Ink TUI renderer.
  *
- * Same function signature as v1 so bin.ts can swap with a conditional import.
  * Uses Amplitude brand colors for terminal theming.
  */
 
@@ -52,7 +51,7 @@ export function startTUI(
   const inkUI = new InkUI(store);
   setUI(inkUI);
 
-  // Render the v2 App
+  // Render the App
   const { unmount: inkUnmount } = render(createElement(App, { store }));
 
   // Reset terminal colors on exit

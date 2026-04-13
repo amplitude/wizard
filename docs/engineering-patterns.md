@@ -1,4 +1,4 @@
-# TUI v2: Engineering Patterns for Deterministic, Bug-Free CLI
+# TUI: Engineering Patterns for Deterministic, Bug-Free CLI
 
 Research synthesis from Vercel CLI, Stripe CLI, GitHub CLI, Railway CLI, Ink, XState, fast-check, and production observability patterns.
 

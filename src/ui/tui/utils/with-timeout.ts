@@ -2,7 +2,7 @@
  * Timeout wrapper for async operations.
  *
  * Prevents stuck states when API calls hang due to network issues.
- * Every API call in v2 screens should be wrapped in this.
+ * Every API call in screens should be wrapped in this.
  */
 
 export class TimeoutError extends Error {

@@ -1,4 +1,4 @@
-# TUI v2: Critical Files Ranked
+# TUI: Critical Files Ranked
 
 Ranked by blast radius — what breaks and how many users are affected if this file has a bug.
 
@@ -6,7 +6,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ## Tier 1: System-Breaking (Entire wizard non-functional)
 
-### 1. `src/ui/tui/store.ts` (shared, re-exported by v2)
+### 1. `src/ui/tui/store.ts`
 
 **Why #1:** Single source of truth for all reactive state. Every component subscribes via `useSyncExternalStore`. If the store's `subscribe`/`getSnapshot`/`emitChange` cycle breaks, the entire UI freezes — no screen transitions, no input handling, no progress updates.
 
@@ -31,7 +31,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ---
 
-### 3. `src/ui/tui/router.ts` (shared)
+### 3. `src/ui/tui/router.ts`
 
 **Why #3:** Determines which screen the user sees. The `resolve()` method walks the flow pipeline on every render. A bug here means wrong screens show, screens get skipped, or the wizard gets stuck.
 
@@ -43,7 +43,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ---
 
-### 4. `src/ui/tui/flows.ts` (shared)
+### 4. `src/ui/tui/flows.ts`
 
 **Why #4:** The `show` and `isComplete` predicates on each `FlowEntry` control the entire wizard progression. A wrong predicate means screens show when they shouldn't, or screens get skipped.
 
@@ -57,7 +57,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ### 5. `src/ui/tui/App.tsx`
 
-**Why #5:** Root component that orchestrates all v2 rendering. Owns the layout, screen resolution from registry, `DissolveTransition`, and `ScreenErrorBoundary`. If App.tsx crashes, the terminal goes blank.
+**Why #5:** Root component that orchestrates all rendering. Owns the layout, screen resolution from registry, `DissolveTransition`, and `ScreenErrorBoundary`. If App.tsx crashes, the terminal goes blank.
 
 **What breaks:** JourneyStepper, HeaderBar, content area, ConsoleView, and all screen rendering.
 

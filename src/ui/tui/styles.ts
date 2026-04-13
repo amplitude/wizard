@@ -1,5 +1,5 @@
 /**
- * v2 Design tokens — Amplitude brand palette + modern TUI primitives.
+ * Design tokens — Amplitude brand palette + modern TUI primitives.
  *
  * Colors sourced from brand.amplitude.com/creative/color.
  * Optimised for dark terminal backgrounds (Gray 100 base).
@@ -35,7 +35,7 @@ export const Brand = {
 // ── Semantic color aliases ───────────────────────────────────────────
 
 export const Colors = {
-  // Text hierarchy (4 levels instead of v1's 2)
+  // Text hierarchy (4 levels)
   heading: Brand.gray10,
   body: Brand.gray30,
   secondary: Brand.gray50,
@@ -121,7 +121,7 @@ export const Layout = {
   separatorChar: '─',
 } as const;
 
-// ── Alignment (same interface as v1 for compat) ─────────────────────
+// ── Alignment ────────────────────────────────────────────────────────
 
 export enum HAlign {
   Left = 'flex-start',

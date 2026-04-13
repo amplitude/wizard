@@ -1,5 +1,5 @@
 /**
- * AuthScreen v2 — Multi-step authentication and account setup (SUSI flow).
+ * AuthScreen — Multi-step authentication and account setup (SUSI flow).
  *
  * Steps:
  *   1. OAuth waiting — spinner + login URL while browser auth happens
@@ -10,9 +10,6 @@
  *
  * The screen drives itself from session.pendingOrgs + session.credentials.
  * When credentials are set the router resolves past this screen.
- *
- * v2: uses v2 color tokens, removes redundant header (App already shows it),
- * cleaner section transitions between the 5 steps.
  */
 
 import { Box, Text } from 'ink';

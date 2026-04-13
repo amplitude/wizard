@@ -1,14 +1,11 @@
 /**
- * DataIngestionCheckScreen (v2) — "Start your app and trigger some actions" polling screen.
+ * DataIngestionCheckScreen — "Start your app and trigger some actions" polling screen.
  *
  * Shown after MCP setup. Polls the activation API every 30 seconds until the
  * project starts receiving events, then auto-advances to the Checklist.
  *
- * v2 changes:
- *   - Active guidance as prominent instruction with framework-aware hint
- *   - BrailleSpinner while waiting instead of static diamond icon
- *   - Success celebration when events arrive (brief green display before auto-advance)
- *   - Same business logic: polling, activation API, event catalog fallback
+ * Active guidance as prominent instruction with framework-aware hint.
+ * BrailleSpinner while waiting. Success celebration when events arrive.
  */
 
 import { Box, Text } from 'ink';

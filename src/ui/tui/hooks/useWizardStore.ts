@@ -1,7 +1,7 @@
 /**
  * useWizardStore — eliminates repeated useSyncExternalStore boilerplate.
  *
- * Every v2 screen had the same 4-line subscription pattern. This hook
+ * Every screen had the same 4-line subscription pattern. This hook
  * replaces it with a single call. Uses .bind() for stable references
  * to avoid unnecessary resubscription on render.
  */

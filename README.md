@@ -84,7 +84,7 @@ prompts and emits one JSON object per line to stdout.
 npx @amplitude/wizard --agent --install-dir . --api-key <key>
 ```
 
-Requires `--install-dir`. See [`docs/tui-v2-dual-mode-architecture.md`](./docs/tui-v2-dual-mode-architecture.md) for the NDJSON schema.
+Requires `--install-dir`. See [`docs/dual-mode-architecture.md`](./docs/dual-mode-architecture.md) for the NDJSON schema.
 
 ## CLI flags
 

@@ -1,5 +1,5 @@
 /**
- * RegionSelectScreen v2 — Choose Amplitude data-center region (US or EU).
+ * RegionSelectScreen — Choose Amplitude data-center region (US or EU).
  *
  * Appears as the very first screen so the correct OAuth URL is known
  * before the browser is opened. Skipped for returning users whose
@@ -8,8 +8,6 @@
  * Also re-shown when the /region slash command sets regionForced.
  *
  * US is focused by default — pressing Enter selects it without navigating.
- *
- * v2: uses v2 color tokens, cleaner layout with data residency hint.
  */
 
 import { Box, Text } from 'ink';

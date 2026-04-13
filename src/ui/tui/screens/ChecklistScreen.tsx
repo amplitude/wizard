@@ -1,13 +1,9 @@
 /**
- * ChecklistScreen (v2) — Post-setup checklist for first chart and dashboard.
+ * ChecklistScreen — Post-setup checklist for first chart and dashboard.
  *
  * Shown after DataIngestionCheckScreen confirms events are flowing.
- *
- * v2 changes:
- *   - Celebration header: "Your events are flowing!" in success green
- *   - Items framed as opportunities, not homework
- *   - Cleaner labels and consistent styling with v2 palette
- *   - Same business logic: fetchOwnedDashboards, opn, store methods
+ * Celebration header: "Your events are flowing!" in success green.
+ * Items framed as opportunities, not homework.
  */
 
 import { Box, Text } from 'ink';

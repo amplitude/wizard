@@ -1,5 +1,5 @@
 /**
- * App v2 — Root component.
+ * App — Root component.
  *
  * Layout (top to bottom):
  *   1. JourneyStepper (1 line) — progress through the flow

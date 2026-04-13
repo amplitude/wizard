@@ -1,6 +1,6 @@
-# TUI v2 Test Coverage
+# TUI Test Coverage
 
-> Generated 2026-04-12. Reflects the `kelsonpw/tui-v2-pipeline` branch.
+> Generated 2026-04-12.
 
 ## How to run each test layer
 
@@ -149,11 +149,11 @@ All tests pass.
 
 ### No unit tests exist for:
 
-1. **TUI v2 screens** (`src/ui/tui/screens/`) -- 14 screen components with zero test files. These are the new Ink/React screen implementations (IntroScreen, AuthScreen, RunScreen, OutroScreen, etc.)
-2. **TUI v2 components** (`src/ui/tui/components/`) -- AmplitudeLogo, BrailleSpinner, HeaderBar, KeyHintBar, JourneyStepper, ConsoleView
-3. **TUI v2 hooks** (`src/ui/tui/hooks/`) -- useScreenInput, useStdoutDimensions, useWizardStore, useAsyncEffect
-4. **TUI v2 utilities** (`src/ui/tui/utils/`) -- diagnostics, with-retry, with-timeout, classify-error
-5. **TUI v2 store/router/flows** (`src/ui/tui/`) -- store.ts, router.ts, flows.ts (note: the v1 equivalents ARE tested)
+1. **TUI screens** (`src/ui/tui/screens/`) -- 14 screen components with zero test files (IntroScreen, AuthScreen, RunScreen, OutroScreen, etc.)
+2. **TUI components** (`src/ui/tui/components/`) -- AmplitudeLogo, BrailleSpinner, HeaderBar, KeyHintBar, JourneyStepper, ConsoleView
+3. **TUI hooks** (`src/ui/tui/hooks/`) -- useScreenInput, useStdoutDimensions, useWizardStore, useAsyncEffect
+4. **TUI utilities** (`src/ui/tui/utils/`) -- diagnostics, with-retry, with-timeout, classify-error
+5. **TUI store/router/flows** (`src/ui/tui/`) -- store.ts, router.ts, flows.ts
 6. **AgentUI** (`src/ui/agent-ui.ts`) -- the `--agent` mode JSON-line output handler
 7. **Session checkpoint** (`src/lib/session-checkpoint.ts`) -- save/load/clear checkpoint, Zod validation, staleness, directory matching
 8. **Token refresh** (`src/utils/` or `src/lib/`) -- silent OAuth token refresh logic
@@ -187,7 +187,7 @@ All tests pass.
 
 | What | Why | Effort |
 |------|-----|--------|
-| TUI v2 `router.test.ts` + `store.test.ts` + `flow-invariants.test.ts` | Mirror the existing v1 tests for v2; same patterns apply. Critical if v2 will replace v1 | Medium |
+| TUI `router.test.ts` + `store.test.ts` + `flow-invariants.test.ts` | Additional router, store, and flow invariant tests | Medium |
 | `agent-ui.test.ts` | Verify JSON-line output format, exit code mapping, error serialization | Medium |
 | BDD scenarios for checkpoint resume | "Resume previous session" / "Start fresh" routing is user-facing and tricky | Medium |
 | `classify-error.test.ts` | Error classification drives UX; pure function, easy to test | Small |
@@ -196,7 +196,7 @@ All tests pass.
 
 | What | Why | Effort |
 |------|-----|--------|
-| TUI v2 screen rendering tests | Ink test renderer for each screen component; useful but requires fixture setup | Large |
+| TUI screen rendering tests | Ink test renderer for each screen component; useful but requires fixture setup | Large |
 | `with-retry.test.ts` / `with-timeout.test.ts` | Utility functions; valuable for edge cases | Small |
 | Token refresh integration test | Requires mocking OAuth endpoints; more of an integration test | Medium |
 | `atomic-write.test.ts` | File system edge cases (permissions, concurrent writes) | Small |

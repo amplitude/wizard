@@ -24,29 +24,29 @@ The flows cover:
 
 ### Entry points
 
-- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=18.17.0 required). Supports `--agent` (NDJSON machine output), `--ci` / `--yes` (non-interactive)
+- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=18.17.0 required). Supports `--agent` (NDJSON machine output), `--ci`/`--yes` (non-interactive)
 - `src/run.ts` — main wizard orchestration, ties TUI to session
 - `src/ui/agent-ui.ts` — `AgentUI` — NDJSON `WizardUI` implementation for `--agent` mode. Auto-approves prompts, emits structured JSON events to stdout, redacts secrets from output
 
 ### TUI layer (`src/ui/tui/`)
 
-Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanostores for reactive state. This is the default (and only) TUI. Features journey stepper, keyboard hint bar, dissolve transitions, error boundaries, and resilience utilities.
+Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanostores for reactive state. Features journey stepper, keyboard hint bar, dissolve transitions, error boundaries, and resilience utilities.
 
 | File / Dir | Role |
 |------------|------|
 | `App.tsx` | Root component — layout, screen resolution, `DissolveTransition`, `ScreenErrorBoundary` |
 | `start-tui.ts` | Entry point — OSC terminal color detection, Ink app bootstrap |
-| `ink-ui.ts` | Re-exports v1 `InkUI` (bridge file) |
-| `store.ts` | Re-exports v1 `WizardStore`, `Screen`, `Overlay`, `Flow`, etc. (bridge file) |
-| `router.ts` | Re-exports v1 `WizardRouter` (bridge file) |
-| `flows.ts` | Re-exports v1 `FLOWS` (bridge file) |
-| `screen-registry.tsx` | Maps all 23 screen/overlay names to v2 React components |
-| `screens/` | 16 v2 screen components (Auth, Run, Outro, MCP, Slack, etc.) |
+| `ink-ui.ts` | `InkUI` — TUI `WizardUI` implementation, delegates to `WizardStore` |
+| `store.ts` | `WizardStore`, `Screen`, `Overlay`, `Flow` — nanostore-backed reactive state |
+| `router.ts` | `WizardRouter` — resolves active screen from session state via flow pipeline; manages overlay stack |
+| `flows.ts` | Declarative flow pipelines (`Screen` + `Flow` enums, `FlowEntry` arrays) |
+| `screen-registry.tsx` | Maps all 23 screen/overlay names to React components |
+| `screens/` | 16 screen components (Auth, Run, Outro, MCP, Slack, etc.) |
 | `components/` | `ConsoleView`, `JourneyStepper`, `HeaderBar`, `KeyHintBar`, `AmplitudeLogo`, `BrailleSpinner` |
 | `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useStdoutDimensions` |
 | `utils/` | `withTimeout`, `withRetry`, `classifyError`, `diagnostics` (flow evaluation + sanitized snapshots) |
 | `styles.ts` | Design tokens and color palette |
-| `console-commands.ts` | v2 slash command registration |
+| `console-commands.ts` | Slash command registration and dispatch |
 | `context/` | React context providers |
 | `primitives/` | Low-level UI building blocks |
 | `services/` | TUI-specific service modules |
@@ -207,9 +207,9 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/flows.md`](./docs/flows.md) — flow diagrams (source of truth for UX)
 - [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
 - [`docs/llm-proxy.md`](./docs/llm-proxy.md) — LLM proxy architecture and configuration
-- [`docs/tui-v1-to-v2-migration.md`](./docs/tui-v1-to-v2-migration.md) — TUI v1-to-v2 migration record (migration is complete; v2 is now the only TUI)
-- [`docs/tui-v2-dual-mode-architecture.md`](./docs/tui-v2-dual-mode-architecture.md) — TUI + agent + CI mode architecture
-- [`docs/tui-v2-critical-files.md`](./docs/tui-v2-critical-files.md) — files ranked by blast radius
-- [`docs/tui-v2-engineering-patterns.md`](./docs/tui-v2-engineering-patterns.md) — async safety, retry, error classification patterns
-- [`docs/tui-v2-reliability-improvements.md`](./docs/tui-v2-reliability-improvements.md) — reliability improvement plan and status
-- [`docs/tui-v2-error-prone-code.md`](./docs/tui-v2-error-prone-code.md) — known race conditions and edge cases
+- [`docs/tui-migration-record.md`](./docs/tui-migration-record.md) — historical record of the TUI redesign migration
+- [`docs/dual-mode-architecture.md`](./docs/dual-mode-architecture.md) — TUI + agent + CI mode architecture
+- [`docs/critical-files.md`](./docs/critical-files.md) — files ranked by blast radius
+- [`docs/engineering-patterns.md`](./docs/engineering-patterns.md) — async safety, retry, error classification patterns
+- [`docs/reliability-improvements.md`](./docs/reliability-improvements.md) — reliability improvement plan and status
+- [`docs/error-prone-code.md`](./docs/error-prone-code.md) — known race conditions and edge cases
