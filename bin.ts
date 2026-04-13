@@ -549,11 +549,24 @@ void yargs(hideBin(process.argv))
                 session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
               }
 
+              // Safety check: if we have credentials but no org/workspace ID,
+              // the wizard would proceed to RunScreen without context. Clear
+              // credentials so AuthScreen shows and forces org/workspace selection.
+              if (
+                session.credentials !== null &&
+                !session.selectedOrgId &&
+                !session.pendingOrgs
+              ) {
+                logToFile(
+                  '[bin] credentials set but no org/workspace — clearing to force AuthScreen',
+                );
+                session.credentials = null;
+              }
+
               // Resolve org/workspace display names so /whoami shows them.
               // Uses the stored token to fetch user info — fire-and-forget so it
-              // doesn't block startup. Runs even without selectedOrgId so that
-              // the localKey path (which skips user fetch) can still populate names.
-              if (zone) {
+              // doesn't block startup.
+              if (zone && session.selectedOrgId) {
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
