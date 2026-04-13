@@ -47,7 +47,7 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
     ? `Current: ${session.region?.toUpperCase() ?? 'US'} ${
         Icons.dash
       } pick a new region below`
-    : 'Choose where your Amplitude data is stored. This determines which data center receives your events.';
+    : 'Select the region for your Amplitude project. This should match the region your organization uses.';
 
   return (
     <Box flexDirection="column" flexGrow={1}>

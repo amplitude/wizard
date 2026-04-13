@@ -32,7 +32,7 @@ CRITICAL — confirm_event_plan format:
   description: Put ALL details here — when it fires, properties, file paths.
   WRONG name: "Fires on the product detail page after product data loads"
   RIGHT name: "product viewed"
-  Names longer than 40 characters will be automatically truncated.`,
+  Names longer than 50 characters will be automatically truncated.`,
 
   ...(DEMO_MODE
     ? [
