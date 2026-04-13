@@ -32,7 +32,8 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
-import { FLAG_LLM_ANALYTICS } from '../../lib/feature-flags.js';
+// Inlined to avoid tsx ESM resolution bug with dynamic import().
+const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
 export {
   TaskStatus,
