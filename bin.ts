@@ -182,6 +182,12 @@ void yargs(hideBin(process.argv))
           describe: 'Skip all prompts and use defaults (same as --ci)',
           type: 'boolean',
         },
+        classic: {
+          default: false,
+          describe:
+            'Use the classic prompt-based UI instead of the rich TUI\nenv: AMPLITUDE_WIZARD_CLASSIC',
+          type: 'boolean',
+        },
       });
     },
     (argv) => {
@@ -213,6 +219,12 @@ void yargs(hideBin(process.argv))
           process.exit(1);
         }
 
+        void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
+      } else if (
+        options.classic ||
+        process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
+      ) {
+        // Classic mode: interactive prompts without the rich TUI
         void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
       } else if (isNonInteractiveEnvironment()) {
         // Non-interactive non-CI: error out
