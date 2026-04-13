@@ -46,7 +46,28 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       store.showLogoutOverlay();
       break;
     case '/whoami':
+      // Show current data immediately, then refresh from API
       store.setCommandFeedback(getWhoamiText(store.session), 30_000);
+      if (store.session.credentials?.idToken && store.session.region) {
+        void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) => {
+          fetchAmplitudeUser(
+            store.session.credentials!.idToken!,
+            store.session.region!,
+          )
+            .then((userInfo) => {
+              if (userInfo.email) store.session.userEmail = userInfo.email;
+              const orgId = store.session.selectedOrgId;
+              if (orgId) {
+                const org = userInfo.orgs.find((o) => o.id === orgId);
+                if (org) store.session.selectedOrgName = org.name;
+              }
+              store.setCommandFeedback(getWhoamiText(store.session), 30_000);
+            })
+            .catch(() => {
+              // Non-fatal — keep showing what we have
+            });
+        });
+      }
       break;
     case '/slack':
       store.showSlackOverlay();
