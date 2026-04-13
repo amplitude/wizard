@@ -28,6 +28,7 @@ export function getWhoamiText(
     WizardSession,
     | 'selectedOrgId'
     | 'selectedOrgName'
+    | 'selectedWorkspaceName'
     | 'selectedProjectName'
     | 'region'
     | 'credentials'
@@ -45,18 +46,23 @@ export function getWhoamiText(
   const orgLabel = session.selectedOrgName ?? session.selectedOrgId ?? '(none)';
   parts.push(`org: ${orgLabel}`);
 
-  // Show project name + numeric ID, or just the name/ID
-  const projectName = session.selectedProjectName;
-  const projectId =
+  // Show project (Amplitude calls this "workspace" internally, but users
+  // think of it as their project). Then show environment name + numeric ID.
+  if (session.selectedWorkspaceName) {
+    parts.push(`project: ${session.selectedWorkspaceName}`);
+  }
+
+  const envName = session.selectedProjectName;
+  const envId =
     session.credentials?.projectId && session.credentials.projectId !== 0
       ? String(session.credentials.projectId)
       : null;
-  if (projectName && projectId) {
-    parts.push(`project: ${projectName} (${projectId})`);
-  } else if (projectName) {
-    parts.push(`project: ${projectName}`);
-  } else if (projectId) {
-    parts.push(`project: ${projectId}`);
+  if (envName && envId) {
+    parts.push(`env: ${envName} (${envId})`);
+  } else if (envName) {
+    parts.push(`env: ${envName}`);
+  } else if (envId) {
+    parts.push(`env: ${envId}`);
   }
 
   parts.push(`region: ${session.region ?? '(none)'}`);
