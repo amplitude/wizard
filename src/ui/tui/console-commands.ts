@@ -26,8 +26,11 @@ export const COMMANDS = [
 export function getWhoamiText(
   session: Pick<
     WizardSession,
+    | 'selectedOrgId'
     | 'selectedOrgName'
+    | 'selectedWorkspaceId'
     | 'selectedWorkspaceName'
+    | 'selectedProjectName'
     | 'region'
     | 'credentials'
     | 'userEmail'
@@ -35,14 +38,31 @@ export function getWhoamiText(
 ): string {
   const loggedIn =
     session.credentials !== null && session.credentials !== undefined;
-  if (!loggedIn && !session.selectedOrgName) {
+  if (!loggedIn && !session.selectedOrgName && !session.selectedOrgId) {
     return 'Not logged in. Run /login to authenticate.';
   }
   const parts: string[] = [];
   if (session.userEmail) parts.push(session.userEmail);
-  parts.push(`org: ${session.selectedOrgName ?? '(none)'}`);
-  parts.push(`workspace: ${session.selectedWorkspaceName ?? '(none)'}`);
+
+  const orgLabel = session.selectedOrgName ?? session.selectedOrgId ?? '(none)';
+  const wsLabel =
+    session.selectedWorkspaceName ?? session.selectedWorkspaceId ?? '(none)';
+  parts.push(`org: ${orgLabel}`);
+  parts.push(`workspace: ${wsLabel}`);
+
+  if (session.selectedProjectName) {
+    parts.push(`project: ${session.selectedProjectName}`);
+  }
   parts.push(`region: ${session.region ?? '(none)'}`);
+
+  // Show masked API key so the user knows which key is active
+  if (session.credentials?.projectApiKey) {
+    const key = session.credentials.projectApiKey;
+    const masked =
+      key.length > 8 ? key.slice(0, 4) + '…' + key.slice(-4) : '****';
+    parts.push(`key: ${masked}`);
+  }
+
   return parts.join('  ');
 }
 

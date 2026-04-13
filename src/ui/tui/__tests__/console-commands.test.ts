@@ -27,71 +27,116 @@ describe('parseFeedbackSlashInput', () => {
 });
 
 describe('getWhoamiText', () => {
+  const base = {
+    selectedOrgId: null as string | null,
+    selectedOrgName: null as string | null,
+    selectedWorkspaceId: null as string | null,
+    selectedWorkspaceName: null as string | null,
+    selectedProjectName: null as string | null,
+    region: null as string | null,
+    credentials: null as {
+      accessToken: string;
+      projectApiKey: string;
+      host: string;
+      projectId: number;
+    } | null,
+    userEmail: null as string | null,
+  };
+
   it('shows login prompt when not authenticated and no org', () => {
-    const result = getWhoamiText({
-      selectedOrgName: null,
-      selectedWorkspaceName: null,
-      region: null,
-      credentials: null,
-      userEmail: null,
-    });
+    const result = getWhoamiText({ ...base });
     expect(result).toBe('Not logged in. Run /login to authenticate.');
   });
 
   it('shows login prompt when credentials are undefined', () => {
     const result = getWhoamiText({
-      selectedOrgName: null,
-      selectedWorkspaceName: null,
-      region: null,
+      ...base,
       credentials: undefined as never,
-      userEmail: null,
     });
     expect(result).toBe('Not logged in. Run /login to authenticate.');
   });
 
-  it('shows email + org/workspace/region when authenticated', () => {
+  it('shows email + org/workspace/region/key when authenticated', () => {
     const result = getWhoamiText({
+      ...base,
       selectedOrgName: 'Acme Corp',
       selectedWorkspaceName: 'Production',
       region: 'us',
       credentials: {
         accessToken: 'tok',
-        projectApiKey: 'key',
+        projectApiKey: 'abcd1234efgh5678',
         host: 'https://api.amplitude.com',
         projectId: 1,
       },
       userEmail: 'ada@example.com',
     });
-    expect(result).toBe(
-      'ada@example.com  org: Acme Corp  workspace: Production  region: us',
-    );
+    expect(result).toContain('ada@example.com');
+    expect(result).toContain('org: Acme Corp');
+    expect(result).toContain('workspace: Production');
+    expect(result).toContain('region: us');
+    expect(result).toContain('key: abcd…5678');
   });
 
   it('shows org/workspace/region without email when email is null', () => {
     const result = getWhoamiText({
+      ...base,
       selectedOrgName: 'Acme Corp',
       selectedWorkspaceName: 'Production',
       region: 'us',
       credentials: {
         accessToken: 'tok',
-        projectApiKey: 'key',
+        projectApiKey: 'key12345',
         host: 'https://api.amplitude.com',
         projectId: 1,
       },
-      userEmail: null,
     });
-    expect(result).toBe('org: Acme Corp  workspace: Production  region: us');
+    expect(result).toContain('org: Acme Corp');
     expect(result).not.toContain('ada');
+  });
+
+  it('falls back to org ID when name is not resolved', () => {
+    const result = getWhoamiText({
+      ...base,
+      selectedOrgId: '12345',
+      selectedWorkspaceId: 'ws-67890',
+      region: 'us',
+      credentials: {
+        accessToken: 'tok',
+        projectApiKey: 'key12345',
+        host: 'https://api.amplitude.com',
+        projectId: 1,
+      },
+      userEmail: 'ada@example.com',
+    });
+    expect(result).toContain('org: 12345');
+    expect(result).toContain('workspace: ws-67890');
+  });
+
+  it('shows project name when available', () => {
+    const result = getWhoamiText({
+      ...base,
+      selectedOrgName: 'Acme Corp',
+      selectedWorkspaceName: 'Production',
+      selectedProjectName: 'My App',
+      region: 'us',
+      credentials: {
+        accessToken: 'tok',
+        projectApiKey: 'key12345',
+        host: 'https://api.amplitude.com',
+        projectId: 1,
+      },
+    });
+    expect(result).toContain('project: My App');
   });
 
   it('shows (none) for missing org/workspace when partially authenticated', () => {
     const result = getWhoamiText({
+      ...base,
       selectedOrgName: 'Acme Corp',
-      selectedWorkspaceName: null,
       region: 'eu',
       credentials: {
         accessToken: 'tok',
-        projectApiKey: 'key',
+        projectApiKey: 'key12345',
         host: 'https://api.eu.amplitude.com',
         projectId: 0,
       },
@@ -105,11 +150,9 @@ describe('getWhoamiText', () => {
 
   it('shows org info even without credentials if org name exists', () => {
     const result = getWhoamiText({
+      ...base,
       selectedOrgName: 'Acme Corp',
-      selectedWorkspaceName: null,
       region: 'us',
-      credentials: null,
-      userEmail: null,
     });
     expect(result).toContain('org: Acme Corp');
     expect(result).not.toContain('Not logged in');
