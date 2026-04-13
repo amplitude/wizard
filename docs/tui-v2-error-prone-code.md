@@ -10,18 +10,17 @@ Every known race condition, silent failure, and edge case — with fix suggestio
 
 **File:** `src/ui/tui-v2/screens/AuthScreen.tsx` (lines ~137-252)
 
+**Status: MITIGATED** — `useAsyncEffect` hook now provides AbortController-based cancellation for async effects. Screens that adopt `useAsyncEffect` get automatic stale-write prevention. However, AuthScreen's 5-step resolution chain has not yet been fully migrated to use `useAsyncEffect` throughout.
+
 **The bug:** The credential resolution effect has a 9-element dependency array. If `selectedEnv` changes mid-flight (user picks a different environment while the backend fetch is running), the old fetch completes and writes credentials for the wrong environment.
 
 **Why it's bad:** User ends up with API key for org A while thinking they selected org B. All subsequent API calls target the wrong project.
 
-**Fix:** Add an abort controller or generation counter:
+**Fix:** Migrate the full resolution chain to `useAsyncEffect`:
 ```ts
-const genRef = useRef(0);
-useEffect(() => {
-  const gen = ++genRef.current;
-  // ... async work ...
-  if (gen !== genRef.current) return; // stale
-  store.setCredentials(...);
+useAsyncEffect(async (signal) => {
+  const result = await resolveCredentials();
+  if (!signal.aborted) store.setCredentials(result);
 }, [deps]);
 ```
 
@@ -153,18 +152,9 @@ useInput((char, key) => {
 
 **File:** `src/ui/tui-v2/screens/AuthScreen.tsx` (lines ~82-89)
 
-**The bug:** `session.selectedOrgId` and `session.selectedWorkspaceId` can be pre-populated from a previous wizard run (via `~/.ampli.json`). If the user's org/workspace changed or they're using a different API key, these stale IDs cause wrong org to be auto-selected.
+**Status: FIXED** — Cross-project config scoping fixes now validate org ID against live data. Zone priority (CLI flag > env var > stored config) prevents env var pollution. Org validation clears stale IDs when they don't match the current org list.
 
-**Fix:** Validate pre-populated IDs against the `pendingOrgs` list:
-```ts
-const prePopulatedOrg = session.selectedOrgId && pendingOrgs
-  ? pendingOrgs.find((o) => o.id === session.selectedOrgId) ?? null
-  : null;
-// If prePopulatedOrg is null but selectedOrgId exists, clear it
-if (!prePopulatedOrg && session.selectedOrgId && pendingOrgs) {
-  // stale org ID — force picker
-}
-```
+**The original bug:** `session.selectedOrgId` and `session.selectedWorkspaceId` could be pre-populated from a previous wizard run (via `~/.ampli.json`). If the user's org/workspace changed or they were using a different API key, these stale IDs caused the wrong org to be auto-selected.
 
 ---
 
@@ -205,3 +195,51 @@ If the setup report exceeds terminal height, bottom content is clipped with no i
 ### 15. Narrow terminal (<60 cols) degrades ungracefully
 
 JourneyStepper collapses to dots, but ConsoleView and PickerMenu don't adapt. Long option labels overflow.
+
+---
+
+## New Issues (from session storage / agent mode additions)
+
+### 16. Session checkpoint schema drift
+
+**File:** `src/lib/session-checkpoint.ts`
+
+**The risk:** `CheckpointSchema` (Zod) must be manually kept in sync with `WizardSession`. If a new field is added to the session that affects flow predicates (e.g., a new `activationLevel` value), but not added to the checkpoint schema, resume-from-crash will silently lose that state.
+
+**Fix:** Add a build-time or test-time assertion that `CheckpointSchema` covers all restorable fields:
+```ts
+// In a test file:
+const checkpointKeys = Object.keys(CheckpointSchema.shape);
+const sessionKeys = Object.keys(buildSession({}));
+const restorable = sessionKeys.filter(k => !CREDENTIAL_FIELDS.includes(k));
+expect(checkpointKeys).toEqual(expect.arrayContaining(restorable));
+```
+
+### 17. Token refresh race with concurrent API calls
+
+**File:** `src/utils/token-refresh.ts`
+
+**The risk:** If multiple API calls discover the token is expired simultaneously, they could all trigger `tryRefreshToken()` in parallel. Each call exchanges the same refresh token, and depending on the OAuth provider, only the first exchange may succeed — subsequent ones may invalidate the new token.
+
+**Fix:** Add a module-level mutex (Promise chain) so only one refresh runs at a time:
+```ts
+let refreshPromise: Promise<...> | null = null;
+export function tryRefreshToken(...) {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = doRefresh(...).finally(() => { refreshPromise = null; });
+  return refreshPromise;
+}
+```
+
+### 18. AgentUI EPIPE on closed stdout
+
+**File:** `src/ui/agent-ui.ts`
+
+**The risk:** In agent mode, `emit()` writes directly to `process.stdout`. If the consuming process (pipe reader) exits early, the next write throws EPIPE and crashes the wizard.
+
+**Fix:** Add an EPIPE handler or catch write errors:
+```ts
+process.stdout.on('error', (err) => {
+  if (err.code === 'EPIPE') process.exit(0); // consumer closed, exit cleanly
+});
+```

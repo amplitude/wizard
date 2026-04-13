@@ -303,6 +303,75 @@ function classifyNetworkError(err: NodeJS.ErrnoException): { message: string; su
 
 ---
 
+## 8. Persistence Layer Patterns (from session storage implementation)
+
+### Pattern: Atomic file writes
+
+Never write directly to config files. Use temp-file + rename to prevent corruption on crash:
+
+```ts
+// src/utils/atomic-write.ts
+function atomicWriteJSON(filePath: string, data: unknown, mode = 0o644): void {
+  const tmp = `${filePath}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', { mode });
+    renameSync(tmp, filePath); // atomic on POSIX
+  } catch (err) {
+    try { unlinkSync(tmp); } catch { /* best-effort cleanup */ }
+    throw err;
+  }
+}
+```
+
+### Pattern: Zod-validated checkpoints
+
+Always validate serialized state on load. Never trust the shape of data read from disk:
+
+```ts
+const result = CheckpointSchema.safeParse(raw);
+if (!result.success) return null; // silently discard malformed data
+```
+
+### Pattern: Scoped + TTL'd persistence
+
+Checkpoints are scoped to a specific install directory and expire after 24 hours:
+
+```ts
+if (checkpoint.installDir !== installDir) return null; // wrong project
+if (age > MAX_AGE_MS) return null; // stale
+```
+
+This prevents cross-project state leakage and avoids restoring outdated state.
+
+### Pattern: Credential-free snapshots
+
+Never persist secrets in checkpoints. Strip tokens and API keys before writing; re-evaluate them on resume:
+
+```ts
+// Checkpoint includes: region, orgId, integration, frameworkContext, introConcluded
+// Checkpoint excludes: credentials, accessToken, projectApiKey, runPhase
+```
+
+### Pattern: Silent token refresh with fallback
+
+Attempt token refresh transparently before it expires. On any failure, fall back to the full auth flow:
+
+```ts
+const refreshed = await tryRefreshToken(storedEntry, zone);
+if (refreshed) { /* use new token */ }
+else { /* fall back to browser OAuth */ }
+```
+
+### Pattern: Zone priority for config scoping
+
+When multiple sources specify a region/zone, use a strict priority order to prevent env var pollution:
+
+```
+CLI flag (--region) > env var (AMPLITUDE_ZONE) > stored config (~/.ampli.json)
+```
+
+---
+
 ## Applied To This Codebase
 
 The following changes have been made to implement these patterns:
@@ -312,3 +381,10 @@ The following changes have been made to implement these patterns:
 3. **`src/ui/tui-v2/hooks/useAsyncEffect.ts`** — AbortController-based async effect hook
 4. **`src/ui/tui-v2/utils/diagnostics.ts`** — Flow evaluation + diagnostic snapshot for `/debug`
 5. **Store patches** — Capped status messages, cancellable feedback timer
+6. **`src/utils/atomic-write.ts`** — Crash-safe JSON writes via temp-file + rename
+7. **`src/utils/token-refresh.ts`** — Silent OAuth token refresh with 5-minute proactive buffer
+8. **`src/lib/session-checkpoint.ts`** — Zod-validated session checkpointing with 24-hour TTL
+9. **`src/lib/mode-config.ts`** — Execution mode resolution (interactive/ci/agent)
+10. **`src/lib/exit-codes.ts`** — Structured exit codes for CI/agent consumers
+11. **`src/ui/tui-v2/utils/classify-error.ts`** — Network error classification with actionable messages
+12. **`src/ui/agent-ui.ts`** — NDJSON WizardUI for agent mode (security-hardened, credential-redacted)

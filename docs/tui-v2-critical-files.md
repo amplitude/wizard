@@ -131,3 +131,38 @@ Cosmetic. Truncation of long org/project names is the main edge case.
 ### 15. `src/ui/tui-v2/start-tui.ts`
 
 Entry point. If OSC terminal color codes fail on an unsupported terminal, colors are wrong but wizard still works.
+
+---
+
+## Tier 4: Infrastructure (Not user-facing, but affects reliability)
+
+### 16. `src/lib/session-checkpoint.ts`
+
+Session checkpointing for crash recovery. Saves sanitized wizard state (no credentials) to a temp file. Zod-validated on load, 24-hour TTL, scoped per install directory. If this breaks, users lose resume-on-crash capability but the wizard still works from scratch.
+
+**Risk factors:**
+- Zod schema must stay in sync with `WizardSession` — adding a new session field without updating `CheckpointSchema` silently drops it from checkpoints.
+- `atomicWriteJSON` uses PID-suffixed temp files; concurrent wizard instances could collide if PIDs wrap.
+
+### 17. `src/utils/token-refresh.ts`
+
+Silent OAuth token refresh. Exchanges expired access tokens for new ones using stored refresh tokens. Falls back to full browser auth on any failure.
+
+**Risk factors:**
+- 5-minute expiry buffer (`EXPIRY_BUFFER_MS`) means token can expire if a long agent run takes more than 5 minutes between refresh check and actual use.
+- Zone settings (`AMPLITUDE_ZONE_SETTINGS`) must have correct `oAuthHost` and `oAuthClientId` per region.
+
+### 18. `src/utils/atomic-write.ts`
+
+Crash-safe file writes. Used by checkpointing and config persistence. If this breaks, config files can corrupt on crash.
+
+**Risk factors:**
+- `renameSync` is atomic on POSIX but relies on same-filesystem for temp and target. Cross-mount scenarios (unlikely for tmpdir) would fail.
+
+### 19. `src/ui/agent-ui.ts`
+
+NDJSON `WizardUI` for `--agent` mode. Every method emits structured JSON to stdout. Auto-approves all prompts. If this breaks, agent mode is unusable but TUI and CI modes are unaffected.
+
+**Risk factors:**
+- Security: stack traces are intentionally redacted from `setRunError` output. If someone adds a new error-emitting method, they must maintain this invariant.
+- `emit()` writes directly to `process.stdout` — if stdout is piped to a closed FD, the process crashes with EPIPE.

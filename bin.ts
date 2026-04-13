@@ -1374,8 +1374,12 @@ void yargs(hideBin(process.argv))
     },
   )
   .example('$0', 'Run the interactive setup wizard')
+  .example('$0 --tui-v2', 'Run with the redesigned TUI')
   .example('$0 --ci --api-key <key> --install-dir .', 'Run in CI mode')
-  .example('$0 --agent', 'Run with structured JSON output for automation')
+  .example(
+    '$0 --agent --install-dir .',
+    'Run with structured JSON output for automation',
+  )
   .epilogue(
     'Docs: https://amplitude.com/docs/wizard\nFeedback: wizard@amplitude.com',
   )

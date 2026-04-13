@@ -61,18 +61,9 @@ The wizard reads `~/.ampli.json` and local `.env.local` to pre-populate credenti
 
 ### Fixes
 
-**4. Validate pre-populated state against live data**
+**4. Validate pre-populated state against live data** -- IMPLEMENTED
 
-After OAuth completes and `pendingOrgs` is available, validate that pre-populated `selectedOrgId` exists in the org list:
-```ts
-if (session.selectedOrgId && pendingOrgs) {
-  const orgExists = pendingOrgs.some(o => o.id === session.selectedOrgId);
-  if (!orgExists) {
-    store.$session.setKey('selectedOrgId', null);
-    store.$session.setKey('selectedWorkspaceId', null);
-  }
-}
-```
+Cross-project config scoping fixes now validate org ID against the live org list. Zone priority (CLI flag > env var > stored config) prevents env var pollution across projects. Stale org/workspace IDs are cleared when they don't match the current data.
 
 **5. Add API key validation on startup**
 
@@ -105,40 +96,15 @@ Multiple screens make API calls that can hang indefinitely. When they fail, erro
 
 ### Fixes
 
-**7. Wrap all API calls in a timeout utility**
+**7. Wrap all API calls in a timeout utility** -- IMPLEMENTED
 
-```ts
-async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
-  );
-  return Promise.race([promise, timeout]);
-}
-
-// Usage:
-const status = await withTimeout(
-  fetchProjectActivationStatus({ ... }),
-  15000,
-  'Activation check',
-);
-```
+Implemented in `src/ui/tui-v2/utils/with-timeout.ts` as `withTimeout<T>(promise, ms, label)`. Uses a dedicated `TimeoutError` class and properly clears the timer in a `finally` block. Available for all v2 screens.
 
 Apply to: `fetchProjectActivationStatus`, `fetchWorkspaceEventTypes`, `fetchOwnedDashboards`, `fetchSlackConnectionStatus`, `fetchSlackInstallUrl`, `getAPIKey`, `installer.detectClients`.
 
-**8. Add retry with backoff for transient failures**
+**8. Add retry with backoff for transient failures** -- IMPLEMENTED
 
-```ts
-async function withRetry<T>(fn: () => Promise<T>, retries = 2, backoffMs = 2000): Promise<T> {
-  for (let i = 0; i <= retries; i++) {
-    try { return await fn(); }
-    catch (err) {
-      if (i === retries) throw err;
-      await new Promise(r => setTimeout(r, backoffMs * (i + 1)));
-    }
-  }
-  throw new Error('unreachable');
-}
-```
+Implemented in `src/ui/tui-v2/utils/with-retry.ts` as `withRetry<T>(fn, opts)`. Uses exponential backoff (`baseDelayMs * 2^attempt`). Bails immediately on 4xx client errors (except 429 rate limiting) since retrying won't help.
 
 **9. Show explicit error states, never silent fallthrough**
 
@@ -159,26 +125,15 @@ OAuth, framework detection, API key resolution, and polling all run concurrently
 
 ### Fixes
 
-**10. Use abort controllers for all async effects**
+**10. Use abort controllers for all async effects** -- IMPLEMENTED
+
+Implemented as the `useAsyncEffect` hook in `src/ui/tui-v2/hooks/useAsyncEffect.ts`. Wraps the pattern in a reusable hook that automatically creates an AbortController, passes the signal to the effect function, and aborts on cleanup/re-run. Silently ignores `AbortError` exceptions.
 
 ```ts
-useEffect(() => {
-  const controller = new AbortController();
-  
-  void (async () => {
-    try {
-      const result = await fetchWithAbort(url, controller.signal);
-      if (!controller.signal.aborted) {
-        store.setActivationLevel(result.level);
-      }
-    } catch (err) {
-      if (!controller.signal.aborted) {
-        setError(err);
-      }
-    }
-  })();
-  
-  return () => controller.abort();
+// Usage in v2 screens:
+useAsyncEffect(async (signal) => {
+  const result = await fetchWithAbort(url, { signal });
+  if (!signal.aborted) store.setActivationLevel(result.level);
 }, [dependencies]);
 ```
 
@@ -267,26 +222,20 @@ if (activationLevel === 'full') {
 
 CI mode uses `LoggingUI` which has no interactive error recovery. API hangs in CI are worse because there's no user to press q. All API calls in CI mode should have aggressive timeouts (10s) and clear error messages.
 
-**17. Validate required args in CI mode upfront**
+**17. Validate required args in CI mode upfront** -- IMPLEMENTED
 
-Before starting any async work in CI mode, validate that all required state is present:
-```ts
-if (options.ci) {
-  if (!options.apiKey && !options.installDir) {
-    abort('CI mode requires --api-key or --install-dir');
-  }
-}
-```
+CLI args are now validated with Zod schemas on startup. Invalid args produce clear error messages with the correct exit code (`ExitCode.INVALID_ARGS = 2`). Applies to both CI and agent modes.
 
-**18. Add structured exit codes**
+**18. Add structured exit codes** -- IMPLEMENTED
 
-Instead of `process.exit(1)` for all failures, use specific codes:
+Implemented in `src/lib/exit-codes.ts` and used across `bin.ts`:
 - 0: success
 - 1: general error
-- 2: auth failure
-- 3: network error
-- 4: user cancelled
-- 5: timeout
+- 2: invalid arguments
+- 3: auth required
+- 4: network error
+- 10: agent failed
+- 130: user cancelled
 
 This lets CI pipelines distinguish between recoverable and unrecoverable failures.
 
@@ -294,18 +243,18 @@ This lets CI pipelines distinguish between recoverable and unrecoverable failure
 
 ## Implementation Priority
 
-| # | Fix | Impact | Effort | Files |
-|---|-----|--------|--------|-------|
-| 7 | Timeout wrapper for all API calls | HIGH | LOW | New utility + 6 screens |
-| 10 | Abort controllers in async effects | HIGH | MEDIUM | AuthScreen, DataSetupScreen, DataIngestionCheck |
-| 4 | Validate pre-populated state | HIGH | LOW | AuthScreen, bin.ts |
-| 9 | Explicit error states on all screens | HIGH | MEDIUM | All screens with API calls |
-| 1 | Ready guards on async screens | MEDIUM | LOW | 3 screens |
-| 5 | API key validation on startup | MEDIUM | LOW | bin.ts |
-| 12 | Clear polling on all exit paths | MEDIUM | LOW | DataIngestionCheck |
-| 13 | Three-question audit | MEDIUM | LOW | Audit + minor text changes |
-| 3 | State machines for complex screens | MEDIUM | MEDIUM | MCP, Auth, DataIngestion |
-| 15 | Show "why" for skipped screens | LOW | LOW | 4 screens |
-| 8 | Retry with backoff | LOW | LOW | New utility |
-| 14 | Transition context messages | LOW | LOW | Store + 5 screens |
-| 18 | Structured exit codes | LOW | LOW | bin.ts |
+| # | Fix | Impact | Effort | Status |
+|---|-----|--------|--------|--------|
+| 7 | Timeout wrapper for all API calls | HIGH | LOW | DONE (`with-timeout.ts`) |
+| 10 | Abort controllers in async effects | HIGH | MEDIUM | DONE (`useAsyncEffect` hook) |
+| 4 | Validate pre-populated state | HIGH | LOW | DONE (cross-project config scoping) |
+| 9 | Explicit error states on all screens | HIGH | MEDIUM | PARTIAL (`classifyError` utility exists, screen adoption in progress) |
+| 1 | Ready guards on async screens | MEDIUM | LOW | TODO |
+| 5 | API key validation on startup | MEDIUM | LOW | TODO |
+| 12 | Clear polling on all exit paths | MEDIUM | LOW | TODO |
+| 13 | Three-question audit | MEDIUM | LOW | DONE (JourneyStepper + KeyHintBar in v2) |
+| 3 | State machines for complex screens | MEDIUM | MEDIUM | TODO |
+| 15 | Show "why" for skipped screens | LOW | LOW | TODO |
+| 8 | Retry with backoff | LOW | LOW | DONE (`with-retry.ts`) |
+| 14 | Transition context messages | LOW | LOW | TODO |
+| 18 | Structured exit codes | LOW | LOW | DONE (`exit-codes.ts`) |

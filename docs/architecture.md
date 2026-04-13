@@ -11,13 +11,14 @@ chart, first dashboard, and Slack integration.
 ## Table of contents
 
 - [The binary](#the-binary)
-- [Two operating modes: TUI vs CI](#two-operating-modes-tui-vs-ci)
+- [Three operating modes: TUI, CI, and Agent](#three-operating-modes-tui-ci-and-agent)
 - [System diagram](#system-diagram)
 - [External dependencies](#external-dependencies-non-npm)
 - [Wizard flow (end-to-end)](#wizard-flow-end-to-end)
 - [Architectural layers](#architectural-layers)
 - [State management](#state-management)
 - [How the agent works](#how-the-agent-works)
+- [Session persistence](#session-persistence)
 - [Authentication flow](#authentication-flow)
 - [The WizardUI interface](#the-wizardui-interface)
 - [TUI mode deep dive](#tui-mode-deep-dive)
@@ -74,36 +75,60 @@ package.json → "bin": { "amplitude-wizard": "dist/bin.js" }
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--force-install` | `false` | Force install despite peer dep failures |
-| `--install-dir` | `process.cwd()` | Target directory |
+| `--install-dir` | `process.cwd()` | Target directory (required for CI/agent) |
 | `--integration` | — | Framework override (e.g., `nextjs`, `django`) |
 | `--menu` | `false` | Show manual framework picker |
 | `--benchmark` | `false` | Enable per-phase token tracking |
+| `--tui-v2` | `false` | Use the redesigned TUI |
+| `--agent` | `false` | Agent mode — structured NDJSON output, auto-approve |
+| `--yes` / `-y` | `false` | Skip all prompts, same as `--ci` |
 
 All flags support env var override via `AMPLITUDE_WIZARD_` prefix (e.g., `AMPLITUDE_WIZARD_CI=true`).
 
+### Exit codes
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | `SUCCESS` | Wizard completed successfully |
+| 1 | `GENERAL_ERROR` | Unclassified error |
+| 2 | `INVALID_ARGS` | Missing or invalid CLI arguments |
+| 3 | `AUTH_REQUIRED` | Authentication failed or required |
+| 4 | `NETWORK_ERROR` | Network connectivity issue |
+| 10 | `AGENT_FAILED` | Claude agent run failed |
+| 130 | `USER_CANCELLED` | User cancelled the wizard |
+
+Defined in `src/lib/exit-codes.ts`.
+
 ---
 
-## Two operating modes: TUI vs CI
+## Three operating modes: TUI, CI, and Agent
 
-The wizard has two fundamentally different execution modes that share the same
-business logic but differ in user interaction.
+The wizard has three execution modes that share the same business logic but
+differ in user interaction.
 
-### Mode selection (bin.ts:166-194)
+### Mode selection (bin.ts)
 
 ```
---ci flag?
-  ├─ YES → LoggingUI (CI mode)
+--agent flag?
+  ├─ YES → AgentUI (NDJSON output)
   │         Requires --install-dir
+  │         Auto-approves all prompts
   │
   └─ NO
-      ├─ process.stdin.isTTY? → YES → InkUI (TUI mode)
-      │                                Launch Ink React app
-      │
-      └─ NO → Error: "requires interactive terminal"
-               Suggests --ci flag
+      ├─ --ci or --yes flag?
+      │   ├─ YES → LoggingUI (CI mode)
+      │   │         Requires --install-dir
+      │   │
+      │   └─ NO
+      │       ├─ process.stdin.isTTY? → YES → InkUI (TUI mode)
+      │       │                                Launch Ink React app
+      │       │                                --tui-v2 selects redesigned TUI
+      │       │
+      │       └─ NO → Error: "requires interactive terminal"
+      │                Suggests --ci flag
 ```
 
-### What is shared (both modes use these)
+### What is shared (all modes use these)
 
 | Layer | Files | Description |
 |-------|-------|-------------|
@@ -127,20 +152,20 @@ detection, and post-agent steps are completely mode-agnostic.
 
 ### What is NOT shared
 
-| Aspect | TUI mode (InkUI) | CI mode (LoggingUI) |
-|--------|-------------------|---------------------|
-| **Rendering** | Ink (React for terminals) with full-screen layout, tabs, colors | Simple `console.log` with Unicode markers (`┌ │ ✔ ▲ ✖`) |
-| **State management** | `WizardStore` with nanostores — reactive atoms, subscriptions, re-renders | No reactive state; session mutations are no-ops |
-| **Screen routing** | `WizardRouter` walks declarative flow pipelines | No screens, no routing, no transitions |
-| **Overlays** | Stack-based interrupts (outage, settings override, snake game) | Warnings printed to console, then continue |
-| **Slash commands** | `/region`, `/login`, `/logout`, `/whoami`, `/mcp`, `/slack`, `/feedback`, `/snake`, `/exit` — always available | None |
-| **Prompts** | Block the agent — user must respond (confirm, choose, approve event plan) | Auto-resolve: `promptConfirm` → `false`, `promptChoice` → `""`, `promptEventPlan` → `approved` |
-| **Error retry** | User presses R to retry; `setRunError()` blocks until user decides | `setRunError()` returns `false` immediately (no retry) |
-| **Heartbeat** | No-op (TUI shows live updates reactively) | Prints last N status messages every ~10 seconds |
-| **Task progress** | `ProgressList` component with status icons, animated transitions | Logs `[completed/total] current task` |
-| **Event plan** | Dedicated "Event plan" tab in RunScreen | Printed to console, auto-approved |
-| **Startup** | Concurrent: OAuth (browser popup) + framework detection + feature discovery, with TUI screens showing progress | Sequential: detect framework → run agent. Auth via `--api-key` flag or stored token |
-| **Tabs** | RunScreen has 3–4 tabs: Status, Event plan (conditional), All logs, Snake | N/A |
+| Aspect | TUI mode (InkUI) | CI mode (LoggingUI) | Agent mode (AgentUI) |
+|--------|-------------------|---------------------|----------------------|
+| **Rendering** | Ink (React for terminals) with full-screen layout, tabs, colors | Simple `console.log` with Unicode markers (`┌ │ ✔ ▲ ✖`) | NDJSON — one JSON object per line to stdout |
+| **State management** | `WizardStore` with nanostores — reactive atoms, subscriptions, re-renders | No reactive state; session mutations are no-ops | No reactive state; emits status/progress/result events |
+| **Screen routing** | `WizardRouter` walks declarative flow pipelines | No screens, no routing, no transitions | No screens, no routing |
+| **Overlays** | Stack-based interrupts (outage, settings override, snake game) | Warnings printed to console, then continue | Warnings emitted as JSON events |
+| **Slash commands** | `/region`, `/login`, `/logout`, `/whoami`, `/mcp`, `/slack`, `/feedback`, `/snake`, `/exit` — always available | None | None |
+| **Prompts** | Block the agent — user must respond (confirm, choose, approve event plan) | Auto-resolve: `promptConfirm` → `false`, `promptChoice` → `""`, `promptEventPlan` → `approved` | Auto-resolve: `promptConfirm` → `true`, `promptChoice` → first option, `promptEventPlan` → `approved` |
+| **Error retry** | User presses R to retry; `setRunError()` blocks until user decides | `setRunError()` returns `false` immediately (no retry) | `setRunError()` emits error event, returns `false` (no retry) |
+| **Heartbeat** | No-op (TUI shows live updates reactively) | Prints last N status messages every ~10 seconds | No-op (events stream continuously) |
+| **Task progress** | `ProgressList` component with status icons, animated transitions | Logs `[completed/total] current task` | Emits `progress` JSON events |
+| **Event plan** | Dedicated "Event plan" tab in RunScreen | Printed to console, auto-approved | Emitted as `result` JSON event, auto-approved |
+| **Startup** | Concurrent: OAuth (browser popup) + framework detection + feature discovery, with TUI screens showing progress | Sequential: detect framework → run agent. Auth via `--api-key` flag or stored token | Sequential, same as CI. Auth via `--api-key` |
+| **Tabs** | RunScreen has 5 tabs: Status, Event plan, All logs, Small Web, Snake | N/A | N/A |
 
 ### Prompt behavior — the critical difference
 
@@ -663,6 +688,41 @@ The agent sandbox restricts what tools the Claude agent can call:
 
 ---
 
+## Session persistence
+
+The wizard remembers users across runs through four persistence layers, checked
+in order during startup in `bin.ts`:
+
+### 1. OAuth tokens (`~/.ampli.json`)
+
+Stored by `src/utils/ampli-settings.ts`. Contains access token, refresh token,
+ID token, user profile, and zone. On restart the wizard calls `tryRefreshToken()`
+(`src/utils/token-refresh.ts`) to silently exchange an expired access token using
+the refresh token (365-day window) before falling back to browser OAuth.
+
+### 2. API key store (`src/utils/api-key-store.ts`)
+
+The project API key is persisted per-project via:
+- **macOS Keychain** — `security` CLI, keyed by SHA-1 hash of the project directory
+- **Linux keyring** — `secret-tool` CLI (gnome-keyring / KWallet)
+- **.env.local fallback** — written to the project directory, auto-added to `.gitignore`
+
+### 3. Project config (`.ampli.json` in the project directory)
+
+Zone, org, workspace, and project selections written by the Amplitude CLI
+toolchain. Read by `src/lib/ampli-config.ts`.
+
+### 4. Crash-recovery checkpoint (`src/lib/session-checkpoint.ts`)
+
+A sanitized session snapshot (no credentials or tokens) saved to
+`$TMPDIR/amplitude-wizard-checkpoint.json`. On restart, if the checkpoint matches
+the current project directory and is less than 24 hours old, the wizard restores:
+region, org/workspace selection, framework detection results, and intro state.
+This lets users resume where they left off after a crash without re-doing setup.
+Checkpoints are deleted on successful completion via `clearCheckpoint()`.
+
+---
+
 ## Authentication flow
 
 ```
@@ -1172,7 +1232,9 @@ Default blocking config:
 | `oauth.ts` | OAuth PKCE flow: browser redirect, local HTTP server on port 13222, token exchange |
 | `analytics.ts` | Amplitude telemetry: `resolveTelemetryApiKey()`, `sessionProperties()`, `captureWizardError()` |
 | `ampli-settings.ts` | `~/.ampli.json` credential store: `readCredentials()`, `storeToken()`, `clearCredentials()` |
-| `api-key-store.ts` | Per-project API key persistence (alongside package.json) |
+| `api-key-store.ts` | Per-project API key persistence (keychain / .env.local) |
+| `token-refresh.ts` | Silent OAuth token refresh via refresh token (365-day window) |
+| `atomic-write.ts` | Atomic JSON file writes (temp + rename) for crash safety |
 | `api.ts` | Amplitude REST/GraphQL API calls: `fetchAmplitudeUser()` |
 | `urls.ts` | URL builders: `getLlmGatewayUrlFromHost()`, `buildMCPUrl()`, `detectRegionFromToken()`, `getHostFromRegion()` |
 | `debug.ts` | File logging: `logToFile()`, `enableDebugLogs()`, `getLogFilePath()` |
@@ -1284,6 +1346,8 @@ amplitude/wizard
 │   │   ├── constants.ts            Integration enum, URLs, env flags
 │   │   ├── wizard-tools.ts         In-process MCP server (8 tools)
 │   │   ├── safe-tools.ts           Agent tool allowlist (~100 tools)
+│   │   ├── exit-codes.ts           Structured exit codes (0-130)
+│   │   ├── session-checkpoint.ts   Crash-recovery checkpoint (save/load/clear)
 │   │   ├── feature-flags.ts        Amplitude Experiment flags
 │   │   ├── detect-amplitude.ts     Pre-existing SDK detection
 │   │   ├── api.ts                  Amplitude API client
@@ -1295,6 +1359,14 @@ amplitude/wizard
 │   │   ├── index.ts                UI singleton (getUI/setUI)
 │   │   ├── wizard-ui.ts            WizardUI interface (28 methods)
 │   │   ├── logging-ui.ts           CI mode: console output, auto-approve
+│   │   ├── agent-ui.ts             Agent mode: NDJSON output, auto-approve
+│   │   ├── tui-v2/                 Redesigned TUI (--tui-v2)
+│   │   │   ├── start-tui.ts        TUI v2 bootstrap
+│   │   │   ├── App.tsx             Root component with JourneyStepper, transitions
+│   │   │   ├── styles.ts           Design tokens
+│   │   │   ├── screens/            Screen components (mirrors tui/)
+│   │   │   ├── components/         HeaderBar, JourneyStepper, KeyHintBar, ConsoleView
+│   │   │   └── screen-registry.tsx Screen/overlay → component mapping
 │   │   └── tui/
 │   │       ├── start-tui.ts        TUI bootstrap: store, InkUI, Ink render
 │   │       ├── App.tsx             Root Ink component
@@ -1353,8 +1425,10 @@ amplitude/wizard
 │   └── utils/                      ~27 utility modules
 │       ├── oauth.ts                OAuth PKCE flow
 │       ├── analytics.ts            Amplitude telemetry
-│       ├── api-key-store.ts        API key persistence
+│       ├── api-key-store.ts        API key persistence (keychain/.env.local)
 │       ├── ampli-settings.ts       ~/.ampli.json management
+│       ├── token-refresh.ts        Silent OAuth token refresh
+│       ├── atomic-write.ts         Crash-safe JSON file writes
 │       ├── urls.ts                 Regional URL construction
 │       ├── debug.ts                File logging
 │       └── ...

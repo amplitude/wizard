@@ -8,7 +8,9 @@ actions.
 
 | Command      | Description                                                       |
 | ------------ | ----------------------------------------------------------------- |
-| `/region`    | Switch data-center region (US or EU)                              |
+| `/region`    | Switch the data-center region (US or EU) — re-triggers data setup |
+| `/org`       | Switch the active org                                             |
+| `/project`   | Switch the active project                                         |
 | `/login`     | Re-authenticate                                                   |
 | `/logout`    | Clear stored credentials                                          |
 | `/whoami`    | Show current user, org, and project                               |
@@ -39,8 +41,11 @@ flowchart TD
     CMD --> MCP_CMD["mcp add / mcp remove"]
     CMD --> COMPLETION["completion"]
     CMD --> WIZARD["wizard (default)"]
+    CMD --> AGENT["wizard --agent<br/>(structured JSON output for automation)"]
 
     FEEDBACK --> FEEDBACK_SEND["Track wizard: feedback submitted via Node SDK"]
+
+    AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
 
     LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
@@ -71,7 +76,7 @@ flowchart TD
 title: Wizard flow
 ---
 flowchart TD
-    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected · user confirms or exits)"]
+    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected · user confirms or exits)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
     INTRO --> REGION_SELECT
 
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
@@ -113,7 +118,7 @@ flowchart TD
 
     POST --> MCP_SCREEN["McpScreen<br/>(install MCP server · skipped on error)"]
     ERR --> OUTRO["See: Outro flow"]
-    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls activation API every 30s · skipped on error)<br/>full users pass immediately · user can exit and resume later"]
+    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls activation API every 30s · skipped on error)<br/>full users pass immediately · user can exit and resume later<br/>Shows rotating coaching tips while waiting<br/>On success: celebration animation with explicit 'continue' prompt"]
     DATA_INGESTION --> CHECKLIST["ChecklistScreen<br/>(first chart · first dashboard · taxonomy @todo)<br/>dashboard unlocks after chart · user can skip any item"]
     CHECKLIST --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
     SLACK_SCREEN --> OUTRO

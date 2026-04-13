@@ -69,13 +69,75 @@ Key behaviors:
 | API errors | MSW mock server | Unhandled error states |
 | Exit codes | Process spawn tests | CI integration regressions |
 
-## 5. Implementation Files
+## 5. Session Storage
+
+All three modes share the same persistence infrastructure. State is layered by scope and lifetime:
+
+```
+                                      ┌─────────────────────────────────────┐
+                                      │        In-memory (WizardStore)      │
+                                      │   Full session state, per-run only  │
+                                      ├─────────────────────────────────────┤
+                                      │     Session checkpoint ($TMPDIR)    │
+                                      │  Crash recovery, 24h TTL, no creds │
+                                      ├─────────────────────────────────────┤
+                                      │     API key store (~/.ampli.json)   │
+                                      │  Per-project, persistent            │
+                                      ├─────────────────────────────────────┤
+                                      │     OAuth tokens (~/.ampli.json)    │
+                                      │  Per-user, silent refresh           │
+                                      └─────────────────────────────────────┘
+```
+
+### Session checkpointing (`src/lib/session-checkpoint.ts`)
+
+Saves a sanitized wizard state snapshot to `$TMPDIR/amplitude-wizard-checkpoint.json` on key state transitions. On restart, loads it to skip already-completed setup steps (intro, region, org selection, framework detection) while still re-running the agent.
+
+**Invariants:**
+- Never contains credentials, tokens, or API keys
+- Zod-validated on load — malformed files are silently discarded
+- Scoped to install directory — won't restore state from a different project
+- 24-hour TTL — stale checkpoints are ignored
+- Written with `atomicWriteJSON()` and 0o600 permissions
+
+### Token refresh (`src/utils/token-refresh.ts`)
+
+Silently refreshes OAuth access tokens using stored refresh tokens. Proactively refreshes 5 minutes before expiry. Returns `null` on any failure, allowing the caller to fall back to full browser OAuth.
+
+### Atomic writes (`src/utils/atomic-write.ts`)
+
+All file persistence uses `atomicWriteJSON()`: write to PID-suffixed temp file, then `renameSync` to target. If the process crashes mid-write, the original file is untouched.
+
+### Config scoping
+
+Zone/region priority prevents cross-project pollution: CLI flag > env var > stored config. Org IDs are validated against the live org list on each session start.
+
+## 6. Security Hardening
+
+| Measure | Where |
+|---------|-------|
+| Stack trace redaction in NDJSON | `AgentUI.setRunError()` — emits `error.message` only, not the stack |
+| Credential redaction in NDJSON | `AgentUI.setCredentials()` — emits host + projectId, not tokens |
+| 0o600 file permissions | `atomicWriteJSON` calls for tokens and checkpoints |
+| Immutable store mutations | Store mutations create new objects, never mutate in place |
+| Zod validation on all external input | CLI args, checkpoint files, token refresh responses |
+
+## 7. Implementation Files
 
 | File | Purpose |
 |------|---------|
 | `src/ui/agent-ui.ts` | NDJSON WizardUI for --agent mode |
 | `src/lib/mode-config.ts` | Execution mode resolution |
 | `src/lib/exit-codes.ts` | Structured exit codes |
+| `src/lib/session-checkpoint.ts` | Session checkpointing for crash recovery |
+| `src/utils/token-refresh.ts` | Silent OAuth token refresh |
+| `src/utils/atomic-write.ts` | Crash-safe file writes |
+| `src/ui/tui-v2/utils/classify-error.ts` | Network error classification |
+| `src/ui/tui-v2/utils/with-timeout.ts` | Timeout wrapper for API calls |
+| `src/ui/tui-v2/utils/with-retry.ts` | Retry with exponential backoff |
+| `src/ui/tui-v2/hooks/useAsyncEffect.ts` | AbortController-based async effects |
+| `src/ui/tui-v2/hooks/useWizardStore.ts` | Stable store subscription hook |
+| `src/ui/tui-v2/utils/diagnostics.ts` | Flow evaluation + diagnostic snapshots |
 | `src/ui/tui/__tests__/router.test.ts` | Router unit tests |
-| `src/ui/tui/__tests__/flow-invariants.test.ts` | fast-check property tests |
-| `bin.ts` | --agent flag, help improvements, --yes alias |
+| `src/ui/tui/__tests__/flow-invariants.test.ts` | fast-check property tests (24 tests) |
+| `bin.ts` | --agent flag, --tui-v2 flag, help improvements, --yes alias |
