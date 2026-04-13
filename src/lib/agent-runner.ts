@@ -26,7 +26,7 @@ import {
 import { getLlmGatewayUrlFromHost } from '../utils/urls';
 import { OUTBOUND_URLS } from './constants.js';
 import * as semver from 'semver';
-import { checkAnthropicStatus } from '../utils/anthropic-status';
+
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
@@ -95,17 +95,6 @@ export async function runAgentWizard(
   // Setup phase — informational only, no prompts
   // Beta notice, pre-run notice, and welcome label are all derivable
   // from session.frameworkConfig — IntroScreen reads them directly.
-
-  // Check model provider service status (pure — no prompt).
-  // The wizard uses Vertex AI via a proxy, so this currently always
-  // returns operational. Actual API errors surface during the agent run.
-  const statusResult = checkAnthropicStatus();
-  if (statusResult.status === 'down' || statusResult.status === 'degraded') {
-    getUI().showServiceStatus({
-      description: statusResult.description,
-      statusPageUrl: 'https://status.cloud.google.com',
-    });
-  }
 
   // Check for blocking env overrides in .claude/settings.json before login.
   // These keys block the Wizard from accessing the Amplitude LLM Gateway.

@@ -356,7 +356,6 @@ describe('health-checks', () => {
     it('always returns healthy (Vertex AI via proxy — no remote check)', async () => {
       const result = await checkAnthropicHealth();
       expect(result.status).toBe(ServiceHealthStatus.Healthy);
-      expect(result.pageUrl).toBe('https://status.cloud.google.com');
     });
   });
 

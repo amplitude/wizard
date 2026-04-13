@@ -120,11 +120,11 @@ async function fetchStatuspageSummary(
 // Individual statuspage-backed checks
 // ---------------------------------------------------------------------------
 
-/** Model provider health — currently a no-op since we use Vertex AI via proxy. */
+/** Model provider health — no-op, wizard uses Vertex AI via proxy. */
 export const checkAnthropicHealth = (): Promise<BaseHealthResult> =>
   Promise.resolve({
     status: ServiceHealthStatus.Healthy,
-    pageUrl: 'https://status.cloud.google.com',
+    pageUrl: '',
   });
 
 export const checkAmplitudeOverallHealth = (): Promise<BaseHealthResult> =>
