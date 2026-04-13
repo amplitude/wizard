@@ -21,6 +21,7 @@ import {
   ProgressList,
   LogViewer,
   SnakeGame,
+  EventPlanViewer,
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
@@ -238,12 +239,23 @@ export const RunScreen = ({ store }: RunScreenProps) => {
       ? store.statusMessages[store.statusMessages.length - 1]
       : undefined;
 
+  const hasEvents = store.eventPlan.length > 0;
+
   const tabs = [
     {
       id: 'progress',
       label: 'Progress',
       component: <ProgressTab store={store} />,
     },
+    ...(hasEvents
+      ? [
+          {
+            id: 'events',
+            label: 'Events',
+            component: <EventPlanViewer events={store.eventPlan} />,
+          },
+        ]
+      : []),
     {
       id: 'logs',
       label: 'Logs',
