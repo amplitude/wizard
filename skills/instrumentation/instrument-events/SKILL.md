@@ -24,10 +24,7 @@ Think like a **Software Architect** reviewing a PR: you care about consistency
 with existing patterns, minimal footprint, and properties that actually power
 dashboards — not vanity fields nobody queries.
 
-Read the **Amplitude Quickstart Taxonomy Agent** skill at
-`../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md` (or install
-`amplitude-quickstart-taxonomy-agent` from the `taxonomy` category via
-wizard-tools) for analytics philosophy, event naming, and property limits.
+Read the `taxonomy` skill at `../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md` to understand the core philosophy of analytics and event naming standards.
 
 ---
 
