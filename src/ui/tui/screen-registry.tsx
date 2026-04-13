@@ -59,6 +59,16 @@ export function createScreens(
       <LogoutScreen
         onComplete={() => store.hideLogoutOverlay()}
         installDir={store.session.installDir}
+        onLoggedOut={() => {
+          store.session.credentials = null;
+          store.session.userEmail = null;
+          store.session.selectedOrgId = null;
+          store.session.selectedOrgName = null;
+          store.session.selectedWorkspaceId = null;
+          store.session.selectedWorkspaceName = null;
+          store.session.selectedProjectName = null;
+          store.emitChange();
+        }}
       />
     ),
     [Overlay.Login]: (

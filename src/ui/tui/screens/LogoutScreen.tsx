@@ -16,6 +16,8 @@ import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 interface LogoutScreenProps {
   onComplete: () => void;
   installDir: string;
+  /** Called to clear in-memory session state after disk credentials are wiped. */
+  onLoggedOut?: () => void;
 }
 
 enum Phase {
@@ -23,7 +25,11 @@ enum Phase {
   Done = 'done',
 }
 
-export const LogoutScreen = ({ onComplete, installDir }: LogoutScreenProps) => {
+export const LogoutScreen = ({
+  onComplete,
+  installDir,
+  onLoggedOut,
+}: LogoutScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Confirm);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -38,8 +44,10 @@ export const LogoutScreen = ({ onComplete, installDir }: LogoutScreenProps) => {
     clearStoredCredentials();
     clearApiKey(installDir);
     clearCheckpoint(installDir);
+    onLoggedOut?.();
     setPhase(Phase.Done);
-    timerRef.current = setTimeout(onComplete, 1500);
+    // Exit after a short delay so the user sees the confirmation
+    timerRef.current = setTimeout(() => process.exit(0), 1500);
   };
 
   return (
