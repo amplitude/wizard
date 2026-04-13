@@ -303,7 +303,9 @@ void yargs(hideBin(process.argv))
               const projectZone = projectConfig.ok
                 ? projectConfig.config.Zone
                 : undefined;
-              const zone = realUser?.zone ?? projectZone ?? null;
+              // Project config takes priority over global user — users work across
+              // US and EU projects, and the project config is the source of truth.
+              const zone = projectZone ?? realUser?.zone ?? null;
 
               if (zone) {
                 session.region = zone;

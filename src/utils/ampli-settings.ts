@@ -16,6 +16,7 @@ import {
   type AmplitudeZone,
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
+import { atomicWriteJSON } from './atomic-write.js';
 
 export const AMPLI_CONFIG_PATH = path.join(os.homedir(), '.ampli.json');
 
@@ -50,12 +51,8 @@ function writeConfig(
   data: Record<string, unknown>,
   configPath = AMPLI_CONFIG_PATH,
 ): void {
-  fs.writeFileSync(configPath, JSON.stringify(data, null, 2), {
-    encoding: 'utf-8',
-    mode: 0o600,
-  });
-  // Ensure permissions are restricted even if the file already existed
-  fs.chmodSync(configPath, 0o600);
+  // Atomic write: temp file + rename prevents corruption if process dies mid-write
+  atomicWriteJSON(configPath, data, 0o600);
 }
 
 function userKey(userId: string, zone: AmplitudeZone): string {

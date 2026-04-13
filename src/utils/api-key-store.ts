@@ -205,13 +205,14 @@ export function readApiKeyWithSource(
     if (key) return { key, source: 'keychain' };
   }
 
-  // .env.local in the project directory
+  // .env.local in the project directory (project-scoped, safe)
   const envKey = envRead(installDir);
   if (envKey) return { key: envKey, source: 'env' };
 
-  // Also honour AMPLITUDE_API_KEY from the environment (e.g. already in .env)
-  const envVar = process.env.AMPLITUDE_API_KEY;
-  if (envVar) return { key: envVar, source: 'env' };
+  // NOTE: We intentionally do NOT fall back to process.env.AMPLITUDE_API_KEY.
+  // A shell-level env var would leak across projects — if a user sets it in
+  // their .bashrc, every project on the machine would silently use it.
+  // Users should use .env.local (project-scoped) or --api-key (explicit).
 
   return null;
 }

@@ -80,6 +80,24 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   const pendingOrgs = session.pendingOrgs;
 
+  // Validate pre-populated org/workspace IDs against live data.
+  // If the user's access changed (removed from org, switched accounts),
+  // stale IDs from ./ampli.json could silently select the wrong project.
+  useEffect(() => {
+    if (!pendingOrgs || pendingOrgs.length === 0) return;
+    if (
+      session.selectedOrgId &&
+      !pendingOrgs.some((o) => o.id === session.selectedOrgId)
+    ) {
+      // Stale org — clear pre-populated values so the picker shows
+      store.setOrgAndWorkspace(
+        { id: '', name: '' },
+        { id: '', name: '' },
+        session.installDir,
+      );
+    }
+  }, [pendingOrgs]);
+
   // Resolve org: user-picked > single-org auto-select > pre-populated from session
   const prePopulatedOrg =
     session.selectedOrgId && pendingOrgs

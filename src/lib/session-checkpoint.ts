@@ -6,7 +6,8 @@
  * (intro, region, auth selections) while still re-running the agent.
  */
 
-import { writeFileSync, readFileSync, unlinkSync, existsSync } from 'fs';
+import { readFileSync, unlinkSync, existsSync } from 'fs';
+import { atomicWriteJSON } from '../utils/atomic-write.js';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { z } from 'zod';
@@ -75,9 +76,7 @@ export function saveCheckpoint(session: WizardSession): void {
     introConcluded: session.introConcluded,
   };
 
-  writeFileSync(CHECKPOINT_FILE, JSON.stringify(checkpoint, null, 2), {
-    mode: 0o600,
-  });
+  atomicWriteJSON(CHECKPOINT_FILE, checkpoint, 0o600);
 }
 
 /**
