@@ -374,7 +374,7 @@ export function buildSession(args: {
       : parseProjectIdArg(args.projectId),
 
     setupConfirmed: false,
-    integration: args.integration ?? null,
+    integration: (validated.integration as Integration) ?? null,
     frameworkContext: {},
     typescript: false,
     detectedFrameworkLabel: null,

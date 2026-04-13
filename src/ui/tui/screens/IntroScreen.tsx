@@ -115,7 +115,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                   store.concludeIntro();
                 } else if (choice === 'fresh') {
                   // Clear checkpoint and reset restored flag so normal flow takes over
-                  clearCheckpoint();
+                  clearCheckpoint(store.session.installDir);
                   store.session = {
                     ...store.session,
                     _restoredFromCheckpoint: false,

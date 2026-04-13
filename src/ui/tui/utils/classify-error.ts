@@ -65,12 +65,17 @@ export function classifyError(err: unknown): ClassifiedError {
     };
   }
 
-  // HTTP status errors
-  if (
-    msg.includes('401') ||
-    msg.includes('403') ||
-    msg.includes('Unauthorized')
-  ) {
+  // HTTP status errors — check structured status first, fall back to message
+  const errObj = err as unknown as Record<string, unknown>;
+  const responseObj = errObj.response as Record<string, unknown> | undefined;
+  const status =
+    typeof errObj.status === 'number'
+      ? errObj.status
+      : typeof responseObj?.status === 'number'
+      ? responseObj.status
+      : null;
+
+  if (status === 401 || status === 403 || msg.includes('Unauthorized')) {
     return {
       message: 'Authentication failed.',
       suggestion:
@@ -79,7 +84,7 @@ export function classifyError(err: unknown): ClassifiedError {
     };
   }
 
-  if (msg.includes('429') || msg.includes('Too Many Requests')) {
+  if (status === 429 || msg.includes('Too Many Requests')) {
     return {
       message: 'Rate limited by the API.',
       suggestion: 'Wait a moment and try again.',
@@ -87,7 +92,7 @@ export function classifyError(err: unknown): ClassifiedError {
     };
   }
 
-  if (msg.includes('500') || msg.includes('502') || msg.includes('503')) {
+  if (status === 500 || status === 502 || status === 503) {
     return {
       message: 'Server error from Amplitude API.',
       suggestion: 'This is temporary. Try again in a few seconds.',

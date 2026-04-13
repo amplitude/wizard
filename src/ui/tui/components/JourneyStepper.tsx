@@ -9,8 +9,8 @@
  */
 
 import { Box, Text } from 'ink';
-import { useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
+import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Screen, Flow } from '../router.js';
 import { Colors, Icons, Brand } from '../styles.js';
 
@@ -71,10 +71,7 @@ interface JourneyStepperProps {
 }
 
 export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
-  useSyncExternalStore(
-    (cb) => store.subscribe(cb),
-    () => store.getSnapshot(),
-  );
+  useWizardStore(store);
 
   // Only show stepper for the main wizard flow
   if (store.router.activeFlow !== Flow.Wizard) return null;

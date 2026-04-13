@@ -323,9 +323,13 @@ void yargs(hideBin(process.argv))
               const projectZone = projectConfig.ok
                 ? projectConfig.config.Zone
                 : undefined;
-              // Project config takes priority over global user — users work across
-              // US and EU projects, and the project config is the source of truth.
-              const zone = projectZone ?? realUser?.zone ?? null;
+              // Checkpoint region wins (user explicitly changed via /region),
+              // then project config, then global user zone.
+              const zone =
+                (session._restoredFromCheckpoint ? session.region : null) ??
+                projectZone ??
+                realUser?.zone ??
+                null;
 
               if (zone) {
                 session.region = zone;
@@ -825,9 +829,12 @@ void yargs(hideBin(process.argv))
             tui.store.onEnterScreen(Screen.Run, () => {
               saveCheckpoint(tui.store.session);
             });
-            // Clear on successful completion
+            // Clear checkpoint only on successful completion — error/cancel
+            // should preserve the checkpoint so users can resume next run.
             tui.store.onEnterScreen(Screen.Outro, () => {
-              clearCheckpoint();
+              if (tui.store.session.outroData?.kind === 'success') {
+                clearCheckpoint(tui.store.session.installDir);
+              }
             });
 
             // Save checkpoint on unexpected termination

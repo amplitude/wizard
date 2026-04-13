@@ -7,6 +7,7 @@
  */
 
 import { readFileSync, unlinkSync, existsSync } from 'fs';
+import { createHash } from 'crypto';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -16,7 +17,12 @@ import type { WizardSession } from './wizard-session';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
-const CHECKPOINT_FILE = join(tmpdir(), 'amplitude-wizard-checkpoint.json');
+/** Per-project checkpoint file using a hash of installDir to avoid cross-instance clobbering. */
+function checkpointPath(installDir: string): string {
+  const dir = installDir || process.cwd();
+  const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
+  return join(tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`);
+}
 
 /** Checkpoints older than 24 hours are considered stale. */
 const MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -76,7 +82,7 @@ export function saveCheckpoint(session: WizardSession): void {
     introConcluded: session.introConcluded,
   };
 
-  atomicWriteJSON(CHECKPOINT_FILE, checkpoint, 0o600);
+  atomicWriteJSON(checkpointPath(session.installDir), checkpoint, 0o600);
 }
 
 /**
@@ -91,11 +97,12 @@ export function saveCheckpoint(session: WizardSession): void {
 export function loadCheckpoint(
   installDir: string,
 ): Partial<WizardSession> | null {
-  if (!existsSync(CHECKPOINT_FILE)) return null;
+  const filePath = checkpointPath(installDir);
+  if (!existsSync(filePath)) return null;
 
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(CHECKPOINT_FILE, 'utf-8'));
+    raw = JSON.parse(readFileSync(filePath, 'utf-8'));
   } catch {
     return null;
   }
@@ -134,10 +141,11 @@ export function loadCheckpoint(
 /**
  * Delete the checkpoint file. Call on successful wizard completion.
  */
-export function clearCheckpoint(): void {
+export function clearCheckpoint(installDir: string): void {
   try {
-    if (existsSync(CHECKPOINT_FILE)) {
-      unlinkSync(CHECKPOINT_FILE);
+    const filePath = checkpointPath(installDir);
+    if (existsSync(filePath)) {
+      unlinkSync(filePath);
     }
   } catch {
     // Best-effort — if deletion fails, the staleness check will expire it.

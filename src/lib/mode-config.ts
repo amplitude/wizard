@@ -15,7 +15,7 @@ export function resolveMode(opts: {
   isTTY: boolean;
 }): ModeConfig {
   const isAgent = Boolean(opts.agent);
-  const autoApprove = opts.yes || opts.ci || isAgent;
+  const autoApprove = Boolean(opts.yes) || Boolean(opts.ci) || isAgent;
   const isInteractive = !autoApprove && opts.isTTY;
 
   return {
