@@ -252,7 +252,17 @@ export const RunScreen = ({ store }: RunScreenProps) => {
     {
       id: 'snake',
       label: 'Snake',
-      component: <SnakeGame music={false} />,
+      component: (
+        <SnakeGame
+          music={false}
+          keybindings={{
+            up: ['w'],
+            down: ['s'],
+            left: ['a'],
+            right: ['d'],
+          }}
+        />
+      ),
     },
   ];
 
