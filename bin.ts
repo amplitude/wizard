@@ -45,7 +45,6 @@ if (!satisfies(process.version, NODE_VERSION_RANGE)) {
   process.exit(1);
 }
 
-import { runWizard } from './src/run';
 import { isNonInteractiveEnvironment } from './src/utils/environment';
 import { getUI, setUI } from './src/ui';
 import { LoggingUI } from './src/ui/logging-ui';
@@ -55,6 +54,15 @@ import {
 } from './src/utils/shell-completions';
 import { persistApiKey } from './src/utils/api-key-store';
 import { ExitCode } from './src/lib/exit-codes';
+
+// Dynamic import to avoid preloading wizard-session.ts as CJS, which
+// prevents the TUI's ESM dynamic imports from resolving named exports.
+const lazyRunWizard = async (
+  ...args: Parameters<typeof import('./src/run')['runWizard']>
+) => {
+  const { runWizard } = await import('./src/run.js');
+  return runWizard(...args);
+};
 
 if (process.env.NODE_ENV === 'test') {
   void (async () => {
@@ -192,7 +200,7 @@ void yargs(hideBin(process.argv))
             );
             process.exit(ExitCode.INVALID_ARGS);
           }
-          await runWizard(options as Parameters<typeof runWizard>[0]);
+          await lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
         })();
       } else if (options.ci || options.yes) {
         // Use LoggingUI for CI mode (no dependencies, no prompts)
@@ -205,7 +213,7 @@ void yargs(hideBin(process.argv))
           process.exit(1);
         }
 
-        void runWizard(options as Parameters<typeof runWizard>[0]);
+        void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
       } else if (isNonInteractiveEnvironment()) {
         // Non-interactive non-CI: error out
         getUI().intro(chalk.inverse(`Amplitude Wizard`));
@@ -884,16 +892,16 @@ void yargs(hideBin(process.argv))
                   '[bin] user chose to run setup wizard despite pre-detection',
                 );
                 tui.store.resetForAgentAfterPreDetected();
-                await runWizard(
-                  options as Parameters<typeof runWizard>[0],
+                await lazyRunWizard(
+                  options as Parameters<typeof lazyRunWizard>[0],
                   tui.store.session,
                 );
               } else {
                 tui.store.setOutroData({ kind: OutroKind.Success });
               }
             } else {
-              await runWizard(
-                options as Parameters<typeof runWizard>[0],
+              await lazyRunWizard(
+                options as Parameters<typeof lazyRunWizard>[0],
                 tui.store.session,
               );
             }
@@ -904,7 +912,7 @@ void yargs(hideBin(process.argv))
             if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
               console.error('TUI init failed:', err);
             }
-            await runWizard(options as Parameters<typeof runWizard>[0]);
+            await lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
           }
         })();
       }
