@@ -9,14 +9,14 @@ const LOGO_LINES = [
   '╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═════╝ ╚══════╝',
 ];
 
-/** Brand gradient: deep purple → bright blue, one color per line. */
+/** Brand gradient: bright blue (top) → deep purple (bottom). */
 const LINE_COLORS = [
-  '#311b8e',
-  '#2a1da0',
-  '#2020b2',
+  '#0c19df',
+  '#0c19df',
   '#1522c4',
-  '#0c19df',
-  '#0c19df',
+  '#2020b2',
+  '#2a1da0',
+  '#311b8e',
 ];
 
 export const AmplitudeTextLogo = () => (
