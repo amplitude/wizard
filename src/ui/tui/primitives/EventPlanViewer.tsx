@@ -2,7 +2,6 @@
  * EventPlanViewer — Renders a list of planned analytics events.
  *
  * Each event shows as: ● event name — description
- * Matches the inline format used in the confirm prompt.
  */
 
 import { Box, Text } from 'ink';
@@ -31,13 +30,12 @@ export const EventPlanViewer = ({ events }: EventPlanViewerProps) => {
       <Text bold>Event plan</Text>
       <Box height={1} />
       {events.map((event) => (
-        <Text key={event.name} wrap="wrap">
+        <Text key={event.name} color={Colors.muted}>
+          {Icons.bullet}{' '}
           <Text color={Colors.accent} bold>
-            {Icons.bullet} {event.name}
+            {event.name}
           </Text>
-          {event.description ? (
-            <Text color={Colors.muted}> — {event.description}</Text>
-          ) : null}
+          {event.description ? ` — ${event.description}` : ''}
         </Text>
       ))}
     </Box>
