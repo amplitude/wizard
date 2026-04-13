@@ -635,10 +635,16 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       events: z
         .array(
           z.object({
-            name: z.string().describe('Event name, e.g. "Button Clicked"'),
+            name: z
+              .string()
+              .describe(
+                'Short event name in Title Case, e.g. "User Signed Up", "Product Added to Cart", "Search Performed". This is displayed as a bold label — keep it concise (2-5 words). Do NOT put descriptions or file paths here.',
+              ),
             description: z
               .string()
-              .describe('When this event fires and what it tracks'),
+              .describe(
+                'When this event fires, what properties it includes, and where it will be placed (file path + function/component).',
+              ),
           }),
         )
         .min(1)
