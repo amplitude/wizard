@@ -45,6 +45,15 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     () => store.session._restoredFromCheckpoint,
   );
 
+  // Hold the intro visible for a minimum duration so users can see the logo
+  // and orient before the continue prompt appears.
+  const INTRO_MIN_MS = 1500;
+  const [introReady, setIntroReady] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setIntroReady(true), INTRO_MIN_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
   const { session } = store;
   const config = session.frameworkConfig;
   const frameworkLabel =
@@ -66,7 +75,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   }, [needsFrameworkPick, session.menu, showResume]);
 
   const showContinue =
-    session.frameworkConfig !== null && !detecting && !pickingFramework;
+    session.frameworkConfig !== null &&
+    !detecting &&
+    !pickingFramework &&
+    introReady;
 
   // ── Resume-from-checkpoint prompt ─────────────────────────────────
   if (showResume) {

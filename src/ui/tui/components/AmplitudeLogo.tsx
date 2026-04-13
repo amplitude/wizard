@@ -15,17 +15,17 @@ const LINES = [
 
 const TEXT = LINES.join('\n');
 
-/** Amplitude blue gradient — bright core fading to dim. */
+/** Amplitude brand gradient — deep purple to bright blue (from brand guide). */
 const WAVE_COLORS = [
-  '#6b9af7', // light blue
-  '#4478f2', // mid blue
-  '#1e61f0', // Amplitude blue (brand)
-  '#1a55d4', // deeper blue
-  '#1549b8', // deep blue
-  '#1a55d4', // deeper blue
-  '#1e61f0', // Amplitude blue
-  '#4478f2', // mid blue
-  '#6b9af7', // light blue
+  '#311b8e', // deep purple (brand)
+  '#2a1da0', // mid purple-blue
+  '#2020b2', // transitional
+  '#1522c4', // mid blue
+  '#0c19df', // bright blue (brand)
+  '#1522c4', // mid blue
+  '#2020b2', // transitional
+  '#2a1da0', // mid purple-blue
+  '#311b8e', // deep purple
 ];
 
 /**
@@ -56,7 +56,7 @@ function applyHorizWave(line: string, rowWaveX: number): string {
     .join('');
 }
 
-export const AmplitudeLogo = ({ color = 'white' }: { color?: string }) => (
+export const AmplitudeLogo = ({ color = '#0c19df' }: { color?: string }) => (
   <Box marginBottom={1}>
     <Text color={color}>{TEXT}</Text>
   </Box>

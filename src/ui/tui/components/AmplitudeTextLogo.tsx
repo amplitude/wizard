@@ -9,8 +9,8 @@ const LOGO_LINES = [
   '╚═╝  ╚═╝╚═╝     ╚═╝╚═╝     ╚══════╝╚═╝   ╚═╝    ╚═════╝ ╚═════╝ ╚══════╝',
 ];
 
-export const AMP_BLUE = '#1E61F0';
-export const AMP_CYAN = '#00D4AA';
+export const AMP_DEEP_PURPLE = '#311b8e';
+export const AMP_BRIGHT_BLUE = '#0c19df';
 
 function lerpColor(a: string, b: string, t: number): string {
   const ar = parseInt(a.slice(1, 3), 16),
@@ -41,7 +41,11 @@ export const AmplitudeTextLogo = () => (
           {chars.map((char, j) => (
             <Text
               key={j}
-              color={lerpColor(AMP_BLUE, AMP_CYAN, last > 0 ? j / last : 0)}
+              color={lerpColor(
+                AMP_DEEP_PURPLE,
+                AMP_BRIGHT_BLUE,
+                last > 0 ? j / last : 0,
+              )}
             >
               {char}
             </Text>
