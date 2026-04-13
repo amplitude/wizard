@@ -11,7 +11,7 @@ import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
+import { OutroKind } from '../session-constants.js';
 import { SlashCommandInput } from '../primitives/index.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons, Layout } from '../styles.js';

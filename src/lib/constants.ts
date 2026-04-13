@@ -186,7 +186,7 @@ export const OUTBOUND_URLS = {
 
   /** Service status pages — shown in the OutageOverlay. */
   status: {
-    claude: 'https://status.claude.com',
+    cloud: 'https://status.cloud.google.com',
     amplitude: 'https://www.amplitudestatus.com',
   },
 

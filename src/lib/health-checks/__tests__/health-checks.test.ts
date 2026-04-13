@@ -353,99 +353,10 @@ describe('health-checks', () => {
   // -----------------------------------------------------------------------
 
   describe('checkAnthropicHealth', () => {
-    it('returns healthy for indicator=none ("All Systems Operational")', async () => {
+    it('always returns healthy (Vertex AI via proxy — no remote check)', async () => {
       const result = await checkAnthropicHealth();
       expect(result.status).toBe(ServiceHealthStatus.Healthy);
-      expect(result.rawIndicator).toBe('none');
-    });
-
-    it('returns degraded for indicator=minor ("Minor Service Outage")', async () => {
-      const body = makeStatuspageStatus({
-        pageId: 'tymt9n04zgry',
-        pageName: 'Claude',
-        pageUrl: 'https://status.claude.com',
-        indicator: 'minor',
-        description: 'Minor Service Outage',
-      });
-      (global.fetch as Mock).mockImplementation(
-        overrideFetch({
-          [URLS.anthropicStatus]: () =>
-            Promise.resolve(
-              new Response(JSON.stringify(body), { status: 200 }),
-            ),
-        }),
-      );
-      const result = await checkAnthropicHealth();
-      expect(result.status).toBe(ServiceHealthStatus.Degraded);
-      expect(result.rawIndicator).toBe('minor');
-    });
-
-    it('returns down for indicator=major ("Partial System Outage")', async () => {
-      const body = makeStatuspageStatus({
-        pageId: 'tymt9n04zgry',
-        pageName: 'Claude',
-        pageUrl: 'https://status.claude.com',
-        indicator: 'major',
-        description: 'Partial System Outage',
-      });
-      (global.fetch as Mock).mockImplementation(
-        overrideFetch({
-          [URLS.anthropicStatus]: () =>
-            Promise.resolve(
-              new Response(JSON.stringify(body), { status: 200 }),
-            ),
-        }),
-      );
-      const result = await checkAnthropicHealth();
-      expect(result.status).toBe(ServiceHealthStatus.Down);
-    });
-
-    it('returns down for indicator=critical ("Major Service Outage")', async () => {
-      const body = makeStatuspageStatus({
-        pageId: 'tymt9n04zgry',
-        pageName: 'Claude',
-        pageUrl: 'https://status.claude.com',
-        indicator: 'critical',
-        description: 'Major Service Outage',
-      });
-      (global.fetch as Mock).mockImplementation(
-        overrideFetch({
-          [URLS.anthropicStatus]: () =>
-            Promise.resolve(
-              new Response(JSON.stringify(body), { status: 200 }),
-            ),
-        }),
-      );
-      const result = await checkAnthropicHealth();
-      expect(result.status).toBe(ServiceHealthStatus.Down);
-    });
-
-    it('returns degraded when statuspage returns HTTP 500', async () => {
-      (global.fetch as Mock).mockImplementation(
-        overrideFetch({
-          [URLS.anthropicStatus]: () =>
-            Promise.resolve(
-              new Response('Internal Server Error', { status: 500 }),
-            ),
-        }),
-      );
-      const result = await checkAnthropicHealth();
-      expect(result.status).toBe(ServiceHealthStatus.Degraded);
-      expect(result.error).toBe('HTTP 500');
-    });
-
-    it('returns degraded when fetch throws (network failure)', async () => {
-      (global.fetch as Mock).mockImplementation(
-        overrideFetch({
-          [URLS.anthropicStatus]: () =>
-            Promise.reject(
-              new Error('getaddrinfo ENOTFOUND status.claude.com'),
-            ),
-        }),
-      );
-      const result = await checkAnthropicHealth();
-      expect(result.status).toBe(ServiceHealthStatus.Degraded);
-      expect(result.error).toBe('getaddrinfo ENOTFOUND status.claude.com');
+      expect(result.pageUrl).toBe('https://status.cloud.google.com');
     });
   });
 
@@ -869,12 +780,13 @@ describe('health-checks', () => {
       }
     });
 
-    it('fires all 10 fetch calls in parallel', async () => {
+    it('fires all 9 fetch calls in parallel (Anthropic health is a no-op)', async () => {
       await checkAllExternalServices();
       const calledUrls = (global.fetch as Mock).mock.calls.map((c: unknown[]) =>
         typeof c[0] === 'string' ? c[0] : (c[0] as URL).toString(),
       );
-      expect(calledUrls).toHaveLength(10);
+      // 9 fetches: Anthropic health is now a no-op (Vertex AI via proxy)
+      expect(calledUrls).toHaveLength(9);
       expect(calledUrls).toContain(URLS.llmGatewayLiveness);
       expect(calledUrls).toContain(URLS.mcpLanding);
     });
@@ -892,27 +804,13 @@ describe('health-checks', () => {
       expect(result.decision).toBe(WizardReadiness.Yes);
     });
 
-    it('returns No when Anthropic is degraded (degradedBlocksRun)', async () => {
-      const body = makeStatuspageStatus({
-        pageId: 'tymt9n04zgry',
-        pageName: 'Claude',
-        pageUrl: 'https://status.claude.com',
-        indicator: 'minor',
-        description: 'Minor Service Outage',
-      });
-      (global.fetch as Mock).mockImplementation(
-        overrideFetch({
-          [URLS.anthropicStatus]: () =>
-            Promise.resolve(
-              new Response(JSON.stringify(body), { status: 200 }),
-            ),
-        }),
-      );
+    it('Anthropic health is always healthy (Vertex AI via proxy)', async () => {
+      // checkAnthropicHealth is now a no-op — it always returns healthy.
+      // This test verifies that model provider status alone cannot block the wizard.
       const result = await evaluateWizardReadiness(
         DEFAULT_WIZARD_READINESS_CONFIG,
       );
-      expect(result.decision).toBe(WizardReadiness.No);
-      expect(result.health.anthropic.status).toBe(ServiceHealthStatus.Degraded);
+      expect(result.health.anthropic.status).toBe(ServiceHealthStatus.Healthy);
     });
 
     it('returns No when LLM Gateway is down (downBlocksRun)', async () => {

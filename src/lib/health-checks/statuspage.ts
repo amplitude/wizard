@@ -120,8 +120,12 @@ async function fetchStatuspageSummary(
 // Individual statuspage-backed checks
 // ---------------------------------------------------------------------------
 
+/** Model provider health — currently a no-op since we use Vertex AI via proxy. */
 export const checkAnthropicHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator('https://status.claude.com/api/v2/status.json');
+  Promise.resolve({
+    status: ServiceHealthStatus.Healthy,
+    pageUrl: 'https://status.cloud.google.com',
+  });
 
 export const checkAmplitudeOverallHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator(

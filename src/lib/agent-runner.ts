@@ -96,12 +96,14 @@ export async function runAgentWizard(
   // Beta notice, pre-run notice, and welcome label are all derivable
   // from session.frameworkConfig — IntroScreen reads them directly.
 
-  // Check Anthropic/Claude service status (pure — no prompt)
-  const statusResult = await checkAnthropicStatus();
+  // Check model provider service status (pure — no prompt).
+  // The wizard uses Vertex AI via a proxy, so this currently always
+  // returns operational. Actual API errors surface during the agent run.
+  const statusResult = checkAnthropicStatus();
   if (statusResult.status === 'down' || statusResult.status === 'degraded') {
     getUI().showServiceStatus({
       description: statusResult.description,
-      statusPageUrl: 'https://status.claude.com',
+      statusPageUrl: 'https://status.cloud.google.com',
     });
   }
 

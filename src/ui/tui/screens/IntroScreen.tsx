@@ -16,7 +16,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
+import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { PickerMenu } from '../primitives/index.js';

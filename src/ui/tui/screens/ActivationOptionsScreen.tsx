@@ -10,7 +10,7 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
+import { OutroKind } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import opn from 'opn';
 

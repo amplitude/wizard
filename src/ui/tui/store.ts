@@ -16,12 +16,14 @@ import {
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
+  buildSession,
+} from '../../lib/wizard-session.js';
+import {
   AdditionalFeature,
   McpOutcome,
   SlackOutcome,
   RunPhase,
-  buildSession,
-} from '../../lib/wizard-session.js';
+} from './session-constants.js';
 import {
   WizardRouter,
   type ScreenName,

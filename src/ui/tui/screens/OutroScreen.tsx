@@ -13,7 +13,7 @@ import { Box, Text } from 'ink';
 import { useState } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
+import { OutroKind } from '../session-constants.js';
 import { Colors, Icons } from '../styles.js';
 import { PickerMenu, ReportViewer } from '../primitives/index.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';

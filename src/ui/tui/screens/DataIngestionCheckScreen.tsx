@@ -21,7 +21,7 @@ import {
 } from '../../../lib/api.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import { Integration } from '../../../lib/constants.js';
-import { OutroKind } from '../../../lib/wizard-session.js';
+import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 
 const POLL_INTERVAL_MS = 30_000;

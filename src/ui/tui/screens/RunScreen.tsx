@@ -25,11 +25,11 @@ import {
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
-  DiscoveredFeature,
   AdditionalFeature,
   ADDITIONAL_FEATURE_LABELS,
-} from '../../../lib/wizard-session.js';
+} from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 
 const LOG_FILE = '/tmp/amplitude-wizard.log';
