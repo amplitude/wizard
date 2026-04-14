@@ -29,6 +29,25 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: async (options: WizardOptions) => {
+      const packageJson = await tryGetPackageJson(options);
+
+      // TanStack Start / TanStack Router share the same browser SDK setup
+      if (
+        packageJson &&
+        hasPackageInstalled('@tanstack/react-start', packageJson)
+      ) {
+        getUI().setDetectedFramework('TanStack Start');
+        return { routerMode: ReactRouterMode.V7_FRAMEWORK };
+      }
+      if (
+        packageJson &&
+        hasPackageInstalled('@tanstack/react-router', packageJson)
+      ) {
+        getUI().setDetectedFramework('TanStack Router');
+        return {};
+      }
+
+      // Standard React Router detection
       const routerMode = await getReactRouterMode(options);
       if (routerMode) {
         getUI().setDetectedFramework(
@@ -55,9 +74,12 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     },
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
-      return packageJson
-        ? hasPackageInstalled('react-router', packageJson)
-        : false;
+      if (!packageJson) return false;
+      return (
+        hasPackageInstalled('react-router', packageJson) ||
+        hasPackageInstalled('@tanstack/react-router', packageJson) ||
+        hasPackageInstalled('@tanstack/react-start', packageJson)
+      );
     },
     detectPackageManager: detectNodePackageManagers,
   },
