@@ -505,6 +505,13 @@ STEP 6: Add event tracking to this project using the instrumentation skills.
    - The skill will guide you through discovering candidate events, filtering to the most critical ones, and producing a concrete tracking plan with exact file locations and tracking code.
    - Implement the tracking calls for all priority-3 (critical) events identified by the skill.
 
+STEP 7: Set up user identification. Scan the project for authentication patterns — login handlers, signup flows, session creation, OAuth callbacks, and logout handlers.
+   - If you find authentication code, propose an identify plan using the confirm_identify_plan tool (from the wizard-tools MCP server). For each location, describe what identify call you will add (setUserId, identify with user properties, or reset).
+   - If the user approves, add the calls: use setUserId() at login/signup to associate events with a known user, identify() with an Identify object to set user properties (e.g. email, plan, role), and reset() at logout to clear the user identity.
+   - If the user skips, do not add any identify calls.
+   - If no authentication patterns exist in the project, skip this step entirely.
+   - Refer to the integration skill's "Identifying users" section for framework-specific guidance on the correct identify pattern.
+
 Important: Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager the project uses. Do not manually search for lockfiles or config files. Always install packages as a background task. Don't await completion; proceed with other work immediately after starting the installation. You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
 
 

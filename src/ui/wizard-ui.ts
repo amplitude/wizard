@@ -8,10 +8,16 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
-/** Result returned by the confirm_event_plan tool to the agent. */
-export type EventPlanDecision =
+/** Result returned by confirm_event_plan / confirm_identify_plan tools to the agent. */
+export type PlanDecision =
   | { decision: 'approved' | 'skipped' }
   | { decision: 'revised'; feedback: string };
+
+/** @deprecated Use {@link PlanDecision} instead. */
+export type EventPlanDecision = PlanDecision;
+
+/** @deprecated Use {@link PlanDecision} instead. */
+export type IdentifyPlanDecision = PlanDecision;
 
 export enum TaskStatus {
   Pending = 'pending',
@@ -117,6 +123,19 @@ export interface WizardUI {
   promptEventPlan(
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision>;
+
+  /**
+   * Show the user identification plan for user approval.
+   * Called by the confirm_identify_plan wizard tool AFTER event instrumentation.
+   * The agent shows where it will add setUserId/identify/reset calls;
+   * the user can approve, skip, or give feedback.
+   */
+  promptIdentifyPlan(
+    identifyCalls: Array<{
+      location: string;
+      description: string;
+    }>,
+  ): Promise<IdentifyPlanDecision>;
 
   // ── Todo tracking from SDK TodoWrite events ───────────────────────
   syncTodos(

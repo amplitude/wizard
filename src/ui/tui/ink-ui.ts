@@ -10,6 +10,7 @@ import type {
   WizardUI,
   SpinnerHandle,
   EventPlanDecision,
+  IdentifyPlanDecision,
 } from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
 import { Overlay } from './router.js';
@@ -178,6 +179,12 @@ export class InkUI implements WizardUI {
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision> {
     return this.store.promptEventPlan(events);
+  }
+
+  promptIdentifyPlan(
+    identifyCalls: Array<{ location: string; description: string }>,
+  ): Promise<IdentifyPlanDecision> {
+    return this.store.promptIdentifyPlan(identifyCalls);
   }
 
   syncTodos(

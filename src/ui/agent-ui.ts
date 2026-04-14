@@ -4,7 +4,12 @@
  * Prompts auto-approve; no interactivity.
  */
 
-import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
+import type {
+  WizardUI,
+  SpinnerHandle,
+  EventPlanDecision,
+  IdentifyPlanDecision,
+} from './wizard-ui';
 import { createInterface } from 'readline';
 
 // ── NDJSON event types ──────────────────────────────────────────────
@@ -233,6 +238,15 @@ export class AgentUI implements WizardUI {
   ): Promise<EventPlanDecision> {
     emit('result', 'event_plan auto-approved', {
       data: { event: 'event_plan', events },
+    });
+    return Promise.resolve({ decision: 'approved' });
+  }
+
+  promptIdentifyPlan(
+    identifyCalls: Array<{ location: string; description: string }>,
+  ): Promise<IdentifyPlanDecision> {
+    emit('result', 'identify_plan auto-approved', {
+      data: { event: 'identify_plan', identifyCalls },
     });
     return Promise.resolve({ decision: 'approved' });
   }

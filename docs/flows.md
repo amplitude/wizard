@@ -107,7 +107,8 @@ flowchart TD
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
         AGENT --> SDK_INSTALL["1. Install SDK + add initialization code"]
         SDK_INSTALL --> INSTRUMENT["2. Instrument events from approved plan"]
-        INSTRUMENT --> FEATURES{Features discovered?}
+        INSTRUMENT --> IDENTIFY["3. User identification<br/>(scan for auth patterns · confirm_identify_plan · setUserId/identify/reset)"]
+        IDENTIFY --> FEATURES{Features discovered?}
         FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
         FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
         FEATURES -->|none| OUTCOME

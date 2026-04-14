@@ -34,6 +34,8 @@ CRITICAL — confirm_event_plan format:
   RIGHT name: "product viewed"
   Names longer than 50 characters will be automatically truncated.`,
 
+  'After event instrumentation is complete, scan the codebase for authentication patterns (login, signup, session creation, OAuth callbacks, logout). If any are found, you MUST call the confirm_identify_plan tool to present the proposed user identification plan before writing any setUserId(), identify(), or reset() calls. Only proceed after the plan is approved. If the user provides feedback, revise accordingly and call confirm_identify_plan again. If the plan is skipped, do not add any identify calls. If no authentication patterns exist in the codebase, skip this step.',
+
   ...(DEMO_MODE
     ? [
         'DEMO MODE: This is a demo run. Limit the instrumentation plan to at most 5 events. Pick the 5 most impactful, representative events for the project. Be concise and fast — skip non-essential analysis.',

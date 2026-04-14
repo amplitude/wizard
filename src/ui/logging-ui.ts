@@ -8,6 +8,7 @@ import {
   type WizardUI,
   type SpinnerHandle,
   type EventPlanDecision,
+  type IdentifyPlanDecision,
 } from './wizard-ui';
 
 export class LoggingUI implements WizardUI {
@@ -181,6 +182,16 @@ export class LoggingUI implements WizardUI {
     console.log(`?  Instrumentation plan (auto-approved in CI):`);
     for (const e of events) {
       console.log(`│  - ${e.name}: ${e.description}`);
+    }
+    return Promise.resolve({ decision: 'approved' });
+  }
+
+  promptIdentifyPlan(
+    identifyCalls: Array<{ location: string; description: string }>,
+  ): Promise<IdentifyPlanDecision> {
+    console.log(`?  Identify plan (auto-approved in CI):`);
+    for (const c of identifyCalls) {
+      console.log(`│  - ${c.location}: ${c.description}`);
     }
     return Promise.resolve({ decision: 'approved' });
   }
