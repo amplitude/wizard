@@ -209,9 +209,24 @@ export class WizardStore {
 
   setCredentials(credentials: WizardSession['credentials']): void {
     this.$session.setKey('credentials', credentials);
+    const session = this.$session.get();
+    if (session.userEmail) {
+      analytics.setDistinctId(session.userEmail);
+      analytics.identifyUser({
+        email: session.userEmail,
+        org_id: session.selectedOrgId ?? undefined,
+        org_name: session.selectedOrgName ?? undefined,
+        workspace_id: session.selectedWorkspaceId ?? undefined,
+        workspace_name: session.selectedWorkspaceName ?? undefined,
+        project_id: session.selectedProjectId ?? credentials?.projectId,
+        project_name: session.selectedProjectName,
+        region: session.region,
+        integration: session.integration,
+      });
+    }
     analytics.wizardCapture('Auth Complete', {
       project_id: credentials?.projectId,
-      region: this.session.region,
+      region: session.region,
     });
     this.emitChange();
   }
@@ -232,6 +247,9 @@ export class WizardStore {
   ): void {
     this.$session.setKey('integration', integration);
     this.$session.setKey('frameworkConfig', config);
+    if (integration) {
+      analytics.identifyUser({ integration });
+    }
     this.emitChange();
   }
 

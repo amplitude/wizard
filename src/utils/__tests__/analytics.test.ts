@@ -1,16 +1,23 @@
 import { type MockedFunction } from 'vitest';
 
-const { mockCreateInstance } = vi.hoisted(() => {
+const { mockCreateInstance, MockIdentify } = vi.hoisted(() => {
   const mockCreateInstance = vi.fn(() => ({
     init: vi.fn(() => ({ promise: Promise.resolve() })),
     track: vi.fn(),
+    identify: vi.fn(),
     flush: vi.fn(() => ({ promise: Promise.resolve() })),
+    setOptOut: vi.fn(),
   }));
-  return { mockCreateInstance };
+  class MockIdentify {
+    set = vi.fn();
+    setOnce = vi.fn();
+  }
+  return { mockCreateInstance, MockIdentify };
 });
 
 vi.mock('@amplitude/analytics-node', () => ({
   createInstance: mockCreateInstance,
+  Identify: MockIdentify,
 }));
 
 vi.mock('uuid', () => ({
@@ -104,6 +111,103 @@ describe('Analytics', () => {
   describe('wizardCapture', () => {
     it('should not throw when capturing wizard events', () => {
       expect(() => analytics.wizardCapture('test event')).not.toThrow();
+    });
+  });
+
+  describe('identifyUser', () => {
+    it('should call client.identify with user properties and correct event options', () => {
+      analytics.setDistinctId('ada@example.com');
+      analytics.identifyUser({
+        email: 'ada@example.com',
+        org_id: 'org-1',
+        org_name: 'Acme',
+        region: 'us',
+      });
+
+      const client = mockCreateInstance.mock.results[0].value;
+      expect(client.identify).toHaveBeenCalledTimes(1);
+
+      const identifyObj = client.identify.mock.calls[0][0];
+      expect(identifyObj.setOnce).toHaveBeenCalledWith(
+        'email',
+        'ada@example.com',
+      );
+      expect(identifyObj.set).toHaveBeenCalledWith('org_id', 'org-1');
+      expect(identifyObj.set).toHaveBeenCalledWith('org_name', 'Acme');
+      expect(identifyObj.set).toHaveBeenCalledWith('region', 'us');
+
+      // Verify event options tie the identify to the right user + device
+      const eventOptions = client.identify.mock.calls[0][1];
+      expect(eventOptions).toEqual({
+        device_id: 'test-uuid',
+        user_id: 'ada@example.com',
+      });
+    });
+
+    it('should be a no-op when distinctId is not set', () => {
+      analytics.identifyUser({ email: 'ada@example.com' });
+
+      const client = mockCreateInstance.mock.results[0].value;
+      expect(client.identify).not.toHaveBeenCalled();
+    });
+
+    it('should be a no-op when API key is empty', () => {
+      const origKey = process.env.AMPLITUDE_API_KEY;
+      process.env.AMPLITUDE_API_KEY = '';
+      try {
+        analytics.setDistinctId('ada@example.com');
+        analytics.identifyUser({ email: 'ada@example.com' });
+
+        const client = mockCreateInstance.mock.results[0].value;
+        expect(client.identify).not.toHaveBeenCalled();
+      } finally {
+        if (origKey === undefined) {
+          delete process.env.AMPLITUDE_API_KEY;
+        } else {
+          process.env.AMPLITUDE_API_KEY = origKey;
+        }
+      }
+    });
+
+    it('should stringify numeric project_id', () => {
+      analytics.setDistinctId('ada@example.com');
+      analytics.identifyUser({
+        project_id: 42,
+      });
+
+      const client = mockCreateInstance.mock.results[0].value;
+      const identifyObj = client.identify.mock.calls[0][0];
+      expect(identifyObj.set).toHaveBeenCalledWith('project_id', '42');
+    });
+
+    it('should skip null/undefined properties', () => {
+      analytics.setDistinctId('ada@example.com');
+      analytics.identifyUser({
+        email: 'ada@example.com',
+        org_id: undefined,
+        project_id: null,
+        region: null,
+      });
+
+      const client = mockCreateInstance.mock.results[0].value;
+      const identifyObj = client.identify.mock.calls[0][0];
+      expect(identifyObj.setOnce).toHaveBeenCalledWith(
+        'email',
+        'ada@example.com',
+      );
+      // org_id, project_id, and region should not have been set
+      expect(identifyObj.set).not.toHaveBeenCalledWith(
+        'org_id',
+        expect.anything(),
+      );
+      expect(identifyObj.set).not.toHaveBeenCalledWith(
+        'project_id',
+        expect.anything(),
+      );
+      expect(identifyObj.set).not.toHaveBeenCalledWith(
+        'region',
+        expect.anything(),
+      );
     });
   });
 });

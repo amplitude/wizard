@@ -147,7 +147,8 @@ export async function resolveCredentials(
             storedToken.idToken,
             zone as AmplitudeZone,
           );
-          analytics.setDistinctId(userInfo.id);
+          analytics.setDistinctId(userInfo.email);
+          analytics.identifyUser({ email: userInfo.email });
           const workspaceId = session.selectedWorkspaceId ?? undefined;
 
           // Find the relevant workspace and its environments

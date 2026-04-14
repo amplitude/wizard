@@ -569,7 +569,12 @@ async function askForWizardLogin(
         selectedOrg ? ` (${selectedOrg.name})` : ''
       }`,
     );
-    analytics.setDistinctId(userInfo.id);
+    analytics.setDistinctId(userInfo.email);
+    analytics.identifyUser({
+      email: userInfo.email,
+      org_id: selectedOrg?.id,
+      org_name: selectedOrg?.name,
+    });
     analytics.setTag('opened-wizard-link', true);
   }
 

@@ -55,7 +55,22 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             store.session.region!,
           )
             .then((userInfo) => {
-              if (userInfo.email) store.session.userEmail = userInfo.email;
+              if (userInfo.email) {
+                store.session.userEmail = userInfo.email;
+                analytics.setDistinctId(userInfo.email);
+                analytics.identifyUser({
+                  email: userInfo.email,
+                  org_id: store.session.selectedOrgId ?? undefined,
+                  org_name: store.session.selectedOrgName ?? undefined,
+                  workspace_id: store.session.selectedWorkspaceId ?? undefined,
+                  workspace_name:
+                    store.session.selectedWorkspaceName ?? undefined,
+                  project_id: store.session.selectedProjectId,
+                  project_name: store.session.selectedProjectName,
+                  region: store.session.region,
+                  integration: store.session.integration,
+                });
+              }
               const orgId = store.session.selectedOrgId;
               if (orgId) {
                 const org = userInfo.orgs.find((o) => o.id === orgId);

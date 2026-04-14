@@ -466,11 +466,26 @@ void yargs(hideBin(process.argv))
                 if (storedToken) {
                   fetchAmplitudeUser(storedToken.idToken, zone)
                     .then((userInfo) => {
-                      analytics.setDistinctId(userInfo.id);
                       let changed = false;
                       if (userInfo.email && !session.userEmail) {
                         session.userEmail = userInfo.email;
                         changed = true;
+                      }
+                      if (userInfo.email) {
+                        analytics.setDistinctId(userInfo.email);
+                        analytics.identifyUser({
+                          email: userInfo.email,
+                          org_id: session.selectedOrgId ?? undefined,
+                          org_name: session.selectedOrgName ?? undefined,
+                          workspace_id:
+                            session.selectedWorkspaceId ?? undefined,
+                          workspace_name:
+                            session.selectedWorkspaceName ?? undefined,
+                          project_id: session.selectedProjectId,
+                          project_name: session.selectedProjectName,
+                          region: session.region,
+                          integration: session.integration,
+                        });
                       }
                       if (session.selectedOrgId) {
                         // Fall back to the first org if the stored ID is stale
@@ -699,7 +714,8 @@ void yargs(hideBin(process.argv))
 
                 // Populate user email for /whoami display
                 session.userEmail = userInfo.email;
-                analytics.setDistinctId(userInfo.id);
+                analytics.setDistinctId(userInfo.email);
+                analytics.identifyUser({ email: userInfo.email });
 
                 // Signal AuthScreen — triggers org/workspace/API key pickers
                 tui.store.setOAuthComplete({
