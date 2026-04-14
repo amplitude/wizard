@@ -7,6 +7,7 @@ import {
   WIZARD_USER_AGENT,
   type AmplitudeZone,
 } from './constants.js';
+import { callAmplitudeMcp } from './mcp-with-fallback.js';
 
 // ── Thunder URL helper ────────────────────────────────────────────────
 
@@ -512,16 +513,6 @@ export async function fetchSources(
 
 // ── MCP-based event ingestion check ──────────────────────────────────────────
 
-const MCP_URL = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
-
-/**
- * Calls query_dataset via the Amplitude MCP server to check whether the
- * project has received any events recently. Uses [Amplitude] Any Active Event
- * over the last 7 days as the signal.
- *
- * Requires the numeric analytics project ID (from workspace.environments[].app.id),
- * not the workspace UUID. Returns false on any error so callers can fall through.
- */
 export interface McpUser {
   /** Amplitude's internal ID (always present) */
   amplitudeId: string;
@@ -531,7 +522,7 @@ export interface McpUser {
 
 export interface McpEventsResult {
   hasEvents: boolean;
-  /** Raw CSV rows from query_dataset (_all, Last 7 Days) for date/count info */
+  /** Kept for API compatibility — always empty (query_dataset was removed from MCP server) */
   csvRows: unknown[][];
   /** Active event names from get_events (isActive=true), up to 10 */
   activeEventNames: string[];
@@ -539,6 +530,17 @@ export interface McpEventsResult {
   activeUsers: McpUser[];
 }
 
+/**
+ * Checks whether the project has received any events via the Amplitude MCP server.
+ * Uses get_users with `_all` as the primary signal (userCount > 0 → events exist),
+ * then fetches get_events for display names.
+ *
+ * Falls back to a Claude agent with the Amplitude MCP configured if the direct
+ * HTTP call fails, so the check survives MCP API drift.
+ *
+ * Requires the numeric analytics project ID (from workspace.environments[].app.id),
+ * not the workspace UUID. Returns false on any error so callers can fall through.
+ */
 export async function fetchHasAnyEventsMcp(
   accessToken: string,
   projectId: string,
@@ -549,178 +551,130 @@ export async function fetchHasAnyEventsMcp(
     activeEventNames: [],
     activeUsers: [],
   };
-  const headers = {
-    Authorization: `Bearer ${accessToken}`,
-    'Content-Type': 'application/json',
-    'User-Agent': WIZARD_USER_AGENT,
-  };
 
-  // Step 1: Initialize session to get Mcp-Session-Id.
-  // Use fetch (undici/h2-compatible) instead of axios to handle HTTP/2 and SSE responses.
-  let sessionId: string | undefined;
-  try {
-    const initRes = await fetch(MCP_URL, {
-      method: 'POST',
-      headers: { ...headers, Accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 0,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: { name: 'amplitude-wizard', version: '1.0.0' },
-        },
-      }),
-    });
-    sessionId = initRes.headers.get('mcp-session-id') ?? undefined;
-    logToFile(
-      `[MCP] initialize: status=${initRes.status}, sessionId=${
-        sessionId ?? 'none'
-      }`,
-    );
-    await initRes.body?.cancel().catch(() => undefined);
-  } catch (initErr) {
-    logToFile(
-      `[MCP] initialize failed: ${
-        initErr instanceof Error ? initErr.message : String(initErr)
-      }`,
-    );
-    return NONE;
-  }
-  if (!sessionId) return NONE;
+  const result = await callAmplitudeMcp<McpEventsResult>({
+    accessToken,
+    label: 'fetchHasAnyEventsMcp',
 
-  // Step 2: Send notifications/initialized — required by the MCP spec before any tool calls.
-  // This is a fire-and-forget notification (no response body expected).
-  try {
-    const notifRes = await fetch(MCP_URL, {
-      method: 'POST',
-      headers: { ...headers, 'Mcp-Session-Id': sessionId },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }),
-    });
-    await notifRes.body?.cancel().catch(() => undefined);
-  } catch {
-    // Non-fatal — some servers tolerate skipping this, but log it for visibility.
-    logToFile('[MCP] notifications/initialized failed (continuing)');
-  }
-
-  /** Call a single MCP tool and return the parsed text content, or null on error. */
-  const callTool = async (
-    id: number,
-    name: string,
-    args: unknown,
-  ): Promise<string | null> => {
-    try {
-      const res = await fetch(MCP_URL, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Mcp-Session-Id': sessionId,
-          Accept: 'application/json, text/event-stream',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id,
-          method: 'tools/call',
-          params: { name, arguments: args },
-        }),
+    direct: async (callTool) => {
+      // get_users with _all — primary signal for whether any events have been received.
+      // '_all' covers every event type without requiring taxonomy setup.
+      // metadata.userCount > 0 means at least one device has sent events to this project.
+      const usersText = await callTool(1, 'get_users', {
+        projectId,
+        event: { event_type: '_all', filters: [] },
+        limit: 5,
       });
-      const body = await res.text();
-      const sseData = body.match(/^data: (.+)$/m)?.[1] ?? '';
-      const rpc = JSON.parse(sseData) as {
-        result?: { content?: Array<{ text?: string }> };
-      };
-      return rpc.result?.content?.[0]?.text ?? null;
-    } catch (err) {
-      logToFile(
-        `[MCP] ${name} error: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return null;
-    }
-  };
 
-  // Step 2: get_users with _all — primary signal for whether any events have been received.
-  // '_all' covers every event type without requiring taxonomy setup.
-  // metadata.userCount > 0 means at least one device has sent events to this project.
-  // (query_dataset was removed from the MCP server; get_users is the reliable alternative.)
-  const usersText = await callTool(1, 'get_users', {
-    projectId,
-    event: { event_type: '_all', filters: [] },
-    limit: 5,
+      if (!usersText) {
+        logToFile('[MCP] get_users: no text in response');
+        return null;
+      }
+
+      let activeUsers: McpUser[];
+      let hasEvents: boolean;
+      try {
+        const parsed = JSON.parse(usersText) as {
+          users?: Array<{
+            amplitudeId?: string;
+            amplitude_id?: string;
+            user_id?: string | null;
+          }>;
+          metadata?: { userCount?: number };
+        };
+        const userCount =
+          parsed.metadata?.userCount ?? parsed.users?.length ?? 0;
+        hasEvents = userCount > 0;
+        activeUsers = (parsed.users ?? [])
+          .filter((u) => u.amplitudeId ?? u.amplitude_id)
+          .map((u) => ({
+            amplitudeId: (u.amplitudeId ?? u.amplitude_id) as string,
+            userId: u.user_id ?? null,
+          }))
+          .slice(0, 5);
+        logToFile(
+          `[MCP] get_users: userCount=${userCount}, hasEvents=${hasEvents}`,
+        );
+      } catch (parseErr) {
+        logToFile(
+          `[MCP] get_users parse error: ${
+            parseErr instanceof Error ? parseErr.message : String(parseErr)
+          }`,
+        );
+        return null;
+      }
+
+      if (!hasEvents) return NONE;
+
+      // get_events — fetch active event names for the celebration display.
+      // isActive=true means events arrived within ~30 days.
+      const eventsText = await callTool(2, 'get_events', {
+        projectId,
+        limit: 10,
+      });
+      let activeEventNames: string[] = [];
+      if (eventsText) {
+        try {
+          const parsed = JSON.parse(eventsText) as {
+            events?: Array<{
+              name?: string;
+              isActive?: boolean;
+              isHidden?: boolean;
+              isDeleted?: boolean;
+            }>;
+          };
+          activeEventNames = (parsed.events ?? [])
+            .filter((e) => e.isActive && !e.isHidden && !e.isDeleted && e.name)
+            .map((e) => e.name as string)
+            .slice(0, 10);
+          logToFile(
+            `[MCP] get_events: ${activeEventNames.length} active events`,
+          );
+        } catch (parseErr) {
+          logToFile(
+            `[MCP] get_events parse error: ${
+              parseErr instanceof Error ? parseErr.message : String(parseErr)
+            }`,
+          );
+        }
+      }
+
+      return { hasEvents: true, csvRows: [], activeEventNames, activeUsers };
+    },
+
+    agentPrompt: `Use the Amplitude MCP to check whether project ${projectId} has received any events.
+Call get_users with event_type "_all" and limit 5. If userCount > 0, also call get_events with limit 10.
+Respond with JSON only — no prose, no markdown fences:
+{"hasEvents":true/false,"activeEventNames":["..."],"activeUsers":[{"amplitudeId":"...","userId":"..."}]}`,
+
+    parseAgent: (text) => {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return null;
+      try {
+        const parsed = JSON.parse(match[0]) as {
+          hasEvents?: boolean;
+          activeEventNames?: string[];
+          activeUsers?: Array<{
+            amplitudeId?: string;
+            userId?: string | null;
+          }>;
+        };
+        return {
+          hasEvents: parsed.hasEvents ?? false,
+          csvRows: [],
+          activeEventNames: parsed.activeEventNames ?? [],
+          activeUsers: (parsed.activeUsers ?? []).map((u) => ({
+            amplitudeId: u.amplitudeId ?? '',
+            userId: u.userId ?? null,
+          })),
+        };
+      } catch {
+        return null;
+      }
+    },
   });
 
-  let activeUsers: McpUser[] = [];
-  let hasEvents = false;
-  if (usersText) {
-    try {
-      const parsed = JSON.parse(usersText) as {
-        users?: Array<{
-          amplitudeId?: string;
-          amplitude_id?: string;
-          user_id?: string | null;
-        }>;
-        metadata?: { userCount?: number };
-      };
-      const userCount = parsed.metadata?.userCount ?? parsed.users?.length ?? 0;
-      hasEvents = userCount > 0;
-      activeUsers = (parsed.users ?? [])
-        .filter((u) => u.amplitudeId ?? u.amplitude_id)
-        .map((u) => ({
-          amplitudeId: (u.amplitudeId ?? u.amplitude_id) as string,
-          userId: u.user_id ?? null,
-        }))
-        .slice(0, 5);
-      logToFile(
-        `[MCP] get_users: userCount=${userCount}, hasEvents=${hasEvents}`,
-      );
-    } catch (parseErr) {
-      logToFile(
-        `[MCP] get_users parse error: ${
-          parseErr instanceof Error ? parseErr.message : String(parseErr)
-        }`,
-      );
-    }
-  } else {
-    logToFile('[MCP] get_users: no text in response');
-  }
-
-  if (!hasEvents) return NONE;
-
-  // Step 3: get_events — fetch active event names for the celebration display.
-  // Called after confirming events exist; isActive=true means events arrived within ~30 days.
-  const eventsText = await callTool(2, 'get_events', { projectId, limit: 10 });
-
-  let activeEventNames: string[] = [];
-  if (eventsText) {
-    try {
-      const parsed = JSON.parse(eventsText) as {
-        events?: Array<{
-          name?: string;
-          isActive?: boolean;
-          isHidden?: boolean;
-          isDeleted?: boolean;
-        }>;
-      };
-      activeEventNames = (parsed.events ?? [])
-        .filter((e) => e.isActive && !e.isHidden && !e.isDeleted && e.name)
-        .map((e) => e.name as string)
-        .slice(0, 10);
-      logToFile(`[MCP] get_events: ${activeEventNames.length} active events`);
-    } catch (parseErr) {
-      logToFile(
-        `[MCP] get_events parse error: ${
-          parseErr instanceof Error ? parseErr.message : String(parseErr)
-        }`,
-      );
-    }
-  }
-
-  return { hasEvents: true, csvRows: [], activeEventNames, activeUsers };
+  return result ?? NONE;
 }
 
 // ── Project activation status ──────────────────────────────────────────────

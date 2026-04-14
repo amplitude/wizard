@@ -68,6 +68,7 @@ Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses
 | `constants.ts` | `Integration` enum (detection/display order matters), env flags, URLs |
 | `commandments.ts` | Wizard-wide system prompt rules always appended to the agent |
 | `wizard-tools.ts` | In-process MCP server providing `check_env_keys`, `set_env_values`, `detect_package_manager`, `confirm_event_plan` |
+| `mcp-with-fallback.ts` | `callAmplitudeMcp<T>` — resilient MCP helper. Tries a direct HTTP call to the Amplitude MCP server; if it returns null or throws (e.g. tool removed), falls back to a minimal Claude agent with only the Amplitude MCP configured. Accepts `abortSignal` for clean exit handling. Use this for any new MCP-based data fetching. |
 | `safe-tools.ts` | Allowlisted tools for the agent sandbox |
 | `middleware/` | Benchmark pipeline, message schemas |
 | `health-checks/` | Runtime health check utilities |
