@@ -8,15 +8,16 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
-/** Result returned by the confirm_event_plan tool to the agent. */
-export type EventPlanDecision =
+/** Result returned by confirm_event_plan / confirm_identify_plan tools to the agent. */
+export type PlanDecision =
   | { decision: 'approved' | 'skipped' }
   | { decision: 'revised'; feedback: string };
 
-/** Result returned by the confirm_identify_plan tool to the agent. */
-export type IdentifyPlanDecision =
-  | { decision: 'approved' | 'skipped' }
-  | { decision: 'revised'; feedback: string };
+/** @deprecated Use {@link PlanDecision} instead. */
+export type EventPlanDecision = PlanDecision;
+
+/** @deprecated Use {@link PlanDecision} instead. */
+export type IdentifyPlanDecision = PlanDecision;
 
 export enum TaskStatus {
   Pending = 'pending',

@@ -13,10 +13,7 @@ import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
-import type {
-  EventPlanDecision,
-  IdentifyPlanDecision,
-} from '../ui/wizard-ui';
+import type { EventPlanDecision, IdentifyPlanDecision } from '../ui/wizard-ui';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -713,9 +710,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
           }),
         )
         .min(1)
-        .describe(
-          'The list of setUserId/identify/reset calls you plan to add',
-        ),
+        .describe('The list of setUserId/identify/reset calls you plan to add'),
     },
     async (args: {
       identifyCalls: Array<{ location: string; description: string }>;
@@ -723,8 +718,9 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       logToFile(
         `confirm_identify_plan: ${args.identifyCalls.length} identify calls`,
       );
-      const decision: IdentifyPlanDecision =
-        await getUI().promptIdentifyPlan(args.identifyCalls);
+      const decision: IdentifyPlanDecision = await getUI().promptIdentifyPlan(
+        args.identifyCalls,
+      );
       let text: string;
       if (decision.decision === 'revised') {
         text = `feedback: ${decision.feedback}`;

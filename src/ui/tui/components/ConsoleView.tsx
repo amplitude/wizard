@@ -165,7 +165,11 @@ export const ConsoleView = ({
   useInput(
     (char, key) => {
       if (key.escape || char === 'q' || char === 'Q') {
-        if (pendingPrompt && pendingPrompt.kind !== 'event-plan' && pendingPrompt.kind !== 'identify-plan') {
+        if (
+          pendingPrompt &&
+          pendingPrompt.kind !== 'event-plan' &&
+          pendingPrompt.kind !== 'identify-plan'
+        ) {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
           return;
         }
@@ -245,14 +249,22 @@ export const ConsoleView = ({
   // Keyboard handling for event-plan prompt
   useInput(
     (char, key) => {
-      if (!pendingPrompt || (pendingPrompt.kind !== 'event-plan' && pendingPrompt.kind !== 'identify-plan')) return;
+      if (
+        !pendingPrompt ||
+        (pendingPrompt.kind !== 'event-plan' &&
+          pendingPrompt.kind !== 'identify-plan')
+      )
+        return;
 
       if (planInputMode === 'feedback') {
         if (key.return) {
           const text = planFeedbackText.trim();
           if (text) {
             if (pendingPrompt.kind === 'identify-plan') {
-              store.resolveIdentifyPlan({ decision: 'revised', feedback: text });
+              store.resolveIdentifyPlan({
+                decision: 'revised',
+                feedback: text,
+              });
             } else {
               store.resolveEventPlan({ decision: 'revised', feedback: text });
             }
@@ -297,7 +309,10 @@ export const ConsoleView = ({
     },
     {
       isActive:
-        !inputActive && !!pendingPrompt && (pendingPrompt.kind === 'event-plan' || pendingPrompt.kind === 'identify-plan'),
+        !inputActive &&
+        !!pendingPrompt &&
+        (pendingPrompt.kind === 'event-plan' ||
+          pendingPrompt.kind === 'identify-plan'),
     },
   );
 
@@ -340,7 +355,9 @@ export const ConsoleView = ({
               />
             ) : pendingPrompt.kind === 'identify-plan' ? (
               <Box flexDirection="column" gap={1}>
-                <Text color={Colors.muted}>Proposed user identification calls:</Text>
+                <Text color={Colors.muted}>
+                  Proposed user identification calls:
+                </Text>
                 <Text color={Colors.heading} bold>
                   Identify Plan
                 </Text>
@@ -401,9 +418,10 @@ export const ConsoleView = ({
                 )}
               </Box>
             )}
-            {pendingPrompt.kind !== 'event-plan' && pendingPrompt.kind !== 'identify-plan' && (
-              <Text color={Colors.muted}> [Q / Esc] skip</Text>
-            )}
+            {pendingPrompt.kind !== 'event-plan' &&
+              pendingPrompt.kind !== 'identify-plan' && (
+                <Text color={Colors.muted}> [Q / Esc] skip</Text>
+              )}
           </Box>
         ) : responseIsLong ? (
           <Box

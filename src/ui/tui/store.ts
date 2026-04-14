@@ -373,7 +373,8 @@ export class WizardStore {
     if (!prompt || prompt.kind !== 'event-plan') return;
     analytics.wizardCapture('Prompt Response', {
       prompt_kind: 'event-plan',
-      response: decision.decision === 'revised' ? 'feedback' : decision.decision,
+      response:
+        decision.decision === 'revised' ? 'feedback' : decision.decision,
     });
     this.$pendingPrompt.set(null);
     this.$version.set(this.$version.get() + 1);
@@ -400,7 +401,8 @@ export class WizardStore {
     if (!prompt || prompt.kind !== 'identify-plan') return;
     analytics.wizardCapture('Prompt Response', {
       prompt_kind: 'identify-plan',
-      response: decision.decision === 'revised' ? 'feedback' : decision.decision,
+      response:
+        decision.decision === 'revised' ? 'feedback' : decision.decision,
     });
     this.$pendingPrompt.set(null);
     this.$version.set(this.$version.get() + 1);
