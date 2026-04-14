@@ -1,8 +1,10 @@
 /* Generic Node.js language wizard using Amplitude */
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
+import { hasPackageInstalled } from '../../utils/package-json';
 import { tryGetPackageJson } from '../../utils/setup-utils';
 import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { FRAMEWORK_PACKAGES } from '../javascript-web/utils';
 
 type JavaScriptNodeContext = Record<string, unknown>;
 
@@ -24,7 +26,14 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
       detectPackageManager: detectNodePackageManagers,
       detect: async (options) => {
         const packageJson = await tryGetPackageJson(options);
-        return !!packageJson;
+        if (!packageJson) return false;
+        // Don't claim projects that belong to a specific framework
+        for (const frameworkPkg of FRAMEWORK_PACKAGES) {
+          if (hasPackageInstalled(frameworkPkg, packageJson)) {
+            return false;
+          }
+        }
+        return true;
       },
     },
 

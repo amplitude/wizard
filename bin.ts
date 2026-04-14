@@ -679,24 +679,17 @@ void yargs(hideBin(process.argv))
 
             // ── Framework detection ────────────────────────────────
             // Runs concurrently with auth while AuthScreen shows.
-            // All frameworks are detected in parallel; the outer
-            // timeout is kept as a safety net.
+            // Each detector has its own per-framework timeout internally,
+            // so no outer timeout is needed.
             const detectionTask = (async () => {
-              const results = await Promise.race([
-                detectAllFrameworks(installDir),
-                new Promise<undefined>((resolve) =>
-                  setTimeout(() => resolve(undefined), DETECTION_TIMEOUT_MS),
-                ),
-              ]);
+              const results = await detectAllFrameworks(installDir);
 
               // Store full results on session for diagnostics
-              if (results) {
-                session.detectionResults = results;
-              }
+              session.detectionResults = results;
 
-              const detectedIntegration = results
-                ? results.find((r) => r.detected)?.integration
-                : undefined;
+              const detectedIntegration = results.find(
+                (r) => r.detected,
+              )?.integration;
 
               if (detectedIntegration) {
                 const config = FRAMEWORK_REGISTRY[detectedIntegration];

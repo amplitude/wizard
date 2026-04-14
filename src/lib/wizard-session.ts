@@ -172,7 +172,6 @@ export interface WizardSession {
     timedOut: boolean;
     error?: string;
     version?: string;
-    versionWarning?: string;
   }> | null;
 
   /**

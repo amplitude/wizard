@@ -12,7 +12,7 @@ import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
-import { getVersionCheckInfo, getVersionWarning } from './lib/version-check';
+import { getVersionCheckInfo } from './lib/version-check';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -153,8 +153,6 @@ export interface DetectionResult {
   error?: string;
   /** Installed version (if detected and getInstalledVersion is defined). */
   version?: string;
-  /** Set when detected version is below minimumVersion. */
-  versionWarning?: string;
 }
 
 /**
@@ -198,7 +196,7 @@ export async function detectAllFrameworks(
           timedOut: false,
         };
 
-        // Version check: if detected and a version resolver is available, check minimum
+        // Capture version for diagnostics (agent-runner handles version warnings)
         if (
           result.detected &&
           (config.detection.getInstalledVersion ||
@@ -221,12 +219,6 @@ export async function detectAllFrameworks(
             );
             if (versionCheckInfo.version) {
               result.version = versionCheckInfo.version;
-              result.versionWarning = getVersionWarning(versionCheckInfo);
-              if (result.versionWarning) {
-                logToFile(
-                  `[detection] ${integration}: ${result.versionWarning}`,
-                );
-              }
             }
           } catch (err) {
             logToFile(
@@ -300,7 +292,6 @@ async function detectAndResolveIntegration(
       durationMs: Math.max(...results.map((r) => r.durationMs)),
       errorCount: results.filter((r) => r.error).length,
       timedOutCount: results.filter((r) => r.timedOut).length,
-      hasVersionWarning: detected.some((r) => r.versionWarning) ?? false,
     });
 
     if (winner) {

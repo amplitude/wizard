@@ -263,10 +263,9 @@ describe('detectAllFrameworks', () => {
 
     expect(nextjs?.detected).toBe(true);
     expect(nextjs?.version).toBe('15.3.1');
-    expect(nextjs?.versionWarning).toBeUndefined();
   });
 
-  test('sets versionWarning when below minimumVersion', async () => {
+  test('captures version even when below minimumVersion (no warning at detection time)', async () => {
     registry = buildRegistry({
       [Integration.nextjs]: {
         detect: async () => true,
@@ -278,25 +277,9 @@ describe('detectAllFrameworks', () => {
     const results = await detectAllFrameworks(process.cwd());
     const nextjs = results.find((r) => r.integration === Integration.nextjs);
 
+    // Detection captures version but does NOT warn — agent-runner handles that
     expect(nextjs?.detected).toBe(true);
     expect(nextjs?.version).toBe('14.0.0');
-    expect(nextjs?.versionWarning).toContain('14.0.0');
-    expect(nextjs?.versionWarning).toContain('15.3.0');
-  });
-
-  test('no versionWarning when version meets minimum', async () => {
-    registry = buildRegistry({
-      [Integration.nextjs]: {
-        detect: async () => true,
-        getInstalledVersion: async () => '15.4.0',
-        minimumVersion: '15.3.0',
-      },
-    });
-
-    const results = await detectAllFrameworks(process.cwd());
-    const nextjs = results.find((r) => r.integration === Integration.nextjs);
-
-    expect(nextjs?.versionWarning).toBeUndefined();
   });
 
   test('handles getInstalledVersion throwing without breaking detection', async () => {
@@ -316,10 +299,9 @@ describe('detectAllFrameworks', () => {
     // Should still be detected, just no version info
     expect(nextjs?.detected).toBe(true);
     expect(nextjs?.version).toBeUndefined();
-    expect(nextjs?.versionWarning).toBeUndefined();
   });
 
-  test('supports dynamic minimumVersion from getVersionCheckInfo', async () => {
+  test('captures version from getVersionCheckInfo', async () => {
     registry = buildRegistry({
       [Integration.nextjs]: {
         detect: async () => true,
@@ -337,29 +319,6 @@ describe('detectAllFrameworks', () => {
     const nextjs = results.find((r) => r.integration === Integration.nextjs);
 
     expect(nextjs?.version).toBe('1.168.10');
-    expect(nextjs?.versionWarning).toBeUndefined();
-  });
-
-  test('getVersionCheckInfo warning uses package-specific minimum', async () => {
-    registry = buildRegistry({
-      [Integration.nextjs]: {
-        detect: async () => true,
-      },
-    });
-    registry[Integration.nextjs].detection.getVersionCheckInfo = vi
-      .fn()
-      .mockResolvedValue({
-        version: '0.9.0',
-        minimumVersion: '1.0.0',
-        packageDisplayName: 'TanStack Router',
-      });
-
-    const results = await detectAllFrameworks(process.cwd());
-    const nextjs = results.find((r) => r.integration === Integration.nextjs);
-
-    expect(nextjs?.versionWarning).toContain('TanStack Router');
-    expect(nextjs?.versionWarning).toContain('0.9.0');
-    expect(nextjs?.versionWarning).toContain('1.0.0');
   });
 
   test('times out slow getInstalledVersion along with detect', async () => {
