@@ -466,6 +466,7 @@ void yargs(hideBin(process.argv))
                 if (storedToken) {
                   fetchAmplitudeUser(storedToken.idToken, zone)
                     .then((userInfo) => {
+                      analytics.setDistinctId(userInfo.id);
                       let changed = false;
                       if (userInfo.email && !session.userEmail) {
                         session.userEmail = userInfo.email;
@@ -698,6 +699,7 @@ void yargs(hideBin(process.argv))
 
                 // Populate user email for /whoami display
                 session.userEmail = userInfo.email;
+                analytics.setDistinctId(userInfo.id);
 
                 // Signal AuthScreen — triggers org/workspace/API key pickers
                 tui.store.setOAuthComplete({

@@ -209,9 +209,6 @@ export class WizardStore {
 
   setCredentials(credentials: WizardSession['credentials']): void {
     this.$session.setKey('credentials', credentials);
-    if (credentials?.projectId) {
-      analytics.setDistinctId(String(credentials.projectId));
-    }
     analytics.wizardCapture('Auth Complete', {
       project_id: credentials?.projectId,
       region: this.session.region,
