@@ -2,9 +2,9 @@
  * Shared constants for the Amplitude wizard.
  */
 
-// Injected at build time by scripts/generate-version.js — do not edit manually.
-// release-please bumps package.json; the prebuild script syncs it here.
-const VERSION = '1.0.0';
+// Kept in sync by release-please (x-release-please-version marker).
+// The prebuild script (sync-version.mjs) acts as a safety net.
+const VERSION = '1.0.0'; // x-release-please-version
 
 // ── Integration / CLI ───────────────────────────────────────────────
 

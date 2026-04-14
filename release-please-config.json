@@ -2,9 +2,13 @@
   "packages": {
     ".": {
       "release-type": "node",
-      "prerelease": true,
-      "prerelease-type": "beta",
-      "versioning": "prerelease"
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "src/lib/constants.ts",
+          "glob": false
+        }
+      ]
     }
   }
 }
