@@ -82,7 +82,9 @@ export async function runAgentWizard(
       logToFile(`[runAgentWizard] ${versionWarning}`);
       const docsUrl =
         config.metadata.unsupportedVersionDocsUrl ?? config.metadata.docsUrl;
-      logToFile(`[runAgentWizard] directing user to manual setup guide: ${docsUrl}`);
+      logToFile(
+        `[runAgentWizard] directing user to manual setup guide: ${docsUrl}`,
+      );
       const minimumVersion =
         versionCheckInfo.minimumVersion ?? config.detection.minimumVersion;
       const packageDisplayName =

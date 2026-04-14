@@ -25,7 +25,8 @@ export async function getVersionCheckInfo(
     return {
       version: info.version,
       minimumVersion: info.minimumVersion ?? detection.minimumVersion,
-      packageDisplayName: info.packageDisplayName ?? detection.packageDisplayName,
+      packageDisplayName:
+        info.packageDisplayName ?? detection.packageDisplayName,
     };
   }
 
@@ -40,11 +41,10 @@ export async function getVersionCheckInfo(
   };
 }
 
-export function getVersionWarning({
-  version,
-  minimumVersion,
-  packageDisplayName,
-}: VersionCheckInfo, options: VersionWarningOptions = {}): string | undefined {
+export function getVersionWarning(
+  { version, minimumVersion, packageDisplayName }: VersionCheckInfo,
+  options: VersionWarningOptions = {},
+): string | undefined {
   if (!version || !minimumVersion || !packageDisplayName) {
     return undefined;
   }

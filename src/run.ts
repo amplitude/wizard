@@ -12,10 +12,7 @@ import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
-import {
-  getVersionCheckInfo,
-  getVersionWarning,
-} from './lib/version-check';
+import { getVersionCheckInfo, getVersionWarning } from './lib/version-check';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -208,22 +205,27 @@ export async function detectAllFrameworks(
             config.detection.getVersionCheckInfo)
         ) {
           try {
-            const versionCheckInfo = await getVersionCheckInfo(config.detection, {
-              installDir,
-              debug: false,
-              forceInstall: false,
-              default: false,
-              signup: false,
-              localMcp: false,
-              ci: false,
-              menu: false,
-              benchmark: false,
-            });
+            const versionCheckInfo = await getVersionCheckInfo(
+              config.detection,
+              {
+                installDir,
+                debug: false,
+                forceInstall: false,
+                default: false,
+                signup: false,
+                localMcp: false,
+                ci: false,
+                menu: false,
+                benchmark: false,
+              },
+            );
             if (versionCheckInfo.version) {
               result.version = versionCheckInfo.version;
               result.versionWarning = getVersionWarning(versionCheckInfo);
               if (result.versionWarning) {
-                logToFile(`[detection] ${integration}: ${result.versionWarning}`);
+                logToFile(
+                  `[detection] ${integration}: ${result.versionWarning}`,
+                );
               }
             }
           } catch (err) {

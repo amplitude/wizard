@@ -18,7 +18,9 @@ vi.mock('../../../ui', () => ({
   }),
 }));
 
-const { REACT_ROUTER_AGENT_CONFIG } = await import('../react-router-wizard-agent');
+const { REACT_ROUTER_AGENT_CONFIG } = await import(
+  '../react-router-wizard-agent'
+);
 
 const options = {
   installDir: '/tmp/does-not-matter',
@@ -43,9 +45,8 @@ describe('react-router version check info', () => {
       packageName === 'react-router' ? '6.30.0' : undefined,
     );
 
-    const info = await REACT_ROUTER_AGENT_CONFIG.detection.getVersionCheckInfo?.(
-      options,
-    );
+    const info =
+      await REACT_ROUTER_AGENT_CONFIG.detection.getVersionCheckInfo?.(options);
 
     expect(info).toEqual({
       version: '6.30.0',
@@ -59,9 +60,8 @@ describe('react-router version check info', () => {
       packageName === '@tanstack/react-start' ? '1.168.10' : undefined,
     );
 
-    const info = await REACT_ROUTER_AGENT_CONFIG.detection.getVersionCheckInfo?.(
-      options,
-    );
+    const info =
+      await REACT_ROUTER_AGENT_CONFIG.detection.getVersionCheckInfo?.(options);
 
     expect(info).toEqual({
       version: '1.168.10',
@@ -75,9 +75,8 @@ describe('react-router version check info', () => {
       packageName === '@tanstack/react-router' ? '1.168.10' : undefined,
     );
 
-    const info = await REACT_ROUTER_AGENT_CONFIG.detection.getVersionCheckInfo?.(
-      options,
-    );
+    const info =
+      await REACT_ROUTER_AGENT_CONFIG.detection.getVersionCheckInfo?.(options);
 
     expect(info).toEqual({
       version: '1.168.10',
