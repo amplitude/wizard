@@ -62,15 +62,24 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   detection: {
     packageName: 'react-router',
     packageDisplayName: 'React Router',
-    getVersion: (packageJson: unknown) =>
-      getPackageVersion('react-router', packageJson as PackageDotJson),
+    getVersion: (packageJson: unknown) => {
+      const pkg = packageJson as PackageDotJson;
+      return (
+        getPackageVersion('react-router', pkg) ??
+        getPackageVersion('@tanstack/react-start', pkg) ??
+        getPackageVersion('@tanstack/react-router', pkg)
+      );
+    },
     getVersionBucket: getReactRouterVersionBucket,
     minimumVersion: '6.0.0',
     getInstalledVersion: async (options: WizardOptions) => {
       const packageJson = await tryGetPackageJson(options);
-      return packageJson
-        ? getPackageVersion('react-router', packageJson)
-        : undefined;
+      if (!packageJson) return undefined;
+      return (
+        getPackageVersion('react-router', packageJson) ??
+        getPackageVersion('@tanstack/react-start', packageJson) ??
+        getPackageVersion('@tanstack/react-router', packageJson)
+      );
     },
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);

@@ -120,14 +120,16 @@ export async function runAgentWizard(
   if (usesPackageJson) {
     packageJson = await tryGetPackageJson({ installDir: session.installDir });
     if (packageJson) {
-      // Log warning if package not installed, but continue (agent handles it)
-      const { hasPackageInstalled } = await import('../utils/package-json.js');
-      if (!hasPackageInstalled(config.detection.packageName, packageJson)) {
+      frameworkVersion = config.detection.getVersion(packageJson);
+      // Log warning if package not found, but continue (agent handles it).
+      // Uses getVersion() rather than checking packageName directly so
+      // frameworks that match multiple packages (e.g. React Router +
+      // TanStack) don't trigger false "not installed" warnings.
+      if (!frameworkVersion) {
         getUI().log.warn(
           `${config.detection.packageDisplayName} does not seem to be installed. Continuing anyway — the agent will handle it.`,
         );
       }
-      frameworkVersion = config.detection.getVersion(packageJson);
     } else {
       getUI().log.warn(
         'Could not find package.json. Continuing anyway — the agent will handle it.',

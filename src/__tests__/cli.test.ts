@@ -54,12 +54,10 @@ const {
 // ── Module mocks ───────────────────────────────────────────────────────────────
 
 const mockRunWizard = vi.fn();
-const mockDetectIntegration = vi.fn().mockResolvedValue(undefined);
 const mockDetectAllFrameworks = vi.fn().mockResolvedValue([]);
 
 vi.mock('../run', () => ({
   runWizard: mockRunWizard,
-  detectIntegration: mockDetectIntegration,
   detectAllFrameworks: mockDetectAllFrameworks,
 }));
 vi.mock('semver', () => ({ satisfies: () => true }));

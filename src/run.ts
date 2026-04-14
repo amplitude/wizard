@@ -186,26 +186,16 @@ export async function detectAllFrameworks(
     async (integration): Promise<DetectionResult> => {
       const config = FRAMEWORK_REGISTRY[integration];
       const start = performance.now();
-      try {
-        const detected = await Promise.race([
-          config.detection.detect({ installDir }),
-          new Promise<'timeout'>((resolve) =>
-            setTimeout(() => resolve('timeout'), timeoutMs),
-          ),
-        ]);
-        const durationMs = Math.round(performance.now() - start);
-        const timedOut = detected === 'timeout';
-        if (timedOut) {
-          logToFile(
-            `[detection] ${integration} timed out after ${durationMs}ms`,
-          );
-        }
 
+      // Both detect() and version check run inside a single Promise.race
+      // so a slow getInstalledVersion can't hang the entire detection.
+      const work = async (): Promise<DetectionResult> => {
+        const detected = await config.detection.detect({ installDir });
         const result: DetectionResult = {
           integration,
-          detected: timedOut ? false : Boolean(detected),
-          durationMs,
-          timedOut,
+          detected: Boolean(detected),
+          durationMs: Math.round(performance.now() - start),
+          timedOut: false,
         };
 
         // Version check: if detected and version info is available, check minimum
@@ -244,6 +234,31 @@ export async function detectAllFrameworks(
           }
         }
 
+        result.durationMs = Math.round(performance.now() - start);
+        return result;
+      };
+
+      try {
+        const result = await Promise.race([
+          work(),
+          new Promise<'timeout'>((resolve) =>
+            setTimeout(() => resolve('timeout'), timeoutMs),
+          ),
+        ]);
+
+        if (result === 'timeout') {
+          const durationMs = Math.round(performance.now() - start);
+          logToFile(
+            `[detection] ${integration} timed out after ${durationMs}ms`,
+          );
+          return {
+            integration,
+            detected: false,
+            durationMs,
+            timedOut: true,
+          };
+        }
+
         return result;
       } catch (err) {
         const durationMs = Math.round(performance.now() - start);
@@ -263,36 +278,6 @@ export async function detectAllFrameworks(
   );
 
   return Promise.all(promises);
-}
-
-/**
- * Detect which framework is present in the project.
- * Runs all detectors in parallel and returns the first match
- * by Integration enum order (highest priority wins).
- */
-export async function detectIntegration(
-  installDir: string,
-  timeoutMs?: number,
-): Promise<Integration | undefined> {
-  const results = await detectAllFrameworks(installDir, timeoutMs);
-
-  const totalMs = Math.max(...results.map((r) => r.durationMs));
-  const detected = results.filter((r) => r.detected);
-  const errored = results.filter((r) => r.error);
-  const timedOut = results.filter((r) => r.timedOut);
-
-  logToFile(
-    `[detection] Complete in ${totalMs}ms: ${detected.length} detected, ${errored.length} errors, ${timedOut.length} timeouts`,
-  );
-
-  // Return first detected in enum order (integrations array preserves enum order)
-  const winner = results.find((r) => r.detected);
-  if (winner) {
-    logToFile(
-      `[detection] Winner: ${winner.integration} (${winner.durationMs}ms)`,
-    );
-  }
-  return winner?.integration;
 }
 
 async function detectAndResolveIntegration(
