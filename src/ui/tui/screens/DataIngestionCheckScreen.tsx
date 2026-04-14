@@ -18,6 +18,7 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
+  extractProjectId,
   fetchAmplitudeUser,
   fetchHasAnyEventsMcp,
   fetchProjectActivationStatus,
@@ -189,11 +190,7 @@ export const DataIngestionCheckScreen = ({
           logToFile(`[DataIngestionCheck] lazily set workspaceId=${ws.id}`);
         }
 
-        effectiveProjectId =
-          ws?.environments
-            ?.slice()
-            .sort((a, b) => a.rank - b.rank)
-            .find((e) => e.app?.id)?.app?.id ?? null;
+        effectiveProjectId = ws ? extractProjectId(ws) : null;
         if (effectiveProjectId) {
           resolvedProjectIdRef.current = effectiveProjectId;
           restoredFields.projectId = effectiveProjectId;
@@ -249,6 +246,7 @@ export const DataIngestionCheckScreen = ({
         `[DataIngestionCheck] MCP check: hasEvents=${result.hasEvents} projectId=${effectiveProjectId} events=${result.activeEventNames.length}`,
       );
       if (result.hasEvents) {
+        setApiUnavailable(false);
         confirmWithCelebration(result.activeEventNames);
         return;
       }

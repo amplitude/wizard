@@ -448,7 +448,9 @@ void yargs(hideBin(process.argv))
                 const { getStoredUser, getStoredToken } = await import(
                   './src/utils/ampli-settings.js'
                 );
-                const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+                const { fetchAmplitudeUser, extractProjectId } = await import(
+                  './src/lib/api.js'
+                );
                 const storedUser = getStoredUser();
                 const realUser =
                   storedUser && storedUser.id !== 'pending' ? storedUser : null;
@@ -495,17 +497,14 @@ void yargs(hideBin(process.argv))
                           if (ws) {
                             session.selectedWorkspaceName = ws.name;
                             // Extract the analytics project ID from the lowest-rank environment.
-                            const projectId =
-                              ws.environments
-                                ?.slice()
-                                .sort((a, b) => a.rank - b.rank)
-                                .find((e) => e.app?.id)?.app?.id ?? null;
+                            const projectId = extractProjectId(ws);
                             logToFile(
                               `[bin] project ID resolution: environments=${
                                 ws.environments?.length ?? 'null'
                               }, projectId=${projectId}`,
                             );
-                            session.selectedProjectId = projectId;
+                            if (projectId)
+                              session.selectedProjectId = projectId;
                           } else {
                             logToFile(
                               `[bin] project ID resolution: no workspaces in org ${org.id}`,

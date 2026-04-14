@@ -87,6 +87,23 @@ export type AmplitudeOrg = {
   }>;
 };
 
+/** Shared workspace type for environment helpers. */
+export type AmplitudeWorkspace = AmplitudeOrg['workspaces'][number];
+
+/**
+ * Extract the primary analytics project ID from a workspace.
+ * Picks the lowest-rank environment that has an app ID.
+ * Returns null if no such environment exists.
+ */
+export function extractProjectId(ws: AmplitudeWorkspace): string | null {
+  return (
+    (ws.environments ?? [])
+      .slice()
+      .sort((a, b) => a.rank - b.rank)
+      .find((e) => e.app?.id)?.app?.id ?? null
+  );
+}
+
 export type AmplitudeUserInfo = {
   id: string;
   firstName: string;
