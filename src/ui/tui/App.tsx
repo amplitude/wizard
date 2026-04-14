@@ -8,7 +8,7 @@
  *   4. Content area (flex grow) — active screen
  *   5. ConsoleView bottom area — separator + hints + input
  *
- * No outer border. Full terminal width (capped at 120). Spacious.
+ * No outer border. Full terminal width (capped at 120).
  */
 
 import { useMemo, type ReactNode } from 'react';

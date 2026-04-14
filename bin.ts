@@ -63,6 +63,142 @@ const lazyRunWizard = async (
   return runWizard(...args);
 };
 
+/**
+ * Build a WizardSession from CLI argv, avoiding the repeated 12-field literal.
+ */
+const buildSessionFromOptions = async (
+  options: Record<string, unknown>,
+  overrides?: { ci?: boolean },
+) => {
+  const { buildSession } = await import('./src/lib/wizard-session.js');
+  return buildSession({
+    debug: options.debug as boolean | undefined,
+    verbose: options.verbose as boolean | undefined,
+    forceInstall: options.forceInstall as boolean | undefined,
+    installDir: options.installDir as string | undefined,
+    ci: overrides?.ci ?? false,
+    signup: options.signup as boolean | undefined,
+    localMcp: options.localMcp as boolean | undefined,
+    apiKey: options.apiKey as string | undefined,
+    menu: options.menu as boolean | undefined,
+    integration: options.integration as Parameters<
+      typeof buildSession
+    >[0]['integration'],
+    benchmark: options.benchmark as boolean | undefined,
+    projectId: options.projectId as string | undefined,
+  });
+};
+
+/**
+ * Shared credential resolution for non-interactive modes (agent + CI).
+ * Handles --api-key shortcut, OAuth token refresh, and pendingOrgs.
+ *
+ * @param mode - 'agent' prompts via AgentUI, 'ci' auto-selects first env
+ */
+const resolveNonInteractiveCredentials = async (
+  session: import('./src/lib/wizard-session').WizardSession,
+  options: Record<string, unknown>,
+  mode: 'agent' | 'ci',
+  agentUI?: import('./src/ui/agent-ui').AgentUI,
+) => {
+  // If --api-key was provided, skip OAuth entirely
+  if (session.apiKey) {
+    const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
+    session.credentials = {
+      accessToken: session.apiKey,
+      projectApiKey: session.apiKey,
+      host: DEFAULT_HOST_URL,
+      projectId: session.projectId ?? 0,
+    };
+    session.projectHasData = false;
+    return;
+  }
+
+  // Resolve credentials from stored OAuth tokens
+  const { resolveCredentials, resolveEnvironmentSelection } = await import(
+    './src/lib/credential-resolution.js'
+  );
+  await resolveCredentials(session, {
+    requireOrgId: false,
+    org: options.org as string | undefined,
+    env: options.env as string | undefined,
+  });
+
+  // Handle multiple environments
+  if (session.pendingOrgs && !session.credentials) {
+    if (mode === 'ci') {
+      // CI mode: auto-select first environment with an API key
+      for (const org of session.pendingOrgs) {
+        for (const ws of org.workspaces) {
+          const env = (ws.environments ?? [])
+            .filter((e) => e.app?.apiKey)
+            .sort((a, b) => a.rank - b.rank)[0];
+          if (env) {
+            await resolveEnvironmentSelection(session, {
+              orgId: org.id,
+              workspaceId: ws.id,
+              env: env.name,
+            });
+            getUI().log.info(
+              `Resolved Amplitude API key non-interactively (CI mode): ${org.name} / ${ws.name} / ${env.name}`,
+            );
+            break;
+          }
+        }
+        if (session.credentials) break;
+      }
+    } else if (agentUI) {
+      // Agent mode: list envs and prompt via stdin
+      const envList: string[] = [];
+      for (const org of session.pendingOrgs) {
+        for (const ws of org.workspaces) {
+          for (const env of ws.environments ?? []) {
+            if (env.app?.apiKey) {
+              envList.push(`  --env "${env.name}"  (${org.name} / ${ws.name})`);
+            }
+          }
+        }
+      }
+      getUI().log.info(
+        `Multiple environments found. Re-run with one of:\n${envList.join(
+          '\n',
+        )}`,
+      );
+      const selection = await agentUI.promptEnvironmentSelection(
+        session.pendingOrgs,
+      );
+      const resolved = await resolveEnvironmentSelection(session, selection);
+      if (!resolved) {
+        process.exit(ExitCode.AUTH_REQUIRED);
+      }
+    }
+  }
+
+  // If we still don't have credentials, auth is required
+  if (!session.credentials) {
+    if (mode === 'agent') {
+      getUI().log.error(
+        'Could not resolve credentials. ' +
+          'Please log in first by running: amplitude-wizard login',
+      );
+      process.exit(ExitCode.AUTH_REQUIRED);
+    }
+    // CI mode falls through — runWizard will handle missing credentials
+  }
+
+  // Log what was resolved so the caller can see it
+  if (mode === 'agent' && session.credentials) {
+    const parts = [
+      session.selectedOrgName,
+      session.selectedWorkspaceName,
+      session.selectedProjectName,
+    ].filter(Boolean);
+    if (parts.length > 0) {
+      getUI().log.info(`Using: ${parts.join(' / ')}`);
+    }
+  }
+};
+
 if (process.env.NODE_ENV === 'test') {
   void (async () => {
     try {
@@ -123,6 +259,16 @@ void yargs(hideBin(process.argv))
     'project-id': {
       describe:
         'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: AMPLITUDE_WIZARD_PROJECT_ID',
+      type: 'string',
+    },
+    org: {
+      describe:
+        'Amplitude org name to use (for multi-org accounts)\nenv: AMPLITUDE_WIZARD_ORG',
+      type: 'string',
+    },
+    env: {
+      describe:
+        'Environment name to use (e.g. "Production", "Development")\nenv: AMPLITUDE_WIZARD_ENV',
       type: 'string',
     },
   })
@@ -193,162 +339,43 @@ void yargs(hideBin(process.argv))
       const options = { ...argv };
 
       // CI mode validation and TTY check
-      if (options.agent || process.env.AMPLITUDE_WIZARD_AGENT === '1') {
-        // Agent mode: structured JSON output, same requirements as CI
+      if (
+        options.agent ||
+        process.env.AMPLITUDE_WIZARD_AGENT === '1' ||
+        (!options.ci &&
+          !options.yes &&
+          !options.classic &&
+          process.env.AMPLITUDE_WIZARD_CLASSIC !== '1' &&
+          isNonInteractiveEnvironment())
+      ) {
+        // Agent mode (explicit --agent or auto-detected non-TTY)
+        if (!options.agent) options.agent = true;
         void (async () => {
           const { AgentUI } = await import('./src/ui/agent-ui.js');
           const agentUI = new AgentUI();
           setUI(agentUI);
-          if (!options.installDir) {
-            getUI().intro(chalk.inverse(`Amplitude Wizard`));
-            getUI().log.error(
-              'Agent mode requires --install-dir (directory to install Amplitude in)',
-            );
-            process.exit(ExitCode.INVALID_ARGS);
-          }
+          if (!options.installDir) options.installDir = process.cwd();
 
-          // Build session and resolve credentials (same logic as TUI)
-          const { buildSession } = await import('./src/lib/wizard-session.js');
-          const session = buildSession({
-            debug: options.debug as boolean | undefined,
-            verbose: options.verbose as boolean | undefined,
-            forceInstall: options.forceInstall as boolean | undefined,
-            installDir: options.installDir as string | undefined,
-            ci: false,
-            signup: options.signup as boolean | undefined,
-            localMcp: options.localMcp as boolean | undefined,
-            apiKey: options.apiKey as string | undefined,
-            menu: options.menu as boolean | undefined,
-            integration: options.integration as Parameters<
-              typeof buildSession
-            >[0]['integration'],
-            benchmark: options.benchmark as boolean | undefined,
-            projectId: options.projectId as string | undefined,
-          });
-
-          // If --api-key was provided, skip OAuth entirely
-          if (session.apiKey) {
-            const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
-            session.credentials = {
-              accessToken: session.apiKey,
-              projectApiKey: session.apiKey,
-              host: DEFAULT_HOST_URL,
-              projectId: session.projectId ?? 0,
-            };
-            session.projectHasData = false;
-          } else {
-            // Resolve credentials from stored OAuth tokens
-            const { resolveCredentials, resolveEnvironmentSelection } =
-              await import('./src/lib/credential-resolution.js');
-            await resolveCredentials(session, { requireOrgId: false });
-
-            // If multiple environments, prompt over NDJSON
-            if (session.pendingOrgs && !session.credentials) {
-              const selection = await agentUI.promptEnvironmentSelection(
-                session.pendingOrgs,
-              );
-              const resolved = await resolveEnvironmentSelection(
-                session,
-                selection,
-              );
-              if (!resolved) {
-                getUI().log.error(
-                  'Could not resolve the selected environment. ' +
-                    'Please check the org, workspace, and environment names.',
-                );
-                process.exit(ExitCode.AUTH_REQUIRED);
-              }
-            }
-
-            // If we still don't have credentials, auth is required
-            if (!session.credentials) {
-              getUI().log.error(
-                'Could not resolve credentials. ' +
-                  'Please log in first by running: npx @amplitude/wizard',
-              );
-              process.exit(ExitCode.AUTH_REQUIRED);
-            }
-          }
-
+          const session = await buildSessionFromOptions(options);
+          await resolveNonInteractiveCredentials(
+            session,
+            options,
+            'agent',
+            agentUI,
+          );
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
             session,
           );
         })();
       } else if (options.ci || options.yes) {
-        // Use LoggingUI for CI mode (no dependencies, no prompts)
+        // CI mode: no prompts, auto-select first environment
         setUI(new LoggingUI());
-        if (!options.installDir) {
-          getUI().intro(chalk.inverse(`Amplitude Wizard`));
-          getUI().log.error(
-            'CI mode requires --install-dir (directory to install Amplitude in)',
-          );
-          process.exit(1);
-        }
+        if (!options.installDir) options.installDir = process.cwd();
 
-        // Build session and resolve credentials for CI mode
         void (async () => {
-          const { buildSession } = await import('./src/lib/wizard-session.js');
-          const session = buildSession({
-            debug: options.debug as boolean | undefined,
-            verbose: options.verbose as boolean | undefined,
-            forceInstall: options.forceInstall as boolean | undefined,
-            installDir: options.installDir as string | undefined,
-            ci: true,
-            signup: options.signup as boolean | undefined,
-            localMcp: options.localMcp as boolean | undefined,
-            apiKey: options.apiKey as string | undefined,
-            menu: options.menu as boolean | undefined,
-            integration: options.integration as Parameters<
-              typeof buildSession
-            >[0]['integration'],
-            benchmark: options.benchmark as boolean | undefined,
-            projectId: options.projectId as string | undefined,
-          });
-
-          if (session.apiKey) {
-            const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
-            session.credentials = {
-              accessToken: session.apiKey,
-              projectApiKey: session.apiKey,
-              host: DEFAULT_HOST_URL,
-              projectId: session.projectId ?? 0,
-            };
-            session.projectHasData = false;
-          } else {
-            const { resolveCredentials } = await import(
-              './src/lib/credential-resolution.js'
-            );
-            await resolveCredentials(session, { requireOrgId: false });
-
-            // CI mode: auto-select first environment if multiple exist
-            if (session.pendingOrgs && !session.credentials) {
-              const { resolveEnvironmentSelection } = await import(
-                './src/lib/credential-resolution.js'
-              );
-              // Pick the first org/workspace/environment with an API key
-              for (const org of session.pendingOrgs) {
-                for (const ws of org.workspaces) {
-                  const env = (ws.environments ?? [])
-                    .filter((e) => e.app?.apiKey)
-                    .sort((a, b) => a.rank - b.rank)[0];
-                  if (env) {
-                    await resolveEnvironmentSelection(session, {
-                      orgId: org.id,
-                      workspaceId: ws.id,
-                      env: env.name,
-                    });
-                    getUI().log.info(
-                      `Resolved Amplitude API key non-interactively (CI mode): ${org.name} / ${ws.name} / ${env.name}`,
-                    );
-                    break;
-                  }
-                }
-                if (session.credentials) break;
-              }
-            }
-          }
-
+          const session = await buildSessionFromOptions(options, { ci: true });
+          await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
             session,
@@ -360,18 +387,6 @@ void yargs(hideBin(process.argv))
       ) {
         // Classic mode: interactive prompts without the rich TUI
         void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
-      } else if (isNonInteractiveEnvironment()) {
-        // Non-interactive non-CI: error out
-        getUI().intro(chalk.inverse(`Amplitude Wizard`));
-        getUI().log.error(
-          'This installer requires an interactive terminal (TTY) to run.\n' +
-            'It appears you are running in a non-interactive environment.\n' +
-            'Please run the wizard in an interactive terminal.\n\n' +
-            'For CI/CD environments, use --ci mode:\n' +
-            '  npx @amplitude/wizard --ci --install-dir . [--api-key <your-key>]\n' +
-            '  (--api-key is optional when a key can be resolved from env or stored credentials.)',
-        );
-        process.exit(1);
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
@@ -383,29 +398,10 @@ void yargs(hideBin(process.argv))
 
           try {
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
-            const { buildSession } = await import(
-              './src/lib/wizard-session.js'
-            );
-
             const tui = startTUI(WIZARD_VERSION);
 
             // Build session from CLI args and attach to store
-            const session = buildSession({
-              debug: options.debug as boolean | undefined,
-              verbose: options.verbose as boolean | undefined,
-              forceInstall: options.forceInstall as boolean | undefined,
-              installDir: options.installDir as string | undefined,
-              ci: false,
-              signup: options.signup as boolean | undefined,
-              localMcp: options.localMcp as boolean | undefined,
-              apiKey: options.apiKey as string | undefined,
-              menu: options.menu as boolean | undefined,
-              integration: options.integration as Parameters<
-                typeof buildSession
-              >[0]['integration'],
-              benchmark: options.benchmark as boolean | undefined,
-              projectId: options.projectId as string | undefined,
-            });
+            const session = await buildSessionFromOptions(options);
 
             // If --api-key was provided, skip the OAuth/TUI auth flow entirely.
             if (session.apiKey) {

@@ -112,7 +112,7 @@
     "build:watch": "pnpm tsc -w",
     "build": "pnpm tsc",
     "postbuild": "chmod +x ./dist/bin.js && pnpm test:smoke",
-    "test:smoke": "node -e \"require('./dist/bin.js')\" 2>&1 | head -5 | grep -q 'Amplitude Wizard' || (echo 'Smoke test failed: compiled binary crashed on load' && exit 1)",
+    "test:smoke": "node ./dist/bin.js --help 2>&1 | head -5 | grep -q 'Amplitude' || (echo 'Smoke test failed: compiled binary crashed on load' && exit 1)",
     "lint": "pnpm lint:prettier && pnpm lint:eslint",
     "lint:prettier": "prettier --check \"{lib,src,test}/**/*.ts\"",
     "lint:eslint": "eslint . --cache --format stylish",

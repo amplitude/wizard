@@ -62,7 +62,11 @@ function parseProjectIdArg(value: string | undefined): number | undefined {
 
 export type CloudRegion = 'us' | 'eu';
 
-/** Lifecycle phase of the main work (agent run, MCP install, etc.) */
+/**
+ * Lifecycle phase of the main work (agent run, MCP install, etc.)
+ * NOTE: Duplicated in src/ui/tui/session-constants.ts (ESM/CJS workaround).
+ * If you change these values, update that file too — a test enforces sync.
+ */
 export const RunPhase = {
   /** Still gathering input (intro, setup screens) */
   Idle: 'idle',

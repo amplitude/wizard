@@ -137,7 +137,12 @@ export class AgentUI implements WizardUI {
 
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
-    emit('error', error.message, {
+    // Sanitize: strip URLs that may contain auth tokens in query params,
+    // and redact file paths that leak internal directory structure.
+    const sanitized = error.message
+      .replace(/https?:\/\/[^\s]+/g, '[URL redacted]')
+      .replace(/\/(?:Users|home|var|tmp)\/[^\s:]+/g, '[path redacted]');
+    emit('error', sanitized, {
       data: { name: error.name },
     });
     return Promise.resolve(false);

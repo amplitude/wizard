@@ -3,7 +3,6 @@
  *
  * Shown after DataIngestionCheckScreen confirms events are flowing.
  * Celebration header: "Your events are flowing!" in success green.
- * Items framed as opportunities, not homework.
  */
 
 import { Box, Text } from 'ink';

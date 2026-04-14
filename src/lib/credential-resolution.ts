@@ -31,6 +31,10 @@ export async function resolveCredentials(
      * Agent/CI mode should set false — a local API key is sufficient.
      */
     requireOrgId?: boolean;
+    /** Org name filter (from --org flag). Case-insensitive partial match. */
+    org?: string;
+    /** Environment name filter (from --env flag). Case-insensitive match. */
+    env?: string;
   },
 ): Promise<void> {
   // Already have credentials (e.g. from --api-key flag)
@@ -44,15 +48,13 @@ export async function resolveCredentials(
     { getAPIKey },
     { getHostFromRegion },
     { logToFile },
-    { persistApiKey },
-    { readApiKeyWithSource },
+    { persistApiKey, readApiKeyWithSource },
   ] = await Promise.all([
     import('../utils/ampli-settings.js'),
     import('./ampli-config.js'),
     import('../utils/get-api-key.js'),
     import('../utils/urls.js'),
     import('../utils/debug.js'),
-    import('../utils/api-key-store.js'),
     import('../utils/api-key-store.js'),
   ]);
 
@@ -105,9 +107,16 @@ export async function resolveCredentials(
             ...storedToken,
             accessToken: refreshResult.accessToken,
             expiresAt: new Date(refreshResult.expiresAt).toISOString(),
+            // Persist rotated refresh token if the server issued one
+            ...(refreshResult.refreshToken
+              ? { refreshToken: refreshResult.refreshToken }
+              : {}),
           });
         }
         storedToken.accessToken = refreshResult.accessToken;
+        if (refreshResult.refreshToken) {
+          storedToken.refreshToken = refreshResult.refreshToken;
+        }
         logToFile(
           '[credential-resolution] silently refreshed expired access token',
         );
@@ -159,7 +168,54 @@ export async function resolveCredentials(
             }
           }
 
-          if (envsWithKey.length === 1) {
+          // If --env flag was provided, try to match across all orgs/workspaces
+          if (options?.env) {
+            const envMatch = options.env.toLowerCase();
+            const orgFilter = options.org?.toLowerCase();
+
+            for (const org of userInfo.orgs) {
+              if (orgFilter && !org.name.toLowerCase().includes(orgFilter)) {
+                continue;
+              }
+              for (const ws of org.workspaces) {
+                const matchedEnv = (ws.environments ?? []).find(
+                  (e) => e.app?.apiKey && e.name.toLowerCase() === envMatch,
+                );
+                if (matchedEnv?.app?.apiKey) {
+                  const apiKey = matchedEnv.app.apiKey;
+                  session.selectedOrgId = org.id;
+                  session.selectedOrgName = org.name;
+                  session.selectedWorkspaceId = ws.id;
+                  session.selectedWorkspaceName = ws.name;
+                  session.selectedProjectName = matchedEnv.name;
+                  if (!session.userEmail && userInfo.email) {
+                    session.userEmail = userInfo.email;
+                  }
+                  logToFile(
+                    `[credential-resolution] --env matched: ${org.name} / ${ws.name} / ${matchedEnv.name}`,
+                  );
+                  persistApiKey(apiKey, installDir);
+                  session.credentials = {
+                    accessToken: storedToken.accessToken,
+                    idToken: storedToken.idToken,
+                    projectApiKey: apiKey,
+                    host: getHostFromRegion(zone as AmplitudeZone),
+                    projectId: 0,
+                  };
+                  session.activationLevel = 'none';
+                  session.projectHasData = false;
+                  break;
+                }
+              }
+              if (session.credentials) break;
+            }
+
+            if (!session.credentials) {
+              logToFile(
+                `[credential-resolution] --env "${options.env}" did not match any environment`,
+              );
+            }
+          } else if (envsWithKey.length === 1) {
             // Single environment — auto-select
             const apiKey = envsWithKey[0].app!.apiKey!;
             session.selectedProjectName = envsWithKey[0].name;
@@ -248,10 +304,18 @@ export async function resolveCredentials(
 
   // Pre-populate org/workspace from ampli.json so activation checks
   // have the IDs they need even when the SUSI flow was skipped.
-  if (projectConfig.ok && projectConfig.config.OrgId) {
+  if (
+    !session.selectedOrgId &&
+    projectConfig.ok &&
+    projectConfig.config.OrgId
+  ) {
     session.selectedOrgId = String(projectConfig.config.OrgId);
   }
-  if (projectConfig.ok && projectConfig.config.WorkspaceId) {
+  if (
+    !session.selectedWorkspaceId &&
+    projectConfig.ok &&
+    projectConfig.config.WorkspaceId
+  ) {
     session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
   }
 

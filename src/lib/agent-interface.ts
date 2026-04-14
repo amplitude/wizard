@@ -1325,6 +1325,33 @@ export async function runAgent(
           continue;
         }
 
+        // Transient SDK/proxy error: malformed conversation history (tool_use
+        // without tool_result) or API 400. These are SDK-level race conditions
+        // that resolve on a fresh retry with a new conversation.
+        const errMsg =
+          innerError instanceof Error ? innerError.message : String(innerError);
+        const isTransientSdkError =
+          attempt < MAX_RETRIES &&
+          !authErrorDetected &&
+          (errMsg.includes('tool_use') ||
+            errMsg.includes('tool_result') ||
+            errMsg.includes('API Error: 400') ||
+            errMsg.includes('invalid_request_error'));
+        if (isTransientSdkError) {
+          logToFile(
+            `Retrying after transient SDK error (next attempt: ${
+              attempt + 2
+            } of ${MAX_RETRIES + 1}): ${errMsg.slice(0, 200)}`,
+          );
+          analytics.wizardCapture('Agent SDK Error Retry', {
+            attempt,
+            error: errMsg.slice(0, 200),
+          });
+          collectedText.length = 0;
+          recentStatuses.length = 0;
+          continue;
+        }
+
         // Already received a successful result — this is an SDK cleanup race condition
         if (receivedSuccessResult) {
           return completeWithSuccess(innerError as Error);

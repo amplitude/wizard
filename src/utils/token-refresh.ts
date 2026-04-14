@@ -28,7 +28,11 @@ export async function tryRefreshToken(
     expiresAt: number;
   },
   zone: AmplitudeZone = DEFAULT_AMPLITUDE_ZONE,
-): Promise<{ accessToken: string; expiresAt: number } | null> {
+): Promise<{
+  accessToken: string;
+  expiresAt: number;
+  refreshToken?: string;
+} | null> {
   // 1. Check whether the token actually needs refreshing
   const now = Date.now();
   if (storedEntry.expiresAt - now > EXPIRY_BUFFER_MS) {
@@ -90,11 +94,16 @@ export async function tryRefreshToken(
 
     const expiresAt = now + expiresIn * 1000;
 
+    // Persist rotated refresh token if the server issued a new one
+    const newRefreshToken =
+      typeof data.refresh_token === 'string' ? data.refresh_token : undefined;
+
     logToFile('[token-refresh] silent refresh succeeded', {
       expiresAt: new Date(expiresAt).toISOString(),
+      rotatedRefreshToken: !!newRefreshToken,
     });
 
-    return { accessToken, expiresAt };
+    return { accessToken, expiresAt, refreshToken: newRefreshToken };
   } catch (err) {
     logToFile(
       '[token-refresh] refresh failed',
