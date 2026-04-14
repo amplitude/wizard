@@ -2,7 +2,9 @@
  * Shared constants for the Amplitude wizard.
  */
 
-import { version as VERSION } from '../../package.json';
+// Injected at build time by scripts/generate-version.js — do not edit manually.
+// release-please bumps package.json; the prebuild script syncs it here.
+const VERSION = '1.0.0-beta.5';
 
 // ── Integration / CLI ───────────────────────────────────────────────
 

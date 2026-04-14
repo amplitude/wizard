@@ -108,7 +108,7 @@
   "scripts": {
     "prepublishOnly": "pnpm build",
     "clean": "rm -rf ./dist",
-    "prebuild": "pnpm clean",
+    "prebuild": "pnpm clean && node scripts/sync-version.mjs",
     "build:watch": "pnpm tsc -w",
     "build": "pnpm tsc",
     "postbuild": "chmod +x ./dist/bin.js && pnpm test:smoke",
