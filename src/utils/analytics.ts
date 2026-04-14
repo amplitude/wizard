@@ -1,4 +1,4 @@
-import { createInstance } from '@amplitude/analytics-node';
+import { createInstance, Identify } from '@amplitude/analytics-node';
 import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
@@ -81,6 +81,55 @@ export class Analytics {
 
   setDistinctId(distinctId: string) {
     this.distinctId = distinctId;
+  }
+
+  /**
+   * Send an identify call to associate user properties with the current user.
+   * Call after setDistinctId() has been called with a valid email.
+   */
+  identifyUser(properties: {
+    email?: string;
+    org_id?: string;
+    org_name?: string;
+    workspace_id?: string;
+    workspace_name?: string;
+    project_id?: string | number | null;
+    project_name?: string | null;
+    region?: string | null;
+    integration?: string | null;
+  }): void {
+    const apiKey = resolveTelemetryApiKey();
+    if (!apiKey || !this.distinctId) {
+      debug('identifyUser skipped (no API key or distinctId):', properties);
+      return;
+    }
+
+    this.ensureInitStarted();
+
+    const identifyObj = new Identify();
+
+    if (properties.email) {
+      identifyObj.setOnce('email', properties.email);
+    }
+    if (properties.org_id) identifyObj.set('org_id', properties.org_id);
+    if (properties.org_name) identifyObj.set('org_name', properties.org_name);
+    if (properties.workspace_id)
+      identifyObj.set('workspace_id', properties.workspace_id);
+    if (properties.workspace_name)
+      identifyObj.set('workspace_name', properties.workspace_name);
+    if (properties.project_id != null)
+      identifyObj.set('project_id', String(properties.project_id));
+    if (properties.project_name)
+      identifyObj.set('project_name', properties.project_name);
+    if (properties.region) identifyObj.set('region', properties.region);
+    if (properties.integration)
+      identifyObj.set('integration', properties.integration);
+
+    this.client.identify(identifyObj, {
+      device_id: this.anonymousId,
+      user_id: this.distinctId,
+    });
+    debug('identifyUser:', properties);
   }
 
   setTag(key: string, value: string | boolean | number | null | undefined) {

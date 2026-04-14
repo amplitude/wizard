@@ -10,6 +10,7 @@
 import type { WizardSession } from './wizard-session';
 import type { AmplitudeZone } from './constants';
 import { extractProjectId } from './api';
+import { analytics } from '../utils/analytics';
 
 /**
  * Resolve credentials from stored OAuth tokens and environment data.
@@ -146,6 +147,8 @@ export async function resolveCredentials(
             storedToken.idToken,
             zone as AmplitudeZone,
           );
+          analytics.setDistinctId(userInfo.email);
+          analytics.identifyUser({ email: userInfo.email });
           const workspaceId = session.selectedWorkspaceId ?? undefined;
 
           // Find the relevant workspace and its environments
