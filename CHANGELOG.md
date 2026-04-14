@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.0-beta.6](https://github.com/amplitude/wizard/compare/wizard-v1.0.0-beta.5...wizard-v1.0.0-beta.6) (2026-04-14)
+
+
+### Features
+
+* fi ([d93a8fb](https://github.com/amplitude/wizard/commit/d93a8fb110a392823f4c2d44c7e03e8903e774c4))
+
+
+### Bug Fixes
+
+* hardcode VERSION instead of requiring package.json at runtime ([#67](https://github.com/amplitude/wizard/issues/67)) ([55aa462](https://github.com/amplitude/wizard/commit/55aa462da58f03fc16fa32d05aee72e9f5e22d5f))
+
 ## [1.0.0-beta.5](https://github.com/amplitude/wizard/compare/wizard-v1.0.0-beta.4...wizard-v1.0.0-beta.5) (2026-04-13)
 
 
