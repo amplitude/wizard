@@ -21,6 +21,50 @@ type ReactRouterContext = {
   routerMode?: ReactRouterMode;
 };
 
+const REACT_ROUTER_MINIMUM_VERSION = '6.0.0';
+const TANSTACK_MINIMUM_VERSION = '1.0.0';
+
+function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
+  version?: string;
+  minimumVersion?: string;
+  packageDisplayName?: string;
+} {
+  const reactRouterVersion = getPackageVersion('react-router', packageJson);
+  if (reactRouterVersion) {
+    return {
+      version: reactRouterVersion,
+      minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
+      packageDisplayName: 'React Router',
+    };
+  }
+
+  const tanstackStartVersion = getPackageVersion(
+    '@tanstack/react-start',
+    packageJson,
+  );
+  if (tanstackStartVersion) {
+    return {
+      version: tanstackStartVersion,
+      minimumVersion: TANSTACK_MINIMUM_VERSION,
+      packageDisplayName: 'TanStack Start',
+    };
+  }
+
+  const tanstackRouterVersion = getPackageVersion(
+    '@tanstack/react-router',
+    packageJson,
+  );
+  if (tanstackRouterVersion) {
+    return {
+      version: tanstackRouterVersion,
+      minimumVersion: TANSTACK_MINIMUM_VERSION,
+      packageDisplayName: 'TanStack Router',
+    };
+  }
+
+  return {};
+}
+
 export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   metadata: {
     name: 'React Router',
@@ -71,15 +115,16 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
       );
     },
     getVersionBucket: getReactRouterVersionBucket,
-    minimumVersion: '6.0.0',
+    minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
     getInstalledVersion: async (options: WizardOptions) => {
       const packageJson = await tryGetPackageJson(options);
       if (!packageJson) return undefined;
-      return (
-        getPackageVersion('react-router', packageJson) ??
-        getPackageVersion('@tanstack/react-start', packageJson) ??
-        getPackageVersion('@tanstack/react-router', packageJson)
-      );
+      return getReactRouterVersionCheckInfo(packageJson).version;
+    },
+    getVersionCheckInfo: async (options: WizardOptions) => {
+      const packageJson = await tryGetPackageJson(options);
+      if (!packageJson) return {};
+      return getReactRouterVersionCheckInfo(packageJson);
     },
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);

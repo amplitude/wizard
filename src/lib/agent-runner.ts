@@ -25,7 +25,7 @@ import {
 } from './agent-interface';
 import { getLlmGatewayUrlFromHost } from '../utils/urls';
 import { OUTBOUND_URLS } from './constants.js';
-import * as semver from 'semver';
+import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { createBenchmarkPipeline } from './middleware/benchmark';
@@ -66,29 +66,34 @@ export async function runAgentWizard(
   }
 
   // Version check
-  if (config.detection.minimumVersion && config.detection.getInstalledVersion) {
-    const version = await config.detection.getInstalledVersion(
+  if (
+    config.detection.getInstalledVersion ||
+    config.detection.getVersionCheckInfo
+  ) {
+    const versionCheckInfo = await getVersionCheckInfo(
+      config.detection,
       sessionToOptions(session),
     );
-    logToFile(`[runAgentWizard] detected version: ${version}`);
-    if (version) {
-      const coerced = semver.coerce(version);
-      if (coerced && semver.lt(coerced, config.detection.minimumVersion)) {
-        logToFile(
-          `[runAgentWizard] version ${version} is less than minimum required ${config.detection.minimumVersion}`,
-        );
-        const docsUrl =
-          config.metadata.unsupportedVersionDocsUrl ?? config.metadata.docsUrl;
-        logToFile(
-          `[runAgentWizard] directing user to manual setup guide: ${docsUrl}`,
-        );
-        getUI().cancel(
-          `The wizard requires ${config.metadata.name} ${config.detection.minimumVersion} or later, but found version ${version}. Upgrade your ${config.metadata.name} version to use the wizard, or follow the manual setup guide.`,
-          { docsUrl },
-        );
-        logToFile('[runAgentWizard] cancel displayed to user');
-        return;
-      }
+    logToFile(`[runAgentWizard] detected version: ${versionCheckInfo.version}`);
+    const versionWarning = getVersionWarning(versionCheckInfo, {
+      coerceVersion: true,
+    });
+    if (versionWarning) {
+      logToFile(`[runAgentWizard] ${versionWarning}`);
+      const docsUrl =
+        config.metadata.unsupportedVersionDocsUrl ?? config.metadata.docsUrl;
+      logToFile(`[runAgentWizard] directing user to manual setup guide: ${docsUrl}`);
+      const minimumVersion =
+        versionCheckInfo.minimumVersion ?? config.detection.minimumVersion;
+      const packageDisplayName =
+        versionCheckInfo.packageDisplayName ?? config.metadata.name;
+      const version = versionCheckInfo.version ?? 'unknown';
+      getUI().cancel(
+        `The wizard requires ${packageDisplayName} ${minimumVersion} or later, but found version ${version}. Upgrade your ${packageDisplayName} version to use the wizard, or follow the manual setup guide.`,
+        { docsUrl },
+      );
+      logToFile('[runAgentWizard] cancel displayed to user');
+      return;
     }
   }
 

@@ -12,7 +12,10 @@ import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
-import * as semver from 'semver';
+import {
+  getVersionCheckInfo,
+  getVersionWarning,
+} from './lib/version-check';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -198,10 +201,14 @@ export async function detectAllFrameworks(
           timedOut: false,
         };
 
-        // Version check: if detected and version info is available, check minimum
-        if (result.detected && config.detection.getInstalledVersion) {
+        // Version check: if detected and a version resolver is available, check minimum
+        if (
+          result.detected &&
+          (config.detection.getInstalledVersion ||
+            config.detection.getVersionCheckInfo)
+        ) {
           try {
-            const version = await config.detection.getInstalledVersion({
+            const versionCheckInfo = await getVersionCheckInfo(config.detection, {
               installDir,
               debug: false,
               forceInstall: false,
@@ -212,17 +219,11 @@ export async function detectAllFrameworks(
               menu: false,
               benchmark: false,
             });
-            if (version) {
-              result.version = version;
-              if (
-                config.detection.minimumVersion &&
-                semver.valid(version) &&
-                semver.lt(version, config.detection.minimumVersion)
-              ) {
-                result.versionWarning = `${config.detection.packageDisplayName} ${version} is below minimum ${config.detection.minimumVersion}`;
-                logToFile(
-                  `[detection] ${integration}: ${result.versionWarning}`,
-                );
+            if (versionCheckInfo.version) {
+              result.version = versionCheckInfo.version;
+              result.versionWarning = getVersionWarning(versionCheckInfo);
+              if (result.versionWarning) {
+                logToFile(`[detection] ${integration}: ${result.versionWarning}`);
               }
             }
           } catch (err) {

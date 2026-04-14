@@ -319,6 +319,49 @@ describe('detectAllFrameworks', () => {
     expect(nextjs?.versionWarning).toBeUndefined();
   });
 
+  test('supports dynamic minimumVersion from getVersionCheckInfo', async () => {
+    registry = buildRegistry({
+      [Integration.nextjs]: {
+        detect: async () => true,
+      },
+    });
+    registry[Integration.nextjs].detection.getVersionCheckInfo = vi
+      .fn()
+      .mockResolvedValue({
+        version: '1.168.10',
+        minimumVersion: '1.0.0',
+        packageDisplayName: 'TanStack Router',
+      });
+
+    const results = await detectAllFrameworks(process.cwd());
+    const nextjs = results.find((r) => r.integration === Integration.nextjs);
+
+    expect(nextjs?.version).toBe('1.168.10');
+    expect(nextjs?.versionWarning).toBeUndefined();
+  });
+
+  test('getVersionCheckInfo warning uses package-specific minimum', async () => {
+    registry = buildRegistry({
+      [Integration.nextjs]: {
+        detect: async () => true,
+      },
+    });
+    registry[Integration.nextjs].detection.getVersionCheckInfo = vi
+      .fn()
+      .mockResolvedValue({
+        version: '0.9.0',
+        minimumVersion: '1.0.0',
+        packageDisplayName: 'TanStack Router',
+      });
+
+    const results = await detectAllFrameworks(process.cwd());
+    const nextjs = results.find((r) => r.integration === Integration.nextjs);
+
+    expect(nextjs?.versionWarning).toContain('TanStack Router');
+    expect(nextjs?.versionWarning).toContain('0.9.0');
+    expect(nextjs?.versionWarning).toContain('1.0.0');
+  });
+
   test('times out slow getInstalledVersion along with detect', async () => {
     registry = buildRegistry({
       [Integration.nextjs]: {
