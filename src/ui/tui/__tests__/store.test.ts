@@ -19,6 +19,7 @@ vi.mock('../../../utils/analytics.js', () => ({
     wizardCapture: vi.fn(),
     setTag: vi.fn(),
     setDistinctId: vi.fn(),
+    identifyUser: vi.fn(),
     shutdown: vi.fn().mockResolvedValue(undefined),
     isFeatureFlagEnabled: vi.fn().mockReturnValue(true),
   },
@@ -281,6 +282,51 @@ describe('WizardStore', () => {
       expect(wizardCaptureMock).toHaveBeenCalledWith('Auth Complete', {
         project_id: 42,
         region: null,
+      });
+    });
+
+    it('setCredentials identifies user by email when userEmail is set', () => {
+      const store = createStore();
+      store.session.userEmail = 'ada@example.com';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'h',
+        projectId: 42,
+      });
+      expect(analytics.setDistinctId).toHaveBeenCalledWith('ada@example.com');
+      expect(analytics.identifyUser).toHaveBeenCalledWith(
+        expect.objectContaining({
+          email: 'ada@example.com',
+          org_id: 'org-1',
+          org_name: 'Acme',
+          project_id: 42,
+        }),
+      );
+    });
+
+    it('setCredentials skips identify when userEmail is null', () => {
+      const store = createStore();
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'h',
+        projectId: 42,
+      });
+      expect(analytics.setDistinctId).not.toHaveBeenCalled();
+      expect(analytics.identifyUser).not.toHaveBeenCalled();
+    });
+
+    it('setFrameworkConfig identifies user with integration', () => {
+      const store = createStore();
+      const config = {
+        metadata: { name: 'Next.js' },
+      } as WizardStore['session']['frameworkConfig'];
+      store.setFrameworkConfig(Integration.nextjs, config);
+      expect(analytics.identifyUser).toHaveBeenCalledWith({
+        integration: Integration.nextjs,
       });
     });
 
