@@ -46,6 +46,10 @@ flowchart TD
     FEEDBACK --> FEEDBACK_SEND["Track wizard: feedback submitted via Node SDK"]
 
     AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
+    AGENT_UI --> AGENT_RUN["SDK installation agent run"]
+    AGENT_RUN --> AGENT_POLL["Data ingestion check<br/>(polls MCP every 30s · up to 30 min)<br/>emits events_detected result event · auto-advances"]
+    AGENT_POLL -->|events detected| AGENT_DONE["outro — events_detected NDJSON result"]
+    AGENT_POLL -->|timeout| AGENT_TIMEOUT["outro — log warning, continue"]
 
     LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]

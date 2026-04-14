@@ -206,4 +206,8 @@ export class LoggingUI implements WizardUI {
   setEventPlan(_events: Array<{ name: string; description: string }>): void {
     // No-op in CI mode
   }
+
+  setEventIngestionDetected(_eventNames: string[]): void {
+    // No-op in CI/logging mode
+  }
 }

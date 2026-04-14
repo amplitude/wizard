@@ -33,6 +33,7 @@ export const CliArgsSchema = z.object({
   debug: z.boolean().default(false),
   verbose: z.boolean().default(false),
   ci: z.boolean().default(false),
+  agent: z.boolean().default(false),
   forceInstall: z.boolean().default(false),
   signup: z.boolean().default(false),
   localMcp: z.boolean().default(false),
@@ -145,6 +146,7 @@ export interface WizardSession {
   forceInstall: boolean;
   installDir: string;
   ci: boolean;
+  agent: boolean;
   signup: boolean;
   localMcp: boolean;
   apiKey?: string;
@@ -375,6 +377,7 @@ export function buildSession(args: {
     forceInstall: validated.forceInstall ?? false,
     installDir: validated.installDir ?? process.cwd(),
     ci: validated.ci ?? false,
+    agent: false,
     signup: validated.signup ?? false,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,

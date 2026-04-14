@@ -387,6 +387,12 @@ export async function runAgentWizard(
 
   // MCP installation is handled by McpScreen — no prompt here
 
+  // Data ingestion check — agent mode only (not CI).
+  // Poll via MCP until events arrive, then emit a structured result event.
+  if (session.agent) {
+    await pollForDataIngestion(session, accessToken, cloudRegion);
+  }
+
   // Build outro data and store it for OutroScreen
   const continueUrl = session.signup
     ? OUTBOUND_URLS.products(cloudRegion)
@@ -412,6 +418,128 @@ export async function runAgentWizard(
   getUI().outro(`Successfully installed Amplitude!`);
 
   await analytics.shutdown('success');
+}
+
+/**
+ * Poll the Amplitude MCP server for event ingestion in agent mode.
+ *
+ * Emits structured NDJSON events via the AgentUI:
+ *   - `status` events every poll cycle while waiting
+ *   - `result` event when events are detected (includes event names)
+ *   - `log` warning if the timeout is reached without detecting events
+ *
+ * Skipped silently if no project ID can be resolved (e.g. --api-key flow).
+ *
+ * @param session    - wizard session (must have session.agent === true)
+ * @param accessToken - OAuth access token for MCP Bearer auth
+ * @param cloudRegion - us | eu, used to resolve project ID lazily if needed
+ */
+async function pollForDataIngestion(
+  session: WizardSession,
+  accessToken: string,
+  cloudRegion: string,
+): Promise<void> {
+  const { fetchHasAnyEventsMcp, fetchAmplitudeUser } = await import(
+    '../lib/api.js'
+  );
+  const { logToFile } = await import('../utils/debug.js');
+
+  const POLL_INTERVAL_MS = 30_000;
+  // Allow override for testing; default 30 minutes.
+  const MAX_WAIT_MS =
+    Number(process.env.DATA_INGESTION_TIMEOUT_MS) || 30 * 60 * 1000;
+
+  // Resolve the numeric analytics project ID.
+  // It is set by resolveEnvironmentSelection for the environment-picker path,
+  // and by the fire-and-forget in bin.ts for the TUI path.
+  // If still missing, try a single fetchAmplitudeUser call.
+  let projectId = session.selectedProjectId ?? null;
+  if (!projectId) {
+    try {
+      const userInfo = await fetchAmplitudeUser(
+        accessToken,
+        cloudRegion as 'us' | 'eu',
+      );
+      const org = session.selectedOrgId
+        ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
+        : userInfo.orgs[0];
+      const ws =
+        org && session.selectedWorkspaceId
+          ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
+          : org?.workspaces[0];
+      projectId =
+        ws?.environments
+          ?.slice()
+          .sort((a, b) => a.rank - b.rank)
+          .find((e) => e.app?.id)?.app?.id ?? null;
+      if (projectId) session.selectedProjectId = projectId;
+    } catch (err) {
+      logToFile(
+        `[pollForDataIngestion] could not resolve projectId: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (!projectId) {
+    logToFile('[pollForDataIngestion] no projectId — skipping ingestion check');
+    return;
+  }
+
+  const ui = getUI();
+  ui.pushStatus('Waiting for events — run your app and trigger some actions');
+
+  const deadline = Date.now() + MAX_WAIT_MS;
+  let pollCount = 0;
+
+  while (Date.now() < deadline) {
+    pollCount++;
+    logToFile(
+      `[pollForDataIngestion] poll #${pollCount} projectId=${projectId}`,
+    );
+
+    try {
+      const result = await fetchHasAnyEventsMcp(accessToken, projectId);
+      if (result.hasEvents) {
+        logToFile(
+          `[pollForDataIngestion] events detected: ${result.activeEventNames.join(
+            ', ',
+          )}`,
+        );
+        // Emit a structured result event so callers can act on it.
+        ui.setEventIngestionDetected(result.activeEventNames);
+        ui.log.success(
+          `Events detected: ${
+            result.activeEventNames.length > 0
+              ? result.activeEventNames.join(', ')
+              : '(events flowing)'
+          }`,
+        );
+        session.dataIngestionConfirmed = true;
+        return;
+      }
+    } catch (err) {
+      logToFile(
+        `[pollForDataIngestion] poll error: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    // Wait before the next poll, but bail early if deadline passed.
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await new Promise<void>((resolve) =>
+      setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)),
+    );
+  }
+
+  logToFile('[pollForDataIngestion] timeout reached without detecting events');
+  ui.log.warn(
+    'No events detected within the timeout window. ' +
+      'Run your app to send events, then check your Amplitude dashboard.',
+  );
 }
 
 /**

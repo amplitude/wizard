@@ -385,6 +385,14 @@ export async function resolveEnvironmentSelection(
   session.selectedWorkspaceName = ws.name;
   session.selectedProjectName = env.name;
 
+  // Extract the numeric analytics project ID for MCP-based event detection.
+  const projectId =
+    (ws.environments ?? [])
+      .slice()
+      .sort((a, b) => a.rank - b.rank)
+      .find((e) => e.app?.id)?.app?.id ?? null;
+  session.selectedProjectId = projectId;
+
   persistApiKey(apiKey, session.installDir);
   session.credentials = {
     accessToken: session.pendingAuthAccessToken ?? '',

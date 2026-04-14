@@ -6,38 +6,110 @@
  * Override with: MCP_ACCESS_TOKEN=<token> pnpm tsx scripts/test-mcp.ts <projectId>
  */
 
-import { readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 
 const PROJECT_ID = process.argv[2] ?? '804053';
 const MCP_URL = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
 
-function getStoredAccessToken(): string | null {
-  try {
-    const config = JSON.parse(
-      readFileSync(join(homedir(), '.ampli.json'), 'utf-8'),
-    ) as Record<string, unknown>;
-    for (const [key, value] of Object.entries(config)) {
-      if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
-      const entry = value as Record<string, string>;
-      if (entry.OAuthAccessToken) {
-        const expiresAt = new Date(entry.OAuthExpiresAt ?? 0);
-        const refreshExpiry = new Date(
-          expiresAt.getTime() + 364 * 24 * 60 * 60 * 1000,
-        );
-        if (new Date() > refreshExpiry) {
-          console.log(`  [skip] ${key}: token expired`);
-          continue;
-        }
-        console.log(`  [use]  ${key}: expires ${entry.OAuthExpiresAt}`);
-        return entry.OAuthAccessToken;
+/** Read stored tokens using the wizard's own storage logic, then refresh if expired. */
+async function resolveWorkingToken(): Promise<string> {
+  const { getStoredToken, getStoredUser } = await import(
+    '../src/utils/ampli-settings.js'
+  );
+  const { refreshAccessToken } = await import('../src/utils/oauth.js');
+
+  const user = getStoredUser();
+  const stored = getStoredToken(user?.id, user?.zone);
+  if (!stored) {
+    throw new Error(
+      'No valid token in ~/.ampli.json — run the wizard to log in first.',
+    );
+  }
+
+  const accessExpired = new Date() > new Date(stored.expiresAt);
+  console.log(
+    `  stored token expires ${stored.expiresAt}${
+      accessExpired ? ' (EXPIRED — will refresh)' : ''
+    }`,
+  );
+
+  // Probe which token the MCP server accepts (accessToken vs idToken).
+  // If the access token is expired, skip straight to refresh.
+  if (!accessExpired) {
+    for (const [label, tok] of [
+      ['accessToken', stored.accessToken],
+      ['idToken', stored.idToken],
+    ] as const) {
+      const probe = await fetch('https://mcp.amplitude.com/mcp', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tok}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 0,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'probe', version: '0' },
+          },
+        }),
+      });
+      await probe.body?.cancel().catch(() => undefined);
+      if (probe.status !== 401) {
+        console.log(`  → ${label} accepted by MCP (status ${probe.status})`);
+        return tok;
       }
+      console.log(`  → ${label} rejected (401)`);
     }
-    return null;
+  }
+
+  // Try to refresh.
+  console.log('  → refreshing via refresh_token...');
+  try {
+    const refreshed = await refreshAccessToken(
+      stored.refreshToken,
+      user?.zone ?? 'us',
+    );
+    console.log(`  → refreshed! expires ${refreshed.expiresAt}`);
+    for (const [label, tok] of [
+      ['accessToken', refreshed.accessToken],
+      ['idToken', refreshed.idToken],
+    ] as const) {
+      const probe = await fetch('https://mcp.amplitude.com/mcp', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${tok}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 0,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'probe', version: '0' },
+          },
+        }),
+      });
+      await probe.body?.cancel().catch(() => undefined);
+      if (probe.status !== 401) {
+        console.log(`  → refreshed ${label} accepted (status ${probe.status})`);
+        return tok;
+      }
+      console.log(`  → refreshed ${label} rejected (401)`);
+    }
+    return refreshed.accessToken;
   } catch (e) {
-    console.error('Failed to read ~/.ampli.json:', e);
-    return null;
+    throw new Error(
+      `Token refresh failed: ${e instanceof Error ? e.message : e}`,
+    );
   }
 }
 
@@ -447,14 +519,19 @@ async function testMcp(accessToken: string): Promise<void> {
 }
 
 async function main() {
-  const accessToken = process.env.MCP_ACCESS_TOKEN ?? getStoredAccessToken();
-  if (!accessToken) {
-    console.error(
-      'No access token found. Run the wizard once to log in, or set MCP_ACCESS_TOKEN.',
-    );
-    process.exit(1);
+  let accessToken: string;
+  if (process.env.MCP_ACCESS_TOKEN) {
+    accessToken = process.env.MCP_ACCESS_TOKEN;
+    console.log(`Access token: (from env) ${accessToken.slice(0, 20)}...`);
+  } else {
+    try {
+      accessToken = await resolveWorkingToken();
+    } catch (e) {
+      console.error(e instanceof Error ? e.message : e);
+      process.exit(1);
+    }
+    console.log(`Working token: ${accessToken.slice(0, 20)}...`);
   }
-  console.log(`Access token: ${accessToken.slice(0, 20)}...`);
   console.log(`Project ID: ${PROJECT_ID}`);
   await testMcp(accessToken);
 }

@@ -357,6 +357,7 @@ void yargs(hideBin(process.argv))
           if (!options.installDir) options.installDir = process.cwd();
 
           const session = await buildSessionFromOptions(options);
+          session.agent = true;
           await resolveNonInteractiveCredentials(
             session,
             options,
@@ -469,28 +470,31 @@ void yargs(hideBin(process.argv))
                         changed = true;
                       }
                       if (session.selectedOrgId) {
-                        const org = userInfo.orgs.find(
-                          (o) => o.id === session.selectedOrgId,
-                        );
+                        // Fall back to the first org if the stored ID is stale
+                        // (e.g. session checkpoint from a different account).
+                        const org =
+                          userInfo.orgs.find(
+                            (o) => o.id === session.selectedOrgId,
+                          ) ?? userInfo.orgs[0];
                         logToFile(
                           `[bin] fire-and-forget: orgs=${userInfo.orgs
                             .map((o) => o.id)
                             .join(',')}, looking for ${
                             session.selectedOrgId
-                          }, found=${org ? 'yes' : 'no'}`,
+                          }, using=${org?.id ?? 'none'}`,
                         );
                         if (org) {
                           session.selectedOrgName = org.name;
                           changed = true;
+                          // Fall back to the first workspace if the stored ID is stale.
                           const ws = session.selectedWorkspaceId
                             ? org.workspaces.find(
                                 (w) => w.id === session.selectedWorkspaceId,
-                              )
-                            : undefined;
+                              ) ?? org.workspaces[0]
+                            : org.workspaces[0];
                           if (ws) {
                             session.selectedWorkspaceName = ws.name;
-                            // Extract the analytics project ID from the lowest-rank
-                            // environment so DataIngestionCheckScreen can use query_dataset.
+                            // Extract the analytics project ID from the lowest-rank environment.
                             const projectId =
                               ws.environments
                                 ?.slice()
@@ -504,7 +508,7 @@ void yargs(hideBin(process.argv))
                             session.selectedProjectId = projectId;
                           } else {
                             logToFile(
-                              `[bin] project ID resolution: workspace ${session.selectedWorkspaceId} not found in org ${session.selectedOrgId} (org has ${org.workspaces.length} workspaces)`,
+                              `[bin] project ID resolution: no workspaces in org ${org.id}`,
                             );
                           }
                         }

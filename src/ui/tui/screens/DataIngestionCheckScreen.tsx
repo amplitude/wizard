@@ -163,14 +163,17 @@ export const DataIngestionCheckScreen = ({
           freshCredentials.idToken ?? freshCredentials.accessToken,
           zone,
         );
+        // Fall back to the first org if the stored ID doesn't match (stale checkpoint).
         const org = currentSession.selectedOrgId
-          ? userInfo.orgs.find((o) => o.id === currentSession.selectedOrgId)
+          ? userInfo.orgs.find((o) => o.id === currentSession.selectedOrgId) ??
+            userInfo.orgs[0]
           : userInfo.orgs[0];
+        // Fall back to the first workspace if the stored ID doesn't match.
         const ws =
           org && currentSession.selectedWorkspaceId
             ? org.workspaces.find(
                 (w) => w.id === currentSession.selectedWorkspaceId,
-              )
+              ) ?? org.workspaces[0]
             : org?.workspaces[0];
 
         const restoredFields: Parameters<typeof store.restoreSessionIds>[0] =

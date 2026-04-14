@@ -189,4 +189,8 @@ export class InkUI implements WizardUI {
   setEventPlan(events: Array<{ name: string; description: string }>): void {
     this.store.setEventPlan(events);
   }
+
+  setEventIngestionDetected(_eventNames: string[]): void {
+    // In TUI mode, DataIngestionCheckScreen handles this via polling — no-op here.
+  }
 }
