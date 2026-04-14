@@ -1,5 +1,24 @@
 # Changelog
 
+## [1.0.0-beta.5](https://github.com/amplitude/wizard/compare/wizard-v1.0.0-beta.4...wizard-v1.0.0-beta.5) (2026-04-13)
+
+
+### Features
+
+* direct Slack OAuth integration via Thunder GraphQL ([#59](https://github.com/amplitude/wizard/issues/59)) ([626ad8a](https://github.com/amplitude/wizard/commit/626ad8a0bb959a083a45fe6f43a3d501b2b44f95))
+* redesign TUI — new visual system, agent mode, session persistence, and UX hardening ([#62](https://github.com/amplitude/wizard/issues/62)) ([9f13c71](https://github.com/amplitude/wizard/commit/9f13c718857c1dab3335ac321e1ccfac9ed2e1bb))
+
+
+### Bug Fixes
+
+* correct MCP install configs for Cursor and Claude Desktop ([#57](https://github.com/amplitude/wizard/issues/57)) ([2ecde5b](https://github.com/amplitude/wizard/commit/2ecde5bda410c4f3615fb47f4b4243a3146d4684))
+* correct misleading MCP prompt and refresh skills on publish ([#56](https://github.com/amplitude/wizard/issues/56)) ([c5298d5](https://github.com/amplitude/wizard/commit/c5298d5b856ddfd619adee101e35aab531773f24))
+* hide slash input on intro and collapse logo on small viewports ([#60](https://github.com/amplitude/wizard/issues/60)) ([8b866e8](https://github.com/amplitude/wizard/commit/8b866e8b9fad1efc12aead86575781074913f61e))
+* improve RunScreen navigation and add demo mode ([#48](https://github.com/amplitude/wizard/issues/48)) ([f97bb4c](https://github.com/amplitude/wizard/commit/f97bb4c51a428c11cc0f50f25ef3de80a7a80c5e))
+* include bundled skills in published package ([#49](https://github.com/amplitude/wizard/issues/49)) ([b2bdc76](https://github.com/amplitude/wizard/commit/b2bdc769d6234b1cae1eb4a0d852cbf122c55bb9))
+* prevent workspace and project pickers from showing simultaneously ([#46](https://github.com/amplitude/wizard/issues/46)) ([aae906c](https://github.com/amplitude/wizard/commit/aae906cad2e49d633fb3cf769a1c69c93e1b5db3))
+* remove vendor leaks and fix inaccurate user-facing strings ([#50](https://github.com/amplitude/wizard/issues/50)) ([fbea036](https://github.com/amplitude/wizard/commit/fbea036b6413f7a4410de9897573e34a64f8c0a0))
+
 ## [1.0.0-beta.4](https://github.com/amplitude/wizard/compare/wizard-v1.0.0-beta.3...wizard-v1.0.0-beta.4) (2026-04-09)
 
 
