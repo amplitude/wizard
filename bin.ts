@@ -357,6 +357,7 @@ void yargs(hideBin(process.argv))
           if (!options.installDir) options.installDir = process.cwd();
 
           const session = await buildSessionFromOptions(options);
+          session.agent = true;
           await resolveNonInteractiveCredentials(
             session,
             options,
@@ -441,12 +442,15 @@ void yargs(hideBin(process.argv))
               await resolveCredentials(session);
 
               // Resolve org/workspace display names so /whoami shows them.
+              // Also extracts the numeric analytics project ID for MCP event detection.
               // Fire-and-forget so it doesn't block startup.
               if (session.region && session.selectedOrgId) {
                 const { getStoredUser, getStoredToken } = await import(
                   './src/utils/ampli-settings.js'
                 );
-                const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+                const { fetchAmplitudeUser, extractProjectId } = await import(
+                  './src/lib/api.js'
+                );
                 const storedUser = getStoredUser();
                 const realUser =
                   storedUser && storedUser.id !== 'pending' ? storedUser : null;
@@ -454,6 +458,11 @@ void yargs(hideBin(process.argv))
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
+                logToFile(
+                  `[bin] fire-and-forget: storedToken=${
+                    storedToken ? 'found' : 'null'
+                  }`,
+                );
                 if (storedToken) {
                   fetchAmplitudeUser(storedToken.idToken, zone)
                     .then((userInfo) => {
@@ -463,19 +472,43 @@ void yargs(hideBin(process.argv))
                         changed = true;
                       }
                       if (session.selectedOrgId) {
-                        const org = userInfo.orgs.find(
-                          (o) => o.id === session.selectedOrgId,
+                        // Fall back to the first org if the stored ID is stale
+                        // (e.g. session checkpoint from a different account).
+                        const org =
+                          userInfo.orgs.find(
+                            (o) => o.id === session.selectedOrgId,
+                          ) ?? userInfo.orgs[0];
+                        logToFile(
+                          `[bin] fire-and-forget: orgs=${userInfo.orgs
+                            .map((o) => o.id)
+                            .join(',')}, looking for ${
+                            session.selectedOrgId
+                          }, using=${org?.id ?? 'none'}`,
                         );
                         if (org) {
                           session.selectedOrgName = org.name;
                           changed = true;
+                          // Fall back to the first workspace if the stored ID is stale.
                           const ws = session.selectedWorkspaceId
                             ? org.workspaces.find(
                                 (w) => w.id === session.selectedWorkspaceId,
-                              )
-                            : undefined;
+                              ) ?? org.workspaces[0]
+                            : org.workspaces[0];
                           if (ws) {
                             session.selectedWorkspaceName = ws.name;
+                            // Extract the analytics project ID from the lowest-rank environment.
+                            const projectId = extractProjectId(ws);
+                            logToFile(
+                              `[bin] project ID resolution: environments=${
+                                ws.environments?.length ?? 'null'
+                              }, projectId=${projectId}`,
+                            );
+                            if (projectId)
+                              session.selectedProjectId = projectId;
+                          } else {
+                            logToFile(
+                              `[bin] project ID resolution: no workspaces in org ${org.id}`,
+                            );
                           }
                         }
                       }
@@ -483,8 +516,12 @@ void yargs(hideBin(process.argv))
                         tui.store.emitChange();
                       }
                     })
-                    .catch(() => {
-                      // Non-fatal — /whoami will just show (none)
+                    .catch((err: unknown) => {
+                      logToFile(
+                        `[bin] fire-and-forget fetchAmplitudeUser failed: ${
+                          err instanceof Error ? err.message : String(err)
+                        }`,
+                      );
                     });
                 }
               }
@@ -1221,6 +1258,7 @@ void yargs(hideBin(process.argv))
           if (storedToken) {
             session.credentials = {
               accessToken: storedToken.accessToken,
+              idToken: storedToken.idToken,
               projectApiKey: '',
               host: getHostFromRegion(zone),
               projectId: 0,

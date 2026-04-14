@@ -79,6 +79,8 @@ Feature: Wizard flow
     And MCP setup is complete
     Then I should be on the DataIngestionCheck screen
     When events are detected in the project
+    Then I should still be on the DataIngestionCheck screen
+    When I press Enter to confirm events
     Then I should be on the Checklist screen
 
   Scenario: Full-activation user passes DataIngestionCheck immediately
@@ -133,6 +135,7 @@ Feature: Wizard flow
     When the Claude agent completes successfully
     And MCP setup is complete
     And events are detected in the project
+    And I press Enter to confirm events
     And the checklist is complete
     Then I should be on the Slack screen
 

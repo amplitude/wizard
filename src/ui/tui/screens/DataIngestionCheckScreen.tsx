@@ -1,11 +1,13 @@
 /**
  * DataIngestionCheckScreen — "Start your app and trigger some actions" polling screen.
  *
- * Shown after MCP setup. Polls the activation API every 30 seconds until the
- * project starts receiving events, then auto-advances to the Checklist.
+ * Shown after MCP setup. Polls for events every 30 seconds:
+ *   1. MCP query_dataset (Bearer auth, works for all users, detects any track() call)
+ *   2. Thunder activation API (autocapture events only, session-cookie auth)
+ *   3. Data-API event catalog (taxonomy events as a proxy)
  *
  * Active guidance as prominent instruction with framework-aware hint.
- * BrailleSpinner while waiting. Success celebration when events arrive.
+ * BrailleSpinner while waiting. Success celebration (with event names) when events arrive.
  */
 
 import { Box, Text } from 'ink';
@@ -16,6 +18,9 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
+  extractProjectId,
+  fetchAmplitudeUser,
+  fetchHasAnyEventsMcp,
   fetchProjectActivationStatus,
   fetchWorkspaceEventTypes,
 } from '../../../lib/api.js';
@@ -58,6 +63,8 @@ export const DataIngestionCheckScreen = ({
   const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  // Cache a lazily-resolved project ID across poll cycles.
+  const resolvedProjectIdRef = useRef<string | null>(null);
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [eventTypes, setEventTypes] = useState<string[] | null>(null);
   const [celebrating, setCelebrating] = useState(false);
@@ -76,6 +83,45 @@ export const DataIngestionCheckScreen = ({
     celebrationTimerRef.current = setTimeout(() => {
       setCelebrationReady(true);
     }, CELEBRATION_DELAY_MS);
+  }
+
+  /**
+   * Silently refresh the OAuth token.
+   * Pass force=true to refresh even if the token appears locally valid
+   * (e.g. after an auth error — the token may have been server-side revoked).
+   */
+  async function refreshToken(force = false): Promise<boolean> {
+    try {
+      const { getStoredToken, getStoredUser, storeToken } = await import(
+        '../../../utils/ampli-settings.js'
+      );
+      const { refreshAccessToken } = await import('../../../utils/oauth.js');
+      const user = getStoredUser();
+      const stored = getStoredToken(user?.id, user?.zone);
+      if (!stored || !user) return false;
+      if (!force && new Date() <= new Date(stored.expiresAt)) return false;
+      logToFile(`[DataIngestionCheck] refreshing token (force=${force})`);
+      const refreshed = await refreshAccessToken(
+        stored.refreshToken,
+        user.zone,
+      );
+      storeToken(user, {
+        accessToken: refreshed.accessToken,
+        idToken: refreshed.idToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: refreshed.expiresAt,
+      });
+      store.updateTokens(refreshed.accessToken, refreshed.idToken);
+      logToFile('[DataIngestionCheck] token refreshed successfully');
+      return true;
+    } catch (err) {
+      logToFile(
+        `[DataIngestionCheck] token refresh failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return false;
+    }
   }
 
   async function checkIngestion() {
@@ -98,6 +144,119 @@ export const DataIngestionCheckScreen = ({
     const dataApiToken =
       currentCredentials.idToken ?? currentCredentials.accessToken;
 
+    // Silently refresh if the token has expired before making any API calls.
+    await refreshToken();
+
+    // Re-read credentials from the store in case refresh updated them.
+    let freshCredentials = store.session.credentials ?? currentCredentials;
+
+    // Step 1: Query via MCP (Bearer auth, works for all users).
+    // Uses _all event type so any custom track() calls are detected.
+    // Requires the numeric analytics project ID from workspace.environments[].app.id.
+    //
+    // selectedProjectId may be null if the startup fire-and-forget fetchAmplitudeUser
+    // failed (e.g. due to an expired token). Resolve lazily using the now-fresh token.
+    let effectiveProjectId =
+      currentSession.selectedProjectId ?? resolvedProjectIdRef.current;
+    if (!effectiveProjectId) {
+      const tryResolve = async () => {
+        const userInfo = await fetchAmplitudeUser(
+          freshCredentials.idToken ?? freshCredentials.accessToken,
+          zone,
+        );
+        // Fall back to the first org if the stored ID doesn't match (stale checkpoint).
+        const org = currentSession.selectedOrgId
+          ? userInfo.orgs.find((o) => o.id === currentSession.selectedOrgId) ??
+            userInfo.orgs[0]
+          : userInfo.orgs[0];
+        // Fall back to the first workspace if the stored ID doesn't match.
+        const ws =
+          org && currentSession.selectedWorkspaceId
+            ? org.workspaces.find(
+                (w) => w.id === currentSession.selectedWorkspaceId,
+              ) ?? org.workspaces[0]
+            : org?.workspaces[0];
+
+        const restoredFields: Parameters<typeof store.restoreSessionIds>[0] =
+          {};
+        if (org && !currentSession.selectedOrgId) {
+          restoredFields.orgId = org.id;
+          restoredFields.orgName = org.name;
+          logToFile(`[DataIngestionCheck] lazily set orgId=${org.id}`);
+        }
+        if (ws && !currentSession.selectedWorkspaceId) {
+          restoredFields.workspaceId = ws.id;
+          restoredFields.workspaceName = ws.name;
+          logToFile(`[DataIngestionCheck] lazily set workspaceId=${ws.id}`);
+        }
+
+        effectiveProjectId = ws ? extractProjectId(ws) : null;
+        if (effectiveProjectId) {
+          resolvedProjectIdRef.current = effectiveProjectId;
+          restoredFields.projectId = effectiveProjectId;
+          logToFile(
+            `[DataIngestionCheck] lazily resolved projectId=${effectiveProjectId}`,
+          );
+        } else {
+          logToFile(
+            '[DataIngestionCheck] lazy resolution: no environments with app.id',
+          );
+        }
+        if (Object.keys(restoredFields).length > 0) {
+          store.restoreSessionIds(restoredFields);
+        }
+      };
+
+      try {
+        await tryResolve();
+      } catch (resolveErr) {
+        const msg =
+          resolveErr instanceof Error ? resolveErr.message : String(resolveErr);
+        logToFile(`[DataIngestionCheck] lazy resolution failed: ${msg}`);
+        if (
+          msg.toLowerCase().includes('auth') ||
+          msg.toLowerCase().includes('401') ||
+          msg.toLowerCase().includes('403')
+        ) {
+          const refreshed = await refreshToken(true);
+          if (refreshed) {
+            freshCredentials = store.session.credentials ?? freshCredentials;
+            try {
+              await tryResolve();
+            } catch (retryErr) {
+              logToFile(
+                `[DataIngestionCheck] lazy resolution retry failed: ${
+                  retryErr instanceof Error
+                    ? retryErr.message
+                    : String(retryErr)
+                }`,
+              );
+            }
+          }
+        }
+      }
+    }
+
+    if (effectiveProjectId) {
+      const result = await fetchHasAnyEventsMcp(
+        freshCredentials.accessToken,
+        effectiveProjectId,
+      );
+      logToFile(
+        `[DataIngestionCheck] MCP check: hasEvents=${result.hasEvents} projectId=${effectiveProjectId} events=${result.activeEventNames.length}`,
+      );
+      if (result.hasEvents) {
+        setApiUnavailable(false);
+        confirmWithCelebration(result.activeEventNames);
+        return;
+      }
+    } else {
+      logToFile(
+        '[DataIngestionCheck] MCP check skipped: no projectId resolved',
+      );
+    }
+
+    // Step 2: Try activation status via Thunder (org-scoped, autocapture events only).
     if (!currentSession.selectedOrgId) {
       setApiUnavailable(true);
       return;

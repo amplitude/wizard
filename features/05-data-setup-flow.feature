@@ -12,15 +12,42 @@ Feature: Data Setup flow
     Given I am on the DataIngestionCheck screen
     Then I should be on the DataIngestionCheck screen
 
-  Scenario: DataIngestionCheck advances when events are detected
+  Scenario: DataIngestionCheck shows event preview when events are detected
     Given I am on the DataIngestionCheck screen
     When events are detected in the project
+    Then I should still be on the DataIngestionCheck screen
+
+  Scenario: DataIngestionCheck advances after user confirms events
+    Given I am on the DataIngestionCheck screen
+    When events are detected in the project
+    And I press Enter to confirm events
     Then I should be on the Checklist screen
 
   Scenario: User exits from DataIngestionCheck
     Given I am on the DataIngestionCheck screen
     When I press "q" to exit
     Then I should be taken to the Outro with a cancel state
+
+  # Agent mode — data ingestion is polled automatically after SDK installation.
+  # No user confirmation required; session.dataIngestionConfirmed is set on detection.
+  # CI mode skips the check entirely.
+
+  Scenario: In agent mode, events are confirmed automatically when detected
+    Given I am in agent mode
+    When events are detected in the project
+    Then data ingestion is confirmed automatically
+
+  Scenario: In agent mode, data ingestion confirmation skips the Enter prompt
+    Given I am in agent mode
+    And I am on the DataIngestionCheck screen
+    When events are detected in the project
+    Then I should be on the Checklist screen
+
+  Scenario: In CI mode, data ingestion check is skipped
+    Given I am running in CI mode
+    And I am on the DataIngestionCheck screen
+    Then I should be on the DataIngestionCheck screen
+
   # ChecklistScreen — first chart + first dashboard (taxonomy @todo)
   # On mount the checklist queries Amplitude for existing charts and dashboards
   # owned by the user, and pre-populates completed items so a returning user

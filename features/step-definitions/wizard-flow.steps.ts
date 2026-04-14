@@ -323,7 +323,57 @@ Then('I should be on the DataIngestionCheck screen', function () {
 });
 
 When('events are detected in the project', function () {
+  // Events found by MCP — the screen shows a preview table but dataIngestionConfirmed
+  // is still false. The router stays on DataIngestionCheck until the user presses Enter.
+  // In agent mode the pollForDataIngestion helper sets dataIngestionConfirmed directly.
+  if (session.agent) {
+    session.dataIngestionConfirmed = true;
+  }
+});
+
+Given('I am in agent mode', function () {
+  session.agent = true;
+  session.introConcluded = true;
+  session.credentials = mockCredentials();
+  session.region = 'us';
+  session.activationLevel = 'none';
+  session.projectHasData = false;
+  session.setupConfirmed = true;
+  session.runPhase = RunPhase.Completed;
+  session.mcpComplete = true;
+});
+
+Given('I am running in CI mode', function () {
+  session.ci = true;
+  session.introConcluded = true;
+  session.credentials = mockCredentials();
+  session.region = 'us';
+  session.activationLevel = 'none';
+  session.projectHasData = false;
+  session.setupConfirmed = true;
+  session.runPhase = RunPhase.Completed;
+  session.mcpComplete = true;
+});
+
+Then('data ingestion is confirmed automatically', function () {
+  assert.strictEqual(
+    session.dataIngestionConfirmed,
+    true,
+    'Expected dataIngestionConfirmed to be true in agent mode',
+  );
+});
+
+When('I press Enter to confirm events', function () {
   session.dataIngestionConfirmed = true;
+});
+
+Then('I should still be on the DataIngestionCheck screen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.DataIngestionCheck,
+    `Expected DataIngestionCheck but got ${screen}`,
+  );
 });
 
 Then('I should be on the Checklist screen', function () {

@@ -255,6 +255,12 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  setEventIngestionDetected(eventNames: string[]): void {
+    emit('result', `events_detected: ${eventNames.length} event types`, {
+      data: { event: 'events_detected', eventNames },
+    });
+  }
+
   /**
    * Prompt the agent caller to select an environment from pendingOrgs.
    *

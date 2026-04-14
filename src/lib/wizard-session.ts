@@ -33,6 +33,7 @@ export const CliArgsSchema = z.object({
   debug: z.boolean().default(false),
   verbose: z.boolean().default(false),
   ci: z.boolean().default(false),
+  agent: z.boolean().default(false),
   forceInstall: z.boolean().default(false),
   signup: z.boolean().default(false),
   localMcp: z.boolean().default(false),
@@ -145,6 +146,7 @@ export interface WizardSession {
   forceInstall: boolean;
   installDir: string;
   ci: boolean;
+  agent: boolean;
   signup: boolean;
   localMcp: boolean;
   apiKey?: string;
@@ -240,6 +242,13 @@ export interface WizardSession {
 
   /** Project/environment selected during SUSI (displayed in TitleBar). */
   selectedProjectName: string | null;
+
+  /**
+   * Numeric analytics project ID for the selected workspace (e.g. "769610").
+   * Sourced from workspace.environments[*].app.id at project selection time.
+   * Used by DataIngestionCheckScreen to call query_dataset via MCP.
+   */
+  selectedProjectId: string | null;
 
   /**
    * Notice shown on the API key entry step of AuthScreen.
@@ -368,6 +377,7 @@ export function buildSession(args: {
     forceInstall: validated.forceInstall ?? false,
     installDir: validated.installDir ?? process.cwd(),
     ci: validated.ci ?? false,
+    agent: false,
     signup: validated.signup ?? false,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,
@@ -407,6 +417,7 @@ export function buildSession(args: {
     selectedWorkspaceId: null,
     selectedWorkspaceName: null,
     selectedProjectName: null,
+    selectedProjectId: null,
     loginUrl: null,
     credentials: null,
     apiKeyNotice: null,

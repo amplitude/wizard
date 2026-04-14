@@ -7,6 +7,7 @@ import {
   WIZARD_USER_AGENT,
   type AmplitudeZone,
 } from './constants.js';
+import { callAmplitudeMcp } from './mcp-with-fallback.js';
 
 // ── Thunder URL helper ────────────────────────────────────────────────
 
@@ -85,6 +86,23 @@ export type AmplitudeOrg = {
     }> | null;
   }>;
 };
+
+/** Shared workspace type for environment helpers. */
+export type AmplitudeWorkspace = AmplitudeOrg['workspaces'][number];
+
+/**
+ * Extract the primary analytics project ID from a workspace.
+ * Picks the lowest-rank environment that has an app ID.
+ * Returns null if no such environment exists.
+ */
+export function extractProjectId(ws: AmplitudeWorkspace): string | null {
+  return (
+    (ws.environments ?? [])
+      .slice()
+      .sort((a, b) => a.rank - b.rank)
+      .find((e) => e.app?.id)?.app?.id ?? null
+  );
+}
 
 export type AmplitudeUserInfo = {
   id: string;
@@ -508,6 +526,172 @@ export async function fetchSources(
     analytics.captureException(apiError, { endpoint: dataApiUrl });
     throw apiError;
   }
+}
+
+// ── MCP-based event ingestion check ──────────────────────────────────────────
+
+export interface McpUser {
+  /** Amplitude's internal ID (always present) */
+  amplitudeId: string;
+  /** App-assigned user ID if setUserId() was called, otherwise null */
+  userId: string | null;
+}
+
+export interface McpEventsResult {
+  hasEvents: boolean;
+  /** Kept for API compatibility — always empty (query_dataset was removed from MCP server) */
+  csvRows: unknown[][];
+  /** Active event names from get_events (isActive=true), up to 10 */
+  activeEventNames: string[];
+  /** Recent users who fired events, up to 5 */
+  activeUsers: McpUser[];
+}
+
+/**
+ * Checks whether the project has received any events via the Amplitude MCP server.
+ * Uses get_users with `_all` as the primary signal (userCount > 0 → events exist),
+ * then fetches get_events for display names.
+ *
+ * Falls back to a Claude agent with the Amplitude MCP configured if the direct
+ * HTTP call fails, so the check survives MCP API drift.
+ *
+ * Requires the numeric analytics project ID (from workspace.environments[].app.id),
+ * not the workspace UUID. Returns false on any error so callers can fall through.
+ */
+export async function fetchHasAnyEventsMcp(
+  accessToken: string,
+  projectId: string,
+): Promise<McpEventsResult> {
+  const NONE: McpEventsResult = {
+    hasEvents: false,
+    csvRows: [],
+    activeEventNames: [],
+    activeUsers: [],
+  };
+
+  const result = await callAmplitudeMcp<McpEventsResult>({
+    accessToken,
+    label: 'fetchHasAnyEventsMcp',
+
+    direct: async (callTool) => {
+      // get_users with _all — primary signal for whether any events have been received.
+      // '_all' covers every event type without requiring taxonomy setup.
+      // metadata.userCount > 0 means at least one device has sent events to this project.
+      const usersText = await callTool(1, 'get_users', {
+        projectId,
+        event: { event_type: '_all', filters: [] },
+        limit: 5,
+      });
+
+      if (!usersText) {
+        logToFile('[MCP] get_users: no text in response');
+        return null;
+      }
+
+      let activeUsers: McpUser[];
+      let hasEvents: boolean;
+      try {
+        const parsed = JSON.parse(usersText) as {
+          users?: Array<{
+            amplitudeId?: string;
+            amplitude_id?: string;
+            user_id?: string | null;
+          }>;
+          metadata?: { userCount?: number };
+        };
+        const userCount =
+          parsed.metadata?.userCount ?? parsed.users?.length ?? 0;
+        hasEvents = userCount > 0;
+        activeUsers = (parsed.users ?? [])
+          .filter((u) => u.amplitudeId ?? u.amplitude_id)
+          .map((u) => ({
+            amplitudeId: (u.amplitudeId ?? u.amplitude_id) as string,
+            userId: u.user_id ?? null,
+          }))
+          .slice(0, 5);
+        logToFile(
+          `[MCP] get_users: userCount=${userCount}, hasEvents=${hasEvents}`,
+        );
+      } catch (parseErr) {
+        logToFile(
+          `[MCP] get_users parse error: ${
+            parseErr instanceof Error ? parseErr.message : String(parseErr)
+          }`,
+        );
+        return null;
+      }
+
+      if (!hasEvents) return NONE;
+
+      // get_events — fetch active event names for the celebration display.
+      // isActive=true means events arrived within ~30 days.
+      const eventsText = await callTool(2, 'get_events', {
+        projectId,
+        limit: 10,
+      });
+      let activeEventNames: string[] = [];
+      if (eventsText) {
+        try {
+          const parsed = JSON.parse(eventsText) as {
+            events?: Array<{
+              name?: string;
+              isActive?: boolean;
+              isHidden?: boolean;
+              isDeleted?: boolean;
+            }>;
+          };
+          activeEventNames = (parsed.events ?? [])
+            .filter((e) => e.isActive && !e.isHidden && !e.isDeleted && e.name)
+            .map((e) => e.name as string)
+            .slice(0, 10);
+          logToFile(
+            `[MCP] get_events: ${activeEventNames.length} active events`,
+          );
+        } catch (parseErr) {
+          logToFile(
+            `[MCP] get_events parse error: ${
+              parseErr instanceof Error ? parseErr.message : String(parseErr)
+            }`,
+          );
+        }
+      }
+
+      return { hasEvents: true, csvRows: [], activeEventNames, activeUsers };
+    },
+
+    agentPrompt: `Use the Amplitude MCP to check whether project ${projectId} has received any events.
+Call get_users with event_type "_all" and limit 5. If userCount > 0, also call get_events with limit 10.
+Respond with JSON only — no prose, no markdown fences:
+{"hasEvents":true/false,"activeEventNames":["..."],"activeUsers":[{"amplitudeId":"...","userId":"..."}]}`,
+
+    parseAgent: (text) => {
+      const match = text.match(/\{[\s\S]*\}/);
+      if (!match) return null;
+      try {
+        const parsed = JSON.parse(match[0]) as {
+          hasEvents?: boolean;
+          activeEventNames?: string[];
+          activeUsers?: Array<{
+            amplitudeId?: string;
+            userId?: string | null;
+          }>;
+        };
+        return {
+          hasEvents: parsed.hasEvents ?? false,
+          csvRows: [],
+          activeEventNames: parsed.activeEventNames ?? [],
+          activeUsers: (parsed.activeUsers ?? []).map((u) => ({
+            amplitudeId: u.amplitudeId ?? '',
+            userId: u.userId ?? null,
+          })),
+        };
+      } catch {
+        return null;
+      }
+    },
+  });
+
+  return result ?? NONE;
 }
 
 // ── Project activation status ──────────────────────────────────────────────

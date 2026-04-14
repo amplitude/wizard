@@ -125,4 +125,8 @@ export interface WizardUI {
 
   // ── Event plan from .amplitude-events.json ────────────────────
   setEventPlan(events: Array<{ name: string; description: string }>): void;
+
+  // ── Data ingestion confirmation ────────────────────────────────
+  /** Emitted by agent mode when MCP polling detects events flowing into the project. */
+  setEventIngestionDetected(eventNames: string[]): void;
 }

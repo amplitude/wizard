@@ -46,6 +46,10 @@ flowchart TD
     FEEDBACK --> FEEDBACK_SEND["Track wizard: feedback submitted via Node SDK"]
 
     AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
+    AGENT_UI --> AGENT_RUN["SDK installation agent run"]
+    AGENT_RUN --> AGENT_POLL["Data ingestion check<br/>(polls MCP every 30s · up to 30 min)<br/>emits events_detected result event · auto-advances"]
+    AGENT_POLL -->|events detected| AGENT_DONE["outro — events_detected NDJSON result"]
+    AGENT_POLL -->|timeout| AGENT_TIMEOUT["outro — log warning, continue"]
 
     LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
@@ -118,7 +122,7 @@ flowchart TD
 
     POST --> MCP_SCREEN["McpScreen<br/>(install MCP server · skipped on error)"]
     ERR --> OUTRO["See: Outro flow"]
-    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls activation API every 30s · skipped on error)<br/>full users pass immediately · user can exit and resume later<br/>Shows rotating coaching tips while waiting<br/>On success: celebration animation with explicit 'continue' prompt"]
+    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls MCP first, then activation API every 30s · full users pass immediately · user can exit and resume later)<br/>BrailleSpinner + coaching tips while waiting · celebration with event preview on success<br/>press Enter to continue"]
     DATA_INGESTION --> CHECKLIST["ChecklistScreen<br/>(first chart · first dashboard · taxonomy @todo)<br/>dashboard unlocks after chart · user can skip any item"]
     CHECKLIST --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
     SLACK_SCREEN --> OUTRO

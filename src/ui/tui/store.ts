@@ -415,6 +415,39 @@ export class WizardStore {
     this.$version.set(this.$version.get() + 1);
   }
 
+  /** Update both access and id tokens (e.g. after a silent OAuth refresh). */
+  updateTokens(accessToken: string, idToken: string): void {
+    const creds = this.$session.get().credentials;
+    if (!creds) return;
+    this.$session.setKey('credentials', { ...creds, accessToken, idToken });
+    this.$version.set(this.$version.get() + 1);
+  }
+
+  /**
+   * Restore org/workspace/project session IDs that weren't populated at startup
+   * (e.g. because the fire-and-forget fetchAmplitudeUser failed due to expired token).
+   * Only updates fields that are provided.
+   */
+  restoreSessionIds(fields: {
+    orgId?: string;
+    orgName?: string;
+    workspaceId?: string;
+    workspaceName?: string;
+    projectId?: string | null;
+  }): void {
+    if (fields.orgId !== undefined)
+      this.$session.setKey('selectedOrgId', fields.orgId);
+    if (fields.orgName !== undefined)
+      this.$session.setKey('selectedOrgName', fields.orgName);
+    if (fields.workspaceId !== undefined)
+      this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
+    if (fields.workspaceName !== undefined)
+      this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
+    if (fields.projectId !== undefined)
+      this.$session.setKey('selectedProjectId', fields.projectId);
+    this.emitChange();
+  }
+
   /** Request the TabContainer to switch to a tab by id. Clears after consumption. */
   setRequestedTab(id: string): void {
     this.$requestedTab.set(id);
@@ -514,13 +547,28 @@ export class WizardStore {
    */
   setOrgAndWorkspace(
     org: { id: string; name: string },
-    workspace: { id: string; name: string },
+    workspace: {
+      id: string;
+      name: string;
+      environments?: Array<{
+        rank: number;
+        app: { id: string; apiKey?: string | null } | null;
+      }> | null;
+    },
     installDir: string,
   ): void {
     this.$session.setKey('selectedOrgId', org.id);
     this.$session.setKey('selectedOrgName', org.name);
     this.$session.setKey('selectedWorkspaceId', workspace.id);
     this.$session.setKey('selectedWorkspaceName', workspace.name);
+
+    // Extract the analytics project ID from the lowest-rank environment.
+    const projectId =
+      workspace.environments
+        ?.slice()
+        .sort((a, b) => a.rank - b.rank)
+        .find((e) => e.app?.id)?.app?.id ?? null;
+    this.$session.setKey('selectedProjectId', projectId);
 
     // Write ampli.json to the project directory.
     // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)

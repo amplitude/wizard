@@ -9,6 +9,7 @@
 
 import type { WizardSession } from './wizard-session';
 import type { AmplitudeZone } from './constants';
+import { extractProjectId } from './api';
 
 /**
  * Resolve credentials from stored OAuth tokens and environment data.
@@ -384,6 +385,10 @@ export async function resolveEnvironmentSelection(
   session.selectedWorkspaceId = ws.id;
   session.selectedWorkspaceName = ws.name;
   session.selectedProjectName = env.name;
+
+  // Extract the numeric analytics project ID for MCP-based event detection.
+  const projectId = extractProjectId(ws);
+  session.selectedProjectId = projectId;
 
   persistApiKey(apiKey, session.installDir);
   session.credentials = {
