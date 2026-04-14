@@ -164,6 +164,17 @@ export interface WizardSession {
   /** True once framework detection has run (whether it found something or not) */
   detectionComplete: boolean;
 
+  /** Full results from parallel detection (all frameworks). Available for diagnostics. */
+  detectionResults: Array<{
+    integration: Integration;
+    detected: boolean;
+    durationMs: number;
+    timedOut: boolean;
+    error?: string;
+    version?: string;
+    versionWarning?: string;
+  }> | null;
+
   /**
    * Whether the currently selected project has existing event data.
    * null = not yet checked (shown as DataSetup screen)
@@ -383,6 +394,7 @@ export function buildSession(args: {
     typescript: false,
     detectedFrameworkLabel: null,
     detectionComplete: false,
+    detectionResults: null,
     projectHasData: null,
     activationLevel: null,
     activationOptionsComplete: false,

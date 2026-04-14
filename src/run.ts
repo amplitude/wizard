@@ -4,6 +4,7 @@ import { Integration, DETECTION_TIMEOUT_MS } from './lib/constants';
 import { readEnvironment } from './utils/environment';
 import { getUI } from './ui';
 import path from 'path';
+import fs from 'node:fs/promises';
 import { FRAMEWORK_REGISTRY } from './lib/registry';
 import { analytics } from './utils/analytics';
 import { runAgentWizard } from './lib/agent-runner';
@@ -11,6 +12,7 @@ import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
+import * as semver from 'semver';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -140,38 +142,184 @@ export async function runWizard(argv: Args, session?: WizardSession) {
   }
 }
 
+/**
+ * Result of a single framework's detection attempt.
+ */
+export interface DetectionResult {
+  integration: Integration;
+  detected: boolean;
+  durationMs: number;
+  timedOut: boolean;
+  error?: string;
+  /** Installed version (if detected and getInstalledVersion is defined). */
+  version?: string;
+  /** Set when detected version is below minimumVersion. */
+  versionWarning?: string;
+}
+
+/**
+ * Run all framework detectors in parallel and return the full results array.
+ * The winner is the first detected framework in Integration enum order
+ * (preserving the existing priority behavior).
+ */
+export async function detectAllFrameworks(
+  installDir: string,
+  timeoutMs: number = DETECTION_TIMEOUT_MS,
+): Promise<DetectionResult[]> {
+  // Pre-validate installDir — fail fast instead of running 18 detectors
+  try {
+    await fs.access(installDir, fs.constants.R_OK);
+  } catch {
+    logToFile(`[detection] installDir is not readable: ${installDir}`);
+    return Object.values(Integration).map((integration) => ({
+      integration,
+      detected: false,
+      durationMs: 0,
+      timedOut: false,
+      error: 'installDir not readable',
+    }));
+  }
+
+  const integrations = Object.values(Integration);
+
+  const promises = integrations.map(
+    async (integration): Promise<DetectionResult> => {
+      const config = FRAMEWORK_REGISTRY[integration];
+      const start = performance.now();
+      try {
+        const detected = await Promise.race([
+          config.detection.detect({ installDir }),
+          new Promise<'timeout'>((resolve) =>
+            setTimeout(() => resolve('timeout'), timeoutMs),
+          ),
+        ]);
+        const durationMs = Math.round(performance.now() - start);
+        const timedOut = detected === 'timeout';
+        if (timedOut) {
+          logToFile(
+            `[detection] ${integration} timed out after ${durationMs}ms`,
+          );
+        }
+
+        const result: DetectionResult = {
+          integration,
+          detected: timedOut ? false : Boolean(detected),
+          durationMs,
+          timedOut,
+        };
+
+        // Version check: if detected and version info is available, check minimum
+        if (result.detected && config.detection.getInstalledVersion) {
+          try {
+            const version = await config.detection.getInstalledVersion({
+              installDir,
+              debug: false,
+              forceInstall: false,
+              default: false,
+              signup: false,
+              localMcp: false,
+              ci: false,
+              menu: false,
+              benchmark: false,
+            });
+            if (version) {
+              result.version = version;
+              if (
+                config.detection.minimumVersion &&
+                semver.valid(version) &&
+                semver.lt(version, config.detection.minimumVersion)
+              ) {
+                result.versionWarning = `${config.detection.packageDisplayName} ${version} is below minimum ${config.detection.minimumVersion}`;
+                logToFile(
+                  `[detection] ${integration}: ${result.versionWarning}`,
+                );
+              }
+            }
+          } catch (err) {
+            logToFile(
+              `[detection] ${integration} version check failed: ${
+                err instanceof Error ? err.message : err
+              }`,
+            );
+          }
+        }
+
+        return result;
+      } catch (err) {
+        const durationMs = Math.round(performance.now() - start);
+        const errorMsg = err instanceof Error ? err.message : String(err);
+        logToFile(
+          `[detection] ${integration} failed after ${durationMs}ms: ${errorMsg}`,
+        );
+        return {
+          integration,
+          detected: false,
+          durationMs,
+          timedOut: false,
+          error: errorMsg,
+        };
+      }
+    },
+  );
+
+  return Promise.all(promises);
+}
+
+/**
+ * Detect which framework is present in the project.
+ * Runs all detectors in parallel and returns the first match
+ * by Integration enum order (highest priority wins).
+ */
 export async function detectIntegration(
   installDir: string,
+  timeoutMs?: number,
 ): Promise<Integration | undefined> {
-  for (const integration of Object.values(Integration)) {
-    const config = FRAMEWORK_REGISTRY[integration];
-    try {
-      const detected = await Promise.race([
-        config.detection.detect({ installDir }),
-        new Promise<false>((resolve) =>
-          setTimeout(() => resolve(false), DETECTION_TIMEOUT_MS),
-        ),
-      ]);
-      if (detected) {
-        return integration;
-      }
-    } catch {
-      // Skip frameworks whose detection throws
-    }
+  const results = await detectAllFrameworks(installDir, timeoutMs);
+
+  const totalMs = Math.max(...results.map((r) => r.durationMs));
+  const detected = results.filter((r) => r.detected);
+  const errored = results.filter((r) => r.error);
+  const timedOut = results.filter((r) => r.timedOut);
+
+  logToFile(
+    `[detection] Complete in ${totalMs}ms: ${detected.length} detected, ${errored.length} errors, ${timedOut.length} timeouts`,
+  );
+
+  // Return first detected in enum order (integrations array preserves enum order)
+  const winner = results.find((r) => r.detected);
+  if (winner) {
+    logToFile(
+      `[detection] Winner: ${winner.integration} (${winner.durationMs}ms)`,
+    );
   }
+  return winner?.integration;
 }
 
 async function detectAndResolveIntegration(
   session: WizardSession,
 ): Promise<Integration> {
   if (!session.menu) {
-    const detectedIntegration = await detectIntegration(session.installDir);
+    const results = await detectAllFrameworks(session.installDir);
+    session.detectionResults = results;
 
-    if (detectedIntegration) {
+    const detected = results.filter((r) => r.detected);
+    const winner = detected[0];
+
+    // Analytics: capture detection metrics
+    analytics.wizardCapture('Framework Detection Complete', {
+      winner: winner?.integration ?? 'none',
+      matchCount: detected.length,
+      durationMs: Math.max(...results.map((r) => r.durationMs)),
+      errorCount: results.filter((r) => r.error).length,
+      timedOutCount: results.filter((r) => r.timedOut).length,
+      hasVersionWarning: detected.some((r) => r.versionWarning) ?? false,
+    });
+
+    if (winner) {
       getUI().setDetectedFramework(
-        FRAMEWORK_REGISTRY[detectedIntegration].metadata.name,
+        FRAMEWORK_REGISTRY[winner.integration].metadata.name,
       );
-      return detectedIntegration;
+      return winner.integration;
     }
 
     // Framework not detected — fall back to generic Amplitude quickstart.

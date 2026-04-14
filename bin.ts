@@ -539,7 +539,7 @@ void yargs(hideBin(process.argv))
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );
-            const { detectIntegration } = await import('./src/run.js');
+            const { detectAllFrameworks } = await import('./src/run.js');
             const installDir = session.installDir ?? process.cwd();
 
             // Verbose startup diagnostics — always written to the log file;
@@ -679,13 +679,24 @@ void yargs(hideBin(process.argv))
 
             // ── Framework detection ────────────────────────────────
             // Runs concurrently with auth while AuthScreen shows.
+            // All frameworks are detected in parallel; the outer
+            // timeout is kept as a safety net.
             const detectionTask = (async () => {
-              const detectedIntegration = await Promise.race([
-                detectIntegration(installDir),
+              const results = await Promise.race([
+                detectAllFrameworks(installDir),
                 new Promise<undefined>((resolve) =>
                   setTimeout(() => resolve(undefined), DETECTION_TIMEOUT_MS),
                 ),
               ]);
+
+              // Store full results on session for diagnostics
+              if (results) {
+                session.detectionResults = results;
+              }
+
+              const detectedIntegration = results
+                ? results.find((r) => r.detected)?.integration
+                : undefined;
 
               if (detectedIntegration) {
                 const config = FRAMEWORK_REGISTRY[detectedIntegration];
