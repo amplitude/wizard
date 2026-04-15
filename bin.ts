@@ -199,72 +199,74 @@ const resolveNonInteractiveCredentials = async (
           ));
         } catch (err) {
           // Account was created but token exchange failed.
-          // Credentials stay null — the downstream check handles the exit.
+          // Credentials stay null — fall through to the guard at the
+          // end of this function which handles the exit.
           getUI().log.error(
             `Token exchange failed: ${
               err instanceof Error ? err.message : 'unknown error'
             }`,
           );
-          return;
         }
-        session.userEmail = userInfo.email;
+        if (tokenResponse && userInfo) {
+          session.userEmail = userInfo.email;
 
-        // Try to resolve an API key from the newly created org
-        if (userInfo.orgs.length > 0) {
-          const org = userInfo.orgs[0];
-          const ws = org.workspaces[0];
-          session.selectedOrgId = org.id;
-          session.selectedOrgName = org.name;
-          if (ws) {
-            session.selectedWorkspaceId = ws.id;
-            session.selectedWorkspaceName = ws.name;
-            const envWithKey = (ws.environments ?? [])
-              .filter(
-                (e: { app: { apiKey?: string | null } | null }) =>
-                  e.app?.apiKey,
-              )
-              .sort(
-                (a: { rank: number }, b: { rank: number }) => a.rank - b.rank,
-              )[0];
-            if (envWithKey?.app?.apiKey) {
+          // Try to resolve an API key from the newly created org
+          if (userInfo.orgs.length > 0) {
+            const org = userInfo.orgs[0];
+            const ws = org.workspaces[0];
+            session.selectedOrgId = org.id;
+            session.selectedOrgName = org.name;
+            if (ws) {
+              session.selectedWorkspaceId = ws.id;
+              session.selectedWorkspaceName = ws.name;
+              const envWithKey = (ws.environments ?? [])
+                .filter(
+                  (e: { app: { apiKey?: string | null } | null }) =>
+                    e.app?.apiKey,
+                )
+                .sort(
+                  (a: { rank: number }, b: { rank: number }) => a.rank - b.rank,
+                )[0];
+              if (envWithKey?.app?.apiKey) {
+                session.credentials = {
+                  accessToken: tokenResponse.access_token,
+                  idToken: tokenResponse.id_token,
+                  projectApiKey: envWithKey.app.apiKey,
+                  host: DEFAULT_HOST_URL,
+                  projectId: 0,
+                };
+                session.projectHasData = false;
+              }
+            }
+          }
+
+          if (!session.credentials) {
+            // Fallback: try fetching API key from backend
+            const apiKey = await getAPIKey({
+              installDir: session.installDir,
+              idToken: tokenResponse.id_token,
+              zone,
+              workspaceId: session.selectedWorkspaceId ?? undefined,
+            }).catch(() => undefined);
+            if (apiKey) {
               session.credentials = {
                 accessToken: tokenResponse.access_token,
                 idToken: tokenResponse.id_token,
-                projectApiKey: envWithKey.app.apiKey,
+                projectApiKey: apiKey,
                 host: DEFAULT_HOST_URL,
                 projectId: 0,
               };
               session.projectHasData = false;
             }
           }
-        }
 
-        if (!session.credentials) {
-          // Fallback: try fetching API key from backend
-          const apiKey = await getAPIKey({
-            installDir: session.installDir,
-            idToken: tokenResponse.id_token,
-            zone,
-            workspaceId: session.selectedWorkspaceId ?? undefined,
-          }).catch(() => undefined);
-          if (apiKey) {
-            session.credentials = {
-              accessToken: tokenResponse.access_token,
-              idToken: tokenResponse.id_token,
-              projectApiKey: apiKey,
-              host: DEFAULT_HOST_URL,
-              projectId: 0,
-            };
-            session.projectHasData = false;
-          }
+          getUI().log.info(
+            `Signup complete for ${userInfo.email.replace(
+              /(.{2}).*@/,
+              '$1***@',
+            )}`,
+          );
         }
-
-        getUI().log.info(
-          `Headless signup complete for ${userInfo.email.replace(
-            /(.{2}).*@/,
-            '$1***@',
-          )}`,
-        );
       } else if (result.type === 'requires_auth') {
         getUI().log.error(
           'Account already exists. Browser auth required — ' +
