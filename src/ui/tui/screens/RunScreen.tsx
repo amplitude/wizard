@@ -24,9 +24,9 @@ import {
   EventPlanViewer,
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
-import { Colors, Icons } from '../styles.js';
+import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import { AmplitudeLogo } from '../components/AmplitudeLogo.js';
+import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
@@ -135,16 +135,17 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const [cols, rows] = useStdoutDimensions();
   const showLogo = cols >= MIN_COLS_FOR_LOGO && rows >= MIN_ROWS_FOR_LOGO;
 
-  const [elapsed, setElapsed] = useState(0);
+  // Single interval drives the spinner, logo animation, and elapsed timer.
+  // All three re-render in the same batch — no extra render cycles.
+  const [tick, setTick] = useState(0);
   const startRef = useRef(Date.now());
-
-  // Elapsed time counter
   useEffect(() => {
-    const id = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
-    }, 1000);
+    const id = setInterval(() => setTick((t) => t + 1), SPINNER_INTERVAL);
     return () => clearInterval(id);
   }, []);
+
+  const elapsed = Math.floor((Date.now() - startRef.current) / 1000);
+  const spinnerFrame = tick % SPINNER_FRAMES.length;
 
   // Handle LLM toggle key
   useScreenInput((input) => {
@@ -194,7 +195,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {/* Header bar: progress count + elapsed + currently editing */}
         <Box marginBottom={1} justifyContent="space-between">
           <Box gap={1}>
-            <BrailleSpinner color={Colors.active} />
+            <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
             <Text color={Colors.body} bold>
               {total > 0
                 ? `${completed}/${total} tasks complete`
@@ -221,10 +222,10 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         <ConditionalTips store={store} />
       </Box>
 
-      {/* Right: static logo (hidden on small terminals) */}
+      {/* Right: animated logo, steps with spinner tick (hidden on small terminals) */}
       {showLogo && (
         <Box flexShrink={0} marginTop={1} marginRight={1}>
-          <AmplitudeLogo />
+          <AnimatedAmplitudeLogo tick={tick} />
         </Box>
       )}
     </Box>
