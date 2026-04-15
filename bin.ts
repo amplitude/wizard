@@ -470,7 +470,7 @@ void yargs(hideBin(process.argv))
           const session = await buildSessionFromOptions(options);
           session.agent = true;
 
-          // Initialize feature flags so headless signup eligibility can be computed
+          // Initialize feature flags so --signup eligibility can be computed
           const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
             await import('./src/lib/feature-flags.js');
           await initFeatureFlags().catch(() => {});
@@ -496,7 +496,7 @@ void yargs(hideBin(process.argv))
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
 
-          // Initialize feature flags so headless signup eligibility can be computed
+          // Initialize feature flags so --signup eligibility can be computed
           const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
             await import('./src/lib/feature-flags.js');
           await initFeatureFlags().catch(() => {});
@@ -716,7 +716,7 @@ void yargs(hideBin(process.argv))
             const { analytics } = await import('./src/utils/analytics.js');
             analytics.applyOptOut();
 
-            // Compute headless signup eligibility (requires both --signup AND flag)
+            // Compute --signup eligibility (requires both --signup AND feature flag)
             {
               const { isFlagEnabled, FLAG_HEADLESS_SIGNUP } = await import(
                 './src/lib/feature-flags.js'
@@ -911,49 +911,54 @@ void yargs(hideBin(process.argv))
                     !session.headlessSignupEmail ||
                     !session.headlessSignupFullName
                   ) {
-                    throw new Error(
-                      'headlessSignupSubmitted was true but email/fullName are missing',
+                    // Shouldn't happen — setHeadlessSignupData sets both before
+                    // headlessSignupSubmitted. Log and fall through to browser OAuth.
+                    logToFile(
+                      '[signup] submitted but email/fullName missing — falling back to browser',
                     );
                   }
 
-                  const result = await performHeadlessSignup({
-                    email: session.headlessSignupEmail,
-                    fullName: session.headlessSignupFullName,
-                    zone,
-                  });
-
-                  if (result.type === 'oauth') {
-                    // New user — exchange code, persist token, then
-                    // use completeAuth for user info + UI signaling
-                    const { tokenResponse } = await completeSignupTokenExchange(
-                      result.code,
-                      zone,
-                    );
-                    await completeAuth({
-                      idToken: tokenResponse.id_token,
-                      accessToken: tokenResponse.access_token,
-                      refreshToken: tokenResponse.refresh_token,
+                  if (
+                    session.headlessSignupEmail &&
+                    session.headlessSignupFullName
+                  ) {
+                    const result = await performHeadlessSignup({
+                      email: session.headlessSignupEmail,
+                      fullName: session.headlessSignupFullName,
                       zone,
                     });
-                    return; // Done — skip browser OAuth
-                  }
 
-                  if (result.type === 'requires_auth') {
-                    // Existing user — fall through to standard browser OAuth.
-                    // TODO: evaluate whether to use the backend-supplied redirect
-                    // URL (result.redirectUrl) instead of constructing a new one
-                    // via performAmplitudeAuth. The backend URL may carry useful
-                    // context (login hints, pre-auth state). For now we ignore it
-                    // to avoid opening two competing browser tabs with mismatched
-                    // PKCE parameters.
-                    logToFile(
-                      '[headless-signup] existing user, falling back to browser OAuth',
-                    );
-                  } else {
-                    logToFile(
-                      `[headless-signup] ${result.type}: falling back to browser OAuth`,
-                    );
-                    // Fall through to standard browser OAuth
+                    if (result.type === 'oauth') {
+                      // New user — exchange code, persist token, then
+                      // use completeAuth for user info + UI signaling
+                      const { tokenResponse } =
+                        await completeSignupTokenExchange(result.code, zone);
+                      await completeAuth({
+                        idToken: tokenResponse.id_token,
+                        accessToken: tokenResponse.access_token,
+                        refreshToken: tokenResponse.refresh_token,
+                        zone,
+                      });
+                      return; // Done — skip browser OAuth
+                    }
+
+                    if (result.type === 'requires_auth') {
+                      // Existing user — fall through to standard browser OAuth.
+                      // TODO: evaluate whether to use the backend-supplied redirect
+                      // URL (result.redirectUrl) instead of constructing a new one
+                      // via performAmplitudeAuth. The backend URL may carry useful
+                      // context (login hints, pre-auth state). For now we ignore it
+                      // to avoid opening two competing browser tabs with mismatched
+                      // PKCE parameters.
+                      logToFile(
+                        '[signup] existing user, falling back to browser OAuth',
+                      );
+                    } else {
+                      logToFile(
+                        `[signup] ${result.type}: falling back to browser OAuth`,
+                      );
+                      // Fall through to standard browser OAuth
+                    }
                   }
                 }
 

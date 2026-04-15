@@ -21,24 +21,21 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export const HeadlessSignupScreen = ({ store }: HeadlessSignupScreenProps) => {
   useWizardStore(store);
 
-  const cliEmail = store.session.email ?? '';
-  const cliFullName = store.session.fullName ?? '';
+  // Auto-submit if both values were provided via CLI flags
+  if (
+    store.session.email &&
+    store.session.fullName &&
+    EMAIL_RE.test(store.session.email) &&
+    !store.session.headlessSignupSubmitted
+  ) {
+    store.setHeadlessSignupData(store.session.email, store.session.fullName);
+    return null;
+  }
 
-  // If both were provided via CLI flags, auto-submit and skip the form
-  const [autoSubmitted] = useState(() => {
-    if (cliEmail && cliFullName && EMAIL_RE.test(cliEmail)) {
-      store.setHeadlessSignupData(cliEmail, cliFullName);
-      return true;
-    }
-    return false;
-  });
-
-  const [email, setEmail] = useState(cliEmail);
+  const [email, setEmail] = useState(store.session.email ?? '');
   const [emailError, setEmailError] = useState('');
   const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
-
-  if (autoSubmitted) return null;
 
   const handleEmailSubmit = (value: string) => {
     const trimmed = value.trim();
