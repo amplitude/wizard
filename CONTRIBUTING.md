@@ -20,6 +20,25 @@ pnpm build
 
 **Requirements:** Node.js >= 18.17.0, pnpm
 
+### Local LLM proxy
+
+The wizard routes Claude API calls through an LLM gateway. For local development
+you can point the wizard at a local proxy:
+
+```bash
+# Terminal 1 — start your local proxy
+# (see internal docs for proxy setup)
+
+# Terminal 2 — run the wizard against it
+WIZARD_LLM_PROXY_URL=http://localhost:3030/wizard pnpm try
+```
+
+You can also bypass the gateway entirely if you have an Anthropic API key:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-... pnpm try
+```
+
 ## Testing
 
 ```bash
