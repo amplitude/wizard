@@ -190,10 +190,23 @@ const resolveNonInteractiveCredentials = async (
       const result = await performHeadlessSignup({ email, fullName, zone });
 
       if (result.type === 'oauth') {
-        const { tokenResponse, userInfo } = await completeSignupTokenExchange(
-          result.code,
-          zone,
-        );
+        let tokenResponse;
+        let userInfo;
+        try {
+          ({ tokenResponse, userInfo } = await completeSignupTokenExchange(
+            result.code,
+            zone,
+          ));
+        } catch (err) {
+          // Account was created but token exchange failed.
+          // Credentials stay null — the downstream check handles the exit.
+          getUI().log.error(
+            `Token exchange failed: ${
+              err instanceof Error ? err.message : 'unknown error'
+            }`,
+          );
+          return;
+        }
         session.userEmail = userInfo.email;
 
         // Try to resolve an API key from the newly created org
