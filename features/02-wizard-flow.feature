@@ -57,7 +57,7 @@ Feature: Wizard flow
     When I select the "EU" region
     Then the data check should re-run for the new region
 
-  Scenario: Returning user with credentials and existing data — goes to MCP then checklist
+  Scenario: Returning user with credentials and existing data — goes to MCP then Slack
     Given I have valid credentials stored in "~/.ampli.json"
     And the current project has existing data
     And my region is already set to "us"
@@ -73,7 +73,7 @@ Feature: Wizard flow
     And I continue past the intro
     Then I should be on the MCP screen
 
-  Scenario: After MCP, wizard waits for data ingestion then shows checklist
+  Scenario: After MCP, wizard waits for data ingestion then advances to Slack
     Given I have reached the RunScreen
     When the Claude agent completes successfully
     And MCP setup is complete
@@ -81,45 +81,21 @@ Feature: Wizard flow
     When events are detected in the project
     Then I should still be on the DataIngestionCheck screen
     When I press Enter to confirm events
-    Then I should be on the Checklist screen
+    Then I should be on the Slack screen
 
-  Scenario: Full-activation user passes DataIngestionCheck immediately
+  Scenario: Full-activation user passes DataIngestionCheck immediately and reaches Slack
     Given I have valid credentials stored in "~/.ampli.json"
     And the current project has existing data
     And my region is already set to "us"
     When the wizard launches
     And I continue past the intro
     And MCP setup is complete
-    Then I should be on the Checklist screen
+    Then I should be on the Slack screen
 
   Scenario: User exits DataIngestionCheck and returns later
     Given I am on the DataIngestionCheck screen
     When I press "q" to exit
     Then I should be taken to the Outro with a cancel state
-
-  Scenario: User creates first chart from checklist
-    Given I am on the Checklist screen
-    And the chart is not yet complete
-    When I select "Create your first chart"
-    Then the chart creation page should open in my browser
-    And the chart should be marked as complete
-
-  Scenario: Dashboard is locked until chart is complete
-    Given I am on the Checklist screen
-    And the chart is not yet complete
-    Then "Create your first dashboard" should be disabled
-
-  Scenario: User creates first dashboard after chart is complete
-    Given I am on the Checklist screen
-    And the chart is complete
-    When I select "Create your first dashboard"
-    Then the dashboard creation page should open in my browser
-    And the dashboard should be marked as complete
-
-  Scenario: User skips remaining checklist items and continues
-    Given I am on the Checklist screen
-    When I select "Skip remaining and continue"
-    Then I should be on the Slack screen
 
   Scenario: Run screen is shown before the agent starts
     Given I have reached the RunScreen
@@ -130,13 +106,12 @@ Feature: Wizard flow
     When the Claude agent completes successfully
     Then I should be on the MCP screen
 
-  Scenario: Slack setup screen appears after MCP
+  Scenario: Slack setup screen appears after data ingestion confirmed
     Given I have reached the RunScreen
     When the Claude agent completes successfully
     And MCP setup is complete
     And events are detected in the project
     And I press Enter to confirm events
-    And the checklist is complete
     Then I should be on the Slack screen
 
   Scenario: Agent run completes successfully
