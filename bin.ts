@@ -904,43 +904,45 @@ void yargs(hideBin(process.argv))
 
                 // ── Headless signup path ───────────────────────────────
                 if (session._headlessSignupEnabled) {
-                  // Wait for HeadlessSignupScreen to collect email + name
-                  await new Promise<void>((resolve) => {
-                    if (tui.store.session.headlessSignupSubmitted) {
-                      resolve();
-                      return;
-                    }
-                    const unsub = tui.store.subscribe(() => {
+                  // Resolve email + name: either from CLI args (screen was
+                  // skipped) or by waiting for HeadlessSignupScreen input.
+                  let signupEmail = session.email;
+                  let signupFullName = session.fullName;
+
+                  if (!signupEmail || !signupFullName) {
+                    // No CLI args — wait for HeadlessSignupScreen to collect them
+                    await new Promise<void>((resolve) => {
                       if (tui.store.session.headlessSignupSubmitted) {
-                        unsub();
                         resolve();
+                        return;
                       }
+                      const unsub = tui.store.subscribe(() => {
+                        if (tui.store.session.headlessSignupSubmitted) {
+                          unsub();
+                          resolve();
+                        }
+                      });
                     });
-                  });
+                    signupEmail = session.headlessSignupEmail ?? undefined;
+                    signupFullName =
+                      session.headlessSignupFullName ?? undefined;
+                  }
 
                   const { performHeadlessSignup } = await import(
                     './src/utils/headless-signup.js'
                   );
                   const { logToFile } = await import('./src/utils/debug.js');
 
-                  if (
-                    !session.headlessSignupEmail ||
-                    !session.headlessSignupFullName
-                  ) {
-                    // Shouldn't happen — setHeadlessSignupData sets both before
-                    // headlessSignupSubmitted. Log and fall through to browser OAuth.
+                  if (!signupEmail || !signupFullName) {
                     logToFile(
-                      '[signup] submitted but email/fullName missing — falling back to browser',
+                      '[signup] email/fullName missing — falling back to browser',
                     );
                   }
 
-                  if (
-                    session.headlessSignupEmail &&
-                    session.headlessSignupFullName
-                  ) {
+                  if (signupEmail && signupFullName) {
                     const result = await performHeadlessSignup({
-                      email: session.headlessSignupEmail,
-                      fullName: session.headlessSignupFullName,
+                      email: signupEmail,
+                      fullName: signupFullName,
                       zone,
                     });
 

@@ -18,21 +18,13 @@ interface HeadlessSignupScreenProps {
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+// This screen is only rendered when CLI --email/--full-name were NOT provided.
+// When both CLI args are present, the flow's isComplete predicate skips this
+// screen entirely and bin.ts reads from session.email/session.fullName directly.
 export const HeadlessSignupScreen = ({ store }: HeadlessSignupScreenProps) => {
   useWizardStore(store);
 
-  // Auto-submit if both values were provided via CLI flags
-  if (
-    store.session.email &&
-    store.session.fullName &&
-    EMAIL_RE.test(store.session.email) &&
-    !store.session.headlessSignupSubmitted
-  ) {
-    store.setHeadlessSignupData(store.session.email, store.session.fullName);
-    return null;
-  }
-
-  const [email, setEmail] = useState(store.session.email ?? '');
+  const [email, setEmail] = useState('');
   const [emailError, setEmailError] = useState('');
   const [emailConfirmed, setEmailConfirmed] = useState(false);
   const [fullNameError, setFullNameError] = useState('');
