@@ -85,7 +85,7 @@ Install the dependency",
     }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tocbot/4.25.0/tocbot.css">
-  <link href="/docs/css/site.css?id=cf9c3f0a1066ff8b5d94a25cd8d407e1" rel="stylesheet">
+  <link href="/docs/css/site.css?id=6e2f9e1efe9343c4ba65666223648444" rel="stylesheet">
   <link href="/docs/css/algolia.css?id=e343cc9490e043fefffa37d2817ddf8c" rel="stylesheet">
   <link href="/docs/css/dracula-prism.css?id=a5713888be640854bb66b8b74c1037ce" rel="stylesheet">
 <style>
@@ -1301,7 +1301,7 @@ For detailed instructions on integrating Amplitude with Next.js applications, in
 </tr>
 <tr>
 <td><code>logLevel</code></td>
-<td><code>LogLevel.None</code> or <code>LogLevel.Error</code> or <code>LogLevel.Warn</code> or <code>LogLevel.Verbose</code> or <code>LogLevel.Debug</code>. Sets the log level.</td>
+<td><code>LogLevel.None</code> or <code>LogLevel.Error</code> or <code>LogLevel.Warn</code> or <code>LogLevel.Verbose</code> or <code>LogLevel.Debug</code>. Sets the log level. You can also use numeric values: <code>0</code> (None), <code>1</code> (Error), <code>2</code> (Warn), <code>3</code> (Verbose), or <code>4</code> (Debug).</td>
 <td><code>LogLevel.Warn</code></td>
 </tr>
 <tr>
@@ -1488,6 +1488,51 @@ To send data to Amplitude's EU servers, your organization must use the EU data s
   logLevel: amplitude.Types.LogLevel.Warn,
 });
 </code></pre>
+<p>
+<div class="hint note"><h2 class="hint-title">Note</h2><div class="hint-content">
+In environments where you can't import the <code>LogLevel</code> enum (such as Google Tag Manager), use numeric values instead:</p>
+<table>
+<thead>
+<tr>
+<th>Numeric value</th>
+<th>Log level</th>
+<th>Enum equivalent</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>None</td>
+<td><code>LogLevel.None</code></td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Error</td>
+<td><code>LogLevel.Error</code></td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Warn</td>
+<td><code>LogLevel.Warn</code></td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td>Verbose</td>
+<td><code>LogLevel.Verbose</code></td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td>Debug</td>
+<td><code>LogLevel.Debug</code></td>
+</tr>
+</tbody>
+</table>
+<p>For example, to suppress all logs in GTM, set <code>logLevel</code> to <code>0</code>:</p>
+<pre><code class="language-js">// In GTM configuration
+logLevel: 0
+</code></pre>
+<p>Don't use string values like <code>&quot;LogLevel.None&quot;</code> in GTM, as these won't work correctly.</div></div>
+</p>
 <p>The default logger outputs log to the developer console. You can provide your own logger implementation based on the <code>Logger</code> interface for any customization purpose. For example, collecting any error messages from the SDK in a production environment.</p>
 <p>Set the logger by configuring the <code>loggerProvider</code> with your own implementation.</p>
 <pre><code class="language-ts">amplitude.init(AMPLITUDE_API_KEY, OPTIONAL_USER_ID, {
@@ -1516,7 +1561,10 @@ To send data to Amplitude's EU servers, your organization must use the EU data s
 <p>
 
     
-    <div class="rounded-lg border text-card-foreground bg-amp-gray-50 border-amp-gray-200 shadow-sm mb-8" data-bundle-loaded="true">
+    <div class="rounded-lg border text-card-foreground bg-amp-gray-50 border-amp-gray-200 shadow-sm mb-8" 
+         data-bundle-package="@amplitude/analytics-browser" 
+         data-bundle-loader="true"
+         data-environment="production">
         <div class="p-4">
             <div class="flex items-center gap-2 mb-3">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
@@ -1531,9 +1579,6 @@ To send data to Amplitude's EU servers, your organization must use the EU data s
                 </svg>
                 <h3 class="font-medium text-amp-gray-900 text-sm m-0">
                     <a href="https://npmjs.com/package/@amplitude/analytics-browser" target="_blank">Package Information</a>
-                    
-                        <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded" title="Fresh data (2026-04-09T17:34:37.498159Z)">Live</span>
-                    
                 </h3>
             </div>
             <div class="space-y-2.5">
@@ -1544,18 +1589,19 @@ To send data to Amplitude's EU servers, your organization must use the EU data s
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="text-xs text-amp-gray-500 mb-1">Version</div>
-                        <div class="font-medium text-amp-gray-900">2.39.0</div>
+                        <div class="bundle-version">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-16 rounded"></div>
+                        </div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-amp-gray-500 mb-1">Size (gzip)</div>
-                        <div class="font-medium text-amp-gray-900">54.92 kB</div>
+                        <div class="bundle-size">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-12 rounded"></div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-        
-        
-        
     </div>
 
 
@@ -4163,7 +4209,10 @@ The top-level <code>fetchRemoteConfig</code> option is deprecated. Use <code>rem
 
 
     
-    <div class="rounded-lg border text-card-foreground bg-amp-gray-50 border-amp-gray-200 shadow-sm mb-8" data-bundle-loaded="true">
+    <div class="rounded-lg border text-card-foreground bg-amp-gray-50 border-amp-gray-200 shadow-sm mb-8" 
+         data-bundle-package="@amplitude/analytics-browser" 
+         data-bundle-loader="true"
+         data-environment="production">
         <div class="p-4">
             <div class="flex items-center gap-2 mb-3">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
@@ -4178,9 +4227,6 @@ The top-level <code>fetchRemoteConfig</code> option is deprecated. Use <code>rem
                 </svg>
                 <h3 class="font-medium text-amp-gray-900 text-sm m-0">
                     <a href="https://npmjs.com/package/@amplitude/analytics-browser" target="_blank">Package Information</a>
-                    
-                        <span class="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded" title="Data from cache (2026-04-09T17:34:37.497980Z)">Cached</span>
-                    
                 </h3>
             </div>
             <div class="space-y-2.5">
@@ -4191,18 +4237,19 @@ The top-level <code>fetchRemoteConfig</code> option is deprecated. Use <code>rem
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="text-xs text-amp-gray-500 mb-1">Version</div>
-                        <div class="font-medium text-amp-gray-900">2.39.0</div>
+                        <div class="bundle-version">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-16 rounded"></div>
+                        </div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-amp-gray-500 mb-1">Size (gzip)</div>
-                        <div class="font-medium text-amp-gray-900">54.92 kB</div>
+                        <div class="bundle-size">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-12 rounded"></div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-        
-        
-        
     </div>
 
 

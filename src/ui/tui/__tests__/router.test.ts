@@ -257,7 +257,6 @@ describe('WizardRouter', () => {
         runPhase: RunPhase.Error,
         mcpComplete: true,
         dataIngestionConfirmed: true,
-        checklistComplete: true,
       };
       // Slack show: runPhase !== Error -> false -> skipped
       expect(router.resolve(session)).not.toBe(Screen.Slack);
@@ -455,7 +454,6 @@ describe('WizardRouter', () => {
         ...sessionPostRun(),
         mcpComplete: true,
         dataIngestionConfirmed: true,
-        checklistComplete: true,
         slackComplete: true,
       };
       expect(router.resolve(session)).toBe(Screen.Outro);

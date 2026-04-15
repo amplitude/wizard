@@ -307,11 +307,7 @@ When('MCP setup is complete', function () {
   session.mcpComplete = true;
 });
 
-When('the checklist is complete', function () {
-  session.checklistComplete = true;
-});
-
-// ── DataIngestionCheck + Checklist ────────────────────────────────────────────
+// ── DataIngestionCheck ────────────────────────────────────────────────────────
 
 Then('I should be on the DataIngestionCheck screen', function () {
   const screen = router.resolve(session);

@@ -1,6 +1,8 @@
 ---
 name: integration-expo
-description: Amplitude integration for Expo applications
+description: >-
+  Amplitude integration for Expo applications using
+  @amplitude/analytics-react-native
 metadata:
   author: Amplitude
   version: dev
@@ -36,18 +38,11 @@ The example project shows the target implementation pattern. Consult the documen
 - **Environment variables**: Always use environment variables for Amplitude keys. Never hardcode them.
 - **Minimal changes**: Add Amplitude code alongside existing integrations. Don't replace or restructure existing code.
 - **Match the example**: Your implementation should follow the example project's patterns as closely as possible.
-
-## Framework guidelines
-
-- @amplitude/analytics-react-native is the React Native SDK package name (same as bare RN)
-- Use expo-constants with app.config.js extras for AMPLITUDE_API_KEY (NOT react-native-config)
-- Access config via Constants.expoConfig?.extra?.amplitudeApiKey in your amplitude config file
-- For expo-router, initialize Amplitude in app/_layout.tsx and track screen views manually with amplitude.track('Screen Viewed', { screen: pathname })
-- @amplitude/analytics-react-native is the React Native SDK package name
-- Use react-native-config to load AMPLITUDE_API_KEY from .env (variables are embedded at build time, not runtime)
-- @amplitude/analytics-react-native requires @react-native-async-storage/async-storage and @react-native-community/netinfo as peer dependencies — install them alongside it
-- Initialize Amplitude once at the top level (e.g., App.tsx) before any track calls
+- **Unified SDK**: For new browser/frontend projects, use `@amplitude/unified` as the default SDK — it bundles Analytics, Session Replay, Experiment, and Guides & Surveys in a single package. Initialize with `initAll()`. Only use `@amplitude/analytics-browser` if the project already has it installed.
+- **Event naming**: Event names MUST use Title Case with spaces following the [Noun] + [Past-Tense Verb] pattern (e.g., "Button Clicked", "Sign Up Completed", "Cart Viewed"). Do NOT use snake_case, camelCase, or SCREAMING_SNAKE. Property names should use snake_case (e.g., button_text, page_url).
+- **No PII in events**: Never send PII (emails, full names, phone numbers, physical addresses, IP addresses) in `track()` event properties. PII belongs in `identify()` user properties only.
+- **Autocapture**: Enable autocapture in the init config to automatically capture sessions, page views, form interactions, and file downloads. Use the `autocapture` config option (not the deprecated `defaultTracking`).
 
 ## Identifying users
 
-Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.
+Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. Call `amplitude.reset()` on logout to unlink future events from the current user. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.

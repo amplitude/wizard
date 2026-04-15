@@ -9,56 +9,63 @@
 
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta content="" name="description">
+  <meta content="Amplitude offers multiple ways to install browser SDKs, each with different product support and" name="description">
   <meta name="google-site-verification" content="UHLjtoO7DV30dx3hVhwTOIWguEUr_VzS41msmq-uYKA" />
   
   <link rel="apple-touch-icon" sizes="180x180" href="/docs/assets/general/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/docs/assets/general/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/docs/assets/general/favicon-16x16.png">
-  <title>Amplitude Analytics SDK Catalog | Amplitude</title>
+  <title>Browser Unified SDK | Amplitude</title>
   
   <script type="application/ld+json">
-{
-    "@context": "https://schema.org",
-    "@type": "WebPage",
-    "datePublished": "",
-    "dateModified": "May 15th, 2024",
-    "headline": "Amplitude Analytics SDK Catalog",
-    "description": "",
-    "url": "/docs/sdks/analytics",
-    "primaryImageOfPage": {
-        "@id": "/docs/assets/images/amplitude-default-seo.png"
-    },
-    "publisher": {
+    {
+      "@context": "https://schema.org",
+      "@type": "Article",
+      "headline": "Browser Unified SDK",
+      "description": "Amplitude offers multiple ways to install browser SDKs, each with different product support and",
+      "url": "/docs/sdks/analytics/browser/browser-unified-sdk",
+      "publisher": {
         "@type": "Organization",
         "name": "Amplitude",
-        "legalName": "Amplitude Inc.",
-        "url": "https://amplitude.com/",
+        "legalName": "Amplitude, Inc.",
+        "url": "https://amplitude.com",
         "logo": {
-            "@type": "ImageObject",
-            "url": "https://amplitude.com/nextjs-public/amplitude-default-seo.png"
+          "@type": "ImageObject",
+          "url": "https://amplitude.com/nextjs-public/amplitude-default-seo.png"
         },
         "address": {
-            "@type": "PostalAddress",
-            "streetAddress": "201 3rd St #200",
-            "addressLocality": "San Francisco",
-            "addressRegion": "CA",
-            "postalCode": "94103",
-            "addressCountry": "USA"
+          "@type": "PostalAddress",
+          "streetAddress": "201 3rd St #200",
+          "addressLocality": "San Francisco",
+          "addressRegion": "CA",
+          "postalCode": "94103",
+          "addressCountry": "USA"
         },
         "contactPoint": {
-            "@type": "ContactPoint",
-            "contactType": "Customer Support",
-            "telephone": "[+650-988-5131]",
-            "email": "sales@amplitude.com"
+          "@type": "ContactPoint",
+          "telephone": "[+650-988-5131]",
+          "contactType": "Customer Support",
+          "email": "sales@amplitude.com"
         },
         "sameAs": [
-            "https://twitter.com/Amplitude_HQ",
-            "https://www.facebook.com/AmplitudeAnalytics/",
-            "https://www.linkedin.com/company/amplitude-analytics"
+          "https://twitter.com/Amplitude_HQ",
+          "https://www.facebook.com/AmplitudeAnalytics/",
+          "https://www.linkedin.com/company/amplitude-analytics"
         ]
+      },
+      "datePublished": "",
+      "dateModified": "April 15th, 2026",
+      "mainEntityOfPage": {
+        "@type": "WebPage",
+        "@id": "/docs/sdks/analytics/browser/browser-unified-sdk"
+      },
+      "author": [
+        {
+          "@type": "Organization",
+          "name": "Amplitude"
+        }
+      ]
     }
-} 
 </script>
   
     <style>
@@ -74,7 +81,7 @@
     }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tocbot/4.25.0/tocbot.css">
-  <link href="/docs/css/site.css?id=cf9c3f0a1066ff8b5d94a25cd8d407e1" rel="stylesheet">
+  <link href="/docs/css/site.css?id=6e2f9e1efe9343c4ba65666223648444" rel="stylesheet">
   <link href="/docs/css/algolia.css?id=e343cc9490e043fefffa37d2817ddf8c" rel="stylesheet">
   <link href="/docs/css/dracula-prism.css?id=a5713888be640854bb66b8b74c1037ce" rel="stylesheet">
 <style>
@@ -290,7 +297,7 @@
         <button @click="sidebarOpen = !sidebarOpen" class="absolute lg:hidden left-0 z-50 w-4 translate-x-[245px] translate-y-8" :class="{ 'rotate-180': sidebarOpen, 'translate-x-[250px]' : sidebarOpen }"><svg xmlns="http://www.w3.org/2000/svg" width="21" height="24" viewBox="0 0 21 24" fill="none"><rect x="0.5" y="0.5" width="20" height="23" rx="3.5" fill="white"/><rect x="0.5" y="0.5" width="20" height="23" rx="3.5" stroke="#DEDFE2"/><g clip-path="url(#clip0_671_1270)"><path d="M11.007 11.8L8.09998 8.893L8.99298 8L12.793 11.8L8.99298 15.6L8.09998 14.707L11.007 11.8Z" fill="#1E2024"/></g><defs><clipPath id="clip0_671_1270"><rect width="16" height="16" fill="white" transform="translate(2.5 4)"/></clipPath></defs></svg></button>
         <div class="h-full overflow-scroll overscroll-contain">
   
-  <amp-side-nav current-uri="/docs/sdks/analytics" nav-title="analytics_sdks">
+  <amp-side-nav current-uri="/docs/sdks/analytics/browser/browser-unified-sdk" nav-title="analytics_sdks">
     
       
       
@@ -300,7 +307,7 @@
           url="/docs/sdks/analytics" 
           slug="analytics-sdks"
           level="1"
-          is-current>
+          >
         </amp-nav-item>
 
       
@@ -324,7 +331,7 @@
                   slug="browser-unified-sdk"
                   parent-slug="browser"
                   level="2"
-                  >
+                  is-current>
                 </amp-nav-item>
               
             
@@ -1120,135 +1127,349 @@
       <div class="absolute top-24 left-0 lg:left-64 bottom-0 right-0 z-0 transition">
         <div class="max-w-screen-xl pt-8 mx-auto">
           <section class="w-full flex flex-col items-center">
-    <div class="flex flex-row flex-nowrap w-full text-sm pl-6 lg:pl-8 text-gray-400">
+  <div class="flex flex-row flex-nowrap w-full text-sm pl-6 lg:pl-8 text-gray-400">
     
     <div class="mr-2 text-s text-gray-500 "><a class=""
         href="/docs/sdks">SDKs</a></div>
-    <span class="mr-2">/</span><div class="mr-2 text-s text-gray-500 "><a class="font-semibold"
+    <span class="mr-2">/</span><div class="mr-2 text-s text-gray-500 "><a class=""
         href="/docs/sdks/analytics">Amplitude Analytics SDK Catalog</a></div>
+    <span class="mr-2">/</span><div class="mr-2 text-s text-gray-500 "><a class=""
+        href="/docs/sdks/analytics/browser">Browser</a></div>
+    <span class="mr-2">/</span><div class="mr-2 text-s text-gray-500 "><a class="font-semibold"
+        href="/docs/sdks/analytics/browser/browser-unified-sdk">Browser Unified SDK</a></div>
     
     
 </div>
-    <div class="flex flex-row w-full p-8">
-      <div class="copy">
-        <div class="flex flex-row items-start justify-between">
-          <h1 class="font-[Gellix] font-normal mb-5">Amplitude Analytics SDK Catalog</h1>
-          
+  <div class="flex flex-row w-full pt-8 px-6 lg:p-8">
+    <div class="copy w-full">
+      <div class="flex flex-row items-start justify-between">
+        <h1 class="font-[Gellix] font-normal mb-5 max-w-3xl">Browser Unified SDK</h1>
         </div>
-        <div
-          class=" prose-a:text-amp-blue-300 prose-ol:list-decimal prose-ol:list-outside prose-pre:bg-[#fafafa] w-full">
-          <div class="flex flex-wrap gap-4">
-            
-            <a href="/docs/sdks/analytics/android">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><?xml version="1.0" encoding="UTF-8" standalone="no"?><svg class="h-12 w-12 max-w-12 max-h-12" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" width="224.8299mm" height="35.448391mm" viewBox="0 0 224.8299 35.448391" version="1.1" id="svg5"><defs id="defs2"><linearGradient id="linearGradient41415"><stop style="stop-color:#4bb064;stop-opacity:1;" offset="0" id="stop41411"/><stop style="stop-color:#90ca9e;stop-opacity:1;" offset="0.27083334" id="stop41419"/><stop style="stop-color:#90ca9e;stop-opacity:0;" offset="1" id="stop41413"/></linearGradient><linearGradient id="linearGradient40562"><stop style="stop-color:#85ac8c;stop-opacity:1;" offset="0" id="stop40558"/><stop style="stop-color:#6ec57e;stop-opacity:1;" offset="1" id="stop40560"/></linearGradient><linearGradient id="linearGradient40080"><stop style="stop-color:#41ad59;stop-opacity:1;" offset="0.15555555" id="stop40076"/><stop style="stop-color:#89cb95;stop-opacity:1;" offset="0.43333331" id="stop41324"/><stop style="stop-color:#82cc8c;stop-opacity:1;" offset="1" id="stop40078"/></linearGradient><linearGradient id="linearGradient38160"><stop style="stop-color:#409462;stop-opacity:1;" offset="0.11666667" id="stop38156"/><stop style="stop-color:#83b785;stop-opacity:1;" offset="1" id="stop38158"/></linearGradient><linearGradient id="linearGradient33156"><stop style="stop-color:#0e2010;stop-opacity:1;" offset="0" id="stop33150"/><stop style="stop-color:#050208;stop-opacity:1;" offset="0.40902776" id="stop33152"/><stop style="stop-color:#0c090e;stop-opacity:1;" offset="0.75999999" id="stop33158"/><stop style="stop-color:#001406;stop-opacity:1;" offset="1" id="stop33154"/></linearGradient><linearGradient id="linearGradient28572"><stop style="stop-color:#4f9765;stop-opacity:1;" offset="0" id="stop28562"/><stop style="stop-color:#449a5f;stop-opacity:1;" offset="0.125" id="stop28574"/><stop style="stop-color:#229a4e;stop-opacity:1;" offset="0.25" id="stop28564"/><stop style="stop-color:#44a560;stop-opacity:1;" offset="0.5" id="stop28566"/><stop style="stop-color:#42a95f;stop-opacity:1;" offset="0.75" id="stop28568"/><stop style="stop-color:#44ac66;stop-opacity:1;" offset="1" id="stop28570"/></linearGradient><linearGradient id="linearGradient25399"><stop style="stop-color:#7cbc95;stop-opacity:0.36538461;" offset="0" id="stop25395"/><stop style="stop-color:#b6d2bb;stop-opacity:0.64903849;" offset="1" id="stop25397"/></linearGradient><linearGradient id="linearGradient25048"><stop style="stop-color:#3b9261;stop-opacity:1;" offset="0.07777778" id="stop25038"/><stop style="stop-color:#229a4e;stop-opacity:1;" offset="0.25" id="stop25040"/><stop style="stop-color:#44a560;stop-opacity:1;" offset="0.5" id="stop25042"/><stop style="stop-color:#42a95f;stop-opacity:1;" offset="0.75" id="stop25044"/><stop style="stop-color:#44ac66;stop-opacity:1;" offset="1" id="stop25046"/></linearGradient><linearGradient id="linearGradient21707"><stop style="stop-color:#3b9261;stop-opacity:1;" offset="0" id="stop21705"/><stop style="stop-color:#229a4e;stop-opacity:1;" offset="0.25" id="stop23164"/><stop style="stop-color:#44a560;stop-opacity:1;" offset="0.5" id="stop22610"/><stop style="stop-color:#42a95f;stop-opacity:1;" offset="0.75" id="stop23718"/><stop style="stop-color:#44ac66;stop-opacity:1;" offset="1" id="stop21703"/></linearGradient><linearGradient id="linearGradient19555"><stop style="stop-color:#51aa63;stop-opacity:1;" offset="0" id="stop19549"/><stop style="stop-color:#44aa59;stop-opacity:1;" offset="0.28749999" id="stop19557"/><stop style="stop-color:#4daf60;stop-opacity:1;" offset="0.7638889" id="stop19551"/><stop style="stop-color:#61a76a;stop-opacity:1;" offset="0.8458333" id="stop34205"/><stop style="stop-color:#7fa186;stop-opacity:1;" offset="1" id="stop19553"/></linearGradient><linearGradient id="linearGradient18066"><stop style="stop-color:#a7d4aa;stop-opacity:1;" offset="0" id="stop18064"/><stop style="stop-color:#9acfa1;stop-opacity:1;" offset="0.52638888" id="stop18693"/><stop style="stop-color:#89c98f;stop-opacity:1;" offset="1" id="stop18062"/></linearGradient><linearGradient id="linearGradient15579"><stop style="stop-color:#4faa63;stop-opacity:1;" offset="0" id="stop15577"/><stop style="stop-color:#4daf60;stop-opacity:1;" offset="0.7638889" id="stop15930"/><stop style="stop-color:#7fa186;stop-opacity:1;" offset="1" id="stop15575"/></linearGradient><linearGradient id="linearGradient14045"><stop style="stop-color:#0e2010;stop-opacity:1;" offset="0" id="stop14043"/><stop style="stop-color:#050208;stop-opacity:1;" offset="0.40902776" id="stop30950"/><stop style="stop-color:#09130b;stop-opacity:1;" offset="0.81805551" id="stop14883"/></linearGradient><linearGradient id="linearGradient13054"><stop style="stop-color:#010001;stop-opacity:1;" offset="0" id="stop13050"/><stop style="stop-color:#010203;stop-opacity:1;" offset="0.5" id="stop13819"/><stop style="stop-color:#001000;stop-opacity:1;" offset="1" id="stop13052"/></linearGradient><radialGradient xlink:href="#linearGradient13054" id="radialGradient13058" cx="177.22487" cy="118.77674" fx="177.22487" fy="118.77674" r="2.4496355" gradientTransform="matrix(1,0,0,1.112451,8.8900403,-11.865027)" gradientUnits="userSpaceOnUse"/><radialGradient xlink:href="#linearGradient19555" id="radialGradient15581" cx="173.17831" cy="140.96013" fx="173.17831" fy="140.96013" r="25.530479" gradientTransform="matrix(1.04395,0,0,0.90072764,-7.6111992,-0.03903516)" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter17368" x="-0.13333943" y="-0.55206027" width="1.2666789" height="2.1041205"/><linearGradient xlink:href="#linearGradient18066" id="linearGradient18068" x1="173.16978" y1="104.60963" x2="173.16978" y2="115.03044" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter19184" x="-0.18752626" y="-0.73417565" width="1.3750525" height="2.4683513"/><clipPath clipPathUnits="userSpaceOnUse" id="clipPath19190"><path id="path19192" style="fill:url(#radialGradient19194);fill-opacity:1;stroke-width:11.0002;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 173.16979,103.93164 a 25.680634,25.680634 0 0 0 -25.52195,22.99601 h 51.06096 a 25.680634,25.680634 0 0 0 -25.53901,-22.99601 z"/></clipPath><radialGradient xlink:href="#linearGradient15579" id="radialGradient19194" gradientUnits="userSpaceOnUse" gradientTransform="matrix(1.04395,0,0,0.90072763,-7.6111992,-0.03903516)" cx="173.17831" cy="140.96013" fx="173.17831" fy="140.96013" r="25.530479"/><clipPath clipPathUnits="userSpaceOnUse" id="clipPath19198"><path id="path19200" style="fill:url(#radialGradient19202);fill-opacity:1;stroke-width:15.5367;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 173.11985,103.65204 a 36.271255,36.271255 0 0 0 -36.04713,32.4795 h 72.11836 a 36.271255,36.271255 0 0 0 -36.07123,-32.4795 z"/></clipPath><radialGradient xlink:href="#linearGradient15579" id="radialGradient19202" gradientUnits="userSpaceOnUse" gradientTransform="matrix(1.474472,0,0,1.2721852,-82.214709,-43.19585)" cx="173.17831" cy="140.96013" fx="173.17831" fy="140.96013" r="25.530479"/><linearGradient xlink:href="#linearGradient25048" id="linearGradient21709" x1="157.50719" y1="104.1368" x2="161.44235" y2="101.97052" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter25026" x="-0.15901417" y="-0.146466" width="1.3180283" height="1.292932"/><clipPath clipPathUnits="userSpaceOnUse" id="clipPath25032"><path id="path25034" style="fill:url(#linearGradient25036);fill-opacity:1;stroke-width:8.245;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 157.35215,97.254528 c -1.2238,3e-6 -2.21588,0.99209 -2.21588,2.215886 5.3e-4,0.349324 0.0839,0.693546 0.24288,1.004586 l 4.25607,7.32359 3.03857,-0.36277 1.04335,-1.69395 -4.54959,-7.542697 c -0.41478,-0.592193 -1.09239,-0.944785 -1.8154,-0.944645 z"/></clipPath><linearGradient xlink:href="#linearGradient21707" id="linearGradient25036" gradientUnits="userSpaceOnUse" x1="157.50719" y1="104.1368" x2="161.44235" y2="101.97052"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient25401" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter28167" x="-0.047869877" y="-0.044092354" width="1.0957398" height="1.0881847"/><linearGradient xlink:href="#linearGradient25048" id="linearGradient28199" gradientUnits="userSpaceOnUse" x1="157.50719" y1="104.1368" x2="161.44235" y2="101.97052" gradientTransform="matrix(-1,0,0,1,346.44948,0)"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient28201" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient28203" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient28572" id="linearGradient28205" gradientUnits="userSpaceOnUse" x1="157.50719" y1="104.1368" x2="161.44235" y2="101.97052" gradientTransform="matrix(-1,0,0,1,346.44948,0)"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient28207" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient28209" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient33156" id="linearGradient29430" x1="-165.42984" y1="118.34532" x2="-162.14827" y2="120.62858" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter31284" x="-0.053902708" y="-0.044768501" width="1.1078054" height="1.089537"/><clipPath clipPathUnits="userSpaceOnUse" id="clipPath32049"><ellipse style="fill:url(#linearGradient32053);fill-opacity:1;stroke-width:8.94842;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="ellipse32051" cx="-164.01886" cy="119.57114" rx="2.4496355" ry="2.7093031" transform="matrix(-1,0,0.17634434,0.98432854,0,0)"/></clipPath><linearGradient xlink:href="#linearGradient14045" id="linearGradient32053" gradientUnits="userSpaceOnUse" x1="-165.42984" y1="118.34532" x2="-162.14827" y2="120.62858"/><filter style="color-interpolation-filters:sRGB" id="filter32602" x="-0.11949068" y="-0.47861589" width="1.2389814" height="1.9572318"/><filter style="color-interpolation-filters:sRGB" id="filter33138" x="-0.15918764" y="-0.37858438" width="1.3183753" height="1.7571688"/><clipPath clipPathUnits="userSpaceOnUse" id="clipPath33144"><ellipse style="fill:url(#linearGradient33148);fill-opacity:1;stroke-width:8.94842;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="ellipse33146" cx="-164.01886" cy="119.57114" rx="2.4496355" ry="2.7093031" transform="matrix(-1,0,0.17634434,0.98432854,0,0)"/></clipPath><linearGradient xlink:href="#linearGradient14045" id="linearGradient33148" gradientUnits="userSpaceOnUse" x1="-165.42984" y1="118.34532" x2="-162.14827" y2="120.62858"/><filter style="color-interpolation-filters:sRGB" id="filter34203" x="-0.027714726" y="-0.2080222" width="1.0554295" height="1.4160444"/><filter style="color-interpolation-filters:sRGB" id="filter37117" x="-0.14793818" y="-0.13375935" width="1.2958764" height="1.2675187"/><linearGradient xlink:href="#linearGradient38160" id="linearGradient38162" x1="-163.54109" y1="122.28044" x2="-164.49663" y2="116.86183" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter39686" x="-0.0078218324" y="-0.058709394" width="1.0156437" height="1.1174188"/><filter style="color-interpolation-filters:sRGB" id="filter40028" x="-0.22826241" y="-0.31615987" width="1.4565248" height="1.6323197"/><clipPath clipPathUnits="userSpaceOnUse" id="clipPath40046"><g id="g40060"><path id="path40048" style="fill:url(#linearGradient40062);fill-opacity:1;stroke-width:8.245;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 157.35215,97.254529 c -1.2238,3e-6 -2.21588,0.992088 -2.21588,2.215885 6.4e-4,0.349325 0.0839,0.693546 0.24288,1.004586 l 4.25607,7.32359 3.03857,-0.36277 1.04335,-1.69395 -4.54959,-7.542696 c -0.41478,-0.592193 -1.09239,-0.944787 -1.8154,-0.944645 z"/><path style="mix-blend-mode:normal;fill:url(#linearGradient40064);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter25026)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path40050" clip-path="url(#clipPath25032)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient40066);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter28167)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path40052" clip-path="url(#clipPath25032)"/><path id="path40054" style="fill:url(#linearGradient40068);fill-opacity:1;stroke-width:8.245;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 157.35215,97.254529 c -1.2238,3e-6 -2.21588,0.992088 -2.21588,2.215885 6.4e-4,0.349325 0.0839,0.693546 0.24288,1.004586 l 4.25607,7.32359 3.03857,-0.36277 1.04335,-1.69395 -4.54959,-7.542696 c -0.41478,-0.592193 -1.09239,-0.944787 -1.8154,-0.944645 z"/><path style="mix-blend-mode:normal;fill:url(#linearGradient40070);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter25026)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path40056" clip-path="url(#clipPath25032)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient40072);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter28167)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path40058" clip-path="url(#clipPath25032)"/></g></clipPath><linearGradient xlink:href="#linearGradient25048" id="linearGradient40062" gradientUnits="userSpaceOnUse" x1="157.50719" y1="104.1368" x2="161.44235" y2="101.97052"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient40064" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient40066" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient25048" id="linearGradient40068" gradientUnits="userSpaceOnUse" x1="157.50719" y1="104.1368" x2="161.44235" y2="101.97052"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient40070" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient40072" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient40080" id="linearGradient40082" x1="161.54057" y1="106.54541" x2="162.6738" y2="107.43582" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter40500" x="-0.30771885" y="-0.42621276" width="1.6154377" height="1.8524255"/><linearGradient xlink:href="#linearGradient40562" id="linearGradient40564" x1="155.13757" y1="111.78979" x2="163.71713" y2="105.74187" gradientUnits="userSpaceOnUse"/><filter style="color-interpolation-filters:sRGB" id="filter41256" x="-0.06033335" y="-0.080505232" width="1.1206667" height="1.1610105"/><clipPath clipPathUnits="userSpaceOnUse" id="clipPath41262"><path id="path41264" style="fill:url(#radialGradient41266);fill-opacity:1;stroke-width:11.0002;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 173.16979,103.93164 a 25.680634,25.680634 0 0 0 -25.52195,22.99601 h 51.06096 a 25.680634,25.680634 0 0 0 -25.53901,-22.99601 z"/></clipPath><radialGradient xlink:href="#linearGradient19555" id="radialGradient41266" gradientUnits="userSpaceOnUse" gradientTransform="matrix(1.04395,0,0,0.90072763,-7.6111992,-0.03903516)" cx="173.17831" cy="140.96013" fx="173.17831" fy="140.96013" r="25.530479"/><filter style="color-interpolation-filters:sRGB" id="filter41272" x="-0.0041782101" y="-0.0055751548" width="1.0083564" height="1.0111503"/><linearGradient xlink:href="#linearGradient40562" id="linearGradient41292" gradientUnits="userSpaceOnUse" x1="155.13757" y1="111.78979" x2="163.71713" y2="105.74187"/><linearGradient xlink:href="#linearGradient40562" id="linearGradient41294" gradientUnits="userSpaceOnUse" x1="155.13757" y1="111.78979" x2="163.71713" y2="105.74187"/><linearGradient xlink:href="#linearGradient25048" id="linearGradient41395" gradientUnits="userSpaceOnUse" x1="157.50719" y1="104.1368" x2="161.44235" y2="101.97052"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient41397" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient41399" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient25399" id="linearGradient41401" gradientUnits="userSpaceOnUse" x1="160.25763" y1="100.00639" x2="156.13103" y2="97.621071"/><linearGradient xlink:href="#linearGradient41415" id="linearGradient41417" x1="161.62859" y1="105.74187" x2="162.97255" y2="107.79859" gradientUnits="userSpaceOnUse"/><linearGradient xlink:href="#linearGradient33156" id="linearGradient42528" gradientUnits="userSpaceOnUse" x1="-165.42984" y1="118.34532" x2="-162.14827" y2="120.62858"/><linearGradient xlink:href="#linearGradient40562" id="linearGradient42530" gradientUnits="userSpaceOnUse" x1="155.13757" y1="111.78979" x2="163.71713" y2="105.74187"/><linearGradient xlink:href="#linearGradient40562" id="linearGradient42532" gradientUnits="userSpaceOnUse" x1="155.13757" y1="111.78979" x2="163.71713" y2="105.74187"/><linearGradient xlink:href="#linearGradient40562" id="linearGradient42534" gradientUnits="userSpaceOnUse" x1="155.13757" y1="111.78979" x2="163.71713" y2="105.74187"/></defs><g id="layer1" transform="translate(9.6811659,-97.476099)"><g id="g42572"><path id="rect366" style="fill:#242424;fill-opacity:1;stroke-width:9.65731;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="M 3.2482807,97.476099 -9.6811659,132.28168 h 5.6206564 l 2.9477273,-8.44915 H 13.831046 l 2.947728,8.44915 h 5.620052 L 9.469378,97.476099 Z m 61.5161073,0 v 14.752551 c -1.996101,-1.91217 -4.088469,-2.93925 -6.445657,-2.93925 -6.136065,0 -11.358133,5.34377 -11.358133,11.85145 0,6.50763 5.281883,11.78364 11.316974,11.78364 2.234347,0 4.100659,-0.72016 6.486816,-3.10631 v 2.4635 h 4.914291 V 97.476099 Z m 73.340912,0 v 14.752551 c -1.99609,-1.91217 -4.08847,-2.93925 -6.44566,-2.93925 -6.13606,0 -11.35813,5.34377 -11.35813,11.85145 0,6.50763 5.28188,11.78364 11.31697,11.78364 2.23436,0 4.10066,-0.72016 6.48682,-3.10631 v 2.4635 h 4.91429 V 97.476099 Z m -22.73019,1.866087 a 3.2418197,3.2418197 0 0 0 -3.24128,3.241894 3.2418197,3.2418197 0 0 0 3.24128,3.24189 3.2418197,3.2418197 0 0 0 3.2419,-3.24189 3.2418197,3.2418197 0 0 0 -3.2419,-3.241894 z M 6.3588295,102.4152 12.11628,118.91824 H 0.6013793 Z m 28.0699935,6.85968 c -5.672686,0 -10.008958,5.01499 -10.008958,9.43212 v 13.57468 h 4.914291 V 118.707 c 0,-2.93016 2.758788,-4.95121 5.094667,-4.95121 2.335877,0 5.183641,2.02105 5.183641,4.95121 v 13.57468 h 4.914292 V 118.707 c 0,-4.41713 -4.425253,-9.43212 -10.097933,-9.43212 z m 64.245326,0.0957 c -6.960324,0 -11.911362,5.25827 -11.911362,11.74429 10e-7,6.48601 5.164095,11.7437 11.911362,11.7437 6.844111,0 11.761251,-5.25769 11.761251,-11.7437 0,-6.48602 -5.0474,-11.74429 -11.761251,-11.74429 z m -15.68409,0.0412 c -5.903261,0 -10.202647,4.2879 -10.202647,11.10271 v 11.7673 h 4.914291 v -11.7673 c 0,-2.24161 0.443963,-3.67435 1.855797,-5.08619 1.633364,-1.63337 3.230292,-1.78165 6.598795,-1.50776 v -4.08808 c -0.275569,-0.1591 -1.363832,-0.42068 -3.166236,-0.42068 z m 29.899151,0.55504 v 22.31497 h 4.91429 v -22.31497 z m -54.278733,3.82963 c 3.698501,-1.8e-4 6.560052,3.28355 6.560056,7.36993 2e-6,4.08638 -2.861551,7.35134 -6.560056,7.35116 -3.698269,-1.8e-4 -6.641166,-3.26504 -6.641163,-7.35116 2e-6,-4.08612 2.942898,-7.36975 6.641163,-7.36993 z m 73.340913,0 c 3.6985,-1.8e-4 6.56004,3.28355 6.56006,7.36993 0,4.08638 -2.86156,7.35134 -6.56006,7.35116 -3.69828,-1.8e-4 -6.64116,-3.26504 -6.64116,-7.35116 10e-6,-4.08612 2.94288,-7.36975 6.64116,-7.36993 z m -33.30811,0.004 c 3.93268,0 6.81125,3.27485 6.81125,7.31424 0,4.03938 -3.04881,7.31363 -6.81125,7.31363 -3.952258,0 -6.919594,-3.27425 -6.919594,-7.31363 0,-4.03939 2.842534,-7.31424 6.919594,-7.31424 z"/><g id="g42526" transform="matrix(1.1712938,0,0,1.1712938,-17.59766,-16.387895)"><g id="g28183"><path id="path7721" style="fill:url(#linearGradient41395);fill-opacity:1;stroke-width:8.245;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 157.35215,97.254529 c -1.2238,3e-6 -2.21588,0.992088 -2.21588,2.215885 6.4e-4,0.349325 0.0839,0.693546 0.24288,1.004586 l 4.25607,7.32359 3.03857,-0.36277 1.04335,-1.69395 -4.54959,-7.542696 c -0.41478,-0.592193 -1.09239,-0.944787 -1.8154,-0.944645 z"/><path style="mix-blend-mode:normal;fill:url(#linearGradient41397);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter25026)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path24395" clip-path="url(#clipPath25032)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient41399);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter28167)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path28163" clip-path="url(#clipPath25032)"/><path id="path28171" style="fill:url(#linearGradient21709);fill-opacity:1;stroke-width:8.245;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 157.35215,97.254529 c -1.2238,3e-6 -2.21588,0.992088 -2.21588,2.215885 6.4e-4,0.349325 0.0839,0.693546 0.24288,1.004586 l 4.25607,7.32359 3.03857,-0.36277 1.04335,-1.69395 -4.54959,-7.542696 c -0.41478,-0.592193 -1.09239,-0.944787 -1.8154,-0.944645 z"/><path style="mix-blend-mode:normal;fill:url(#linearGradient41401);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter25026)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path28173" clip-path="url(#clipPath25032)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient25401);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter28167)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path28175" clip-path="url(#clipPath25032)"/></g><path style="fill:url(#linearGradient41417);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter40028)" d="m 163.44592,105.29223 -3.8107,2.50636 3.78673,0.85315 c 0.39619,-1.19744 1.72036,-2.58039 0.024,-3.35951 z" id="path39742" clip-path="url(#clipPath40046)"/><g id="g28927" transform="translate(-0.07422183)"><path id="path28185" style="fill:url(#linearGradient28199);fill-opacity:1;stroke-width:8.245;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 189.09733,97.254529 c 1.2238,3e-6 2.21588,0.992088 2.21588,2.215885 -6.4e-4,0.349325 -0.0839,0.693546 -0.24288,1.004586 l -4.25607,7.32359 -3.03857,-0.36277 -1.04335,-1.69395 4.54959,-7.542696 c 0.41478,-0.592193 1.09239,-0.944787 1.8154,-0.944645 z"/><path style="mix-blend-mode:normal;fill:url(#linearGradient28201);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter25026)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path28187" clip-path="url(#clipPath25032)" transform="matrix(-1,0,0,1,346.44948,0)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient28203);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter28167)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path28189" clip-path="url(#clipPath25032)" transform="matrix(-1,0,0,1,346.44948,0)"/><path id="path28191" style="fill:url(#linearGradient28205);fill-opacity:1;stroke-width:8.245;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 189.09733,97.254529 c 1.2238,3e-6 2.21588,0.992088 2.21588,2.215885 -6.4e-4,0.349325 -0.0839,0.693546 -0.24288,1.004586 l -4.25607,7.32359 -3.03857,-0.36277 -1.04335,-1.69395 4.54959,-7.542696 c 0.41478,-0.592193 1.09239,-0.944787 1.8154,-0.944645 z"/><path style="mix-blend-mode:normal;fill:url(#linearGradient28207);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter25026)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path28193" clip-path="url(#clipPath25032)" transform="matrix(-1,0,0,1,346.44948,0)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient28209);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter28167)" d="m 155.13627,98.852496 c 1.26535,-0.92185 2.46098,-1.189321 3.6468,-0.446521 l 4.16719,7.821755 1.75286,-1.05833 -2.97656,-7.639845 -3.57187,-1.85829 -3.175,1.72599 z" id="path28195" clip-path="url(#clipPath25032)" transform="matrix(-1,0,0,1,346.44948,0)"/></g><path style="fill:url(#linearGradient40082);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter40500)" d="m 163.44592,105.29223 -3.8107,2.50636 3.78673,0.85315 c 0.39619,-1.19744 1.72036,-2.58039 0.024,-3.35951 z" id="path40074" clip-path="url(#clipPath40046)" transform="matrix(-1,0,0,1,346.37526,0)"/><path id="path7716" style="fill:url(#radialGradient15581);fill-opacity:1;stroke-width:11.0002;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" d="m 173.16979,103.93164 a 25.680634,25.680634 0 0 0 -25.52195,22.99601 h 51.06096 a 25.680634,25.680634 0 0 0 -25.53901,-22.99601 z"/><ellipse style="mix-blend-mode:normal;fill:url(#linearGradient38162);fill-opacity:1;stroke-width:8.94842;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers;filter:url(#filter37117)" id="ellipse36630" cx="-164.01886" cy="119.57114" rx="2.4496355" ry="2.7093031" transform="matrix(-1.0640424,0,0.18763785,1.0473673,-11.854534,-7.56809)"/><ellipse style="fill:url(#linearGradient42528);fill-opacity:1;stroke-width:8.94842;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="ellipse36208" cx="-164.01886" cy="119.57114" rx="2.4496355" ry="2.7093031" transform="matrix(-1,0,0.17634434,0.98432854,0,0)"/><path style="fill:url(#linearGradient18068);fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter19184)" d="m 151.71217,115.53058 h 7.52208 c 2.4156,-2.75375 6.43874,-3.18627 12.20877,-3.18627 9.40435,0 12.45567,-1.38321 15.09387,3.18628 h 7.93144 c -1.69167,-6.3134 -11.73599,-10.92096 -21.29854,-10.92096 -10.25,0.15116 -19.98049,5.40824 -21.45762,10.92095 z" id="path16883" clip-path="url(#clipPath19190)"/><ellipse style="fill:url(#radialGradient13058);fill-opacity:1;stroke-width:8.97447;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="path8454" cx="186.11491" cy="120.26827" rx="2.4496355" ry="2.7250993" transform="matrix(1,0,-0.20566317,0.97862284,0,0)"/><path style="fill:#a7d5aa;fill-opacity:1;stroke:none;stroke-width:0.600001;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter17368)" d="m 151.43817,115.03043 h 7.59046 c 2.43756,-2.77879 8.00929,-2.68612 12.87359,-2.68612 7.92813,0 12.01509,-1.9249 14.67728,2.68613 h 8.00356 c -1.70706,-6.3708 -11.85072,-10.42081 -21.41327,-10.42081 -10.25,0.15116 -20.24106,4.85797 -21.73162,10.4208 z" id="path19040" transform="matrix(0.70801614,0,0,0.70801614,50.598142,30.544324)" clip-path="url(#clipPath19198)"/><ellipse style="fill:url(#linearGradient29430);fill-opacity:1;stroke-width:8.94842;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers" id="ellipse8456" cx="-164.01886" cy="119.57114" rx="2.4496355" ry="2.7093031" transform="matrix(-1,0,0.17634434,0.98432854,0,0)"/><path style="fill:#083e15;fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter31284)" d="m 186.577,120.11489 c 0.40134,-0.41767 0.94893,-1.4441 0.815,-1.67607 0.48981,-2.29198 -1.32635,-3.17621 -2.76522,-3.40838 l 3.5085,-0.20127 c 0,0 0.77859,2.36644 0.82683,2.53007 0.33884,1.14927 -0.95059,2.37127 -2.38511,2.75565 z" id="path31282" clip-path="url(#clipPath32049)"/><path style="mix-blend-mode:normal;fill:#445747;fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter32602)" d="m 185.23314,115.76888 c -0.57707,-0.24133 -1.23556,-0.31602 -1.96853,-0.23829 0.71506,-0.25462 1.33009,-0.49992 1.96853,0.23829 z" id="path32109"/><path style="mix-blend-mode:normal;fill:#375f40;fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter33138)" d="m 183.81543,115.19227 c 1.10912,-0.45363 1.92347,0.23366 2.78966,0.72034 l -0.18133,-1.1992 -2.67064,0.11576 z" id="path32660" clip-path="url(#clipPath33144)"/><path id="path34195" style="color:#000000;mix-blend-mode:normal;fill:#afb4ad;fill-opacity:1;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers;filter:url(#filter34203)" d="m 185.54669,115.72927 c -0.0149,-3.3e-4 -0.0298,0.001 -0.0444,0.004 -0.0521,0.0106 -0.0978,0.0414 -0.12713,0.0858 -0.0615,0.0918 -0.037,0.21602 0.0548,0.27751 0.33366,0.22303 0.52573,0.45776 0.68368,0.67747 0.0647,0.0894 0.18955,0.10955 0.27905,0.045 0.0888,-0.0639 0.10973,-0.18734 0.047,-0.27698 -0.16985,-0.23628 -0.40327,-0.52121 -0.78703,-0.77773 -0.0313,-0.0213 -0.0681,-0.0333 -0.10594,-0.0346 z m -24.73389,0.0584 c -0.0377,8.2e-4 -0.0745,0.0123 -0.10594,0.0331 -0.38377,0.25652 -0.61718,0.54093 -0.78703,0.77721 -0.0649,0.0896 -0.0447,0.21487 0.045,0.27957 0.0896,0.0649 0.21487,0.0447 0.27957,-0.045 0.15794,-0.21971 0.35158,-0.45497 0.68523,-0.67799 0.0915,-0.0615 0.11596,-0.18533 0.0548,-0.27699 -0.0293,-0.0444 -0.075,-0.0752 -0.12712,-0.0858 v -5.2e-4 c -0.0146,-0.003 -0.0295,-0.004 -0.0444,-0.004 z m 1.89825,2.66855 c 0.0376,-0.0376 -0.1041,0.0212 -0.14159,0.0589 -0.17025,0.17007 -0.33902,0.2726 -0.52762,0.38499 -0.0947,0.0562 -0.12614,0.17844 -0.0703,0.27337 0.0563,0.096 0.18005,0.12755 0.27544,0.0703 0.18947,-0.11291 0.39782,-0.23785 0.60565,-0.44545 0.0783,-0.0781 0.0783,-0.20504 0,-0.28319 -0.0375,-0.0377 -0.1792,-0.0213 -0.1416,-0.0589 z m 20.99131,-0.009 c -0.0531,4e-5 -0.1041,0.0212 -0.1416,0.0589 -0.0783,0.0781 -0.0783,0.20505 0,0.28319 0.20783,0.2076 0.41772,0.33254 0.6072,0.44545 0.0949,0.0558 0.21715,0.0244 0.27337,-0.0703 0.0558,-0.0949 0.0244,-0.21715 -0.0703,-0.27337 -0.1886,-0.11239 -0.35685,-0.21492 -0.5271,-0.38499 -0.0375,-0.0377 -0.0884,-0.0589 -0.14159,-0.0589 z"/><path id="path39682" style="color:#000000;mix-blend-mode:normal;fill:#afb4ad;fill-opacity:1;stroke-linecap:round;stroke-linejoin:round;paint-order:stroke fill markers;filter:url(#filter39686)" d="m 185.54669,115.72927 c -0.0149,-3.3e-4 -0.0298,0.001 -0.0444,0.004 -0.0521,0.0106 -0.0978,0.0414 -0.12713,0.0858 -0.0615,0.0918 -0.037,0.21602 0.0548,0.27751 0.33366,0.22303 0.52573,0.45776 0.68368,0.67747 0.0647,0.0894 0.18955,0.10955 0.27905,0.045 0.0888,-0.0639 0.10973,-0.18734 0.047,-0.27698 -0.16985,-0.23628 -0.40327,-0.52121 -0.78703,-0.77773 -0.0313,-0.0213 -0.0681,-0.0333 -0.10594,-0.0346 z m -24.73389,0.0584 c -0.0377,8.2e-4 -0.0745,0.0123 -0.10594,0.0331 -0.38377,0.25652 -0.61718,0.54093 -0.78703,0.77721 -0.0649,0.0896 -0.0447,0.21487 0.045,0.27957 0.0896,0.0649 0.21487,0.0447 0.27957,-0.045 0.15794,-0.21971 0.35158,-0.45497 0.68523,-0.67799 0.0915,-0.0615 0.11596,-0.18533 0.0548,-0.27699 -0.0293,-0.0444 -0.075,-0.0752 -0.12712,-0.0858 v -5.2e-4 c -0.0146,-0.003 -0.0295,-0.004 -0.0444,-0.004 z m 1.89825,2.66855 c 0.0376,-0.0376 -0.1041,0.0212 -0.14159,0.0589 -0.17025,0.17007 -0.33902,0.2726 -0.52762,0.38499 -0.0947,0.0562 -0.12614,0.17844 -0.0703,0.27337 0.0563,0.096 0.18005,0.12755 0.27544,0.0703 0.18947,-0.11291 0.39782,-0.23785 0.60565,-0.44545 0.0783,-0.0781 0.0783,-0.20504 0,-0.28319 -0.0375,-0.0377 -0.1792,-0.0213 -0.1416,-0.0589 z m 20.99131,-0.009 c -0.0531,4e-5 -0.1041,0.0212 -0.1416,0.0589 -0.0783,0.0781 -0.0783,0.20505 0,0.28319 0.20783,0.2076 0.41772,0.33254 0.6072,0.44545 0.0949,0.0558 0.21715,0.0244 0.27337,-0.0703 0.0558,-0.0949 0.0244,-0.21715 -0.0703,-0.27337 -0.1886,-0.11239 -0.35685,-0.21492 -0.5271,-0.38499 -0.0375,-0.0377 -0.0884,-0.0589 -0.14159,-0.0589 z"/><path style="mix-blend-mode:normal;fill:url(#linearGradient42530);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter41256)" d="m 163.71714,105.74187 c -3.0186,1.68048 -6.86549,3.87094 -9.68304,7.40703 l -0.20046,-3.7488 z" id="path40556" clip-path="url(#clipPath41262)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient42532);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter41272)" d="m 163.71714,105.74187 c -3.0186,1.68048 -6.86549,3.87094 -9.68304,7.40703 l -0.20046,-3.7488 z" id="path41268" clip-path="url(#clipPath41262)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient42534);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter41256)" d="m 163.71714,105.74187 c -3.0186,1.68048 -6.86549,3.87094 -9.68304,7.40703 l -0.20046,-3.7488 z" id="path41276" clip-path="url(#clipPath41262)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient40564);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter41272)" d="m 163.71714,105.74187 c -3.0186,1.68048 -6.86549,3.87094 -9.68304,7.40703 l -0.20046,-3.7488 z" id="path41278" clip-path="url(#clipPath41262)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient41294);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter41256)" d="m 163.71714,105.74187 c -3.0186,1.68048 -6.86549,3.87094 -9.68304,7.40703 l -0.20046,-3.7488 z" id="path41288" clip-path="url(#clipPath41262)" transform="matrix(-1,0,0,1,346.37574,0)"/><path style="mix-blend-mode:normal;fill:url(#linearGradient41292);fill-opacity:1;stroke:none;stroke-width:0.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:none;stroke-opacity:1;paint-order:stroke fill markers;filter:url(#filter41272)" d="m 163.71714,105.74187 c -3.0186,1.68048 -6.86549,3.87094 -9.68304,7.40703 l -0.20046,-3.7488 z" id="path41290" clip-path="url(#clipPath41262)" transform="matrix(-1,0,0,1,346.37574,0)"/></g></g></g></svg>
-                </div>
-                <div class="pl-8">Android</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/browser">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" width="2500" height="2500" viewBox="0 0 1052 1052"><path fill="#f0db4f" d="M0 0h1052v1052H0z"/><path d="M965.9 801.1c-7.7-48-39-88.3-131.7-125.9-32.2-14.8-68.1-25.399-78.8-49.8-3.8-14.2-4.3-22.2-1.9-30.8 6.9-27.9 40.2-36.6 66.6-28.6 17 5.7 33.1 18.801 42.8 39.7 45.4-29.399 45.3-29.2 77-49.399-11.6-18-17.8-26.301-25.4-34-27.3-30.5-64.5-46.2-124-45-10.3 1.3-20.699 2.699-31 4-29.699 7.5-58 23.1-74.6 44-49.8 56.5-35.6 155.399 25 196.1 59.7 44.8 147.4 55 158.6 96.9 10.9 51.3-37.699 67.899-86 62-35.6-7.4-55.399-25.5-76.8-58.4-39.399 22.8-39.399 22.8-79.899 46.1 9.6 21 19.699 30.5 35.8 48.7 76.2 77.3 266.899 73.5 301.1-43.5 1.399-4.001 10.6-30.801 3.199-72.101zm-394-317.6h-98.4c0 85-.399 169.4-.399 254.4 0 54.1 2.8 103.7-6 118.9-14.4 29.899-51.7 26.2-68.7 20.399-17.3-8.5-26.1-20.6-36.3-37.699-2.8-4.9-4.9-8.7-5.601-9-26.699 16.3-53.3 32.699-80 49 13.301 27.3 32.9 51 58 66.399 37.5 22.5 87.9 29.4 140.601 17.3 34.3-10 63.899-30.699 79.399-62.199 22.4-41.3 17.6-91.3 17.4-146.6.5-90.2 0-180.4 0-270.9z" fill="#323330"/></svg>
-                </div>
-                <div class="pl-8">Browser</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/flutter">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" viewBox="-2 0 24 24"><title>Flutter icon</title><path d="M14.314 0L2.3 12 6 15.7 21.684.012h-7.357L14.314 0zm.014 11.072l-6.471 6.457 6.47 6.47H21.7l-6.46-6.468 6.46-6.46h-7.371z"/></svg>
-                </div>
-                <div class="pl-8">Flutter</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/go">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" fill="#00ADD8" viewBox="0 0 24 24"><title>Go</title><path d="M1.811 10.231c-.047 0-.058-.023-.035-.059l.246-.315c.023-.035.081-.058.128-.058h4.172c.046 0 .058.035.035.07l-.199.303c-.023.036-.082.07-.117.07zM.047 11.306c-.047 0-.059-.023-.035-.058l.245-.316c.023-.035.082-.058.129-.058h5.328c.047 0 .07.035.058.07l-.093.28c-.012.047-.058.07-.105.07zm2.828 1.075c-.047 0-.059-.035-.035-.07l.163-.292c.023-.035.07-.07.117-.07h2.337c.047 0 .07.035.07.082l-.023.28c0 .047-.047.082-.082.082zm12.129-2.36c-.736.187-1.239.327-1.963.514-.176.046-.187.058-.34-.117-.174-.199-.303-.327-.548-.444-.737-.362-1.45-.257-2.115.175-.795.514-1.204 1.274-1.192 2.22.011.935.654 1.706 1.577 1.835.795.105 1.46-.175 1.987-.77.105-.13.198-.27.315-.434H10.47c-.245 0-.304-.152-.222-.35.152-.362.432-.97.596-1.274a.315.315 0 01.292-.187h4.253c-.023.316-.023.631-.07.947a4.983 4.983 0 01-.958 2.29c-.841 1.11-1.94 1.8-3.33 1.986-1.145.152-2.209-.07-3.143-.77-.865-.655-1.356-1.52-1.484-2.595-.152-1.274.222-2.419.993-3.424.83-1.086 1.928-1.776 3.272-2.02 1.098-.2 2.15-.07 3.096.571.62.41 1.063.97 1.356 1.648.07.105.023.164-.117.2m3.868 6.461c-1.064-.024-2.034-.328-2.852-1.029a3.665 3.665 0 01-1.262-2.255c-.21-1.32.152-2.489.947-3.529.853-1.122 1.881-1.706 3.272-1.95 1.192-.21 2.314-.095 3.33.595.923.63 1.496 1.484 1.648 2.605.198 1.578-.257 2.863-1.344 3.962-.771.783-1.718 1.273-2.805 1.495-.315.06-.63.07-.934.106zm2.78-4.72c-.011-.153-.011-.27-.034-.387-.21-1.157-1.274-1.81-2.384-1.554-1.087.245-1.788.935-2.045 2.033-.21.912.234 1.835 1.075 2.21.643.28 1.285.244 1.905-.07.923-.48 1.425-1.228 1.484-2.233z"/></svg>
-                </div>
-                <div class="pl-8">Go</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/ios">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><?xml version="1.0" encoding="UTF-8" standalone="no"?><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" xmlns:svg="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 117.6206 58.359901" id="svg4" width="117.6206" height="58.359901"><defs id="defs8"/><path d="m 0.5468,57.4219 h 9.7266 V 16.0159 H 0.5468 Z m 4.8438,-46.836 c 3.0469,0 5.4297,-2.3438 5.4297,-5.2734 C 10.8203,2.3437 8.4375,0 5.3906,0 2.3828,0 0,2.3438 0,5.3125 c 0,2.9297 2.3828,5.2734 5.3906,5.2734 z m 37.267,-10.469 c -16.445,0 -26.758,11.211 -26.758,29.141 0,17.93 10.312,29.102 26.758,29.102 16.406,0 26.719,-11.172 26.719,-29.102 0,-17.93 -10.312,-29.141 -26.719,-29.141 z m 0,8.5938 c 10.039,0 16.445,7.9688 16.445,20.547 0,12.539 -6.4062,20.508 -16.445,20.508 -10.078,0 -16.445,-7.9688 -16.445,-20.508 0,-12.578 6.3672,-20.547 16.445,-20.547 z m 30.822,32.852 c 0.42969,10.391 8.9453,16.797 21.914,16.797 13.633,0 22.227,-6.7188 22.227,-17.422 0,-8.3984 -4.8438,-13.125 -16.289,-15.742 l -6.4844,-1.4844 c -6.9141,-1.6406 -9.7656,-3.8281 -9.7656,-7.5781 0,-4.6875 4.2969,-7.8125 10.664,-7.8125 6.4453,0 10.859,3.1641 11.328,8.4375 h 9.6094 c -0.23438,-9.9219 -8.4375,-16.641 -20.859,-16.641 -12.266,0 -20.977,6.7578 -20.977,16.758 0,8.0469 4.9219,13.047 15.312,15.43 l 7.3047,1.7188 c 7.1094,1.6797 10,4.0234 10,8.0859 0,4.6875 -4.7266,8.0469 -11.523,8.0469 -6.875,0 -12.07,-3.3984 -12.695,-8.5938 h -9.7656 z" id="path2"/></svg>
-                </div>
-                <div class="pl-8">iOS</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/java">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" width="1344" height="2500" viewBox="6.527 4.399 290.829 540.906"><path d="M285.104 430.945h-2.037v-1.14h5.486v1.14h-2.025v5.688h-1.424v-5.688zm10.942.297h-.032l-2.02 5.393h-.924l-2.006-5.393h-.024v5.393h-1.343v-6.828h1.976l1.86 4.835 1.854-4.835h1.969v6.828h-1.311l.001-5.393z" fill="#e76f00"/><path d="M102.681 291.324s-14.178 8.245 10.09 11.035c29.4 3.354 44.426 2.873 76.825-3.259 0 0 8.518 5.341 20.414 9.967-72.63 31.128-164.376-1.803-107.329-17.743M93.806 250.704s-15.902 11.771 8.384 14.283c31.406 3.24 56.208 3.505 99.125-4.759 0 0 5.937 6.018 15.271 9.309-87.815 25.678-185.624 2.025-122.78-18.833" fill="#5382a1"/><path d="M168.625 181.799c17.896 20.604-4.701 39.146-4.701 39.146s45.439-23.458 24.571-52.833c-19.491-27.395-34.438-41.005 46.479-87.934.001-.001-127.013 31.721-66.349 101.621" fill="#e76f00"/><path d="M264.684 321.369s10.492 8.646-11.555 15.333c-41.923 12.7-174.488 16.535-211.314.507-13.238-5.76 11.587-13.752 19.396-15.429 8.144-1.766 12.798-1.437 12.798-1.437-14.722-10.371-95.157 20.363-40.857 29.166 148.084 24.015 269.944-10.814 231.532-28.14M109.499 208.617s-67.431 16.016-23.879 21.832c18.389 2.462 55.047 1.905 89.192-.956 27.906-2.354 55.928-7.358 55.928-7.358s-9.84 4.214-16.959 9.074c-68.475 18.01-200.756 9.631-162.674-8.79 32.206-15.568 58.392-13.802 58.392-13.802M230.462 276.231c69.608-36.171 37.425-70.932 14.96-66.248-5.506 1.146-7.961 2.139-7.961 2.139s2.045-3.202 5.947-4.588c44.441-15.624 78.619 46.081-14.346 70.521 0 0 1.079-.962 1.4-1.824" fill="#5382a1"/><path d="M188.495 4.399s38.55 38.562-36.563 97.862c-60.233 47.567-13.735 74.689-.025 105.678-35.158-31.723-60.96-59.647-43.65-85.637 25.406-38.151 95.792-56.648 80.238-117.903" fill="#e76f00"/><path d="M116.339 374.246c66.815 4.277 169.417-2.373 171.846-33.987 0 0-4.67 11.984-55.219 21.503-57.027 10.731-127.364 9.479-169.081 2.601.002-.002 8.541 7.067 52.454 9.883" fill="#5382a1"/><path d="M105.389 495.049c-6.303 5.467-12.96 8.536-18.934 8.536-8.527 0-13.134-5.113-13.134-13.314 0-8.871 4.937-15.357 24.739-15.357h7.328l.001 20.135m17.392 19.623V453.93c0-15.518-8.85-25.756-30.188-25.756-12.457 0-23.369 3.076-32.238 6.999l2.56 10.752c6.983-2.563 16.022-4.949 24.894-4.949 12.292 0 17.58 4.949 17.58 15.181v7.678h-6.135c-29.865 0-43.337 11.593-43.337 28.993 0 15.018 8.878 23.554 25.594 23.554 10.745 0 18.766-4.437 26.264-10.929l1.361 9.221 13.645-.002zM180.824 514.672h-21.691l-26.106-84.96h18.944l16.198 52.199 3.601 15.699c8.195-22.698 13.992-45.726 16.891-67.898h18.427c-4.938 27.976-13.822 58.684-26.264 84.96M264.038 495.049c-6.315 5.467-12.983 8.536-18.958 8.536-8.512 0-13.131-5.113-13.131-13.314 0-8.871 4.947-15.357 24.748-15.357h7.341v20.135m17.39 19.623V453.93c0-15.518-8.871-25.756-30.186-25.756-12.465 0-23.381 3.076-32.246 6.999l2.557 10.752c6.985-2.563 16.041-4.949 24.906-4.949 12.283 0 17.579 4.949 17.579 15.181v7.678h-6.146c-29.873 0-43.34 11.593-43.34 28.993 0 15.018 8.871 23.554 25.584 23.554 10.752 0 18.77-4.437 26.28-10.929l1.366 9.221 13.646-.002zM36.847 529.099c-4.958 7.239-12.966 12.966-21.733 16.206L6.527 535.2c6.673-3.424 12.396-8.954 15.055-14.104 2.3-4.581 3.252-10.485 3.252-24.604v-96.995h18.478v95.666c-.001 18.875-1.51 26.5-6.465 33.936" fill="#e76f00"/></svg>
-                </div>
-                <div class="pl-8">JRE Java</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/node">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" width="2270" height="2500" viewBox="0 0 256 282" preserveAspectRatio="xMinYMin meet"><g fill="#8CC84B"><path d="M116.504 3.58c6.962-3.985 16.03-4.003 22.986 0 34.995 19.774 70.001 39.517 104.99 59.303 6.581 3.707 10.983 11.031 10.916 18.614v118.968c.049 7.897-4.788 15.396-11.731 19.019-34.88 19.665-69.742 39.354-104.616 59.019-7.106 4.063-16.356 3.75-23.24-.646-10.457-6.062-20.932-12.094-31.39-18.15-2.137-1.274-4.546-2.288-6.055-4.36 1.334-1.798 3.719-2.022 5.657-2.807 4.365-1.388 8.374-3.616 12.384-5.778 1.014-.694 2.252-.428 3.224.193 8.942 5.127 17.805 10.403 26.777 15.481 1.914 1.105 3.852-.362 5.488-1.274 34.228-19.345 68.498-38.617 102.72-57.968 1.268-.61 1.969-1.956 1.866-3.345.024-39.245.006-78.497.012-117.742.145-1.576-.767-3.025-2.192-3.67-34.759-19.575-69.5-39.18-104.253-58.76a3.621 3.621 0 0 0-4.094-.006C91.2 39.257 56.465 58.88 21.712 78.454c-1.42.646-2.373 2.071-2.204 3.653.006 39.245 0 78.497 0 117.748a3.329 3.329 0 0 0 1.89 3.303c9.274 5.259 18.56 10.481 27.84 15.722 5.228 2.814 11.647 4.486 17.407 2.33 5.083-1.823 8.646-7.01 8.549-12.407.048-39.016-.024-78.038.036-117.048-.127-1.732 1.516-3.163 3.2-3 4.456-.03 8.918-.06 13.374.012 1.86-.042 3.14 1.823 2.91 3.568-.018 39.263.048 78.527-.03 117.79.012 10.464-4.287 21.85-13.966 26.97-11.924 6.177-26.662 4.867-38.442-1.056-10.198-5.09-19.93-11.097-29.947-16.55C5.368 215.886.555 208.357.604 200.466V81.497c-.073-7.74 4.504-15.197 11.29-18.85C46.768 42.966 81.636 23.27 116.504 3.58z"/><path d="M146.928 85.99c15.21-.979 31.493-.58 45.18 6.913 10.597 5.742 16.472 17.793 16.659 29.566-.296 1.588-1.956 2.464-3.472 2.355-4.413-.006-8.827.06-13.24-.03-1.872.072-2.96-1.654-3.195-3.309-1.268-5.633-4.34-11.212-9.642-13.929-8.139-4.075-17.576-3.87-26.451-3.785-6.479.344-13.446.905-18.935 4.715-4.214 2.886-5.494 8.712-3.99 13.404 1.418 3.369 5.307 4.456 8.489 5.458 18.33 4.794 37.754 4.317 55.734 10.626 7.444 2.572 14.726 7.572 17.274 15.366 3.333 10.446 1.872 22.932-5.56 31.318-6.027 6.901-14.805 10.657-23.56 12.697-11.647 2.597-23.734 2.663-35.562 1.51-11.122-1.268-22.696-4.19-31.282-11.768-7.342-6.375-10.928-16.308-10.572-25.895.085-1.619 1.697-2.748 3.248-2.615 4.444-.036 8.888-.048 13.332.006 1.775-.127 3.091 1.407 3.182 3.08.82 5.367 2.837 11 7.517 14.182 9.032 5.827 20.365 5.428 30.707 5.591 8.568-.38 18.186-.495 25.178-6.158 3.689-3.23 4.782-8.634 3.785-13.283-1.08-3.925-5.186-5.754-8.712-6.95-18.095-5.724-37.736-3.647-55.656-10.12-7.275-2.571-14.31-7.432-17.105-14.906-3.9-10.578-2.113-23.662 6.098-31.765 8.006-8.06 19.563-11.164 30.551-12.275z"/></g></svg>
-                </div>
-                <div class="pl-8">Node.js</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/python">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" width="2500" height="2490" viewBox="0 0 256 255" preserveAspectRatio="xMinYMin meet"><defs><linearGradient x1="12.959%" y1="12.039%" x2="79.639%" y2="78.201%" id="a"><stop stop-color="#387EB8" offset="0%"/><stop stop-color="#366994" offset="100%"/></linearGradient><linearGradient x1="19.128%" y1="20.579%" x2="90.742%" y2="88.429%" id="b"><stop stop-color="#FFE052" offset="0%"/><stop stop-color="#FFC331" offset="100%"/></linearGradient></defs><path d="M126.916.072c-64.832 0-60.784 28.115-60.784 28.115l.072 29.128h61.868v8.745H41.631S.145 61.355.145 126.77c0 65.417 36.21 63.097 36.21 63.097h21.61v-30.356s-1.165-36.21 35.632-36.21h61.362s34.475.557 34.475-33.319V33.97S194.67.072 126.916.072zM92.802 19.66a11.12 11.12 0 0 1 11.13 11.13 11.12 11.12 0 0 1-11.13 11.13 11.12 11.12 0 0 1-11.13-11.13 11.12 11.12 0 0 1 11.13-11.13z" fill="url(#a)"/><path d="M128.757 254.126c64.832 0 60.784-28.115 60.784-28.115l-.072-29.127H127.6v-8.745h86.441s41.486 4.705 41.486-60.712c0-65.416-36.21-63.096-36.21-63.096h-21.61v30.355s1.165 36.21-35.632 36.21h-61.362s-34.475-.557-34.475 33.32v56.013s-5.235 33.897 62.518 33.897zm34.114-19.586a11.12 11.12 0 0 1-11.13-11.13 11.12 11.12 0 0 1 11.13-11.131 11.12 11.12 0 0 1 11.13 11.13 11.12 11.12 0 0 1-11.13 11.13z" fill="url(#b)"/></svg>
-                </div>
-                <div class="pl-8">Python</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/react-native">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" height="2500" viewBox="175.7 78 490.6 436.9" width="2194"><g fill="#61dafb"><path d="m666.3 296.5c0-32.5-40.7-63.3-103.1-82.4 14.4-63.6 8-114.2-20.2-130.4-6.5-3.8-14.1-5.6-22.4-5.6v22.3c4.6 0 8.3.9 11.4 2.6 13.6 7.8 19.5 37.5 14.9 75.7-1.1 9.4-2.9 19.3-5.1 29.4-19.6-4.8-41-8.5-63.5-10.9-13.5-18.5-27.5-35.3-41.6-50 32.6-30.3 63.2-46.9 84-46.9v-22.3c-27.5 0-63.5 19.6-99.9 53.6-36.4-33.8-72.4-53.2-99.9-53.2v22.3c20.7 0 51.4 16.5 84 46.6-14 14.7-28 31.4-41.3 49.9-22.6 2.4-44 6.1-63.6 11-2.3-10-4-19.7-5.2-29-4.7-38.2 1.1-67.9 14.6-75.8 3-1.8 6.9-2.6 11.5-2.6v-22.3c-8.4 0-16 1.8-22.6 5.6-28.1 16.2-34.4 66.7-19.9 130.1-62.2 19.2-102.7 49.9-102.7 82.3 0 32.5 40.7 63.3 103.1 82.4-14.4 63.6-8 114.2 20.2 130.4 6.5 3.8 14.1 5.6 22.5 5.6 27.5 0 63.5-19.6 99.9-53.6 36.4 33.8 72.4 53.2 99.9 53.2 8.4 0 16-1.8 22.6-5.6 28.1-16.2 34.4-66.7 19.9-130.1 62-19.1 102.5-49.9 102.5-82.3zm-130.2-66.7c-3.7 12.9-8.3 26.2-13.5 39.5-4.1-8-8.4-16-13.1-24-4.6-8-9.5-15.8-14.4-23.4 14.2 2.1 27.9 4.7 41 7.9zm-45.8 106.5c-7.8 13.5-15.8 26.3-24.1 38.2-14.9 1.3-30 2-45.2 2-15.1 0-30.2-.7-45-1.9-8.3-11.9-16.4-24.6-24.2-38-7.6-13.1-14.5-26.4-20.8-39.8 6.2-13.4 13.2-26.8 20.7-39.9 7.8-13.5 15.8-26.3 24.1-38.2 14.9-1.3 30-2 45.2-2 15.1 0 30.2.7 45 1.9 8.3 11.9 16.4 24.6 24.2 38 7.6 13.1 14.5 26.4 20.8 39.8-6.3 13.4-13.2 26.8-20.7 39.9zm32.3-13c5.4 13.4 10 26.8 13.8 39.8-13.1 3.2-26.9 5.9-41.2 8 4.9-7.7 9.8-15.6 14.4-23.7 4.6-8 8.9-16.1 13-24.1zm-101.4 106.7c-9.3-9.6-18.6-20.3-27.8-32 9 .4 18.2.7 27.5.7 9.4 0 18.7-.2 27.8-.7-9 11.7-18.3 22.4-27.5 32zm-74.4-58.9c-14.2-2.1-27.9-4.7-41-7.9 3.7-12.9 8.3-26.2 13.5-39.5 4.1 8 8.4 16 13.1 24s9.5 15.8 14.4 23.4zm73.9-208.1c9.3 9.6 18.6 20.3 27.8 32-9-.4-18.2-.7-27.5-.7-9.4 0-18.7.2-27.8.7 9-11.7 18.3-22.4 27.5-32zm-74 58.9c-4.9 7.7-9.8 15.6-14.4 23.7-4.6 8-8.9 16-13 24-5.4-13.4-10-26.8-13.8-39.8 13.1-3.1 26.9-5.8 41.2-7.9zm-90.5 125.2c-35.4-15.1-58.3-34.9-58.3-50.6s22.9-35.6 58.3-50.6c8.6-3.7 18-7 27.7-10.1 5.7 19.6 13.2 40 22.5 60.9-9.2 20.8-16.6 41.1-22.2 60.6-9.9-3.1-19.3-6.5-28-10.2zm53.8 142.9c-13.6-7.8-19.5-37.5-14.9-75.7 1.1-9.4 2.9-19.3 5.1-29.4 19.6 4.8 41 8.5 63.5 10.9 13.5 18.5 27.5 35.3 41.6 50-32.6 30.3-63.2 46.9-84 46.9-4.5-.1-8.3-1-11.3-2.7zm237.2-76.2c4.7 38.2-1.1 67.9-14.6 75.8-3 1.8-6.9 2.6-11.5 2.6-20.7 0-51.4-16.5-84-46.6 14-14.7 28-31.4 41.3-49.9 22.6-2.4 44-6.1 63.6-11 2.3 10.1 4.1 19.8 5.2 29.1zm38.5-66.7c-8.6 3.7-18 7-27.7 10.1-5.7-19.6-13.2-40-22.5-60.9 9.2-20.8 16.6-41.1 22.2-60.6 9.9 3.1 19.3 6.5 28.1 10.2 35.4 15.1 58.3 34.9 58.3 50.6-.1 15.7-23 35.6-58.4 50.6z"/><circle cx="420.9" cy="296.5" r="45.7"/></g></svg>
-                </div>
-                <div class="pl-8">React Native</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/unity">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" width="2433" height="2500" viewBox="0 0 256 263" preserveAspectRatio="xMinYMin meet"><path d="M166.872 131.237l45.91-79.275 22.184 79.275-22.185 79.256-45.909-79.256zm-22.376 12.874l45.916 79.262-79.966-20.486-57.77-58.776h91.82zm45.906-105.033l-45.906 79.275h-91.82l57.77-58.78 79.956-20.495zm65.539 65.18L227.933.06l-104.54 27.925-15.475 27.207-31.401-.225L0 131.244l76.517 76.259h.003l31.388-.232 15.497 27.207 104.528 27.92L255.94 158.22l-15.906-26.982 15.906-26.978z" fill="#222C37"/></svg>
-                </div>
-                <div class="pl-8">Unity</div>
-            </div>
-            </a>
-            
-            <a href="/docs/sdks/analytics/unreal">
-            <div
-                class="border border-amp-gray-100 rounded h-24 w-64 p-4 hover:shadow-lg transition-shadow flex items-center">
-                <div><svg class="h-12 w-12 max-w-12 max-h-12" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 210.4 210.4" width="2500" height="2500"><path d="M105.2 5c55.3 0 100.2 45 100.2 100.2s-45 100.2-100.2 100.2S5 160.5 5 105.2 50 5 105.2 5m0-5C47.1 0 0 47.1 0 105.2s47.1 105.2 105.2 105.2 105.2-47.1 105.2-105.2S163.4 0 105.2 0z"/><path d="M97.9 42.2s-23.7 6.7-45 29.3-24 38.7-24 50.7c4.7-8 33.7-52.1 40.5-31.1v50.2s-.4 6.8-10.8 4.1c3.1 5.8 19.1 20.1 48 23 6.6-6.6 15.2-16.1 15.2-16.1l14.4 12.2s25.9-16.8 36.1-41.2c-9.5 6.2-21 20.6-27 10.5V72.7s15.4-23.1 17.8-24.2c-6.1 1.1-27.6 8.2-38.9 22.8-3.2-3.5-12.1-3.6-12.1-3.6s7 5.8 7.1 11.1 0 49.5 0 54.6c-4.8 4.9-9.9 7.5-13.2 7.5-7.7 0-9.9-2.7-12-5.4V71.3s-3.8 3.2-6.8-2S84.1 54 97.9 42.2z"/></svg>
-                </div>
-                <div class="pl-8">Unreal Engine</div>
-            </div>
-            </a>
-            
-            </div>
-        </div>
-      </div>
-      
+      <div
+        class="prose prose-a:text-amp-blue prose-ol:list-decimal prose-ol:list-outside prose-pre:bg-[#fafafa] max-w-prose" data-headings-anchors data-math-root>
         
+        
+
+
+        
+
+
+        
+        <p>Amplitude offers multiple ways to install browser SDKs, each with different product support and version control options. This guide explains the three main installation methods and helps you choose the right approach for your needs.</p>
+<h2 id="choose-your-installation-method">Choose your installation method<a href="#choose-your-installation-method" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h2>
+<p>Amplitude provides three main ways to install browser SDKs:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Description</th>
+<th>Version control</th>
+<th>Best for</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="#unified-sdk-npm">Unified SDK (npm)</a></td>
+<td>Single npm package with all Amplitude features</td>
+<td>Customer-managed</td>
+<td>Teams requiring reproducible builds and strict change management</td>
+</tr>
+<tr>
+<td><a href="#unified-script-cdn">Unified Script (CDN)</a></td>
+<td>Single script tag that loads Amplitude capabilities</td>
+<td>Amplitude-managed</td>
+<td>Quick setup with automatic updates and sensible defaults</td>
+</tr>
+<tr>
+<td><a href="#google-tag-manager">GTM Template</a></td>
+<td>Google Tag Manager template</td>
+<td>Template version-controlled</td>
+<td>Teams using GTM for tag management</td>
+</tr>
+</tbody>
+</table>
+<h3 id="product-support-by-installation-method">Product support by installation method<a href="#product-support-by-installation-method" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>Different installation methods support different Amplitude products:</p>
+<table>
+<thead>
+<tr>
+<th>Product</th>
+<th>Unified Script (CDN)</th>
+<th>Unified SDK (npm)</th>
+<th>GTM Template</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Analytics (<code>@amplitude/analytics-browser</code>)</td>
+<td>✅ Included</td>
+<td>✅ Included</td>
+<td>✅ Included</td>
+</tr>
+<tr>
+<td>Session Replay</td>
+<td>✅ Included</td>
+<td>✅ Included</td>
+<td>✅ Optional (checkbox)</td>
+</tr>
+<tr>
+<td>Guides &amp; Surveys</td>
+<td>⚠️ Separate script</td>
+<td>✅ Included</td>
+<td>✅ Optional (checkbox)</td>
+</tr>
+<tr>
+<td>Web Experiment (<code>@amplitude/experiment-tag</code>)</td>
+<td>✅ Included</td>
+<td>❌ Not included</td>
+<td>❌ Not supported</td>
+</tr>
+<tr>
+<td>Feature Experiment (<code>@amplitude/experiment-js-client</code>)</td>
+<td>❌ Not included</td>
+<td>✅ Included</td>
+<td>❌ Not supported</td>
+</tr>
+</tbody>
+</table>
+<p>
+<div class="hint note"><h2 class="hint-title">Web Experiment compared with Feature Experiment</h2><div class="hint-content"></p>
+<ul>
+<li><strong>Web Experiment</strong>: Uses visual editing for no-code A/B testing on web pages. The Unified Script includes it automatically.</li>
+<li><strong>Feature Experiment</strong>: Uses code-based feature flags with the Experiment JavaScript SDK. The Unified npm package includes it.</div></div>
+</li>
+</ul>
+<h2 id="unified-sdk-npm">Unified SDK (npm)<a href="#unified-sdk-npm" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h2>
+<p>The Unified SDK provides a single npm package (<code>@amplitude/unified</code>) giving you access to Analytics, Session Replay, Feature Experiment, and Guides &amp; Surveys through a single API. Install it with npm or yarn, and control the version in your <code>package.json</code>.</p>
+<p><strong>Key characteristics:</strong></p>
+<ul>
+<li>Customer-managed package installation with full control over versions.</li>
+<li>Includes Feature Experiment (code-based feature flags), not Web Experiment (visual editor).</li>
+<li>Upgrade by bumping the package version in your dependency file.</li>
+<li>Ideal for teams that require reproducible builds and strict change management.</li>
+</ul>
+<p>
+<div class="hint info"><h2 class="hint-title">Individual product installation</h2><div class="hint-content">
+If you're concerned about bundle size and only need specific products, install them individually:</p>
+<ul>
+<li><a href="/docs/sdks/analytics/browser/browser-sdk-2">Analytics</a>: For tracking user events and behavior.</li>
+<li><a href="/docs/sdks/experiment-sdks/experiment-javascript">Experiment</a>: For running A/B tests and feature flags.</li>
+<li><a href="/docs/session-replay/session-replay-standalone-sdk">Session Replay</a>: For capturing and replaying user sessions.</li>
+<li><a href="/docs/guides-and-surveys/sdk">Guides and Surveys</a>: For in-product messaging and surveys.</div></div>
+</li>
+</ul>
+<h3 id="install-the-unified-sdk">Install the Unified SDK<a href="#install-the-unified-sdk" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>Install the dependency with npm or yarn.</p>
+<p>
+<div class="border border-amp-gray-200 rounded" x-data="{ activeTab: 'npm' }">
+<div class="flex space-x-1 border-amp-gray-200 border-b border-solid">
+<button x-on:click="activeTab = 'npm'" :class="{'border-b-2 border-amp-blue-500 text-amp-blue-500 -mb-[2px]' : activeTab === 'npm', 'bg-gray-200': activeTab !== 'npm'}" class="px-4  py-2">npm</button><button x-on:click="activeTab = 'yarn'" :class="{'border-b-2 border-amp-blue-500 text-amp-blue-500 -mb-[2px]' : activeTab === 'yarn', 'bg-gray-200': activeTab !== 'yarn'}" class="px-4  py-2">yarn</button><button x-on:click="activeTab = 'AI prompt'" :class="{'border-b-2 border-amp-blue-500 text-amp-blue-500 -mb-[2px]' : activeTab === 'AI prompt', 'bg-gray-200': activeTab !== 'AI prompt'}" class="px-4  py-2">AI prompt</button></div>
+
+<div x-cloak x-show="activeTab === 'npm'" class="p-4 tab"></p>
+<pre><code class="language-bash">npm install @amplitude/unified
+</code></pre>
+<p>
+</div>
+<div x-cloak x-show="activeTab === 'yarn'" class="p-4 tab"></p>
+<pre><code class="language-bash">yarn add @amplitude/unified
+</code></pre>
+<p>
+</div>
+<div x-cloak x-show="activeTab === 'AI prompt'" class="p-4 tab">
+<p>Paste the prompt below into your terminal or AI tools like Copilot, Cursor, Replit, or Bolt.</p></p>
+<p>Click the <strong>Key</strong> icon to insert your Amplitude API key.
+</p>
+<pre><code class="language-plaintext">You are an Amplitude installation wizard, an expert AI programming assistant that implements Amplitude Analytics, Session Replay, Experiment, and Guides and Surveys for JavaScript-based applications.
+<p>Your task is to select, install, and initialize the correct Amplitude package(s) necessary to enable Amplitude Analytics, Session Replay, Experiment, and Guides and Surveys for this application and track key interactions, all in strict accordance to the Documentation provided below.</p>
+<p>Rules</p>
+<ul>
+<li>Do not make any code changes if this is not a JavaScript-based application</li>
+<li>Ensure ALL the code added ONLY runs client-side and never server-side</li>
+<li>Ensure amplitude is only initialized once during the lifecycle of the application</li>
+</ul>
+<h2 id="context">Context<a href="#context" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h2>
+<h2 id="documentation">Documentation<a href="#documentation" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h2>
+<ol>
+<li>Install the Amplitude Analytics Browser SDK with <code>npm install @amplitude/unified</code> or <code>yarn add @amplitude/unified</code></li>
+<li>Import amplitude into the root of the client application with <code>import * as amplitude from '@amplitude/unified';</code></li>
+<li>Initialize amplitude with <code>amplitude.initAll('AMPLITUDE_API_KEY', {&quot;analytics&quot;:{&quot;autocapture&quot;:true},&quot;sessionReplay&quot;:{&quot;sampleRate&quot;:1},&quot;experiment&quot;:{&quot;deploymentKey&quot;:&quot;DEPLOYMENT_KEY&quot;},&quot;engagement&quot;:{&quot;serverZone&quot;:&quot;US&quot;,&quot;logLevel&quot;:LogLevel.Warn}});</code></code></pre></li>
+</ol>
+<p>
+</div>
+</div></p>
+<h3 id="initialize-the-unified-sdk">Initialize the Unified SDK<a href="#initialize-the-unified-sdk" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>The Unified SDK provides a single initialization method that initializes all Amplitude features.</p>
+<pre><code class="language-typescript">import { initAll } from '@amplitude/unified';
+
+initAll('AMPLITUDE_API_KEY');
+</code></pre>
+<h3 id="access-sdk-features">Access SDK features<a href="#access-sdk-features" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>The Unified SDK provides access to all Amplitude features through a single interface:</p>
+<p>
+<div class="hint info"><h2 class="hint-title">Feature Documentation</h2><div class="hint-content">
+For detailed information about each product's features and APIs, refer to their respective documentation:</p>
+<ul>
+<li><a href="/docs/sdks/analytics/browser/browser-sdk-2">Analytics Browser SDK</a></li>
+<li><a href="/docs/sdks/experiment-sdks/experiment-javascript">Experiment JavaScript SDK</a></li>
+<li><a href="/docs/session-replay/session-replay-standalone-sdk">Session Replay Standalone SDK</a></li>
+<li><a href="/docs/guides-and-surveys/sdk">Guides and Surveys Web SDK</a></div></div>
+</li>
+</ul>
+<pre><code class="language-typescript">import { 
+  track, 
+  identify, 
+  experiment, 
+  sessionReplay 
+} from '@amplitude/unified';
+
+// Track events
+track('Button Clicked', { buttonName: 'Sign Up' });
+
+// Identify users
+identify(new Identify().set('userType', 'premium'));
+
+// Access Experiment features
+const variant = await experiment.fetch('experiment-key');
+
+// Access Session Replay features
+sessionReplay.flush();
+</code></pre>
+<h3 id="configuration">Configuration<a href="#configuration" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>The Unified SDK supports configuration options for all Amplitude features. You can configure each product individually while sharing some common options.</p>
+<pre><code class="language-typescript">import { initAll } from '@amplitude/unified';
+
+initAll('AMPLITUDE_API_KEY', {
+  // Shared options for all SDKs (optional)
+  serverZone: 'US', // or 'EU'
+  instanceName: 'my-instance',
+  
+  // Analytics options
+  analytics: {
+    // Analytics configuration options
+  },
+  
+  // Session Replay options
+  sessionReplay: {
+    // Session Replay configuration options
+    sampleRate: 1 // To enable session replay
+  },
+  
+  // Experiment options
+  experiment: {
+    // Experiment configuration options
+  },
+  
+  // Guides and Surveys options
+  engagement: {
+    // Guides and Surveys configuration options
+  }
+});
+</code></pre>
+<h4 id="shared-options">Shared options<a href="#shared-options" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h4>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Type</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>serverZone</code></td>
+<td><code>'US'</code> or <code>'EU'</code></td>
+<td><code>'US'</code></td>
+<td>The server zone to use for all SDKs.</td>
+</tr>
+<tr>
+<td><code>instanceName</code></td>
+<td><code>string</code></td>
+<td><code>$default_instance</code></td>
+<td>A unique name for this instance of the SDK.</td>
+</tr>
+</tbody>
+</table>
+<h4 id="analytics-options">Analytics options<a href="#analytics-options" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h4>
+<p>All options from <code>@amplitude/analytics-browser</code> are supported. Refer to the <a href="/docs/sdks/analytics/browser/browser-sdk-2#initialize-the-sdk">Analytics Browser SDK documentation</a> for details.</p>
+<h4 id="session-replay-options">Session Replay options<a href="#session-replay-options" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h4>
+<p>The Unified Browser SDK supports all options from <code>@amplitude/plugin-session-replay-browser</code>. Refer to the <a href="/docs/session-replay/session-replay-plugin#configuration">Session Replay Plugin documentation</a> for more information. Set <code>config.sessionReplay.sampleRate</code> to a non-zero value to enable Session Replay.</p>
+<p>Sample rate controls the rate at which Amplitude captures session replays. For example, if you set <code>config.sessionReplay.sampleRate</code> to <code>0.5</code>, Session Replay captures roughly half of all sessions.</p>
+<h4 id="experiment-options">Experiment options<a href="#experiment-options" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h4>
+<p>All options from <code>@amplitude/plugin-experiment-browser</code> are supported. Refer to the <a href="/docs/sdks/experiment-sdks/experiment-javascript#configuration">Experiment documentation</a> for details.</p>
+<h4 id="guides-and-surveys-options">Guides and Surveys options<a href="#guides-and-surveys-options" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h4>
+<p>The Unified Browser SDK supports all <a href="/docs/guides-and-surveys/sdk#initialize-the-sdk">Guides and Surveys options</a>. The engagement plugin initializes automatically when you pass engagement options in the configuration.</p>
+<h2 id="unified-script-cdn">Unified script (CDN)<a href="#unified-script-cdn" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h2>
+<p>The Unified Script is a single script tag that loads Amplitude browser capabilities from Amplitude's CDN. Amplitude remotely controls the versions of the underlying SDKs, offering a &quot;single line of code&quot; experience with sensible defaults and optional remote or manual configuration.</p>
+<p><strong>Key characteristics:</strong></p>
+<ul>
+<li>Amplitude manages SDK versions and can patch bugs or improve performance centrally without requiring a customer release.</li>
+<li>Includes Web Experiment (visual editor) by default.</li>
+<li>Session Replay and Web Experiment enable automatically with default settings.</li>
+<li>Guides &amp; Surveys requires a separate script because of size concerns.</li>
+</ul>
+<h3 id="install-the-unified-script">Install the Unified Script<a href="#install-the-unified-script" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>Add the following script tag to the <code>&lt;head&gt;</code> of your site:</p>
+<pre><code class="language-html">&lt;script src=&quot;https://cdn.amplitude.com/script/AMPLITUDE_API_KEY.js&quot;&gt;&lt;/script&gt;
+</code></pre>
+<p>Replace <code>AMPLITUDE_API_KEY</code> with your project's API key.</p>
+<h3 id="initialize-the-unified-script">Initialize the Unified Script<a href="#initialize-the-unified-script" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>The Unified Script enables Session Replay and Web Experiment by default. For manual configuration:</p>
+<pre><code class="language-html">&lt;script src=&quot;https://cdn.amplitude.com/script/AMPLITUDE_API_KEY.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+  window.amplitude.init('AMPLITUDE_API_KEY', {
+    defaultTracking: true,
+    autocapture: true,
+    fetchRemoteConfig: true
+  });
+  // Enable Session Replay with custom sample rate
+  window.amplitude.add(window.sessionReplay.plugin({ sampleRate: 1 }));
+&lt;/script&gt;
+</code></pre>
+<h3 id="add-guides--surveys-to-the-unified-script">Add Guides &amp; Surveys to the Unified Script<a href="#add-guides--surveys-to-the-unified-script" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>Because of size concerns, Guides &amp; Surveys requires a separate script. Add it after the Unified Script:</p>
+<pre><code class="language-html">&lt;script src=&quot;https://cdn.amplitude.com/script/AMPLITUDE_API_KEY.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://cdn.amplitude.com/script/AMPLITUDE_API_KEY.engagement.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+  window.amplitude.add(window.engagement.plugin());
+  window.amplitude.init('AMPLITUDE_API_KEY', {
+    fetchRemoteConfig: true,
+    autocapture: true
+  });
+&lt;/script&gt;
+</code></pre>
+<p>Refer to the <a href="/docs/guides-and-surveys/sdk">Guides and Surveys SDK documentation</a> for more configuration options.</p>
+<h2 id="google-tag-manager">Google Tag Manager<a href="#google-tag-manager" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h2>
+<p>The <a href="/docs/data/source-catalog/google-tag-manager">Amplitude GTM template</a> directly wraps the Analytics Browser 2.0 SDK (<code>@amplitude/analytics-browser</code>). It doesn't use the Unified SDK or Unified Script.</p>
+<p><strong>Key characteristics:</strong></p>
+<ul>
+<li>Template version-controlled through GTM.</li>
+<li>Supports Analytics, Session Replay, and Guides &amp; Surveys.</li>
+<li>Doesn't support Web Experiment or Feature Experiment.</li>
+<li>Session Replay and Guides &amp; Surveys are disabled by default and require manual checkbox selection.</li>
+</ul>
+<h3 id="enable-session-replay-and-guides--surveys-in-gtm">Enable Session Replay and Guides &amp; Surveys in GTM<a href="#enable-session-replay-and-guides--surveys-in-gtm" class="heading-permalink" aria-hidden="true" title="Permalink"></a></h3>
+<p>To enable these features:</p>
+<ol>
+<li>Navigate to your Amplitude tag in GTM.</li>
+<li>In the tag configuration, check the <strong>Session Replay</strong> checkbox to enable session replays.</li>
+<li>Check the <strong>Guides &amp; Surveys</strong> checkbox to enable in-product messaging.</li>
+<li>Save and publish your changes.</li>
+</ol>
+<p>Refer to the <a href="/docs/data/source-catalog/google-tag-manager">Google Tag Manager documentation</a> for detailed configuration options.</p>
+
+        
+      </div>
+      </div>
+
+    
+      
 
 <div class="relative basis-64 shrink-0 hidden lg:block">
   <div class="flex flex-row ml-8 mb-2">
     
 
-<div class="copy-page-menu relative" data-md-url="/docs/md/sdks/analytics.md">
+<div class="copy-page-menu relative" data-md-url="/docs/md/sdks/analytics/browser/browser-unified-sdk.md">
     <button class="copy-page-toggle group flex items-center font-medium border border-white hover:border-amp-gray-200 rounded-md transition-all duration-200"
         aria-label="Copy page options" title="Copy page options">
         <div class="flex items-center justify-center">
@@ -1267,7 +1488,7 @@
                 Copy as Markdown
             </button>
             
-            <a href="/docs/md/sdks/analytics.md" target="_blank" class="copy-page-link flex items-center w-full px-4 py-2 text-sm text-amp-gray-700 hover:bg-amp-gray-50 hover:text-amp-gray-900 transition-colors duration-150">
+            <a href="/docs/md/sdks/analytics/browser/browser-unified-sdk.md" target="_blank" class="copy-page-link flex items-center w-full px-4 py-2 text-sm text-amp-gray-700 hover:bg-amp-gray-50 hover:text-amp-gray-900 transition-colors duration-150">
                 <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
@@ -1276,14 +1497,14 @@
             
             <hr class="my-1 border-amp-gray-100">
             
-            <a href="https://chat.openai.com/?q=Look+at+this+document+from+Amplitude+so+I+can+ask+questions+about+it%3A+https%3A//amplitude.com/docs/md/sdks/analytics.md" target="_blank" class="open-chatgpt copy-page-link flex items-center w-full px-4 py-2 text-sm text-amp-gray-700 hover:bg-amp-gray-50 hover:text-amp-gray-900 transition-colors duration-150">
+            <a href="https://chat.openai.com/?q=Look+at+this+document+from+Amplitude+so+I+can+ask+questions+about+it%3A+https%3A//amplitude.com/docs/md/sdks/analytics/browser/browser-unified-sdk.md" target="_blank" class="open-chatgpt copy-page-link flex items-center w-full px-4 py-2 text-sm text-amp-gray-700 hover:bg-amp-gray-50 hover:text-amp-gray-900 transition-colors duration-150">
                 <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 mr-3" viewBox="0 0 320 320">
                     <path d="m297.06 130.97c7.26-21.79 4.76-45.66-6.85-65.48-17.46-30.4-52.56-46.04-86.84-38.68-15.25-17.18-37.16-26.95-60.13-26.81-35.04-.08-66.13 22.48-76.91 55.82-22.51 4.61-41.94 18.7-53.31 38.67-17.59 30.32-13.58 68.54 9.92 94.54-7.26 21.79-4.76 45.66 6.85 65.48 17.46 30.4 52.56 46.04 86.84 38.68 15.24 17.18 37.16 26.95 60.13 26.8 35.06.09 66.16-22.49 76.94-55.86 22.51-4.61 41.94-18.7 53.31-38.67 17.57-30.32 13.55-68.51-9.94-94.51zm-120.28 168.11c-14.03.02-27.62-4.89-38.39-13.88.49-.26 1.34-.73 1.89-1.07l63.72-36.8c3.26-1.85 5.26-5.32 5.24-9.07v-89.83l26.93 15.55c.29.14.48.42.52.74v74.39c-.04 33.08-26.83 59.9-59.91 59.97zm-128.84-55.03c-7.03-12.14-9.56-26.37-7.15-40.18.47.28 1.3.79 1.89 1.13l63.72 36.8c3.23 1.89 7.23 1.89 10.47 0l77.79-44.92v31.1c.02.32-.13.63-.38.83l-64.41 37.19c-28.69 16.52-65.33 6.7-81.92-21.95zm-16.77-139.09c7-12.16 18.05-21.46 31.21-26.29 0 .55-.03 1.52-.03 2.2v73.61c-.02 3.74 1.98 7.21 5.23 9.06l77.79 44.91-26.93 15.55c-.27.18-.61.21-.91.08l-64.42-37.22c-28.63-16.58-38.45-53.21-21.95-81.89zm221.26 51.49-77.79-44.92 26.93-15.54c.27-.18.61-.21.91-.08l64.42 37.19c28.68 16.57 38.51 53.26 21.94 81.94-7.01 12.14-18.05 21.44-31.2 26.28v-75.81c.03-3.74-1.96-7.2-5.2-9.06zm26.8-40.34c-.47-.29-1.3-.79-1.89-1.13l-63.72-36.8c-3.23-1.89-7.23-1.89-10.47 0l-77.79 44.92v-31.1c-.02-.32.13-.63.38-.83l64.41-37.16c28.69-16.55 65.37-6.7 81.91 22 6.99 12.12 9.52 26.31 7.15 40.1zm-168.51 55.43-26.94-15.55c-.29-.14-.48-.42-.52-.74v-74.39c.02-33.12 26.89-59.96 60.01-59.94 14.01 0 27.57 4.92 38.34 13.88-.49.26-1.33.73-1.89 1.07l-63.72 36.8c-3.26 1.85-5.26 5.31-5.24 9.06l-.04 89.79zm14.63-31.54 34.65-20.01 34.65 20v40.01l-34.65 20-34.65-20z"/>
                     </svg>
                 Open in ChatGPT
             </a>
             
-            <a href="https://claude.ai/chat?q=Look+at+this+document+from+Amplitude+so+I+can+ask+questions+about+it%3A+https%3A//amplitude.com/docs/md/sdks/analytics.md" target="_blank" class="open-claude copy-page-link flex items-center w-full px-4 py-2 text-sm text-amp-gray-700 hover:bg-amp-gray-50 hover:text-amp-gray-900 transition-colors duration-150">
+            <a href="https://claude.ai/chat?q=Look+at+this+document+from+Amplitude+so+I+can+ask+questions+about+it%3A+https%3A//amplitude.com/docs/md/sdks/analytics/browser/browser-unified-sdk.md" target="_blank" class="open-claude copy-page-link flex items-center w-full px-4 py-2 text-sm text-amp-gray-700 hover:bg-amp-gray-50 hover:text-amp-gray-900 transition-colors duration-150">
                 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" class="h-4 w-4 mr-3" viewBox="0 0 256 256" xml:space="preserve">
                     <g style="stroke: none; stroke-width: 0; stroke-dasharray: none; stroke-linecap: butt; stroke-linejoin: miter; stroke-miterlimit: 10; fill: none; fill-rule: nonzero; opacity: 1;" transform="translate(1.4065934065934016 1.4065934065934016) scale(2.81 2.81)">
                         <path d="M 17.671 59.85 l 17.699 -9.93 l 0.298 -0.862 l -0.298 -0.48 h -0.862 l -2.958 -0.182 l -10.113 -0.273 l -8.77 -0.364 L 4.17 47.302 l -2.138 -0.456 l -2.004 -2.642 l 0.207 -1.318 l 1.798 -1.209 l 2.575 0.225 l 5.691 0.389 l 8.54 0.589 l 6.195 0.364 l 9.177 0.954 h 1.458 l 0.207 -0.589 l -0.498 -0.364 l -0.389 -0.364 l -8.837 -5.989 l -9.566 -6.329 l -5.011 -3.644 l -2.709 -1.846 l -1.367 -1.731 l -0.589 -3.778 l 2.46 -2.709 l 3.304 0.225 l 0.844 0.225 l 3.347 2.575 l 7.149 5.533 l 9.335 6.875 l 1.367 1.136 l 0.547 -0.389 l 0.067 -0.273 l -0.613 -1.026 l -5.078 -9.177 l -5.418 -9.335 l -2.411 -3.869 l -0.638 -2.32 C 20.945 6.08 20.781 5.278 20.781 4.3 l 2.8 -3.802 L 25.13 0 l 3.735 0.498 l 1.573 1.367 l 2.32 5.308 l 3.76 8.357 l 5.831 11.364 l 1.707 3.371 l 0.911 3.122 l 0.34 0.954 h 0.589 v -0.547 l 0.48 -6.402 l 0.887 -7.859 L 48.125 9.42 l 0.298 -2.849 l 1.409 -3.413 l 2.8 -1.846 l 2.187 1.045 l 1.798 2.575 l -0.249 1.664 l -1.069 6.948 l -2.095 10.884 l -1.367 7.288 h 0.796 l 0.911 -0.911 l 3.687 -4.895 l 6.195 -7.744 l 2.733 -3.073 l 3.189 -3.395 l 2.047 -1.616 h 3.869 l 2.849 4.233 l -1.275 4.373 l -3.984 5.053 l -3.304 4.282 l -4.737 6.377 l -2.958 5.102 l 0.273 0.407 l 0.705 -0.067 l 10.702 -2.278 l 5.782 -1.045 l 6.9 -1.184 l 3.122 1.458 l 0.34 1.482 l -1.227 3.031 l -7.38 1.822 l -8.655 1.731 l -12.888 3.049 l -0.158 0.115 l 0.182 0.225 l 5.806 0.547 l 2.484 0.134 h 6.08 l 11.321 0.844 l 2.958 1.956 l 1.774 2.393 l -0.298 1.822 l -4.555 2.32 l -6.147 -1.458 l -14.346 -3.413 l -4.92 -1.227 h -0.68 v 0.407 l 4.1 4.009 l 7.513 6.784 l 9.408 8.746 l 0.48 2.162 l -1.209 1.707 L 78.044 75.8 l -8.266 -6.219 l -3.189 -2.8 l -7.222 -6.08 h -0.48 v 0.638 l 1.664 2.436 l 8.789 13.21 l 0.456 4.051 l -0.638 1.318 l -2.278 0.796 l -2.502 -0.456 l -5.144 -7.222 l -5.308 -8.133 l -4.282 -7.288 l -0.522 0.298 l -2.527 27.216 l -1.184 1.391 L 42.677 90 l -2.278 -1.731 l -1.209 -2.8 l 1.209 -5.533 l 1.458 -7.222 l 1.184 -5.74 l 1.069 -7.131 l 0.638 -2.369 l -0.043 -0.158 l -0.522 0.067 l -5.375 7.38 l -8.175 11.048 l -6.468 6.924 l -1.549 0.613 l -2.685 -1.391 l 0.249 -2.484 l 1.5 -2.211 l 8.953 -11.388 l 5.4 -7.058 l 3.486 -4.075 l -0.024 -0.589 h -0.207 L 15.509 69.592 l -4.233 0.547 l -1.822 -1.707 l 0.225 -2.8 l 0.862 -0.911 l 7.149 -4.92 l -0.024 0.024 L 17.671 59.85 z" style="stroke: none; stroke-width: 1; stroke-dasharray: none; stroke-linecap: butt; stroke-linejoin: miter; stroke-miterlimit: 10; fill: rgb(0,0,0); fill-rule: nonzero; opacity: 1;" transform=" matrix(1 0 0 1 0 0) " stroke-linecap="round"/>
@@ -1471,15 +1692,228 @@
 </div>
   
 
+
+    
+    <div class="rounded-lg border text-card-foreground bg-amp-gray-50 border-amp-gray-200 shadow-sm mb-8" 
+         data-bundle-package="@amplitude/unified" 
+         data-bundle-loader="true"
+         data-environment="production">
+        <div class="p-4">
+            <div class="flex items-center gap-2 mb-3">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+                    viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                    stroke-linejoin="round" class="lucide lucide-package h-4 w-4 text-amp-gray-600">
+                    <path d="m7.5 4.27 9 5.15"></path>
+                    <path
+                        d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z">
+                    </path>
+                    <path d="m3.3 7 8.7 5 8.7-5"></path>
+                    <path d="M12 22V12"></path>
+                </svg>
+                <h3 class="font-medium text-amp-gray-900 text-sm m-0">
+                    <a href="https://npmjs.com/package/@amplitude/unified" target="_blank">Package Information</a>
+                </h3>
+            </div>
+            <div class="space-y-2.5">
+                <div>
+                    <div class="text-xs text-amp-gray-500 mb-1">Package Name</div>
+                    <code class="block font-mono text-xs bg-white px-2 py-1.5 rounded border border-amp-gray-200 text-amp-gray-700 w-full overflow-x-auto">@amplitude/unified</code>
+                </div>
+                <div class="flex justify-between items-center">
+                    <div>
+                        <div class="text-xs text-amp-gray-500 mb-1">Version</div>
+                        <div class="bundle-version">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-16 rounded"></div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-xs text-amp-gray-500 mb-1">Size (gzip)</div>
+                        <div class="bundle-size">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-12 rounded"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const bundleCards = document.querySelectorAll('[data-bundle-loader]');
+    
+    // Skip if no cards need loading (server-side data was successful)
+    if (bundleCards.length === 0) return;
+    
+    bundleCards.forEach(async (card) => {
+        const packageName = card.dataset.bundlePackage;
+        const environment = card.dataset.environment;
+        
+        try {
+            let data;
+            let dataSource = 'unknown';
+            
+            // Only try Laravel API in local/development (NOT preview/production)
+            if (environment === 'local' || environment === 'development') {
+                try {
+                    const response = await fetch(`/api/bundle-phobia?package=${encodeURIComponent(packageName)}`);
+                    if (response.ok) {
+                        data = await response.json();
+                        if (data._bundlephobia_success) {
+                            dataSource = data._bundlephobia_cached ? 'laravel-cache' : 'laravel-live';
+                            updateBundleSuccess(card, data, dataSource);
+                            return;
+                        }
+                    }
+                } catch (apiError) {
+                    console.warn('Laravel API not available, falling back to direct BundlePhobia API');
+                }
+            } else {
+                console.log(`Skipping Laravel API for environment: ${environment}`);
+            }
+            
+            // Direct BundlePhobia API (works in all environments)
+            const response = await fetch(`https://bundlephobia.com/api/size?package=${encodeURIComponent(packageName)}`);
+            
+            if (response.ok) {
+                const directData = await response.json();
+                if (directData && directData.size) {
+                    // Transform direct API response to match our format
+                    const transformedData = {
+                        name: directData.name || packageName,
+                        version: directData.version || 'Latest',
+                        size_gzip_kb: directData.gzip ? Math.round(directData.gzip / 1024 * 100) / 100 : 'N/A'
+                    };
+                    dataSource = 'bundlephobia-direct';
+                    updateBundleSuccess(card, transformedData, dataSource);
+                    return;
+                }
+            }
+            
+            // Both APIs failed
+            showBundleError(card, packageName, 'Unable to fetch bundle data');
+            
+        } catch (error) {
+            console.warn('Bundle size fetch failed:', error);
+            showBundleError(card, packageName, 'Network error');
+        }
+    });
+    
+    function updateBundleSuccess(card, data, source) {
+        card.querySelector('.bundle-version').innerHTML = 
+            `<div class="font-medium text-amp-gray-900">${data.version}</div>`;
+        card.querySelector('.bundle-size').innerHTML = 
+            `<div class="font-medium text-amp-gray-900">${data.size_gzip_kb} kB</div>`;
+        
+        // Add source indicator
+        const sourceIndicator = getSourceIndicator(source, data);
+        card.querySelector('h3').innerHTML += sourceIndicator;
+        
+        // Mark as loaded
+        card.removeAttribute('data-bundle-loader');
+        card.setAttribute('data-bundle-loaded', 'true');
+    }
+    
+    function getSourceIndicator(source, data) {
+        switch (source) {
+            case 'laravel-cache':
+                return '<span class="ml-2 text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded" title="Data from Laravel cache">Cached</span>';
+            case 'laravel-live':
+                return '<span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded" title="Fresh data from Laravel">Live</span>';
+            case 'bundlephobia-direct':
+                return '<span class="ml-2 text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded" title="Direct from BundlePhobia API">Direct</span>';
+            default:
+                return '';
+        }
+    }
+    
+    function showBundleError(card, packageName, errorMessage) {
+        const flexContainer = card.querySelector('.flex.justify-between');
+        flexContainer.innerHTML = `
+            <div class="p-3 bg-white border border-amp-gray-200 rounded text-sm text-amp-gray-700 w-full">
+                <p class="m-0 mb-2"><strong>Bundle size information temporarily unavailable.</strong></p>
+                <p class="m-0 text-xs text-amp-gray-600">
+                    Visit <a href="https://bundlephobia.com/package/${packageName}" target="_blank" class="text-amp-blue-600 underline">BundlePhobia</a> 
+                    or <a href="https://npmjs.com/package/${packageName}" target="_blank" class="text-app-blue-600 underline">npm</a> 
+                    for current package details.
+                </p>
+            </div>
+        `;
+        
+        card.removeAttribute('data-bundle-loader');
+        card.setAttribute('data-bundle-loaded', 'error');
+    }
+});
+</script>
+
+
+
+
+
   <div class="sticky top-24 ml-8 text-sm js-toc">
   </div>
 
 </div>
 
-      
-    </div>
-    </div>
     
+  </div>
+  </div>
+  
+<div class="mt-12 mb-5 max-w-screen-xl mx-auto pl-8">
+    <div class="inline-flex items-center">
+    <span class="text-sm text-amp-gray-600 mr-4">Was this page helpful?</span>
+    <div class="inline-flex flex-row-reverse items-center">
+            <button @click="amplitude.track('Article rating')" class="article-rating inline-flex flex-row-reverse items-center">
+            
+            <svg xmlns="http://www.w3.org/2000/svg"
+                class="inline cursor-pointer"
+                height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed">
+                <path
+                    d="m354-287 126-76 126 77-33-144 111-96-146-13-58-136-58 135-146 13 111 97-33 143ZM233-120l65-281L80-590l288-25 112-265 112 265 288 25-218 189 65 281-247-149-247 149Zm247-350Z">
+                </path>
+            </svg>
+            
+            <svg xmlns="http://www.w3.org/2000/svg"
+                class="inline cursor-pointer"
+                height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed">
+                <path
+                    d="m354-287 126-76 126 77-33-144 111-96-146-13-58-136-58 135-146 13 111 97-33 143ZM233-120l65-281L80-590l288-25 112-265 112 265 288 25-218 189 65 281-247-149-247 149Zm247-350Z">
+                </path>
+            </svg>
+            
+            <svg xmlns="http://www.w3.org/2000/svg"
+                class="inline cursor-pointer"
+                height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed">
+                <path
+                    d="m354-287 126-76 126 77-33-144 111-96-146-13-58-136-58 135-146 13 111 97-33 143ZM233-120l65-281L80-590l288-25 112-265 112 265 288 25-218 189 65 281-247-149-247 149Zm247-350Z">
+                </path>
+            </svg>
+            
+            <svg xmlns="http://www.w3.org/2000/svg"
+                class="inline cursor-pointer"
+                height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed">
+                <path
+                    d="m354-287 126-76 126 77-33-144 111-96-146-13-58-136-58 135-146 13 111 97-33 143ZM233-120l65-281L80-590l288-25 112-265 112 265 288 25-218 189 65 281-247-149-247 149Zm247-350Z">
+                </path>
+            </svg>
+            
+            <svg xmlns="http://www.w3.org/2000/svg"
+                class="inline cursor-pointer"
+                height="24px" viewBox="0 -960 960 960" width="24px" fill="#e8eaed">
+                <path
+                    d="m354-287 126-76 126 77-33-144 111-96-146-13-58-136-58 135-146 13 111 97-33 143ZM233-120l65-281L80-590l288-25 112-265 112 265 288 25-218 189 65 281-247-149-247 149Zm247-350Z">
+                </path>
+            </svg>
+            
+            </button>
+    </div>
+</div>
+
+
+        <p class="text-xs text-amp-gray-600"><svg class="inline" xmlns="http://www.w3.org/2000/svg" width="20" height="21" viewBox="0 0 20 21" fill="none"><g id="schedule"><mask id="mask0_388_26358" style="mask-type:alpha" maskUnits="userSpaceOnUse" x="0" y="0" width="20" height="21"><rect id="Bounding box" y="0.987793" width="20" height="20" fill="#D9D9D9"/></mask><g mask="url(#mask0_388_26358)"><path id="schedule_2" d="M12.7917 14.5295L13.8542 13.467L10.75 10.3628V5.98779H9.25V10.9878L12.7917 14.5295ZM10 18.9878C8.89756 18.9878 7.86153 18.7795 6.89192 18.3628C5.92231 17.9461 5.07292 17.3732 4.34375 16.644C3.61458 15.9149 3.04167 15.0645 2.625 14.0928C2.20833 13.1212 2 12.083 2 10.9783C2 9.8735 2.20833 8.83502 2.625 7.86279C3.04167 6.89057 3.61458 6.04335 4.34375 5.32113C5.07292 4.5989 5.92332 4.02946 6.89496 3.61279C7.86661 3.19613 8.90481 2.98779 10.0095 2.98779C11.1143 2.98779 12.1528 3.19779 13.1251 3.61779C14.0974 4.03779 14.9432 4.60779 15.6625 5.32779C16.3817 6.04779 16.9511 6.89446 17.3707 7.86779C17.7902 8.84113 18 9.88113 18 10.9878C18 12.0902 17.7917 13.1263 17.375 14.0959C16.9583 15.0655 16.3889 15.9149 15.6667 16.644C14.9444 17.3732 14.0963 17.9461 13.1223 18.3628C12.1482 18.7795 11.1075 18.9878 10 18.9878ZM10.0099 17.4878C11.8082 17.4878 13.3395 16.8524 14.6037 15.5815C15.8679 14.3107 16.5 12.7761 16.5 10.9779C16.5 9.17956 15.8679 7.64831 14.6037 6.38411C13.3395 5.1199 11.8082 4.48779 10.0099 4.48779C8.21165 4.48779 6.67708 5.1199 5.40625 6.38411C4.13542 7.64831 3.5 9.17956 3.5 10.9779C3.5 12.7761 4.13542 14.3107 5.40625 15.5815C6.67708 16.8524 8.21165 17.4878 10.0099 17.4878Z" fill="#5A5E68"/></g></g></svg> April 15th, 2026</p>
+</div>
+
 <div class="pl-8 border-y border-y-amp-gray-100  py-[2.12rem] gap-2">
     <div class="flex flex-col max-w-screen-xl mx-auto">
         <div><svg class="inline" xmlns="http://www.w3.org/2000/svg" height="24px" viewBox="0 -960 960 960" width="24px" fill="currentColor"><path d="M478-240q21 0 35.5-14.5T528-290q0-21-14.5-35.5T478-340q-21 0-35.5 14.5T428-290q0 21 14.5 35.5T478-240Zm-36-154h74q0-33 7.5-52t42.5-52q26-26 41-49.5t15-56.5q0-56-41-86t-97-30q-57 0-92.5 30T342-618l66 26q5-18 22.5-39t53.5-21q32 0 48 17.5t16 38.5q0 20-12 37.5T506-526q-44 39-54 59t-10 73Zm38 314q-83 0-156-31.5T197-197q-54-54-85.5-127T80-480q0-83 31.5-156T197-763q54-54 127-85.5T480-880q83 0 156 31.5T763-763q54 54 85.5 127T880-480q0 83-31.5 156T763-197q-54 54-127 85.5T480-80Zm0-80q134 0 227-93t93-227q0-134-93-227t-227-93q-134 0-227 93t-93 227q0 134 93 227t227 93Zm0-320Z"/></svg> <p class="text-[0.875rem] text-amp-gray-600 inline">Need help? <a href="https://help.amplitude.com/hc/en-us/requests/new" class="text-amp-blue-300" target="_blank">Contact Support</a></p></div>
@@ -1522,7 +1956,7 @@
         </div>
     </div>
 </div>
-  </section>
+</section>
         </div>
       </div>
     

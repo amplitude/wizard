@@ -34,18 +34,7 @@ CRITICAL — confirm_event_plan format:
   RIGHT name: "product viewed"
   Names longer than 50 characters will be automatically truncated.`,
 
-  `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it.
-
-Follow this process exactly:
-1. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools).
-2. Read .amplitude-events.json for the list of instrumented events.
-3. Identify 2–5 product funnels from the events (onboarding, core loop, conversion, retention, etc.).
-4. Plan up to 8 charts: 1 funnel chart per funnel, 1–2 trend charts, 1–2 Autocapture charts ([Amplitude] Page Viewed), and 1 retention chart.
-5. Create each chart via the Amplitude MCP using exact event names from .amplitude-events.json.
-6. Create a single dashboard containing all charts, named "[Product] Analytics — [Year]".
-7. Write .amplitude-dashboard.json with the dashboard URL, ID, and chart metadata.
-
-The dashboard creation is a first-class deliverable, not an optional bonus. An expert implementation strategist always ties instrumentation to actionable charts before signing off.`,
+  `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 
   ...(DEMO_MODE
     ? [

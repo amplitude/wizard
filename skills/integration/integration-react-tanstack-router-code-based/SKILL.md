@@ -24,6 +24,7 @@ Follow these steps in order to complete the integration:
 ## Reference files
 
 - `references/EXAMPLE.md` - React with TanStack Router (code-based) example project code
+- `references/browser-unified-sdk.md` - Amplitude documentation for Browser Unified Sdk
 - `references/browser-sdk-2.md` - Or install unified SDK to get access to all Amplitude products
 - `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
@@ -38,20 +39,11 @@ The example project shows the target implementation pattern. Consult the documen
 - **Environment variables**: Always use environment variables for Amplitude keys. Never hardcode them.
 - **Minimal changes**: Add Amplitude code alongside existing integrations. Don't replace or restructure existing code.
 - **Match the example**: Your implementation should follow the example project's patterns as closely as possible.
-
-## Framework guidelines
-
-- For feature flags, use the Amplitude Experiment React SDK hooks (useVariantValue, useExperiment) — they handle loading states and async fetch automatically
-- Add analytics track calls in event handlers where user actions occur, NOT in useEffect reacting to state changes
-- Do NOT use useEffect for data transformation - calculate derived values during render instead
-- Do NOT use useEffect to respond to user events - put that logic in the event handler itself
-- Do NOT use useEffect to chain state updates - calculate all related updates together in the event handler
-- Do NOT use useEffect to notify parent components - call the parent callback alongside setState in the event handler
-- To reset component state when a prop changes, pass the prop as the component's key instead of using useEffect
-- useEffect is ONLY for synchronizing with external systems (non-React widgets, browser APIs, network subscriptions)
-- Use TanStack Router's built-in navigation events for pageview tracking instead of useEffect
-- Initialize Amplitude once in the root component defined in either the file-based convention (__root.tsx) or code-based convention (wherever createRootRoute() is called) so all child routes have access to the Amplitude client
+- **Unified SDK**: For new browser/frontend projects, use `@amplitude/unified` as the default SDK — it bundles Analytics, Session Replay, Experiment, and Guides & Surveys in a single package. Initialize with `initAll()`. Only use `@amplitude/analytics-browser` if the project already has it installed.
+- **Event naming**: Event names MUST use Title Case with spaces following the [Noun] + [Past-Tense Verb] pattern (e.g., "Button Clicked", "Sign Up Completed", "Cart Viewed"). Do NOT use snake_case, camelCase, or SCREAMING_SNAKE. Property names should use snake_case (e.g., button_text, page_url).
+- **No PII in events**: Never send PII (emails, full names, phone numbers, physical addresses, IP addresses) in `track()` event properties. PII belongs in `identify()` user properties only.
+- **Autocapture**: Enable autocapture in the init config to automatically capture sessions, page views, form interactions, and file downloads. Use the `autocapture` config option (not the deprecated `defaultTracking`).
 
 ## Identifying users
 
-Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.
+Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. Call `amplitude.reset()` on logout to unlink future events from the current user. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.

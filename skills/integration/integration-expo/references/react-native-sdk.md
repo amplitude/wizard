@@ -87,7 +87,7 @@ Because React-Native",
     }
   </style>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/tocbot/4.25.0/tocbot.css">
-  <link href="/docs/css/site.css?id=cf9c3f0a1066ff8b5d94a25cd8d407e1" rel="stylesheet">
+  <link href="/docs/css/site.css?id=6e2f9e1efe9343c4ba65666223648444" rel="stylesheet">
   <link href="/docs/css/algolia.css?id=e343cc9490e043fefffa37d2817ddf8c" rel="stylesheet">
   <link href="/docs/css/dracula-prism.css?id=a5713888be640854bb66b8b74c1037ce" rel="stylesheet">
 <style>
@@ -2302,7 +2302,10 @@ IDFA is no longer recommended. You should consider using IDFV instead when possi
 
 
     
-    <div class="rounded-lg border text-card-foreground bg-amp-gray-50 border-amp-gray-200 shadow-sm mb-8" data-bundle-loaded="true">
+    <div class="rounded-lg border text-card-foreground bg-amp-gray-50 border-amp-gray-200 shadow-sm mb-8" 
+         data-bundle-package="@amplitude/analytics-react-native" 
+         data-bundle-loader="true"
+         data-environment="production">
         <div class="p-4">
             <div class="flex items-center gap-2 mb-3">
                 <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"
@@ -2317,9 +2320,6 @@ IDFA is no longer recommended. You should consider using IDFV instead when possi
                 </svg>
                 <h3 class="font-medium text-amp-gray-900 text-sm m-0">
                     <a href="https://npmjs.com/package/@amplitude/analytics-react-native" target="_blank">Package Information</a>
-                    
-                        <span class="ml-2 text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded" title="Fresh data (2026-04-09T17:36:37.871199Z)">Live</span>
-                    
                 </h3>
             </div>
             <div class="space-y-2.5">
@@ -2330,18 +2330,19 @@ IDFA is no longer recommended. You should consider using IDFV instead when possi
                 <div class="flex justify-between items-center">
                     <div>
                         <div class="text-xs text-amp-gray-500 mb-1">Version</div>
-                        <div class="font-medium text-amp-gray-900">1.5.52</div>
+                        <div class="bundle-version">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-16 rounded"></div>
+                        </div>
                     </div>
                     <div class="text-right">
                         <div class="text-xs text-amp-gray-500 mb-1">Size (gzip)</div>
-                        <div class="font-medium text-amp-gray-900">24.74 kB</div>
+                        <div class="bundle-size">
+                            <div class="animate-pulse bg-amp-gray-200 h-5 w-12 rounded"></div>
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-        
-        
-        
     </div>
 
 
