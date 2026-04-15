@@ -681,114 +681,120 @@ void yargs(hideBin(process.argv))
             // Runs concurrently with auth while AuthScreen shows.
             // Each detector has its own per-framework timeout internally,
             // so no outer timeout is needed.
+            // IMPORTANT: setDetectionComplete() MUST fire in all code paths
+            // or the user gets stuck on the detecting screen forever.
             const detectionTask = (async () => {
-              const results = await detectAllFrameworks(installDir);
-
-              // Store full results on session for diagnostics
-              session.detectionResults = results;
-
-              const detectedIntegration = results.find(
-                (r) => r.detected,
-              )?.integration;
-
-              if (detectedIntegration) {
-                const config = FRAMEWORK_REGISTRY[detectedIntegration];
-
-                // Run gatherContext for the friendly variant label
-                if (config.metadata.gatherContext) {
-                  try {
-                    const context = await Promise.race([
-                      config.metadata.gatherContext({
-                        installDir,
-                        debug: session.debug,
-                        forceInstall: session.forceInstall,
-                        default: false,
-                        signup: session.signup,
-                        localMcp: session.localMcp,
-                        ci: session.ci,
-                        menu: session.menu,
-                        benchmark: session.benchmark,
-                      }),
-                      new Promise<Record<string, never>>((resolve) =>
-                        setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
-                      ),
-                    ]);
-                    for (const [key, value] of Object.entries(context)) {
-                      if (!(key in session.frameworkContext)) {
-                        tui.store.setFrameworkContext(key, value);
-                      }
-                    }
-                  } catch {
-                    // Detection failed — will show generic name
-                  }
-                }
-
-                tui.store.setFrameworkConfig(detectedIntegration, config);
-
-                if (!session.detectedFrameworkLabel) {
-                  tui.store.setDetectedFramework(config.metadata.name);
-                }
-              }
-
-              // Feature discovery — deterministic scan of package.json deps
               try {
-                const { readFileSync } = await import('fs');
-                const pkgPath = join(installDir, 'package.json');
-                const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
-                  dependencies?: Record<string, string>;
-                  devDependencies?: Record<string, string>;
-                };
-                const allDeps = {
-                  ...pkg.dependencies,
-                  ...pkg.devDependencies,
-                };
-                const depNames = Object.keys(allDeps);
+                const results = await detectAllFrameworks(installDir);
 
-                const { DiscoveredFeature } = await import(
-                  './src/lib/wizard-session.js'
-                );
+                // Store full results on session for diagnostics
+                session.detectionResults = results;
 
-                if (
-                  depNames.some((d) =>
-                    ['stripe', '@stripe/stripe-js'].includes(d),
-                  )
-                ) {
-                  tui.store.addDiscoveredFeature(DiscoveredFeature.Stripe);
-                }
+                const detectedIntegration = results.find(
+                  (r) => r.detected,
+                )?.integration;
 
-                // LLM SDK detection — sourced from Amplitude LLM analytics skill
-                // Gated by the wizard-llm-analytics feature flag.
-                const { isFlagEnabled } = await import(
-                  './src/lib/feature-flags.js'
-                );
-                const { FLAG_LLM_ANALYTICS } = await import(
-                  './src/lib/feature-flags.js'
-                );
-                if (isFlagEnabled(FLAG_LLM_ANALYTICS)) {
-                  const LLM_PACKAGES = [
-                    'openai',
-                    '@anthropic-ai/sdk',
-                    'ai',
-                    '@ai-sdk/openai',
-                    'langchain',
-                    '@langchain/openai',
-                    '@langchain/langgraph',
-                    '@google/generative-ai',
-                    '@google/genai',
-                    '@instructor-ai/instructor',
-                    '@mastra/core',
-                    'portkey-ai',
-                  ];
-                  if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
-                    tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
+                if (detectedIntegration) {
+                  const config = FRAMEWORK_REGISTRY[detectedIntegration];
+
+                  // Run gatherContext for the friendly variant label
+                  if (config.metadata.gatherContext) {
+                    try {
+                      const context = await Promise.race([
+                        config.metadata.gatherContext({
+                          installDir,
+                          debug: session.debug,
+                          forceInstall: session.forceInstall,
+                          default: false,
+                          signup: session.signup,
+                          localMcp: session.localMcp,
+                          ci: session.ci,
+                          menu: session.menu,
+                          benchmark: session.benchmark,
+                        }),
+                        new Promise<Record<string, never>>((resolve) =>
+                          setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
+                        ),
+                      ]);
+                      for (const [key, value] of Object.entries(context)) {
+                        if (!(key in session.frameworkContext)) {
+                          tui.store.setFrameworkContext(key, value);
+                        }
+                      }
+                    } catch {
+                      // Detection failed — will show generic name
+                    }
+                  }
+
+                  tui.store.setFrameworkConfig(detectedIntegration, config);
+
+                  if (!session.detectedFrameworkLabel) {
+                    tui.store.setDetectedFramework(config.metadata.name);
                   }
                 }
-              } catch {
-                // No package.json or parse error — skip feature discovery
-              }
 
-              // Signal detection is done — IntroScreen shows picker or results
-              tui.store.setDetectionComplete();
+                // Feature discovery — deterministic scan of package.json deps
+                try {
+                  const { readFileSync } = await import('fs');
+                  const pkgPath = join(installDir, 'package.json');
+                  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
+                    dependencies?: Record<string, string>;
+                    devDependencies?: Record<string, string>;
+                  };
+                  const allDeps = {
+                    ...pkg.dependencies,
+                    ...pkg.devDependencies,
+                  };
+                  const depNames = Object.keys(allDeps);
+
+                  const { DiscoveredFeature } = await import(
+                    './src/lib/wizard-session.js'
+                  );
+
+                  if (
+                    depNames.some((d) =>
+                      ['stripe', '@stripe/stripe-js'].includes(d),
+                    )
+                  ) {
+                    tui.store.addDiscoveredFeature(DiscoveredFeature.Stripe);
+                  }
+
+                  // LLM SDK detection — sourced from Amplitude LLM analytics skill
+                  // Gated by the wizard-llm-analytics feature flag.
+                  const { isFlagEnabled } = await import(
+                    './src/lib/feature-flags.js'
+                  );
+                  const { FLAG_LLM_ANALYTICS } = await import(
+                    './src/lib/feature-flags.js'
+                  );
+                  if (isFlagEnabled(FLAG_LLM_ANALYTICS)) {
+                    const LLM_PACKAGES = [
+                      'openai',
+                      '@anthropic-ai/sdk',
+                      'ai',
+                      '@ai-sdk/openai',
+                      'langchain',
+                      '@langchain/openai',
+                      '@langchain/langgraph',
+                      '@google/generative-ai',
+                      '@google/genai',
+                      '@instructor-ai/instructor',
+                      '@mastra/core',
+                      'portkey-ai',
+                    ];
+                    if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
+                      tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
+                    }
+                  }
+                } catch {
+                  // No package.json or parse error — skip feature discovery
+                }
+              } finally {
+                // Signal detection is done — IntroScreen shows picker or results.
+                // This MUST fire even if detection or feature discovery throws,
+                // otherwise the user gets stuck on the detecting screen forever.
+                tui.store.setDetectionComplete();
+              }
             })();
 
             // Gate runWizard on the user reaching RunScreen — at that point
