@@ -24,20 +24,12 @@ type ReactRouterContext = {
 const REACT_ROUTER_MINIMUM_VERSION = '6.0.0';
 const TANSTACK_MINIMUM_VERSION = '1.0.0';
 
+// Priority matches gatherContext: TanStack Start > TanStack Router > react-router
 function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
   version?: string;
   minimumVersion?: string;
   packageDisplayName?: string;
 } {
-  const reactRouterVersion = getPackageVersion('react-router', packageJson);
-  if (reactRouterVersion) {
-    return {
-      version: reactRouterVersion,
-      minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
-      packageDisplayName: 'React Router',
-    };
-  }
-
   const tanstackStartVersion = getPackageVersion(
     '@tanstack/react-start',
     packageJson,
@@ -59,6 +51,15 @@ function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
       version: tanstackRouterVersion,
       minimumVersion: TANSTACK_MINIMUM_VERSION,
       packageDisplayName: 'TanStack Router',
+    };
+  }
+
+  const reactRouterVersion = getPackageVersion('react-router', packageJson);
+  if (reactRouterVersion) {
+    return {
+      version: reactRouterVersion,
+      minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
+      packageDisplayName: 'React Router',
     };
   }
 
@@ -108,10 +109,11 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     packageDisplayName: 'React Router',
     getVersion: (packageJson: unknown) => {
       const pkg = packageJson as PackageDotJson;
+      // Priority matches gatherContext: TanStack Start > TanStack Router > react-router
       return (
-        getPackageVersion('react-router', pkg) ??
         getPackageVersion('@tanstack/react-start', pkg) ??
-        getPackageVersion('@tanstack/react-router', pkg)
+        getPackageVersion('@tanstack/react-router', pkg) ??
+        getPackageVersion('react-router', pkg)
       );
     },
     getVersionBucket: getReactRouterVersionBucket,
