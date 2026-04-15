@@ -916,8 +916,9 @@ void yargs(hideBin(process.argv))
                     });
                   });
 
-                  const { performHeadlessSignup, completeSignupTokenExchange } =
-                    await import('./src/utils/headless-signup.js');
+                  const { performHeadlessSignup } = await import(
+                    './src/utils/headless-signup.js'
+                  );
                   const { logToFile } = await import('./src/utils/debug.js');
 
                   if (
@@ -942,10 +943,17 @@ void yargs(hideBin(process.argv))
                     });
 
                     if (result.type === 'oauth') {
-                      // New user — exchange code, persist token, then
-                      // use completeAuth for user info + UI signaling
-                      const { tokenResponse } =
-                        await completeSignupTokenExchange(result.code, zone);
+                      // New user — exchange code for tokens, then let
+                      // completeAuth handle user fetch + store + UI signaling.
+                      // Don't use completeSignupTokenExchange here — it would
+                      // double-fetch the user and double-store the token.
+                      const { exchangeHeadlessCode } = await import(
+                        './src/utils/headless-signup.js'
+                      );
+                      const tokenResponse = await exchangeHeadlessCode(
+                        result.code,
+                        zone,
+                      );
                       await completeAuth({
                         idToken: tokenResponse.id_token,
                         accessToken: tokenResponse.access_token,
