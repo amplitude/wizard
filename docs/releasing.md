@@ -28,7 +28,7 @@ release-please runs
 1. Merge PRs to `main` using [conventional commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, etc.)
 2. release-please opens a release PR that bumps the version and updates the changelog
 3. Review and merge the release PR
-4. A growth team member approves the `npm-publish` environment deployment in the Actions UI
+4. A maintainer approves the `npm-publish` environment deployment in the Actions UI
 5. The package is published to npm
 
 ### Beta releases
@@ -57,9 +57,9 @@ If the automated flow fails, use the **Publish (manual)** workflow:
 |---------|---------------|
 | **Authentication** | npm OIDC trusted publishing — no static tokens |
 | **Provenance** | Disabled while repo is internal (see [Going public](#going-public) below) |
-| **Approval gate** | `npm-publish` GitHub environment requires growth team approval |
+| **Approval gate** | `npm-publish` GitHub environment requires maintainer approval |
 | **SHA pinning** | All external actions pinned to full commit SHAs |
-| **CODEOWNERS** | Workflow and manifest changes require growth team review |
+| **CODEOWNERS** | Workflow and manifest changes require maintainer review |
 
 ## Key files
 

@@ -9,22 +9,17 @@ import {
 } from './constants.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
 
-// ── Thunder URL helper ────────────────────────────────────────────────
+// ── App API URL helper ────────────────────────────────────────────────
 
 /**
- * Builds the Thunder GraphQL endpoint for the given zone and orgId.
- * Respects `WIZARD_PROXY_THUNDER_URL` for local development — e.g.
- * `WIZARD_PROXY_THUNDER_URL=http://localhost:3030/` routes Thunder
- * traffic to a local server.
+ * Builds the org-scoped App API GraphQL endpoint for the given zone and orgId.
  */
-function thunderUrl(
+function appApiUrl(
   zone: AmplitudeZone,
   orgId: string,
   queryName?: string,
 ): string {
-  const base =
-    process.env.WIZARD_PROXY_THUNDER_URL ??
-    AMPLITUDE_ZONE_SETTINGS[zone].appApiUrlBase;
+  const base = AMPLITUDE_ZONE_SETTINGS[zone].appApiUrlBase;
   // Ensure the base ends with /graphql/org/ so we can append orgId.
   const graphqlBase = base.endsWith('/graphql/org/')
     ? base
@@ -374,9 +369,9 @@ query OwnedDashboards {
 
 /**
  * Checks whether the authenticated user has any charts or dashboards in their org.
- * Uses the Thunder org-scoped GraphQL endpoint.
+ * Uses the App API org-scoped GraphQL endpoint.
  *
- * Detection is org-scoped — Thunder has no project-level chart/dashboard listing
+ * Detection is org-scoped — App API has no project-level chart/dashboard listing
  * API. For a typical new-project user this is equivalent to project-scoped.
  *
  * Returns { hasCharts: false, hasDashboards: false } on any error so the
@@ -387,7 +382,7 @@ export async function fetchOwnedDashboards(
   zone: AmplitudeZone,
   orgId: string,
 ): Promise<{ hasCharts: boolean; hasDashboards: boolean }> {
-  const url = thunderUrl(zone, orgId, 'OwnedDashboards');
+  const url = appApiUrl(zone, orgId, 'OwnedDashboards');
   try {
     const response = await axios.post(
       url,
@@ -731,7 +726,7 @@ query hasAnyDefaultEventTrackingSourceAndEvents($appId: ID!) {
  * Checks whether an Amplitude project has ingested any events and whether
  * the SDK snippet is configured.
  *
- * Always routes to Thunder (the main Amplitude app GraphQL server) at
+ * Always routes to App API (the main Amplitude app GraphQL server) at
  * /t/graphql/org/:orgId using a Bearer access_token.
  */
 export async function fetchProjectActivationStatus(opts: {
@@ -741,7 +736,7 @@ export async function fetchProjectActivationStatus(opts: {
   orgId: string;
 }): Promise<ProjectActivationStatus> {
   const { accessToken, zone, appId, orgId } = opts;
-  const url = thunderUrl(
+  const url = appApiUrl(
     zone,
     orgId,
     'hasAnyDefaultEventTrackingSourceAndEvents',
@@ -790,7 +785,7 @@ query SlackInstallUrl($action: SlackInstallUrlAction!, $originalPath: String) {
 }`;
 
 /**
- * Fetches the direct Slack OAuth install URL from Thunder.
+ * Fetches the direct Slack OAuth install URL from App API.
  * This lets the wizard open the Slack authorization page directly instead of
  * routing through Amplitude Settings.
  *
@@ -802,7 +797,7 @@ export async function fetchSlackInstallUrl(
   orgId: string,
   originalPath: string,
 ): Promise<string | null> {
-  const url = thunderUrl(zone, orgId, 'SlackInstallUrl');
+  const url = appApiUrl(zone, orgId, 'SlackInstallUrl');
   try {
     const response = await axios.post(
       url,
@@ -865,7 +860,7 @@ export async function fetchSlackConnectionStatus(
   zone: AmplitudeZone,
   orgId: string,
 ): Promise<boolean | null> {
-  const url = thunderUrl(zone, orgId, 'SlackConnectionStatus');
+  const url = appApiUrl(zone, orgId, 'SlackConnectionStatus');
   try {
     const response = await axios.post(
       url,

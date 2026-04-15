@@ -182,29 +182,10 @@ pnpm test             # unit tests (vitest)
 pnpm test:watch       # watch mode
 pnpm test:bdd         # BDD / Cucumber tests
 pnpm test:e2e         # end-to-end tests
-pnpm test:proxy       # LLM proxy health check
+pnpm test:proxy       # proxy health check
 pnpm lint             # prettier + eslint
 pnpm fix              # auto-fix lint issues
 ```
-
-### Local LLM proxy
-
-The wizard routes API calls through a Langley proxy. For local development, run
-it alongside the wizard.
-
-**Prerequisites:** `aws-sso` with the `us-prod-dev` profile, and
-`amplitude/javascript` checked out as a sibling directory (`../javascript`).
-Override with `JS_REPO=/path/to/javascript`.
-
-```bash
-# Terminal 1 — proxy
-pnpm proxy
-
-# Terminal 2 — wizard
-WIZARD_PROXY_DEV_TOKEN=dev-token pnpm try
-```
-
-Or `pnpm dev` to run both in one terminal.
 
 ### Documentation
 
@@ -213,4 +194,5 @@ Or `pnpm dev` to run both in one terminal.
 | [Flow diagrams](./docs/flows.md) | Source of truth for UX flows |
 | [Architecture](./docs/architecture.md) | System design |
 | [Dual-mode architecture](./docs/dual-mode-architecture.md) | TUI, agent, and CI mode |
+| [External services](./docs/external-services.md) | Runtime dependencies and APIs |
 | [Engineering patterns](./docs/engineering-patterns.md) | Async safety, retry, error classification |

@@ -59,14 +59,9 @@ query orgs {
 
 Used to populate org/workspace/project pickers and resolve the API key for the selected project.
 
-### App API (Thunder GraphQL)
+### App API (GraphQL)
 
 Org-scoped endpoint for app-level operations (charts, dashboards, Slack, activation status).
-
-| Zone | Base URL |
-|------|----------|
-| US | `https://core.amplitude.com/t/graphql/org/<orgId>` |
-| EU | `https://core.amplitude.eu/t/graphql/org/<orgId>` |
 
 **Auth:** `Authorization: Bearer <accessToken>` (OAuth access token).
 
@@ -119,16 +114,7 @@ Used to construct: `/chart/new`, `/dashboard/new`, `/settings/profile`, `/produc
 
 ## LLM Gateway & Agent
 
-The wizard routes all Claude API calls through Amplitude's Langley proxy service.
-
-| Environment | Gateway URL |
-|-------------|-------------|
-| Production | `https://gateway.us.amplitude.com` |
-| Local dev | Started via `pnpm proxy` (requires `aws-vault` with `us-prod-dev` profile) |
-
-**Liveness check:** `GET https://gateway.us.amplitude.com/_liveness` (5000ms timeout).
-
-**Auth:** The proxy validates Amplitude OAuth tokens. In local dev, `WIZARD_PROXY_DEV_BYPASS=1` skips OAuth — any token works.
+The wizard routes all Claude API calls through Amplitude's LLM gateway, which validates OAuth tokens and forwards requests to Claude.
 
 **Agent SDK:** `@anthropic-ai/claude-agent-sdk` — creates a persistent agent session with tool permissions, MCP server connections, and hook callbacks. The agent runs inside the wizard process.
 
@@ -197,7 +183,7 @@ Both use a 5000ms timeout (`src/lib/health-checks/endpoints.ts`):
 
 | Service | URL | Method |
 |---------|-----|--------|
-| LLM Gateway | `https://gateway.us.amplitude.com/_liveness` | GET |
+| LLM Gateway | Configured via `ANTHROPIC_BASE_URL` | GET |
 | MCP Server | `https://mcp.amplitude.com/` | GET |
 
 ---
@@ -378,9 +364,6 @@ npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
 | `OAUTH_CLIENT_ID` | Zone-specific | Override OAuth client ID |
 | `AMPLITUDE_API_KEY` | `e5a2c9bdffe949f7da77e6b481e118fa` | Telemetry project API key |
 | `AMPLITUDE_SERVER_URL` | `https://api2.amplitude.com` | Telemetry server URL |
-| `WIZARD_PROXY_DEV_TOKEN` | — | LLM proxy auth token for local dev |
-| `WIZARD_PROXY_DEV_BYPASS` | — | Skip OAuth validation in proxy (dev only) |
-| `WIZARD_PROXY_THUNDER_URL` | — | Override Thunder GraphQL base URL (local dev) |
 | `DEMO_MODE_WIZARD` | — | When `1`, limits agent to 5 events for demo runs |
 | `CI` | — | Non-interactive mode detection; also set to `1` when invoking Vercel CLI |
 

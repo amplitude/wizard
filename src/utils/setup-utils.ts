@@ -609,7 +609,7 @@ async function askForWizardLogin(
   // ── 5. Get the Amplitude project API key ─────────────────────────
   // The Data API returns apiKey on the Environment → App type, so we
   // can grab it directly from the workspace data we already fetched.
-  // Falls back to Thunder's agentic API, then manual prompt.
+  // Falls back to manual prompt if not found.
   let projectApiKey: string | undefined;
 
   if (selectedWorkspace) {

@@ -6,9 +6,9 @@ description: >
   URL(s), codebase, and user context. Use when naming events, scoping
   instrumentation, mapping funnels, or producing a JSON taxonomy aligned to
   Amplitude analysis (funnels, retention, journeys, group analytics). In the
-  wizard, pair with instrumentation skills; there is no Langley web-crawl stack
-  — gather context with Read/Grep/Glob, WebFetch when available, Amplitude MCP
-  get_context, and the user's free-text goals.
+  wizard, pair with instrumentation skills. Gather context with Read/Grep/Glob,
+  WebFetch when available, Amplitude MCP get_context, and the user's free-text
+  goals.
 ---
 
 # Amplitude Quickstart Taxonomy Agent
@@ -18,9 +18,8 @@ kit** Amplitude tracking plan for new or evolving products. You synthesize
 **URLs, codebase context, and free-text user goals** into a focused taxonomy
 optimized for Amplitude’s core analysis capabilities.
 
-**Origin:** This skill mirrors the Langley agent `UrlEventSuggesterResponse` /
-Quickstart Taxonomy Agent behavior. Runtime tools differ: follow the **Execution
-context** below instead of Langley-only Python tools.
+This skill produces a `UrlEventSuggesterResponse`-shaped JSON taxonomy. Follow
+the **Execution context** below for available tools.
 
 ---
 
@@ -31,7 +30,7 @@ context** below instead of Langley-only Python tools.
 | Org / project               | Use Amplitude MCP **`get_context`** when available, or use session / `.ampli.json` context from the conversation.                                                                                                                                                                                                                       |
 | Website / URL understanding | Use **WebFetch** (or equivalent fetch tool) on public URLs, **Read** local app routes/layouts, and **Grep** / **Glob** for navigation and feature entry points. There is **no** `crawl_website` / `analyze_crawled_flows` in this environment — be explicit if crawl coverage is incomplete and ask the user for missing URLs or flows. |
 | Business context            | Use **WebFetch** / permitted search tools, plus the user’s description. Infer vertical (e-commerce, SaaS, media, etc.) from both.                                                                                                                                                                                                       |
-| Taxonomy validation         | **No** `subagent__taxonomy_best_practices` subagent. Use **Step 7** self-check and naming rules in this skill.                                                                                                                                                                                                                          |
+| Taxonomy validation         | Use **Step 7** self-check and naming rules in this skill.                                                                                                                                                                                                                          |
 
 Give **equal weight** to free-text goals and URL/code evidence. Logged-in or
 backend-only flows may not appear on a marketing URL — rely on the user and
@@ -138,8 +137,7 @@ Infer which Amplitude patterns apply:
 
 ## Output format (STRICT)
 
-Return **one JSON object** matching the **UrlEventSuggesterResponse** shape used
-by the Langley agent.
+Return **one JSON object** matching the **UrlEventSuggesterResponse** shape.
 
 **Required top-level fields**
 
@@ -211,18 +209,3 @@ When the user only has a **codebase** (no public URL), set `page_overview` from
 the **primary surface** you infer (e.g. app shell, core route) and still return
 valid JSON.
 
----
-
-## Langley reference metadata (for operators)
-
-```text
-display_status: debug
-response_model: langley.core.model.agent_response_models.url_event_suggester_response.UrlEventSuggesterResponse
-agent_collection_class: langley.core.runtime.multi_agent_collection.MultiAgentCollection
-model: openai:gpt-5.2 (with parallel_tool_calls, reasoning_effort medium, text_verbosity low in Langley)
-enable_memory: false
-```
-
-Langley tools (`crawl_website`, `analyze_crawled_flows`, `search_web`,
-`get_page_html`, `subagent__taxonomy_best_practices`) are **not** bundled here —
-substitute with the Execution context table.
