@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.2.0](https://github.com/amplitude/wizard/compare/wizard-v1.1.0...wizard-v1.2.0) (2026-04-15)
+
+
+### Features
+
+* automate chart and dashboard creation after instrumentation ([33ee119](https://github.com/amplitude/wizard/commit/33ee1190075388286accaee0ae3ffb5895d63a9b))
+* automate chart and dashboard creation after instrumentation ([2420fe2](https://github.com/amplitude/wizard/commit/2420fe2e4cd2bb37a3365a34a44ef3f1ef4aab8f))
+* bulletproof framework detection ([#73](https://github.com/amplitude/wizard/issues/73)) ([4ddf05f](https://github.com/amplitude/wizard/commit/4ddf05fc5387174fc19828b09630351f1e7f2ee0))
+* consolidate skills — context-hub as single source of truth ([103ebdb](https://github.com/amplitude/wizard/commit/103ebdbd131adc1702f7f054d4d51b7544ca341a))
+* consolidate skills — context-hub as single source of truth for all skill categories ([0d49ce3](https://github.com/amplitude/wizard/commit/0d49ce34379f633a4f820ff2ff7c6df4d9d88e06))
+* data ingestion preview using MCP ([601f589](https://github.com/amplitude/wizard/commit/601f5894bba61445b74f7ba021d883c9e19d3e62))
+* MCP event preview in DataIngestionCheckScreen ([1eb642d](https://github.com/amplitude/wizard/commit/1eb642d2af043f9710b48ee5c611d713f6000f19))
+* resilient MCP helper with Claude agent fallback ([61339f8](https://github.com/amplitude/wizard/commit/61339f87c06cfa92a87656efe750e43ff7b247d0))
+
+
+### Bug Fixes
+
+* always capture user ID as analytics distinct ID ([75a6ca6](https://github.com/amplitude/wizard/commit/75a6ca6f7bb5bd6e4ac5a3cdb3ff3b191b4c4f92))
+* always capture user ID as analytics distinct ID ([1ec93c0](https://github.com/amplitude/wizard/commit/1ec93c04f814cee534a424e64bc54fb4086af9a7))
+* identify users by email and send user properties to telemetry ([3eeab56](https://github.com/amplitude/wizard/commit/3eeab56f6fedeca4681437c54f113de120725268))
+* MCP event detection — replace removed query_dataset tool and resolve stale org checkpoint ([4b5813e](https://github.com/amplitude/wizard/commit/4b5813e98b8b4dcf2d7ef0027d0a5fe8a6211866))
+* missing MCP notifications/initialized handshake and wrong pendingAuthAccessToken ([0f6126a](https://github.com/amplitude/wizard/commit/0f6126a60b6aee1fad592538c5b941bf23e46cac))
+
 ## [1.1.0](https://github.com/amplitude/wizard/compare/wizard-v1.0.0...wizard-v1.1.0) (2026-04-14)
 
 
