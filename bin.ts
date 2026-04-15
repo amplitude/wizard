@@ -181,35 +181,18 @@ const resolveNonInteractiveCredentials = async (
     const email = session.email;
     const fullName = session.fullName;
     if (email && fullName) {
-      const { performHeadlessSignup, exchangeHeadlessCode } = await import(
-        './src/utils/headless-signup.js'
-      );
-      const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+      const { performHeadlessSignup, completeSignupTokenExchange } =
+        await import('./src/utils/headless-signup.js');
       const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
-      const { storeToken } = await import('./src/utils/ampli-settings.js');
       const { getAPIKey } = await import('./src/utils/get-api-key.js');
 
       const zone = (session.region ?? 'us') as 'us' | 'eu';
       const result = await performHeadlessSignup({ email, fullName, zone });
 
       if (result.type === 'oauth') {
-        const tokenResponse = await exchangeHeadlessCode(result.code, zone);
-        const userInfo = await fetchAmplitudeUser(tokenResponse.id_token, zone);
-
-        storeToken(
-          {
-            id: userInfo.id,
-            firstName: userInfo.firstName,
-            lastName: userInfo.lastName,
-            email: userInfo.email,
-            zone,
-          },
-          {
-            accessToken: tokenResponse.access_token,
-            idToken: tokenResponse.id_token,
-            refreshToken: tokenResponse.refresh_token,
-            expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-          },
+        const { tokenResponse, userInfo } = await completeSignupTokenExchange(
+          result.code,
+          zone,
         );
         session.userEmail = userInfo.email;
 
@@ -263,7 +246,12 @@ const resolveNonInteractiveCredentials = async (
           }
         }
 
-        getUI().log.info(`Headless signup complete for ${userInfo.email}`);
+        getUI().log.info(
+          `Headless signup complete for ${userInfo.email.replace(
+            /(.{2}).*@/,
+            '$1***@',
+          )}`,
+        );
       } else if (result.type === 'requires_auth') {
         getUI().log.error(
           'Account already exists. Browser auth required — ' +
@@ -481,6 +469,14 @@ void yargs(hideBin(process.argv))
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
+
+          // Initialize feature flags so headless signup eligibility can be computed
+          const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
+            await import('./src/lib/feature-flags.js');
+          await initFeatureFlags().catch(() => {});
+          session._headlessSignupEnabled =
+            session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+
           await resolveNonInteractiveCredentials(
             session,
             options,
@@ -499,6 +495,14 @@ void yargs(hideBin(process.argv))
 
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
+
+          // Initialize feature flags so headless signup eligibility can be computed
+          const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
+            await import('./src/lib/feature-flags.js');
+          await initFeatureFlags().catch(() => {});
+          session._headlessSignupEnabled =
+            session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
@@ -899,19 +903,29 @@ void yargs(hideBin(process.argv))
                     });
                   });
 
-                  const { performHeadlessSignup, exchangeHeadlessCode } =
+                  const { performHeadlessSignup, completeSignupTokenExchange } =
                     await import('./src/utils/headless-signup.js');
                   const { logToFile } = await import('./src/utils/debug.js');
 
+                  if (
+                    !session.headlessSignupEmail ||
+                    !session.headlessSignupFullName
+                  ) {
+                    throw new Error(
+                      'headlessSignupSubmitted was true but email/fullName are missing',
+                    );
+                  }
+
                   const result = await performHeadlessSignup({
-                    email: session.headlessSignupEmail!,
-                    fullName: session.headlessSignupFullName!,
+                    email: session.headlessSignupEmail,
+                    fullName: session.headlessSignupFullName,
                     zone,
                   });
 
                   if (result.type === 'oauth') {
-                    // New user — exchange auth code for tokens
-                    const tokenResponse = await exchangeHeadlessCode(
+                    // New user — exchange code, persist token, then
+                    // use completeAuth for user info + UI signaling
+                    const { tokenResponse } = await completeSignupTokenExchange(
                       result.code,
                       zone,
                     );
@@ -925,20 +939,16 @@ void yargs(hideBin(process.argv))
                   }
 
                   if (result.type === 'requires_auth') {
-                    // Existing user — open the redirect URL from the backend
-                    // and fall through to the standard browser OAuth callback flow.
+                    // Existing user — fall through to standard browser OAuth.
+                    // TODO: evaluate whether to use the backend-supplied redirect
+                    // URL (result.redirectUrl) instead of constructing a new one
+                    // via performAmplitudeAuth. The backend URL may carry useful
+                    // context (login hints, pre-auth state). For now we ignore it
+                    // to avoid opening two competing browser tabs with mismatched
+                    // PKCE parameters.
                     logToFile(
-                      '[headless-signup] existing user, opening redirect URL',
+                      '[headless-signup] existing user, falling back to browser OAuth',
                     );
-                    // The redirect URL is a fully-formed OAuth authorize URL.
-                    // Open it in the browser and let the callback server handle it.
-                    tui.store.setLoginUrl(result.redirectUrl);
-                    const opn = (await import('opn')).default;
-                    opn(result.redirectUrl, { wait: false }).catch(() => {
-                      // No browser — user will copy-paste the URL shown by the TUI
-                    });
-                    // Fall through to standard performAmplitudeAuth below
-                    // (which starts the callback server and waits for the code)
                   } else {
                     logToFile(
                       `[headless-signup] ${result.type}: falling back to browser OAuth`,

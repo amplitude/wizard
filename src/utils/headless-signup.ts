@@ -18,6 +18,7 @@ import {
   OUTBOUND_URLS,
   type AmplitudeZone,
 } from '../lib/constants.js';
+import type { AmplitudeUserInfo } from '../lib/api.js';
 import { logToFile } from './debug.js';
 
 // ── Endpoint URL ────────────────────────────────────────────────────
@@ -110,10 +111,16 @@ export async function performHeadlessSignup(options: {
     zone,
   });
 
+  const spaceIdx = fullName.indexOf(' ');
+  const firstName =
+    spaceIdx > 0 ? fullName.slice(0, spaceIdx).trim() : fullName;
+  const lastName = spaceIdx > 0 ? fullName.slice(spaceIdx + 1).trim() : '';
+
   try {
     const response = await axios.post(url, {
       email,
-      first_name: fullName,
+      first_name: firstName,
+      ...(lastName && { last_name: lastName }),
       scopes: ['openid', 'offline'],
       state,
       client_id: oAuthClientId,
@@ -168,6 +175,36 @@ export async function performHeadlessSignup(options: {
     logToFile(`[headless-signup] request failed: ${message}`);
     return { type: 'error', code: 'network_error', message };
   }
+}
+
+// ── Complete signup: exchange code, fetch user, persist token ────────
+
+export async function completeSignupTokenExchange(
+  code: string,
+  zone: AmplitudeZone,
+): Promise<{ tokenResponse: OAuthTokenResponse; userInfo: AmplitudeUserInfo }> {
+  const tokenResponse = await exchangeHeadlessCode(code, zone);
+  const { fetchAmplitudeUser } = await import('../lib/api.js');
+  const userInfo = await fetchAmplitudeUser(tokenResponse.id_token, zone);
+  const { storeToken } = await import('./ampli-settings.js');
+  storeToken(
+    {
+      id: userInfo.id,
+      firstName: userInfo.firstName,
+      lastName: userInfo.lastName,
+      email: userInfo.email,
+      zone,
+    },
+    {
+      accessToken: tokenResponse.access_token,
+      idToken: tokenResponse.id_token,
+      refreshToken: tokenResponse.refresh_token,
+      expiresAt: new Date(
+        Date.now() + tokenResponse.expires_in * 1000,
+      ).toISOString(),
+    },
+  );
+  return { tokenResponse, userInfo };
 }
 
 // ── Token exchange (no PKCE) ────────────────────────────────────────
