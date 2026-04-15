@@ -21,6 +21,51 @@ type ReactRouterContext = {
   routerMode?: ReactRouterMode;
 };
 
+const REACT_ROUTER_MINIMUM_VERSION = '6.0.0';
+const TANSTACK_MINIMUM_VERSION = '1.0.0';
+
+// Priority matches gatherContext: TanStack Start > TanStack Router > react-router
+function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
+  version?: string;
+  minimumVersion?: string;
+  packageDisplayName?: string;
+} {
+  const tanstackStartVersion = getPackageVersion(
+    '@tanstack/react-start',
+    packageJson,
+  );
+  if (tanstackStartVersion) {
+    return {
+      version: tanstackStartVersion,
+      minimumVersion: TANSTACK_MINIMUM_VERSION,
+      packageDisplayName: 'TanStack Start',
+    };
+  }
+
+  const tanstackRouterVersion = getPackageVersion(
+    '@tanstack/react-router',
+    packageJson,
+  );
+  if (tanstackRouterVersion) {
+    return {
+      version: tanstackRouterVersion,
+      minimumVersion: TANSTACK_MINIMUM_VERSION,
+      packageDisplayName: 'TanStack Router',
+    };
+  }
+
+  const reactRouterVersion = getPackageVersion('react-router', packageJson);
+  if (reactRouterVersion) {
+    return {
+      version: reactRouterVersion,
+      minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
+      packageDisplayName: 'React Router',
+    };
+  }
+
+  return {};
+}
+
 export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   metadata: {
     name: 'React Router',
@@ -29,6 +74,25 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: async (options: WizardOptions) => {
+      const packageJson = await tryGetPackageJson(options);
+
+      // TanStack Start / TanStack Router share the same browser SDK setup
+      if (
+        packageJson &&
+        hasPackageInstalled('@tanstack/react-start', packageJson)
+      ) {
+        getUI().setDetectedFramework('TanStack Start');
+        return { routerMode: ReactRouterMode.V7_FRAMEWORK };
+      }
+      if (
+        packageJson &&
+        hasPackageInstalled('@tanstack/react-router', packageJson)
+      ) {
+        getUI().setDetectedFramework('TanStack Router');
+        return {};
+      }
+
+      // Standard React Router detection
       const routerMode = await getReactRouterMode(options);
       if (routerMode) {
         getUI().setDetectedFramework(
@@ -43,21 +107,35 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   detection: {
     packageName: 'react-router',
     packageDisplayName: 'React Router',
-    getVersion: (packageJson: unknown) =>
-      getPackageVersion('react-router', packageJson as PackageDotJson),
+    getVersion: (packageJson: unknown) => {
+      const pkg = packageJson as PackageDotJson;
+      // Priority matches gatherContext: TanStack Start > TanStack Router > react-router
+      return (
+        getPackageVersion('@tanstack/react-start', pkg) ??
+        getPackageVersion('@tanstack/react-router', pkg) ??
+        getPackageVersion('react-router', pkg)
+      );
+    },
     getVersionBucket: getReactRouterVersionBucket,
-    minimumVersion: '6.0.0',
+    minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
     getInstalledVersion: async (options: WizardOptions) => {
       const packageJson = await tryGetPackageJson(options);
-      return packageJson
-        ? getPackageVersion('react-router', packageJson)
-        : undefined;
+      if (!packageJson) return undefined;
+      return getReactRouterVersionCheckInfo(packageJson).version;
+    },
+    getVersionCheckInfo: async (options: WizardOptions) => {
+      const packageJson = await tryGetPackageJson(options);
+      if (!packageJson) return {};
+      return getReactRouterVersionCheckInfo(packageJson);
     },
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
-      return packageJson
-        ? hasPackageInstalled('react-router', packageJson)
-        : false;
+      if (!packageJson) return false;
+      return (
+        hasPackageInstalled('react-router', packageJson) ||
+        hasPackageInstalled('@tanstack/react-router', packageJson) ||
+        hasPackageInstalled('@tanstack/react-start', packageJson)
+      );
     },
     detectPackageManager: detectNodePackageManagers,
   },

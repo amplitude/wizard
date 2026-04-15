@@ -25,7 +25,7 @@ import {
 } from './agent-interface';
 import { getLlmGatewayUrlFromHost } from '../utils/urls';
 import { OUTBOUND_URLS } from './constants.js';
-import * as semver from 'semver';
+import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { createBenchmarkPipeline } from './middleware/benchmark';
@@ -66,29 +66,36 @@ export async function runAgentWizard(
   }
 
   // Version check
-  if (config.detection.minimumVersion && config.detection.getInstalledVersion) {
-    const version = await config.detection.getInstalledVersion(
+  if (
+    config.detection.getInstalledVersion ||
+    config.detection.getVersionCheckInfo
+  ) {
+    const versionCheckInfo = await getVersionCheckInfo(
+      config.detection,
       sessionToOptions(session),
     );
-    logToFile(`[runAgentWizard] detected version: ${version}`);
-    if (version) {
-      const coerced = semver.coerce(version);
-      if (coerced && semver.lt(coerced, config.detection.minimumVersion)) {
-        logToFile(
-          `[runAgentWizard] version ${version} is less than minimum required ${config.detection.minimumVersion}`,
-        );
-        const docsUrl =
-          config.metadata.unsupportedVersionDocsUrl ?? config.metadata.docsUrl;
-        logToFile(
-          `[runAgentWizard] directing user to manual setup guide: ${docsUrl}`,
-        );
-        getUI().cancel(
-          `The wizard requires ${config.metadata.name} ${config.detection.minimumVersion} or later, but found version ${version}. Upgrade your ${config.metadata.name} version to use the wizard, or follow the manual setup guide.`,
-          { docsUrl },
-        );
-        logToFile('[runAgentWizard] cancel displayed to user');
-        return;
-      }
+    logToFile(`[runAgentWizard] detected version: ${versionCheckInfo.version}`);
+    const versionWarning = getVersionWarning(versionCheckInfo, {
+      coerceVersion: true,
+    });
+    if (versionWarning) {
+      logToFile(`[runAgentWizard] ${versionWarning}`);
+      const docsUrl =
+        config.metadata.unsupportedVersionDocsUrl ?? config.metadata.docsUrl;
+      logToFile(
+        `[runAgentWizard] directing user to manual setup guide: ${docsUrl}`,
+      );
+      const minimumVersion =
+        versionCheckInfo.minimumVersion ?? config.detection.minimumVersion;
+      const packageDisplayName =
+        versionCheckInfo.packageDisplayName ?? config.metadata.name;
+      const version = versionCheckInfo.version ?? 'unknown';
+      getUI().cancel(
+        `The wizard requires ${packageDisplayName} ${minimumVersion} or later, but found version ${version}. Upgrade your ${packageDisplayName} version to use the wizard, or follow the manual setup guide.`,
+        { docsUrl },
+      );
+      logToFile('[runAgentWizard] cancel displayed to user');
+      return;
     }
   }
 
@@ -120,14 +127,16 @@ export async function runAgentWizard(
   if (usesPackageJson) {
     packageJson = await tryGetPackageJson({ installDir: session.installDir });
     if (packageJson) {
-      // Log warning if package not installed, but continue (agent handles it)
-      const { hasPackageInstalled } = await import('../utils/package-json.js');
-      if (!hasPackageInstalled(config.detection.packageName, packageJson)) {
+      frameworkVersion = config.detection.getVersion(packageJson);
+      // Log warning if package not found, but continue (agent handles it).
+      // Uses getVersion() rather than checking packageName directly so
+      // frameworks that match multiple packages (e.g. React Router +
+      // TanStack) don't trigger false "not installed" warnings.
+      if (!frameworkVersion) {
         getUI().log.warn(
           `${config.detection.packageDisplayName} does not seem to be installed. Continuing anyway — the agent will handle it.`,
         );
       }
-      frameworkVersion = config.detection.getVersion(packageJson);
     } else {
       getUI().log.warn(
         'Could not find package.json. Continuing anyway — the agent will handle it.',

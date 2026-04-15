@@ -842,7 +842,7 @@ method with its behavior in each mode:
 
 5. Concurrent tasks (while user sees IntroScreen/AuthScreen):
    ├─ authTask: Wait for region → OAuth → fetchAmplitudeUser → store.setOAuthComplete()
-   └─ detectionTask: detectIntegration() → gatherContext() → feature discovery → store.setDetectionComplete()
+   └─ detectionTask: detectAllFrameworks() → gatherContext() → feature discovery → store.setDetectionComplete()
 
 6. await tui.waitForSetup()
    └─ Blocks until onEnterScreen(Screen.Run) fires completeSetup()

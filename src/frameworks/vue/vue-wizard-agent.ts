@@ -34,7 +34,10 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     },
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
-      return packageJson ? hasPackageInstalled('vue', packageJson) : false;
+      if (!packageJson) return false;
+      // Nuxt projects have both 'vue' and 'nuxt' — don't claim them
+      if (hasPackageInstalled('nuxt', packageJson)) return false;
+      return hasPackageInstalled('vue', packageJson);
     },
     detectPackageManager: detectNodePackageManagers,
   },

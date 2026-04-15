@@ -114,6 +114,16 @@ export interface FrameworkDetection {
   /** Get the currently installed version. Called by runner for version check. */
   getInstalledVersion?: (options: WizardOptions) => Promise<string | undefined>;
 
+  /**
+   * Optional: Return dynamic version-check metadata when a framework can be
+   * backed by multiple packages with different minimum versions.
+   */
+  getVersionCheckInfo?: (options: WizardOptions) => Promise<{
+    version?: string;
+    minimumVersion?: string;
+    packageDisplayName?: string;
+  }>;
+
   /** Detect whether this framework is present in the project. */
   detect: (options: Pick<WizardOptions, 'installDir'>) => Promise<boolean>;
 
