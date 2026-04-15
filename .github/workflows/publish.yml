@@ -12,16 +12,23 @@ jobs:
     name: Check package version and detect an update
     runs-on: ubuntu-24.04
     outputs:
-      committed-version: ${{ steps.check-package-version.outputs.committed-version }}
-      published-version: ${{ steps.check-package-version.outputs.published-version }}
-      is-new-version: ${{ steps.check-package-version.outputs.is-new-version }}
+      committed-version: ${{ steps.check.outputs.committed-version }}
+      published-version: ${{ steps.check.outputs.published-version }}
+      is-new-version: ${{ steps.check.outputs.is-new-version }}
     steps:
       - name: Checkout the repository
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Check package version and detect an update
-        id: check-package-version
-        uses: Amplitude/check-package-version@97f76f610f6c3d259e2eac4f2783adbb84ac8493 # v2
+        id: check
+        run: |
+          COMMITTED=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view @amplitude/wizard version 2>/dev/null || echo "0.0.0")
+          IS_NEW=$( [ "$COMMITTED" != "$PUBLISHED" ] && echo "true" || echo "false" )
+          echo "committed-version=$COMMITTED" >> "$GITHUB_OUTPUT"
+          echo "published-version=$PUBLISHED"  >> "$GITHUB_OUTPUT"
+          echo "is-new-version=$IS_NEW"         >> "$GITHUB_OUTPUT"
+          echo "Committed: $COMMITTED  Published: $PUBLISHED  New: $IS_NEW"
 
   release:
     name: Publish release if new version
@@ -53,9 +60,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Refresh bundled skills
-        run: |
-          bash scripts/refresh-integration-skills.sh
-          bash scripts/refresh-instrumentation-skills.sh
+        run: bash scripts/refresh-skills.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
