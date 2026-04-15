@@ -36,6 +36,8 @@ const {
     resetForAgentAfterPreDetected: vi.fn(),
     setOutroData: vi.fn(),
     setRunPhase: vi.fn(),
+    promptConfirm: vi.fn().mockResolvedValue(false),
+    emitChange: vi.fn(),
   };
   return {
     mockStore,
@@ -128,6 +130,7 @@ vi.mock('../lib/feature-flags', () => ({
   getAllFlags: vi.fn().mockReturnValue({}),
   FLAG_LLM_ANALYTICS: 'wizard-llm-analytics',
   FLAG_AGENT_ANALYTICS: 'wizard-agent-analytics',
+  FLAG_HEADLESS_SIGNUP: 'wizard-headless-signup',
 }));
 vi.mock('../utils/analytics', () => ({
   analytics: {
@@ -859,6 +862,10 @@ describe.skip('CLI argument parsing', () => {
       await runCLI([
         '--debug',
         '--signup',
+        '--email',
+        'test@example.com',
+        '--full-name',
+        'Test User',
         '--force-install',
         '--install-dir',
         '/custom/path',
@@ -874,6 +881,10 @@ describe.skip('CLI argument parsing', () => {
       expect(args['force-install']).toBe(true);
       expect(args['install-dir']).toBe('/custom/path');
       expect(args.integration).toBe('nextjs');
+
+      // Headless signup flags
+      expect(args.email).toBe('test@example.com');
+      expect(args['full-name']).toBe('Test User');
 
       // New defaults
       expect(args.default).toBe(true);

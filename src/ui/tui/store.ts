@@ -514,6 +514,17 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Called from HeadlessSignupScreen when the user submits email + full name.
+   * The authTask in bin.ts waits for headlessSignupSubmitted before proceeding.
+   */
+  setHeadlessSignupData(email: string, fullName: string): void {
+    this.$session.setKey('headlessSignupEmail', email);
+    this.$session.setKey('headlessSignupFullName', fullName);
+    this.$session.setKey('headlessSignupSubmitted', true);
+    this.emitChange();
+  }
+
   setActivationOptionsComplete(): void {
     this.$session.setKey('activationOptionsComplete', true);
     this.emitChange();

@@ -40,6 +40,8 @@ export const CliArgsSchema = z.object({
   menu: z.boolean().default(false),
   benchmark: z.boolean().default(false),
   apiKey: z.string().optional(),
+  email: z.string().email().optional(),
+  fullName: z.string().optional(),
   integration: z.string().optional(),
 });
 
@@ -339,6 +341,20 @@ export interface WizardSession {
   /** Email address of the authenticated user (from ~/.ampli.json stored profile). */
   userEmail: string | null;
 
+  // Headless signup (--signup + feature flag)
+  /** Email provided via CLI (--email) for headless signup. */
+  email?: string;
+  /** Full name provided via CLI (--full-name) for headless signup. */
+  fullName?: string;
+  /** Email collected in the HeadlessSignupScreen (user input, pre-auth). */
+  headlessSignupEmail: string | null;
+  /** Full name collected in the HeadlessSignupScreen. */
+  headlessSignupFullName: string | null;
+  /** True once the HeadlessSignupScreen form has been submitted. */
+  headlessSignupSubmitted: boolean;
+  /** Computed from --signup + feature flag at startup. Never checkpointed. */
+  _headlessSignupEnabled: boolean;
+
   /**
    * Set to true by bin.ts when a crash-recovery checkpoint is loaded.
    * IntroScreen checks this to show a "Resume where you left off" prompt
@@ -359,6 +375,8 @@ export function buildSession(args: {
   signup?: boolean;
   localMcp?: boolean;
   apiKey?: string;
+  email?: string;
+  fullName?: string;
   menu?: boolean;
   integration?: Integration;
   benchmark?: boolean;
@@ -441,6 +459,14 @@ export function buildSession(args: {
     checklistDashboardUrl: null,
 
     userEmail: null,
+
+    email: validated.email,
+    fullName: validated.fullName,
+    headlessSignupEmail: null,
+    headlessSignupFullName: null,
+    headlessSignupSubmitted: false,
+    _headlessSignupEnabled: false,
+
     _restoredFromCheckpoint: false,
   };
 }

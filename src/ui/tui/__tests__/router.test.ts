@@ -613,4 +613,47 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Slack);
     });
   });
+
+  // ── HeadlessSignup screen routing ────────────────────────────────────
+
+  describe('HeadlessSignup screen', () => {
+    it('is skipped when _headlessSignupEnabled is false', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        _headlessSignupEnabled: false,
+      });
+      // Should go straight to Auth, not HeadlessSignup
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('shows when _headlessSignupEnabled is true', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        _headlessSignupEnabled: true,
+      });
+      expect(router.resolve(session)).toBe(Screen.HeadlessSignup);
+    });
+
+    it('advances to Auth when headlessSignupSubmitted is true', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        _headlessSignupEnabled: true,
+        headlessSignupSubmitted: true,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('does not show when signup is false (default)', () => {
+      const router = new WizardRouter();
+      // Fresh session has signup=false, _headlessSignupEnabled=false
+      const session = sessionWith({ introConcluded: true, region: 'us' });
+      expect(router.resolve(session)).not.toBe(Screen.HeadlessSignup);
+    });
+  });
 });

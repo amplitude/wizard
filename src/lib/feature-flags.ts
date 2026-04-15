@@ -17,6 +17,9 @@ export const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 /** Gate for agent-level analytics / telemetry instrumented by the wizard. */
 export const FLAG_AGENT_ANALYTICS = 'wizard-agent-analytics';
 
+/** Gate for headless (browserless) signup via the provisioning endpoint. */
+export const FLAG_HEADLESS_SIGNUP = 'wizard-headless-signup';
+
 // ── Deployment key ───────────────────────────────────────────────────
 
 /**

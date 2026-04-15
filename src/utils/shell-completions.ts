@@ -47,6 +47,8 @@ _amplitude_wizard() {
     '--debug[Enable verbose logging]'
     '--verbose[Print diagnostic info to the run log]'
     '--signup[Create a new Amplitude account during setup]'
+    '--email[Email for headless signup (used with --signup)]:email:'
+    '--full-name[Full name for headless signup (used with --signup)]:name:'
     '--ci[Enable non-interactive CI mode]'
     '--api-key[Amplitude project API key]:key:'
     '--project-id[Amplitude project ID]:id:'
@@ -108,7 +110,7 @@ _amplitude_wizard_completions() {
   prev="${DB}COMP_WORDS[COMP_CWORD-1]}"
 
   local commands="login logout whoami feedback slack mcp completion"
-  local global_flags="--debug --verbose --signup --ci --api-key --project-id --local-mcp --help --version"
+  local global_flags="--debug --verbose --signup --email --full-name --ci --api-key --project-id --local-mcp --help --version"
   local wizard_flags="--force-install --install-dir --integration --menu --benchmark"
   local integrations="nextjs vue react-router django flask fastapi javascript_web javascript_node python"
 

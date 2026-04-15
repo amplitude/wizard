@@ -80,6 +80,8 @@ const buildSessionFromOptions = async (
     signup: options.signup as boolean | undefined,
     localMcp: options.localMcp as boolean | undefined,
     apiKey: options.apiKey as string | undefined,
+    email: options.email as string | undefined,
+    fullName: options.fullName as string | undefined,
     menu: options.menu as boolean | undefined,
     integration: options.integration as Parameters<
       typeof buildSession
@@ -174,6 +176,117 @@ const resolveNonInteractiveCredentials = async (
     }
   }
 
+  // If we still don't have credentials, try headless signup if eligible
+  if (!session.credentials && session._headlessSignupEnabled) {
+    const email = session.email;
+    const fullName = session.fullName;
+    if (email && fullName) {
+      const { performHeadlessSignup, exchangeHeadlessCode } = await import(
+        './src/utils/headless-signup.js'
+      );
+      const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+      const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
+      const { storeToken } = await import('./src/utils/ampli-settings.js');
+      const { getAPIKey } = await import('./src/utils/get-api-key.js');
+
+      const zone = (session.region ?? 'us') as 'us' | 'eu';
+      const result = await performHeadlessSignup({ email, fullName, zone });
+
+      if (result.type === 'oauth') {
+        const tokenResponse = await exchangeHeadlessCode(result.code, zone);
+        const userInfo = await fetchAmplitudeUser(tokenResponse.id_token, zone);
+
+        storeToken(
+          {
+            id: userInfo.id,
+            firstName: userInfo.firstName,
+            lastName: userInfo.lastName,
+            email: userInfo.email,
+            zone,
+          },
+          {
+            accessToken: tokenResponse.access_token,
+            idToken: tokenResponse.id_token,
+            refreshToken: tokenResponse.refresh_token,
+            expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+          },
+        );
+        session.userEmail = userInfo.email;
+
+        // Try to resolve an API key from the newly created org
+        if (userInfo.orgs.length > 0) {
+          const org = userInfo.orgs[0];
+          const ws = org.workspaces[0];
+          session.selectedOrgId = org.id;
+          session.selectedOrgName = org.name;
+          if (ws) {
+            session.selectedWorkspaceId = ws.id;
+            session.selectedWorkspaceName = ws.name;
+            const envWithKey = (ws.environments ?? [])
+              .filter(
+                (e: { app: { apiKey?: string | null } | null }) =>
+                  e.app?.apiKey,
+              )
+              .sort(
+                (a: { rank: number }, b: { rank: number }) => a.rank - b.rank,
+              )[0];
+            if (envWithKey?.app?.apiKey) {
+              session.credentials = {
+                accessToken: tokenResponse.access_token,
+                idToken: tokenResponse.id_token,
+                projectApiKey: envWithKey.app.apiKey,
+                host: DEFAULT_HOST_URL,
+                projectId: 0,
+              };
+              session.projectHasData = false;
+            }
+          }
+        }
+
+        if (!session.credentials) {
+          // Fallback: try fetching API key from backend
+          const apiKey = await getAPIKey({
+            installDir: session.installDir,
+            idToken: tokenResponse.id_token,
+            zone,
+            workspaceId: session.selectedWorkspaceId ?? undefined,
+          }).catch(() => undefined);
+          if (apiKey) {
+            session.credentials = {
+              accessToken: tokenResponse.access_token,
+              idToken: tokenResponse.id_token,
+              projectApiKey: apiKey,
+              host: DEFAULT_HOST_URL,
+              projectId: 0,
+            };
+            session.projectHasData = false;
+          }
+        }
+
+        getUI().log.info(`Headless signup complete for ${userInfo.email}`);
+      } else if (result.type === 'requires_auth') {
+        getUI().log.error(
+          'Account already exists. Browser auth required — ' +
+            'run without --agent to sign in via browser.',
+        );
+        process.exit(ExitCode.AUTH_REQUIRED);
+      } else {
+        getUI().log.error(
+          `Headless signup failed: ${
+            result.type === 'error' ? result.message : 'missing required fields'
+          }`,
+        );
+        process.exit(ExitCode.AUTH_REQUIRED);
+      }
+    } else {
+      getUI().log.error(
+        'Headless signup requires --email and --full-name flags. ' +
+          'Example: amplitude-wizard --signup --email you@example.com --full-name "Jane Smith"',
+      );
+      process.exit(ExitCode.AUTH_REQUIRED);
+    }
+  }
+
   // If we still don't have credentials, auth is required
   if (!session.credentials) {
     if (mode === 'agent') {
@@ -259,6 +372,16 @@ void yargs(hideBin(process.argv))
     'project-id': {
       describe:
         'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: AMPLITUDE_WIZARD_PROJECT_ID',
+      type: 'string',
+    },
+    email: {
+      describe:
+        'Email for headless signup (used with --signup)\nenv: AMPLITUDE_WIZARD_EMAIL',
+      type: 'string',
+    },
+    'full-name': {
+      describe:
+        'Full name for headless signup (used with --signup)\nenv: AMPLITUDE_WIZARD_FULL_NAME',
       type: 'string',
     },
     org: {
@@ -589,6 +712,15 @@ void yargs(hideBin(process.argv))
             const { analytics } = await import('./src/utils/analytics.js');
             analytics.applyOptOut();
 
+            // Compute headless signup eligibility (requires both --signup AND flag)
+            {
+              const { isFlagEnabled, FLAG_HEADLESS_SIGNUP } = await import(
+                './src/lib/feature-flags.js'
+              );
+              session._headlessSignupEnabled =
+                session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+            }
+
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
             );
@@ -621,6 +753,28 @@ void yargs(hideBin(process.argv))
             // AuthScreen calls store.setCredentials() when done, advancing the
             // router past Auth → RegionSelect → DataSetup → to IntroScreen.
             const authTask = (async () => {
+              // ── Already-logged-in + headless signup check ──────────
+              // If the user passed --signup (headless) but already has credentials,
+              // warn them and offer to continue (which clears credentials).
+              if (
+                session._headlessSignupEnabled &&
+                tui.store.session.credentials !== null
+              ) {
+                const currentEmail = session.userEmail ?? 'an existing account';
+                const proceed = await tui.store.promptConfirm(
+                  `You're already logged in as ${currentEmail}. ` +
+                    `Using --signup will log you out and create a new account. Continue?`,
+                );
+                if (!proceed) {
+                  process.exit(0);
+                }
+                // Clear credentials so the auth flow runs
+                tui.store.session.credentials = null;
+                tui.store.session.pendingOrgs = null;
+                tui.store.session.userEmail = null;
+                tui.store.emitChange();
+              }
+
               // Skip the full OAuth + SUSI flow when credentials were pre-populated
               // from ~/.ampli.json + the saved API key (returning user).
               if (tui.store.session.credentials !== null) return;
@@ -641,6 +795,67 @@ void yargs(hideBin(process.argv))
                 );
 
                 const forceFresh = !ampliConfigExists(installDir);
+
+                // Shared helper: given auth tokens, fetch user info, persist, and
+                // signal AuthScreen. Used by both headless and browser paths.
+                const completeAuth = async (auth: {
+                  idToken: string;
+                  accessToken: string;
+                  refreshToken: string;
+                  zone: typeof DEFAULT_AMPLITUDE_ZONE;
+                }) => {
+                  const cloudRegion = auth.zone;
+
+                  let userInfo;
+                  try {
+                    userInfo = await fetchAmplitudeUser(
+                      auth.idToken,
+                      cloudRegion,
+                    );
+                  } catch {
+                    // Token may be expired — re-open the browser for a fresh login
+                    tui.store.setLoginUrl(null);
+                    const freshAuth = await performAmplitudeAuth({
+                      zone: cloudRegion,
+                      forceFresh: true,
+                    });
+                    userInfo = await fetchAmplitudeUser(
+                      freshAuth.idToken,
+                      cloudRegion,
+                    );
+                    // Update auth with fresh tokens
+                    auth = { ...freshAuth };
+                  }
+
+                  storeToken(
+                    {
+                      id: userInfo.id,
+                      firstName: userInfo.firstName,
+                      lastName: userInfo.lastName,
+                      email: userInfo.email,
+                      zone: auth.zone,
+                    },
+                    {
+                      accessToken: auth.accessToken,
+                      idToken: auth.idToken,
+                      refreshToken: auth.refreshToken,
+                      expiresAt: new Date(
+                        Date.now() + 3600 * 1000,
+                      ).toISOString(),
+                    },
+                  );
+
+                  session.userEmail = userInfo.email;
+                  analytics.setDistinctId(userInfo.email);
+                  analytics.identifyUser({ email: userInfo.email });
+
+                  tui.store.setOAuthComplete({
+                    accessToken: auth.accessToken,
+                    idToken: auth.idToken,
+                    cloudRegion,
+                    orgs: userInfo.orgs,
+                  });
+                };
 
                 // Wait for the user to dismiss the welcome screen AND pick a
                 // region before opening the OAuth URL. This ensures the logo
@@ -668,62 +883,78 @@ void yargs(hideBin(process.argv))
                     ? 'eu'
                     : DEFAULT_AMPLITUDE_ZONE;
 
-                let auth = await performAmplitudeAuth({
+                // ── Headless signup path ───────────────────────────────
+                if (session._headlessSignupEnabled) {
+                  // Wait for HeadlessSignupScreen to collect email + name
+                  await new Promise<void>((resolve) => {
+                    if (tui.store.session.headlessSignupSubmitted) {
+                      resolve();
+                      return;
+                    }
+                    const unsub = tui.store.subscribe(() => {
+                      if (tui.store.session.headlessSignupSubmitted) {
+                        unsub();
+                        resolve();
+                      }
+                    });
+                  });
+
+                  const { performHeadlessSignup, exchangeHeadlessCode } =
+                    await import('./src/utils/headless-signup.js');
+                  const { logToFile } = await import('./src/utils/debug.js');
+
+                  const result = await performHeadlessSignup({
+                    email: session.headlessSignupEmail!,
+                    fullName: session.headlessSignupFullName!,
+                    zone,
+                  });
+
+                  if (result.type === 'oauth') {
+                    // New user — exchange auth code for tokens
+                    const tokenResponse = await exchangeHeadlessCode(
+                      result.code,
+                      zone,
+                    );
+                    await completeAuth({
+                      idToken: tokenResponse.id_token,
+                      accessToken: tokenResponse.access_token,
+                      refreshToken: tokenResponse.refresh_token,
+                      zone,
+                    });
+                    return; // Done — skip browser OAuth
+                  }
+
+                  if (result.type === 'requires_auth') {
+                    // Existing user — open the redirect URL from the backend
+                    // and fall through to the standard browser OAuth callback flow.
+                    logToFile(
+                      '[headless-signup] existing user, opening redirect URL',
+                    );
+                    // The redirect URL is a fully-formed OAuth authorize URL.
+                    // Open it in the browser and let the callback server handle it.
+                    tui.store.setLoginUrl(result.redirectUrl);
+                    const opn = (await import('opn')).default;
+                    opn(result.redirectUrl, { wait: false }).catch(() => {
+                      // No browser — user will copy-paste the URL shown by the TUI
+                    });
+                    // Fall through to standard performAmplitudeAuth below
+                    // (which starts the callback server and waits for the code)
+                  } else {
+                    logToFile(
+                      `[headless-signup] ${result.type}: falling back to browser OAuth`,
+                    );
+                    // Fall through to standard browser OAuth
+                  }
+                }
+
+                // ── Standard browser OAuth path ───────────────────────
+                const auth = await performAmplitudeAuth({
                   zone,
                   forceFresh,
                 });
 
-                // Update login URL (clears the "copy this URL" hint)
                 tui.store.setLoginUrl(null);
-
-                // Zone was already selected by the user before OAuth started.
-                const cloudRegion = zone;
-
-                let userInfo;
-                try {
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
-                  );
-                } catch {
-                  // Token may be expired — re-open the browser for a fresh login
-                  tui.store.setLoginUrl(null);
-                  auth = await performAmplitudeAuth({ zone, forceFresh: true });
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
-                  );
-                }
-
-                // Persist to ~/.ampli.json
-                storeToken(
-                  {
-                    id: userInfo.id,
-                    firstName: userInfo.firstName,
-                    lastName: userInfo.lastName,
-                    email: userInfo.email,
-                    zone: auth.zone,
-                  },
-                  {
-                    accessToken: auth.accessToken,
-                    idToken: auth.idToken,
-                    refreshToken: auth.refreshToken,
-                    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-                  },
-                );
-
-                // Populate user email for /whoami display
-                session.userEmail = userInfo.email;
-                analytics.setDistinctId(userInfo.email);
-                analytics.identifyUser({ email: userInfo.email });
-
-                // Signal AuthScreen — triggers org/workspace/API key pickers
-                tui.store.setOAuthComplete({
-                  accessToken: auth.accessToken,
-                  idToken: auth.idToken,
-                  cloudRegion,
-                  orgs: userInfo.orgs,
-                });
+                await completeAuth(auth);
               } catch (err) {
                 // Auth failure is non-fatal here — agent-runner will retry/handle it
                 if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {

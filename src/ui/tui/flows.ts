@@ -27,6 +27,7 @@ export enum Screen {
   Mcp = 'mcp',
   DataIngestionCheck = 'data-ingestion-check',
   Slack = 'slack',
+  HeadlessSignup = 'headless-signup',
   Outro = 'outro',
   McpAdd = 'mcp-add',
   McpRemove = 'mcp-remove',
@@ -81,6 +82,13 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.RegionSelect,
       show: (s) => s.region === null || s.regionForced,
       isComplete: (s) => s.region !== null && !s.regionForced,
+    },
+    // 2b. Headless signup — collects email + full name for browserless account
+    //     creation. Only shown when --signup AND wizard-headless-signup flag are on.
+    {
+      screen: Screen.HeadlessSignup,
+      show: (s) => s._headlessSignupEnabled,
+      isComplete: (s) => s.headlessSignupSubmitted,
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
