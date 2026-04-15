@@ -9,7 +9,6 @@ Feature: Slack Integration
     And MCP setup is complete
     And events are detected in the project
     And I press Enter to confirm events
-    And the checklist is complete
     Then I should be on the Slack screen
 
   Scenario: Slack setup is skipped when agent run errors

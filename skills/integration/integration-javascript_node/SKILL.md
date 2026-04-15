@@ -24,7 +24,7 @@ Follow these steps in order to complete the integration:
 ## Reference files
 
 - `references/EXAMPLE.md` - JavaScript Node example project code
-- `references/analytics.md` - Amplitude documentation for Analytics
+- `references/node.md` - Amplitude documentation for Node
 - `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
 - `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
@@ -38,17 +38,11 @@ The example project shows the target implementation pattern. Consult the documen
 - **Environment variables**: Always use environment variables for Amplitude keys. Never hardcode them.
 - **Minimal changes**: Add Amplitude code alongside existing integrations. Don't replace or restructure existing code.
 - **Match the example**: Your implementation should follow the example project's patterns as closely as possible.
-
-## Framework guidelines
-
-- @amplitude/analytics-node is the Node.js server-side SDK package name — do NOT use @amplitude/analytics-browser on the server
-- Add amplitude.track() calls in route handlers for meaningful user actions — every route that creates, updates, or deletes data should track an event with contextual properties
-- In long-running servers, the SDK batches events automatically — do NOT set flushQueueSize or flushIntervalMillis unless you have a specific reason to
-- For short-lived processes (scripts, CLIs, serverless), call await amplitude.flush() before the process exits to ensure all events are sent
-- Reverse proxy is NOT needed for server-side Node.js — only client-side JavaScript may benefit from a proxy to avoid ad blockers
-- Remember that source code is available in the node_modules directory
-- Check package.json for type checking or build scripts to validate changes
+- **Unified SDK**: For new browser/frontend projects, use `@amplitude/unified` as the default SDK — it bundles Analytics, Session Replay, Experiment, and Guides & Surveys in a single package. Initialize with `initAll()`. Only use `@amplitude/analytics-browser` if the project already has it installed.
+- **Event naming**: Event names MUST use Title Case with spaces following the [Noun] + [Past-Tense Verb] pattern (e.g., "Button Clicked", "Sign Up Completed", "Cart Viewed"). Do NOT use snake_case, camelCase, or SCREAMING_SNAKE. Property names should use snake_case (e.g., button_text, page_url).
+- **No PII in events**: Never send PII (emails, full names, phone numbers, physical addresses, IP addresses) in `track()` event properties. PII belongs in `identify()` user properties only.
+- **Autocapture**: Enable autocapture in the init config to automatically capture sessions, page views, form interactions, and file downloads. Use the `autocapture` config option (not the deprecated `defaultTracking`).
 
 ## Identifying users
 
-Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.
+Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. Call `amplitude.reset()` on logout to unlink future events from the current user. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.

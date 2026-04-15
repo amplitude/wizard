@@ -413,7 +413,6 @@ describe('WizardRouter happy path transitions', () => {
         s.runPhase = RunPhase.Completed;
         s.mcpComplete = true;
         s.dataIngestionConfirmed = true;
-        s.checklistComplete = true;
         s.slackComplete = true;
       },
       expected: Screen.Outro,
@@ -606,7 +605,6 @@ describe('WizardRouter error phase routing', () => {
                       hasData === null ? null : activation;
                     session.mcpComplete = mcpDone;
                     session.dataIngestionConfirmed = false;
-                    session.checklistComplete = false;
                     session.slackComplete = false;
                     session.outroData = null;
 

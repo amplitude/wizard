@@ -21,7 +21,9 @@ Do not skip server-side events - they capture actions that cannot be tracked cli
 
 Create a new file with a JSON array at the root of the project: .amplitude-events.json. It should include one object for each event we want to add: event name, event description, and the file path we want to place the event in. If events already exist, don't duplicate them; supplement them.
 
-Track actions only, not pageviews. These can be captured automatically. Exceptions can be made for "viewed"-type events that correspond to the top of a conversion funnel.
+**Event names MUST use Title Case with spaces** following the [Noun] + [Past-Tense Verb] pattern (e.g., "Button Clicked", "Sign Up Completed", "Cart Viewed"). Do NOT use snake_case (button_clicked), camelCase (buttonClicked), or SCREAMING_SNAKE (BUTTON_CLICKED). Property names should use snake_case (e.g., button_text, page_url).
+
+Track actions only, not pageviews. These can be captured automatically via Amplitude's autocapture. Exceptions can be made for "viewed"-type events that correspond to the top of a conversion funnel.
 
 As you review files, make an internal note of opportunities to identify users. We'll need them for the next step.
 

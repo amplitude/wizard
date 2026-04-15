@@ -157,7 +157,7 @@ Amplitude is accessed via `useNuxtApp()`:
 
 ```typescript
 const { $amplitude: amplitude } = useNuxtApp()
-amplitude.track('event_name', { property: 'value' })
+amplitude.track('Event Name', { property: 'value' })
 ```
 
 TypeScript types are provided via `types/nuxt-app.d.ts`:

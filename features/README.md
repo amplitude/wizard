@@ -10,7 +10,7 @@ Cucumber/Gherkin feature files describing the intended behavior of the Amplitude
 | `02-wizard-flow.feature` | main wizard spine |
 | `03-activation-check.feature` | returning user activation status evaluation |
 | `04-susi-flow.feature` | sign up / sign in, org and project selection for new users |
-| `05-data-setup-flow.feature` | taxonomy, first chart, first dashboard checklist |
+| `05-data-setup-flow.feature` | data ingestion check, agent-created dashboard, Outro |
 | `06-org-project-selection.feature` | org/project picker, create new |
 | `07-framework-detection.feature` | auto-detect, manual picker, setup questions |
 | `08-outro.feature` | success, error, and cancel end states |

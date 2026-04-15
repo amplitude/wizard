@@ -15,7 +15,7 @@ The flows cover:
 - **Wizard flow** — the main spine of the interactive TUI
 - **Activation Check flow** — evaluates whether a returning user's project is ingesting events, and routes them accordingly
 - **SUSI flow** — sign up / sign in, org and project selection for new users
-- **Data Setup flow** — taxonomy agent, first chart, first dashboard checklist after events are ingested
+- **Data Setup flow** — taxonomy agent, first chart, first dashboard after events are ingested
 - **Org / Project Selection flow** — picker UI for switching org or project, also used by `/org` and `/project` slash commands
 - **Framework Detection flow** — auto-detect or manual selection, plus setup question disambiguation
 - **Outro flow** — success, error, and cancel states after the agent run
@@ -91,9 +91,9 @@ Skills are bundled markdown-based instructions that the agent can follow during 
 
 - `skills/integration/` — Per-framework SDK integration guides (step-by-step workflows with reference docs)
 - `skills/instrumentation/` — Analytics instrumentation skills (event discovery, pattern matching, diff intake)
-- `skills/taxonomy/` — Quickstart taxonomy agent (`amplitude-quickstart-taxonomy-agent`) for event naming, starter-kit scoping, and UrlEventSuggesterResponse-shaped JSON plans
+- `skills/taxonomy/` — Quickstart taxonomy agent and chart/dashboard planning skills
 
-Skills under `skills/instrumentation/` are refreshed via `pnpm skills:refresh`. Taxonomy skills ship only in-repo.
+All three categories are owned and built by `amplitude/context-hub` and pulled into the wizard via `pnpm skills:refresh`. context-hub is the single source of truth: integration skills are generated from `transformation-config/`, taxonomy and instrumentation skills live in `context-hub/skills/`. Run `pnpm skills:refresh` to pull the latest from context-hub's GitHub release (or from a local `../context-hub/dist/skills/` build if that directory exists).
 
 ### Steps (`src/steps/`)
 
@@ -157,7 +157,7 @@ pnpm fix           # auto-fix lint issues
 pnpm flows         # render docs/flows.md diagrams to docs/diagrams/
 pnpm proxy         # start the Langley wizard LLM proxy (requires aws-vault)
 pnpm dev           # build once, link globally, then watch + proxy in parallel
-pnpm skills:refresh # refresh bundled integration/instrumentation skills
+pnpm skills:refresh # pull all skills from context-hub (integration, instrumentation, taxonomy)
 ```
 
 ### Local LLM proxy

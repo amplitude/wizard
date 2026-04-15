@@ -1,6 +1,8 @@
 ---
 name: integration-python
-description: Amplitude integration for any Python application using the Python SDK
+description: >-
+  Amplitude integration for any Python application using the amplitude-analytics
+  package
 metadata:
   author: Amplitude
   version: dev
@@ -36,18 +38,11 @@ The example project shows the target implementation pattern. Consult the documen
 - **Environment variables**: Always use environment variables for Amplitude keys. Never hardcode them.
 - **Minimal changes**: Add Amplitude code alongside existing integrations. Don't replace or restructure existing code.
 - **Match the example**: Your implementation should follow the example project's patterns as closely as possible.
-
-## Framework guidelines
-
-- Remember that source code is available in the venv/site-packages directory
-- amplitude-analytics is the Python SDK package name
-- Install dependencies with `pip install amplitude-analytics` or `pip install -r requirements.txt` and do NOT use unquoted version specifiers like `>=` directly in shell commands
-- Always initialize with Amplitude(api_key) and configure via Config() — do NOT use module-level config
-- In CLIs and scripts: MUST call client.shutdown() before exit or all events are lost
-- NEVER send PII in track() event properties — no emails, full names, phone numbers, physical addresses, IP addresses, or user-generated content
-- PII belongs in identify() user properties, NOT in track() event properties. Safe event properties are metadata like message_length, form_type, boolean flags.
-- Register client.shutdown with atexit.register() to ensure all events are flushed on exit
+- **Unified SDK**: For new browser/frontend projects, use `@amplitude/unified` as the default SDK — it bundles Analytics, Session Replay, Experiment, and Guides & Surveys in a single package. Initialize with `initAll()`. Only use `@amplitude/analytics-browser` if the project already has it installed.
+- **Event naming**: Event names MUST use Title Case with spaces following the [Noun] + [Past-Tense Verb] pattern (e.g., "Button Clicked", "Sign Up Completed", "Cart Viewed"). Do NOT use snake_case, camelCase, or SCREAMING_SNAKE. Property names should use snake_case (e.g., button_text, page_url).
+- **No PII in events**: Never send PII (emails, full names, phone numbers, physical addresses, IP addresses) in `track()` event properties. PII belongs in `identify()` user properties only.
+- **Autocapture**: Enable autocapture in the init config to automatically capture sessions, page views, form interactions, and file downloads. Use the `autocapture` config option (not the deprecated `defaultTracking`).
 
 ## Identifying users
 
-Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.
+Identify users during login and signup events. Refer to the example code and documentation for the correct identify pattern for this framework. Call `amplitude.setUserId(userId)` to associate events with a known user, and use `amplitude.identify()` with an `Identify` object to set user properties. Call `amplitude.reset()` on logout to unlink future events from the current user. If both frontend and backend code exist, pass a consistent user/device ID via custom request headers to maintain event correlation.
