@@ -66,6 +66,10 @@ function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
   return {};
 }
 
+// Closure-scoped state shared between getVersion and getVersionBucket so that
+// the analytics bucket reflects which package the version actually came from.
+let lastDetectedPackagePrefix: string | undefined;
+
 export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   metadata: {
     name: 'React Router',
@@ -110,13 +114,34 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     getVersion: (packageJson: unknown) => {
       const pkg = packageJson as PackageDotJson;
       // Priority matches gatherContext: TanStack Start > TanStack Router > react-router
-      return (
-        getPackageVersion('@tanstack/react-start', pkg) ??
-        getPackageVersion('@tanstack/react-router', pkg) ??
-        getPackageVersion('react-router', pkg)
+      const tanstackStartVersion = getPackageVersion(
+        '@tanstack/react-start',
+        pkg,
       );
+      if (tanstackStartVersion) {
+        lastDetectedPackagePrefix = 'tanstack-start';
+        return tanstackStartVersion;
+      }
+
+      const tanstackRouterVersion = getPackageVersion(
+        '@tanstack/react-router',
+        pkg,
+      );
+      if (tanstackRouterVersion) {
+        lastDetectedPackagePrefix = 'tanstack-router';
+        return tanstackRouterVersion;
+      }
+
+      lastDetectedPackagePrefix = undefined;
+      return getPackageVersion('react-router', pkg);
     },
-    getVersionBucket: getReactRouterVersionBucket,
+    getVersionBucket: (version: string) => {
+      const bucket = getReactRouterVersionBucket(version);
+      if (lastDetectedPackagePrefix) {
+        return `${lastDetectedPackagePrefix}/${bucket}`;
+      }
+      return bucket;
+    },
     minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
     getInstalledVersion: async (options: WizardOptions) => {
       const packageJson = await tryGetPackageJson(options);
