@@ -32,7 +32,6 @@ Before(function () {
   session.setupConfirmed = true;
   session.mcpComplete = true;
   session.dataIngestionConfirmed = true;
-  session.checklistComplete = true;
   session.slackComplete = true;
 });
 
@@ -147,3 +146,50 @@ Then('I should see a cancellation message', function () {
   );
   assert.ok(session.outroData?.message, 'Expected outroData.message to be set');
 });
+
+Given('the agent created a dashboard at {string}', function (url: string) {
+  session.checklistDashboardUrl = url;
+});
+
+Given('no dashboard was created by the agent', function () {
+  session.checklistDashboardUrl = null;
+});
+
+Then('I should see the dashboard URL {string}', function (url: string) {
+  assert.strictEqual(
+    session.checklistDashboardUrl,
+    url,
+    `Expected checklistDashboardUrl to be ${url}`,
+  );
+});
+
+Then(
+  'the {string} action should open the dashboard URL',
+  function (label: string) {
+    assert.strictEqual(
+      label,
+      'Open your analytics dashboard',
+      'Expected label to be "Open your analytics dashboard"',
+    );
+    assert.ok(
+      session.checklistDashboardUrl,
+      'Expected checklistDashboardUrl to be set when this action is shown',
+    );
+  },
+);
+
+Then(
+  'the {string} action should open the Amplitude overview',
+  function (label: string) {
+    assert.strictEqual(
+      label,
+      'Open Amplitude',
+      'Expected label to be "Open Amplitude"',
+    );
+    assert.strictEqual(
+      session.checklistDashboardUrl,
+      null,
+      'Expected checklistDashboardUrl to be null when falling back to overview',
+    );
+  },
+);

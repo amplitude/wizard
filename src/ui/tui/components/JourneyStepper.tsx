@@ -20,7 +20,6 @@ const WIZARD_STEPS: Array<{ screen: Screen; label: string }> = [
   { screen: Screen.Auth, label: 'Auth' },
   { screen: Screen.Run, label: 'Setup' },
   { screen: Screen.DataIngestionCheck, label: 'Verify' },
-  { screen: Screen.Checklist, label: 'Explore' },
   { screen: Screen.Outro, label: 'Done' },
 ];
 
@@ -30,8 +29,7 @@ const STEP_SCREENS: Record<string, Screen[]> = {
   Auth: [Screen.RegionSelect, Screen.Auth, Screen.DataSetup],
   Setup: [Screen.ActivationOptions, Screen.Setup, Screen.Run, Screen.Mcp],
   Verify: [Screen.DataIngestionCheck],
-  Explore: [Screen.Checklist, Screen.Slack],
-  Done: [Screen.Outro],
+  Done: [Screen.Outro, Screen.Slack],
 };
 
 type StepState = 'completed' | 'active' | 'future';

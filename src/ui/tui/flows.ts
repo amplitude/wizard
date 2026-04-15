@@ -26,7 +26,6 @@ export enum Screen {
   Run = 'run',
   Mcp = 'mcp',
   DataIngestionCheck = 'data-ingestion-check',
-  Checklist = 'checklist',
   Slack = 'slack',
   Outro = 'outro',
   McpAdd = 'mcp-add',
@@ -129,14 +128,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         s.runPhase !== RunPhase.Error && s.activationLevel !== 'full',
       isComplete: (s) => s.dataIngestionConfirmed,
     },
-    // 6. Post-setup checklist — first chart + first dashboard.
-    //    Skipped on error.
-    {
-      screen: Screen.Checklist,
-      show: (s) => s.runPhase !== RunPhase.Error,
-      isComplete: (s) => s.checklistComplete,
-    },
-    // 7. Slack integration setup (skipped on error)
+    // 6. Slack integration setup (skipped on error)
     {
       screen: Screen.Slack,
       show: (s) => s.runPhase !== RunPhase.Error,

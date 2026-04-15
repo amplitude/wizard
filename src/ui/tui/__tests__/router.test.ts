@@ -95,23 +95,12 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.DataIngestionCheck);
     });
 
-    it('advances from DataIngestionCheck to Checklist when dataIngestionConfirmed', () => {
+    it('advances from DataIngestionCheck to Slack when dataIngestionConfirmed', () => {
       const router = new WizardRouter();
       const session = {
         ...sessionPostRun(),
         mcpComplete: true,
         dataIngestionConfirmed: true,
-      };
-      expect(router.resolve(session)).toBe(Screen.Checklist);
-    });
-
-    it('advances from Checklist to Slack when checklistComplete', () => {
-      const router = new WizardRouter();
-      const session = {
-        ...sessionPostRun(),
-        mcpComplete: true,
-        dataIngestionConfirmed: true,
-        checklistComplete: true,
       };
       expect(router.resolve(session)).toBe(Screen.Slack);
     });
@@ -122,7 +111,6 @@ describe('WizardRouter', () => {
         ...sessionPostRun(),
         mcpComplete: true,
         dataIngestionConfirmed: true,
-        checklistComplete: true,
         slackComplete: true,
       };
       expect(router.resolve(session)).toBe(Screen.Outro);
@@ -134,7 +122,6 @@ describe('WizardRouter', () => {
         ...sessionPostRun(),
         mcpComplete: true,
         dataIngestionConfirmed: true,
-        checklistComplete: true,
         slackComplete: true,
       };
       expect(router.resolve(session)).toBe(Screen.Outro);
@@ -261,18 +248,6 @@ describe('WizardRouter', () => {
       };
       // DataIngestionCheck show: activationLevel !== 'full' -> false -> skipped
       expect(router.resolve(session)).not.toBe(Screen.DataIngestionCheck);
-    });
-
-    it('Checklist skips on error', () => {
-      const router = new WizardRouter();
-      const session = {
-        ...sessionPostRun(),
-        runPhase: RunPhase.Error,
-        mcpComplete: true,
-        dataIngestionConfirmed: true,
-      };
-      // Checklist show: runPhase !== Error -> false -> skipped
-      expect(router.resolve(session)).not.toBe(Screen.Checklist);
     });
 
     it('Slack skips on error', () => {
@@ -629,7 +604,7 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Mcp);
     });
 
-    it('full activation with mcp complete skips DataIngestionCheck to Checklist', () => {
+    it('full activation with mcp complete skips DataIngestionCheck to Slack', () => {
       const router = new WizardRouter();
       const session = {
         ...sessionAtRun(),
@@ -637,7 +612,7 @@ describe('WizardRouter', () => {
         mcpComplete: true,
       };
       // DataIngestionCheck show: activationLevel !== 'full' -> false -> skipped
-      expect(router.resolve(session)).toBe(Screen.Checklist);
+      expect(router.resolve(session)).toBe(Screen.Slack);
     });
   });
 });
