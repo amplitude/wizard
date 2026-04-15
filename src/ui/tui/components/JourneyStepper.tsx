@@ -29,7 +29,7 @@ const STEP_SCREENS: Record<string, Screen[]> = {
   Auth: [Screen.RegionSelect, Screen.Auth, Screen.DataSetup],
   Setup: [Screen.ActivationOptions, Screen.Setup, Screen.Run, Screen.Mcp],
   Verify: [Screen.DataIngestionCheck],
-  Done: [Screen.Outro, Screen.Slack],
+  Done: [Screen.Slack, Screen.Outro],
 };
 
 type StepState = 'completed' | 'active' | 'future';
@@ -92,15 +92,15 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
           step.state === 'completed'
             ? Icons.checkmark
             : step.state === 'active'
-            ? Icons.bullet
-            : Icons.bulletOpen;
+              ? Icons.bullet
+              : Icons.bulletOpen;
 
         const color =
           step.state === 'completed'
             ? Brand.lilac
             : step.state === 'active'
-            ? Colors.accent
-            : Colors.muted;
+              ? Colors.accent
+              : Colors.muted;
 
         return (
           <Box key={step.label}>
