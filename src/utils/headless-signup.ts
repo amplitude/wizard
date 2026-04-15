@@ -111,16 +111,10 @@ export async function performHeadlessSignup(options: {
     zone,
   });
 
-  const spaceIdx = fullName.indexOf(' ');
-  const firstName =
-    spaceIdx > 0 ? fullName.slice(0, spaceIdx).trim() : fullName;
-  const lastName = spaceIdx > 0 ? fullName.slice(spaceIdx + 1).trim() : '';
-
   try {
     const response = await axios.post(url, {
       email,
-      first_name: firstName,
-      ...(lastName && { last_name: lastName }),
+      full_name: fullName,
       scopes: ['openid', 'offline'],
       state,
       client_id: oAuthClientId,

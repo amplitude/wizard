@@ -67,8 +67,7 @@ describe('performHeadlessSignup', () => {
       expect.any(String),
       expect.objectContaining({
         email: 'test@example.com',
-        first_name: 'Test',
-        last_name: 'User',
+        full_name: 'Test User',
         scopes: ['openid', 'offline'],
         state: expect.any(String),
         client_id: expect.any(String),
