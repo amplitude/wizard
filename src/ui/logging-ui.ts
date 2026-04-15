@@ -210,4 +210,8 @@ export class LoggingUI implements WizardUI {
   setEventIngestionDetected(_eventNames: string[]): void {
     // No-op in CI/logging mode
   }
+
+  setDashboardUrl(_url: string): void {
+    // No-op in CI/logging mode
+  }
 }

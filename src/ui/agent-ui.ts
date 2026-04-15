@@ -261,6 +261,12 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  setDashboardUrl(url: string): void {
+    emit('result', `dashboard_created: ${url}`, {
+      data: { event: 'dashboard_created', dashboardUrl: url },
+    });
+  }
+
   /**
    * Prompt the agent caller to select an environment from pendingOrgs.
    *

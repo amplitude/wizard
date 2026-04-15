@@ -129,4 +129,12 @@ export interface WizardUI {
   // ── Data ingestion confirmation ────────────────────────────────
   /** Emitted by agent mode when MCP polling detects events flowing into the project. */
   setEventIngestionDetected(eventNames: string[]): void;
+
+  // ── Agent-created dashboard ────────────────────────────────────
+  /**
+   * Called when the agent writes .amplitude-dashboard.json with the URL of
+   * the dashboard it created during the conclude phase. Surfaces the link in
+   * ChecklistScreen so users can open the dashboard immediately.
+   */
+  setDashboardUrl(url: string): void;
 }

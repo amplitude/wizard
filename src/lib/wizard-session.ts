@@ -328,17 +328,13 @@ export interface WizardSession {
    */
   dataIngestionConfirmed: boolean;
 
-  /** Checklist item: whether the user's first chart has been created. */
-  checklistChartComplete: boolean;
-
-  /** Checklist item: whether the user's first dashboard has been created. */
-  checklistDashboardComplete: boolean;
-
   /**
-   * True once the user has dismissed the checklist (either all items done,
-   * or they chose to continue without completing everything).
+   * URL of the dashboard created by the agent during the conclude phase.
+   * Set when the agent writes .amplitude-dashboard.json and the watcher
+   * picks it up. Shown in OutroScreen as a direct link.
+   * Null until the agent creates a dashboard.
    */
-  checklistComplete: boolean;
+  checklistDashboardUrl: string | null;
 
   /** Email address of the authenticated user (from ~/.ampli.json stored profile). */
   userEmail: string | null;
@@ -442,9 +438,7 @@ export function buildSession(args: {
     amplitudePreDetectedChoicePending: false,
 
     dataIngestionConfirmed: false,
-    checklistChartComplete: false,
-    checklistDashboardComplete: false,
-    checklistComplete: false,
+    checklistDashboardUrl: null,
 
     userEmail: null,
     _restoredFromCheckpoint: false,

@@ -17,7 +17,6 @@ import { ActivationOptionsScreen } from './screens/ActivationOptionsScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
 import { DataIngestionCheckScreen } from './screens/DataIngestionCheckScreen.js';
-import { ChecklistScreen } from './screens/ChecklistScreen.js';
 import { SlackScreen } from './screens/SlackScreen.js';
 import { LogoutScreen } from './screens/LogoutScreen.js';
 import { LoginScreen } from './screens/LoginScreen.js';
@@ -88,7 +87,6 @@ export function createScreens(
     [Screen.Run]: <RunScreen store={store} />,
     [Screen.Mcp]: <McpScreen store={store} installer={services.mcpInstaller} />,
     [Screen.DataIngestionCheck]: <DataIngestionCheckScreen store={store} />,
-    [Screen.Checklist]: <ChecklistScreen store={store} />,
     [Screen.Outro]: <OutroScreen store={store} />,
 
     // Standalone MCP flows

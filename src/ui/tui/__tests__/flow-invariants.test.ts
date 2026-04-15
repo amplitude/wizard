@@ -160,19 +160,6 @@ class SetDataIngestionConfirmedCommand implements fc.Command<Model, Real> {
   }
 }
 
-class SetChecklistCompleteCommand implements fc.Command<Model, Real> {
-  toString() {
-    return 'SetChecklistComplete';
-  }
-  check() {
-    return true;
-  }
-  run(model: Model, real: Real) {
-    model.mutations.push('checklistComplete=true');
-    real.session.checklistComplete = true;
-  }
-}
-
 class SetSlackCompleteCommand implements fc.Command<Model, Real> {
   toString() {
     return 'SetSlackComplete';
@@ -219,12 +206,11 @@ class AssertInvariantsCommand implements fc.Command<Model, Real> {
     // 2. resolve() always returns a valid Screen or Overlay value
     expect(ALL_SCREEN_NAMES.has(resolved as Screen | Overlay)).toBe(true);
 
-    // 3. If runPhase === Error, never resolve to Mcp, DataIngestionCheck, Checklist, or Slack
+    // 3. If runPhase === Error, never resolve to Mcp, DataIngestionCheck, or Slack
     if (session.runPhase === RunPhase.Error) {
       const errorForbidden = new Set([
         Screen.Mcp,
         Screen.DataIngestionCheck,
-        Screen.Checklist,
         Screen.Slack,
       ]);
       expect(
@@ -304,7 +290,6 @@ const allCommands = [
     .map((p) => new SetRunPhaseCommand(p)),
   fc.constant(new SetMcpCompleteCommand()),
   fc.constant(new SetDataIngestionConfirmedCommand()),
-  fc.constant(new SetChecklistCompleteCommand()),
   fc.constant(new SetSlackCompleteCommand()),
   fc.constant(new CancelCommand()),
   fc.constant(new AssertInvariantsCommand()),
@@ -415,21 +400,6 @@ describe('WizardRouter happy path transitions', () => {
         s.mcpComplete = true;
         s.dataIngestionConfirmed = true;
       },
-      expected: Screen.Checklist,
-    },
-    {
-      state: 'after checklist complete',
-      mutate: (s: WizardSession) => {
-        s.introConcluded = true;
-        s.region = 'us';
-        s.credentials = mockCredentials();
-        s.projectHasData = false;
-        s.activationLevel = 'none';
-        s.runPhase = RunPhase.Completed;
-        s.mcpComplete = true;
-        s.dataIngestionConfirmed = true;
-        s.checklistComplete = true;
-      },
       expected: Screen.Slack,
     },
     {
@@ -487,7 +457,7 @@ describe('WizardRouter complete happy path', () => {
     session.projectHasData = false;
     session.activationLevel = 'none';
     session.runPhase = RunPhase.Error;
-    // MCP, DataIngestionCheck, Checklist, Slack are all skipped on error
+    // MCP, DataIngestionCheck, Slack are all skipped on error
 
     expect(router.resolve(session)).toBe(Screen.Outro);
   });
@@ -603,58 +573,55 @@ describe('WizardRouter error phase routing', () => {
     // Run shows (activationLevel !== full) and is complete (phase === Error)
     // Mcp is hidden (runPhase === Error)
     // DataIngestionCheck is hidden (runPhase === Error)
-    // Checklist is hidden (runPhase === Error)
     // Slack is hidden (runPhase === Error)
     // So we land on Outro
     expect(router.resolve(session)).toBe(Screen.Outro);
   });
 
-  it.each([
-    Screen.Mcp,
-    Screen.DataIngestionCheck,
-    Screen.Checklist,
-    Screen.Slack,
-  ])('never resolves to %s when runPhase is Error', (forbiddenScreen) => {
-    const session = buildSession({});
-    const router = new WizardRouter(Flow.Wizard);
+  it.each([Screen.Mcp, Screen.DataIngestionCheck, Screen.Slack])(
+    'never resolves to %s when runPhase is Error',
+    (forbiddenScreen) => {
+      const session = buildSession({});
+      const router = new WizardRouter(Flow.Wizard);
 
-    // Try many combinations — none should yield the forbidden screen
-    const phases = [RunPhase.Error];
-    const booleans = [true, false];
-    const activations = ['none', 'partial', 'full'] as const;
+      // Try many combinations — none should yield the forbidden screen
+      const phases = [RunPhase.Error];
+      const booleans = [true, false];
+      const activations = ['none', 'partial', 'full'] as const;
 
-    for (const phase of phases) {
-      for (const introConcluded of booleans) {
-        for (const hasRegion of booleans) {
-          for (const hasCreds of booleans) {
-            for (const hasData of [true, false, null]) {
-              for (const activation of activations) {
-                for (const mcpDone of booleans) {
-                  session.runPhase = phase;
-                  session.introConcluded = introConcluded;
-                  session.region = hasRegion ? 'us' : null;
-                  session.regionForced = false;
-                  session.credentials = hasCreds ? mockCredentials() : null;
-                  session.projectHasData = hasData;
-                  session.activationLevel =
-                    hasData === null ? null : activation;
-                  session.mcpComplete = mcpDone;
-                  session.dataIngestionConfirmed = false;
-                  session.checklistComplete = false;
-                  session.slackComplete = false;
-                  session.outroData = null;
+      for (const phase of phases) {
+        for (const introConcluded of booleans) {
+          for (const hasRegion of booleans) {
+            for (const hasCreds of booleans) {
+              for (const hasData of [true, false, null]) {
+                for (const activation of activations) {
+                  for (const mcpDone of booleans) {
+                    session.runPhase = phase;
+                    session.introConcluded = introConcluded;
+                    session.region = hasRegion ? 'us' : null;
+                    session.regionForced = false;
+                    session.credentials = hasCreds ? mockCredentials() : null;
+                    session.projectHasData = hasData;
+                    session.activationLevel =
+                      hasData === null ? null : activation;
+                    session.mcpComplete = mcpDone;
+                    session.dataIngestionConfirmed = false;
+                    session.checklistComplete = false;
+                    session.slackComplete = false;
+                    session.outroData = null;
 
-                  const result = router.resolve(session);
-                  expect(
-                    result,
-                    `Error phase resolved to ${forbiddenScreen} with introConcluded=${introConcluded}, region=${hasRegion}, creds=${hasCreds}, data=${hasData}, activation=${activation}, mcp=${mcpDone}`,
-                  ).not.toBe(forbiddenScreen);
+                    const result = router.resolve(session);
+                    expect(
+                      result,
+                      `Error phase resolved to ${forbiddenScreen} with introConcluded=${introConcluded}, region=${hasRegion}, creds=${hasCreds}, data=${hasData}, activation=${activation}, mcp=${mcpDone}`,
+                    ).not.toBe(forbiddenScreen);
+                  }
                 }
               }
             }
           }
         }
       }
-    }
-  });
+    },
+  );
 });

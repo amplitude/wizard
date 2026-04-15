@@ -509,23 +509,8 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setChecklistChartComplete(): void {
-    this.$session.setKey('checklistChartComplete', true);
-    this.emitChange();
-  }
-
-  setChecklistDashboardComplete(): void {
-    this.$session.setKey('checklistDashboardComplete', true);
-    this.emitChange();
-  }
-
-  setChecklistComplete(): void {
-    this.$session.setKey('checklistComplete', true);
-    analytics.wizardCapture('Checklist Completed', {
-      chart_complete: this.session.checklistChartComplete,
-      dashboard_complete: this.session.checklistDashboardComplete,
-      ...sessionPropertiesCompact(this.session),
-    });
+  setChecklistDashboardUrl(url: string): void {
+    this.$session.setKey('checklistDashboardUrl', url);
     this.emitChange();
   }
 

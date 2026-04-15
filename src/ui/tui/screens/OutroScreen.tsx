@@ -121,6 +121,18 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Box>
           )}
 
+          {/* Dashboard link — shown when the agent created one */}
+          {store.session.checklistDashboardUrl && (
+            <Box marginTop={1} flexDirection="column">
+              <Text color={Colors.success} bold>
+                {Icons.checkmark} Dashboard ready:
+              </Text>
+              <Text color={Colors.muted}>
+                {store.session.checklistDashboardUrl}
+              </Text>
+            </Box>
+          )}
+
           {/* Single-line review note */}
           <Box marginTop={1}>
             <Text color={Colors.muted}>
@@ -190,7 +202,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           <PickerMenu
             options={[
               { label: 'View setup report', value: 'report' },
-              { label: 'Open Amplitude dashboard', value: 'dashboard' },
+              {
+                label: store.session.checklistDashboardUrl
+                  ? 'Open your analytics dashboard'
+                  : 'Open Amplitude',
+                value: 'dashboard',
+                hint: store.session.checklistDashboardUrl
+                  ? undefined
+                  : 'amplitude.com',
+              },
               { label: 'Exit', value: 'exit' },
             ]}
             onSelect={(value) => {
@@ -203,7 +223,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                 setShowReport(true);
               } else if (choice === 'dashboard') {
                 const zone = (store.session.region ?? 'us') as AmplitudeZone;
-                const url = OUTBOUND_URLS.overview[zone];
+                const url =
+                  store.session.checklistDashboardUrl ??
+                  OUTBOUND_URLS.overview[zone];
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });
