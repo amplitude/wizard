@@ -210,7 +210,6 @@ jobs:
       github.event_name == 'pull_request' &&
       (github.event.action == 'opened' || github.event.action == 'synchronize')
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -267,24 +266,30 @@ jobs:
             }
 
             // Dispatch to wizard-workbench — mirrors handle-command payload
-            // but uses app='all' as the default for an auto-run.
-            await github.rest.repos.createDispatchEvent({
-              owner: 'Amplitude',
-              repo: 'wizard-workbench',
-              event_type: 'wizard-ci-trigger',
-              client_payload: {
-                app: 'all',
-                source: 'wizard-pr-auto',
-                source_repo: 'wizard',
-                source_pr_number: pr.number,
-                source_pr_url: pr.html_url,
-                wizard_ref: pr.head.ref,
-                notify_slack: 'false',
-                notify_pr: 'true'
-              }
-            });
-
-            console.log(`Auto-triggered wizard-ci for PR #${pr.number} (app: all)`);
+            // but uses app='all' as the default for an auto-run. Wrapped in
+            // try/catch so token permission issues don't block the PR — the
+            // comment-based /wizard-ci flow still works as a fallback.
+            try {
+              await github.rest.repos.createDispatchEvent({
+                owner: 'Amplitude',
+                repo: 'wizard-workbench',
+                event_type: 'wizard-ci-trigger',
+                client_payload: {
+                  app: 'all',
+                  source: 'wizard-pr-auto',
+                  source_repo: 'wizard',
+                  source_pr_number: pr.number,
+                  source_pr_url: pr.html_url,
+                  wizard_ref: pr.head.ref,
+                  notify_slack: 'false',
+                  notify_pr: 'true'
+                }
+              });
+              console.log(`Auto-triggered wizard-ci for PR #${pr.number} (app: all)`);
+            } catch (err) {
+              console.warn(`Auto-trigger failed (falling back to /wizard-ci comment flow): ${err.message}`);
+              return;
+            }
 
             // Only post the explanatory comment on 'opened' — on 'synchronize'
             // the PR already has a post-welcome comment and we don't want to
