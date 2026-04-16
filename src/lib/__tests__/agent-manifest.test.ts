@@ -52,6 +52,18 @@ describe('getAgentManifest', () => {
     expect(codes.get('USER_CANCELLED')).toBe(130);
   });
 
+  it('documents NESTED_AGENT=11 for nested Claude Code refusal', () => {
+    const codes = new Map(manifest.exitCodes.map((c) => [c.name, c.code]));
+    expect(codes.get('NESTED_AGENT')).toBe(11);
+    const entry = manifest.exitCodes.find((c) => c.name === 'NESTED_AGENT');
+    expect(entry?.describe).toMatch(/AMPLITUDE_WIZARD_ALLOW_NESTED/);
+  });
+
+  it('documents AMPLITUDE_WIZARD_ALLOW_NESTED bypass env var', () => {
+    const names = manifest.env.map((e) => e.name);
+    expect(names).toContain('AMPLITUDE_WIZARD_ALLOW_NESTED');
+  });
+
   it('includes the new agent-native commands', () => {
     const names = manifest.commands.map((c) => c.command);
     expect(names).toContain('detect');

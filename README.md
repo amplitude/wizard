@@ -166,6 +166,34 @@ surface the instruction to the human, trigger the login, then re-run:
 Reason values: `no_stored_credentials`, `token_expired`, `refresh_failed`,
 `env_selection_failed`.
 
+**Nested-invocation signal.** Running the wizard from inside another Claude
+Code / Claude Agent SDK session is refused up front: the wizard spawns its
+own Claude Agent SDK subprocess for the setup agent, and nesting makes that
+inner run fail with an opaque 400. The wizard exits with code `11`
+(`NESTED_AGENT`) and emits:
+
+```json
+{
+  "v": 1,
+  "type": "lifecycle",
+  "level": "error",
+  "message": "Refusing to run the Amplitude wizard from inside another Claude Code / Claude Agent SDK session...",
+  "data": {
+    "event": "nested_agent",
+    "signal": "claude_code_cli",
+    "detectedEnvVar": "CLAUDECODE",
+    "bypassEnv": "AMPLITUDE_WIZARD_ALLOW_NESTED"
+  }
+}
+```
+
+Detection looks for `CLAUDECODE=1` (Claude Code CLI) or `CLAUDE_CODE_ENTRYPOINT`
+(Claude Agent SDK). Verbs that don't spawn the inner SDK (`login`, `logout`,
+`whoami`, `auth ...`, `detect`, `status`, `manifest`, `mcp ...`, `help`) are
+exempt and remain safe to invoke from inside Claude Code. Set
+`AMPLITUDE_WIZARD_ALLOW_NESTED=1` to bypass the check (not recommended — the
+inner run will still 400).
+
 ### MCP server
 
 `npx @amplitude/wizard mcp serve` exposes the wizard's read-only operations as

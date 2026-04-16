@@ -97,3 +97,65 @@ describe('AgentUI.emitAuthRequired', () => {
     });
   });
 });
+
+describe('AgentUI.emitNestedAgent', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('emits a lifecycle event with event: "nested_agent"', () => {
+    const ui = new AgentUI();
+    ui.emitNestedAgent({
+      signal: 'claude_code_cli',
+      envVar: 'CLAUDECODE',
+      instruction: 'Refusing to run nested.',
+      bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+    });
+
+    const event = lastEvent();
+    expect(event.v).toBe(1);
+    expect(event.type).toBe('lifecycle');
+    expect(event.level).toBe('error');
+    expect(event.message).toBe('Refusing to run nested.');
+    expect(event.data).toMatchObject({
+      event: 'nested_agent',
+      signal: 'claude_code_cli',
+      detectedEnvVar: 'CLAUDECODE',
+      bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+    });
+  });
+
+  it('distinguishes the two signal sources', () => {
+    const ui = new AgentUI();
+    ui.emitNestedAgent({
+      signal: 'claude_agent_sdk',
+      envVar: 'CLAUDE_CODE_ENTRYPOINT',
+      instruction: 'Refusing to run nested.',
+      bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+    });
+
+    const event = lastEvent();
+    expect(event.data).toMatchObject({
+      signal: 'claude_agent_sdk',
+      detectedEnvVar: 'CLAUDE_CODE_ENTRYPOINT',
+    });
+  });
+});
