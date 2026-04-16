@@ -82,8 +82,6 @@ export type HeadlessSignupResult =
   | { type: 'needs_information'; schema: Record<string, unknown> }
   | { type: 'error'; code: string; message: string };
 
-export type { OAuthTokenResponse };
-
 // ── Main entry point ────────────────────────────────────────────────
 
 /**
