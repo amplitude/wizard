@@ -143,6 +143,29 @@ version tag and a typed envelope. See
 [docs/dual-mode-architecture.md](./docs/dual-mode-architecture.md) for the
 full schema and deprecation policy.
 
+**Auth-required signal.** When an agent-mode run starts without valid
+credentials, the wizard emits a structured `lifecycle` event and exits with
+code `3` (`AUTH_REQUIRED`) instead of a plain error log. Orchestrators can
+surface the instruction to the human, trigger the login, then re-run:
+
+```json
+{
+  "v": 1,
+  "type": "lifecycle",
+  "level": "error",
+  "message": "Not signed in to Amplitude. Ask the user to run `npx @amplitude/wizard login`...",
+  "data": {
+    "event": "auth_required",
+    "reason": "no_stored_credentials",
+    "loginCommand": ["npx", "@amplitude/wizard", "login"],
+    "resumeCommand": ["npx", "@amplitude/wizard", "--agent"]
+  }
+}
+```
+
+Reason values: `no_stored_credentials`, `token_expired`, `refresh_failed`,
+`env_selection_failed`.
+
 ### MCP server
 
 `npx @amplitude/wizard mcp serve` exposes the wizard's read-only operations as

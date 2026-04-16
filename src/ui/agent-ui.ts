@@ -90,6 +90,35 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  /**
+   * Emit a structured auth_required lifecycle event when the wizard is invoked
+   * in --agent mode without valid credentials. Agent orchestrators (Claude
+   * Code, Cursor, etc.) can parse the payload, surface the login URL and
+   * resume command to the human, and restart the wizard once auth completes.
+   *
+   * Always paired with process.exit(ExitCode.AUTH_REQUIRED) by the caller.
+   */
+  emitAuthRequired(data: {
+    reason:
+      | 'no_stored_credentials'
+      | 'token_expired'
+      | 'refresh_failed'
+      | 'env_selection_failed';
+    instruction: string;
+    loginCommand: string[];
+    resumeCommand?: string[];
+  }): void {
+    emit('lifecycle', data.instruction, {
+      level: 'error',
+      data: {
+        event: 'auth_required',
+        reason: data.reason,
+        loginCommand: data.loginCommand,
+        resumeCommand: data.resumeCommand,
+      },
+    });
+  }
+
   // ── Logging ─────────────────────────────────────────────────────────
 
   log = {

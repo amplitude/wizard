@@ -211,6 +211,13 @@ const resolveNonInteractiveCredentials = async (
       );
       const resolved = await resolveEnvironmentSelection(session, selection);
       if (!resolved) {
+        agentUI.emitAuthRequired({
+          reason: 'env_selection_failed',
+          instruction:
+            'Could not resolve an Amplitude environment with an API key. ' +
+            `Pass --env <name> (and --org <name> if needed) when re-running ${CLI_INVOCATION}.`,
+          loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
+        });
         process.exit(ExitCode.AUTH_REQUIRED);
       }
     }
@@ -218,11 +225,18 @@ const resolveNonInteractiveCredentials = async (
 
   // If we still don't have credentials, auth is required
   if (!session.credentials) {
-    if (mode === 'agent') {
-      getUI().log.error(
-        'Could not resolve credentials. ' +
-          `Please log in first by running: ${CLI_INVOCATION} login`,
-      );
+    if (mode === 'agent' && agentUI) {
+      const loginCommand = [...CLI_INVOCATION.split(' '), 'login'];
+      const resumeCommand = [...CLI_INVOCATION.split(' '), '--agent'];
+      agentUI.emitAuthRequired({
+        reason: 'no_stored_credentials',
+        instruction:
+          'Not signed in to Amplitude. Ask the user to run ' +
+          `\`${loginCommand.join(' ')}\` in a terminal to authenticate, ` +
+          `then re-run \`${resumeCommand.join(' ')}\` to resume.`,
+        loginCommand,
+        resumeCommand,
+      });
       process.exit(ExitCode.AUTH_REQUIRED);
     }
     // CI mode falls through — runWizard will handle missing credentials
