@@ -40,6 +40,7 @@ import {
 
 type SDKQueryOptions = {
   model?: string;
+  fallbackModel?: string;
   cwd?: string;
   permissionMode?: string;
   mcpServers?: McpServersConfig;
@@ -52,6 +53,7 @@ type SDKQueryOptions = {
   stderr?: (data: string) => void;
   hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
   abortSignal?: AbortSignal;
+  maxTurns?: number;
 };
 
 type SDKQueryFn = (params: {
@@ -693,6 +695,11 @@ export async function initializeAgent(
         );
       }
 
+      // Capture the pre-existing beta header state before we override it below,
+      // so the diagnostic log reflects what the user's environment had configured.
+      const betaHeadersEnabledInEnv =
+        !process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS;
+
       process.env.ANTHROPIC_BASE_URL = gatewayUrl;
       process.env.ANTHROPIC_AUTH_TOKEN = config.amplitudeBearerToken;
       // Use CLAUDE_CODE_OAUTH_TOKEN to override any stored /login credentials
@@ -700,6 +707,10 @@ export async function initializeAgent(
       // Disable experimental betas (like input_examples) that the LLM gateway doesn't support
       process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = 'true';
       logToFile('Configured LLM gateway:', gatewayUrl);
+      logToFile('Gateway config:', {
+        url: gatewayUrl,
+        betaHeadersEnabledInEnv,
+      });
     }
 
     // Configure MCP servers
@@ -1124,8 +1135,11 @@ export async function runAgent(
     const MAX_RETRIES = 3;
     // Cold-start timeout: subprocess spawn + MCP server connections + first LLM response
     const INITIAL_STALL_TIMEOUT_MS = 60_000;
-    // Mid-run timeout: between consecutive messages during active work
-    const STALL_TIMEOUT_MS = 30_000;
+    // Mid-run timeout: between consecutive messages during active work.
+    // Raised from 30s to 120s to accommodate extended thinking (Opus can
+    // think for 10+ min before emitting the first token with the proxy's
+    // 20-min fetch timeout).
+    const STALL_TIMEOUT_MS = 120_000;
 
     // Tracks whether an authentication failure was detected in the current attempt.
     // Passed to createStopHook so it can skip reflection when auth is broken.
@@ -1133,10 +1147,23 @@ export async function runAgent(
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
+        // Exponential backoff: 2s, 4s, 8s
+        const backoffMs = Math.min(2_000 * Math.pow(2, attempt - 1), 8_000);
         logToFile(
-          `Agent stall retry: attempt ${attempt + 1} of ${MAX_RETRIES + 1}`,
+          `Agent stall retry: attempt ${attempt + 1} of ${
+            MAX_RETRIES + 1
+          }, backing off ${backoffMs}ms`,
         );
-        analytics.wizardCapture('Agent Stall Retry', { attempt });
+        analytics.wizardCapture('Agent Stall Retry', {
+          attempt,
+          backoff_ms: backoffMs,
+        });
+        getUI().pushStatus(
+          `Retrying connection (attempt ${attempt + 1} of ${
+            MAX_RETRIES + 1
+          })...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
         // Clear per-attempt output so stale error markers don't affect the fresh run
         collectedText.length = 0;
         recentStatuses.length = 0;
@@ -1194,9 +1221,16 @@ export async function runAgent(
           prompt: createPromptStream(),
           options: {
             model: agentConfig.model,
+            // Fallback model if primary is unavailable (e.g. Vertex outage).
+            // Must be capable enough for code generation — haiku is too weak.
+            fallbackModel: agentConfig.useDirectApiKey
+              ? 'claude-sonnet-4-5-20250514'
+              : 'anthropic/claude-sonnet-4-5-20250514',
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
+            // Safety nets: cap runaway tool loops and token spend
+            maxTurns: 200,
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
@@ -1335,21 +1369,31 @@ export async function runAgent(
         // that warrants a retry rather than immediately giving up.
         clearTimeout(staleTimer);
         const partialOutput = collectedText.join('\n');
+        const transientErrorMatchers = [
+          { pattern: 'API Error: 400', label: 'api_400' },
+          { pattern: 'API Error: 408', label: 'api_408' },
+          { pattern: 'API Error: 503', label: 'api_503' },
+          { pattern: 'API Error: 529', label: 'api_529' },
+          { pattern: 'DEADLINE_EXCEEDED', label: 'deadline_exceeded' },
+        ];
+        const matchedTransientError = transientErrorMatchers.find((m) =>
+          partialOutput.includes(m.pattern),
+        );
         const hitTransientApiError =
           !receivedSuccessResult &&
           !authErrorDetected &&
-          partialOutput.includes('API Error: 400') &&
-          attempt < MAX_RETRIES;
+          attempt < MAX_RETRIES &&
+          !!matchedTransientError;
 
-        if (hitTransientApiError) {
+        if (hitTransientApiError && matchedTransientError) {
           logToFile(
-            `Retrying after API 400 error (next attempt: ${attempt + 2} of ${
-              MAX_RETRIES + 1
-            })`,
+            `Retrying after ${matchedTransientError.pattern} (next attempt: ${
+              attempt + 2
+            } of ${MAX_RETRIES + 1})`,
           );
           analytics.wizardCapture('Agent API Error Retry', {
             attempt,
-            error: 'api_400',
+            error: matchedTransientError.label,
           });
           collectedText.length = 0;
           recentStatuses.length = 0;
@@ -1374,8 +1418,8 @@ export async function runAgent(
         }
 
         // Transient SDK/proxy error: malformed conversation history (tool_use
-        // without tool_result) or API 400. These are SDK-level race conditions
-        // that resolve on a fresh retry with a new conversation.
+        // without tool_result), API errors, or Vertex-specific transient failures.
+        // These resolve on a fresh retry with a new conversation.
         const errMsg =
           innerError instanceof Error ? innerError.message : String(innerError);
         const isTransientSdkError =
@@ -1384,6 +1428,10 @@ export async function runAgent(
           (errMsg.includes('tool_use') ||
             errMsg.includes('tool_result') ||
             errMsg.includes('API Error: 400') ||
+            errMsg.includes('API Error: 408') ||
+            errMsg.includes('API Error: 503') ||
+            errMsg.includes('API Error: 529') ||
+            errMsg.includes('DEADLINE_EXCEEDED') ||
             errMsg.includes('invalid_request_error'));
         if (isTransientSdkError) {
           logToFile(

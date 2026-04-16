@@ -452,8 +452,8 @@ describe('runAgent', () => {
         { successMessage: 'Done', errorMessage: 'Failed' },
       );
 
-      // Trigger the initial stall timeout (60s cold-start grace period)
-      await vi.advanceTimersByTimeAsync(60_001);
+      // Trigger the initial stall timeout (60s cold-start grace period) + backoff (2s)
+      await vi.advanceTimersByTimeAsync(63_000);
 
       const result = await runPromise;
 
@@ -494,10 +494,11 @@ describe('runAgent', () => {
       // .catch() handler and doesn't become an unhandled rejection mid-advance.
       const rejectCheck = expect(runPromise).rejects.toThrow('Stall aborted');
 
-      // Single large advance — fires all 4 stall timers (4 × 60s cold-start) in sequence.
+      // Fires all 4 stall timers (1 × 60s cold-start + 3 × 120s mid-run) plus
+      // backoff delays (2s + 4s + 8s = 14s) in sequence.
       // advanceTimersByTimeAsync processes microtasks between each timer firing,
       // so each retry's new timer gets registered before the next fires.
-      await vi.advanceTimersByTimeAsync(250_000);
+      await vi.advanceTimersByTimeAsync(500_000);
 
       await rejectCheck;
       expect(queryCallCount).toBe(4); // MAX_RETRIES=3 → 4 total attempts
