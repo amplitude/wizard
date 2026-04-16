@@ -258,6 +258,8 @@ export class Analytics {
     }
     this.initPromise = this.client.init(apiKey, {
       serverUrl: getAmplitudeNodeServerUrl(),
+      flushQueueSize: 10,
+      flushIntervalMillis: 1000,
     }).promise;
   }
 
