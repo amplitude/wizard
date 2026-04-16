@@ -1,4 +1,4 @@
-import { analytics } from './analytics.js';
+import { analytics, resolveTelemetryApiKey } from './analytics.js';
 
 /**
  * Send a single feedback event to Amplitude via the shared analytics singleton.
@@ -11,6 +11,9 @@ export async function trackWizardFeedback(message: string): Promise<void> {
   const trimmed = message.trim();
   if (!trimmed) {
     throw new Error('Feedback message cannot be empty');
+  }
+  if (!resolveTelemetryApiKey()) {
+    throw new Error('Feedback cannot be sent');
   }
   analytics.wizardCapture('feedback submitted', { message: trimmed });
   await analytics.flush();

@@ -40,6 +40,10 @@ export async function runPrettierStep({
     const prettierInstalled = hasPackageInstalled('prettier', packageJson);
 
     if (!prettierInstalled) {
+      analytics.wizardCapture('Prettier Ran', {
+        integration,
+        prettier_installed: false,
+      });
       return;
     }
 
