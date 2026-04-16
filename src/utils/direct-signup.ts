@@ -4,7 +4,9 @@ import {
   AMPLITUDE_ZONE_SETTINGS,
   type AmplitudeZone,
 } from '../lib/constants.js';
-import { logToFile } from './debug.js';
+import { createLogger } from '../lib/observability/logger.js';
+
+const log = createLogger('direct-signup');
 
 const SuccessSchema = z.object({
   access_token: z.string(),
@@ -48,7 +50,7 @@ export async function performDirectSignup(
 ): Promise<DirectSignupResult> {
   const { oAuthHost } = AMPLITUDE_ZONE_SETTINGS[input.zone];
   const url = `${oAuthHost}/signup`;
-  logToFile('[direct-signup] POST', { url, email: input.email });
+  log.debug('[direct-signup] POST', { url, email: input.email });
 
   try {
     const response = await axios.post(
@@ -81,7 +83,7 @@ export async function performDirectSignup(
       };
     }
 
-    logToFile('[direct-signup] unexpected response shape', {
+    log.error('[direct-signup] unexpected response shape', {
       status: response.status,
     });
     return {
@@ -95,7 +97,7 @@ export async function performDirectSignup(
         : e instanceof Error
         ? e.message
         : String(e);
-    logToFile('[direct-signup] network error', { err });
+    log.error('[direct-signup] network error', { err });
     return { kind: 'error', message: err };
   }
 }
