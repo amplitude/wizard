@@ -32,11 +32,10 @@ export function resolveConsoleCredentials(
 
   // Session credentials: available after auth screen
   if (session.credentials?.projectApiKey && session.credentials?.host) {
-    const devToken = process.env.WIZARD_PROXY_DEV_TOKEN;
     return {
       kind: 'gateway',
       baseUrl: getLlmGatewayUrlFromHost(session.credentials.host),
-      apiKey: devToken ?? session.credentials.projectApiKey,
+      apiKey: session.credentials.projectApiKey,
     };
   }
 

@@ -89,7 +89,7 @@ export const SlackScreen = ({
       } credentials=${credentials ? 'present' : 'null'} region=${region}`,
     );
 
-    // Thunder uses access_token (Hydra-validated), not id_token.
+    // The App API uses access_token, not id_token.
     const accessToken = credentials?.accessToken;
     if (accessToken && orgId) {
       void fetchSlackConnectionStatus(
@@ -129,7 +129,7 @@ export const SlackScreen = ({
 
     const credentials = store.session.credentials;
     const orgId = store.session.selectedOrgId;
-    // Thunder uses access_token (Hydra-validated), not id_token.
+    // The App API uses access_token, not id_token.
     const accessToken = credentials?.accessToken;
 
     // Try the direct Slack OAuth URL first; fall back to settings page.

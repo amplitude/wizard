@@ -40,7 +40,7 @@
 * add Unreal Engine framework integration ([b59d044](https://github.com/amplitude/wizard/commit/b59d04449740d45066c6f4fc12386267033b4c3c))
 * **ci:** optional API key with auto-resolve; drop ISSUES_URL alias ([74df38d](https://github.com/amplitude/wizard/commit/74df38d5f77620f183a03a9ceb15cf5d4395118f))
 * detect existing Amplitude installs, add report viewer, improve post-run UX ([970fc01](https://github.com/amplitude/wizard/commit/970fc01768a2cb8222af7d114417a172590057fe))
-* direct Slack OAuth integration via Thunder GraphQL ([#59](https://github.com/amplitude/wizard/issues/59)) ([626ad8a](https://github.com/amplitude/wizard/commit/626ad8a0bb959a083a45fe6f43a3d501b2b44f95))
+* direct Slack OAuth integration via App API ([#59](https://github.com/amplitude/wizard/issues/59)) ([626ad8a](https://github.com/amplitude/wizard/commit/626ad8a0bb959a083a45fe6f43a3d501b2b44f95))
 * extend already-setup detection to all new frameworks ([441b084](https://github.com/amplitude/wizard/commit/441b084e5ac5bf027fd42c42ee898ebda07435f0))
 * fi ([d93a8fb](https://github.com/amplitude/wizard/commit/d93a8fb110a392823f4c2d44c7e03e8903e774c4))
 * harden release pipeline with OIDC, provenance, and CODEOWNERS ([#38](https://github.com/amplitude/wizard/issues/38)) ([b82c3a2](https://github.com/amplitude/wizard/commit/b82c3a2a86e38a45cfd800e700d9f5ae70652c59))
@@ -93,7 +93,7 @@
 
 ### Features
 
-* direct Slack OAuth integration via Thunder GraphQL ([#59](https://github.com/amplitude/wizard/issues/59)) ([626ad8a](https://github.com/amplitude/wizard/commit/626ad8a0bb959a083a45fe6f43a3d501b2b44f95))
+* direct Slack OAuth integration via App API ([#59](https://github.com/amplitude/wizard/issues/59)) ([626ad8a](https://github.com/amplitude/wizard/commit/626ad8a0bb959a083a45fe6f43a3d501b2b44f95))
 * redesign TUI — new visual system, agent mode, session persistence, and UX hardening ([#62](https://github.com/amplitude/wizard/issues/62)) ([9f13c71](https://github.com/amplitude/wizard/commit/9f13c718857c1dab3335ac321e1ccfac9ed2e1bb))
 
 

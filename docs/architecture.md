@@ -229,22 +229,11 @@ plans are auto-approved and confirmations auto-skipped.
                               │  HTTPS (Messages API)
                               ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Amplitude LLM Proxy                                                │
-│  core.amplitude.com/wizard  (US)                                    │
-│  core.eu.amplitude.com/wizard (EU)                                  │
+│  Amplitude LLM Gateway                                              │
 │                                                                     │
-│  Validates OAuth token → forwards to GCP Vertex AI → Claude         │
+│  Validates OAuth token → routes to Claude                           │
 │  Endpoints: /health, /v1/models, /v1/messages                       │
-└──────────────────────────────┬──────────────────────────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────┐
-                    │  GCP Vertex AI      │
-                    │  (rawPredict /      │
-                    │   streamRawPredict) │
-                    │       ↓             │
-                    │   Claude model      │
-                    └─────────────────────┘
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -260,8 +249,7 @@ and file system touchpoints, see [`external-services.md`](./external-services.md
 | Dependency | Role | How the wizard talks to it |
 |-----------|------|---------------------------|
 | **Amplitude OAuth** (`core.amplitude.com/oauth2`) | User authentication (PKCE flow) | Local HTTP server on port 13222 receives callback; token stored in `~/.ampli.json` |
-| **Amplitude LLM Proxy** (`core.amplitude.com/wizard`) | Routes Claude API calls through Vertex AI so users never need an Anthropic key | `ANTHROPIC_BASE_URL` env var → Claude Agent SDK sends requests here |
-| **GCP Vertex AI** | Hosts the Claude model | Proxy forwards; wizard never talks to it directly |
+| **Amplitude LLM Gateway** | Routes Claude API calls so users never need an Anthropic key | `ANTHROPIC_BASE_URL` env var → Claude Agent SDK sends requests here |
 | **Amplitude API** (`core.amplitude.com/api`) | Org/project listing, activation checks, API key validation | REST calls from AuthScreen and DataSetupScreen |
 | **Amplitude MCP Server** (`mcp.amplitude.com/mcp`) | Gives Claude (in the user's editor) access to Amplitude tools | Wizard writes the server URL into editor configs; editors handle OAuth themselves |
 | **Amplitude Experiment** | Feature flag evaluation (LLM analytics, agent analytics flags) | Local evaluation via `@amplitude/experiment-node-server` |
@@ -271,9 +259,7 @@ and file system touchpoints, see [`external-services.md`](./external-services.md
 
 | Dependency | Role |
 |-----------|------|
-| **amplitude/javascript** repo (sibling) | The local LLM proxy (`pnpm proxy`) loads proxy code from `../javascript`. Override with `JS_REPO=` env var |
-| **aws-sso** (`us-prod-dev` profile) | Credentials for the local proxy to reach GCP |
-| **~/.ampli.json** | Shared credential store with the `ampli` CLI (amplitude/ampli repo) |
+| **~/.ampli.json** | Shared credential store with the `ampli` CLI |
 
 ---
 
@@ -1287,7 +1273,6 @@ Validate LLM proxy connectivity, model availability, streaming.
 | `release-please.yml` | Push to main | Automated version bump, changelog, release PR |
 | `refresh-integration-skills.yml` | Schedule | Auto-update integration skill bundles |
 | `refresh-instrumentation-skills.yml` | Schedule | Auto-update instrumentation skill bundles |
-| `wizard-ci-trigger.yml` | Various | Downstream CI triggers |
 
 ### Release process
 
@@ -1298,12 +1283,12 @@ the `beta` npm dist-tag. The automated flow:
 PR merged to main (conventional commit)
   → release-please creates/updates a release PR (version bump + CHANGELOG)
   → Merge the release PR → GitHub Release + tag created
-  → growth team approves the npm-publish environment
+  → a maintainer approves the npm-publish environment
   → Published to npm with OIDC provenance
 ```
 
 Security controls: OIDC trusted publishing (no static npm tokens), `--provenance`
-supply-chain attestation, SHA-pinned actions, and CODEOWNERS requiring growth team
+supply-chain attestation, SHA-pinned actions, and CODEOWNERS requiring maintainer
 review on workflow/manifest changes.
 
 ---
@@ -1315,8 +1300,7 @@ review on workflow/manifest changes.
 | npm package | `@amplitude/wizard` | `package.json` |
 | Binary name | `amplitude-wizard` | `package.json` |
 | OAuth callback port | `13222` | `src/lib/constants.ts` |
-| LLM proxy (US) | `https://core.amplitude.com/wizard` | `src/utils/urls.ts` |
-| LLM proxy (EU) | `https://core.eu.amplitude.com/wizard` | `src/utils/urls.ts` |
+| LLM Gateway | Configured via `ANTHROPIC_BASE_URL` | `src/utils/urls.ts` |
 | MCP server (US) | `https://mcp.amplitude.com/mcp` | `src/steps/.../defaults.ts` |
 | MCP server (EU) | `https://mcp.eu.amplitude.com/mcp` | `src/steps/.../defaults.ts` |
 | Node.js minimum | `18.17.0` | `bin.ts` |
@@ -1429,7 +1413,6 @@ amplitude/wizard
 │   └── taxonomy/                   Taxonomy agent skills (1)
 ├── docs/
 │   ├── flows.md                    Flow diagrams (source of truth for UX)
-│   ├── llm-proxy.md                Proxy architecture
 │   ├── mcp-installation.md         MCP editor installation
 │   ├── releasing.md                Release process and security controls
 │   └── architecture.md             This document
@@ -1437,7 +1420,7 @@ amplitude/wizard
 ├── e2e-tests/                      End-to-end tests
 ├── .github/
 │   ├── workflows/                  CI/CD (8 workflows)
-│   └── CODEOWNERS                  Require growth team review on key files
+│   └── CODEOWNERS                  Require maintainer review on key files
 ├── release-please-config.json      Beta prerelease configuration
 └── .release-please-manifest.json   Current version tracker
 ```

@@ -155,33 +155,8 @@ pnpm test:proxy    # validate proxy health, models, streaming
 pnpm lint          # run prettier + eslint checks
 pnpm fix           # auto-fix lint issues
 pnpm flows         # render docs/flows.md diagrams to docs/diagrams/
-pnpm proxy         # start the Langley wizard LLM proxy (requires aws-vault)
-pnpm dev           # build once, link globally, then watch + proxy in parallel
 pnpm skills:refresh # pull all skills from context-hub (integration, instrumentation, taxonomy)
 ```
-
-### Local LLM proxy
-
-The wizard routes Claude API calls through a Langley proxy service instead of
-hitting Anthropic directly. For local development, start the proxy before running
-the wizard:
-
-```bash
-# Terminal 1 — start the proxy (in amplitude/wizard repo)
-pnpm proxy
-
-# Terminal 2 — run the wizard
-WIZARD_PROXY_DEV_TOKEN=dev-token pnpm try
-```
-
-Or use `pnpm dev` to run both in one terminal.
-
-`pnpm proxy` expects the `amplitude/javascript` repo to be a sibling directory
-(`../javascript`). Override with `JS_REPO=/path/to/javascript pnpm proxy`.
-
-It requires `aws-sso` with the `us-prod-dev` profile for credentials.
-The proxy runs with `WIZARD_PROXY_DEV_BYPASS=1` which skips Amplitude OAuth — any
-token value works locally (e.g. `WIZARD_PROXY_DEV_TOKEN=dev-token`).
 
 ## Testing
 
@@ -201,13 +176,11 @@ GitHub Actions workflows in `.github/workflows/`:
 - `publish.yml` — npm publish flow
 - `release-please.yml` — automated release PRs
 - `refresh-instrumentation-skills.yml` / `refresh-integration-skills.yml` — skill refresh automation
-- `wizard-ci-trigger.yml` — downstream CI triggers
 
 ## Key docs
 
 - [`docs/flows.md`](./docs/flows.md) — flow diagrams (source of truth for UX)
 - [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
-- [`docs/llm-proxy.md`](./docs/llm-proxy.md) — LLM proxy architecture and configuration
 - [`docs/dual-mode-architecture.md`](./docs/dual-mode-architecture.md) — TUI + agent + CI mode architecture
 - [`docs/critical-files.md`](./docs/critical-files.md) — files ranked by blast radius
 - [`docs/engineering-patterns.md`](./docs/engineering-patterns.md) — async safety, retry, error classification patterns

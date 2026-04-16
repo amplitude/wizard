@@ -218,57 +218,48 @@ void yargs(hideBin(process.argv))
   .options({
     debug: {
       default: false,
-      describe: 'Enable verbose logging\nenv: AMPLITUDE_WIZARD_DEBUG',
+      describe: 'enable debug logging',
       type: 'boolean',
     },
     verbose: {
       default: false,
-      describe:
-        'Print diagnostic info (working dir, config, etc.) to the log\nenv: AMPLITUDE_WIZARD_VERBOSE',
+      describe: 'print extra diagnostic info to the log',
       type: 'boolean',
     },
     default: {
       default: true,
-      describe:
-        'Use default options for all prompts\nenv: AMPLITUDE_WIZARD_DEFAULT',
+      describe: 'use default options for all prompts',
       type: 'boolean',
     },
     signup: {
       default: false,
-      describe:
-        'Create a new Amplitude account during setup\nenv: AMPLITUDE_WIZARD_SIGNUP',
+      describe: 'create a new Amplitude account during setup',
       type: 'boolean',
     },
     'local-mcp': {
       default: false,
-      describe:
-        'Use local MCP server at http://localhost:8787/mcp\nenv: AMPLITUDE_WIZARD_LOCAL_MCP',
+      describe: 'connect to a local MCP server for development',
       type: 'boolean',
     },
     ci: {
       default: false,
-      describe:
-        'Enable CI mode for non-interactive execution\nenv: AMPLITUDE_WIZARD_CI',
+      describe: 'run non-interactively (for CI pipelines)',
       type: 'boolean',
     },
     'api-key': {
-      describe:
-        'Amplitude API key for authentication\nenv: AMPLITUDE_WIZARD_API_KEY',
+      describe: 'Amplitude API key (skips browser login)',
       type: 'string',
     },
     'project-id': {
-      describe:
-        'Amplitude project ID to use (optional; when not set, uses default from API key or OAuth)\nenv: AMPLITUDE_WIZARD_PROJECT_ID',
+      describe: 'Amplitude project ID to target',
       type: 'string',
     },
     org: {
-      describe:
-        'Amplitude org name to use (for multi-org accounts)\nenv: AMPLITUDE_WIZARD_ORG',
+      describe: 'Amplitude org name (for multi-org accounts)',
       type: 'string',
     },
     env: {
-      describe:
-        'Environment name to use (e.g. "Production", "Development")\nenv: AMPLITUDE_WIZARD_ENV',
+      describe: 'environment name, e.g. "Production"',
       type: 'string',
     },
   })
@@ -279,17 +270,15 @@ void yargs(hideBin(process.argv))
       return yargs.options({
         'force-install': {
           default: false,
-          describe:
-            'Force install packages even if peer dependency checks fail\nenv: AMPLITUDE_WIZARD_FORCE_INSTALL',
+          describe: 'install packages even if dependency checks fail',
           type: 'boolean',
         },
         'install-dir': {
-          describe:
-            'Directory to install Amplitude in\nenv: AMPLITUDE_WIZARD_INSTALL_DIR',
+          describe: 'project directory to instrument',
           type: 'string',
         },
         integration: {
-          describe: 'Integration to set up',
+          describe: 'framework to set up (skips auto-detection)',
           choices: [
             'nextjs',
             'vue',
@@ -305,20 +294,17 @@ void yargs(hideBin(process.argv))
         },
         menu: {
           default: false,
-          describe:
-            'Show menu for manual integration selection instead of auto-detecting\nenv: AMPLITUDE_WIZARD_MENU',
+          describe: 'show a framework picker instead of auto-detecting',
           type: 'boolean',
         },
         benchmark: {
           default: false,
-          describe:
-            'Run in benchmark mode with per-phase token tracking\nenv: AMPLITUDE_WIZARD_BENCHMARK',
+          describe: 'collect performance metrics during the run',
           type: 'boolean',
         },
         agent: {
           default: false,
-          describe:
-            'Run in agent mode with structured JSON output\nenv: AMPLITUDE_WIZARD_AGENT',
+          describe: 'emit structured NDJSON output for automation',
           type: 'boolean',
         },
         yes: {
@@ -329,8 +315,7 @@ void yargs(hideBin(process.argv))
         },
         classic: {
           default: false,
-          describe:
-            'Use the classic prompt-based UI instead of the rich TUI\nenv: AMPLITUDE_WIZARD_CLASSIC',
+          describe: 'use the classic prompt-based UI',
           type: 'boolean',
         },
       });
@@ -982,7 +967,7 @@ void yargs(hideBin(process.argv))
     (yargs) => {
       return yargs.options({
         zone: {
-          describe: 'Amplitude data center zone (us or eu)',
+          describe: 'data center region (us or eu)',
           choices: ['us', 'eu'] as const,
           default: 'us' as const,
           type: 'string',
@@ -1091,7 +1076,7 @@ void yargs(hideBin(process.argv))
   )
   .command(
     'whoami',
-    'Show the currently logged-in Amplitude account',
+    'Show the currently logged-in user',
 
     () => {},
     (_argv) => {
@@ -1121,7 +1106,7 @@ void yargs(hideBin(process.argv))
   )
   .command(
     'feedback',
-    'Send product feedback',
+    'Send product feedback to the Amplitude team',
     (yargs) => {
       return yargs.options({
         message: {
@@ -1165,7 +1150,7 @@ void yargs(hideBin(process.argv))
   )
   .command(
     'slack',
-    'Set up Amplitude Slack integration',
+    'Connect Amplitude to Slack',
     (y) => y,
     (_argv) => {
       void (async () => {
@@ -1190,7 +1175,7 @@ void yargs(hideBin(process.argv))
           const storedUser = getStoredUser();
           const zone = storedUser?.zone ?? 'us';
           const storedToken = getStoredToken(storedUser?.id, zone);
-          // Thunder validates access_tokens via Hydra, not id_tokens.
+          // The App API validates access_tokens, not id_tokens.
           const accessToken = storedToken?.accessToken;
 
           // Read orgId from project-level ampli.json
@@ -1222,7 +1207,7 @@ void yargs(hideBin(process.argv))
           const settingsUrl = OUTBOUND_URLS.slackSettings(zone, orgId);
           let url = settingsUrl;
 
-          // Try to get the direct Slack OAuth URL from Thunder.
+          // Try to get the direct Slack OAuth URL from the App API.
           const directUrl = await fetchSlackInstallUrl(
             accessToken,
             zone,
@@ -1253,7 +1238,7 @@ void yargs(hideBin(process.argv))
   )
   .command(
     'region',
-    'Switch data-center region (US or EU)',
+    'Switch your data center region (US or EU)',
     (y) => y,
     (argv) => {
       void (async () => {
@@ -1325,17 +1310,16 @@ void yargs(hideBin(process.argv))
       })();
     },
   )
-  .command('mcp <command>', 'MCP server management commands', (yargs) => {
+  .command('mcp <command>', 'Manage the Amplitude MCP server', (yargs) => {
     return yargs
       .command(
         'add',
-        'Install Amplitude MCP server to supported clients',
+        'Install the Amplitude MCP server into your editor',
         (yargs) => {
           return yargs.options({
             local: {
               default: false,
-              describe:
-                'Add local development MCP server (http://localhost:8787)',
+              describe: 'use a local MCP server for development',
               type: 'boolean',
             },
           });
@@ -1371,13 +1355,12 @@ void yargs(hideBin(process.argv))
       )
       .command(
         'remove',
-        'Remove Amplitude MCP server from supported clients',
+        'Remove the Amplitude MCP server from your editor',
         (yargs) => {
           return yargs.options({
             local: {
               default: false,
-              describe:
-                'Remove local development MCP server (http://localhost:8787)',
+              describe: 'remove a local MCP server',
               type: 'boolean',
             },
           });
@@ -1416,7 +1399,7 @@ void yargs(hideBin(process.argv))
   })
   .command(
     'completion',
-    'Print shell completion script\n(add `eval "$(amplitude-wizard completion)"` to ~/.zshrc or ~/.bashrc)',
+    'Print shell completion script for bash/zsh',
     () => {},
     () => {
       const script = (process.env.SHELL ?? '').endsWith('zsh')
@@ -1433,7 +1416,7 @@ void yargs(hideBin(process.argv))
     'Run with structured JSON output for automation',
   )
   .epilogue(
-    'Docs: https://amplitude.com/docs/wizard\nFeedback: wizard@amplitude.com',
+    'Docs: https://github.com/amplitude/wizard\nFeedback: amplitude-wizard feedback',
   )
   .recommendCommands()
   .help()

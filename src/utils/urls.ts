@@ -50,8 +50,8 @@ export async function detectRegionFromToken(
 /**
  * Get the LLM proxy URL for the Claude Agent SDK.
  *
- * Routes through the wizard-proxy-router in Thunder (javascript repo), which
- * validates Amplitude OAuth tokens and proxies to GCP Vertex AI.
+ * Routes through Amplitude's LLM gateway, which validates OAuth tokens
+ * and proxies to the Claude model.
  *
  * Override with WIZARD_LLM_PROXY_URL env var for explicit URL override.
  * The Claude Agent SDK uses this as ANTHROPIC_BASE_URL and appends /v1/messages.
@@ -64,7 +64,6 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
   }
 
   if (host.includes('localhost')) {
-    // Local dev: point at the local proxy (start with `pnpm proxy` in the wizard repo)
     return 'http://localhost:3030/wizard';
   }
 
