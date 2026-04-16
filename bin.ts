@@ -275,7 +275,7 @@ const resolveNonInteractiveCredentials = async (
         process.exit(ExitCode.AUTH_REQUIRED);
       } else {
         getUI().log.error(
-          `Headless signup failed: ${
+          `Signup failed: ${
             result.type === 'error' ? result.message : 'missing required fields'
           }`,
         );
@@ -283,7 +283,7 @@ const resolveNonInteractiveCredentials = async (
       }
     } else {
       getUI().log.error(
-        'Headless signup requires --email and --full-name flags. ' +
+        '--signup requires --email and --full-name flags. ' +
           'Example: amplitude-wizard --signup --email you@example.com --full-name "Jane Smith"',
       );
       process.exit(ExitCode.AUTH_REQUIRED);

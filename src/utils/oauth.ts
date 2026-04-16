@@ -101,7 +101,7 @@ const OAUTH_CALLBACK_STYLES = `
   </style>
 `;
 
-const OAuthTokenResponseSchema = z.object({
+export const OAuthTokenResponseSchema = z.object({
   access_token: z.string(),
   id_token: z.string(),
   refresh_token: z.string(),
@@ -185,21 +185,22 @@ async function startCallbackServer(): Promise<{
   });
 }
 
-async function exchangeCodeForToken(
+export async function exchangeCodeForToken(
   code: string,
-  codeVerifier: string,
+  codeVerifier: string | undefined,
   zone: AmplitudeZone,
 ): Promise<OAuthTokenResponse> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
+  const params: Record<string, string> = {
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+    client_id: oAuthClientId,
+  };
+  if (codeVerifier) params.code_verifier = codeVerifier;
   const response = await axios.post(
     `${oAuthHost}/oauth2/token`,
-    new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-      client_id: oAuthClientId,
-      code_verifier: codeVerifier,
-    }).toString(),
+    new URLSearchParams(params).toString(),
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
   );
   return OAuthTokenResponseSchema.parse(response.data);
