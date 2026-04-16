@@ -15,7 +15,11 @@ vi.mock('../../telemetry', () => ({
   traceStep: (_name: string, fn: () => unknown) => fn(),
 }));
 vi.mock('../../utils/analytics', () => ({
-  analytics: { setTag: vi.fn() },
+  analytics: {
+    setTag: vi.fn(),
+    setSessionProperty: vi.fn(),
+    wizardCapture: vi.fn(),
+  },
 }));
 
 function makeTmpDir(): string {

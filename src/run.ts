@@ -77,7 +77,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
     session.integration ?? (await detectAndResolveIntegration(session));
 
   session.integration = integration;
-  analytics.setTag('integration', integration);
+  analytics.setSessionProperty('integration', integration);
   analytics.wizardCapture('Session Started', {
     integration,
     ci: session.ci ?? false,

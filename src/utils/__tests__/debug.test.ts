@@ -80,23 +80,13 @@ describe('initLogFile', () => {
     expect(fs.existsSync(logPath)).toBe(false);
   });
 
-  it('creates the log file with a run header when enabled', () => {
+  // initLogFile() is now a no-op — the structured logger (initLogger) handles
+  // file creation and rotation. These tests verify the backward-compat shim
+  // doesn't crash, not that it creates files.
+  it('is a safe no-op (structured logger handles init)', () => {
     const logPath = path.join(tmpDir, 'wizard.log');
     configureLogFile({ path: logPath, enabled: true });
-    initLogFile();
-    expect(fs.existsSync(logPath)).toBe(true);
-    const contents = fs.readFileSync(logPath, 'utf-8');
-    expect(contents).toContain('Amplitude Wizard Run:');
-  });
-
-  it('truncates the log if it exceeds 5 MB', () => {
-    const logPath = path.join(tmpDir, 'big.log');
-    // Write 6 MB of data
-    fs.writeFileSync(logPath, 'x'.repeat(6 * 1024 * 1024));
-    configureLogFile({ path: logPath, enabled: true });
-    initLogFile();
-    const size = fs.statSync(logPath).size;
-    expect(size).toBeLessThan(6 * 1024 * 1024);
+    expect(() => initLogFile()).not.toThrow();
   });
 });
 
@@ -110,11 +100,12 @@ describe('logToFile', () => {
     expect(fs.existsSync(logPath)).toBe(false);
   });
 
-  it('appends a timestamped message to the log file when enabled', () => {
+  it('appends a structured log entry to the log file when enabled', () => {
     const logPath = path.join(tmpDir, 'output.log');
     configureLogFile({ path: logPath, enabled: true });
     logToFile('hello world');
     const contents = fs.readFileSync(logPath, 'utf-8');
+    // Now writes structured JSON via the observability logger
     expect(contents).toContain('hello world');
   });
 
@@ -123,6 +114,7 @@ describe('logToFile', () => {
     configureLogFile({ path: logPath, enabled: true });
     logToFile('part1', 'part2', { key: 'val' });
     const contents = fs.readFileSync(logPath, 'utf-8');
+    // Multiple args are joined into a single message string
     expect(contents).toContain('part1');
     expect(contents).toContain('part2');
   });

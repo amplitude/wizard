@@ -149,7 +149,10 @@ export async function runAgentWizard(
   // Set analytics tags for framework version
   if (frameworkVersion && config.detection.getVersionBucket) {
     const versionBucket = config.detection.getVersionBucket(frameworkVersion);
-    analytics.setTag(`${config.metadata.integration}-version`, versionBucket);
+    analytics.setSessionProperty(
+      `${config.metadata.integration}-version`,
+      versionBucket,
+    );
   }
 
   analytics.wizardCapture('Agent Started', {
@@ -228,7 +231,7 @@ export async function runAgentWizard(
   // Set analytics tags from framework context
   const contextTags = config.analytics.getTags(frameworkContext);
   Object.entries(contextTags).forEach(([key, value]) => {
-    analytics.setTag(key, value);
+    analytics.setSessionProperty(key, value);
   });
 
   // Skip the Amplitude MCP when the framework provides its own prompt (no MCP needed)

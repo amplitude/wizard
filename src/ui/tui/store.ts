@@ -271,6 +271,7 @@ export class WizardStore {
   setRegion(region: string): void {
     this.$session.setKey('region', region as WizardSession['region']);
     this.$session.setKey('regionForced', false);
+    analytics.wizardCapture('region selected', { region });
 
     // Persist region to project-level ampli.json so next run uses the right zone.
     // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
@@ -731,6 +732,7 @@ export class WizardStore {
 
   setOutroData(data: OutroData): void {
     this.$session.setKey('outroData', data);
+    analytics.wizardCapture('outro reached', { outro_kind: data.kind });
     this.emitChange();
   }
 

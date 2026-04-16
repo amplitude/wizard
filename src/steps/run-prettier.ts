@@ -39,8 +39,6 @@ export async function runPrettierStep({
     if (!packageJson) return;
     const prettierInstalled = hasPackageInstalled('prettier', packageJson);
 
-    analytics.setTag('prettier-installed', prettierInstalled);
-
     if (!prettierInstalled) {
       return;
     }
@@ -72,6 +70,7 @@ export async function runPrettierStep({
 
     analytics.wizardCapture('Prettier Ran', {
       integration,
+      prettier_installed: true,
     });
   });
 }
