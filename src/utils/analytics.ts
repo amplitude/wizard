@@ -318,12 +318,6 @@ export class Analytics {
   }
 }
 
-/**
- * Full Amplitude `event_type` for CLI/TUI product feedback.
- * Same string as `wizardCapture('Feedback Submitted', …)`.
- */
-export const WIZARD_FEEDBACK_EVENT_TYPE = 'wizard: feedback submitted';
-
 export const analytics = new Analytics();
 
 /**

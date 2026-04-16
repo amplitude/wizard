@@ -34,11 +34,16 @@ const STRING_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   },
   // Bearer tokens
   { pattern: /Bearer\s+[^\s"']+/gi, replacement: 'Bearer [REDACTED]' },
+  // URL query strings (may contain auth tokens like ?code=…&token=…)
+  {
+    pattern: /(https?:\/\/[^\s"'?]*)\?[^\s"']+/g,
+    replacement: '$1?[REDACTED_PARAMS]',
+  },
   // Hex strings that look like API keys (32+ hex chars)
   { pattern: /\b[a-f0-9]{32,}\b/gi, replacement: '[REDACTED_KEY]' },
-  // Absolute paths (macOS / Linux home dirs)
+  // Absolute paths (macOS / Linux home dirs and system temp dirs)
   {
-    pattern: /\/(?:Users|home)\/[^\s"':,}\]]+/g,
+    pattern: /\/(?:Users|home|var|tmp)\/[^\s"':,}\]]+/g,
     replacement: '[~]/...',
   },
 ];

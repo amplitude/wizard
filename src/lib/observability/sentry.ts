@@ -98,6 +98,9 @@ function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
   // Selectively redact user-facing fields only. Do NOT redact the entire event
   // — Sentry's own fields (event_id, trace_id, span_id) are 32+ hex chars
   // that the hex pattern would corrupt.
+  // Capture original first exception value before redaction for classification
+  const originalFirstValue = event.exception?.values?.[0]?.value;
+
   if (event.exception?.values) {
     event.exception.values = event.exception.values.map((v) => ({
       ...v,
@@ -130,8 +133,9 @@ function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
   }
 
   // Custom fingerprinting: group by error classification, not raw message.
+  // Use the original (un-redacted) value so classification patterns match correctly.
   if (event.exception?.values?.[0]) {
-    const error = new Error(event.exception.values[0].value ?? 'unknown');
+    const error = new Error(originalFirstValue ?? 'unknown');
     error.name = event.exception.values[0].type ?? 'Error';
     const classified = getClassifyError()(error);
 
