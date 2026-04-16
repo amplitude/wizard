@@ -181,8 +181,9 @@ const resolveNonInteractiveCredentials = async (
     const email = session.signupEmail;
     const fullName = session.signupFullName;
     if (email && fullName) {
-      const { performHeadlessSignup, completeSignupTokenExchange, maskEmail } =
-        await import('./src/utils/headless-signup.js');
+      const { performHeadlessSignup, maskEmail } = await import(
+        './src/utils/headless-signup.js'
+      );
       const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
       const { getAPIKey } = await import('./src/utils/get-api-key.js');
 
@@ -190,15 +191,35 @@ const resolveNonInteractiveCredentials = async (
       const result = await performHeadlessSignup({ email, fullName, zone });
 
       if (result.type === 'oauth') {
+        const { exchangeHeadlessCode } = await import(
+          './src/utils/headless-signup.js'
+        );
+        const { completeAuth } = await import('./src/utils/auth-complete.js');
+        const { performAmplitudeAuth } = await import('./src/utils/oauth.js');
+        const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+        const { storeToken } = await import('./src/utils/ampli-settings.js');
+        const { analytics } = await import('./src/utils/analytics.js');
+
         let tokenResponse;
         let userInfo;
         try {
-          ({ tokenResponse, userInfo } = await completeSignupTokenExchange(
-            result.code,
-            zone,
-          ));
+          tokenResponse = await exchangeHeadlessCode(result.code, zone);
+          await completeAuth({
+            session,
+            auth: {
+              idToken: tokenResponse.id_token,
+              accessToken: tokenResponse.access_token,
+              refreshToken: tokenResponse.refresh_token,
+              zone,
+            },
+            analytics,
+            performAmplitudeAuth,
+            fetchAmplitudeUser,
+            storeToken,
+          });
+          userInfo = await fetchAmplitudeUser(tokenResponse.id_token, zone);
         } catch (err) {
-          // Account was created but token exchange failed.
+          // Account was created but token exchange or user fetch failed.
           // Credentials stay null — fall through to the guard at the
           // end of this function which handles the exit.
           getUI().log.error(
@@ -810,69 +831,11 @@ void yargs(hideBin(process.argv))
                 const { storeToken } = await import(
                   './src/utils/ampli-settings.js'
                 );
+                const { completeAuth } = await import(
+                  './src/utils/auth-complete.js'
+                );
 
                 const forceFresh = !ampliConfigExists(installDir);
-
-                // Shared helper: given auth tokens, fetch user info, persist, and
-                // signal AuthScreen. Used by both headless and browser paths.
-                const completeAuth = async (auth: {
-                  idToken: string;
-                  accessToken: string;
-                  refreshToken: string;
-                  zone: typeof DEFAULT_AMPLITUDE_ZONE;
-                }) => {
-                  const cloudRegion = auth.zone;
-
-                  let userInfo;
-                  try {
-                    userInfo = await fetchAmplitudeUser(
-                      auth.idToken,
-                      cloudRegion,
-                    );
-                  } catch {
-                    // Token may be expired — re-open the browser for a fresh login
-                    tui.store.setLoginUrl(null);
-                    const freshAuth = await performAmplitudeAuth({
-                      zone: cloudRegion,
-                      forceFresh: true,
-                    });
-                    userInfo = await fetchAmplitudeUser(
-                      freshAuth.idToken,
-                      cloudRegion,
-                    );
-                    // Update auth with fresh tokens
-                    auth = { ...freshAuth };
-                  }
-
-                  storeToken(
-                    {
-                      id: userInfo.id,
-                      firstName: userInfo.firstName,
-                      lastName: userInfo.lastName,
-                      email: userInfo.email,
-                      zone: auth.zone,
-                    },
-                    {
-                      accessToken: auth.accessToken,
-                      idToken: auth.idToken,
-                      refreshToken: auth.refreshToken,
-                      expiresAt: new Date(
-                        Date.now() + 3600 * 1000,
-                      ).toISOString(),
-                    },
-                  );
-
-                  session.userEmail = userInfo.email;
-                  analytics.setDistinctId(userInfo.email);
-                  analytics.identifyUser({ email: userInfo.email });
-
-                  tui.store.setOAuthComplete({
-                    accessToken: auth.accessToken,
-                    idToken: auth.idToken,
-                    cloudRegion,
-                    orgs: userInfo.orgs,
-                  });
-                };
 
                 // Wait for the user to dismiss the welcome screen AND pick a
                 // region before opening the OAuth URL. This ensures the logo
@@ -947,8 +910,6 @@ void yargs(hideBin(process.argv))
                     if (result.type === 'oauth') {
                       // New user — exchange code for tokens, then let
                       // completeAuth handle user fetch + store + UI signaling.
-                      // Don't use completeSignupTokenExchange here — it would
-                      // double-fetch the user and double-store the token.
                       const { exchangeHeadlessCode } = await import(
                         './src/utils/headless-signup.js'
                       );
@@ -957,10 +918,18 @@ void yargs(hideBin(process.argv))
                         zone,
                       );
                       await completeAuth({
-                        idToken: tokenResponse.id_token,
-                        accessToken: tokenResponse.access_token,
-                        refreshToken: tokenResponse.refresh_token,
-                        zone,
+                        tui,
+                        session,
+                        auth: {
+                          idToken: tokenResponse.id_token,
+                          accessToken: tokenResponse.access_token,
+                          refreshToken: tokenResponse.refresh_token,
+                          zone,
+                        },
+                        analytics,
+                        performAmplitudeAuth,
+                        fetchAmplitudeUser,
+                        storeToken,
                       });
                       return; // Done — skip browser OAuth
                     }
@@ -992,7 +961,15 @@ void yargs(hideBin(process.argv))
                 });
 
                 tui.store.setLoginUrl(null);
-                await completeAuth(auth);
+                await completeAuth({
+                  tui,
+                  session,
+                  auth,
+                  analytics,
+                  performAmplitudeAuth,
+                  fetchAmplitudeUser,
+                  storeToken,
+                });
               } catch (err) {
                 // Auth failure is non-fatal here — agent-runner will retry/handle it
                 if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {

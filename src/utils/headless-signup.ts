@@ -18,7 +18,6 @@ import {
   OUTBOUND_URLS,
   type AmplitudeZone,
 } from '../lib/constants.js';
-import type { AmplitudeUserInfo } from '../lib/api.js';
 import { type OAuthTokenResponse, exchangeCodeForToken } from './oauth.js';
 import { logToFile } from './debug.js';
 
@@ -172,36 +171,6 @@ export async function performHeadlessSignup(options: {
     logToFile(`[signup] request failed: ${message}`);
     return { type: 'error', code: 'network_error', message };
   }
-}
-
-// ── Complete signup: exchange code, fetch user, persist token ────────
-
-export async function completeSignupTokenExchange(
-  code: string,
-  zone: AmplitudeZone,
-): Promise<{ tokenResponse: OAuthTokenResponse; userInfo: AmplitudeUserInfo }> {
-  const tokenResponse = await exchangeHeadlessCode(code, zone);
-  const { fetchAmplitudeUser } = await import('../lib/api.js');
-  const userInfo = await fetchAmplitudeUser(tokenResponse.id_token, zone);
-  const { storeToken } = await import('./ampli-settings.js');
-  storeToken(
-    {
-      id: userInfo.id,
-      firstName: userInfo.firstName,
-      lastName: userInfo.lastName,
-      email: userInfo.email,
-      zone,
-    },
-    {
-      accessToken: tokenResponse.access_token,
-      idToken: tokenResponse.id_token,
-      refreshToken: tokenResponse.refresh_token,
-      expiresAt: new Date(
-        Date.now() + tokenResponse.expires_in * 1000,
-      ).toISOString(),
-    },
-  );
-  return { tokenResponse, userInfo };
 }
 
 // ── Token exchange (no PKCE) ────────────────────────────────────────
