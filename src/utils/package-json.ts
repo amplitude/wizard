@@ -5,6 +5,7 @@ export type PackageDotJson = {
   devDependencies?: Record<string, string>;
   resolutions?: Record<string, string>;
   overrides?: Record<string, string>;
+  bin?: string | Record<string, string>;
   pnpm?: {
     overrides?: Record<string, string>;
   };
