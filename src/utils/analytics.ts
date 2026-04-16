@@ -286,6 +286,21 @@ export class Analytics {
     return this.activeFlags;
   }
 
+  /**
+   * Flush pending events without ending the session.
+   * Use for mid-session flushes (e.g. feedback command) where
+   * the wizard continues running after the flush.
+   */
+  async flush(): Promise<void> {
+    if (this.initPromise === null) return;
+    try {
+      await this.initPromise;
+      await this.client.flush().promise;
+    } catch (err) {
+      debug('analytics flush error:', err);
+    }
+  }
+
   async shutdown(status: 'success' | 'error' | 'cancelled') {
     this.wizardCapture('Session Ended', {
       status,

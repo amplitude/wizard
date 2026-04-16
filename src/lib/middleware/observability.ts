@@ -58,6 +58,7 @@ export function createObservabilityMiddleware(): Middleware {
         for (const block of message.message.content) {
           if (block.type === 'tool_use') {
             totalToolCalls++;
+            if (currentPhaseTiming) currentPhaseTiming.toolCalls++;
             const toolName = block.name ?? 'unknown';
             log.debug(`Tool call: ${toolName}`, {
               tool: toolName,

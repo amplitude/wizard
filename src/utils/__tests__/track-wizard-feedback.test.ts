@@ -1,16 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { mockWizardCapture, mockShutdown } = vi.hoisted(() => {
+const { mockWizardCapture, mockFlush } = vi.hoisted(() => {
   return {
     mockWizardCapture: vi.fn(),
-    mockShutdown: vi.fn().mockResolvedValue(undefined),
+    mockFlush: vi.fn().mockResolvedValue(undefined),
   };
 });
 
 vi.mock('../analytics.js', () => ({
   analytics: {
     wizardCapture: mockWizardCapture,
-    shutdown: mockShutdown,
+    flush: mockFlush,
   },
 }));
 
@@ -19,7 +19,7 @@ import { trackWizardFeedback } from '../track-wizard-feedback.js';
 describe('trackWizardFeedback', () => {
   beforeEach(() => {
     mockWizardCapture.mockClear();
-    mockShutdown.mockClear();
+    mockFlush.mockClear();
   });
 
   it('captures feedback via the analytics singleton and flushes', async () => {
@@ -28,7 +28,8 @@ describe('trackWizardFeedback', () => {
     expect(mockWizardCapture).toHaveBeenCalledWith('feedback submitted', {
       message: 'hello',
     });
-    expect(mockShutdown).toHaveBeenCalledWith('success');
+    // Uses flush() not shutdown() — avoids spurious "Session Ended" mid-session
+    expect(mockFlush).toHaveBeenCalled();
   });
 
   it('rejects empty messages', async () => {
