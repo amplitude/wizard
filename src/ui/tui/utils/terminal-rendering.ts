@@ -49,12 +49,23 @@ export function highlightCode(code: string, language?: string): string {
 
 // ── Markdown rendering ─────────────────────────────────────────────────
 
+/** Convert a hex color (e.g. '#4083FF') to an ANSI truecolor escape. */
+function hexToAnsi(hex: string): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `\x1b[38;2;${r};${g};${b}m`;
+}
+
 // marked-terminal's types declare the return as a Renderer, but at runtime it
 // produces a valid MarkedExtension. Cast to satisfy marked.use().
-marked.use(
+const md = new marked.Marked();
+md.use(
   markedTerminal({
-    firstHeading: (s: string) => `\x1b[1m\x1b[38;2;64;131;255m${s}\x1b[0m`,
-    heading: (s: string) => `\x1b[1m\x1b[38;2;105;128;255m${s}\x1b[0m`,
+    firstHeading: (s: string) =>
+      `\x1b[1m${hexToAnsi(Brand.blueOnDark)}${s}\x1b[0m`,
+    heading: (s: string) => `\x1b[1m${hexToAnsi(Brand.lilac)}${s}\x1b[0m`,
     showSectionPrefix: false,
     reflowText: true,
     width: 100,
@@ -65,6 +76,6 @@ marked.use(
  * Render a markdown string to ANSI-styled terminal output.
  * Supports headings, code blocks, tables, lists, bold/italic, and links.
  */
-export function renderMarkdown(md: string): string {
-  return marked.parse(md) as string;
+export function renderMarkdown(input: string): string {
+  return md.parse(input) as string;
 }
