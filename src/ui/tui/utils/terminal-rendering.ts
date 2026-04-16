@@ -7,7 +7,6 @@
 
 import terminalLink from 'terminal-link';
 import gradient from 'gradient-string';
-import { highlight } from 'cli-highlight';
 import { Marked } from 'marked';
 import { markedTerminal } from 'marked-terminal';
 import { Brand } from '../styles.js';
@@ -32,20 +31,6 @@ const brandGrad = gradient([Brand.blue, Brand.lilac, Brand.violet]);
 /** Apply the Amplitude brand gradient (blue → lilac → violet) to text. */
 export function brandGradient(text: string): string {
   return brandGrad(text);
-}
-
-// ── Syntax highlighting ────────────────────────────────────────────────
-
-/**
- * Syntax-highlight a code string for terminal display.
- * Returns the original string if highlighting fails.
- */
-export function highlightCode(code: string, language?: string): string {
-  try {
-    return highlight(code, { language, ignoreIllegals: true });
-  } catch {
-    return code;
-  }
 }
 
 // ── Markdown rendering ─────────────────────────────────────────────────
