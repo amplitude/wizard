@@ -1,5 +1,5 @@
 /**
- * Headless signup — browserless account creation via the Thunder
+ * Headless signup — browserless account creation via the App API
  * provisioning endpoint. Gated behind the `wizard-headless-signup` flag.
  *
  * The endpoint returns one of four response types:
