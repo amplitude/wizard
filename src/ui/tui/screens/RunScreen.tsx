@@ -22,6 +22,7 @@ import {
   LogViewer,
   SnakeGame,
   EventPlanViewer,
+  TerminalLink,
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
@@ -89,9 +90,9 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
       <Text key="stripe" color={Colors.secondary}>
         <Text color={Colors.accent}>{Icons.diamond}</Text> Stripe detected
         {Icons.dash} add as data source:{' '}
-        <Text color={Colors.accentSecondary}>
-          {OUTBOUND_URLS.stripeDataSource}
-        </Text>
+        <TerminalLink url={OUTBOUND_URLS.stripeDataSource}>
+          Add Stripe data source
+        </TerminalLink>
       </Text>,
     );
   }

@@ -5,6 +5,7 @@
 
 import { Box, Text } from 'ink';
 import { Colors } from '../styles.js';
+import { highlightCode } from '../utils/terminal-rendering.js';
 import { useState, useEffect } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
@@ -65,11 +66,19 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
 
   return (
     <Box flexDirection="column" height={visibleLines}>
-      {lines.map((line, i) => (
-        <Text key={i} color={Colors.muted} wrap="truncate">
-          {line}
-        </Text>
-      ))}
+      {lines.map((line, i) => {
+        const isJson =
+          line.trimStart().startsWith('{') || line.trimStart().startsWith('[');
+        return (
+          <Text
+            key={i}
+            color={isJson ? undefined : Colors.muted}
+            wrap="truncate"
+          >
+            {isJson ? highlightCode(line, 'json') : line}
+          </Text>
+        );
+      })}
     </Box>
   );
 };

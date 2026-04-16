@@ -6,7 +6,7 @@
 import { Box, Text } from 'ink';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { ConfirmationInput } from '../primitives/index.js';
+import { ConfirmationInput, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 
 interface OutageScreenProps {
@@ -35,7 +35,9 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
         </Text>
         <Text color={Colors.body}>
           <Text color={Colors.warning}>Status page:</Text>{' '}
-          <Text color={Colors.accent}>{serviceStatus.statusPageUrl}</Text>
+          <TerminalLink url={serviceStatus.statusPageUrl}>
+            {serviceStatus.statusPageUrl}
+          </TerminalLink>
         </Text>
         <Text> </Text>
         <Text color={Colors.secondary}>
