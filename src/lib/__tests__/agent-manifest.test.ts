@@ -42,6 +42,7 @@ describe('getAgentManifest', () => {
     expect(names).toContain('auth status');
     expect(names).toContain('auth token');
     expect(names).toContain('manifest');
+    expect(names).toContain('mcp serve');
   });
 
   it('is JSON-serializable (contract: stdout-writable)', () => {

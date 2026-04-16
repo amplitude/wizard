@@ -204,6 +204,12 @@ export function getAgentManifest(): AgentManifest {
         outputs: 'human',
       },
       {
+        command: 'mcp serve',
+        describe:
+          'Run the Amplitude wizard MCP server on stdio (for AI coding agents)',
+        outputs: 'json',
+      },
+      {
         command: 'manifest',
         describe: 'Print this machine-readable CLI manifest',
         outputs: 'json',

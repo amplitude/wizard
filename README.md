@@ -139,6 +139,33 @@ version tag and a typed envelope. See
 [docs/dual-mode-architecture.md](./docs/dual-mode-architecture.md) for the
 full schema and deprecation policy.
 
+### MCP server
+
+`amplitude-wizard mcp serve` exposes the wizard's read-only operations as
+[Model Context Protocol](https://modelcontextprotocol.io) tools over stdio.
+AI coding agents call them directly as typed tools instead of spawning the
+CLI and parsing output. Add to your MCP client's config:
+
+```json
+{
+  "mcpServers": {
+    "amplitude-wizard": {
+      "command": "amplitude-wizard",
+      "args": ["mcp", "serve"]
+    }
+  }
+}
+```
+
+Tools exposed:
+
+| Tool | Purpose |
+|------|---------|
+| `detect_framework` | Detect the framework used in a project |
+| `get_project_status` | Full setup state: framework, SDK, API key, auth |
+| `get_auth_status` | Whether the user is logged in and when their token expires |
+| `get_auth_token` | Return the stored OAuth access token (security-sensitive) |
+
 ## Commands
 
 Available at any point during the wizard:

@@ -1712,7 +1712,28 @@ void yargs(hideBin(process.argv))
           })();
         },
       )
-      .demandCommand(1, 'You must specify a subcommand (add or remove)')
+      .command(
+        'serve',
+        'Run the Amplitude wizard MCP server on stdio (for AI coding agents)',
+        () => {},
+        () => {
+          void (async () => {
+            try {
+              const { startAgentMcpServer } = await import(
+                './src/lib/wizard-mcp-server.js'
+              );
+              await startAgentMcpServer();
+            } catch (err) {
+              const msg = err instanceof Error ? err.message : String(err);
+              process.stderr.write(
+                `amplitude-wizard mcp serve: failed to start: ${msg}\n`,
+              );
+              process.exit(1);
+            }
+          })();
+        },
+      )
+      .demandCommand(1, 'You must specify a subcommand (add, remove, or serve)')
       .help();
   })
   .command(
