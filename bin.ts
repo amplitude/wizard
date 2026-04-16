@@ -187,7 +187,7 @@ const resolveNonInteractiveCredentials = async (
       const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
       const { getAPIKey } = await import('./src/utils/get-api-key.js');
 
-      const zone = (session.region ?? 'us') as 'us' | 'eu';
+      const zone = session.region ?? 'us';
       const result = await performHeadlessSignup({ email, fullName, zone });
 
       if (result.type === 'oauth') {
