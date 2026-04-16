@@ -785,24 +785,26 @@ describe('--email and --full-name flags', () => {
       .spyOn(process.stderr, 'write')
       .mockImplementation(() => true);
 
-    await runCLI([
-      '--signup',
-      '--ci',
-      '--email',
-      'ada',
-      '--full-name',
-      'Ada Lovelace',
-      '--install-dir',
-      '/tmp/test',
-    ]);
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada',
+        '--full-name',
+        'Ada Lovelace',
+        '--install-dir',
+        '/tmp/test',
+      ]);
 
-    // Give any async handlers time to fire
-    await new Promise((r) => setTimeout(r, 50));
-
-    stderrSpy.mockRestore();
+      // Give any async handlers time to fire
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      stderrSpy.mockRestore();
+    }
 
     // The key invariant: a malformed email must NOT reach runWizard.
-    // yargs' coerce failure fires its fail handler and skips the command handler.
+    // yargs' coerce failure prevents the command handler from running.
     expect(mockRunWizard).not.toHaveBeenCalled();
   });
 
