@@ -38,6 +38,18 @@ export async function resolveCredentials(
     /** Environment name filter (from --env flag). Case-insensitive match. */
     env?: string;
     /**
+     * Workspace ID filter (from --workspace-id flag). Matches workspace.id
+     * exactly. Lets agents disambiguate when multiple workspaces have
+     * environments with the same name.
+     */
+    workspaceId?: string;
+    /**
+     * Numeric project ID filter (from --project-id flag). Matches
+     * environment.app.id exactly. This is the most unambiguous selector
+     * — one project ID maps to exactly one (org, workspace, env) triple.
+     */
+    projectId?: string;
+    /**
      * Optional OAuth access token (from AMPLITUDE_TOKEN env var).
      * When provided and a stored session exists, replaces the stored
      * access token. Does NOT bypass the stored idToken/refreshToken —
@@ -187,19 +199,43 @@ export async function resolveCredentials(
             }
           }
 
-          // If --env flag was provided, try to match across all orgs/workspaces
-          if (options?.env) {
-            const envMatch = options.env.toLowerCase();
-            const orgFilter = options.org?.toLowerCase();
+          // Try to match across all orgs/workspaces using any combination of
+          // --project-id, --workspace-id, --env, and --org filters. All
+          // provided filters must match; the most-specific reaches credentials
+          // first.
+          //
+          //   --project-id <numeric>  → matches env.app.id exactly (unique)
+          //   --workspace-id <uuid>   → narrows to one workspace
+          //   --env <name>            → environment name (case-insensitive)
+          //   --org <name>            → case-insensitive partial match
+          const hasFilter = Boolean(
+            options?.env ||
+              options?.projectId ||
+              options?.workspaceId ||
+              options?.org,
+          );
+          if (hasFilter) {
+            const envMatch = options?.env?.toLowerCase();
+            const orgFilter = options?.org?.toLowerCase();
+            const workspaceIdFilter = options?.workspaceId;
+            const projectIdFilter = options?.projectId;
 
             for (const org of userInfo.orgs) {
               if (orgFilter && !org.name.toLowerCase().includes(orgFilter)) {
                 continue;
               }
               for (const ws of org.workspaces) {
-                const matchedEnv = (ws.environments ?? []).find(
-                  (e) => e.app?.apiKey && e.name.toLowerCase() === envMatch,
-                );
+                if (workspaceIdFilter && ws.id !== workspaceIdFilter) {
+                  continue;
+                }
+                const matchedEnv = (ws.environments ?? []).find((e) => {
+                  if (!e.app?.apiKey) return false;
+                  if (projectIdFilter && e.app.id !== projectIdFilter)
+                    return false;
+                  if (envMatch && e.name.toLowerCase() !== envMatch)
+                    return false;
+                  return true;
+                });
                 if (matchedEnv?.app?.apiKey) {
                   const apiKey = matchedEnv.app.apiKey;
                   session.selectedOrgId = org.id;
@@ -211,7 +247,7 @@ export async function resolveCredentials(
                     session.userEmail = userInfo.email;
                   }
                   logToFile(
-                    `[credential-resolution] --env matched: ${org.name} / ${ws.name} / ${matchedEnv.name}`,
+                    `[credential-resolution] filter matched: ${org.name} / ${ws.name} / ${matchedEnv.name} (project-id=${matchedEnv.app.id})`,
                   );
                   persistApiKey(apiKey, installDir);
                   session.credentials = {
@@ -231,7 +267,11 @@ export async function resolveCredentials(
 
             if (!session.credentials) {
               logToFile(
-                `[credential-resolution] --env "${options.env}" did not match any environment`,
+                `[credential-resolution] filters did not match any env: project-id=${
+                  projectIdFilter ?? '(none)'
+                }, workspace-id=${workspaceIdFilter ?? '(none)'}, env=${
+                  options?.env ?? '(none)'
+                }, org=${options?.org ?? '(none)'}`,
               );
             }
           } else if (envsWithKey.length === 1) {

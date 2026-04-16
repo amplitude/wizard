@@ -381,7 +381,8 @@ export class AgentUI implements WizardUI {
       }>;
     }>,
   ): Promise<{ orgId: string; workspaceId: string; env: string }> {
-    // Build a sanitized view (no API keys exposed)
+    // Build a sanitized, tree view of orgs -> workspaces -> environments.
+    // API keys are never emitted (they'd leak on stdout to the orchestrator).
     const sanitizedOrgs = orgs.map((org) => ({
       id: org.id,
       name: org.name,
@@ -391,16 +392,70 @@ export class AgentUI implements WizardUI {
         environments: (ws.environments ?? [])
           .filter((e) => e.app?.apiKey)
           .sort((a, b) => a.rank - b.rank)
-          .map((e) => ({ name: e.name, rank: e.rank })),
+          .map((e) => ({
+            name: e.name,
+            rank: e.rank,
+            projectId: e.app?.id ?? null,
+            hasApiKey: Boolean(e.app?.apiKey),
+          })),
       })),
     }));
 
-    emit('prompt', 'Select an environment', {
-      data: {
-        promptType: 'environment_selection',
-        orgs: sanitizedOrgs,
+    // Also emit a flat list of every selectable env so agents can pick
+    // without traversing the tree. Each entry is unique by
+    // (orgId, workspaceId, envName) and carries the numeric projectId
+    // that callers can pass as --project-id for unambiguous selection.
+    const choices = orgs.flatMap((org) =>
+      org.workspaces.flatMap((ws) =>
+        (ws.environments ?? [])
+          .filter((e) => e.app?.apiKey)
+          .sort((a, b) => a.rank - b.rank)
+          .map((e) => ({
+            orgId: org.id,
+            orgName: org.name,
+            workspaceId: ws.id,
+            workspaceName: ws.name,
+            projectId: e.app?.id ?? null,
+            envName: e.name,
+            rank: e.rank,
+            label: `${org.name} / ${ws.name} / ${e.name}`,
+          })),
+      ),
+    );
+
+    emit(
+      'prompt',
+      `Multiple Amplitude environments available — select one of ${choices.length}.`,
+      {
+        data: {
+          promptType: 'environment_selection',
+          // Amplitude hierarchy: Org > Workspace > Project(App) > Environment
+          // The "workspace" in our API == "Project" in the Amplitude UI.
+          // Each environment belongs to a single project (app) and carries
+          // its own ingestion API key.
+          hierarchy: ['org', 'workspace', 'environment'],
+          choices,
+          orgs: sanitizedOrgs,
+          // Agents should reply on stdin with one JSON line matching this shape:
+          responseSchema: {
+            orgId: 'string (required, from choices[].orgId)',
+            workspaceId: 'string (required, from choices[].workspaceId)',
+            env: 'string (required, from choices[].envName)',
+          },
+          // Or re-invoke with CLI flags. Prefer --project-id for unambiguous
+          // selection when env names collide across workspaces.
+          resumeFlags: choices.map((c) => ({
+            label: c.label,
+            flags: [
+              '--project-id',
+              String(c.projectId ?? ''),
+              '--env',
+              c.envName,
+            ],
+          })),
+        },
       },
-    });
+    );
 
     // Read one line from stdin
     try {

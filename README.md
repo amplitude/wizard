@@ -118,7 +118,7 @@ npx @amplitude/wizard auth token            # stdout: <access-token>
 
 | Command | Output | Purpose |
 |---------|--------|---------|
-| `manifest` | JSON | Machine-readable CLI surface (flags, env vars, exit codes) |
+| `manifest` | JSON | Machine-readable CLI surface (flags, env vars, exit codes, glossary) |
 | `detect [--json]` | JSON or human | Detect the framework |
 | `status [--json]` | JSON or human | Full project state: framework, SDK, API key, auth |
 | `auth status [--json]` | JSON or human | Login state + token expiry |
@@ -128,6 +128,25 @@ All commands auto-emit JSON when stdout is piped. Use `--human` to override
 and force human-readable output. `--json` enables JSON output without the
 auto-approve side effects of `--agent` (so you can script but still get
 prompted for confirmation when needed).
+
+**Selecting an Amplitude project.** Amplitude's hierarchy is
+Org → Workspace → Project → Environment. When multiple match, pick one
+with a flag — `--project-id` is unambiguous; the others narrow when
+needed:
+
+| Flag | When to use |
+|------|-------------|
+| `--project-id <id>` | Numeric project ID (e.g. `769610`). Most unambiguous selector. |
+| `--workspace-id <uuid>` | Narrow to one workspace when env names collide. |
+| `--org <name>` | Case-insensitive partial match on org name. |
+| `--env <name>` | Amplitude environment (e.g. `Production`). NOT a POSIX env var. |
+
+When running `--agent` without a selector and the user has multiple
+projects, the wizard emits a `prompt` event with `promptType:
+"environment_selection"` carrying a flat `choices` array plus pre-built
+`resumeFlags` so the orchestrator can show the human a picker and
+re-invoke with the chosen flags. Run `amplitude-wizard manifest` for the
+full glossary.
 
 **Environment variables:**
 
