@@ -219,9 +219,7 @@ export const SlackScreen = ({
                 </Text>
                 <Text color={Colors.muted}>
                   Docs:{' '}
-                  <TerminalLink url="https://amplitude.com/docs/analytics/integrate-slack">
-                    amplitude.com/docs/analytics/integrate-slack
-                  </TerminalLink>
+                  <TerminalLink url="https://amplitude.com/docs/analytics/integrate-slack" />
                 </Text>
               </>
             ) : (
@@ -236,9 +234,7 @@ export const SlackScreen = ({
                 </Text>
                 <Text color={Colors.muted}>
                   Docs:{' '}
-                  <TerminalLink url="https://amplitude.com/docs/analytics/integrate-slack">
-                    amplitude.com/docs/analytics/integrate-slack
-                  </TerminalLink>
+                  <TerminalLink url="https://amplitude.com/docs/analytics/integrate-slack" />
                 </Text>
               </>
             )}
