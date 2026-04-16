@@ -7,7 +7,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
@@ -27,11 +27,14 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
 
   const [lines, setLines] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
+  const prevRawRef = useRef<string>('');
 
   useEffect(() => {
     const updateContent = () => {
       try {
         const raw = fs.readFileSync(filePath, 'utf-8');
+        if (raw === prevRawRef.current) return; // skip redundant re-renders
+        prevRawRef.current = raw;
         const rendered = renderMarkdown(raw);
         setLines(rendered.split('\n'));
       } catch {
