@@ -100,6 +100,19 @@ export function isFlagEnabled(flagKey: string): boolean {
 }
 
 /**
+ * Initialize feature flags (if needed) and compute whether headless
+ * signup is eligible for the given session.  Mutates `session` in place.
+ */
+export async function resolveHeadlessSignupFlag(session: {
+  signup: boolean;
+  _headlessSignupEnabled: boolean;
+}): Promise<void> {
+  await initFeatureFlags().catch(() => {});
+  session._headlessSignupEnabled =
+    session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+}
+
+/**
  * Return a snapshot of all evaluated flags (key -> string value).
  */
 export function getAllFlags(): Record<string, string> {

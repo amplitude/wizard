@@ -128,6 +128,7 @@ vi.mock('../lib/feature-flags', () => ({
   isFlagEnabled: vi.fn().mockReturnValue(true),
   getFlag: vi.fn().mockReturnValue(undefined),
   getAllFlags: vi.fn().mockReturnValue({}),
+  resolveHeadlessSignupFlag: vi.fn().mockResolvedValue(undefined),
   FLAG_LLM_ANALYTICS: 'wizard-llm-analytics',
   FLAG_AGENT_ANALYTICS: 'wizard-agent-analytics',
   FLAG_HEADLESS_SIGNUP: 'wizard-headless-signup',

@@ -22,6 +22,13 @@ import type { AmplitudeUserInfo } from '../lib/api.js';
 import { type OAuthTokenResponse, exchangeCodeForToken } from './oauth.js';
 import { logToFile } from './debug.js';
 
+// ── Helpers ─────────────────────────────────────────────────────────
+
+/** Mask an email for safe logging: `mi***@example.com` */
+export function maskEmail(email: string): string {
+  return email.replace(/(.{2}).*@/, '$1***@');
+}
+
 // ── Endpoint URL ────────────────────────────────────────────────────
 
 const HEADLESS_PROVISIONING_PATH =
@@ -93,7 +100,7 @@ export async function performHeadlessSignup(options: {
   const url = headlessSignupUrl(zone);
   logToFile('[headless-signup] calling provisioning endpoint', {
     url,
-    email: email.replace(/(.{2}).*@/, '$1***@'),
+    email: maskEmail(email),
     zone,
   });
 

@@ -181,7 +181,7 @@ const resolveNonInteractiveCredentials = async (
     const email = session.signupEmail;
     const fullName = session.signupFullName;
     if (email && fullName) {
-      const { performHeadlessSignup, completeSignupTokenExchange } =
+      const { performHeadlessSignup, completeSignupTokenExchange, maskEmail } =
         await import('./src/utils/headless-signup.js');
       const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
       const { getAPIKey } = await import('./src/utils/get-api-key.js');
@@ -260,12 +260,7 @@ const resolveNonInteractiveCredentials = async (
             }
           }
 
-          getUI().log.info(
-            `Signup complete for ${userInfo.email.replace(
-              /(.{2}).*@/,
-              '$1***@',
-            )}`,
-          );
+          getUI().log.info(`Signup complete for ${maskEmail(userInfo.email)}`);
         }
       } else if (result.type === 'requires_auth') {
         getUI().log.error(
@@ -486,11 +481,10 @@ void yargs(hideBin(process.argv))
           session.agent = true;
 
           // Initialize feature flags so --signup eligibility can be computed
-          const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
-            await import('./src/lib/feature-flags.js');
-          await initFeatureFlags().catch(() => {});
-          session._headlessSignupEnabled =
-            session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+          const { resolveHeadlessSignupFlag } = await import(
+            './src/lib/feature-flags.js'
+          );
+          await resolveHeadlessSignupFlag(session);
 
           await resolveNonInteractiveCredentials(
             session,
@@ -512,11 +506,10 @@ void yargs(hideBin(process.argv))
           const session = await buildSessionFromOptions(options, { ci: true });
 
           // Initialize feature flags so --signup eligibility can be computed
-          const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
-            await import('./src/lib/feature-flags.js');
-          await initFeatureFlags().catch(() => {});
-          session._headlessSignupEnabled =
-            session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+          const { resolveHeadlessSignupFlag } = await import(
+            './src/lib/feature-flags.js'
+          );
+          await resolveHeadlessSignupFlag(session);
 
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
@@ -731,14 +724,11 @@ void yargs(hideBin(process.argv))
             const { analytics } = await import('./src/utils/analytics.js');
             analytics.applyOptOut();
 
-            // Compute --signup eligibility (requires both --signup AND feature flag)
-            {
-              const { isFlagEnabled, FLAG_HEADLESS_SIGNUP } = await import(
-                './src/lib/feature-flags.js'
-              );
-              session._headlessSignupEnabled =
-                session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
-            }
+            // Compute --signup eligibility (flags already initialized above)
+            const { resolveHeadlessSignupFlag } = await import(
+              './src/lib/feature-flags.js'
+            );
+            await resolveHeadlessSignupFlag(session);
 
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
