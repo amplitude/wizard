@@ -40,7 +40,11 @@ export const CliArgsSchema = z.object({
   menu: z.boolean().default(false),
   benchmark: z.boolean().default(false),
   apiKey: z.string().optional(),
-  email: z.string().email().optional(),
+  // Don't validate email shape here — a bad email would fail the whole
+  // CliArgsSchema.safeParse and send every field to the raw-args fallback,
+  // silently losing defaults and transforms (notably projectId string→number).
+  // performHeadlessSignup / HeadlessSignupScreen validate email shape downstream.
+  email: z.string().optional(),
   fullName: z.string().optional(),
   integration: z.string().optional(),
 });
