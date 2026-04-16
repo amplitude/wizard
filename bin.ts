@@ -540,6 +540,41 @@ void yargs(hideBin(process.argv))
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
+
+          // Try direct signup before falling through to standard credential resolution.
+          // When --signup is off, flag is off, or email/fullName are missing, this
+          // branch is a no-op (performSignupOrAuth short-circuits internally).
+          // On success, performSignupOrAuth writes the real StoredUser + tokens to
+          // ~/.ampli.json via fetchAmplitudeUser, so resolveNonInteractiveCredentials
+          // below will populate session.credentials (including projectApiKey) via the
+          // standard resolveCredentials pipeline — no manual session.credentials
+          // wiring needed here.
+          if (session.signup && session.signupEmail && session.signupFullName) {
+            const { performSignupOrAuth } = await import(
+              './src/utils/signup-or-auth.js'
+            );
+            const { DEFAULT_AMPLITUDE_ZONE } = await import(
+              './src/lib/constants.js'
+            );
+            const zone = (session.region ?? DEFAULT_AMPLITUDE_ZONE) as
+              | 'us'
+              | 'eu';
+            try {
+              await performSignupOrAuth({
+                signup: true,
+                email: session.signupEmail,
+                fullName: session.signupFullName,
+                zone,
+              });
+            } catch (err) {
+              getUI().log.warn(
+                `Direct signup failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }. Falling back to existing credential resolution.`,
+              );
+            }
+          }
+
           await resolveNonInteractiveCredentials(
             session,
             options,
