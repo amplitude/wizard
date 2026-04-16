@@ -779,6 +779,33 @@ describe('--email and --full-name flags', () => {
     process.exit = originalExit;
   });
 
+  test('errors when --email is malformed', async () => {
+    // Silence yargs error output for this test
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI([
+      '--signup',
+      '--ci',
+      '--email',
+      'ada',
+      '--full-name',
+      'Ada Lovelace',
+      '--install-dir',
+      '/tmp/test',
+    ]);
+
+    // Give any async handlers time to fire
+    await new Promise((r) => setTimeout(r, 50));
+
+    stderrSpy.mockRestore();
+
+    // The key invariant: a malformed email must NOT reach runWizard.
+    // yargs' coerce failure fires its fail handler and skips the command handler.
+    expect(mockRunWizard).not.toHaveBeenCalled();
+  });
+
   test('accepts --email and --full-name on the default command', async () => {
     await runCLI([
       '--signup',
