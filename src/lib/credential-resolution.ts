@@ -37,6 +37,14 @@ export async function resolveCredentials(
     org?: string;
     /** Environment name filter (from --env flag). Case-insensitive match. */
     env?: string;
+    /**
+     * Optional OAuth access token (from AMPLITUDE_TOKEN env var).
+     * When provided and a stored session exists, replaces the stored
+     * access token. Does NOT bypass the stored idToken/refreshToken —
+     * a prior login is still required for agent mode to fetch project
+     * API keys.
+     */
+    accessTokenOverride?: string;
   },
 ): Promise<void> {
   // Already have credentials (e.g. from --api-key flag)
@@ -91,6 +99,13 @@ export async function resolveCredentials(
       : getStoredToken(undefined, zone);
 
     if (storedToken) {
+      // Apply env-var access token override (AMPLITUDE_TOKEN), if any.
+      // Only overrides the access token; idToken/refreshToken stay from
+      // storage because fetchAmplitudeUser needs a valid idToken.
+      if (options?.accessTokenOverride) {
+        storedToken.accessToken = options.accessTokenOverride;
+      }
+
       // Silent token refresh
       const { tryRefreshToken } = await import('../utils/token-refresh.js');
       const expiresAtMs = new Date(storedToken.expiresAt).getTime();

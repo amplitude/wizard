@@ -110,7 +110,17 @@ const resolveNonInteractiveCredentials = async (
   mode: 'agent' | 'ci',
   agentUI?: import('./src/ui/agent-ui').AgentUI,
 ) => {
-  // If --api-key was provided, skip OAuth entirely
+  // Fast path: --api-key / AMPLITUDE_WIZARD_API_KEY provided. This is a real
+  // project API key, safe to embed into generated client-side code (it ends
+  // up in amplitude.init('${projectApiKey}') calls).
+  //
+  // AMPLITUDE_TOKEN / AMPLITUDE_WIZARD_TOKEN is an OAuth *access token*, NOT a
+  // project API key. It must never be used as projectApiKey — doing so would
+  // (a) leak an OAuth secret into client bundles and (b) break SDK init since
+  // it isn't a valid ingestion key. OAuth tokens fall through to
+  // resolveCredentials below, which reads the full stored session from
+  // ~/.ampli.json (idToken, refreshToken) and fetches the real project API
+  // key from the Amplitude API.
   if (session.apiKey) {
     const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
     session.credentials = {
@@ -123,7 +133,13 @@ const resolveNonInteractiveCredentials = async (
     return;
   }
 
-  // Resolve credentials from stored OAuth tokens
+  // Resolve credentials from stored OAuth tokens. AMPLITUDE_TOKEN /
+  // AMPLITUDE_WIZARD_TOKEN (if set) overrides the stored access token so
+  // an automation can inject a fresh one — but a prior `amplitude-wizard
+  // login` is still required because we need the stored idToken to fetch
+  // the project API key.
+  const envAccessToken =
+    process.env.AMPLITUDE_TOKEN ?? process.env.AMPLITUDE_WIZARD_TOKEN;
   const { resolveCredentials, resolveEnvironmentSelection } = await import(
     './src/lib/credential-resolution.js'
   );
@@ -131,6 +147,7 @@ const resolveNonInteractiveCredentials = async (
     requireOrgId: false,
     org: options.org as string | undefined,
     env: options.env as string | undefined,
+    accessTokenOverride: envAccessToken,
   });
 
   // Handle multiple environments
@@ -342,6 +359,16 @@ void yargs(hideBin(process.argv))
     env: {
       describe: 'environment name, e.g. "Production"',
       type: 'string',
+    },
+    json: {
+      default: false,
+      describe: 'emit machine-readable JSON output (implied when piped)',
+      type: 'boolean',
+    },
+    human: {
+      default: false,
+      describe: 'force human-readable output (overrides --json auto-detect)',
+      type: 'boolean',
     },
   })
   .command(
@@ -1392,6 +1419,215 @@ void yargs(hideBin(process.argv))
       })();
     },
   )
+  .command(
+    'detect',
+    'Detect the framework in the current project (outputs JSON)',
+    (yargs) => {
+      return yargs.options({
+        'install-dir': {
+          describe: 'project directory to inspect',
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        const installDir = argv['install-dir'] ?? process.cwd();
+        const { resolveMode } = await import('./src/lib/mode-config.js');
+        const { jsonOutput } = resolveMode({
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+          isTTY: Boolean(process.stdout.isTTY),
+        });
+        try {
+          const { runDetect } = await import('./src/lib/agent-ops.js');
+          const result = await runDetect(installDir);
+
+          if (jsonOutput) {
+            process.stdout.write(JSON.stringify(result) + '\n');
+          } else if (result.integration) {
+            console.log(
+              `${chalk.green('✔')} Detected ${chalk.bold(
+                result.frameworkName ?? result.integration,
+              )} (${result.integration})`,
+            );
+          } else {
+            console.log(
+              chalk.dim(
+                'No framework detected. Run `amplitude-wizard --menu` to pick one manually.',
+              ),
+            );
+          }
+          process.exit(result.integration ? 0 : 1);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          if (jsonOutput) {
+            process.stdout.write(JSON.stringify({ error: message }) + '\n');
+          } else {
+            console.error(chalk.red(`Detection failed: ${message}`));
+          }
+          process.exit(ExitCode.GENERAL_ERROR);
+        }
+      })();
+    },
+  )
+  .command(
+    'status',
+    'Show project setup state: framework, SDK, API key, auth (JSON-friendly)',
+    (yargs) => {
+      return yargs.options({
+        'install-dir': {
+          describe: 'project directory to inspect',
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        const installDir = argv['install-dir'] ?? process.cwd();
+        const { resolveMode } = await import('./src/lib/mode-config.js');
+        const { jsonOutput } = resolveMode({
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+          isTTY: Boolean(process.stdout.isTTY),
+        });
+        try {
+          const { runStatus } = await import('./src/lib/agent-ops.js');
+          const result = await runStatus(installDir);
+
+          if (jsonOutput) {
+            process.stdout.write(JSON.stringify(result) + '\n');
+          } else {
+            const check = (v: boolean) =>
+              v ? chalk.green('✔') : chalk.dim('·');
+            console.log(
+              `${check(result.framework.integration !== null)} Framework: ${
+                result.framework.name ?? chalk.dim('none detected')
+              }`,
+            );
+            console.log(
+              `${check(
+                result.amplitudeInstalled.confidence !== 'none',
+              )} Amplitude SDK: ${
+                result.amplitudeInstalled.reason ?? chalk.dim('not installed')
+              }`,
+            );
+            console.log(
+              `${check(result.apiKey.configured)} API key: ${
+                result.apiKey.configured
+                  ? `stored in ${result.apiKey.source}`
+                  : chalk.dim('not set')
+              }`,
+            );
+            console.log(
+              `${check(result.auth.loggedIn)} Logged in: ${
+                result.auth.loggedIn
+                  ? `${result.auth.email} (${result.auth.zone})`
+                  : chalk.dim('run `amplitude-wizard login`')
+              }`,
+            );
+          }
+          process.exit(0);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          if (jsonOutput) {
+            process.stdout.write(JSON.stringify({ error: message }) + '\n');
+          } else {
+            console.error(chalk.red(`Status failed: ${message}`));
+          }
+          process.exit(ExitCode.GENERAL_ERROR);
+        }
+      })();
+    },
+  )
+  .command('auth <command>', 'Manage authentication', (yargs) => {
+    return yargs
+      .command(
+        'status',
+        'Show current login state (JSON-friendly)',
+        () => {},
+        (argv) => {
+          void (async () => {
+            const { getAuthStatus } = await import('./src/lib/agent-ops.js');
+            const { resolveMode } = await import('./src/lib/mode-config.js');
+            const { jsonOutput } = resolveMode({
+              json: argv.json as boolean | undefined,
+              human: argv.human as boolean | undefined,
+              isTTY: Boolean(process.stdout.isTTY),
+            });
+            const result = getAuthStatus();
+
+            if (jsonOutput) {
+              process.stdout.write(JSON.stringify(result) + '\n');
+            } else if (result.loggedIn && result.user) {
+              console.log(
+                `${chalk.green('✔')} Logged in as ${chalk.bold(
+                  `${result.user.firstName} ${result.user.lastName}`,
+                )} <${result.user.email}>`,
+              );
+              console.log(chalk.dim(`  Zone: ${result.user.zone}`));
+              if (result.tokenExpiresAt) {
+                console.log(
+                  chalk.dim(`  Token expires: ${result.tokenExpiresAt}`),
+                );
+              }
+            } else {
+              console.log(
+                chalk.yellow(
+                  'Not logged in. Run `amplitude-wizard login` to authenticate.',
+                ),
+              );
+            }
+            process.exit(result.loggedIn ? 0 : ExitCode.AUTH_REQUIRED);
+          })();
+        },
+      )
+      .command(
+        'token',
+        'Print the stored OAuth access token to stdout',
+        () => {},
+        (argv) => {
+          void (async () => {
+            const { getAuthToken } = await import('./src/lib/agent-ops.js');
+            const { resolveMode } = await import('./src/lib/mode-config.js');
+            const { jsonOutput } = resolveMode({
+              json: argv.json as boolean | undefined,
+              human: argv.human as boolean | undefined,
+              isTTY: Boolean(process.stdout.isTTY),
+            });
+            const result = getAuthToken();
+
+            if (!result.token) {
+              if (jsonOutput) {
+                process.stdout.write(
+                  JSON.stringify({
+                    error: 'not logged in',
+                    code: 'AUTH_REQUIRED',
+                  }) + '\n',
+                );
+              } else {
+                console.error(
+                  chalk.red(
+                    'Not logged in. Run `amplitude-wizard login` first.',
+                  ),
+                );
+              }
+              process.exit(ExitCode.AUTH_REQUIRED);
+            }
+
+            if (jsonOutput) {
+              process.stdout.write(JSON.stringify(result) + '\n');
+            } else {
+              // Raw token on stdout so `$(amplitude-wizard auth token)` works
+              process.stdout.write(result.token + '\n');
+            }
+            process.exit(0);
+          })();
+        },
+      )
+      .demandCommand(1, 'You must specify a subcommand (status or token)')
+      .help();
+  })
   .command('mcp <command>', 'Manage the Amplitude MCP server', (yargs) => {
     return yargs
       .command(
@@ -1491,14 +1727,45 @@ void yargs(hideBin(process.argv))
       process.exit(0);
     },
   )
+  .command(
+    'manifest',
+    'Print a machine-readable description of the CLI (for AI agents)',
+    () => {},
+    () => {
+      void (async () => {
+        const { getAgentManifest } = await import(
+          './src/lib/agent-manifest.js'
+        );
+        process.stdout.write(
+          JSON.stringify(getAgentManifest(), null, 2) + '\n',
+        );
+        process.exit(0);
+      })();
+    },
+  )
   .example('$0', 'Run the interactive setup wizard')
   .example('$0 --ci --api-key <key> --install-dir .', 'Run in CI mode')
   .example(
     '$0 --agent --install-dir .',
-    'Run with structured JSON output for automation',
+    'Run with structured NDJSON output for automation',
   )
+  .example('$0 detect --json', 'Detect the framework; output JSON')
+  .example('$0 status --json', 'Report project setup state as JSON')
+  .example('$0 auth token', 'Print the stored OAuth token (for scripts/agents)')
+  .example('$0 manifest', 'Dump the machine-readable CLI manifest as JSON')
   .epilogue(
-    'Docs: https://github.com/amplitude/wizard\nFeedback: amplitude-wizard feedback',
+    [
+      'Environment variables:',
+      '  AMPLITUDE_WIZARD_API_KEY     Amplitude project API key (alias of --api-key)',
+      '  AMPLITUDE_TOKEN              OAuth access-token override (requires prior login)',
+      '  AMPLITUDE_WIZARD_TOKEN       Alias for AMPLITUDE_TOKEN',
+      '  AMPLITUDE_WIZARD_AGENT=1     Force agent mode (NDJSON output, auto-approve)',
+      '  AMPLITUDE_WIZARD_DEBUG=1     Enable debug logging',
+      '  AMPLITUDE_WIZARD_LOG=<path>  Write logs to this file',
+      '',
+      'Docs:      https://github.com/amplitude/wizard',
+      'Feedback:  amplitude-wizard feedback',
+    ].join('\n'),
   )
   .recommendCommands()
   .help()
