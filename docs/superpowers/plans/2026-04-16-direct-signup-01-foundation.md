@@ -340,7 +340,7 @@ export async function performDirectSignup(
 ): Promise<DirectSignupResult> {
   const { oAuthHost } = AMPLITUDE_ZONE_SETTINGS[input.zone];
   const url = `${oAuthHost}/signup`;
-  logToFile('[direct-signup] POST', { url, email: input.email });
+  logToFile('[direct-signup] POST', { url, zone: input.zone });
 
   try {
     const response = await axios.post(

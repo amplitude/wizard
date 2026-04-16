@@ -808,6 +808,35 @@ describe('--email and --full-name flags', () => {
     expect(mockRunWizard).not.toHaveBeenCalled();
   });
 
+  test('errors when --full-name is empty', async () => {
+    // Silence yargs error output for this test
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada@example.com',
+        '--full-name',
+        '',
+        '--install-dir',
+        '/tmp/test',
+      ]);
+
+      // Give any async handlers time to fire
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    // The key invariant: an empty full-name must NOT reach runWizard.
+    // yargs' coerce failure prevents the command handler from running.
+    expect(mockRunWizard).not.toHaveBeenCalled();
+  });
+
   test('accepts --email and --full-name on the default command', async () => {
     await runCLI([
       '--signup',
