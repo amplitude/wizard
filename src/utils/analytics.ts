@@ -111,24 +111,41 @@ export class Analytics {
     if (properties.email) {
       identifyObj.setOnce('email', properties.email);
     }
-    if (properties.org_id) identifyObj.set('org_id', properties.org_id);
-    if (properties.org_name) identifyObj.set('org_name', properties.org_name);
+    if (properties.org_id) identifyObj.set('org id', properties.org_id);
+    if (properties.org_name) identifyObj.set('org name', properties.org_name);
     if (properties.workspace_id)
-      identifyObj.set('workspace_id', properties.workspace_id);
+      identifyObj.set('workspace id', properties.workspace_id);
     if (properties.workspace_name)
-      identifyObj.set('workspace_name', properties.workspace_name);
+      identifyObj.set('workspace name', properties.workspace_name);
     if (properties.project_id != null)
-      identifyObj.set('project_id', String(properties.project_id));
+      identifyObj.set('project id', String(properties.project_id));
     if (properties.project_name)
-      identifyObj.set('project_name', properties.project_name);
+      identifyObj.set('project name', properties.project_name);
     if (properties.region) identifyObj.set('region', properties.region);
     if (properties.integration)
       identifyObj.set('integration', properties.integration);
 
-    this.client.identify(identifyObj, {
+    const eventOptions = {
       device_id: this.anonymousId,
       user_id: this.distinctId,
-    });
+    };
+
+    this.client.identify(identifyObj, eventOptions);
+
+    // Associate org-level group (matches main product convention)
+    if (properties.org_id) {
+      this.client.setGroup('org id', properties.org_id, eventOptions);
+
+      const groupProps = new Identify();
+      if (properties.org_name) groupProps.set('org name', properties.org_name);
+      this.client.groupIdentify(
+        'org id',
+        properties.org_id,
+        groupProps,
+        eventOptions,
+      );
+    }
+
     debug('identifyUser:', properties);
   }
 

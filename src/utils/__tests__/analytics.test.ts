@@ -5,6 +5,8 @@ const { mockCreateInstance, MockIdentify } = vi.hoisted(() => {
     init: vi.fn(() => ({ promise: Promise.resolve() })),
     track: vi.fn(),
     identify: vi.fn(),
+    setGroup: vi.fn(),
+    groupIdentify: vi.fn(),
     flush: vi.fn(() => ({ promise: Promise.resolve() })),
     setOptOut: vi.fn(),
   }));
@@ -132,9 +134,21 @@ describe('Analytics', () => {
         'email',
         'ada@example.com',
       );
-      expect(identifyObj.set).toHaveBeenCalledWith('org_id', 'org-1');
-      expect(identifyObj.set).toHaveBeenCalledWith('org_name', 'Acme');
+      expect(identifyObj.set).toHaveBeenCalledWith('org id', 'org-1');
+      expect(identifyObj.set).toHaveBeenCalledWith('org name', 'Acme');
       expect(identifyObj.set).toHaveBeenCalledWith('region', 'us');
+
+      // Verify groupIdentify with org id
+      expect(client.setGroup).toHaveBeenCalledWith(
+        'org id',
+        'org-1',
+        expect.objectContaining({ user_id: 'ada@example.com' }),
+      );
+      expect(client.groupIdentify).toHaveBeenCalledTimes(1);
+      const groupIdentifyArgs = client.groupIdentify.mock.calls[0];
+      expect(groupIdentifyArgs[0]).toBe('org id');
+      expect(groupIdentifyArgs[1]).toBe('org-1');
+      expect(groupIdentifyArgs[2].set).toHaveBeenCalledWith('org name', 'Acme');
 
       // Verify event options tie the identify to the right user + device
       const eventOptions = client.identify.mock.calls[0][1];
@@ -177,7 +191,7 @@ describe('Analytics', () => {
 
       const client = mockCreateInstance.mock.results[0].value;
       const identifyObj = client.identify.mock.calls[0][0];
-      expect(identifyObj.set).toHaveBeenCalledWith('project_id', '42');
+      expect(identifyObj.set).toHaveBeenCalledWith('project id', '42');
     });
 
     it('should skip null/undefined properties', () => {
@@ -195,13 +209,13 @@ describe('Analytics', () => {
         'email',
         'ada@example.com',
       );
-      // org_id, project_id, and region should not have been set
+      // org id, project id, and region should not have been set
       expect(identifyObj.set).not.toHaveBeenCalledWith(
-        'org_id',
+        'org id',
         expect.anything(),
       );
       expect(identifyObj.set).not.toHaveBeenCalledWith(
-        'project_id',
+        'project id',
         expect.anything(),
       );
       expect(identifyObj.set).not.toHaveBeenCalledWith(
