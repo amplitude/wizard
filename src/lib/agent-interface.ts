@@ -1216,10 +1216,11 @@ export async function runAgent(
           prompt: createPromptStream(),
           options: {
             model: agentConfig.model,
-            // Fallback model if primary is unavailable (e.g. Vertex outage)
+            // Fallback model if primary is unavailable (e.g. Vertex outage).
+            // Must be capable enough for code generation — haiku is too weak.
             fallbackModel: agentConfig.useDirectApiKey
-              ? 'claude-haiku-4-5-20251001'
-              : 'anthropic/claude-haiku-4-5-20251001',
+              ? 'claude-sonnet-4-5-20250514'
+              : 'anthropic/claude-sonnet-4-5-20250514',
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
