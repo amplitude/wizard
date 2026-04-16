@@ -41,7 +41,7 @@ export const CliArgsSchema = z.object({
   benchmark: z.boolean().default(false),
   apiKey: z.string().optional(),
   integration: z.string().optional(),
-  signupEmail: z.string().email().nullable().optional().default(null),
+  signupEmail: z.string().nullable().optional().default(null),
   signupFullName: z.string().nullable().optional().default(null),
 });
 
