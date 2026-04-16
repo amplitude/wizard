@@ -137,6 +137,11 @@ export function getAgentManifest(): AgentManifest {
         name: 'AMPLITUDE_WIZARD_LOG',
         describe: 'Path to write logs to',
       },
+      {
+        name: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+        describe:
+          'Set to 1 to skip the nested-invocation diagnostic. The wizard sanitizes inherited Claude env vars either way, so nesting works by default.',
+      },
     ],
     exitCodes: [
       { code: 0, name: 'SUCCESS', describe: 'Completed successfully' },

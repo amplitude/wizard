@@ -54,6 +54,7 @@ import {
 } from './src/utils/shell-completions';
 import { analytics } from './src/utils/analytics';
 import { ExitCode } from './src/lib/exit-codes';
+import { detectNestedAgent } from './src/lib/detect-nested-agent';
 import {
   initLogger,
   initCorrelation,
@@ -324,6 +325,35 @@ const resolveNonInteractiveCredentials = async (
   // Print log file path when debugging (helps users find the log)
   if (isDebug) {
     getUI().log.info(`Log file: ${getLogFilePath()}`);
+  }
+
+  // Detect nested invocation inside another Claude Code / Claude Agent SDK
+  // session. We used to refuse to run because inherited env vars
+  // (CLAUDECODE, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_OAUTH_TOKEN, etc.) leaked
+  // into the Claude Agent SDK subprocess we spawn for the setup agent and
+  // caused the LLM gateway to reject requests. Those vars are now sanitized
+  // in `initializeAgent()` before the SDK boots, so nesting is supported.
+  //
+  // We still detect and surface it as a diagnostic so outer agent
+  // orchestrators (Claude Code) can log the signal, and so humans debugging
+  // auth weirdness have a breadcrumb.
+  const nested = detectNestedAgent();
+  if (nested) {
+    const detail =
+      `Detected nested Claude Code / Claude Agent SDK invocation via ${nested.envVar}=${nested.envValue}. ` +
+      `Inherited Claude env vars will be sanitized before the setup agent spawns.`;
+    if (mode === 'agent') {
+      const { AgentUI } =
+        require('./src/ui/agent-ui.js') as typeof import('./src/ui/agent-ui');
+      new AgentUI().emitNestedAgent({
+        signal: nested.signal,
+        envVar: nested.envVar,
+        instruction: detail,
+        bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+      });
+    } else if (isDebug) {
+      getUI().log.info(detail);
+    }
   }
 }
 

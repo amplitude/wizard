@@ -13,7 +13,10 @@ export default defineConfig({
     },
     alias: {
       '@anthropic-ai/claude-agent-sdk': fileURLToPath(
-        new URL('./__mocks__/@anthropic-ai/claude-agent-sdk.ts', import.meta.url),
+        new URL(
+          './__mocks__/@anthropic-ai/claude-agent-sdk.ts',
+          import.meta.url,
+        ),
       ),
     },
   },
