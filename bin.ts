@@ -110,19 +110,22 @@ const resolveNonInteractiveCredentials = async (
   mode: 'agent' | 'ci',
   agentUI?: import('./src/ui/agent-ui').AgentUI,
 ) => {
-  // If --api-key / AMPLITUDE_TOKEN / AMPLITUDE_WIZARD_TOKEN was provided,
-  // skip OAuth entirely. AMPLITUDE_TOKEN is the short form favored by agent
-  // orchestrators (mirrors the Intercom CLI convention); AMPLITUDE_WIZARD_TOKEN
-  // uses our existing yargs env prefix.
-  const envToken =
-    process.env.AMPLITUDE_TOKEN ?? process.env.AMPLITUDE_WIZARD_TOKEN;
-  const inlineKey = session.apiKey ?? envToken;
-  if (inlineKey) {
+  // Fast path: --api-key / AMPLITUDE_WIZARD_API_KEY provided. This is a real
+  // project API key, safe to embed into generated client-side code (it ends
+  // up in amplitude.init('${projectApiKey}') calls).
+  //
+  // AMPLITUDE_TOKEN / AMPLITUDE_WIZARD_TOKEN is an OAuth *access token*, NOT a
+  // project API key. It must never be used as projectApiKey — doing so would
+  // (a) leak an OAuth secret into client bundles and (b) break SDK init since
+  // it isn't a valid ingestion key. OAuth tokens fall through to
+  // resolveCredentials below, which reads the full stored session from
+  // ~/.ampli.json (idToken, refreshToken) and fetches the real project API
+  // key from the Amplitude API.
+  if (session.apiKey) {
     const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
-    session.apiKey = inlineKey;
     session.credentials = {
-      accessToken: inlineKey,
-      projectApiKey: inlineKey,
+      accessToken: session.apiKey,
+      projectApiKey: session.apiKey,
       host: DEFAULT_HOST_URL,
       projectId: session.projectId ?? 0,
     };
@@ -130,7 +133,13 @@ const resolveNonInteractiveCredentials = async (
     return;
   }
 
-  // Resolve credentials from stored OAuth tokens
+  // Resolve credentials from stored OAuth tokens. AMPLITUDE_TOKEN /
+  // AMPLITUDE_WIZARD_TOKEN (if set) overrides the stored access token so
+  // an automation can inject a fresh one — but a prior `amplitude-wizard
+  // login` is still required because we need the stored idToken to fetch
+  // the project API key.
+  const envAccessToken =
+    process.env.AMPLITUDE_TOKEN ?? process.env.AMPLITUDE_WIZARD_TOKEN;
   const { resolveCredentials, resolveEnvironmentSelection } = await import(
     './src/lib/credential-resolution.js'
   );
@@ -138,6 +147,7 @@ const resolveNonInteractiveCredentials = async (
     requireOrgId: false,
     org: options.org as string | undefined,
     env: options.env as string | undefined,
+    accessTokenOverride: envAccessToken,
   });
 
   // Handle multiple environments
@@ -1746,9 +1756,9 @@ void yargs(hideBin(process.argv))
   .epilogue(
     [
       'Environment variables:',
-      '  AMPLITUDE_TOKEN              OAuth access token (skips interactive login)',
-      '  AMPLITUDE_WIZARD_TOKEN       Alias for AMPLITUDE_TOKEN',
       '  AMPLITUDE_WIZARD_API_KEY     Amplitude project API key (alias of --api-key)',
+      '  AMPLITUDE_TOKEN              OAuth access-token override (requires prior login)',
+      '  AMPLITUDE_WIZARD_TOKEN       Alias for AMPLITUDE_TOKEN',
       '  AMPLITUDE_WIZARD_AGENT=1     Force agent mode (NDJSON output, auto-approve)',
       '  AMPLITUDE_WIZARD_DEBUG=1     Enable debug logging',
       '  AMPLITUDE_WIZARD_LOG=<path>  Write logs to this file',

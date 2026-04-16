@@ -99,13 +99,14 @@ amplitude-wizard --agent             # run the full wizard in NDJSON mode
 the one moment a human has to step in. Everything else is scriptable:
 
 ```bash
-# Option 1: token from env var (preferred for automation)
-AMPLITUDE_TOKEN=<access-token> amplitude-wizard --agent --install-dir .
-
-# Option 2: inline API key
+# Option 1: inline project API key (preferred for CI / full automation)
 amplitude-wizard --agent --install-dir . --api-key <key>
 
-# Option 3: agent reads the token after the human logs in once
+# Option 2: prior login on the same machine, then run
+amplitude-wizard login                 # one-time browser click
+amplitude-wizard --agent --install-dir .
+
+# Option 3: read the stored OAuth token for other scripts
 amplitude-wizard auth token            # stdout: <access-token>
 ```
 
@@ -128,9 +129,9 @@ prompted for confirmation when needed).
 
 | Var | Effect |
 |-----|--------|
-| `AMPLITUDE_TOKEN` | OAuth access token — skips interactive login |
-| `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 | `AMPLITUDE_WIZARD_API_KEY` | Amplitude project API key (= `--api-key`) |
+| `AMPLITUDE_TOKEN` | OAuth access-token override (requires prior login) |
+| `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 | `AMPLITUDE_WIZARD_AGENT=1` | Force agent mode (NDJSON, auto-approve) |
 
 **NDJSON schema.** Every event emitted in `--agent` mode carries a `v:1`
@@ -205,7 +206,7 @@ team sharing). API keys use your OS keychain when available, otherwise
 
 | Env var | Effect |
 |---------|--------|
-| `AMPLITUDE_TOKEN` | OAuth access token — skips interactive login |
+| `AMPLITUDE_TOKEN` | OAuth access-token override (requires prior `amplitude-wizard login`) |
 | `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 
 ### Exit codes

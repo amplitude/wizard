@@ -88,7 +88,8 @@ export function getAgentManifest(): AgentManifest {
     env: [
       {
         name: 'AMPLITUDE_TOKEN',
-        describe: 'OAuth access token (skips interactive login)',
+        describe:
+          'OAuth access-token override (requires prior `amplitude-wizard login`)',
       },
       {
         name: 'AMPLITUDE_WIZARD_TOKEN',
