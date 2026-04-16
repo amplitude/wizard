@@ -27,6 +27,19 @@ export interface CommandEntry {
 export interface AgentManifest {
   schemaVersion: 1;
   bin: string;
+  /** npm package name, for `npx <package>` invocation. */
+  package: string;
+  /**
+   * Ordered list of ways to invoke the CLI. The first entry is the
+   * recommended form — agents should use it unless they know the CLI
+   * is globally installed. Each entry is an argv prefix that precedes
+   * the verb and flags (e.g. `[...invocation, 'detect', '--json']`).
+   */
+  invocations: Array<{
+    argv: string[];
+    describe: string;
+    requiresGlobalInstall: boolean;
+  }>;
   description: string;
   globalFlags: CommandFlag[];
   env: Array<{ name: string; describe: string }>;
@@ -39,6 +52,19 @@ export function getAgentManifest(): AgentManifest {
   return {
     schemaVersion: 1,
     bin: 'amplitude-wizard',
+    package: '@amplitude/wizard',
+    invocations: [
+      {
+        argv: ['npx', '@amplitude/wizard'],
+        describe: 'Works without installation (recommended for agents)',
+        requiresGlobalInstall: false,
+      },
+      {
+        argv: ['amplitude-wizard'],
+        describe: 'Direct bin — requires `npm install -g @amplitude/wizard`',
+        requiresGlobalInstall: true,
+      },
+    ],
     description:
       'Interactive CLI that instruments apps with Amplitude analytics.',
     globalFlags: [
@@ -202,6 +228,12 @@ export function getAgentManifest(): AgentManifest {
         command: 'mcp remove',
         describe: 'Remove the Amplitude MCP server from your editor',
         outputs: 'human',
+      },
+      {
+        command: 'mcp serve',
+        describe:
+          'Run the Amplitude wizard MCP server on stdio (for AI coding agents)',
+        outputs: 'json',
       },
       {
         command: 'manifest',
