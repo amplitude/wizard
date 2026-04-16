@@ -20,7 +20,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // This screen is only rendered when CLI --email/--full-name were NOT provided.
 // When both CLI args are present, the flow's isComplete predicate skips this
-// screen entirely and bin.ts reads from session.email/session.fullName directly.
+// screen entirely and bin.ts reads from session.signupEmail/session.signupFullName directly.
 export const HeadlessSignupScreen = ({ store }: HeadlessSignupScreenProps) => {
   useWizardStore(store);
 

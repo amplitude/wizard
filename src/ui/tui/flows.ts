@@ -89,7 +89,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.HeadlessSignup,
       show: (s) => s._headlessSignupEnabled,
       isComplete: (s) =>
-        s.headlessSignupSubmitted || (!!s.email && !!s.fullName),
+        s.headlessSignupSubmitted || (!!s.signupEmail && !!s.signupFullName),
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.

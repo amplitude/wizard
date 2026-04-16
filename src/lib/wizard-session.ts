@@ -343,9 +343,9 @@ export interface WizardSession {
 
   // Headless signup (--signup + feature flag)
   /** Email provided via CLI (--email) for headless signup. */
-  email?: string;
+  signupEmail?: string;
   /** Full name provided via CLI (--full-name) for headless signup. */
-  fullName?: string;
+  signupFullName?: string;
   /** Email collected in the HeadlessSignupScreen (user input, pre-auth). */
   headlessSignupEmail: string | null;
   /** Full name collected in the HeadlessSignupScreen. */
@@ -460,8 +460,8 @@ export function buildSession(args: {
 
     userEmail: null,
 
-    email: validated.email,
-    fullName: validated.fullName,
+    signupEmail: validated.email,
+    signupFullName: validated.fullName,
     headlessSignupEmail: null,
     headlessSignupFullName: null,
     headlessSignupSubmitted: false,

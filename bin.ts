@@ -178,8 +178,8 @@ const resolveNonInteractiveCredentials = async (
 
   // If we still don't have credentials, try headless signup if eligible
   if (!session.credentials && session._headlessSignupEnabled) {
-    const email = session.email;
-    const fullName = session.fullName;
+    const email = session.signupEmail;
+    const fullName = session.signupFullName;
     if (email && fullName) {
       const { performHeadlessSignup, completeSignupTokenExchange } =
         await import('./src/utils/headless-signup.js');
@@ -906,8 +906,8 @@ void yargs(hideBin(process.argv))
                 if (session._headlessSignupEnabled) {
                   // Resolve email + name: either from CLI args (screen was
                   // skipped) or by waiting for HeadlessSignupScreen input.
-                  let signupEmail = session.email;
-                  let signupFullName = session.fullName;
+                  let signupEmail = session.signupEmail;
+                  let signupFullName = session.signupFullName;
 
                   if (!signupEmail || !signupFullName) {
                     // No CLI args — wait for HeadlessSignupScreen to collect them
