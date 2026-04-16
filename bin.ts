@@ -541,14 +541,12 @@ void yargs(hideBin(process.argv))
           const session = await buildSessionFromOptions(options);
           session.agent = true;
 
-          // Try direct signup before falling through to standard credential resolution.
-          // When --signup is off, flag is off, or email/fullName are missing, this
-          // branch is a no-op (performSignupOrAuth short-circuits internally).
-          // On success, performSignupOrAuth writes the real StoredUser + tokens to
-          // ~/.ampli.json via fetchAmplitudeUser, so resolveNonInteractiveCredentials
-          // below will populate session.credentials (including projectApiKey) via the
-          // standard resolveCredentials pipeline — no manual session.credentials
-          // wiring needed here.
+          // Attempt direct signup before falling through to cached-token resolution.
+          // performSignupOrAuth returns null when the flag is off, when inputs are
+          // missing, or when the server returns a non-success response. We do NOT
+          // attempt OAuth here — agent mode has no browser. On null, we continue to
+          // resolveNonInteractiveCredentials, which handles cached tokens or exits
+          // cleanly with AUTH_REQUIRED.
           if (session.signup && session.signupEmail && session.signupFullName) {
             const { performSignupOrAuth } = await import(
               './src/utils/signup-or-auth.js'
@@ -556,21 +554,23 @@ void yargs(hideBin(process.argv))
             const { DEFAULT_AMPLITUDE_ZONE } = await import(
               './src/lib/constants.js'
             );
-            const zone = (session.region ?? DEFAULT_AMPLITUDE_ZONE) as
-              | 'us'
-              | 'eu';
+            const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
             try {
-              await performSignupOrAuth({
-                signup: true,
+              const tokens = await performSignupOrAuth({
                 email: session.signupEmail,
                 fullName: session.signupFullName,
                 zone,
               });
+              if (tokens === null) {
+                getUI().log.info(
+                  'Direct signup did not produce credentials; continuing to cached-token resolution.',
+                );
+              }
             } catch (err) {
               getUI().log.warn(
-                `Direct signup failed: ${
+                `Direct signup errored: ${
                   err instanceof Error ? err.message : String(err)
-                }. Falling back to existing credential resolution.`,
+                }. Continuing to cached-token resolution.`,
               );
             }
           }

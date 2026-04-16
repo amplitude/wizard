@@ -18,23 +18,17 @@ vi.mock('../utils/ampli-settings.js', () => ({
   storeToken: vi.fn(),
 }));
 
-vi.mock('../utils/oauth.js', () => ({
-  performAmplitudeAuth: vi.fn(async () => ({
-    accessToken: 'oauth-access',
-    idToken: 'oauth-id',
-    refreshToken: 'oauth-refresh',
-    zone: 'us' as const,
-  })),
-}));
-
 describe('agent mode + --signup + direct signup integration', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('on success, direct signup populates a real StoredUser and returns tokens without calling OAuth', async () => {
+  it('on success, direct signup populates a real StoredUser and returns tokens', async () => {
+    const { isFlagEnabled } = await import('../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockImplementation(
+      (key: string) => key === 'wizard-direct-signup',
+    );
     const { performDirectSignup } = await import('../utils/direct-signup.js');
     const { fetchAmplitudeUser } = await import('../lib/api.js');
     const { storeToken } = await import('../utils/ampli-settings.js');
-    const { performAmplitudeAuth } = await import('../utils/oauth.js');
 
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'success',
@@ -65,7 +59,6 @@ describe('agent mode + --signup + direct signup integration', () => {
     });
 
     const result = await performSignupOrAuth({
-      signup: session.signup,
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone: 'us',
@@ -81,42 +74,44 @@ describe('agent mode + --signup + direct signup integration', () => {
       }),
       expect.anything(),
     );
-    expect(performAmplitudeAuth).not.toHaveBeenCalled();
-    expect(result.accessToken).toBe('agent-access');
+    expect(result).not.toBeNull();
+    expect(result!.accessToken).toBe('agent-access');
   });
 
-  it('when --signup is not set, the wrapper short-circuits to OAuth (parity)', async () => {
+  it('when flag is off, the wrapper returns null without calling direct signup', async () => {
+    const { isFlagEnabled } = await import('../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(false);
     const { performDirectSignup } = await import('../utils/direct-signup.js');
-    const { performAmplitudeAuth } = await import('../utils/oauth.js');
 
     const { performSignupOrAuth } = await import('../utils/signup-or-auth.js');
-    await performSignupOrAuth({
-      signup: false,
+    const result = await performSignupOrAuth({
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
     });
 
     expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(performAmplitudeAuth).toHaveBeenCalledOnce();
+    expect(result).toBeNull();
   });
 
-  it('when direct signup returns requires_redirect, falls back to OAuth', async () => {
+  it('when direct signup returns requires_redirect, returns null', async () => {
+    const { isFlagEnabled } = await import('../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockImplementation(
+      (key: string) => key === 'wizard-direct-signup',
+    );
     const { performDirectSignup } = await import('../utils/direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'requires_redirect',
     });
-    const { performAmplitudeAuth } = await import('../utils/oauth.js');
 
     const { performSignupOrAuth } = await import('../utils/signup-or-auth.js');
-    await performSignupOrAuth({
-      signup: true,
+    const result = await performSignupOrAuth({
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
     });
 
     expect(performDirectSignup).toHaveBeenCalledOnce();
-    expect(performAmplitudeAuth).toHaveBeenCalledOnce();
+    expect(result).toBeNull();
   });
 });
