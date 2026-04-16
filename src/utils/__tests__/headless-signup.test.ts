@@ -30,6 +30,7 @@ describe('performHeadlessSignup', () => {
     expect(mockedAxios.post).toHaveBeenCalledWith(
       'https://app.amplitude.com/t/headless/provisioning/link-or-create-account',
       expect.objectContaining({ email: 'test@example.com' }),
+      expect.objectContaining({ timeout: 15_000 }),
     );
   });
 
@@ -48,6 +49,7 @@ describe('performHeadlessSignup', () => {
     expect(mockedAxios.post).toHaveBeenCalledWith(
       'https://app.eu.amplitude.com/t/headless/provisioning/link-or-create-account',
       expect.objectContaining({ email: 'eu@example.com' }),
+      expect.objectContaining({ timeout: 15_000 }),
     );
   });
 
@@ -73,6 +75,7 @@ describe('performHeadlessSignup', () => {
         client_id: expect.any(String),
         redirect_uri: expect.stringContaining('localhost'),
       }),
+      expect.objectContaining({ timeout: 15_000 }),
     );
   });
 

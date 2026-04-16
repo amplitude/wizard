@@ -98,14 +98,18 @@ export async function performHeadlessSignup(options: {
   });
 
   try {
-    const response = await axios.post(url, {
-      email,
-      full_name: fullName,
-      scopes: ['openid', 'offline'],
-      state,
-      client_id: oAuthClientId,
-      redirect_uri: REDIRECT_URI,
-    });
+    const response = await axios.post(
+      url,
+      {
+        email,
+        full_name: fullName,
+        scopes: ['openid', 'offline'],
+        state,
+        client_id: oAuthClientId,
+        redirect_uri: REDIRECT_URI,
+      },
+      { timeout: 15_000 },
+    );
 
     const parsed = HeadlessProvisioningResponse.parse(response.data);
 
@@ -139,6 +143,12 @@ export async function performHeadlessSignup(options: {
         };
     }
   } catch (err) {
+    // Timeout — caller should fall back to browser OAuth
+    if (axios.isAxiosError(err) && err.code === 'ECONNABORTED') {
+      logToFile('[headless-signup] request timed out');
+      return { type: 'error', code: 'timeout', message: 'Request timed out' };
+    }
+
     // Handle HTTP errors (4xx/5xx) that may include a structured error body
     if (axios.isAxiosError(err) && err.response?.data) {
       const bodyParse = ErrorResponse.safeParse(err.response.data);
