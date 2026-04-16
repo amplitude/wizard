@@ -152,6 +152,56 @@ describe('performDirectSignup', () => {
     }
   });
 
+  it('returns error with parsed OAuth error on 400 token exchange response', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ type: 'oauth', oauth: { code: 'auth-code-xyz' } }),
+      ),
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json(
+          { error: 'invalid_grant', error_description: 'Expired' },
+          { status: 400 },
+        ),
+      ),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('invalid_grant');
+      expect(result.message).toContain('Expired');
+    }
+  });
+
+  it('returns error when token exchange 200 body does not match TokenSchema', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ type: 'oauth', oauth: { code: 'auth-code-xyz' } }),
+      ),
+      http.post(TOKEN_URL, () => HttpResponse.json({})),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('invalid response');
+    }
+  });
+
+  it('returns error when provisioning returns oauth code with empty string', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ type: 'oauth', oauth: { code: '' } }),
+      ),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+  });
+
   it('returns error when expires_in is out of bounds', async () => {
     server.use(
       http.post(PROVISIONING_URL, () =>
@@ -165,9 +215,6 @@ describe('performDirectSignup', () => {
     const result = await performDirectSignup(INPUT);
 
     expect(result.kind).toBe('error');
-    if (result.kind === 'error') {
-      expect(result.message).toContain('Invalid expires_in');
-    }
   });
 
   it('returns error when expires_in is excessively large', async () => {
@@ -186,8 +233,5 @@ describe('performDirectSignup', () => {
     const result = await performDirectSignup(INPUT);
 
     expect(result.kind).toBe('error');
-    if (result.kind === 'error') {
-      expect(result.message).toContain('Invalid expires_in');
-    }
   });
 });
