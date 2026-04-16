@@ -164,6 +164,8 @@ const resolveNonInteractiveCredentials = async (
     requireOrgId: false,
     org: options.org as string | undefined,
     env: options.env as string | undefined,
+    workspaceId: options.workspaceId as string | undefined,
+    projectId: options.projectId as string | undefined,
     accessTokenOverride: envAccessToken,
   });
 
@@ -191,22 +193,11 @@ const resolveNonInteractiveCredentials = async (
         if (session.credentials) break;
       }
     } else if (agentUI) {
-      // Agent mode: list envs and prompt via stdin
-      const envList: string[] = [];
-      for (const org of session.pendingOrgs) {
-        for (const ws of org.workspaces) {
-          for (const env of ws.environments ?? []) {
-            if (env.app?.apiKey) {
-              envList.push(`  --env "${env.name}"  (${org.name} / ${ws.name})`);
-            }
-          }
-        }
-      }
-      getUI().log.info(
-        `Multiple environments found. Re-run with one of:\n${envList.join(
-          '\n',
-        )}`,
-      );
+      // Agent mode: emit a structured prompt event with the full
+      // org/workspace/project/env hierarchy. The orchestrator can either
+      // reply on stdin with { orgId, workspaceId, env } or re-invoke with
+      // --project-id / --env flags (which are unambiguous even when env
+      // names collide across workspaces).
       const selection = await agentUI.promptEnvironmentSelection(
         session.pendingOrgs,
       );
@@ -216,7 +207,7 @@ const resolveNonInteractiveCredentials = async (
           reason: 'env_selection_failed',
           instruction:
             'Could not resolve an Amplitude environment with an API key. ' +
-            `Pass --env <name> (and --org <name> if needed) when re-running ${CLI_INVOCATION}.`,
+            `Pass --project-id <id> (preferred) or --env <name> + --org <name> when re-running ${CLI_INVOCATION}.`,
           loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
         });
         process.exit(ExitCode.AUTH_REQUIRED);
@@ -409,7 +400,12 @@ void yargs(hideBin(process.argv))
       type: 'string',
     },
     'project-id': {
-      describe: 'Amplitude project ID to target',
+      describe:
+        'Amplitude project ID (numeric, e.g. 769610) — unambiguous selector',
+      type: 'string',
+    },
+    'workspace-id': {
+      describe: 'Amplitude workspace ID (UUID) for multi-workspace orgs',
       type: 'string',
     },
     org: {

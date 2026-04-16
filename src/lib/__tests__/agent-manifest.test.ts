@@ -39,6 +39,37 @@ describe('getAgentManifest', () => {
     expect(names).toContain('--ci');
   });
 
+  it('lists Amplitude-hierarchy selector flags', () => {
+    const names = manifest.globalFlags.map((f) => f.name);
+    expect(names).toContain('--project-id');
+    expect(names).toContain('--workspace-id');
+    expect(names).toContain('--org');
+    expect(names).toContain('--env');
+  });
+
+  it('documents the Amplitude data-model hierarchy', () => {
+    expect(manifest.concepts.hierarchy).toEqual([
+      'org',
+      'workspace',
+      'project',
+      'environment',
+    ]);
+  });
+
+  it('glossary distinguishes Amplitude env from POSIX env var', () => {
+    const envTerm = manifest.concepts.glossary.find(
+      (g) => g.term === 'environment',
+    );
+    expect(envTerm).toBeDefined();
+    expect(envTerm!.describe).toMatch(/NOT a POSIX env|Not a POSIX/i);
+  });
+
+  it('glossary distinguishes API key from access token', () => {
+    const terms = manifest.concepts.glossary.map((g) => g.term);
+    expect(terms).toContain('API key');
+    expect(terms).toContain('access token');
+  });
+
   it('documents AMPLITUDE_TOKEN as an env var', () => {
     const names = manifest.env.map((e) => e.name);
     expect(names).toContain('AMPLITUDE_TOKEN');

@@ -41,6 +41,17 @@ export interface AgentManifest {
     requiresGlobalInstall: boolean;
   }>;
   description: string;
+  /**
+   * Amplitude's data-model terminology — surfaces the hierarchy so
+   * agents reading the manifest know that `workspace`, `project`, and
+   * `environment` are nested, not synonyms. Without this, agents tend
+   * to confuse `--env` (Amplitude environment) with environment
+   * variables, or `workspace` with a directory path.
+   */
+  concepts: {
+    hierarchy: string[];
+    glossary: Array<{ term: string; describe: string }>;
+  };
   globalFlags: CommandFlag[];
   env: Array<{ name: string; describe: string }>;
   exitCodes: Array<{ code: number; name: string; describe: string }>;
@@ -67,6 +78,41 @@ export function getAgentManifest(): AgentManifest {
     ],
     description:
       'Interactive CLI that instruments apps with Amplitude analytics.',
+    concepts: {
+      hierarchy: ['org', 'workspace', 'project', 'environment'],
+      glossary: [
+        {
+          term: 'org',
+          describe:
+            'An Amplitude organization (account-level). Identified by a UUID; select with --org <name>.',
+        },
+        {
+          term: 'workspace',
+          describe:
+            'A top-level grouping inside an org. Identified by a UUID; select with --workspace-id <uuid>.',
+        },
+        {
+          term: 'project',
+          describe:
+            'An Amplitude project — the ingestion surface that owns an API key and a set of events. Identified by a numeric ID (e.g. 769610); select with --project-id <id>. This is the most unambiguous selector.',
+        },
+        {
+          term: 'environment',
+          describe:
+            'A named runtime mode of a project (e.g. "Production", "Development", "Staging"). Not a POSIX environment variable. Select with --env <name> alongside --project-id or --workspace-id.',
+        },
+        {
+          term: 'API key',
+          describe:
+            'A project-level ingestion key embedded into client code (amplitude.init("<key>")). Passed with --api-key or AMPLITUDE_WIZARD_API_KEY. Not the same as an OAuth access token.',
+        },
+        {
+          term: 'access token',
+          describe:
+            'An OAuth access token minted by `amplitude-wizard login`. Used for server-side API calls, never embedded in client code. Passed with AMPLITUDE_TOKEN.',
+        },
+      ],
+    },
     globalFlags: [
       {
         name: '--agent',
@@ -102,6 +148,29 @@ export function getAgentManifest(): AgentManifest {
       {
         name: '--install-dir',
         describe: 'Project directory to inspect or instrument',
+        type: 'string',
+      },
+      {
+        name: '--project-id',
+        describe:
+          'Amplitude project ID (numeric, e.g. 769610) — unambiguous selector. See concepts.glossary.',
+        type: 'string',
+      },
+      {
+        name: '--workspace-id',
+        describe:
+          'Amplitude workspace ID (UUID). Narrow to one workspace when env names collide.',
+        type: 'string',
+      },
+      {
+        name: '--org',
+        describe: 'Amplitude org name (case-insensitive partial match)',
+        type: 'string',
+      },
+      {
+        name: '--env',
+        describe:
+          'Amplitude environment name (e.g. "Production"). NOT a POSIX env var.',
         type: 'string',
       },
       {
