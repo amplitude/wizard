@@ -75,9 +75,9 @@ npx @amplitude/wizard --agent --install-dir . --api-key <key>
 
 ## Using with AI coding agents
 
-Claude Code, Cursor, and Codex can drive the wizard end-to-end. Point your
-agent at the CLI and it will detect the framework, check project state, and
-report back as JSON — no prompt parsing required.
+AI coding agents can drive the wizard end-to-end. Point your agent at the
+CLI and it will detect the framework, check project state, and report back
+as JSON — no prompt parsing required.
 
 **Kick it off from your agent:**
 

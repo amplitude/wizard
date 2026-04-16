@@ -1423,14 +1423,14 @@ void yargs(hideBin(process.argv))
     (argv) => {
       void (async () => {
         const installDir = argv['install-dir'] ?? process.cwd();
+        const { resolveMode } = await import('./src/lib/mode-config.js');
+        const { jsonOutput } = resolveMode({
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+          isTTY: Boolean(process.stdout.isTTY),
+        });
         try {
           const { runDetect } = await import('./src/lib/agent-ops.js');
-          const { resolveMode } = await import('./src/lib/mode-config.js');
-          const { jsonOutput } = resolveMode({
-            json: argv.json as boolean | undefined,
-            human: argv.human as boolean | undefined,
-            isTTY: Boolean(process.stdout.isTTY),
-          });
           const result = await runDetect(installDir);
 
           if (jsonOutput) {
@@ -1451,7 +1451,7 @@ void yargs(hideBin(process.argv))
           process.exit(result.integration ? 0 : 1);
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
-          if (argv.json || !process.stdout.isTTY) {
+          if (jsonOutput) {
             process.stdout.write(JSON.stringify({ error: message }) + '\n');
           } else {
             console.error(chalk.red(`Detection failed: ${message}`));
@@ -1475,14 +1475,14 @@ void yargs(hideBin(process.argv))
     (argv) => {
       void (async () => {
         const installDir = argv['install-dir'] ?? process.cwd();
+        const { resolveMode } = await import('./src/lib/mode-config.js');
+        const { jsonOutput } = resolveMode({
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+          isTTY: Boolean(process.stdout.isTTY),
+        });
         try {
           const { runStatus } = await import('./src/lib/agent-ops.js');
-          const { resolveMode } = await import('./src/lib/mode-config.js');
-          const { jsonOutput } = resolveMode({
-            json: argv.json as boolean | undefined,
-            human: argv.human as boolean | undefined,
-            isTTY: Boolean(process.stdout.isTTY),
-          });
           const result = await runStatus(installDir);
 
           if (jsonOutput) {
@@ -1520,7 +1520,7 @@ void yargs(hideBin(process.argv))
           process.exit(0);
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e);
-          if (argv.json || !process.stdout.isTTY) {
+          if (jsonOutput) {
             process.stdout.write(JSON.stringify({ error: message }) + '\n');
           } else {
             console.error(chalk.red(`Status failed: ${message}`));

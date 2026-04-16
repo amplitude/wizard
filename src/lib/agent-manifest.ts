@@ -128,7 +128,7 @@ export function getAgentManifest(): AgentManifest {
       {
         code: 10,
         name: 'AGENT_FAILED',
-        describe: 'The Claude-powered setup agent failed mid-run',
+        describe: 'The AI-powered setup agent failed mid-run',
       },
       {
         code: 130,
