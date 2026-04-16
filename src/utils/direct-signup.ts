@@ -1,14 +1,42 @@
-import axios, { AxiosError } from 'axios';
+import axios from 'axios';
+import * as crypto from 'node:crypto';
 import { z } from 'zod';
 import {
   AMPLITUDE_ZONE_SETTINGS,
+  OAUTH_PORT,
   type AmplitudeZone,
 } from '../lib/constants.js';
 import { createLogger } from '../lib/observability/logger.js';
 
 const log = createLogger('direct-signup');
 
-const SuccessSchema = z.object({
+const REQUEST_TIMEOUT_MS = 10_000;
+const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
+
+// Discriminated union response schemas from the provisioning endpoint.
+const OAuthCodeSchema = z.object({
+  type: z.literal('oauth'),
+  oauth: z.object({ code: z.string() }),
+});
+
+const RedirectSchema = z.object({
+  type: z.literal('requires_auth'),
+  requires_auth: z.object({
+    type: z.literal('redirect'),
+    redirect: z.object({ url: z.string() }),
+  }),
+});
+
+const NeedsInformationSchema = z.object({
+  type: z.literal('needs_information'),
+});
+
+const ErrorSchema = z.object({
+  type: z.literal('error'),
+  error: z.object({ code: z.string(), message: z.string() }),
+});
+
+const TokenSchema = z.object({
   access_token: z.string(),
   id_token: z.string(),
   refresh_token: z.string(),
@@ -16,9 +44,13 @@ const SuccessSchema = z.object({
   expires_in: z.number(),
 });
 
-const RequiresRedirectSchema = z.object({
-  requires_redirect: z.literal(true),
-});
+function provisioningUrl(zone: AmplitudeZone): string {
+  const base =
+    zone === 'eu'
+      ? 'https://app.eu.amplitude.com'
+      : 'https://app.amplitude.com';
+  return `${base}/t/headless/provisioning/link-or-create-account`;
+}
 
 export interface DirectSignupInput {
   email: string;
@@ -42,47 +74,60 @@ export type DirectSignupResult =
 
 /**
  * Attempts to create an Amplitude account and obtain tokens directly via the
- * signup endpoint (amplitude/javascript PR #103683). Callers should fall back
- * to the OAuth redirect flow on `requires_redirect` or `error`.
+ * provisioning endpoint (amplitude/javascript PR #103683). Callers should fall
+ * back to the OAuth redirect flow on `requires_redirect` or `error`.
  */
 export async function performDirectSignup(
   input: DirectSignupInput,
 ): Promise<DirectSignupResult> {
-  const { oAuthHost } = AMPLITUDE_ZONE_SETTINGS[input.zone];
-  const url = `${oAuthHost}/signup`;
+  const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[input.zone];
+  const url = provisioningUrl(input.zone);
+  const state = crypto.randomBytes(16).toString('hex');
   log.debug('[direct-signup] POST', { url, zone: input.zone });
 
+  let response;
   try {
-    const response = await axios.post(
+    response = await axios.post(
       url,
-      { email: input.email, fullName: input.fullName, zone: input.zone },
+      {
+        email: input.email,
+        scopes: ['openid', 'offline'],
+        state,
+        client_id: oAuthClientId,
+        redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+        full_name: input.fullName,
+      },
       {
         headers: { 'Content-Type': 'application/json' },
+        timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
       },
     );
+  } catch (e) {
+    return {
+      kind: 'error',
+      message: e instanceof Error ? e.message : String(e),
+    };
+  }
 
-    const redirect = RequiresRedirectSchema.safeParse(response.data);
-    if (redirect.success) return { kind: 'requires_redirect' };
-    if (response.status === 409) return { kind: 'requires_redirect' };
+  const parsedRedirect = RedirectSchema.safeParse(response.data);
+  if (parsedRedirect.success) return { kind: 'requires_redirect' };
 
-    const success = SuccessSchema.safeParse(response.data);
-    if (success.success) {
-      const expiresAt = new Date(
-        Date.now() + success.data.expires_in * 1000,
-      ).toISOString();
-      return {
-        kind: 'success',
-        tokens: {
-          accessToken: success.data.access_token,
-          idToken: success.data.id_token,
-          refreshToken: success.data.refresh_token,
-          expiresAt,
-          zone: input.zone,
-        },
-      };
-    }
+  const parsedNeedsInfo = NeedsInformationSchema.safeParse(response.data);
+  if (parsedNeedsInfo.success) {
+    log.warn(
+      '[direct-signup] server requested additional information; falling back to OAuth',
+    );
+    return { kind: 'requires_redirect' };
+  }
 
+  const parsedError = ErrorSchema.safeParse(response.data);
+  if (parsedError.success) {
+    return { kind: 'error', message: parsedError.data.error.message };
+  }
+
+  const parsedCode = OAuthCodeSchema.safeParse(response.data);
+  if (!parsedCode.success) {
     log.error('[direct-signup] unexpected response shape', {
       status: response.status,
     });
@@ -90,14 +135,59 @@ export async function performDirectSignup(
       kind: 'error',
       message: `Unexpected response (${response.status})`,
     };
-  } catch (e) {
-    const err =
-      e instanceof AxiosError
-        ? e.message
-        : e instanceof Error
-        ? e.message
-        : String(e);
-    log.error('[direct-signup] network error', { err });
-    return { kind: 'error', message: err };
   }
+
+  // Exchange the auth code for tokens.
+  let tokenResponse;
+  try {
+    tokenResponse = await axios.post(
+      `${oAuthHost}/oauth2/token`,
+      new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: parsedCode.data.oauth.code,
+        redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+        client_id: oAuthClientId,
+      }).toString(),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: REQUEST_TIMEOUT_MS,
+      },
+    );
+  } catch (e) {
+    return {
+      kind: 'error',
+      message: `Token exchange failed: ${
+        e instanceof Error ? e.message : String(e)
+      }`,
+    };
+  }
+
+  const parsedTokens = TokenSchema.safeParse(tokenResponse.data);
+  if (!parsedTokens.success) {
+    return {
+      kind: 'error',
+      message: 'Token exchange returned invalid response',
+    };
+  }
+
+  const expiresIn = parsedTokens.data.expires_in;
+  if (
+    !Number.isFinite(expiresIn) ||
+    expiresIn <= 0 ||
+    expiresIn > MAX_EXPIRES_IN_SECONDS
+  ) {
+    return { kind: 'error', message: `Invalid expires_in: ${expiresIn}` };
+  }
+
+  const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+  return {
+    kind: 'success',
+    tokens: {
+      accessToken: parsedTokens.data.access_token,
+      idToken: parsedTokens.data.id_token,
+      refreshToken: parsedTokens.data.refresh_token,
+      expiresAt,
+      zone: input.zone,
+    },
+  };
 }
