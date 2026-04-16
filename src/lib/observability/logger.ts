@@ -183,12 +183,27 @@ export function configureLogFile(opts: {
 
 // ── File writer ─────────────────────────────────────────────────────
 
+const LEVEL_LABEL: Record<LogLevel, string> = {
+  debug: 'DEBUG',
+  info: 'INFO ',
+  warn: 'WARN ',
+  error: 'ERROR',
+};
+
 function writeToFile(entry: LogEntry): void {
   if (!logFileEnabled) return;
   try {
-    // Redact the entire entry before writing
+    // Human-readable format for the TUI Logs tab and manual inspection.
+    // Format: [timestamp] [run_id] [namespace] LEVEL message {context}
     const redacted = redact(entry) as LogEntry;
-    appendFileSync(logFilePath, JSON.stringify(redacted) + '\n');
+    const ctxStr =
+      redacted.ctx && Object.keys(redacted.ctx).length > 0
+        ? ' ' + JSON.stringify(redacted.ctx)
+        : '';
+    const line = `[${redacted['@timestamp']}] [${redacted.run_id}] [${
+      redacted.namespace
+    }] ${LEVEL_LABEL[redacted.level]} ${redacted.msg}${ctxStr}\n`;
+    appendFileSync(logFilePath, line);
   } catch {
     // Silently ignore — logging must never crash the wizard
   }

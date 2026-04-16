@@ -38,21 +38,24 @@ describe('logger', () => {
     }
   });
 
-  it('writes structured JSON to the log file', () => {
+  /** Get non-empty, non-header log lines (skip the run header block). */
+  function getLogLines(): string[] {
+    const content = readFileSync(logFile, 'utf-8');
+    return content
+      .split('\n')
+      .filter((l) => l.startsWith('[') && !l.startsWith('[='));
+  }
+
+  it('writes human-readable lines to the log file', () => {
     const log = createLogger('test-module');
     log.info('hello world', { key: 'value' });
 
-    const content = readFileSync(logFile, 'utf-8');
-    const lines = content.split('\n').filter((l) => l.startsWith('{'));
+    const lines = getLogLines();
     expect(lines.length).toBe(1);
-
-    const entry = JSON.parse(lines[0]);
-    expect(entry.namespace).toBe('test-module');
-    expect(entry.level).toBe('info');
-    expect(entry.msg).toBe('hello world');
-    expect(entry.ctx).toEqual({ key: 'value' });
-    expect(entry.run_id).toBeDefined();
-    expect(entry.session_id).toBe('test-session-id');
+    expect(lines[0]).toContain('[test-module]');
+    expect(lines[0]).toContain('INFO');
+    expect(lines[0]).toContain('hello world');
+    expect(lines[0]).toContain('"key":"value"');
   });
 
   it('writes all levels to the log file', () => {
@@ -62,12 +65,12 @@ describe('logger', () => {
     log.warn('w');
     log.error('e');
 
-    const content = readFileSync(logFile, 'utf-8');
-    const lines = content.split('\n').filter((l) => l.startsWith('{'));
+    const lines = getLogLines();
     expect(lines.length).toBe(4);
-
-    const levels = lines.map((l) => JSON.parse(l).level);
-    expect(levels).toEqual(['debug', 'info', 'warn', 'error']);
+    expect(lines[0]).toContain('DEBUG');
+    expect(lines[1]).toContain('INFO');
+    expect(lines[2]).toContain('WARN');
+    expect(lines[3]).toContain('ERROR');
   });
 
   it('child loggers inherit namespace', () => {
@@ -75,10 +78,8 @@ describe('logger', () => {
     const child = log.child('child');
     child.info('from child');
 
-    const content = readFileSync(logFile, 'utf-8');
-    const lines = content.split('\n').filter((l) => l.startsWith('{'));
-    const entry = JSON.parse(lines[0]);
-    expect(entry.namespace).toBe('parent:child');
+    const lines = getLogLines();
+    expect(lines[0]).toContain('[parent:child]');
   });
 
   it('redacts sensitive data in log file entries', () => {
@@ -88,11 +89,10 @@ describe('logger', () => {
       host: 'https://api.amplitude.com',
     });
 
-    const content = readFileSync(logFile, 'utf-8');
-    const lines = content.split('\n').filter((l) => l.startsWith('{'));
-    const entry = JSON.parse(lines[0]);
-    expect(entry.ctx.accessToken).toBe('[REDACTED]');
-    expect(entry.ctx.host).toBe('https://api.amplitude.com');
+    const lines = getLogLines();
+    expect(lines[0]).toContain('[REDACTED]');
+    expect(lines[0]).not.toContain('secret-token-123');
+    expect(lines[0]).toContain('api.amplitude.com');
   });
 
   it('routes warn/error to terminal sink by default', () => {
@@ -113,7 +113,6 @@ describe('logger', () => {
   });
 
   it('routes debug/info to terminal when debug mode is on', () => {
-    // Reinitialize with debug mode
     initLogger({
       mode: 'ci',
       debug: true,
@@ -135,20 +134,27 @@ describe('logger', () => {
     expect(messages).toHaveLength(2);
   });
 
-  it('omits ctx from log entry when empty', () => {
+  it('omits context from log line when empty', () => {
     const log = createLogger('no-ctx');
     log.info('no context');
 
-    const content = readFileSync(logFile, 'utf-8');
-    const lines = content.split('\n').filter((l) => l.startsWith('{'));
-    const entry = JSON.parse(lines[0]);
-    expect(entry.ctx).toBeUndefined();
+    const lines = getLogLines();
+    // No JSON context appended — line ends with the message
+    expect(lines[0]).toMatch(/no context$/);
+  });
+
+  it('includes run_id in log lines', () => {
+    const log = createLogger('corr');
+    log.info('test');
+
+    const lines = getLogLines();
+    // run_id is an 8-char hex string in brackets
+    expect(lines[0]).toMatch(/\[[a-f0-9]{8}\]/);
   });
 
   it('never throws even if file write fails', () => {
     configureLogFile({ path: '/nonexistent/path/log.txt', enabled: true });
     const log = createLogger('safe');
-    // Should not throw
     expect(() => log.error('this should not crash')).not.toThrow();
   });
 });
