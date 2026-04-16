@@ -133,7 +133,7 @@ describe('AgentUI.emitNestedAgent', () => {
     const event = lastEvent();
     expect(event.v).toBe(1);
     expect(event.type).toBe('lifecycle');
-    expect(event.level).toBe('error');
+    expect(event.level).toBe('info');
     expect(event.message).toBe('Refusing to run nested.');
     expect(event.data).toMatchObject({
       event: 'nested_agent',

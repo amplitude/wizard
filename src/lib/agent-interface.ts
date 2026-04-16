@@ -26,6 +26,7 @@ import { getStoredToken } from '../utils/ampli-settings';
 import { LINTING_TOOLS } from './safe-tools';
 import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
+import { sanitizeNestedClaudeEnv } from './sanitize-claude-env';
 import type { PackageManagerDetector } from './package-manager-detection';
 
 import { z } from 'zod';
@@ -671,6 +672,18 @@ export async function initializeAgent(
   initLogFile();
   logToFile('Agent initialization starting');
   logToFile('Install directory:', options.installDir);
+
+  // Strip inherited Claude Code / Agent SDK env vars before the inner SDK
+  // subprocess boots. Without this, an outer Claude Code session's
+  // CLAUDECODE=1, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_OAUTH_TOKEN, etc. leak
+  // into the child and cause the LLM gateway to reject requests (400).
+  const sanitized = sanitizeNestedClaudeEnv();
+  if (sanitized.cleared.length > 0) {
+    logToFile(
+      'Sanitized inherited Claude env vars (nested-invocation safe):',
+      sanitized.cleared,
+    );
+  }
 
   getUI().log.step('Initializing Claude agent...');
 

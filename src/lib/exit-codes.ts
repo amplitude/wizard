@@ -5,7 +5,6 @@ export const ExitCode = {
   AUTH_REQUIRED: 3,
   NETWORK_ERROR: 4,
   AGENT_FAILED: 10,
-  NESTED_AGENT: 11,
   USER_CANCELLED: 130,
 } as const;
 

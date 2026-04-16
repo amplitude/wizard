@@ -140,7 +140,7 @@ export function getAgentManifest(): AgentManifest {
       {
         name: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
         describe:
-          'Set to 1 to bypass the nested-Claude-Code refusal (not recommended — the inner Claude Agent SDK run will 400)',
+          'Set to 1 to skip the nested-invocation diagnostic. The wizard sanitizes inherited Claude env vars either way, so nesting works by default.',
       },
     ],
     exitCodes: [
@@ -161,12 +161,6 @@ export function getAgentManifest(): AgentManifest {
         code: 10,
         name: 'AGENT_FAILED',
         describe: 'The AI-powered setup agent failed mid-run',
-      },
-      {
-        code: 11,
-        name: 'NESTED_AGENT',
-        describe:
-          'Refused to run inside another Claude Code / Claude Agent SDK session (would fail with an LLM 400). Set AMPLITUDE_WIZARD_ALLOW_NESTED=1 to override.',
       },
       {
         code: 130,

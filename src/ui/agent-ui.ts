@@ -122,10 +122,9 @@ export class AgentUI implements WizardUI {
   /**
    * Emit a structured nested_agent lifecycle event when the wizard is
    * invoked from inside another Claude Code / Claude Agent SDK session.
-   * Nesting breaks the internal Claude Agent SDK subprocess, so we refuse
-   * early rather than surface the opaque 400.
-   *
-   * Always paired with process.exit(ExitCode.NESTED_AGENT) by the caller.
+   * The wizard sanitizes inherited Claude env vars before spawning its
+   * own SDK subprocess, so nesting is supported — this event is a
+   * diagnostic breadcrumb for outer orchestrators, not a failure.
    */
   emitNestedAgent(data: {
     signal: 'claude_code_cli' | 'claude_agent_sdk';
@@ -134,7 +133,7 @@ export class AgentUI implements WizardUI {
     bypassEnv: string;
   }): void {
     emit('lifecycle', data.instruction, {
-      level: 'error',
+      level: 'info',
       data: {
         event: 'nested_agent',
         signal: data.signal,

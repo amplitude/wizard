@@ -327,58 +327,32 @@ const resolveNonInteractiveCredentials = async (
     getUI().log.info(`Log file: ${getLogFilePath()}`);
   }
 
-  // Refuse to run inside another Claude Code / Claude Agent SDK session.
-  // The wizard spawns its own Claude Agent SDK subprocess for the setup
-  // agent, and nesting makes the inner run hit a 400 from the LLM provider
-  // before we can do anything useful. Better to fail fast with a clear
-  // message than surface the opaque 400.
+  // Detect nested invocation inside another Claude Code / Claude Agent SDK
+  // session. We used to refuse to run because inherited env vars
+  // (CLAUDECODE, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_OAUTH_TOKEN, etc.) leaked
+  // into the Claude Agent SDK subprocess we spawn for the setup agent and
+  // caused the LLM gateway to reject requests. Those vars are now sanitized
+  // in `initializeAgent()` before the SDK boots, so nesting is supported.
   //
-  // Skip for wizard self-commands that don't spawn the Claude Agent SDK
-  // (login / logout / whoami / mcp / manifest / detect / status / auth / help /
-  // completion / version). Those are safe to run from inside Claude Code and
-  // are actually how an outer agent orchestrator drives us.
-  const NESTED_AGENT_SAFE_VERBS = new Set([
-    'login',
-    'logout',
-    'whoami',
-    'mcp',
-    'manifest',
-    'detect',
-    'status',
-    'auth',
-    'help',
-    'completion',
-    'feedback',
-    'slack',
-    'region',
-    '--version',
-    '-v',
-    '--help',
-    '-h',
-  ]);
-  const firstArg = rawArgv.find((a) => !a.startsWith('-')) ?? rawArgv[0];
-  const isSafeVerb = firstArg ? NESTED_AGENT_SAFE_VERBS.has(firstArg) : false;
-  if (!isSafeVerb) {
-    const nested = detectNestedAgent();
-    if (nested) {
-      const instruction =
-        'Refusing to run the Amplitude wizard from inside another Claude Code / Claude Agent SDK session. ' +
-        'Nested Claude Agent SDK runs fail with a 400 from the LLM provider. ' +
-        `Run \`${CLI_INVOCATION}\` in a regular terminal instead, or set \`AMPLITUDE_WIZARD_ALLOW_NESTED=1\` to override (not recommended). ` +
-        `(detected via ${nested.envVar}=${nested.envValue})`;
-      if (mode === 'agent') {
-        const { AgentUI } =
-          require('./src/ui/agent-ui.js') as typeof import('./src/ui/agent-ui');
-        new AgentUI().emitNestedAgent({
-          signal: nested.signal,
-          envVar: nested.envVar,
-          instruction,
-          bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
-        });
-      } else {
-        red(instruction);
-      }
-      process.exit(ExitCode.NESTED_AGENT);
+  // We still detect and surface it as a diagnostic so outer agent
+  // orchestrators (Claude Code) can log the signal, and so humans debugging
+  // auth weirdness have a breadcrumb.
+  const nested = detectNestedAgent();
+  if (nested) {
+    const detail =
+      `Detected nested Claude Code / Claude Agent SDK invocation via ${nested.envVar}=${nested.envValue}. ` +
+      `Inherited Claude env vars will be sanitized before the setup agent spawns.`;
+    if (mode === 'agent') {
+      const { AgentUI } =
+        require('./src/ui/agent-ui.js') as typeof import('./src/ui/agent-ui');
+      new AgentUI().emitNestedAgent({
+        signal: nested.signal,
+        envVar: nested.envVar,
+        instruction: detail,
+        bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+      });
+    } else if (isDebug) {
+      getUI().log.info(detail);
     }
   }
 }
