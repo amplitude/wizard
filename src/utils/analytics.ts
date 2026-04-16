@@ -269,7 +269,6 @@ export class Analytics {
    */
   async initFlags(): Promise<void> {
     await initFeatureFlags(this.distinctId, this.anonymousId);
-    this.applyOptOut();
   }
 
   /**
@@ -278,7 +277,6 @@ export class Analytics {
   async refreshFlags(): Promise<void> {
     await refreshFlags(this.distinctId, this.anonymousId);
     this.activeFlags = getAllFlags();
-    this.applyOptOut();
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
