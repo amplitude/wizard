@@ -233,33 +233,34 @@ const resolveNonInteractiveCredentials = async (
         if (tokenResponse && userInfo) {
           session.userEmail = userInfo.email;
 
-          // Try to resolve an API key from the newly created org
-          if (userInfo.orgs.length > 0) {
-            const org = userInfo.orgs[0];
-            const ws = org.workspaces[0];
-            session.selectedOrgId = org.id;
-            session.selectedOrgName = org.name;
-            if (ws) {
+          // Try to resolve an API key from the newly created org.
+          // Only assign selectedOrg/Workspace once credentials are
+          // actually populated so a failed resolve doesn't leave the
+          // session pointing at an org we couldn't use.
+          const org = userInfo.orgs[0];
+          const ws = org?.workspaces[0];
+          if (ws) {
+            const envWithKey = (ws.environments ?? [])
+              .filter(
+                (e: { app: { apiKey?: string | null } | null }) =>
+                  e.app?.apiKey,
+              )
+              .sort(
+                (a: { rank: number }, b: { rank: number }) => a.rank - b.rank,
+              )[0];
+            if (envWithKey?.app?.apiKey) {
+              session.credentials = {
+                accessToken: tokenResponse.access_token,
+                idToken: tokenResponse.id_token,
+                projectApiKey: envWithKey.app.apiKey,
+                host: DEFAULT_HOST_URL,
+                projectId: 0,
+              };
+              session.projectHasData = false;
+              session.selectedOrgId = org.id;
+              session.selectedOrgName = org.name;
               session.selectedWorkspaceId = ws.id;
               session.selectedWorkspaceName = ws.name;
-              const envWithKey = (ws.environments ?? [])
-                .filter(
-                  (e: { app: { apiKey?: string | null } | null }) =>
-                    e.app?.apiKey,
-                )
-                .sort(
-                  (a: { rank: number }, b: { rank: number }) => a.rank - b.rank,
-                )[0];
-              if (envWithKey?.app?.apiKey) {
-                session.credentials = {
-                  accessToken: tokenResponse.access_token,
-                  idToken: tokenResponse.id_token,
-                  projectApiKey: envWithKey.app.apiKey,
-                  host: DEFAULT_HOST_URL,
-                  projectId: 0,
-                };
-                session.projectHasData = false;
-              }
             }
           }
 
@@ -269,7 +270,7 @@ const resolveNonInteractiveCredentials = async (
               installDir: session.installDir,
               idToken: tokenResponse.id_token,
               zone,
-              workspaceId: session.selectedWorkspaceId ?? undefined,
+              workspaceId: ws?.id,
             }).catch(() => undefined);
             if (apiKey) {
               session.credentials = {
@@ -280,10 +281,28 @@ const resolveNonInteractiveCredentials = async (
                 projectId: 0,
               };
               session.projectHasData = false;
+              if (org) {
+                session.selectedOrgId = org.id;
+                session.selectedOrgName = org.name;
+              }
+              if (ws) {
+                session.selectedWorkspaceId = ws.id;
+                session.selectedWorkspaceName = ws.name;
+              }
             }
           }
 
-          getUI().log.info(`Signup complete for ${maskEmail(userInfo.email)}`);
+          if (session.credentials) {
+            getUI().log.info(
+              `Signup complete for ${maskEmail(userInfo.email)}`,
+            );
+          } else {
+            getUI().log.error(
+              `Signup succeeded for ${maskEmail(
+                userInfo.email,
+              )} but no API key could be resolved`,
+            );
+          }
         }
       } else if (result.type === 'requires_auth') {
         getUI().log.error(
