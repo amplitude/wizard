@@ -193,8 +193,13 @@ export async function startAgentMcpServer(): Promise<void> {
   process.on('SIGINT', () => void shutdown(0));
   process.on('SIGTERM', () => void shutdown(0));
 
-  // Surface transport errors on stderr so they don't corrupt the JSON-RPC
-  // stream on stdout.
+  await server.connect(transport);
+
+  // MCP SDK's Protocol.connect() internally reassigns transport.onerror,
+  // transport.onclose, and transport.onmessage. Wire our handlers *after*
+  // connect() so they override the SDK defaults — otherwise the process
+  // won't exit cleanly when the parent agent closes stdin (hang), and
+  // transport errors go unlogged.
   transport.onerror = (err: Error): void => {
     process.stderr.write(
       `amplitude-wizard mcp serve: transport error: ${err.message}\n`,
@@ -204,7 +209,5 @@ export async function startAgentMcpServer(): Promise<void> {
     // Parent agent disconnected (stdin closed) — exit cleanly.
     void shutdown(0);
   };
-
-  await server.connect(transport);
   // The transport owns stdin and keeps the event loop alive until it closes.
 }
