@@ -41,6 +41,8 @@ export const CliArgsSchema = z.object({
   benchmark: z.boolean().default(false),
   apiKey: z.string().optional(),
   integration: z.string().optional(),
+  signupEmail: z.string().email().nullable().optional().default(null),
+  signupFullName: z.string().nullable().optional().default(null),
 });
 
 /**
@@ -148,6 +150,8 @@ export interface WizardSession {
   ci: boolean;
   agent: boolean;
   signup: boolean;
+  signupEmail: string | null;
+  signupFullName: string | null;
   localMcp: boolean;
   apiKey?: string;
   menu: boolean;
@@ -363,6 +367,8 @@ export function buildSession(args: {
   integration?: Integration;
   benchmark?: boolean;
   projectId?: string;
+  signupEmail?: string;
+  signupFullName?: string;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -385,6 +391,8 @@ export function buildSession(args: {
     ci: validated.ci ?? false,
     agent: false,
     signup: validated.signup ?? false,
+    signupEmail: validated.signupEmail ?? null,
+    signupFullName: validated.signupFullName ?? null,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
