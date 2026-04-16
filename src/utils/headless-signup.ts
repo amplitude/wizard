@@ -74,7 +74,7 @@ const HeadlessProvisioningResponse = z.discriminatedUnion('type', [
 // ── Public result type ──────────────────────────────────────────────
 
 export type HeadlessSignupResult =
-  | { type: 'oauth'; code: string; state: string }
+  | { type: 'oauth'; code: string }
   | { type: 'requires_auth'; redirectUrl: string }
   | { type: 'needs_information'; schema: Record<string, unknown> }
   | { type: 'error'; code: string; message: string };
@@ -122,7 +122,7 @@ export async function performHeadlessSignup(options: {
     switch (parsed.type) {
       case 'oauth':
         logToFile('[signup] received oauth response with auth code');
-        return { type: 'oauth', code: parsed.oauth.code, state };
+        return { type: 'oauth', code: parsed.oauth.code };
 
       case 'requires_auth':
         logToFile('[signup] requires_auth: redirect received');

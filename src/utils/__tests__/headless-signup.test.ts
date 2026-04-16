@@ -94,7 +94,6 @@ describe('performHeadlessSignup', () => {
     expect(result).toEqual({
       type: 'oauth',
       code: 'auth-code-123',
-      state: expect.any(String),
     });
   });
 
