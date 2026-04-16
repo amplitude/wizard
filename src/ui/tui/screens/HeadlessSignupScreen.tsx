@@ -8,6 +8,7 @@
 import { Box, Text } from 'ink';
 import { useState } from 'react';
 import { TextInput } from '@inkjs/ui';
+import { z } from 'zod';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
@@ -16,7 +17,7 @@ interface HeadlessSignupScreenProps {
   store: WizardStore;
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const EmailSchema = z.string().trim().toLowerCase().email();
 
 // This screen is only rendered when CLI --email/--full-name were NOT provided.
 // When both CLI args are present, the flow's isComplete predicate skips this
@@ -30,17 +31,17 @@ export const HeadlessSignupScreen = ({ store }: HeadlessSignupScreenProps) => {
   const [fullNameError, setFullNameError] = useState('');
 
   const handleEmailSubmit = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setEmailError('Email is required');
-      return;
-    }
-    if (!EMAIL_RE.test(trimmed)) {
-      setEmailError('Please enter a valid email address');
+    const result = EmailSchema.safeParse(value);
+    if (!result.success) {
+      setEmailError(
+        value.trim()
+          ? 'Please enter a valid email address'
+          : 'Email is required',
+      );
       return;
     }
     setEmailError('');
-    setEmail(trimmed);
+    setEmail(result.data);
     setEmailConfirmed(true);
   };
 
