@@ -28,6 +28,8 @@ import { OUTBOUND_URLS } from './constants.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { enableDebugLogs, logToFile } from '../utils/debug';
+import { createObservabilityMiddleware } from './middleware/observability';
+import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
@@ -149,7 +151,10 @@ export async function runAgentWizard(
   // Set analytics tags for framework version
   if (frameworkVersion && config.detection.getVersionBucket) {
     const versionBucket = config.detection.getVersionBucket(frameworkVersion);
-    analytics.setTag(`${config.metadata.integration}-version`, versionBucket);
+    analytics.setSessionProperty(
+      `${config.metadata.integration}-version`,
+      versionBucket,
+    );
   }
 
   analytics.wizardCapture('Agent Started', {
@@ -228,7 +233,7 @@ export async function runAgentWizard(
   // Set analytics tags from framework context
   const contextTags = config.analytics.getTags(frameworkContext);
   Object.entries(contextTags).forEach(([key, value]) => {
-    analytics.setTag(key, value);
+    analytics.setSessionProperty(key, value);
   });
 
   // Skip the Amplitude MCP when the framework provides its own prompt (no MCP needed)
@@ -288,9 +293,11 @@ export async function runAgentWizard(
     sessionToOptions(session),
   );
 
+  // Always run observability middleware for structured logging + Sentry breadcrumbs.
+  // Benchmark middleware (token/cost tracking) is opt-in via --benchmark.
   const middleware = session.benchmark
     ? createBenchmarkPipeline(spinner, sessionToOptions(session))
-    : undefined;
+    : new MiddlewarePipeline([createObservabilityMiddleware()]);
 
   const agentResult = await runAgent(
     agent,

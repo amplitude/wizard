@@ -67,6 +67,7 @@ describe('runWizard error handling', () => {
     vi.clearAllMocks();
 
     mockAnalytics.setTag = vi.fn();
+    mockAnalytics.setSessionProperty = vi.fn();
     mockAnalytics.captureException = vi.fn();
     mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);
 

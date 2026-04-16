@@ -6,5 +6,7 @@ export function traceStep<T>(step: string, callback: () => T): T {
 }
 
 export function updateProgress(step: string) {
-  analytics.setTag('progress', step);
+  // Track progress as a session property so it reflects the current step
+  // on all subsequent events (useful for debugging which step errored).
+  analytics.setSessionProperty('progress', step);
 }

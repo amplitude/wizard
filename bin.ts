@@ -52,7 +52,16 @@ import {
   ZSH_COMPLETION_SCRIPT,
   BASH_COMPLETION_SCRIPT,
 } from './src/utils/shell-completions';
+import { analytics } from './src/utils/analytics';
 import { ExitCode } from './src/lib/exit-codes';
+import {
+  initLogger,
+  initCorrelation,
+  initSentry,
+  setTerminalSink,
+  getLogFilePath,
+} from './src/lib/observability';
+import type { LogLevel } from './src/lib/observability';
 
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
 // prevents the TUI's ESM dynamic imports from resolving named exports.
@@ -198,6 +207,78 @@ const resolveNonInteractiveCredentials = async (
     }
   }
 };
+
+// ── Observability bootstrap ─────────────────────────────────────────
+// Initialize structured logging early so all code paths can use it.
+// The terminal sink routes log output through the UI singleton (getUI()),
+// which may be LoggingUI, InkUI, or AgentUI depending on the mode.
+{
+  initCorrelation(analytics.getAnonymousId());
+
+  // Resolve mode from argv early (before yargs parses) for logger config.
+  // This is a lightweight check — full mode resolution happens in yargs handlers.
+  const rawArgv = process.argv.slice(2);
+  const isAgent =
+    rawArgv.includes('--agent') || process.env.AMPLITUDE_WIZARD_AGENT === '1';
+  const isCi =
+    rawArgv.includes('--ci') ||
+    rawArgv.includes('--yes') ||
+    rawArgv.includes('-y');
+  const isDebug =
+    rawArgv.includes('--debug') || process.env.AMPLITUDE_WIZARD_DEBUG === '1';
+  const isVerbose =
+    rawArgv.includes('--verbose') ||
+    process.env.AMPLITUDE_WIZARD_VERBOSE === '1';
+
+  const mode = isAgent ? 'agent' : isCi ? 'ci' : 'interactive';
+
+  initLogger({
+    mode,
+    debug: isDebug,
+    verbose: isVerbose || isDebug,
+    version: WIZARD_VERSION,
+    logFile: process.env.AMPLITUDE_WIZARD_LOG,
+  });
+
+  // Initialize Sentry error tracking.
+  // Respects DO_NOT_TRACK=1 and AMPLITUDE_WIZARD_NO_TELEMETRY=1 for opt-out.
+  initSentry({
+    sessionId: analytics.getAnonymousId(),
+    version: WIZARD_VERSION,
+    mode,
+    debug: isDebug,
+  });
+
+  // Set session-scoped properties so every event includes mode/version/platform.
+  analytics.setSessionProperty('mode', mode);
+  analytics.setSessionProperty('wizard_version', WIZARD_VERSION);
+  analytics.setSessionProperty('platform', process.platform);
+  analytics.setSessionProperty('node_version', process.version);
+
+  // Route logger terminal output through the UI singleton.
+  setTerminalSink((level: LogLevel, namespace: string, msg: string) => {
+    const prefix = `[${namespace}]`;
+    switch (level) {
+      case 'error':
+        getUI().log.error(`${prefix} ${msg}`);
+        break;
+      case 'warn':
+        getUI().log.warn(`${prefix} ${msg}`);
+        break;
+      case 'info':
+        getUI().log.info(`${prefix} ${msg}`);
+        break;
+      case 'debug':
+        getUI().log.info(`${prefix} ${msg}`);
+        break;
+    }
+  });
+
+  // Print log file path when debugging (helps users find the log)
+  if (isDebug) {
+    getUI().log.info(`Log file: ${getLogFilePath()}`);
+  }
+}
 
 if (process.env.NODE_ENV === 'test') {
   void (async () => {
@@ -571,7 +652,6 @@ void yargs(hideBin(process.argv))
             });
 
             // Apply SDK-level opt-out based on feature flags
-            const { analytics } = await import('./src/utils/analytics.js');
             analytics.applyOptOut();
 
             const { FRAMEWORK_REGISTRY } = await import(

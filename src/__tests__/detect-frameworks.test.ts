@@ -94,6 +94,7 @@ vi.mock('../utils/analytics', () => ({
   analytics: {
     wizardCapture: vi.fn(),
     setTag: vi.fn(),
+    setSessionProperty: vi.fn(),
   },
 }));
 

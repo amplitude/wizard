@@ -1,35 +1,17 @@
-import { createInstance } from '@amplitude/analytics-node';
-import { v4 as uuidv4 } from 'uuid';
-
-import {
-  WIZARD_FEEDBACK_EVENT_TYPE,
-  getAmplitudeNodeServerUrl,
-  resolveTelemetryApiKey,
-} from './analytics.js';
+import { analytics } from './analytics.js';
 
 /**
- * Send a single feedback event to Amplitude via the Node SDK.
- * Uses the same API key and server URL as other wizard telemetry.
+ * Send a single feedback event to Amplitude via the shared analytics singleton.
+ * Uses the same device_id, session_id, and run_id as other wizard telemetry.
+ *
+ * Uses flush() (not shutdown()) so the session continues normally after
+ * feedback is sent — avoids a spurious "Session Ended" event mid-session.
  */
 export async function trackWizardFeedback(message: string): Promise<void> {
   const trimmed = message.trim();
   if (!trimmed) {
     throw new Error('Feedback message cannot be empty');
   }
-  const apiKey = resolveTelemetryApiKey();
-  if (!apiKey) {
-    throw new Error(
-      'Feedback cannot be sent: set AMPLITUDE_API_KEY or unset it to use the default telemetry project.',
-    );
-  }
-
-  const client = createInstance();
-  await client.init(apiKey, { serverUrl: getAmplitudeNodeServerUrl() }).promise;
-  const deviceId = uuidv4();
-  client.track(
-    WIZARD_FEEDBACK_EVENT_TYPE,
-    { message: trimmed },
-    { device_id: deviceId },
-  );
-  await client.flush().promise;
+  analytics.wizardCapture('feedback submitted', { message: trimmed });
+  await analytics.flush();
 }

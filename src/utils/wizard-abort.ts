@@ -8,6 +8,10 @@
  */
 import { analytics } from './analytics';
 import { getUI } from '../ui';
+import {
+  flushSentry,
+  captureError as sentryCaptureError,
+} from '../lib/observability';
 
 export class WizardError extends Error {
   constructor(
@@ -53,15 +57,24 @@ export async function wizardAbort(
     }
   }
 
-  // 2. Capture error in analytics (if provided)
+  // 2. Capture error in analytics + Sentry (if provided)
   if (error) {
     analytics.captureException(error, {
       ...((error instanceof WizardError && error.context) || {}),
     });
+    sentryCaptureError(error, {
+      exitCode,
+      ...((error instanceof WizardError && error.context) || {}),
+    });
   }
 
-  // 3. Shutdown analytics
-  await analytics.shutdown(error ? 'error' : 'cancelled');
+  // 3. Shutdown analytics and flush Sentry
+  await Promise.all([
+    analytics.shutdown(error ? 'error' : 'cancelled'),
+    flushSentry().catch(() => {
+      /* Sentry flush failure is non-fatal */
+    }),
+  ]);
 
   // 4. Display message to user
   getUI().cancel(message);

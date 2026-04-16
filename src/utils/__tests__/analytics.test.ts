@@ -26,6 +26,20 @@ vi.mock('uuid', () => ({
   v4: vi.fn(() => 'test-uuid'),
 }));
 
+vi.mock('../../lib/observability', () => ({
+  getSessionId: vi.fn().mockReturnValue('test-session-id'),
+  getRunId: vi.fn().mockReturnValue('test-run-id'),
+  setSentryUser: vi.fn(),
+  createLogger: vi.fn().mockReturnValue({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+  configureLogFile: vi.fn(),
+  getLogFilePath: vi.fn().mockReturnValue('/tmp/test.log'),
+}));
+
 vi.mock('../../lib/feature-flags', () => ({
   initFeatureFlags: vi.fn().mockResolvedValue(undefined),
   refreshFlags: vi.fn().mockResolvedValue(undefined),
@@ -78,8 +92,14 @@ describe('Analytics', () => {
     });
   });
 
-  describe('setTag', () => {
-    it('should not throw when setting tags', () => {
+  describe('setSessionProperty', () => {
+    it('should not throw when setting session properties', () => {
+      expect(() =>
+        analytics.setSessionProperty('integration', 'nextjs'),
+      ).not.toThrow();
+    });
+
+    it('setTag still works as deprecated alias', () => {
       expect(() => analytics.setTag('integration', 'nextjs')).not.toThrow();
     });
   });

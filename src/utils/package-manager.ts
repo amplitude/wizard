@@ -240,7 +240,7 @@ export function detectAllPackageManagers({
     }
 
     if (detectedManagers.length === 0) {
-      analytics.setTag('package-manager', 'not-detected');
+      analytics.setSessionProperty('package-manager', 'not-detected');
     }
     return detectedManagers;
   });

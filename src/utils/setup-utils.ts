@@ -300,12 +300,12 @@ export async function getPackageManager(
 
   if (detectedPackageManagers.length >= 1) {
     const selected = detectedPackageManagers[0];
-    analytics.setTag('package-manager', selected.name);
+    analytics.setSessionProperty('package-manager', selected.name);
     return selected;
   }
 
   // No package manager detected — default to npm
-  analytics.setTag('package-manager', npm.name);
+  analytics.setSessionProperty('package-manager', npm.name);
   return npm;
 }
 
@@ -575,7 +575,7 @@ async function askForWizardLogin(
       org_id: selectedOrg?.id,
       org_name: selectedOrg?.name,
     });
-    analytics.setTag('opened-wizard-link', true);
+    analytics.wizardCapture('Wizard Link Opened');
   }
 
   // ── 4b. Workspace selection ───────────────────────────────────────

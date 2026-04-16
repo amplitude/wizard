@@ -2,6 +2,7 @@ import { createInstance, Identify } from '@amplitude/analytics-node';
 import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
+import { getSessionId, getRunId, setSentryUser } from '../lib/observability';
 import {
   initFeatureFlags,
   refreshFlags,
@@ -63,24 +64,42 @@ export function sessionPropertiesCompact(
 }
 
 export class Analytics {
-  private tags: Record<string, string | boolean | number | null | undefined> =
-    {};
+  /**
+   * Session-scoped event properties — spread into every `capture()` call.
+   *
+   * Use for values that are genuinely session-wide and relevant to every event:
+   *   mode, wizard_version, platform, node_version, integration, package-manager
+   *
+   * Do NOT use for step-specific state (vercel-detected, prettier-installed, etc.)
+   * — pass those as event properties directly on the relevant event.
+   */
+  private sessionProperties: Record<
+    string,
+    string | boolean | number | null | undefined
+  > = {};
   private distinctId?: string;
   private anonymousId: string;
   private appName = 'wizard';
   private activeFlags: Record<string, string> | null = null;
   private readonly client: ReturnType<typeof createInstance>;
   private initPromise: Promise<void> | null = null;
+  private readonly startedAt = Date.now();
 
   constructor() {
-    this.tags = { $app_name: this.appName };
+    this.sessionProperties = { $app_name: this.appName };
     this.anonymousId = uuidv4();
     this.distinctId = undefined;
     this.client = createInstance();
   }
 
+  /** Expose the anonymous device ID for cross-system correlation (logs, Sentry). */
+  getAnonymousId(): string {
+    return this.anonymousId;
+  }
+
   setDistinctId(distinctId: string) {
     this.distinctId = distinctId;
+    setSentryUser(distinctId);
   }
 
   /**
@@ -149,8 +168,28 @@ export class Analytics {
     debug('identifyUser:', properties);
   }
 
+  /**
+   * Set a session-scoped property that appears on every subsequent event.
+   *
+   * Only use for values relevant to ALL events in the session:
+   *   mode, wizard_version, platform, node_version, integration, package-manager
+   *
+   * For step-specific data (vercel status, prettier, etc.), pass as event
+   * properties directly on the relevant `wizardCapture()` call instead.
+   */
+  setSessionProperty(
+    key: string,
+    value: string | boolean | number | null | undefined,
+  ) {
+    this.sessionProperties[key] = value;
+  }
+
+  /**
+   * @deprecated Use `setSessionProperty()` for session-wide data, or pass
+   * step-specific data as event properties on `wizardCapture()`.
+   */
   setTag(key: string, value: string | boolean | number | null | undefined) {
-    this.tags[key] = value;
+    this.sessionProperties[key] = value;
   }
 
   captureException(error: Error, properties: Record<string, unknown> = {}) {
@@ -170,7 +209,9 @@ export class Analytics {
 
     this.ensureInitStarted();
     const eventProps = {
-      ...this.tags,
+      ...this.sessionProperties,
+      session_id: getSessionId(),
+      run_id: getRunId(),
       ...properties,
     };
     const options: { device_id: string; user_id?: string } = {
@@ -262,8 +303,26 @@ export class Analytics {
     return this.activeFlags;
   }
 
+  /**
+   * Flush pending events without ending the session.
+   * Use for mid-session flushes (e.g. feedback command) where
+   * the wizard continues running after the flush.
+   */
+  async flush(): Promise<void> {
+    if (this.initPromise === null) return;
+    try {
+      await this.initPromise;
+      await this.client.flush().promise;
+    } catch (err) {
+      debug('analytics flush error:', err);
+    }
+  }
+
   async shutdown(status: 'success' | 'error' | 'cancelled') {
-    this.wizardCapture('Session Ended', { status });
+    this.wizardCapture('Session Ended', {
+      status,
+      session_duration_ms: Date.now() - this.startedAt,
+    });
     if (this.initPromise === null) {
       return;
     }

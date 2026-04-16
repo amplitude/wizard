@@ -1,18 +1,28 @@
+/**
+ * Debug and file logging utilities.
+ *
+ * This module now delegates to the structured logger in `src/lib/observability/`.
+ * The public API (`debug()`, `logToFile()`, `enableDebugLogs()`) is preserved
+ * for backward compatibility — existing call sites don't need to change.
+ *
+ * New code should use `createLogger()` from `../lib/observability` directly.
+ */
+
 import chalk from 'chalk';
-import { appendFileSync, statSync, truncateSync } from 'fs';
 import { prepareMessage } from './logging';
 import { getUI } from '../ui';
+import {
+  createLogger,
+  configureLogFile as configureObservabilityLogFile,
+  getLogFilePath as getObservabilityLogFilePath,
+} from '../lib/observability';
+
+const legacyLog = createLogger('legacy');
 
 let debugEnabled = false;
-let logFilePath = '/tmp/amplitude-wizard.log';
-// Disable file logging in test environments — tests write via Vitest and
-// pollute the shared log with hundreds of synthetic "Wizard failed" entries.
-let logEnabled = process.env.NODE_ENV !== 'test';
-
-const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
 export function getLogFilePath(): string {
-  return logFilePath;
+  return getObservabilityLogFilePath();
 }
 
 /**
@@ -23,49 +33,32 @@ export function configureLogFile(opts: {
   path?: string;
   enabled?: boolean;
 }): void {
-  if (opts.path !== undefined) logFilePath = opts.path;
-  if (opts.enabled !== undefined) logEnabled = opts.enabled;
+  configureObservabilityLogFile(opts);
 }
 
 /**
  * Initialize the log file with a run header.
- * Call this at the start of each wizard run.
- * Fails silently to avoid crashing the wizard.
+ * @deprecated The structured logger handles initialization via `initLogger()`.
+ * Kept for backward compatibility — safe to call but may be a no-op
+ * if `initLogger()` has already been called.
  */
 export function initLogFile() {
-  if (!logEnabled) return;
-  try {
-    // Truncate the log if it has grown too large, keeping it manageable.
-    try {
-      if (statSync(logFilePath).size > LOG_MAX_BYTES) {
-        truncateSync(logFilePath, 0);
-      }
-    } catch {
-      // File doesn't exist yet — that's fine
-    }
-    const header = `\n${'='.repeat(
-      60,
-    )}\nAmplitude Wizard Run: ${new Date().toISOString()}\n${'='.repeat(60)}\n`;
-    appendFileSync(logFilePath, header);
-  } catch {
-    // Silently ignore - logging is non-critical
-  }
+  // initLogger() in bin.ts now handles file init.
+  // This is kept as a no-op for any remaining call sites.
 }
 
 /**
  * Log a message to the log file.
  * Always writes regardless of debug flag (when logging is enabled).
  * Fails silently to avoid masking errors in catch blocks.
+ *
+ * @deprecated Use `createLogger('my-module').debug()` or `.info()` instead.
  */
 export function logToFile(...args: unknown[]) {
-  if (!logEnabled) return;
-  try {
-    const timestamp = new Date().toISOString();
-    const msg = args.map((a) => prepareMessage(a)).join(' ');
-    appendFileSync(logFilePath, `[${timestamp}] ${msg}\n`);
-  } catch {
-    // Silently ignore logging failures to avoid masking original errors
-  }
+  const msg = args.map((a) => prepareMessage(a)).join(' ');
+  // Route through the structured logger at debug level.
+  // The logger writes to the file with structured JSON.
+  legacyLog.debug(msg);
 }
 
 export function debug(...args: unknown[]) {

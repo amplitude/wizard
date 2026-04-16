@@ -8,7 +8,11 @@ vi.mock('../../telemetry', () => ({
 }));
 
 vi.mock('../analytics', () => ({
-  analytics: { setTag: vi.fn() },
+  analytics: {
+    setTag: vi.fn(),
+    setSessionProperty: vi.fn(),
+    wizardCapture: vi.fn(),
+  },
 }));
 
 vi.mock('../setup-utils', () => ({
@@ -197,11 +201,11 @@ describe('detectAllPackageManagers', () => {
     expect(result.map((pm) => pm.name)).toContain('pnpm');
   });
 
-  it('returns empty array and calls analytics.setTag when nothing detected', () => {
-    vi.mocked(analytics.setTag).mockClear();
+  it('returns empty array and calls analytics.setSessionProperty when nothing detected', () => {
+    vi.mocked(analytics.setSessionProperty).mockClear();
     const result = detectAllPackageManagers({ installDir: tmpDir });
     expect(result).toHaveLength(0);
-    expect(analytics.setTag).toHaveBeenCalledWith(
+    expect(analytics.setSessionProperty).toHaveBeenCalledWith(
       'package-manager',
       'not-detected',
     );

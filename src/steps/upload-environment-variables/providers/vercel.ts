@@ -16,10 +16,19 @@ export class VercelEnvironmentProvider extends EnvironmentProvider {
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async detect(): Promise<boolean> {
-    const vercelDetected =
-      this.hasVercelCli() && this.isProjectLinked() && this.isAuthenticated();
+    const cliInstalled = this.hasVercelCli();
+    const projectLinked = this.isProjectLinked();
+    const authenticated =
+      cliInstalled && projectLinked && this.isAuthenticated();
+    const vercelDetected = cliInstalled && projectLinked && authenticated;
 
-    analytics.setTag('vercel-detected', vercelDetected);
+    // Report detection status as event properties (not session-global tags)
+    analytics.wizardCapture('Vercel Detection', {
+      vercel_detected: vercelDetected,
+      vercel_cli_installed: cliInstalled,
+      vercel_project_linked: projectLinked,
+      vercel_authenticated: authenticated,
+    });
 
     return vercelDetected;
   }
@@ -32,22 +41,16 @@ export class VercelEnvironmentProvider extends EnvironmentProvider {
   hasVercelCli(): boolean {
     try {
       execSync('vercel --version', { stdio: 'ignore' });
-      analytics.setTag('vercel-cli-installed', true);
       return true;
     } catch {
-      analytics.setTag('vercel-cli-installed', false);
       return false;
     }
   }
 
   isProjectLinked(): boolean {
-    const isProjectLinked = fs.existsSync(
+    return fs.existsSync(
       path.join(this.options.installDir, '.vercel', 'project.json'),
     );
-
-    analytics.setTag('vercel-project-linked', isProjectLinked);
-
-    return isProjectLinked;
   }
 
   isAuthenticated(): boolean {
@@ -65,18 +68,11 @@ export class VercelEnvironmentProvider extends EnvironmentProvider {
       String(result.stdout) + String(result.stderr)
     ).toLowerCase();
 
-    if (
+    return !(
       output.includes('log in to vercel') ||
       output.includes('vercel login') ||
       result.status !== 0
-    ) {
-      analytics.setTag('vercel-authenticated', false);
-      return false;
-    }
-
-    analytics.setTag('vercel-authenticated', true);
-
-    return true;
+    );
   }
 
   async uploadEnvironmentVariable(
