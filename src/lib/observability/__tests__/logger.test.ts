@@ -58,6 +58,23 @@ describe('logger', () => {
     expect(lines[0]).toContain('"key":"value"');
   });
 
+  it('writes complete NDJSON to the companion .jsonl file', () => {
+    const log = createLogger('test-module');
+    log.info('hello world', { key: 'value' });
+
+    const jsonlContent = readFileSync(logFile + 'l', 'utf-8');
+    const jsonLines = jsonlContent.split('\n').filter((l) => l.startsWith('{'));
+    expect(jsonLines.length).toBe(1);
+
+    const entry = JSON.parse(jsonLines[0]);
+    expect(entry.namespace).toBe('test-module');
+    expect(entry.level).toBe('info');
+    expect(entry.msg).toBe('hello world');
+    expect(entry.ctx).toEqual({ key: 'value' });
+    expect(entry.run_id).toBeDefined();
+    expect(entry.session_id).toBe('test-session-id');
+  });
+
   it('writes all levels to the log file', () => {
     const log = createLogger('levels');
     log.debug('d');

@@ -106,18 +106,20 @@ export function initLogger(
 
   if (!logFileEnabled) return;
 
-  // Rotate if over limit (keep one backup)
-  try {
-    const stats = statSync(logFilePath);
-    if (stats.size > LOG_MAX_BYTES) {
-      try {
-        renameSync(logFilePath, `${logFilePath}.1`);
-      } catch {
-        // Rename failed — truncate will happen naturally
+  // Rotate if over limit (keep one backup). Rotate both .log and .logl files.
+  for (const path of [logFilePath, logFilePath + 'l']) {
+    try {
+      const stats = statSync(path);
+      if (stats.size > LOG_MAX_BYTES) {
+        try {
+          renameSync(path, `${path}.1`);
+        } catch {
+          // Rename failed — truncate will happen naturally
+        }
       }
+    } catch {
+      // File doesn't exist yet — fine
     }
-  } catch {
-    // File doesn't exist yet — fine
   }
 
   // Write run header
@@ -193,9 +195,9 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
 function writeToFile(entry: LogEntry): void {
   if (!logFileEnabled) return;
   try {
-    // Human-readable format for the TUI Logs tab and manual inspection.
-    // Format: [timestamp] [run_id] [namespace] LEVEL message {context}
     const redacted = redact(entry) as LogEntry;
+
+    // 1. Human-readable line to the main log file (displayed in TUI Logs tab).
     const ctxStr =
       redacted.ctx && Object.keys(redacted.ctx).length > 0
         ? ' ' + JSON.stringify(redacted.ctx)
@@ -204,6 +206,9 @@ function writeToFile(entry: LogEntry): void {
       redacted.namespace
     }] ${LEVEL_LABEL[redacted.level]} ${redacted.msg}${ctxStr}\n`;
     appendFileSync(logFilePath, line);
+
+    // 2. Complete NDJSON to a companion .jsonl file (for programmatic analysis).
+    appendFileSync(logFilePath + 'l', JSON.stringify(redacted) + '\n');
   } catch {
     // Silently ignore — logging must never crash the wizard
   }
