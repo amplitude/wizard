@@ -869,9 +869,17 @@ void yargs(hideBin(process.argv))
                   let signupEmail = session.signupEmail;
                   let signupFullName = session.signupFullName;
 
+                  const { logToFile } = await import('./src/utils/debug.js');
+
                   if (!signupEmail || !signupFullName) {
-                    // No CLI args — wait for HeadlessSignupScreen to collect them
-                    await new Promise<void>((resolve) => {
+                    // No CLI args — wait for HeadlessSignupScreen to collect
+                    // them, with a 10-minute timeout so authTask can't hang
+                    // forever if the screen never submits.
+                    const { withTimeout, TimeoutError } = await import(
+                      './src/ui/tui/utils/with-timeout.js'
+                    );
+                    const SIGNUP_WAIT_MS = 10 * 60 * 1000;
+                    const wait = new Promise<void>((resolve) => {
                       if (tui.store.session.headlessSignupSubmitted) {
                         resolve();
                         return;
@@ -883,15 +891,29 @@ void yargs(hideBin(process.argv))
                         }
                       });
                     });
-                    signupEmail = session.headlessSignupEmail ?? undefined;
-                    signupFullName =
-                      session.headlessSignupFullName ?? undefined;
+                    try {
+                      await withTimeout(
+                        wait,
+                        SIGNUP_WAIT_MS,
+                        'signup submission',
+                      );
+                      signupEmail = session.headlessSignupEmail ?? undefined;
+                      signupFullName =
+                        session.headlessSignupFullName ?? undefined;
+                    } catch (err) {
+                      if (err instanceof TimeoutError) {
+                        logToFile(
+                          `[signup] timed out waiting for screen submission after ${SIGNUP_WAIT_MS}ms`,
+                        );
+                      } else {
+                        throw err;
+                      }
+                    }
                   }
 
                   const { performHeadlessSignup } = await import(
                     './src/utils/headless-signup.js'
                   );
-                  const { logToFile } = await import('./src/utils/debug.js');
 
                   if (!signupEmail || !signupFullName) {
                     logToFile(
