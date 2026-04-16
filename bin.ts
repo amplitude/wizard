@@ -973,12 +973,9 @@ void yargs(hideBin(process.argv))
 
                     if (result.type === 'requires_auth') {
                       // Existing user — fall through to standard browser OAuth.
-                      // TODO: evaluate whether to use the backend-supplied redirect
-                      // URL (result.redirectUrl) instead of constructing a new one
-                      // via performAmplitudeAuth. The backend URL may carry useful
-                      // context (login hints, pre-auth state). For now we ignore it
-                      // to avoid opening two competing browser tabs with mismatched
-                      // PKCE parameters.
+                      // TODO(followup): evaluate using the backend-supplied
+                      // redirect URL (result.redirectUrl). File a ticket; for
+                      // now we use performAmplitudeAuth to keep PKCE consistent.
                       logToFile(
                         '[signup] existing user, falling back to browser OAuth',
                       );
