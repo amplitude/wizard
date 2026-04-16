@@ -19,6 +19,9 @@ vi.mock('../../lib/feature-flags.js', () => ({
 vi.mock('../ampli-settings.js', () => ({
   storeToken: vi.fn(),
 }));
+vi.mock('../../lib/api.js', () => ({
+  fetchAmplitudeUser: vi.fn(),
+}));
 
 describe('performSignupOrAuth', () => {
   beforeEach(() => vi.clearAllMocks());
@@ -144,6 +147,14 @@ describe('performSignupOrAuth', () => {
         zone: 'us',
       },
     });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: [],
+    });
     const { performAmplitudeAuth } = await import('../oauth.js');
     const { storeToken } = await import('../ampli-settings.js');
 
@@ -159,7 +170,7 @@ describe('performSignupOrAuth', () => {
     expect(storeToken).toHaveBeenCalledOnce();
   });
 
-  it('persists StoredUser with split first/last name from fullName', async () => {
+  it('persists StoredUser with real user id from fetchAmplitudeUser', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
@@ -173,6 +184,14 @@ describe('performSignupOrAuth', () => {
         zone: 'us',
       },
     });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: [],
+    });
     const { storeToken } = await import('../ampli-settings.js');
 
     await performSignupOrAuth({
@@ -184,7 +203,7 @@ describe('performSignupOrAuth', () => {
 
     expect(storeToken).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: 'pending',
+        id: 'user-123',
         firstName: 'Ada',
         lastName: 'Lovelace',
         email: 'ada@example.com',
@@ -208,6 +227,14 @@ describe('performSignupOrAuth', () => {
         zone: 'us',
       },
     });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: [],
+    });
     const { storeToken } = await import('../ampli-settings.js');
 
     await performSignupOrAuth({
@@ -219,11 +246,45 @@ describe('performSignupOrAuth', () => {
 
     expect(storeToken).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: 'pending',
+        id: 'user-123',
         firstName: 'Ada',
         lastName: 'Lovelace',
       }),
       expect.anything(),
     );
+  });
+
+  it('falls back to pending sentinel when fetchAmplitudeUser fails after direct-signup success', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'direct-access',
+        idToken: 'direct-id',
+        refreshToken: 'direct-refresh',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockRejectedValue(new Error('network'));
+    const { storeToken } = await import('../ampli-settings.js');
+    const { performAmplitudeAuth } = await import('../oauth.js');
+
+    const result = await performSignupOrAuth({
+      signup: true,
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(storeToken).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'pending' }),
+      expect.anything(),
+    );
+    expect(result.accessToken).toBe('direct-access');
+    expect(performAmplitudeAuth).not.toHaveBeenCalled();
   });
 });
