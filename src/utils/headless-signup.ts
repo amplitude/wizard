@@ -1,6 +1,6 @@
 /**
- * Headless signup — browserless account creation via the App API
- * provisioning endpoint. Gated behind the `wizard-headless-signup` flag.
+ * Browserless account creation via the App API provisioning endpoint.
+ * Gated behind the `wizard-headless-signup` flag.
  *
  * The endpoint returns one of four response types:
  *   - "oauth"            → auth code returned (exchange for tokens)
@@ -98,7 +98,7 @@ export async function performHeadlessSignup(options: {
   const state = crypto.randomBytes(16).toString('hex');
 
   const url = headlessSignupUrl(zone);
-  logToFile('[headless-signup] calling provisioning endpoint', {
+  logToFile('[signup] calling provisioning endpoint', {
     url,
     email: maskEmail(email),
     zone,
@@ -122,18 +122,18 @@ export async function performHeadlessSignup(options: {
 
     switch (parsed.type) {
       case 'oauth':
-        logToFile('[headless-signup] received oauth response with auth code');
+        logToFile('[signup] received oauth response with auth code');
         return { type: 'oauth', code: parsed.oauth.code, state };
 
       case 'requires_auth':
-        logToFile('[headless-signup] requires_auth: redirect received');
+        logToFile('[signup] requires_auth: redirect received');
         return {
           type: 'requires_auth',
           redirectUrl: parsed.requires_auth.redirect.url,
         };
 
       case 'needs_information':
-        logToFile('[headless-signup] server needs more information');
+        logToFile('[signup] server needs more information');
         return {
           type: 'needs_information',
           schema: parsed.needs_information.schema,
@@ -141,7 +141,7 @@ export async function performHeadlessSignup(options: {
 
       case 'error':
         logToFile(
-          `[headless-signup] server error: ${parsed.error.code} — ${parsed.error.message}`,
+          `[signup] server error: ${parsed.error.code} — ${parsed.error.message}`,
         );
         return {
           type: 'error',
@@ -152,7 +152,7 @@ export async function performHeadlessSignup(options: {
   } catch (err) {
     // Timeout — caller should fall back to browser OAuth
     if (axios.isAxiosError(err) && err.code === 'ECONNABORTED') {
-      logToFile('[headless-signup] request timed out');
+      logToFile('[signup] request timed out');
       return { type: 'error', code: 'timeout', message: 'Request timed out' };
     }
 
@@ -169,7 +169,7 @@ export async function performHeadlessSignup(options: {
     }
 
     const message = err instanceof Error ? err.message : 'Unknown error';
-    logToFile(`[headless-signup] request failed: ${message}`);
+    logToFile(`[signup] request failed: ${message}`);
     return { type: 'error', code: 'network_error', message };
   }
 }
