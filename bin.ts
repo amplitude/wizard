@@ -216,17 +216,19 @@ const resolveNonInteractiveCredentials = async (
             performAmplitudeAuth,
             fetchAmplitudeUser,
             storeToken,
+            allowBrowserRecovery: false,
           });
           userInfo = await fetchAmplitudeUser(tokenResponse.id_token, zone);
         } catch (err) {
           // Account was created but token exchange or user fetch failed.
-          // Credentials stay null — fall through to the guard at the
-          // end of this function which handles the exit.
+          // Credentials stay null — surface the error; fall through to the
+          // guard at the end of this function which handles the exit.
           getUI().log.error(
-            `Token exchange failed: ${
+            `Signup completed but token exchange failed: ${
               err instanceof Error ? err.message : 'unknown error'
             }`,
           );
+          process.exit(ExitCode.AUTH_REQUIRED);
         }
         if (tokenResponse && userInfo) {
           session.userEmail = userInfo.email;
@@ -930,6 +932,7 @@ void yargs(hideBin(process.argv))
                         performAmplitudeAuth,
                         fetchAmplitudeUser,
                         storeToken,
+                        allowBrowserRecovery: false,
                       });
                       return; // Done — skip browser OAuth
                     }
