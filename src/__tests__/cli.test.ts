@@ -38,6 +38,7 @@ const {
     setRunPhase: vi.fn(),
     promptConfirm: vi.fn().mockResolvedValue(false),
     emitChange: vi.fn(),
+    clearCredentialsForSignup: vi.fn(),
   };
   return {
     mockStore,

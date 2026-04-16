@@ -809,10 +809,7 @@ void yargs(hideBin(process.argv))
                 );
                 clearStoredCredentials();
                 // Clear in-memory credentials so the auth flow runs
-                tui.store.session.credentials = null;
-                tui.store.session.pendingOrgs = null;
-                tui.store.session.userEmail = null;
-                tui.store.emitChange();
+                tui.store.clearCredentialsForSignup();
               }
 
               // Skip the full OAuth + SUSI flow when credentials were pre-populated

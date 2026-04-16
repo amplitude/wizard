@@ -515,6 +515,18 @@ export class WizardStore {
   }
 
   /**
+   * Clear in-memory credentials when the user opts into --signup
+   * despite being already logged in. Goes through setKey so per-key
+   * listeners fire (unlike a direct mutation).
+   */
+  clearCredentialsForSignup(): void {
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('pendingOrgs', null);
+    this.$session.setKey('userEmail', null);
+    this.emitChange();
+  }
+
+  /**
    * Called from HeadlessSignupScreen when the user submits email + full name.
    * The authTask in bin.ts waits for headlessSignupSubmitted before proceeding.
    */
