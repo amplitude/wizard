@@ -2,6 +2,7 @@ import { performAmplitudeAuth, type AmplitudeAuthResult } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
 import { FLAG_DIRECT_SIGNUP, isFlagEnabled } from '../lib/feature-flags.js';
 import { storeToken, type StoredUser } from './ampli-settings.js';
+import { fetchAmplitudeUser } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
 
@@ -45,25 +46,48 @@ export async function performSignupOrAuth(
   });
 
   if (result.kind === 'success') {
-    // Persist to ~/.ampli.json in the same format as OAuth.
-    const parts = input.fullName!.trim().split(/\s+/);
-    const pendingUser: StoredUser = {
-      id: 'pending',
-      firstName: parts[0] ?? '',
-      lastName: parts.slice(1).join(' '),
-      email: input.email!,
-      zone: input.zone,
-    };
-    storeToken(pendingUser, {
+    const tokens = {
       accessToken: result.tokens.accessToken,
       idToken: result.tokens.idToken,
       refreshToken: result.tokens.refreshToken,
       expiresAt: result.tokens.expiresAt,
-    });
+    };
+
+    // Fetch the real user profile so resolveCredentials() downstream can find
+    // a non-pending stored user with a valid zone. Fall back to the pending
+    // sentinel on fetch failure — the next wizard run will patch the entry.
+    try {
+      const userInfo = await fetchAmplitudeUser(tokens.idToken, input.zone);
+      const user: StoredUser = {
+        id: userInfo.id,
+        firstName: userInfo.firstName,
+        lastName: userInfo.lastName,
+        email: userInfo.email,
+        zone: input.zone,
+      };
+      storeToken(user, tokens);
+    } catch (_err) {
+      log.warn(
+        'fetchAmplitudeUser failed after direct signup; falling back to pending sentinel',
+        {
+          zone: input.zone,
+        },
+      );
+      const parts = input.fullName!.trim().split(/\s+/);
+      const pendingUser: StoredUser = {
+        id: 'pending',
+        firstName: parts[0] ?? '',
+        lastName: parts.slice(1).join(' '),
+        email: input.email!,
+        zone: input.zone,
+      };
+      storeToken(pendingUser, tokens);
+    }
+
     return {
-      idToken: result.tokens.idToken,
-      accessToken: result.tokens.accessToken,
-      refreshToken: result.tokens.refreshToken,
+      idToken: tokens.idToken,
+      accessToken: tokens.accessToken,
+      refreshToken: tokens.refreshToken,
       zone: result.tokens.zone,
     };
   }
