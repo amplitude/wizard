@@ -14,7 +14,7 @@
 import * as Sentry from '@sentry/node';
 import type { LogLevel } from './logger';
 import { setSentrySink } from './logger';
-import { redact } from './redact';
+import { redact, redactString } from './redact';
 import type { ExecutionMode } from '../mode-config';
 
 // classifyError is in an ESM module — lazy-import to avoid CJS/ESM conflict.
@@ -95,29 +95,57 @@ function resolveEnvironment(mode: ExecutionMode): string {
 // ── beforeSend: redaction + fingerprinting ──────────────────────────
 
 function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
-  // Redact all string values in the event
-  const redacted = redact(event) as Sentry.ErrorEvent;
+  // Selectively redact user-facing fields only. Do NOT redact the entire event
+  // — Sentry's own fields (event_id, trace_id, span_id) are 32+ hex chars
+  // that the hex pattern would corrupt.
+  if (event.exception?.values) {
+    event.exception.values = event.exception.values.map((v) => ({
+      ...v,
+      value: v.value ? redactString(v.value) : v.value,
+    }));
+  }
+  if (event.breadcrumbs) {
+    event.breadcrumbs = event.breadcrumbs.map((b) => ({
+      ...b,
+      message: b.message ? redactString(b.message) : b.message,
+      data: b.data ? (redact(b.data) as Record<string, unknown>) : b.data,
+    }));
+  }
+  if (event.contexts) {
+    // Redact custom wizard contexts but preserve Sentry system contexts (trace, etc.)
+    const SYSTEM_CONTEXTS = new Set([
+      'trace',
+      'otel',
+      'runtime',
+      'os',
+      'device',
+      'app',
+      'browser',
+    ]);
+    for (const [key, ctx] of Object.entries(event.contexts)) {
+      if (!SYSTEM_CONTEXTS.has(key) && ctx) {
+        event.contexts[key] = redact(ctx) as Record<string, unknown>;
+      }
+    }
+  }
 
   // Custom fingerprinting: group by error classification, not raw message.
-  // This prevents noisy grouping from varying file paths and user-specific data.
-  if (redacted.exception?.values?.[0]) {
-    const error = new Error(redacted.exception.values[0].value ?? 'unknown');
-    error.name = redacted.exception.values[0].type ?? 'Error';
+  if (event.exception?.values?.[0]) {
+    const error = new Error(event.exception.values[0].value ?? 'unknown');
+    error.name = event.exception.values[0].type ?? 'Error';
     const classified = getClassifyError()(error);
 
-    // Derive a stable category from the classification
     const category = classified.retryable ? 'transient' : 'permanent';
-    const integration = redacted.tags?.integration as string | undefined;
+    const integration = event.tags?.integration as string | undefined;
 
-    redacted.fingerprint = [
+    event.fingerprint = [
       '{{ default }}',
       category,
       ...(integration ? [integration] : []),
     ];
 
-    // Attach classification context
-    redacted.contexts = {
-      ...redacted.contexts,
+    event.contexts = {
+      ...event.contexts,
       classification: {
         message: classified.message,
         suggestion: classified.suggestion,
@@ -127,7 +155,7 @@ function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
     };
   }
 
-  return redacted;
+  return event;
 }
 
 // ── Public API ──────────────────────────────────────────────────────

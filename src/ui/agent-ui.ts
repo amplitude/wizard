@@ -25,6 +25,8 @@ interface NDJSONEvent {
   '@timestamp': string;
   type: NDJSONEventType;
   message: string;
+  session_id?: string;
+  run_id?: string;
   data?: unknown;
   level?: string;
 }
@@ -62,14 +64,9 @@ function emit(
     '@timestamp': new Date().toISOString(),
     type,
     message,
+    session_id,
+    run_id,
     ...extra,
-    data: {
-      ...(typeof extra?.data === 'object' && extra?.data !== null
-        ? extra.data
-        : {}),
-      session_id,
-      run_id,
-    } as unknown,
   };
   process.stdout.write(JSON.stringify(event) + '\n');
 }
