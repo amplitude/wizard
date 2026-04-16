@@ -1,5 +1,5 @@
 /**
- * Headless signup — browserless account creation via the Thunder
+ * Headless signup — browserless account creation via the App API
  * provisioning endpoint. Gated behind the `wizard-headless-signup` flag.
  *
  * The endpoint returns one of four response types:
@@ -19,6 +19,7 @@ import {
   type AmplitudeZone,
 } from '../lib/constants.js';
 import type { AmplitudeUserInfo } from '../lib/api.js';
+import { type OAuthTokenResponse, exchangeCodeForToken } from './oauth.js';
 import { logToFile } from './debug.js';
 
 // ── Endpoint URL ────────────────────────────────────────────────────
@@ -70,23 +71,7 @@ export type HeadlessSignupResult =
   | { type: 'needs_information'; schema: Record<string, unknown> }
   | { type: 'error'; code: string; message: string };
 
-// ── Token exchange response (same shape as oauth.ts) ────────────────
-
-const OAuthTokenResponseSchema = z.object({
-  access_token: z.string(),
-  id_token: z.string(),
-  refresh_token: z.string(),
-  token_type: z.string(),
-  expires_in: z.number(),
-});
-
-export type OAuthTokenResponse = z.infer<typeof OAuthTokenResponseSchema>;
-
-// ── Helpers ─────────────────────────────────────────────────────────
-
-function generateState(): string {
-  return crypto.randomBytes(16).toString('hex');
-}
+export type { OAuthTokenResponse };
 
 // ── Main entry point ────────────────────────────────────────────────
 
@@ -102,7 +87,7 @@ export async function performHeadlessSignup(options: {
   const { email, fullName, zone } = options;
   const { oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
   const redirectUri = `http://localhost:${OAUTH_PORT}/callback`;
-  const state = generateState();
+  const state = crypto.randomBytes(16).toString('hex');
 
   const url = headlessSignupUrl(zone);
   logToFile('[headless-signup] calling provisioning endpoint', {
@@ -205,23 +190,12 @@ export async function completeSignupTokenExchange(
 
 /**
  * Exchange an auth code from the headless provisioning endpoint for
- * OAuth tokens. Same `/oauth2/token` endpoint as the browser flow,
- * but without a PKCE `code_verifier` (the code was generated server-side).
+ * OAuth tokens. Delegates to the shared exchangeCodeForToken without
+ * a PKCE code_verifier (the code was generated server-side).
  */
 export async function exchangeHeadlessCode(
   code: string,
   zone: AmplitudeZone,
 ): Promise<OAuthTokenResponse> {
-  const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
-  const response = await axios.post(
-    `${oAuthHost}/oauth2/token`,
-    new URLSearchParams({
-      grant_type: 'authorization_code',
-      code,
-      redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-      client_id: oAuthClientId,
-    }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
-  );
-  return OAuthTokenResponseSchema.parse(response.data);
+  return exchangeCodeForToken(code, undefined, zone);
 }
