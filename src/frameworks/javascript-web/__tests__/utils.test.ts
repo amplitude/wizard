@@ -113,4 +113,13 @@ describe('hasIndexHtml', () => {
     fs.writeFileSync(path.join(tmpDir, 'INDEX.HTML'), '<html>', 'utf-8');
     expect(hasIndexHtml({ installDir: tmpDir })).toBe(true);
   });
+
+  it('ignores index.html inside test directories', () => {
+    for (const dir of ['e2e-tests', '__tests__', 'fixtures', 'examples']) {
+      const sub = path.join(tmpDir, dir, 'app');
+      fs.mkdirSync(sub, { recursive: true });
+      fs.writeFileSync(path.join(sub, 'index.html'), '<html>', 'utf-8');
+    }
+    expect(hasIndexHtml({ installDir: tmpDir })).toBe(false);
+  });
 });

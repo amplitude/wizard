@@ -12,13 +12,35 @@ export type JavaScriptContext = {
 
 const INDEX_HTML_MAX_DEPTH = 6;
 const INDEX_HTML_IGNORE_DIRS = new Set([
+  // Dependencies & VCS
   'node_modules',
   '.git',
+  // Build outputs
   '.next',
+  '.output',
   'dist',
   'build',
+  'out',
+  // Caches
   '.turbo',
   '.cache',
+  'coverage',
+  // Test directories
+  'e2e-tests',
+  'e2e',
+  'test-applications',
+  'test-apps',
+  '__tests__',
+  'tests',
+  'test',
+  'fixtures',
+  '__fixtures__',
+  // Examples
+  'examples',
+  'example',
+  // Storybook
+  'storybook-static',
+  '.storybook',
 ]);
 
 /**

@@ -43,6 +43,11 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
         return false;
       }
 
+      // A "bin" field means this is a Node.js CLI tool, not a web app
+      if (packageJson.bin) {
+        return false;
+      }
+
       // Exclude projects with known framework packages
       for (const frameworkPkg of FRAMEWORK_PACKAGES) {
         if (hasPackageInstalled(frameworkPkg, packageJson)) {
