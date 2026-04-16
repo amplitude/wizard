@@ -88,26 +88,30 @@ as JSON — no prompt parsing required.
 The agent will typically run:
 
 ```bash
-amplitude-wizard manifest            # introspect the CLI surface (JSON)
-amplitude-wizard detect --json       # detect framework
-amplitude-wizard status --json       # get full project state
-amplitude-wizard auth status --json  # check if the human is logged in
-amplitude-wizard --agent             # run the full wizard in NDJSON mode
+npx @amplitude/wizard manifest            # introspect the CLI surface (JSON)
+npx @amplitude/wizard detect --json       # detect framework
+npx @amplitude/wizard status --json       # get full project state
+npx @amplitude/wizard auth status --json  # check if the human is logged in
+npx @amplitude/wizard --agent             # run the full wizard in NDJSON mode
 ```
+
+> `npx @amplitude/wizard` works without installation. If the package is
+> globally installed (`npm install -g @amplitude/wizard`), the shorter
+> `amplitude-wizard` bin resolves to the same entry point.
 
 **Authentication in-the-loop.** OAuth login requires a browser click — that's
 the one moment a human has to step in. Everything else is scriptable:
 
 ```bash
 # Option 1: inline project API key (preferred for CI / full automation)
-amplitude-wizard --agent --install-dir . --api-key <key>
+npx @amplitude/wizard --agent --install-dir . --api-key <key>
 
 # Option 2: prior login on the same machine, then run
-amplitude-wizard login                 # one-time browser click
-amplitude-wizard --agent --install-dir .
+npx @amplitude/wizard login                 # one-time browser click
+npx @amplitude/wizard --agent --install-dir .
 
 # Option 3: read the stored OAuth token for other scripts
-amplitude-wizard auth token            # stdout: <access-token>
+npx @amplitude/wizard auth token            # stdout: <access-token>
 ```
 
 **Agent-friendly verbs:**
@@ -141,10 +145,24 @@ full schema and deprecation policy.
 
 ### MCP server
 
-`amplitude-wizard mcp serve` exposes the wizard's read-only operations as
+`npx @amplitude/wizard mcp serve` exposes the wizard's read-only operations as
 [Model Context Protocol](https://modelcontextprotocol.io) tools over stdio.
 AI coding agents call them directly as typed tools instead of spawning the
 CLI and parsing output. Add to your MCP client's config:
+
+```json
+{
+  "mcpServers": {
+    "amplitude-wizard": {
+      "command": "npx",
+      "args": ["-y", "@amplitude/wizard", "mcp", "serve"]
+    }
+  }
+}
+```
+
+If you've installed globally (`npm install -g @amplitude/wizard`), you can
+use the bin directly:
 
 ```json
 {

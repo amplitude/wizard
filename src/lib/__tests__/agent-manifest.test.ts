@@ -14,6 +14,23 @@ describe('getAgentManifest', () => {
     expect(manifest.description).toMatch(/Amplitude/);
   });
 
+  it('names the npm package', () => {
+    expect(manifest.package).toBe('@amplitude/wizard');
+  });
+
+  it('lists invocations with npx first (the recommended form)', () => {
+    expect(manifest.invocations.length).toBeGreaterThan(0);
+    const first = manifest.invocations[0];
+    expect(first.argv).toEqual(['npx', '@amplitude/wizard']);
+    expect(first.requiresGlobalInstall).toBe(false);
+
+    const direct = manifest.invocations.find((i) =>
+      i.argv.includes('amplitude-wizard'),
+    );
+    expect(direct).toBeDefined();
+    expect(direct?.requiresGlobalInstall).toBe(true);
+  });
+
   it('lists the agent-relevant global flags', () => {
     const names = manifest.globalFlags.map((f) => f.name);
     expect(names).toContain('--agent');

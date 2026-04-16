@@ -73,6 +73,22 @@ const lazyRunWizard = async (
 };
 
 /**
+ * How the user invoked this CLI — echoed back in help/error messages so we
+ * don't tell `npx @amplitude/wizard` users to run `amplitude-wizard login`
+ * (which only works when globally installed).
+ *
+ * npx stages packages under a cache path containing `/_npx/`. Everything
+ * else is treated as a direct bin invocation.
+ */
+const CLI_INVOCATION: string = (() => {
+  const scriptPath = process.argv[1] ?? '';
+  if (scriptPath.includes('/_npx/') || scriptPath.includes('\\_npx\\')) {
+    return 'npx @amplitude/wizard';
+  }
+  return 'amplitude-wizard';
+})();
+
+/**
  * Build a WizardSession from CLI argv, avoiding the repeated 12-field literal.
  */
 const buildSessionFromOptions = async (
@@ -205,7 +221,7 @@ const resolveNonInteractiveCredentials = async (
     if (mode === 'agent') {
       getUI().log.error(
         'Could not resolve credentials. ' +
-          'Please log in first by running: amplitude-wizard login',
+          `Please log in first by running: ${CLI_INVOCATION} login`,
       );
       process.exit(ExitCode.AUTH_REQUIRED);
     }
@@ -1205,7 +1221,7 @@ void yargs(hideBin(process.argv))
         } else {
           console.log(
             chalk.yellow(
-              'Not logged in. Run `amplitude-wizard login` to authenticate.',
+              `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
             ),
           );
         }
@@ -1234,7 +1250,7 @@ void yargs(hideBin(process.argv))
         const message = (fromFlag || argvRest).trim();
         if (!message) {
           getUI().log.error(
-            'Usage: amplitude-wizard feedback <message>  or  feedback --message <message>',
+            `Usage: ${CLI_INVOCATION} feedback <message>  or  feedback --message <message>`,
           );
           process.exit(1);
           return;
@@ -1404,7 +1420,7 @@ void yargs(hideBin(process.argv))
           } else {
             console.log(
               chalk.dim(
-                `\nRegion set to ${pickedRegion.toUpperCase()}. Run \`amplitude-wizard login\` to authenticate.`,
+                `\nRegion set to ${pickedRegion.toUpperCase()}. Run \`${CLI_INVOCATION} login\` to authenticate.`,
               ),
             );
           }
@@ -1412,7 +1428,7 @@ void yargs(hideBin(process.argv))
         } catch {
           setUI(new LoggingUI());
           getUI().log.error(
-            'Could not start region picker. Use --zone with `amplitude-wizard login` to set your region.',
+            `Could not start region picker. Use --zone with \`${CLI_INVOCATION} login\` to set your region.`,
           );
           process.exit(1);
         }
@@ -1454,7 +1470,7 @@ void yargs(hideBin(process.argv))
           } else {
             console.log(
               chalk.dim(
-                'No framework detected. Run `amplitude-wizard --menu` to pick one manually.',
+                `No framework detected. Run \`${CLI_INVOCATION} --menu\` to pick one manually.`,
               ),
             );
           }
@@ -1523,7 +1539,7 @@ void yargs(hideBin(process.argv))
               `${check(result.auth.loggedIn)} Logged in: ${
                 result.auth.loggedIn
                   ? `${result.auth.email} (${result.auth.zone})`
-                  : chalk.dim('run `amplitude-wizard login`')
+                  : chalk.dim(`run \`${CLI_INVOCATION} login\``)
               }`,
             );
           }
@@ -1574,7 +1590,7 @@ void yargs(hideBin(process.argv))
             } else {
               console.log(
                 chalk.yellow(
-                  'Not logged in. Run `amplitude-wizard login` to authenticate.',
+                  `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
                 ),
               );
             }
@@ -1608,7 +1624,7 @@ void yargs(hideBin(process.argv))
               } else {
                 console.error(
                   chalk.red(
-                    'Not logged in. Run `amplitude-wizard login` first.',
+                    `Not logged in. Run \`${CLI_INVOCATION} login\` first.`,
                   ),
                 );
               }
@@ -1726,7 +1742,7 @@ void yargs(hideBin(process.argv))
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
               process.stderr.write(
-                `amplitude-wizard mcp serve: failed to start: ${msg}\n`,
+                `${CLI_INVOCATION} mcp serve: failed to start: ${msg}\n`,
               );
               process.exit(1);
             }
@@ -1785,7 +1801,7 @@ void yargs(hideBin(process.argv))
       '  AMPLITUDE_WIZARD_LOG=<path>  Write logs to this file',
       '',
       'Docs:      https://github.com/amplitude/wizard',
-      'Feedback:  amplitude-wizard feedback',
+      `Feedback:  ${CLI_INVOCATION} feedback`,
     ].join('\n'),
   )
   .recommendCommands()
