@@ -17,6 +17,9 @@ export const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 /** Gate for agent-level analytics / telemetry instrumented by the wizard. */
 export const FLAG_AGENT_ANALYTICS = 'wizard-agent-analytics';
 
+/** Gate for direct signup via the signup endpoint (falls back to OAuth redirect). */
+export const FLAG_DIRECT_SIGNUP = 'wizard-direct-signup';
+
 // ── Deployment key ───────────────────────────────────────────────────
 
 /**
