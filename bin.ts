@@ -306,8 +306,8 @@ const resolveNonInteractiveCredentials = async (
         }
       } else if (result.type === 'requires_auth') {
         getUI().log.error(
-          'Account already exists. Browser auth required — ' +
-            'run without --agent to sign in via browser.',
+          'Signup requires browser auth — complete sign-in interactively ' +
+            '(not in --agent/--ci/non-TTY mode).',
         );
         process.exit(ExitCode.AUTH_REQUIRED);
       } else {
@@ -948,8 +948,8 @@ void yargs(hideBin(process.argv))
                     });
 
                     if (result.type === 'oauth') {
-                      // New user — exchange code for tokens, then let
-                      // completeAuth handle user fetch + store + UI signaling.
+                      // Exchange code for tokens, then let completeAuth handle
+                      // user fetch + store + UI signaling.
                       const { exchangeHeadlessCode } = await import(
                         './src/utils/headless-signup.js'
                       );
