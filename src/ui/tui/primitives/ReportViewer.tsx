@@ -29,9 +29,12 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
   const [offset, setOffset] = useState(0);
 
   useEffect(() => {
+    let prevRaw = '';
     const updateContent = () => {
       try {
         const raw = fs.readFileSync(filePath, 'utf-8');
+        if (raw === prevRaw) return;
+        prevRaw = raw;
         const rendered = renderMarkdown(raw);
         setLines(rendered.split('\n'));
       } catch {
