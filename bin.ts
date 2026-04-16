@@ -777,7 +777,15 @@ void yargs(hideBin(process.argv))
                 if (!proceed) {
                   process.exit(0);
                 }
-                // Clear credentials so the auth flow runs
+                // Purge ~/.ampli.json as well — otherwise any OAuth fallback
+                // later in authTask would silently re-use the prior user's
+                // stored tokens (forceFresh is computed from project-local
+                // ampli.json, not ~/.ampli.json).
+                const { clearStoredCredentials } = await import(
+                  './src/utils/ampli-settings.js'
+                );
+                clearStoredCredentials();
+                // Clear in-memory credentials so the auth flow runs
                 tui.store.session.credentials = null;
                 tui.store.session.pendingOrgs = null;
                 tui.store.session.userEmail = null;
