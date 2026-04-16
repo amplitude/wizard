@@ -67,8 +67,11 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
   return (
     <Box flexDirection="column" height={visibleLines}>
       {lines.map((line, i) => {
+        const trimmed = line.trimStart();
         const isJson =
-          line.trimStart().startsWith('{') || line.trimStart().startsWith('[');
+          trimmed.startsWith('{') ||
+          trimmed.startsWith('[{') ||
+          trimmed.startsWith('["');
         return (
           <Text
             key={i}
