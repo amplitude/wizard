@@ -4,6 +4,7 @@ import * as path from 'path';
 import { spawn, execSync } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import { dim, green, red } from '../../src/utils/logging';
+import type { NDJSONEvent } from '../../src/ui/agent-ui';
 
 export const KEYS = {
   UP: '\u001b[A',
@@ -31,20 +32,63 @@ export const log = {
 export class WizardTestEnv {
   taskHandle: ChildProcess;
 
+  /**
+   * Every NDJSON event observed on stdout, in order. Populated when the
+   * wizard is spawned with `--agent` so callers can assert against the
+   * stream after the run terminates.
+   */
+  ndjsonEvents: NDJSONEvent[] = [];
+
+  /** Raw stdout lines that could not be parsed as NDJSON (kept for debugging). */
+  ndjsonNonJsonLines: string[] = [];
+
+  private ndjsonBuffer = '';
+  private ndjsonListeners: Array<(event: NDJSONEvent) => void> = [];
+
   constructor(
     cmd: string,
     args: string[],
     opts?: {
       cwd?: string;
       debug?: boolean;
+      env?: NodeJS.ProcessEnv;
     },
   ) {
-    this.taskHandle = spawn(cmd, args, { cwd: opts?.cwd, stdio: 'pipe' });
+    this.taskHandle = spawn(cmd, args, {
+      cwd: opts?.cwd,
+      stdio: 'pipe',
+      env: opts?.env ?? process.env,
+    });
 
     if (opts?.debug) {
       this.taskHandle.stdout?.pipe(process.stdout);
       this.taskHandle.stderr?.pipe(process.stderr);
     }
+
+    // Always attach an NDJSON parser. For non-agent runs the buffer just
+    // accumulates non-JSON output and we skip it.
+    this.taskHandle.stdout?.on('data', (chunk: Buffer | string) => {
+      this.ndjsonBuffer += chunk.toString();
+      let newlineIdx: number;
+      while ((newlineIdx = this.ndjsonBuffer.indexOf('\n')) !== -1) {
+        const line = this.ndjsonBuffer.slice(0, newlineIdx).trim();
+        this.ndjsonBuffer = this.ndjsonBuffer.slice(newlineIdx + 1);
+        if (!line) continue;
+        if (line.startsWith('{')) {
+          try {
+            const event = JSON.parse(line) as NDJSONEvent;
+            this.ndjsonEvents.push(event);
+            for (const listener of this.ndjsonListeners) {
+              listener(event);
+            }
+            continue;
+          } catch {
+            // Fall through — log as non-JSON
+          }
+        }
+        this.ndjsonNonJsonLines.push(line);
+      }
+    });
   }
 
   sendStdin(input: string | string[]) {
@@ -99,7 +143,9 @@ export class WizardTestEnv {
 
     return new Promise<boolean>((resolve, reject) => {
       const timeoutId = setTimeout(() => {
-        reject(new Error(`Timeout waiting for status code: ${String(statusCode)}`));
+        reject(
+          new Error(`Timeout waiting for status code: ${String(statusCode)}`),
+        );
       }, timeout);
 
       this.taskHandle.on('exit', (code: number | null) => {
@@ -149,6 +195,49 @@ export class WizardTestEnv {
           resolve(true);
         }
       });
+    });
+  }
+
+  /**
+   * Wait for an NDJSON event matching `predicate`. Resolves to the matching
+   * event, or rejects if the timeout elapses without a match.
+   *
+   * If a matching event has already been observed, resolves synchronously
+   * on the next microtask.
+   */
+  waitForNDJSONEvent(
+    predicate: (event: NDJSONEvent) => boolean,
+    options: { timeout?: number } = {},
+  ): Promise<NDJSONEvent> {
+    const { timeout } = { timeout: 60_000, ...options };
+
+    // Fast path: check already-seen events
+    const existing = this.ndjsonEvents.find(predicate);
+    if (existing) {
+      return Promise.resolve(existing);
+    }
+
+    return new Promise<NDJSONEvent>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const idx = this.ndjsonListeners.indexOf(listener);
+        if (idx >= 0) this.ndjsonListeners.splice(idx, 1);
+        reject(
+          new Error(
+            `Timeout (${timeout}ms) waiting for NDJSON event. Saw ${this.ndjsonEvents.length} events.`,
+          ),
+        );
+      }, timeout);
+
+      const listener = (event: NDJSONEvent) => {
+        if (predicate(event)) {
+          clearTimeout(timer);
+          const idx = this.ndjsonListeners.indexOf(listener);
+          if (idx >= 0) this.ndjsonListeners.splice(idx, 1);
+          resolve(event);
+        }
+      };
+
+      this.ndjsonListeners.push(listener);
     });
   }
 
@@ -219,26 +308,56 @@ export function revertLocalChanges(projectDir: string): void {
   }
 }
 
+export interface StartWizardOptions {
+  debug?: boolean;
+  /** When true, spawn the wizard in agent mode (`--agent`) with a test API key. */
+  agentMode?: boolean;
+  /** API key passed via `--api-key`. Only used in agent mode. Defaults to a test key. */
+  apiKey?: string;
+  /** Extra args to forward to the wizard binary. */
+  extraArgs?: string[];
+  /** Extra env vars to set on the spawned process. */
+  env?: NodeJS.ProcessEnv;
+}
+
 /**
- * Start the wizard instance with the given integration and project directory
- * @param integration
- * @param projectDir
+ * Start the wizard instance with the given project directory.
+ *
+ * By default spawns the interactive TUI with `--debug`. Pass `agentMode: true`
+ * to run via NDJSON streaming — this also skips re-initializing git so the
+ * caller can manage fixtures however they like.
  *
  * @returns WizardTestEnv
  */
 export function startWizardInstance(
   projectDir: string,
-  debug = false,
+  debugOrOptions: boolean | StartWizardOptions = false,
 ): WizardTestEnv {
   const binPath = path.join(__dirname, '../../dist/bin.js');
+
+  const options: StartWizardOptions =
+    typeof debugOrOptions === 'boolean'
+      ? { debug: debugOrOptions }
+      : debugOrOptions;
 
   revertLocalChanges(projectDir);
   cleanupGit(projectDir);
   initGit(projectDir);
 
-  return new WizardTestEnv('node', [binPath, '--debug'], {
+  const args: string[] = options.agentMode
+    ? [
+        binPath,
+        '--agent',
+        '--api-key',
+        options.apiKey ?? 'test-api-key',
+        ...(options.extraArgs ?? []),
+      ]
+    : [binPath, '--debug', ...(options.extraArgs ?? [])];
+
+  return new WizardTestEnv('node', args, {
     cwd: projectDir,
-    debug,
+    debug: options.debug,
+    env: options.env,
   });
 }
 

@@ -9,7 +9,7 @@ import { createInterface } from 'readline';
 
 // ── NDJSON event types ──────────────────────────────────────────────
 
-type NDJSONEventType =
+export type NDJSONEventType =
   | 'lifecycle'
   | 'log'
   | 'status'
@@ -20,7 +20,7 @@ type NDJSONEventType =
   | 'result'
   | 'error';
 
-interface NDJSONEvent {
+export interface NDJSONEvent {
   v: 1;
   '@timestamp': string;
   type: NDJSONEventType;
