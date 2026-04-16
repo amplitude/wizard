@@ -27,6 +27,8 @@ import { logToFile } from './debug.js';
 const HEADLESS_PROVISIONING_PATH =
   '/t/headless/provisioning/link-or-create-account';
 
+const REDIRECT_URI = `http://localhost:${OAUTH_PORT}/callback`;
+
 function headlessSignupUrl(zone: AmplitudeZone): string {
   return `${OUTBOUND_URLS.app[zone]}${HEADLESS_PROVISIONING_PATH}`;
 }
@@ -86,7 +88,6 @@ export async function performHeadlessSignup(options: {
 }): Promise<HeadlessSignupResult> {
   const { email, fullName, zone } = options;
   const { oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
-  const redirectUri = `http://localhost:${OAUTH_PORT}/callback`;
   const state = crypto.randomBytes(16).toString('hex');
 
   const url = headlessSignupUrl(zone);
@@ -103,7 +104,7 @@ export async function performHeadlessSignup(options: {
       scopes: ['openid', 'offline'],
       state,
       client_id: oAuthClientId,
-      redirect_uri: redirectUri,
+      redirect_uri: REDIRECT_URI,
     });
 
     const parsed = HeadlessProvisioningResponse.parse(response.data);
