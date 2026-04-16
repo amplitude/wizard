@@ -5,7 +5,7 @@
  * The authTask in bin.ts reads the submitted values from the session.
  */
 
-import { Box, Text } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import { useState } from 'react';
 import { TextInput } from '@inkjs/ui';
 import { z } from 'zod';
@@ -54,6 +54,19 @@ export const HeadlessSignupScreen = ({ store }: HeadlessSignupScreenProps) => {
     setFullNameError('');
     store.setHeadlessSignupData(email, trimmed);
   };
+
+  // Allow the user to back up to the email step after confirming it (e.g.
+  // on a typo) without killing the wizard. Escape or Backspace on the
+  // full-name step resets emailConfirmed.
+  useInput(
+    (_input, key) => {
+      if (emailConfirmed && (key.escape || key.backspace)) {
+        setEmailConfirmed(false);
+        setFullNameError('');
+      }
+    },
+    { isActive: emailConfirmed },
+  );
 
   return (
     <Box flexDirection="column" flexGrow={1}>
