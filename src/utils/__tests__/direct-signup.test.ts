@@ -79,6 +79,23 @@ describe('performDirectSignup', () => {
     expect(result.kind).toBe('error');
   });
 
+  it('returns error on 200 with unexpected body shape', async () => {
+    server.use(
+      http.post('https://auth.amplitude.com/signup', () =>
+        HttpResponse.json({}),
+      ),
+    );
+    const result = await performDirectSignup({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('Unexpected response');
+    }
+  });
+
   it('routes EU requests to auth.eu.amplitude.com', async () => {
     let observedUrl = '';
     server.use(
@@ -98,6 +115,6 @@ describe('performDirectSignup', () => {
       fullName: 'Ada Lovelace',
       zone: 'eu',
     });
-    expect(observedUrl).toContain('auth.eu.amplitude.com');
+    expect(observedUrl).toBe('https://auth.eu.amplitude.com/signup');
   });
 });
