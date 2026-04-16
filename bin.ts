@@ -451,6 +451,13 @@ void yargs(hideBin(process.argv))
       describe:
         'full name to use when creating a new account (requires --signup)',
       type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (value.trim().length === 0) {
+          throw new Error('--full-name cannot be empty');
+        }
+        return value;
+      },
     },
   })
   .command(
