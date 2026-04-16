@@ -3,8 +3,8 @@
  * provisioning endpoint. Gated behind the `wizard-headless-signup` flag.
  *
  * The endpoint returns one of four response types:
- *   - "oauth"            → new user, auth code returned (exchange for tokens)
- *   - "requires_auth"    → existing user, redirect URL provided (open browser)
+ *   - "oauth"            → auth code returned (exchange for tokens)
+ *   - "requires_auth"    → redirect URL provided (open browser)
  *   - "needs_information" → missing required fields (re-prompt)
  *   - "error"            → server error
  */
@@ -115,11 +115,11 @@ export async function performHeadlessSignup(options: {
 
     switch (parsed.type) {
       case 'oauth':
-        logToFile('[headless-signup] got auth code for new user');
+        logToFile('[headless-signup] received oauth response with auth code');
         return { type: 'oauth', code: parsed.oauth.code, state };
 
       case 'requires_auth':
-        logToFile('[headless-signup] existing user, redirect required');
+        logToFile('[headless-signup] requires_auth: redirect received');
         return {
           type: 'requires_auth',
           redirectUrl: parsed.requires_auth.redirect.url,
