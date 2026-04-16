@@ -12,23 +12,11 @@
 
 ---
 
-## Open design question to resolve in this PR
+## Resolved design decisions (carried over from PR 1)
 
-**Should `performSignupOrAuth()` call `fetchAmplitudeUser()` after a successful direct signup?**
+- **`fetchAmplitudeUser` after direct signup:** yes — now happens inside `performSignupOrAuth()` (resolved in PR 1 commit 517c759). `resolveCredentials()` filters out `id:'pending'` stored users, so without a real user fetch, `zone` resolves to null and the whole credential-resolution path silently no-ops. With the real user in `~/.ampli.json`, PR 2's agent branch can let `resolveNonInteractiveCredentials()` populate `projectApiKey` / `selectedOrgId` via the existing pipeline — no duplicate env-selection logic needed.
 
-Context: PR 1 left the `id: 'pending'` sentinel pattern from OAuth intact — the wrapper writes a pending StoredUser entry and the real user ID is filled in on the next run. Reviewer (`bird-m`) raised the question in [PR #96 inline comment on `signup-or-auth.ts:52`](https://github.com/amplitude/wizard/pull/96). We deferred to PR 2 because the wrapper is dead code in PR 1 — can't observe real behavior.
-
-**Decide in this PR by tracing the agent-mode flow:**
-
-- Does `resolveNonInteractiveCredentials()` (called after the direct-signup branch) choke on a pending user?
-- Does the agent IIFE need `session.userEmail`, `session.selectedOrgId`, or similar user-derived fields to proceed?
-- Does `analytics.identifyUser(...)` need to be called with real user info?
-
-**If yes to any:** add `fetchAmplitudeUser` inside `performSignupOrAuth()` after direct-signup success, fall back to the `pending` sentinel on fetch failure. Add unit tests for both success and fetch-failure paths.
-
-**If no:** leave the wrapper as-is; the next wizard run will patch the pending entry via the existing fetch-user path (bin.ts:451+).
-
-Whichever way this resolves, document the decision in the PR description.
+This simplifies PR 2's bin.ts change dramatically: instead of manually populating `session.credentials`, we just call `performSignupOrAuth()` before `resolveNonInteractiveCredentials()` and let the latter do its normal thing.
 
 ---
 
@@ -174,28 +162,23 @@ Insert the direct-signup branch **before** `resolveNonInteractiveCredentials(...
 // Try direct signup before falling through to standard credential resolution.
 // When --signup is off, flag is off, or email/fullName are missing, this
 // branch is a no-op (performSignupOrAuth short-circuits internally).
+// On success, the wrapper writes the real StoredUser + tokens to ~/.ampli.json
+// via fetchAmplitudeUser, so resolveNonInteractiveCredentials below will
+// populate session.credentials (including projectApiKey) via the standard
+// resolveCredentials pipeline — no manual session.credentials wiring needed here.
 if (session.signup && session.signupEmail && session.signupFullName) {
   const { performSignupOrAuth } = await import(
     './src/utils/signup-or-auth.js'
   );
-  const { DEFAULT_AMPLITUDE_ZONE, DEFAULT_HOST_URL } = await import(
-    './src/lib/constants.js'
-  );
+  const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
   const zone = (session.region ?? DEFAULT_AMPLITUDE_ZONE) as 'us' | 'eu';
   try {
-    const auth = await performSignupOrAuth({
+    await performSignupOrAuth({
       signup: true,
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
     });
-    session.credentials = {
-      accessToken: auth.accessToken,
-      idToken: auth.idToken,
-      projectApiKey: '',
-      host: DEFAULT_HOST_URL,
-      projectId: session.projectId ?? 0,
-    };
   } catch (err) {
     getUI().log.warn(
       `Direct signup failed: ${
