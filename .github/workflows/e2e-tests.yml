@@ -36,13 +36,10 @@ jobs:
       fail-fast: false
       matrix:
         framework:
-          # Existing TUI-mode tests with recorded LLM fixtures.
-          - name: nextjs-app-router
-            filter: NextJS
-          - name: react-vite
-            filter: Vite
-          # New agent-mode tests (framework detection only — no LLM fixtures
-          # required for these assertions).
+          # Agent-mode framework detection smoke tests. Each spawns the wizard
+          # with `--agent --api-key <test>`, asserts pre-LLM events (intro,
+          # setDetectedFramework), and tolerates LLM gateway failures since
+          # no fixtures are recorded yet.
           - name: vue
             filter: Vue
           - name: react-router
@@ -54,6 +51,11 @@ jobs:
           # Validates the --agent NDJSON envelope contract itself.
           - name: agent-mode
             filter: agent mode
+          # NOTE: nextjs-app-router and react-vite are NOT in this matrix.
+          # Those tests use TUI mode and hang on OAuth in CI (no
+          # pre-authenticated session available). Enabling them requires
+          # either a CI test credential or a refactor to use agent mode
+          # with recorded fixtures — tracked as follow-up work.
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 

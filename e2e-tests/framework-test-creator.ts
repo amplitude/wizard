@@ -300,11 +300,18 @@ async function runAgentMode(
     );
 
     // Snapshot all events collected so the describe-level closures can run
-    // agent assertions after beforeAll resolves.
+    // agent assertions after beforeAll resolves. We don't throw on terminal
+    // error events — the wizard may fail late (e.g. LLM gateway unreachable
+    // in CI without fixtures) but framework detection and other pre-LLM
+    // events still fire and should be assertable. Tests that require a
+    // successful run can assert on outro via `expectedEvents`.
     collectedEvents.push(...wizardInstance.ndjsonEvents);
 
     if (terminal.type === 'error') {
-      throw new Error(`Agent run terminated with error: ${terminal.message}`);
+      console.warn(
+        `[createFrameworkTest] Agent run terminated with error: ${terminal.message}. ` +
+          `Pre-error events are still available for assertions.`,
+      );
     }
   } finally {
     wizardInstance.kill();
