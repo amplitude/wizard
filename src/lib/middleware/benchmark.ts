@@ -17,6 +17,7 @@ import { createPluginsFromConfig } from './benchmarks';
 import type { BenchmarkConfig } from './config';
 import type { WizardOptions } from '../../utils/types';
 import { AgentSignals } from '../agent-interface';
+import { createObservabilityMiddleware } from './observability';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -98,7 +99,8 @@ export function createBenchmarkPipeline(
     `${AgentSignals.BENCHMARK} Tracking enabled, starting with setup phase`,
   );
 
-  return new MiddlewarePipeline(plugins, {
+  // Prepend observability middleware so it runs on benchmark pipelines too.
+  return new MiddlewarePipeline([createObservabilityMiddleware(), ...plugins], {
     phaseDetector: new PhaseDetector(),
     autoDetectPhases: true,
   });

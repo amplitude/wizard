@@ -31,17 +31,45 @@ interface NDJSONEvent {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
+// Lazy imports to avoid circular dependencies at module load time.
+let _getSessionId: (() => string) | null = null;
+let _getRunId: (() => string) | null = null;
+function getCorrelationIds(): { session_id: string; run_id: string } {
+  if (!_getSessionId) {
+    try {
+      const mod = require('../lib/observability/correlation') as {
+        getSessionId: () => string;
+        getRunId: () => string;
+      };
+      _getSessionId = mod.getSessionId;
+      _getRunId = mod.getRunId;
+    } catch {
+      _getSessionId = () => 'unknown';
+      _getRunId = () => 'unknown';
+    }
+  }
+  return { session_id: _getSessionId(), run_id: _getRunId!() };
+}
+
 function emit(
   type: NDJSONEventType,
   message: string,
   extra?: Omit<NDJSONEvent, 'v' | '@timestamp' | 'type' | 'message'>,
 ): void {
+  const { session_id, run_id } = getCorrelationIds();
   const event: NDJSONEvent = {
     v: 1,
     '@timestamp': new Date().toISOString(),
     type,
     message,
     ...extra,
+    data: {
+      ...(typeof extra?.data === 'object' && extra?.data !== null
+        ? extra.data
+        : {}),
+      session_id,
+      run_id,
+    } as unknown,
   };
   process.stdout.write(JSON.stringify(event) + '\n');
 }
@@ -132,11 +160,18 @@ export class AgentUI implements WizardUI {
 
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
-    // Sanitize: strip URLs that may contain auth tokens in query params,
-    // and redact file paths that leak internal directory structure.
-    const sanitized = error.message
-      .replace(/https?:\/\/[^\s]+/g, '[URL redacted]')
-      .replace(/\/(?:Users|home|var|tmp)\/[^\s:]+/g, '[path redacted]');
+    let sanitized: string;
+    try {
+      const { redactString } = require('../lib/observability/redact') as {
+        redactString: (s: string) => string;
+      };
+      sanitized = redactString(error.message);
+    } catch {
+      // Fallback to inline redaction if observability module not available
+      sanitized = error.message
+        .replace(/https?:\/\/[^\s]+/g, '[URL redacted]')
+        .replace(/\/(?:Users|home|var|tmp)\/[^\s:]+/g, '[path redacted]');
+    }
     emit('error', sanitized, {
       data: { name: error.name },
     });

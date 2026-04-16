@@ -28,6 +28,8 @@ import { OUTBOUND_URLS } from './constants.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { enableDebugLogs, logToFile } from '../utils/debug';
+import { createObservabilityMiddleware } from './middleware/observability';
+import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
@@ -291,9 +293,11 @@ export async function runAgentWizard(
     sessionToOptions(session),
   );
 
+  // Always run observability middleware for structured logging + Sentry breadcrumbs.
+  // Benchmark middleware (token/cost tracking) is opt-in via --benchmark.
   const middleware = session.benchmark
     ? createBenchmarkPipeline(spinner, sessionToOptions(session))
-    : undefined;
+    : new MiddlewarePipeline([createObservabilityMiddleware()]);
 
   const agentResult = await runAgent(
     agent,
