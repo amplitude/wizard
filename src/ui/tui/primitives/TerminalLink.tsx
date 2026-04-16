@@ -14,9 +14,11 @@ interface TerminalLinkProps {
   url: string;
   /** Display text. Defaults to the URL itself. */
   children?: string;
+  /** Link color. Defaults to Colors.accent. */
+  color?: string;
 }
 
-export const TerminalLink = ({ url, children }: TerminalLinkProps) => {
+export const TerminalLink = ({ url, children, color }: TerminalLinkProps) => {
   const text = children ?? url;
-  return <Text color={Colors.accent}>{makeLink(text, url)}</Text>;
+  return <Text color={color ?? Colors.accent}>{makeLink(text, url)}</Text>;
 };
