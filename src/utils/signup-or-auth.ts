@@ -46,7 +46,7 @@ export async function performSignupOrAuth(
 
   if (result.kind === 'success') {
     // Persist to ~/.ampli.json in the same format as OAuth.
-    const parts = input.fullName!.split(' ');
+    const parts = input.fullName!.trim().split(/\s+/);
     const pendingUser: StoredUser = {
       id: 'pending',
       firstName: parts[0] ?? '',
