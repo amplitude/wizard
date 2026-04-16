@@ -184,10 +184,44 @@ describe('performSignupOrAuth', () => {
 
     expect(storeToken).toHaveBeenCalledWith(
       expect.objectContaining({
+        id: 'pending',
         firstName: 'Ada',
         lastName: 'Lovelace',
         email: 'ada@example.com',
         zone: 'us',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('normalizes extra whitespace in fullName before splitting', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date().toISOString(),
+        zone: 'us',
+      },
+    });
+    const { storeToken } = await import('../ampli-settings.js');
+
+    await performSignupOrAuth({
+      signup: true,
+      email: 'ada@example.com',
+      fullName: '  Ada   Lovelace  ',
+      zone: 'us',
+    });
+
+    expect(storeToken).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'pending',
+        firstName: 'Ada',
+        lastName: 'Lovelace',
       }),
       expect.anything(),
     );
