@@ -40,6 +40,7 @@ import {
 
 type SDKQueryOptions = {
   model?: string;
+  fallbackModel?: string;
   cwd?: string;
   permissionMode?: string;
   mcpServers?: McpServersConfig;
@@ -52,6 +53,7 @@ type SDKQueryOptions = {
   stderr?: (data: string) => void;
   hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
   abortSignal?: AbortSignal;
+  maxTurns?: number;
 };
 
 type SDKQueryFn = (params: {
@@ -700,6 +702,10 @@ export async function initializeAgent(
       // Disable experimental betas (like input_examples) that the LLM gateway doesn't support
       process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS = 'true';
       logToFile('Configured LLM gateway:', gatewayUrl);
+      logToFile('Gateway config:', {
+        url: gatewayUrl,
+        betaHeadersEnabled: !process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS,
+      });
     }
 
     // Configure MCP servers
@@ -1124,8 +1130,11 @@ export async function runAgent(
     const MAX_RETRIES = 3;
     // Cold-start timeout: subprocess spawn + MCP server connections + first LLM response
     const INITIAL_STALL_TIMEOUT_MS = 60_000;
-    // Mid-run timeout: between consecutive messages during active work
-    const STALL_TIMEOUT_MS = 30_000;
+    // Mid-run timeout: between consecutive messages during active work.
+    // Raised from 30s to 120s to accommodate extended thinking (Opus can
+    // think for 10+ min before emitting the first token with the proxy's
+    // 20-min fetch timeout).
+    const STALL_TIMEOUT_MS = 120_000;
 
     // Tracks whether an authentication failure was detected in the current attempt.
     // Passed to createStopHook so it can skip reflection when auth is broken.
@@ -1133,10 +1142,23 @@ export async function runAgent(
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
+        // Exponential backoff: 2s, 4s, 8s
+        const backoffMs = Math.min(2_000 * Math.pow(2, attempt - 1), 8_000);
         logToFile(
-          `Agent stall retry: attempt ${attempt + 1} of ${MAX_RETRIES + 1}`,
+          `Agent stall retry: attempt ${attempt + 1} of ${
+            MAX_RETRIES + 1
+          }, backing off ${backoffMs}ms`,
         );
-        analytics.wizardCapture('Agent Stall Retry', { attempt });
+        analytics.wizardCapture('Agent Stall Retry', {
+          attempt,
+          backoff_ms: backoffMs,
+        });
+        getUI().pushStatus(
+          `Retrying connection (attempt ${attempt + 1} of ${
+            MAX_RETRIES + 1
+          })...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, backoffMs));
         // Clear per-attempt output so stale error markers don't affect the fresh run
         collectedText.length = 0;
         recentStatuses.length = 0;
@@ -1194,9 +1216,15 @@ export async function runAgent(
           prompt: createPromptStream(),
           options: {
             model: agentConfig.model,
+            // Fallback model if primary is unavailable (e.g. Vertex outage)
+            fallbackModel: agentConfig.useDirectApiKey
+              ? 'claude-haiku-4-5-20251001'
+              : 'anthropic/claude-haiku-4-5-20251001',
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
+            // Safety nets: cap runaway tool loops and token spend
+            maxTurns: 200,
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
@@ -1338,8 +1366,12 @@ export async function runAgent(
         const hitTransientApiError =
           !receivedSuccessResult &&
           !authErrorDetected &&
-          partialOutput.includes('API Error: 400') &&
-          attempt < MAX_RETRIES;
+          attempt < MAX_RETRIES &&
+          (partialOutput.includes('API Error: 400') ||
+            partialOutput.includes('API Error: 408') ||
+            partialOutput.includes('API Error: 503') ||
+            partialOutput.includes('API Error: 529') ||
+            partialOutput.includes('DEADLINE_EXCEEDED'));
 
         if (hitTransientApiError) {
           logToFile(
@@ -1374,8 +1406,8 @@ export async function runAgent(
         }
 
         // Transient SDK/proxy error: malformed conversation history (tool_use
-        // without tool_result) or API 400. These are SDK-level race conditions
-        // that resolve on a fresh retry with a new conversation.
+        // without tool_result), API errors, or Vertex-specific transient failures.
+        // These resolve on a fresh retry with a new conversation.
         const errMsg =
           innerError instanceof Error ? innerError.message : String(innerError);
         const isTransientSdkError =
@@ -1384,6 +1416,10 @@ export async function runAgent(
           (errMsg.includes('tool_use') ||
             errMsg.includes('tool_result') ||
             errMsg.includes('API Error: 400') ||
+            errMsg.includes('API Error: 408') ||
+            errMsg.includes('API Error: 503') ||
+            errMsg.includes('API Error: 529') ||
+            errMsg.includes('DEADLINE_EXCEEDED') ||
             errMsg.includes('invalid_request_error'));
         if (isTransientSdkError) {
           logToFile(
