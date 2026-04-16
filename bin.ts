@@ -71,7 +71,7 @@ const buildSessionFromOptions = async (
   overrides?: { ci?: boolean },
 ) => {
   const { buildSession } = await import('./src/lib/wizard-session.js');
-  return buildSession({
+  const session = buildSession({
     debug: options.debug as boolean | undefined,
     verbose: options.verbose as boolean | undefined,
     forceInstall: options.forceInstall as boolean | undefined,
@@ -89,6 +89,14 @@ const buildSessionFromOptions = async (
     benchmark: options.benchmark as boolean | undefined,
     projectId: options.projectId as string | undefined,
   });
+  // Resolve --signup eligibility once so downstream code
+  // (resolveNonInteractiveCredentials, authTask) can rely on
+  // session._headlessSignupEnabled being populated.
+  const { resolveHeadlessSignupFlag } = await import(
+    './src/lib/feature-flags.js'
+  );
+  await resolveHeadlessSignupFlag(session);
+  return session;
 };
 
 /**
@@ -528,12 +536,6 @@ void yargs(hideBin(process.argv))
           const session = await buildSessionFromOptions(options);
           session.agent = true;
 
-          // Initialize feature flags so --signup eligibility can be computed
-          const { resolveHeadlessSignupFlag } = await import(
-            './src/lib/feature-flags.js'
-          );
-          await resolveHeadlessSignupFlag(session);
-
           await resolveNonInteractiveCredentials(
             session,
             options,
@@ -552,12 +554,6 @@ void yargs(hideBin(process.argv))
 
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
-
-          // Initialize feature flags so --signup eligibility can be computed
-          const { resolveHeadlessSignupFlag } = await import(
-            './src/lib/feature-flags.js'
-          );
-          await resolveHeadlessSignupFlag(session);
 
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
@@ -771,12 +767,6 @@ void yargs(hideBin(process.argv))
             // Apply SDK-level opt-out based on feature flags
             const { analytics } = await import('./src/utils/analytics.js');
             analytics.applyOptOut();
-
-            // Compute --signup eligibility (flags already initialized above)
-            const { resolveHeadlessSignupFlag } = await import(
-              './src/lib/feature-flags.js'
-            );
-            await resolveHeadlessSignupFlag(session);
 
             const { FRAMEWORK_REGISTRY } = await import(
               './src/lib/registry.js'
