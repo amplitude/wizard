@@ -960,7 +960,9 @@ void yargs(hideBin(process.argv))
               } catch {
                 // Best-effort — don't block exit
               }
-              process.exit(130);
+
+              // Best-effort flush — the 1s force-kill timer bounds the wait
+              void analytics.flush().finally(() => process.exit(130));
             });
 
             // Wait for auth and framework detection to finish concurrently.
