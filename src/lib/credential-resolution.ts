@@ -232,14 +232,20 @@ export async function resolveCredentials(
                 if (workspaceIdFilter && ws.id !== workspaceIdFilter) {
                   continue;
                 }
-                const matchedEnv = (ws.environments ?? []).find((e) => {
-                  if (!e.app?.apiKey) return false;
-                  if (projectIdFilter && e.app.id !== projectIdFilter)
-                    return false;
-                  if (envMatch && e.name.toLowerCase() !== envMatch)
-                    return false;
-                  return true;
-                });
+                // Sort by rank so when only --workspace-id narrows (no
+                // --project-id / --env), we pick the highest-ranked env
+                // (Production over Development), matching every other
+                // env-selection path in the codebase.
+                const matchedEnv = (ws.environments ?? [])
+                  .filter((e) => {
+                    if (!e.app?.apiKey) return false;
+                    if (projectIdFilter && e.app.id !== projectIdFilter)
+                      return false;
+                    if (envMatch && e.name.toLowerCase() !== envMatch)
+                      return false;
+                    return true;
+                  })
+                  .sort((a, b) => a.rank - b.rank)[0];
                 if (matchedEnv?.app?.apiKey) {
                   const apiKey = matchedEnv.app.apiKey;
                   session.selectedOrgId = org.id;
@@ -277,6 +283,13 @@ export async function resolveCredentials(
                   options?.env ?? '(none)'
                 }, org=${options?.org ?? '(none)'}`,
               );
+              // Populate pendingOrgs so the caller emits
+              // `auth_required: env_selection_failed` (or the TUI picker)
+              // instead of the misleading `no_stored_credentials` path.
+              // The user IS signed in — their filters just didn't match.
+              session.pendingOrgs = userInfo.orgs;
+              session.pendingAuthIdToken = storedToken.idToken;
+              session.pendingAuthAccessToken = storedToken.accessToken;
             }
           } else if (envsWithKey.length === 1) {
             // Single environment — auto-select
