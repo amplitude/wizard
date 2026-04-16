@@ -18,6 +18,7 @@ interface HeadlessSignupScreenProps {
 }
 
 const EmailSchema = z.string().trim().toLowerCase().email();
+const FullNameSchema = z.string().trim().min(1, 'Full name is required');
 
 // This screen is only rendered when CLI --email/--full-name were NOT provided.
 // When both CLI args are present, the flow's isComplete predicate skips this
@@ -46,13 +47,15 @@ export const HeadlessSignupScreen = ({ store }: HeadlessSignupScreenProps) => {
   };
 
   const handleFullNameSubmit = (value: string) => {
-    const trimmed = value.trim();
-    if (!trimmed) {
-      setFullNameError('Full name is required');
+    const result = FullNameSchema.safeParse(value);
+    if (!result.success) {
+      setFullNameError(
+        result.error.issues[0]?.message ?? 'Full name is required',
+      );
       return;
     }
     setFullNameError('');
-    store.setHeadlessSignupData(email, trimmed);
+    store.setHeadlessSignupData(email, result.data);
   };
 
   // Allow the user to back up to the email step after confirming it (e.g.
