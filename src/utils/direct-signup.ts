@@ -3,6 +3,7 @@ import * as crypto from 'node:crypto';
 import { z } from 'zod';
 import {
   AMPLITUDE_ZONE_SETTINGS,
+  OUTBOUND_URLS,
   OAUTH_PORT,
   type AmplitudeZone,
 } from '../lib/constants.js';
@@ -16,7 +17,7 @@ const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
 // Discriminated union response schemas from the provisioning endpoint.
 const OAuthCodeSchema = z.object({
   type: z.literal('oauth'),
-  oauth: z.object({ code: z.string() }),
+  oauth: z.object({ code: z.string().min(1) }),
 });
 
 const RedirectSchema = z.object({
@@ -29,6 +30,9 @@ const RedirectSchema = z.object({
 
 const NeedsInformationSchema = z.object({
   type: z.literal('needs_information'),
+  needs_information: z.object({
+    schema: z.record(z.string(), z.unknown()),
+  }),
 });
 
 const ErrorSchema = z.object({
@@ -41,15 +45,16 @@ const TokenSchema = z.object({
   id_token: z.string(),
   refresh_token: z.string(),
   token_type: z.string(),
-  expires_in: z.number(),
+  expires_in: z.number().int().positive().max(MAX_EXPIRES_IN_SECONDS),
+});
+
+const OAuthErrorBodySchema = z.object({
+  error: z.string(),
+  error_description: z.string().optional(),
 });
 
 function provisioningUrl(zone: AmplitudeZone): string {
-  const base =
-    zone === 'eu'
-      ? 'https://app.eu.amplitude.com'
-      : 'https://app.amplitude.com';
-  return `${base}/t/headless/provisioning/link-or-create-account`;
+  return `${OUTBOUND_URLS.app[zone]}/t/headless/provisioning/link-or-create-account`;
 }
 
 export interface DirectSignupInput {
@@ -82,6 +87,9 @@ export async function performDirectSignup(
 ): Promise<DirectSignupResult> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[input.zone];
   const url = provisioningUrl(input.zone);
+  // The server uses this as the OAuth `confirmationSecret` when issuing the
+  // auth code. We send it for server-side correlation; there's no echo to
+  // verify against (unlike browser OAuth `state`).
   const state = crypto.randomBytes(16).toString('hex');
   log.debug('[direct-signup] POST', { url, zone: input.zone });
 
@@ -151,6 +159,7 @@ export async function performDirectSignup(
       {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: REQUEST_TIMEOUT_MS,
+        validateStatus: (s) => s < 500,
       },
     );
   } catch (e) {
@@ -162,6 +171,26 @@ export async function performDirectSignup(
     };
   }
 
+  if (tokenResponse.status >= 400) {
+    const parsedOAuthError = OAuthErrorBodySchema.safeParse(tokenResponse.data);
+    if (parsedOAuthError.success) {
+      const { error, error_description } = parsedOAuthError.data;
+      const description = error_description ? `: ${error_description}` : '';
+      log.warn('[direct-signup] token exchange error', { error });
+      return {
+        kind: 'error',
+        message: `Token exchange ${tokenResponse.status}: ${error}${description}`,
+      };
+    }
+    log.warn('[direct-signup] token exchange failed', {
+      status: tokenResponse.status,
+    });
+    return {
+      kind: 'error',
+      message: `Token exchange failed (${tokenResponse.status})`,
+    };
+  }
+
   const parsedTokens = TokenSchema.safeParse(tokenResponse.data);
   if (!parsedTokens.success) {
     return {
@@ -170,16 +199,9 @@ export async function performDirectSignup(
     };
   }
 
-  const expiresIn = parsedTokens.data.expires_in;
-  if (
-    !Number.isFinite(expiresIn) ||
-    expiresIn <= 0 ||
-    expiresIn > MAX_EXPIRES_IN_SECONDS
-  ) {
-    return { kind: 'error', message: `Invalid expires_in: ${expiresIn}` };
-  }
-
-  const expiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
+  const expiresAt = new Date(
+    Date.now() + parsedTokens.data.expires_in * 1000,
+  ).toISOString();
   return {
     kind: 'success',
     tokens: {
