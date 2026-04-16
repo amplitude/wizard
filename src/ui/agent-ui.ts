@@ -429,11 +429,11 @@ export class AgentUI implements WizardUI {
       {
         data: {
           promptType: 'environment_selection',
-          // Amplitude hierarchy: Org > Workspace > Project(App) > Environment
-          // The "workspace" in our API == "Project" in the Amplitude UI.
-          // Each environment belongs to a single project (app) and carries
-          // its own ingestion API key.
-          hierarchy: ['org', 'workspace', 'environment'],
+          // Must stay aligned with the manifest's concepts.hierarchy so
+          // agents don't see one shape in the manifest and a different
+          // shape in the prompt. Each choice carries projectId, which is
+          // the unambiguous selector when env names collide.
+          hierarchy: ['org', 'workspace', 'project', 'environment'],
           choices,
           orgs: sanitizedOrgs,
           // Agents should reply on stdin with one JSON line matching this shape:

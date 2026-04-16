@@ -243,7 +243,12 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       }>;
     };
     expect(data.promptType).toBe('environment_selection');
-    expect(data.hierarchy).toEqual(['org', 'workspace', 'environment']);
+    expect(data.hierarchy).toEqual([
+      'org',
+      'workspace',
+      'project',
+      'environment',
+    ]);
     expect(data.choices).toHaveLength(2);
     expect(data.choices[0]).toMatchObject({
       orgId: 'org-1',

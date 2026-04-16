@@ -208,13 +208,17 @@ export async function resolveCredentials(
           //   --workspace-id <uuid>   → narrows to one workspace
           //   --env <name>            → environment name (case-insensitive)
           //   --org <name>            → case-insensitive partial match
-          const hasFilter = Boolean(
-            options?.env ||
-              options?.projectId ||
-              options?.workspaceId ||
-              options?.org,
+          //
+          // --org alone is NOT a specific-enough filter to silently pick one
+          // env — without a workspace/project/env disambiguator it would
+          // just grab the first env with a key, which can easily be the
+          // wrong one in multi-env orgs. We intentionally fall through to
+          // the pendingOrgs selection path in that case and only enter this
+          // filter loop when at least one specific filter is present.
+          const hasSpecificFilter = Boolean(
+            options?.env || options?.projectId || options?.workspaceId,
           );
-          if (hasFilter) {
+          if (hasSpecificFilter) {
             const envMatch = options?.env?.toLowerCase();
             const orgFilter = options?.org?.toLowerCase();
             const workspaceIdFilter = options?.workspaceId;
