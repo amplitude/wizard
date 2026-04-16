@@ -329,6 +329,12 @@ const resolveNonInteractiveCredentials = async (
 
   // If we still don't have credentials, auth is required
   if (!session.credentials) {
+    if (session.signup && !session._headlessSignupEnabled) {
+      getUI().log.error(
+        '--signup is not enabled for this install. Complete signup interactively via browser.',
+      );
+      process.exit(ExitCode.AUTH_REQUIRED);
+    }
     if (mode === 'agent') {
       getUI().log.error(
         'Could not resolve credentials. ' +

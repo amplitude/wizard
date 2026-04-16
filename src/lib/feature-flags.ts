@@ -107,7 +107,11 @@ export async function resolveHeadlessSignupFlag(session: {
   signup: boolean;
   _headlessSignupEnabled: boolean;
 }): Promise<void> {
-  await initFeatureFlags().catch(() => {});
+  try {
+    await initFeatureFlags();
+  } catch (err) {
+    debug('feature-flags: resolveHeadlessSignupFlag init failed', err);
+  }
   session._headlessSignupEnabled =
     session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
 }
