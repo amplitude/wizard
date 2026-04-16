@@ -695,6 +695,11 @@ export async function initializeAgent(
         );
       }
 
+      // Capture the pre-existing beta header state before we override it below,
+      // so the diagnostic log reflects what the user's environment had configured.
+      const betaHeadersEnabledInEnv =
+        !process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS;
+
       process.env.ANTHROPIC_BASE_URL = gatewayUrl;
       process.env.ANTHROPIC_AUTH_TOKEN = config.amplitudeBearerToken;
       // Use CLAUDE_CODE_OAUTH_TOKEN to override any stored /login credentials
@@ -704,7 +709,7 @@ export async function initializeAgent(
       logToFile('Configured LLM gateway:', gatewayUrl);
       logToFile('Gateway config:', {
         url: gatewayUrl,
-        betaHeadersEnabled: !process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS,
+        betaHeadersEnabledInEnv,
       });
     }
 
@@ -1364,25 +1369,31 @@ export async function runAgent(
         // that warrants a retry rather than immediately giving up.
         clearTimeout(staleTimer);
         const partialOutput = collectedText.join('\n');
+        const transientErrorMatchers = [
+          { pattern: 'API Error: 400', label: 'api_400' },
+          { pattern: 'API Error: 408', label: 'api_408' },
+          { pattern: 'API Error: 503', label: 'api_503' },
+          { pattern: 'API Error: 529', label: 'api_529' },
+          { pattern: 'DEADLINE_EXCEEDED', label: 'deadline_exceeded' },
+        ];
+        const matchedTransientError = transientErrorMatchers.find((m) =>
+          partialOutput.includes(m.pattern),
+        );
         const hitTransientApiError =
           !receivedSuccessResult &&
           !authErrorDetected &&
           attempt < MAX_RETRIES &&
-          (partialOutput.includes('API Error: 400') ||
-            partialOutput.includes('API Error: 408') ||
-            partialOutput.includes('API Error: 503') ||
-            partialOutput.includes('API Error: 529') ||
-            partialOutput.includes('DEADLINE_EXCEEDED'));
+          !!matchedTransientError;
 
-        if (hitTransientApiError) {
+        if (hitTransientApiError && matchedTransientError) {
           logToFile(
-            `Retrying after API 400 error (next attempt: ${attempt + 2} of ${
-              MAX_RETRIES + 1
-            })`,
+            `Retrying after ${matchedTransientError.pattern} (next attempt: ${
+              attempt + 2
+            } of ${MAX_RETRIES + 1})`,
           );
           analytics.wizardCapture('Agent API Error Retry', {
             attempt,
-            error: 'api_400',
+            error: matchedTransientError.label,
           });
           collectedText.length = 0;
           recentStatuses.length = 0;
