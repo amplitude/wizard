@@ -12,6 +12,26 @@
 
 ---
 
+## Open design question to resolve in this PR
+
+**Should `performSignupOrAuth()` call `fetchAmplitudeUser()` after a successful direct signup?**
+
+Context: PR 1 left the `id: 'pending'` sentinel pattern from OAuth intact — the wrapper writes a pending StoredUser entry and the real user ID is filled in on the next run. Reviewer (`bird-m`) raised the question in [PR #96 inline comment on `signup-or-auth.ts:52`](https://github.com/amplitude/wizard/pull/96). We deferred to PR 2 because the wrapper is dead code in PR 1 — can't observe real behavior.
+
+**Decide in this PR by tracing the agent-mode flow:**
+
+- Does `resolveNonInteractiveCredentials()` (called after the direct-signup branch) choke on a pending user?
+- Does the agent IIFE need `session.userEmail`, `session.selectedOrgId`, or similar user-derived fields to proceed?
+- Does `analytics.identifyUser(...)` need to be called with real user info?
+
+**If yes to any:** add `fetchAmplitudeUser` inside `performSignupOrAuth()` after direct-signup success, fall back to the `pending` sentinel on fetch failure. Add unit tests for both success and fetch-failure paths.
+
+**If no:** leave the wrapper as-is; the next wizard run will patch the pending entry via the existing fetch-user path (bin.ts:451+).
+
+Whichever way this resolves, document the decision in the PR description.
+
+---
+
 ## File Structure
 
 **Modify:**
