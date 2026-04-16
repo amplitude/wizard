@@ -436,8 +436,12 @@ export function buildSession(args: {
     ci: validated.ci ?? false,
     agent: false,
     signup: validated.signup ?? false,
-    signupEmail: validated.signupEmail ?? null,
-    signupFullName: validated.signupFullName ?? null,
+    // On parse failure we intentionally reject raw args for the signup
+    // fields — otherwise a malformed email would skip zod's .email() check
+    // via the fallback and reach the signup endpoint. Null here means the
+    // signup wrapper short-circuits with "missing email or fullName".
+    signupEmail: parsed.success ? validated.signupEmail ?? null : null,
+    signupFullName: parsed.success ? validated.signupFullName ?? null : null,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,

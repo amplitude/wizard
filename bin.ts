@@ -647,6 +647,13 @@ void yargs(hideBin(process.argv))
     email: {
       describe: 'email to use when creating a new account (requires --signup)',
       type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+          throw new Error(`Invalid email: "${value}"`);
+        }
+        return value;
+      },
     },
     'full-name': {
       describe:
