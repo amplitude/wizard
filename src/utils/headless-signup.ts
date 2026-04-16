@@ -25,7 +25,10 @@ import { logToFile } from './debug.js';
 
 /** Mask an email for safe logging: `mi***@example.com` */
 export function maskEmail(email: string): string {
-  return email.replace(/(.{2}).*@/, '$1***@');
+  const at = email.indexOf('@');
+  if (at <= 0) return '***';
+  const prefix = email.slice(0, Math.min(2, at));
+  return `${prefix}***${email.slice(at)}`;
 }
 
 // ── Endpoint URL ────────────────────────────────────────────────────
