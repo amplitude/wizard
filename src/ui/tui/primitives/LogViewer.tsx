@@ -19,7 +19,7 @@ const CHROME_ROWS = 8;
 const TIMESTAMP_RE = /^\[/;
 const ERROR_RE = /\berror\b|\bfail(?:ed)?\b/i;
 const WARN_RE = /\bwarn(?:ing)?\b/i;
-const SUCCESS_RE = /\bsucceed(?:ed)?\b|\bcompleted?\b/i;
+const SUCCESS_RE = /\bsuccess(?:ful(?:ly)?)?\b|\bsucceed(?:ed)?\b|\bcompleted?\b/i;
 
 function getLineColor(line: string): string | null {
   if (ERROR_RE.test(line)) return Colors.error;
