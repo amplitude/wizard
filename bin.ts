@@ -181,89 +181,92 @@ const resolveNonInteractiveCredentials = async (
     const email = session.email;
     const fullName = session.fullName;
     if (email && fullName) {
-      const { performHeadlessSignup, exchangeHeadlessCode } = await import(
-        './src/utils/headless-signup.js'
-      );
-      const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+      const { performHeadlessSignup, completeSignupTokenExchange } =
+        await import('./src/utils/headless-signup.js');
       const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
-      const { storeToken } = await import('./src/utils/ampli-settings.js');
       const { getAPIKey } = await import('./src/utils/get-api-key.js');
 
       const zone = (session.region ?? 'us') as 'us' | 'eu';
       const result = await performHeadlessSignup({ email, fullName, zone });
 
       if (result.type === 'oauth') {
-        const tokenResponse = await exchangeHeadlessCode(result.code, zone);
-        const userInfo = await fetchAmplitudeUser(tokenResponse.id_token, zone);
-
-        storeToken(
-          {
-            id: userInfo.id,
-            firstName: userInfo.firstName,
-            lastName: userInfo.lastName,
-            email: userInfo.email,
+        let tokenResponse;
+        let userInfo;
+        try {
+          ({ tokenResponse, userInfo } = await completeSignupTokenExchange(
+            result.code,
             zone,
-          },
-          {
-            accessToken: tokenResponse.access_token,
-            idToken: tokenResponse.id_token,
-            refreshToken: tokenResponse.refresh_token,
-            expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-          },
-        );
-        session.userEmail = userInfo.email;
+          ));
+        } catch (err) {
+          // Account was created but token exchange failed.
+          // Credentials stay null — fall through to the guard at the
+          // end of this function which handles the exit.
+          getUI().log.error(
+            `Token exchange failed: ${
+              err instanceof Error ? err.message : 'unknown error'
+            }`,
+          );
+        }
+        if (tokenResponse && userInfo) {
+          session.userEmail = userInfo.email;
 
-        // Try to resolve an API key from the newly created org
-        if (userInfo.orgs.length > 0) {
-          const org = userInfo.orgs[0];
-          const ws = org.workspaces[0];
-          session.selectedOrgId = org.id;
-          session.selectedOrgName = org.name;
-          if (ws) {
-            session.selectedWorkspaceId = ws.id;
-            session.selectedWorkspaceName = ws.name;
-            const envWithKey = (ws.environments ?? [])
-              .filter(
-                (e: { app: { apiKey?: string | null } | null }) =>
-                  e.app?.apiKey,
-              )
-              .sort(
-                (a: { rank: number }, b: { rank: number }) => a.rank - b.rank,
-              )[0];
-            if (envWithKey?.app?.apiKey) {
+          // Try to resolve an API key from the newly created org
+          if (userInfo.orgs.length > 0) {
+            const org = userInfo.orgs[0];
+            const ws = org.workspaces[0];
+            session.selectedOrgId = org.id;
+            session.selectedOrgName = org.name;
+            if (ws) {
+              session.selectedWorkspaceId = ws.id;
+              session.selectedWorkspaceName = ws.name;
+              const envWithKey = (ws.environments ?? [])
+                .filter(
+                  (e: { app: { apiKey?: string | null } | null }) =>
+                    e.app?.apiKey,
+                )
+                .sort(
+                  (a: { rank: number }, b: { rank: number }) => a.rank - b.rank,
+                )[0];
+              if (envWithKey?.app?.apiKey) {
+                session.credentials = {
+                  accessToken: tokenResponse.access_token,
+                  idToken: tokenResponse.id_token,
+                  projectApiKey: envWithKey.app.apiKey,
+                  host: DEFAULT_HOST_URL,
+                  projectId: 0,
+                };
+                session.projectHasData = false;
+              }
+            }
+          }
+
+          if (!session.credentials) {
+            // Fallback: try fetching API key from backend
+            const apiKey = await getAPIKey({
+              installDir: session.installDir,
+              idToken: tokenResponse.id_token,
+              zone,
+              workspaceId: session.selectedWorkspaceId ?? undefined,
+            }).catch(() => undefined);
+            if (apiKey) {
               session.credentials = {
                 accessToken: tokenResponse.access_token,
                 idToken: tokenResponse.id_token,
-                projectApiKey: envWithKey.app.apiKey,
+                projectApiKey: apiKey,
                 host: DEFAULT_HOST_URL,
                 projectId: 0,
               };
               session.projectHasData = false;
             }
           }
-        }
 
-        if (!session.credentials) {
-          // Fallback: try fetching API key from backend
-          const apiKey = await getAPIKey({
-            installDir: session.installDir,
-            idToken: tokenResponse.id_token,
-            zone,
-            workspaceId: session.selectedWorkspaceId ?? undefined,
-          }).catch(() => undefined);
-          if (apiKey) {
-            session.credentials = {
-              accessToken: tokenResponse.access_token,
-              idToken: tokenResponse.id_token,
-              projectApiKey: apiKey,
-              host: DEFAULT_HOST_URL,
-              projectId: 0,
-            };
-            session.projectHasData = false;
-          }
+          getUI().log.info(
+            `Signup complete for ${userInfo.email.replace(
+              /(.{2}).*@/,
+              '$1***@',
+            )}`,
+          );
         }
-
-        getUI().log.info(`Headless signup complete for ${userInfo.email}`);
       } else if (result.type === 'requires_auth') {
         getUI().log.error(
           'Account already exists. Browser auth required — ' +
@@ -481,6 +484,14 @@ void yargs(hideBin(process.argv))
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
+
+          // Initialize feature flags so --signup eligibility can be computed
+          const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
+            await import('./src/lib/feature-flags.js');
+          await initFeatureFlags().catch(() => {});
+          session._headlessSignupEnabled =
+            session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+
           await resolveNonInteractiveCredentials(
             session,
             options,
@@ -499,6 +510,14 @@ void yargs(hideBin(process.argv))
 
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
+
+          // Initialize feature flags so --signup eligibility can be computed
+          const { initFeatureFlags, isFlagEnabled, FLAG_HEADLESS_SIGNUP } =
+            await import('./src/lib/feature-flags.js');
+          await initFeatureFlags().catch(() => {});
+          session._headlessSignupEnabled =
+            session.signup && isFlagEnabled(FLAG_HEADLESS_SIGNUP);
+
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
@@ -712,7 +731,7 @@ void yargs(hideBin(process.argv))
             const { analytics } = await import('./src/utils/analytics.js');
             analytics.applyOptOut();
 
-            // Compute headless signup eligibility (requires both --signup AND flag)
+            // Compute --signup eligibility (requires both --signup AND feature flag)
             {
               const { isFlagEnabled, FLAG_HEADLESS_SIGNUP } = await import(
                 './src/lib/feature-flags.js'
@@ -885,65 +904,86 @@ void yargs(hideBin(process.argv))
 
                 // ── Headless signup path ───────────────────────────────
                 if (session._headlessSignupEnabled) {
-                  // Wait for HeadlessSignupScreen to collect email + name
-                  await new Promise<void>((resolve) => {
-                    if (tui.store.session.headlessSignupSubmitted) {
-                      resolve();
-                      return;
-                    }
-                    const unsub = tui.store.subscribe(() => {
+                  // Resolve email + name: either from CLI args (screen was
+                  // skipped) or by waiting for HeadlessSignupScreen input.
+                  let signupEmail = session.email;
+                  let signupFullName = session.fullName;
+
+                  if (!signupEmail || !signupFullName) {
+                    // No CLI args — wait for HeadlessSignupScreen to collect them
+                    await new Promise<void>((resolve) => {
                       if (tui.store.session.headlessSignupSubmitted) {
-                        unsub();
                         resolve();
+                        return;
                       }
+                      const unsub = tui.store.subscribe(() => {
+                        if (tui.store.session.headlessSignupSubmitted) {
+                          unsub();
+                          resolve();
+                        }
+                      });
                     });
-                  });
-
-                  const { performHeadlessSignup, exchangeHeadlessCode } =
-                    await import('./src/utils/headless-signup.js');
-                  const { logToFile } = await import('./src/utils/debug.js');
-
-                  const result = await performHeadlessSignup({
-                    email: session.headlessSignupEmail!,
-                    fullName: session.headlessSignupFullName!,
-                    zone,
-                  });
-
-                  if (result.type === 'oauth') {
-                    // New user — exchange auth code for tokens
-                    const tokenResponse = await exchangeHeadlessCode(
-                      result.code,
-                      zone,
-                    );
-                    await completeAuth({
-                      idToken: tokenResponse.id_token,
-                      accessToken: tokenResponse.access_token,
-                      refreshToken: tokenResponse.refresh_token,
-                      zone,
-                    });
-                    return; // Done — skip browser OAuth
+                    signupEmail = session.headlessSignupEmail ?? undefined;
+                    signupFullName =
+                      session.headlessSignupFullName ?? undefined;
                   }
 
-                  if (result.type === 'requires_auth') {
-                    // Existing user — open the redirect URL from the backend
-                    // and fall through to the standard browser OAuth callback flow.
+                  const { performHeadlessSignup } = await import(
+                    './src/utils/headless-signup.js'
+                  );
+                  const { logToFile } = await import('./src/utils/debug.js');
+
+                  if (!signupEmail || !signupFullName) {
                     logToFile(
-                      '[headless-signup] existing user, opening redirect URL',
+                      '[signup] email/fullName missing — falling back to browser',
                     );
-                    // The redirect URL is a fully-formed OAuth authorize URL.
-                    // Open it in the browser and let the callback server handle it.
-                    tui.store.setLoginUrl(result.redirectUrl);
-                    const opn = (await import('opn')).default;
-                    opn(result.redirectUrl, { wait: false }).catch(() => {
-                      // No browser — user will copy-paste the URL shown by the TUI
+                  }
+
+                  if (signupEmail && signupFullName) {
+                    const result = await performHeadlessSignup({
+                      email: signupEmail,
+                      fullName: signupFullName,
+                      zone,
                     });
-                    // Fall through to standard performAmplitudeAuth below
-                    // (which starts the callback server and waits for the code)
-                  } else {
-                    logToFile(
-                      `[headless-signup] ${result.type}: falling back to browser OAuth`,
-                    );
-                    // Fall through to standard browser OAuth
+
+                    if (result.type === 'oauth') {
+                      // New user — exchange code for tokens, then let
+                      // completeAuth handle user fetch + store + UI signaling.
+                      // Don't use completeSignupTokenExchange here — it would
+                      // double-fetch the user and double-store the token.
+                      const { exchangeHeadlessCode } = await import(
+                        './src/utils/headless-signup.js'
+                      );
+                      const tokenResponse = await exchangeHeadlessCode(
+                        result.code,
+                        zone,
+                      );
+                      await completeAuth({
+                        idToken: tokenResponse.id_token,
+                        accessToken: tokenResponse.access_token,
+                        refreshToken: tokenResponse.refresh_token,
+                        zone,
+                      });
+                      return; // Done — skip browser OAuth
+                    }
+
+                    if (result.type === 'requires_auth') {
+                      // Existing user — fall through to standard browser OAuth.
+                      // TODO: evaluate whether to use the backend-supplied redirect
+                      // URL (result.redirectUrl) instead of constructing a new one
+                      // via performAmplitudeAuth. The backend URL may carry useful
+                      // context (login hints, pre-auth state). For now we ignore it
+                      // to avoid opening two competing browser tabs with mismatched
+                      // PKCE parameters.
+                      logToFile(
+                        '[signup] existing user, falling back to browser OAuth',
+                      );
+                    } else {
+                      logToFile(
+                        `[signup] ${result.type}: falling back to browser OAuth`,
+                      );
+                      // Fall through to standard browser OAuth
+                    }
                   }
                 }
 
