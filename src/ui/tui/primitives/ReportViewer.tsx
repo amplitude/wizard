@@ -1,17 +1,18 @@
 /**
  * ReportViewer — Scrollable viewer for amplitude-setup-report.md.
  *
- * Reads the file from disk and displays it with basic markdown rendering
- * (headings bold, bullet points preserved). Supports up/down scrolling
- * via arrow keys or j/k vim keys.
+ * Reads the file from disk and renders it with full markdown support
+ * (headings, code blocks, tables, lists, emphasis) via marked-terminal.
+ * Supports up/down scrolling via arrow keys or j/k vim keys.
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors } from '../styles.js';
+import { renderMarkdown } from '../utils/terminal-rendering.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + separator + tab bar chrome */
 const CHROME_ROWS = 10;
@@ -20,35 +21,28 @@ interface ReportViewerProps {
   filePath: string;
 }
 
-/** Strip markdown syntax for terminal rendering — keep text readable. */
-function renderLine(line: string): {
-  text: string;
-  bold: boolean;
-  dimmed: boolean;
-} {
-  if (/^#{1,3}\s/.test(line)) {
-    return { text: line.replace(/^#+\s*/, ''), bold: true, dimmed: false };
-  }
-  if (/^---+$/.test(line.trim())) {
-    return { text: '─'.repeat(40), bold: false, dimmed: true };
-  }
-  return { text: line, bold: false, dimmed: false };
-}
-
 export const ReportViewer = ({ filePath }: ReportViewerProps) => {
   const [, rows] = useStdoutDimensions();
   const visibleLines = Math.max(5, rows - CHROME_ROWS);
 
   const [lines, setLines] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
+  const prevRawRef = useRef<string>('');
 
   useEffect(() => {
-    try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      setLines(content.split('\n'));
-    } catch {
-      setLines(['(No report found — the agent may still be running)']);
-    }
+    const updateContent = () => {
+      try {
+        const raw = fs.readFileSync(filePath, 'utf-8');
+        if (raw === prevRawRef.current) return; // skip redundant re-renders
+        prevRawRef.current = raw;
+        const rendered = renderMarkdown(raw);
+        setLines(rendered.split('\n'));
+      } catch {
+        setLines(['(No report found — the agent may still be running)']);
+      }
+    };
+
+    updateContent();
 
     // Watch for the file to appear/update (agent may still be writing)
     let watcher: fs.FSWatcher | undefined;
@@ -56,21 +50,13 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
 
     const startWatch = () => {
       try {
-        watcher = fs.watch(filePath, () => {
-          try {
-            const content = fs.readFileSync(filePath, 'utf-8');
-            setLines(content.split('\n'));
-          } catch {
-            // ignore
-          }
-        });
+        watcher = fs.watch(filePath, () => updateContent());
       } catch {
         // File not yet available — poll
         interval = setInterval(() => {
           try {
             fs.accessSync(filePath);
-            const content = fs.readFileSync(filePath, 'utf-8');
-            setLines(content.split('\n'));
+            updateContent();
             clearInterval(interval);
             interval = undefined;
             startWatch();
@@ -107,19 +93,11 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
 
   return (
     <Box flexDirection="column" height={visibleLines}>
-      {visible.map((line, i) => {
-        const { text, bold, dimmed } = renderLine(line);
-        return (
-          <Text
-            key={i}
-            bold={bold}
-            color={dimmed ? Colors.muted : undefined}
-            wrap="truncate"
-          >
-            {text}
-          </Text>
-        );
-      })}
+      {visible.map((line, i) => (
+        <Text key={i} wrap="truncate">
+          {line}
+        </Text>
+      ))}
       {lines.length > visibleLines && (
         <Text color={Colors.muted}>
           {' '}

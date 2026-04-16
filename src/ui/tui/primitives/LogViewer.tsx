@@ -1,6 +1,10 @@
 /**
  * LogViewer — Real-time log tail, pinned to available terminal height.
  * Only renders the last N lines that fit on screen.
+ *
+ * Lines are color-coded by log level (error → red, warn → amber,
+ * success → green). Multi-line entries (JSON bodies, stack traces)
+ * inherit the color of their parent timestamp line.
  */
 
 import { Box, Text } from 'ink';
@@ -11,6 +15,18 @@ import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + spacer + separator + input + tab bar chrome */
 const CHROME_ROWS = 8;
+
+const TIMESTAMP_RE = /^\[/;
+const ERROR_RE = /\berror\b|\bfail(?:ed)?\b/i;
+const WARN_RE = /\bwarn(?:ing)?\b/i;
+const SUCCESS_RE = /\bsucceed(?:ed)?\b|\bcompleted?\b/i;
+
+function getLineColor(line: string): string | null {
+  if (ERROR_RE.test(line)) return Colors.error;
+  if (WARN_RE.test(line)) return Colors.warning;
+  if (SUCCESS_RE.test(line)) return Colors.success;
+  return null;
+}
 
 interface LogViewerProps {
   filePath: string;
@@ -63,10 +79,19 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
     };
   }, [filePath, visibleLines]);
 
+  // Pre-render pass: assign colors with carry-forward for multi-line entries
+  let currentColor: string = Colors.muted;
+  const coloredLines = lines.map((line) => {
+    if (TIMESTAMP_RE.test(line)) {
+      currentColor = getLineColor(line) ?? Colors.muted;
+    }
+    return { line, color: currentColor };
+  });
+
   return (
     <Box flexDirection="column" height={visibleLines}>
-      {lines.map((line, i) => (
-        <Text key={i} color={Colors.muted} wrap="truncate">
+      {coloredLines.map(({ line, color }, i) => (
+        <Text key={i} color={color} wrap="truncate">
           {line}
         </Text>
       ))}

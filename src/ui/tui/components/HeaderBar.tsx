@@ -6,6 +6,9 @@
 
 import { Box, Text } from 'ink';
 import { Colors, Icons } from '../styles.js';
+import { brandGradient } from '../utils/terminal-rendering.js';
+
+const HEADER_TITLE = brandGradient('Amplitude Wizard');
 
 interface HeaderBarProps {
   width: number;
@@ -22,9 +25,7 @@ export const HeaderBar = ({ width, orgName, projectName }: HeaderBarProps) => {
   return (
     <Box width={width} paddingX={1}>
       <Box flexShrink={0}>
-        <Text color={Colors.heading} bold>
-          Amplitude Wizard
-        </Text>
+        <Text bold>{HEADER_TITLE}</Text>
       </Box>
       {context && (
         <Box flexGrow={1} justifyContent="flex-end" overflow="hidden">

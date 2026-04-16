@@ -17,7 +17,7 @@ import { useState, useEffect } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { PickerMenu } from '../primitives/index.js';
+import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import {
@@ -357,7 +357,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               <Text color={Colors.muted}>
                 If the browser didn't open, copy and paste this URL:
               </Text>
-              <Text color={Colors.accent}>{session.loginUrl}</Text>
+              <TerminalLink url={session.loginUrl}>
+                {session.loginUrl}
+              </TerminalLink>
             </Box>
           )}
         </Box>

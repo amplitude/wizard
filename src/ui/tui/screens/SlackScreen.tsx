@@ -14,7 +14,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { SlackOutcome } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { ConfirmationInput } from '../primitives/index.js';
+import { ConfirmationInput, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import {
   fetchSlackInstallUrl,
@@ -210,7 +210,7 @@ export const SlackScreen = ({
               <>
                 <Text color={Colors.body}>
                   Browser opened to{' '}
-                  <Text color={Colors.accent}>{settingsUrl}</Text>
+                  <TerminalLink url={settingsUrl}>{settingsUrl}</TerminalLink>
                 </Text>
                 <Text color={Colors.secondary}>
                   Go to Settings {Icons.chevronRight} Personal Settings{' '}
@@ -219,9 +219,7 @@ export const SlackScreen = ({
                 </Text>
                 <Text color={Colors.muted}>
                   Docs:{' '}
-                  <Text color={Colors.accent}>
-                    https://amplitude.com/docs/analytics/integrate-slack
-                  </Text>
+                  <TerminalLink url="https://amplitude.com/docs/analytics/integrate-slack" />
                 </Text>
               </>
             ) : (
@@ -236,9 +234,7 @@ export const SlackScreen = ({
                 </Text>
                 <Text color={Colors.muted}>
                   Docs:{' '}
-                  <Text color={Colors.accent}>
-                    https://amplitude.com/docs/analytics/integrate-slack
-                  </Text>
+                  <TerminalLink url="https://amplitude.com/docs/analytics/integrate-slack" />
                 </Text>
               </>
             )}

@@ -21,3 +21,4 @@ export { DissolveTransition } from './DissolveTransition.js';
 export type { WipeDirection } from './DissolveTransition.js';
 export { SlashCommandInput } from './SlashCommandInput.js';
 export type { SlashCommand } from './SlashCommandInput.js';
+export { TerminalLink } from './TerminalLink.js';

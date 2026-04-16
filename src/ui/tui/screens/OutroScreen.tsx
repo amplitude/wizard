@@ -15,7 +15,7 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
 import { Colors, Icons } from '../styles.js';
-import { PickerMenu, ReportViewer } from '../primitives/index.js';
+import { PickerMenu, ReportViewer, TerminalLink } from '../primitives/index.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
@@ -167,7 +167,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             {outroData.docsUrl && (
               <Text color={Colors.secondary}>
                 {Icons.arrowRight} Docs:{' '}
-                <Text color={Colors.accent}>{outroData.docsUrl}</Text>
+                <TerminalLink url={outroData.docsUrl}>
+                  {outroData.docsUrl}
+                </TerminalLink>
               </Text>
             )}
           </Box>
@@ -189,7 +191,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             <Box marginTop={1}>
               <Text color={Colors.secondary}>
                 Manual setup:{' '}
-                <Text color={Colors.accent}>{outroData.docsUrl}</Text>
+                <TerminalLink url={outroData.docsUrl}>
+                  {outroData.docsUrl}
+                </TerminalLink>
               </Text>
             </Box>
           )}
