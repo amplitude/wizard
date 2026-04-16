@@ -187,6 +187,28 @@ describe('performHeadlessSignup', () => {
     });
   });
 
+  it('handles ECONNABORTED timeout', async () => {
+    const err = new Error('timeout of 15000ms exceeded') as Error & {
+      code?: string;
+    };
+    err.code = 'ECONNABORTED';
+    mockedAxios.isAxiosError.mockReturnValue(true);
+    mockedAxios.post.mockRejectedValue(err);
+    const { performHeadlessSignup } = await getModule();
+
+    const result = await performHeadlessSignup({
+      email: 'test@example.com',
+      fullName: 'Test User',
+      zone: 'us',
+    });
+
+    expect(result).toEqual({
+      type: 'error',
+      code: 'timeout',
+      message: 'Request timed out',
+    });
+  });
+
   it('handles HTTP error with structured body', async () => {
     const err = new Error('Request failed') as Error & {
       response?: { data: unknown };
