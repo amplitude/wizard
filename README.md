@@ -166,6 +166,36 @@ surface the instruction to the human, trigger the login, then re-run:
 Reason values: `no_stored_credentials`, `token_expired`, `refresh_failed`,
 `env_selection_failed`.
 
+**Nested-invocation signal.** Running the wizard from inside another Claude
+Code / Claude Agent SDK session is supported. The wizard spawns its own
+Claude Agent SDK subprocess for the setup agent, and inherited env vars from
+the outer session (`CLAUDECODE=1`, `CLAUDE_CODE_ENTRYPOINT`,
+`CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_AGENT_SDK_VERSION`, etc.) would otherwise
+leak into the inner SDK and cause the LLM gateway to reject requests with a
+400. The wizard strips those vars before spawning, so nested runs succeed.
+
+When nesting is detected the wizard emits a diagnostic so outer agent
+orchestrators can log the signal:
+
+```json
+{
+  "v": 1,
+  "type": "lifecycle",
+  "level": "info",
+  "message": "Detected nested Claude Code / Claude Agent SDK invocation via CLAUDECODE=1...",
+  "data": {
+    "event": "nested_agent",
+    "signal": "claude_code_cli",
+    "detectedEnvVar": "CLAUDECODE",
+    "bypassEnv": "AMPLITUDE_WIZARD_ALLOW_NESTED"
+  }
+}
+```
+
+Detection looks for `CLAUDECODE=1` (Claude Code CLI) or `CLAUDE_CODE_ENTRYPOINT`
+(Claude Agent SDK). Set `AMPLITUDE_WIZARD_ALLOW_NESTED=1` to skip the
+diagnostic entirely (sanitization still runs).
+
 ### MCP server
 
 `npx @amplitude/wizard mcp serve` exposes the wizard's read-only operations as

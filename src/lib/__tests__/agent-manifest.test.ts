@@ -52,6 +52,11 @@ describe('getAgentManifest', () => {
     expect(codes.get('USER_CANCELLED')).toBe(130);
   });
 
+  it('documents AMPLITUDE_WIZARD_ALLOW_NESTED env var', () => {
+    const names = manifest.env.map((e) => e.name);
+    expect(names).toContain('AMPLITUDE_WIZARD_ALLOW_NESTED');
+  });
+
   it('includes the new agent-native commands', () => {
     const names = manifest.commands.map((c) => c.command);
     expect(names).toContain('detect');
