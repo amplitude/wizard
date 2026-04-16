@@ -3,30 +3,41 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { performDirectSignup } from '../direct-signup';
 
+const PROVISIONING_URL =
+  'https://app.amplitude.com/t/headless/provisioning/link-or-create-account';
+const EU_PROVISIONING_URL =
+  'https://app.eu.amplitude.com/t/headless/provisioning/link-or-create-account';
+const TOKEN_URL = 'https://auth.amplitude.com/oauth2/token';
+
+const VALID_TOKEN_RESPONSE = {
+  access_token: 'a',
+  id_token: 'i',
+  refresh_token: 'r',
+  token_type: 'Bearer',
+  expires_in: 3600,
+};
+
 const server = setupServer();
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
+const INPUT = {
+  email: 'ada@example.com',
+  fullName: 'Ada Lovelace',
+  zone: 'us' as const,
+};
+
 describe('performDirectSignup', () => {
-  it('returns success with tokens on 200', async () => {
+  it('happy path: exchanges oauth code for tokens and returns success', async () => {
     server.use(
-      http.post('https://auth.amplitude.com/signup', () =>
-        HttpResponse.json({
-          access_token: 'a',
-          id_token: 'i',
-          refresh_token: 'r',
-          token_type: 'Bearer',
-          expires_in: 3600,
-        }),
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ type: 'oauth', oauth: { code: 'auth-code-xyz' } }),
       ),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
     );
 
-    const result = await performDirectSignup({
-      email: 'ada@example.com',
-      fullName: 'Ada Lovelace',
-      zone: 'us',
-    });
+    const result = await performDirectSignup(INPUT);
 
     expect(result.kind).toBe('success');
     if (result.kind === 'success') {
@@ -34,87 +45,149 @@ describe('performDirectSignup', () => {
       expect(result.tokens.idToken).toBe('i');
       expect(result.tokens.refreshToken).toBe('r');
       expect(result.tokens.zone).toBe('us');
+      expect(result.tokens.expiresAt).toBeTruthy();
     }
   });
 
-  it('returns requires_redirect when body is { requires_redirect: true }', async () => {
+  it('returns requires_redirect on requires_auth response', async () => {
     server.use(
-      http.post('https://auth.amplitude.com/signup', () =>
-        HttpResponse.json({ requires_redirect: true }),
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'requires_auth',
+          requires_auth: {
+            type: 'redirect',
+            redirect: { url: 'https://amplitude.com/login' },
+          },
+        }),
       ),
     );
-    const result = await performDirectSignup({
-      email: 'ada@example.com',
-      fullName: 'Ada Lovelace',
-      zone: 'us',
-    });
+
+    const result = await performDirectSignup(INPUT);
+
     expect(result.kind).toBe('requires_redirect');
   });
 
-  it('returns requires_redirect on HTTP 409', async () => {
+  it('returns requires_redirect on needs_information response', async () => {
     server.use(
-      http.post('https://auth.amplitude.com/signup', () =>
-        HttpResponse.json({ error: 'conflict' }, { status: 409 }),
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'needs_information',
+          needs_information: { schema: {} },
+        }),
       ),
     );
-    const result = await performDirectSignup({
-      email: 'ada@example.com',
-      fullName: 'Ada Lovelace',
-      zone: 'us',
-    });
+
+    const result = await performDirectSignup(INPUT);
+
     expect(result.kind).toBe('requires_redirect');
   });
 
-  it('returns error on network failure', async () => {
+  it('returns error with server message on error response', async () => {
     server.use(
-      http.post('https://auth.amplitude.com/signup', () =>
-        HttpResponse.error(),
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'error',
+          error: { code: 'invalid_parameters', message: 'Email is invalid' },
+        }),
       ),
     );
-    const result = await performDirectSignup({
-      email: 'ada@example.com',
-      fullName: 'Ada Lovelace',
-      zone: 'us',
-    });
-    expect(result.kind).toBe('error');
-  });
 
-  it('returns error on 200 with unexpected body shape', async () => {
-    server.use(
-      http.post('https://auth.amplitude.com/signup', () =>
-        HttpResponse.json({}),
-      ),
-    );
-    const result = await performDirectSignup({
-      email: 'ada@example.com',
-      fullName: 'Ada Lovelace',
-      zone: 'us',
-    });
+    const result = await performDirectSignup(INPUT);
+
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
-      expect(result.message).toContain('Unexpected response');
+      expect(result.message).toContain('Email is invalid');
     }
   });
 
-  it('routes EU requests to auth.eu.amplitude.com', async () => {
+  it('returns error with "Unexpected" message on unrecognized response shape', async () => {
+    server.use(http.post(PROVISIONING_URL, () => HttpResponse.json({})));
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('Unexpected');
+    }
+  });
+
+  it('returns error on network failure at provisioning endpoint', async () => {
+    server.use(http.post(PROVISIONING_URL, () => HttpResponse.error()));
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+  });
+
+  it('routes EU requests to app.eu.amplitude.com', async () => {
     let observedUrl = '';
     server.use(
-      http.post('https://auth.eu.amplitude.com/signup', ({ request }) => {
+      http.post(EU_PROVISIONING_URL, ({ request }) => {
         observedUrl = request.url;
-        return HttpResponse.json({
-          access_token: 'a',
-          id_token: 'i',
-          refresh_token: 'r',
-          token_type: 'Bearer',
-          expires_in: 3600,
-        });
+        return HttpResponse.json({ type: 'oauth', oauth: { code: 'eu-code' } });
       }),
+      http.post('https://auth.eu.amplitude.com/oauth2/token', () =>
+        HttpResponse.json(VALID_TOKEN_RESPONSE),
+      ),
     );
-    await performDirectSignup({
-      email: 'ada@example.com',
-      fullName: 'Ada Lovelace',
-      zone: 'eu',
-    });
-    expect(observedUrl).toBe('https://auth.eu.amplitude.com/signup');
+
+    await performDirectSignup({ ...INPUT, zone: 'eu' });
+
+    expect(observedUrl).toBe(EU_PROVISIONING_URL);
+  });
+
+  it('returns error when token exchange fails after successful provisioning', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ type: 'oauth', oauth: { code: 'auth-code-xyz' } }),
+      ),
+      http.post(TOKEN_URL, () => HttpResponse.error()),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('Token exchange failed');
+    }
+  });
+
+  it('returns error when expires_in is out of bounds', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ type: 'oauth', oauth: { code: 'auth-code-xyz' } }),
+      ),
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json({ ...VALID_TOKEN_RESPONSE, expires_in: 0 }),
+      ),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('Invalid expires_in');
+    }
+  });
+
+  it('returns error when expires_in is excessively large', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ type: 'oauth', oauth: { code: 'auth-code-xyz' } }),
+      ),
+      http.post(TOKEN_URL, () =>
+        HttpResponse.json({
+          ...VALID_TOKEN_RESPONSE,
+          expires_in: 99_999_999_999,
+        }),
+      ),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('Invalid expires_in');
+    }
   });
 });
