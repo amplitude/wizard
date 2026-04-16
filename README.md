@@ -73,6 +73,71 @@ npx @amplitude/wizard --ci --api-key <key> --install-dir .
 npx @amplitude/wizard --agent --install-dir . --api-key <key>
 ```
 
+## Using with AI coding agents
+
+Claude Code, Cursor, and Codex can drive the wizard end-to-end. Point your
+agent at the CLI and it will detect the framework, check project state, and
+report back as JSON — no prompt parsing required.
+
+**Kick it off from your agent:**
+
+```
+> Set up Amplitude on this project.
+```
+
+The agent will typically run:
+
+```bash
+amplitude-wizard manifest            # introspect the CLI surface (JSON)
+amplitude-wizard detect --json       # detect framework
+amplitude-wizard status --json       # get full project state
+amplitude-wizard auth status --json  # check if the human is logged in
+amplitude-wizard --agent             # run the full wizard in NDJSON mode
+```
+
+**Authentication in-the-loop.** OAuth login requires a browser click — that's
+the one moment a human has to step in. Everything else is scriptable:
+
+```bash
+# Option 1: token from env var (preferred for automation)
+AMPLITUDE_TOKEN=<access-token> amplitude-wizard --agent --install-dir .
+
+# Option 2: inline API key
+amplitude-wizard --agent --install-dir . --api-key <key>
+
+# Option 3: agent reads the token after the human logs in once
+amplitude-wizard auth token            # stdout: <access-token>
+```
+
+**Agent-friendly verbs:**
+
+| Command | Output | Purpose |
+|---------|--------|---------|
+| `manifest` | JSON | Machine-readable CLI surface (flags, env vars, exit codes) |
+| `detect [--json]` | JSON or human | Detect the framework |
+| `status [--json]` | JSON or human | Full project state: framework, SDK, API key, auth |
+| `auth status [--json]` | JSON or human | Login state + token expiry |
+| `auth token` | raw token or JSON | Print stored OAuth token for scripts |
+
+All commands auto-emit JSON when stdout is piped. Use `--human` to override
+and force human-readable output. `--json` enables JSON output without the
+auto-approve side effects of `--agent` (so you can script but still get
+prompted for confirmation when needed).
+
+**Environment variables:**
+
+| Var | Effect |
+|-----|--------|
+| `AMPLITUDE_TOKEN` | OAuth access token — skips interactive login |
+| `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
+| `AMPLITUDE_WIZARD_API_KEY` | Amplitude project API key (= `--api-key`) |
+| `AMPLITUDE_WIZARD_AGENT=1` | Force agent mode (NDJSON, auto-approve) |
+
+**NDJSON schema.** Every event emitted in `--agent` mode carries a `v:1`
+version tag and a typed envelope. See
+[docs/dual-mode-architecture.md](./docs/dual-mode-architecture.md) for the
+full schema and deprecation policy.
+
 ## Commands
 
 Available at any point during the wizard:
@@ -127,12 +192,21 @@ team sharing). API keys use your OS keychain when available, otherwise
 | Flag | Env var | Description |
 |------|---------|-------------|
 | `--install-dir <dir>` | `AMPLITUDE_WIZARD_INSTALL_DIR` | Directory to install in (required for CI/agent) |
-| `--agent` | `AMPLITUDE_WIZARD_AGENT` | Structured JSON output mode |
+| `--agent` | `AMPLITUDE_WIZARD_AGENT` | NDJSON output + auto-approve prompts |
+| `--json` | — | Machine-readable JSON (does NOT auto-approve prompts) |
+| `--human` | — | Force human output (overrides `--json` auto-detect when piped) |
 | `--yes` / `-y` | — | Skip all prompts, same as `--ci` |
 | `--integration <name>` | — | Force a specific integration |
 | `--menu` | `AMPLITUDE_WIZARD_MENU` | Show framework selection menu |
 | `--force-install` | `AMPLITUDE_WIZARD_FORCE_INSTALL` | Install packages even if peer checks fail |
 | `--benchmark` | `AMPLITUDE_WIZARD_BENCHMARK` | Per-phase token tracking |
+
+### Agent / scripting env vars
+
+| Env var | Effect |
+|---------|--------|
+| `AMPLITUDE_TOKEN` | OAuth access token — skips interactive login |
+| `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 
 ### Exit codes
 
