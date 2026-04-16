@@ -265,8 +265,8 @@ jobs:
               return;
             }
 
-            // Dispatch to wizard-workbench — mirrors handle-command payload
-            // but uses app='all' as the default for an auto-run. Wrapped in
+            // Dispatch the workbench workflow — mirrors handle-command
+            // payload but uses app='all' as the default for an auto-run. Wrapped in
             // try/catch so token permission issues don't block the PR — the
             // comment-based /wizard-ci flow still works as a fallback.
             try {

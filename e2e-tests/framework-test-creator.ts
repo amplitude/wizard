@@ -36,7 +36,7 @@ function resolveProjectDir(config: FrameworkTestConfig): {
     const resolved = path.join(workbenchDir, 'apps', config.workbenchApp);
     if (!fs.existsSync(resolved)) {
       throw new Error(
-        `${config.name}: workbench app not found at ${resolved}. Clone wizard-workbench to $WIZARD_WORKBENCH_DIR (currently "${workbenchDir}").`,
+        `${config.name}: workbench app not found at ${resolved}. Set $WIZARD_WORKBENCH_DIR to a valid checkout (currently "${workbenchDir}").`,
       );
     }
     return { projectDir: resolved };
