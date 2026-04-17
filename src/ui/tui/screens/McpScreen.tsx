@@ -109,6 +109,14 @@ export const McpScreen = ({
   const isOverlay = onComplete !== undefined;
   const showPreDetectedChoice = amplitudePreDetectedChoicePending && !isOverlay;
 
+  /** True when Claude Code will get the richer plugin install. */
+  const claudeCodeUsesPlugin =
+    !store.session.localMcp && process.env.AMPLITUDE_WIZARD_MCP_ONLY !== '1';
+  const labelFor = (name: string) =>
+    name === CLAUDE_CODE_CLIENT_NAME && claudeCodeUsesPlugin
+      ? `${name} (plugin — slash commands + MCP)`
+      : `${name} (MCP server)`;
+
   useEffect(() => {
     if (showPreDetectedChoice) {
       return;
@@ -337,8 +345,14 @@ export const McpScreen = ({
             {phase === Phase.Ask && (
               <>
                 <Text color={Colors.secondary}>
-                  Found: {clients.map((c) => c.name).join(', ')}
+                  {isRemove ? 'Found:' : 'We’ll install:'}
                 </Text>
+                {clients.map((c, i) => (
+                  <Text key={i} color={Colors.body}>
+                    {'  '}
+                    {Icons.bullet} {isRemove ? c.name : labelFor(c.name)}
+                  </Text>
+                ))}
                 <Box marginTop={1}>
                   <ConfirmationInput
                     message={
@@ -359,7 +373,7 @@ export const McpScreen = ({
               <PickerMenu
                 message="Pick which AI tools to connect"
                 options={clients.map((c) => ({
-                  label: c.name,
+                  label: isRemove ? c.name : labelFor(c.name),
                   value: c.name,
                 }))}
                 mode="multi"
