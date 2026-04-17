@@ -924,10 +924,38 @@ void yargs(hideBin(process.argv))
                     ? 'eu'
                     : DEFAULT_AMPLITUDE_ZONE;
 
-                let auth = await performAmplitudeAuth({
-                  zone,
-                  forceFresh,
-                });
+                // Try direct signup first when --signup + email + fullName are provided
+                // and the feature flag is enabled. performSignupOrAuth returns null when
+                // any of those gates are missing, or when the server returns a non-success
+                // response — in which case we fall through to the existing OAuth flow
+                // (TUI has a browser; this fallback is valid).
+                let auth: Awaited<
+                  ReturnType<typeof performAmplitudeAuth>
+                > | null = null;
+                const s = tui.store.session;
+                if (s.signup && s.signupEmail && s.signupFullName) {
+                  try {
+                    const { performSignupOrAuth } = await import(
+                      './src/utils/signup-or-auth.js'
+                    );
+                    auth = await performSignupOrAuth({
+                      email: s.signupEmail,
+                      fullName: s.signupFullName,
+                      zone,
+                    });
+                  } catch (err) {
+                    getUI().log.warn(
+                      `Direct signup errored: ${
+                        err instanceof Error ? err.message : String(err)
+                      }. Falling back to OAuth.`,
+                    );
+                    auth = null;
+                  }
+                }
+
+                if (auth === null) {
+                  auth = await performAmplitudeAuth({ zone, forceFresh });
+                }
 
                 // Update login URL (clears the "copy this URL" hint)
                 tui.store.setLoginUrl(null);
