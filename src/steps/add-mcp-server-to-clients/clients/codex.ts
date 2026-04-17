@@ -21,12 +21,20 @@ export class CodexMCPClient extends DefaultMCPClient {
   }
 
   isClientSupported(): Promise<boolean> {
-    // Require BOTH the binary on PATH and the ~/.codex/ user-data dir.
-    // Without the dir check, any unrelated `codex` binary on PATH (there
-    // are a few in the wild) would make us claim Codex is installed.
+    // Require the binary on PATH, the ~/.codex/ user-data dir, AND that
+    // the binary wasn't silently bundled by an outer tool (Conductor et al.
+    // ship their own `codex`; the user didn't install it and would be
+    // surprised to see Codex pop up in the wizard's picker).
+    let resolved: string;
     try {
-      execSync('codex --version', { stdio: 'ignore' });
+      resolved = execSync('command -v codex', { encoding: 'utf8' }).trim();
     } catch {
+      return Promise.resolve(false);
+    }
+    if (!resolved) return Promise.resolve(false);
+    // Anything inside an app bundle / Application Support is almost
+    // certainly a host app bundling the CLI, not a user install.
+    if (/\/Library\/Application Support\//i.test(resolved)) {
       return Promise.resolve(false);
     }
     return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.codex')));

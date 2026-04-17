@@ -8,6 +8,11 @@ vi.mock('node:child_process', () => ({
   spawnSync: vi.fn(),
 }));
 
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  return { ...actual, existsSync: vi.fn(() => true) };
+});
+
 vi.mock('../../../../utils/analytics', () => ({
   analytics: {
     captureException: vi.fn(),
@@ -23,14 +28,10 @@ describe('CodexMCPClient', () => {
   });
 
   describe('isClientSupported', () => {
-    it('returns true when codex binary is available', async () => {
-      execSyncMock.mockReturnValue(undefined);
-
+    it('returns true when codex binary is at a user path and ~/.codex exists', async () => {
+      execSyncMock.mockReturnValue('/opt/homebrew/bin/codex\n');
       const client = new CodexMCPClient();
       await expect(client.isClientSupported()).resolves.toBe(true);
-      expect(execSyncMock).toHaveBeenCalledWith('codex --version', {
-        stdio: 'ignore',
-      });
     });
 
     it('returns false when codex binary is missing', async () => {
@@ -38,6 +39,14 @@ describe('CodexMCPClient', () => {
         throw new Error('not found');
       });
 
+      const client = new CodexMCPClient();
+      await expect(client.isClientSupported()).resolves.toBe(false);
+    });
+
+    it('returns false when codex is bundled under /Library/Application Support (e.g. Conductor)', async () => {
+      execSyncMock.mockReturnValue(
+        '/Users/u/Library/Application Support/com.conductor.app/bin/codex\n',
+      );
       const client = new CodexMCPClient();
       await expect(client.isClientSupported()).resolves.toBe(false);
     });
