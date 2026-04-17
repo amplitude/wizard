@@ -153,6 +153,15 @@ export const OUTBOUND_URLS = {
     return `${base}/analytics/settings/profile`;
   },
 
+  /** Projects settings — opened when the user wants to create a new project. */
+  projectsSettings: (zone: AmplitudeZone, orgId?: string | null): string => {
+    const base = OUTBOUND_URLS.app[zone];
+    if (orgId) {
+      return `${base}/analytics/org/${orgId}/settings/projects`;
+    }
+    return `${base}/analytics/settings/projects`;
+  },
+
   /** Products page — shown in the Outro for sign-up users. */
   products: (zone: AmplitudeZone): string =>
     `${OUTBOUND_URLS.overview[zone]}/products?source=wizard`,

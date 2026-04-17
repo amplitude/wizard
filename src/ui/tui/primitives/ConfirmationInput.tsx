@@ -1,6 +1,7 @@
 /**
  * ConfirmationInput — Continue/cancel prompt.
- * Enter confirms, escape cancels. Arrow keys toggle focus.
+ * Enter confirms, escape cancels. Up/down arrows toggle focus.
+ * Options stack vertically to match PickerMenu.
  */
 
 import { Box, Text } from 'ink';
@@ -32,7 +33,7 @@ export const ConfirmationInput = ({
   const [focused, setFocused] = useState<FocusTarget>(FocusTarget.Continue);
 
   useScreenInput((_input, key) => {
-    if (key.leftArrow || key.rightArrow) {
+    if (key.upArrow || key.downArrow) {
       setFocused((f) =>
         f === FocusTarget.Continue ? FocusTarget.Cancel : FocusTarget.Continue,
       );
@@ -52,7 +53,7 @@ export const ConfirmationInput = ({
   return (
     <Box flexDirection="column">
       <PromptLabel message={message} />
-      <Box gap={2} marginTop={1} marginLeft={2}>
+      <Box flexDirection="column" marginTop={1} marginLeft={2}>
         <Text
           bold={focused === FocusTarget.Continue}
           color={

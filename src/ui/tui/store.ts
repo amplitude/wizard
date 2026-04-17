@@ -542,6 +542,12 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /** Replace the cached org list (used by Start Over to pick up newly-created projects). */
+  setPendingOrgs(orgs: WizardSession['pendingOrgs']): void {
+    this.$session.setKey('pendingOrgs', orgs);
+    this.emitChange();
+  }
+
   /**
    * Called from AuthScreen when the user finishes org + workspace selection.
    * Writes ampli.json and records org/workspace on the session.
