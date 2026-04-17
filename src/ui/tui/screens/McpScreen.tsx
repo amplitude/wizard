@@ -170,7 +170,10 @@ export const McpScreen = ({
             count: detected.length,
           });
           setClients(detected);
-          setPhase(Phase.Ask);
+          // Single tool: simple yes/no confirm (nothing meaningful to pick
+          // between). 2+ tools: jump straight to the multi-select so users
+          // can uncheck anything they don't want in this install.
+          setPhase(detected.length === 1 || isRemove ? Phase.Ask : Phase.Pick);
         }
       } catch {
         captureWizardError(
@@ -204,16 +207,13 @@ export const McpScreen = ({
     if (isRemove) {
       analytics.wizardCapture('MCP Remove Confirmed');
       void doRemove();
-    } else if (clients.length === 1) {
-      const names = clients.map((c) => c.name);
-      analytics.wizardCapture('MCP Install Confirmed', { clients: names });
-      proceedWithNames(names);
-    } else {
-      analytics.wizardCapture('MCP Client Picker Shown', {
-        available_clients: clients.map((c) => c.name),
-      });
-      setPhase(Phase.Pick);
+      return;
     }
+    // Single-tool confirm path only — multi-tool detection routes straight
+    // to the Pick phase (see the detection useEffect).
+    const names = clients.map((c) => c.name);
+    analytics.wizardCapture('MCP Install Confirmed', { clients: names });
+    proceedWithNames(names);
   };
 
   const handleSkip = () => {
@@ -408,32 +408,45 @@ export const McpScreen = ({
               </>
             )}
 
-            {phase === Phase.Pick && showPluginToggle && (
-              <Text color={Colors.muted}>
-                [m]{' '}
-                {claudeCodeUsesPlugin
-                  ? 'Use MCP server only for Claude Code (no slash commands)'
-                  : 'Use the Amplitude plugin for Claude Code (slash commands + MCP)'}
-              </Text>
-            )}
             {phase === Phase.Pick && (
-              <PickerMenu
-                message="Pick which AI tools to connect"
-                options={clients.map((c) => ({
-                  label: isRemove ? c.name : labelFor(c.name),
-                  value: c.name,
-                }))}
-                mode="multi"
-                onSelect={(selected) => {
-                  const names = Array.isArray(selected) ? selected : [selected];
-                  if (names.length === 0) return;
-                  analytics.wizardCapture('MCP Clients Selected', {
-                    selected_clients: names,
-                    available_clients: clients.map((c) => c.name),
-                  });
-                  proceedWithNames(names);
-                }}
-              />
+              <>
+                <Text color={Colors.secondary}>
+                  All detected tools are selected — press space to uncheck any
+                  you don’t want, then Enter to continue.
+                </Text>
+                {showPluginToggle && (
+                  <Text color={Colors.muted}>
+                    [m]{' '}
+                    {claudeCodeUsesPlugin
+                      ? 'Use MCP server only for Claude Code (no slash commands)'
+                      : 'Use the Amplitude plugin for Claude Code (slash commands + MCP)'}
+                  </Text>
+                )}
+                <PickerMenu
+                  message="Connect Amplitude to:"
+                  options={clients.map((c) => ({
+                    label: isRemove ? c.name : labelFor(c.name),
+                    value: c.name,
+                  }))}
+                  mode="multi"
+                  defaultSelected={clients.map((c) => c.name)}
+                  onSelect={(selected) => {
+                    const names = Array.isArray(selected)
+                      ? selected
+                      : [selected];
+                    analytics.wizardCapture('MCP Clients Selected', {
+                      selected_clients: names,
+                      available_clients: clients.map((c) => c.name),
+                    });
+                    if (names.length === 0) {
+                      // User unchecked everything — treat as skip.
+                      handleSkip();
+                      return;
+                    }
+                    proceedWithNames(names);
+                  }}
+                />
+              </>
             )}
 
             {phase === Phase.Working && (

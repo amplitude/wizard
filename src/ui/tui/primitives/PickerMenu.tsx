@@ -25,6 +25,8 @@ interface PickerMenuProps<T> {
   mode?: 'single' | 'multi';
   centered?: boolean;
   columns?: 1 | 2 | 3 | 4;
+  /** In multi mode, values to start selected. Ignored in single mode. */
+  defaultSelected?: T[];
   onSelect: (value: T | T[]) => void;
 }
 
@@ -34,6 +36,7 @@ export const PickerMenu = <T,>({
   mode = 'single',
   centered = false,
   columns = 1,
+  defaultSelected,
   onSelect,
 }: PickerMenuProps<T>) => {
   if (mode === 'multi') {
@@ -43,6 +46,7 @@ export const PickerMenu = <T,>({
         options={options}
         centered={centered}
         columns={columns}
+        defaultSelected={defaultSelected}
         onSelect={onSelect}
       />
     );
@@ -247,16 +251,25 @@ const MultiPickerMenu = <T,>({
   options,
   centered = false,
   columns = 1,
+  defaultSelected,
   onSelect,
 }: {
   message?: string;
   options: PickerOption<T>[];
   centered?: boolean;
   columns?: number;
+  defaultSelected?: T[];
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
-  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [selected, setSelected] = useState<Set<number>>(() => {
+    if (!defaultSelected?.length) return new Set();
+    const initial = new Set<number>();
+    options.forEach((opt, i) => {
+      if (defaultSelected.includes(opt.value)) initial.add(i);
+    });
+    return initial;
+  });
   const rows = Math.ceil(options.length / columns);
 
   useScreenInput((input, key) => {
