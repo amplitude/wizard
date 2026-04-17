@@ -78,7 +78,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
 
   session.integration = integration;
   analytics.setSessionProperty('integration', integration);
-  analytics.wizardCapture('Session Started', {
+  analytics.wizardCapture('session started', {
     integration,
     ci: session.ci ?? false,
   });
@@ -286,7 +286,7 @@ async function detectAndResolveIntegration(
     const winner = detected[0];
 
     // Analytics: capture detection metrics
-    analytics.wizardCapture('Framework Detection Complete', {
+    analytics.wizardCapture('framework detection complete', {
       winner: winner?.integration ?? 'none',
       'match count': detected.length,
       'duration ms': Math.max(...results.map((r) => r.durationMs)),

@@ -195,7 +195,7 @@ export class WizardStore {
   completeSetup(): void {
     this.$session.setKey('setupConfirmed', true);
     analytics.wizardCapture(
-      'Setup Confirmed',
+      'setup confirmed',
       sessionPropertiesCompact(this.session),
     );
     this._resolveSetup();
@@ -224,7 +224,7 @@ export class WizardStore {
         integration: session.integration,
       });
     }
-    analytics.wizardCapture('Auth Complete', {
+    analytics.wizardCapture('auth complete', {
       'project id': credentials?.projectId,
       region: session.region,
     });
@@ -343,8 +343,8 @@ export class WizardStore {
   resolvePrompt(answer: boolean | string): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind === 'event-plan') return;
-    analytics.wizardCapture('Prompt Response', {
-      prompt_kind: prompt.kind,
+    analytics.wizardCapture('prompt response', {
+      'prompt kind': prompt.kind,
       response: String(answer),
     });
     this.$pendingPrompt.set(null);
@@ -368,8 +368,8 @@ export class WizardStore {
   resolveEventPlan(decision: EventPlanDecision): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind !== 'event-plan') return;
-    analytics.wizardCapture('Prompt Response', {
-      prompt_kind: 'event-plan',
+    analytics.wizardCapture('prompt response', {
+      'prompt kind': 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
     this.$pendingPrompt.set(null);
@@ -504,7 +504,7 @@ export class WizardStore {
   setDataIngestionConfirmed(): void {
     this.$session.setKey('dataIngestionConfirmed', true);
     analytics.wizardCapture(
-      'Data Ingestion Confirmed',
+      'data ingestion confirmed',
       sessionPropertiesCompact(this.session),
     );
     this.emitChange();
@@ -712,7 +712,7 @@ export class WizardStore {
     if (feature === AdditionalFeature.LLM) {
       this.$session.setKey('llmOptIn', true);
     }
-    analytics.wizardCapture('Feature Enabled', { feature });
+    analytics.wizardCapture('feature enabled', { feature });
     this.emitChange();
   }
 
@@ -763,9 +763,9 @@ export class WizardStore {
     this.$session.setKey('mcpComplete', true);
     this.$session.setKey('mcpOutcome', outcome);
     this.$session.setKey('mcpInstalledClients', installedClients);
-    analytics.wizardCapture('MCP Complete', {
-      mcp_outcome: outcome,
-      mcp_installed_clients: installedClients,
+    analytics.wizardCapture('mcp complete', {
+      'mcp outcome': outcome,
+      'mcp installed clients': installedClients,
       ...sessionPropertiesCompact(this.session),
     });
     this.emitChange();
@@ -774,7 +774,7 @@ export class WizardStore {
   setSlackComplete(outcome: SlackOutcome = SlackOutcome.Skipped): void {
     this.$session.setKey('slackComplete', true);
     this.$session.setKey('slackOutcome', outcome);
-    analytics.wizardCapture('Slack Complete', {
+    analytics.wizardCapture('slack complete', {
       'slack outcome': outcome,
       ...sessionPropertiesCompact(this.session),
     });
@@ -868,9 +868,9 @@ export class WizardStore {
       if (hooks) {
         for (const fn of hooks) fn();
       }
-      analytics.wizardCapture('Wizard Screen Entered', {
-        screen_name: next,
-        previous_screen: prev,
+      analytics.wizardCapture('wizard screen entered', {
+        'screen name': next,
+        'previous screen': prev,
         ...sessionPropertiesCompact(this.session),
       });
     }

@@ -157,7 +157,7 @@ export async function runAgentWizard(
     );
   }
 
-  analytics.wizardCapture('Agent Started', {
+  analytics.wizardCapture('agent started', {
     integration: config.metadata.integration,
   });
 

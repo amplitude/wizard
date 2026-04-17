@@ -203,7 +203,7 @@ export async function installPackage({
       )} with ${chalk.bold(pkgManager.label)}.`,
     );
 
-    analytics.wizardCapture('Package Installed', {
+    analytics.wizardCapture('package installed', {
       'package name': packageName,
       'package manager': pkgManager.name,
       integration,
@@ -575,7 +575,7 @@ async function askForWizardLogin(
       org_id: selectedOrg?.id,
       org_name: selectedOrg?.name,
     });
-    analytics.wizardCapture('Wizard Link Opened');
+    analytics.wizardCapture('wizard link opened');
   }
 
   // ── 4b. Workspace selection ───────────────────────────────────────

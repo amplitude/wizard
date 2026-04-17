@@ -222,7 +222,7 @@ export const McpScreen = ({
       try {
         const detected = await installer.detectClients();
         if (detected.length === 0) {
-          analytics.wizardCapture('MCP No Clients Detected', { mode });
+          analytics.wizardCapture('mcp no clients detected', { mode });
           setPhase(Phase.None);
           timerRef.current = setTimeout(
             () =>
@@ -230,7 +230,7 @@ export const McpScreen = ({
             1500,
           );
         } else {
-          analytics.wizardCapture('MCP Clients Detected', {
+          analytics.wizardCapture('mcp clients detected', {
             mode,
             clients: detected.map((c) => c.name),
             count: detected.length,
@@ -282,19 +282,19 @@ export const McpScreen = ({
 
   const handleConfirm = () => {
     if (isRemove) {
-      analytics.wizardCapture('MCP Remove Confirmed');
+      analytics.wizardCapture('mcp remove confirmed');
       void doRemove();
       return;
     }
     // Single-tool confirm path only — multi-tool detection routes straight
     // to the Pick phase (see the detection useEffect).
     const names = clients.map((c) => c.name);
-    analytics.wizardCapture('MCP Install Confirmed', { clients: names });
+    analytics.wizardCapture('mcp install confirmed', { clients: names });
     proceedWithNames(names);
   };
 
   const handleSkip = () => {
-    analytics.wizardCapture('MCP Skipped', { mode });
+    analytics.wizardCapture('mcp skipped', { mode });
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
@@ -328,7 +328,7 @@ export const McpScreen = ({
           if (launchAppForClient(name)) launched += 1;
         }
         if (launched > 0) setAppsLaunched(true);
-        analytics.wizardCapture('MCP Post-Install Launch', {
+        analytics.wizardCapture('mcp post-install launch', {
           launched,
           clients: resultClients,
         });
@@ -383,11 +383,11 @@ export const McpScreen = ({
     }
     setResultClients(installed);
     setFailures(installFailures);
-    analytics.wizardCapture('MCP Install Complete', {
+    analytics.wizardCapture('mcp install complete', {
       installed,
       failed: installFailures.map((f) => f.name),
       attempted: names,
-      claude_code_mode: ccMode,
+      'claude code mode': ccMode,
     });
     setPhase(Phase.Done);
     const outcome =
@@ -414,7 +414,7 @@ export const McpScreen = ({
     } catch {
       setResultClients([]);
     }
-    analytics.wizardCapture('MCP Remove Complete', { removed: result });
+    analytics.wizardCapture('mcp remove complete', { removed: result });
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
@@ -462,8 +462,8 @@ export const McpScreen = ({
               ]}
               onSelect={(value) => {
                 const runWizard = value === 'wizard';
-                analytics.wizardCapture('Amplitude Pre-Detected Choice', {
-                  run_wizard_anyway: runWizard,
+                analytics.wizardCapture('amplitude pre-detected choice', {
+                  'run wizard anyway': runWizard,
                 });
                 store.resolvePreDetectedChoice(runWizard);
               }}
@@ -548,10 +548,10 @@ export const McpScreen = ({
                   onSelect={(selected) => {
                     const raw = Array.isArray(selected) ? selected : [selected];
                     const { names, ccMode } = resolveSelection(raw);
-                    analytics.wizardCapture('MCP Clients Selected', {
-                      selected_clients: names,
-                      available_clients: clients.map((c) => c.name),
-                      claude_code_mode: ccMode,
+                    analytics.wizardCapture('mcp clients selected', {
+                      'selected clients': names,
+                      'available clients': clients.map((c) => c.name),
+                      'claude code mode': ccMode,
                     });
                     if (names.length === 0) {
                       handleSkip();

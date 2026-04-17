@@ -328,7 +328,7 @@ export class Analytics {
   }
 
   async shutdown(status: 'success' | 'error' | 'cancelled') {
-    this.wizardCapture('Session Ended', {
+    this.wizardCapture('session ended', {
       status,
       'session duration ms': Date.now() - this.startedAt,
     });
@@ -346,7 +346,7 @@ export class Analytics {
 
 /**
  * Full Amplitude `event_type` for CLI/TUI product feedback.
- * Same string as `wizardCapture('Feedback Submitted', …)`.
+ * Same string as `wizardCapture('feedback submitted', …)`.
  */
 export const WIZARD_FEEDBACK_EVENT_TYPE = 'wizard cli: feedback submitted';
 
@@ -362,7 +362,7 @@ export function captureWizardError(
   errorContext: string,
   extra?: Record<string, unknown>,
 ): void {
-  analytics.wizardCapture('Error Encountered', {
+  analytics.wizardCapture('error encountered', {
     'error category': errorCategory,
     'error message': errorMessage,
     'error context': errorContext,
