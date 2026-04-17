@@ -190,14 +190,13 @@ export const McpScreen = ({
 
   const proceedWithNames = (names: string[]) => {
     // For Claude Code we default to the plugin (MCP + slash commands).
-    // Two escape hatches route to raw MCP instead:
+    // Three escape hatches route to raw MCP instead:
     //   - session.localMcp: --local-mcp points at localhost; plugin is prod-only.
-    //   - AMPLITUDE_WIZARD_MCP_ONLY=1: hidden knob for users who explicitly
-    //     don't want the plugin.
-    const forceMcp =
-      store.session.localMcp || process.env.AMPLITUDE_WIZARD_MCP_ONLY === '1';
+    //   - AMPLITUDE_WIZARD_MCP_ONLY=1: hidden env knob.
+    //   - overrideMcpOnly: user pressed `m` in this run.
+    const useMcp = forcedMcpOnly || overrideMcpOnly;
     const ccMode: ClaudeCodeInstallMode =
-      !forceMcp && names.includes(CLAUDE_CODE_CLIENT_NAME) ? 'plugin' : 'mcp';
+      !useMcp && names.includes(CLAUDE_CODE_CLIENT_NAME) ? 'plugin' : 'mcp';
     void doInstall(names, ccMode);
   };
 
