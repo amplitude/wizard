@@ -268,7 +268,7 @@ export const McpScreen = ({
 
   const proceedWithNames = (
     names: string[],
-    ccMode: ClaudeCodeInstallMode = 'plugin',
+    ccMode: ClaudeCodeInstallMode = 'mcp',
   ) => {
     // Environment escape hatches always win over the user's selection
     // (prod plugin can't talk to localhost, and AMPLITUDE_WIZARD_MCP_ONLY
