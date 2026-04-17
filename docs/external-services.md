@@ -202,7 +202,7 @@ The wizard reports its own usage analytics to the main `amplitude/Amplitude` pro
 
 Both keys mirror Lightning's ampli config (`packages/instrumentation/src/lightning/{agents,wormhole}/src/ampli/index.ts` in `amplitude/javascript`). Local contributor builds invoked via `pnpm try` / `pnpm dev` automatically set `NODE_ENV=development` so they route to the dev project instead of flooding prod. Contributors who `pnpm link --global` and invoke `amplitude-wizard` directly (outside the `pnpm dev` script) need to `export NODE_ENV=development` themselves to hit dev.
 
-**Event namespace:** All events prefixed with `wizard: ` (e.g., `wizard: Session Ended`, `wizard: feedback submitted`, `wizard: error encountered`).
+**Event namespace:** All events prefixed with `wizard cli: ` (e.g., `wizard cli: Session Ended`, `wizard cli: feedback submitted`, `wizard cli: error encountered`).
 
 **Property-key convention:** All event-property, user-property, and group-identify keys are lowercase with spaces (`'org id'`, `'duration ms'`, `'error message'`). Keys starting with `$` (`$app_name`, `$error`) are Amplitude-reserved and stay untouched.
 

@@ -233,13 +233,13 @@ export class Analytics {
   }
 
   /**
-   * Capture a wizard-specific event. Automatically prepends "wizard: " to the event name.
+   * Capture a wizard-specific event. Automatically prepends "wizard cli: " to the event name.
    * All new wizard analytics should use this method instead of capture() directly.
    * Use lowercase with spaces for eventName (e.g. "agent started", "api key submitted")
    * per Amplitude quickstart taxonomy guidelines.
    */
   wizardCapture(eventName: string, properties?: Record<string, unknown>): void {
-    this.capture(`wizard: ${eventName}`, properties);
+    this.capture(`wizard cli: ${eventName}`, properties);
   }
 
   /**
@@ -348,13 +348,13 @@ export class Analytics {
  * Full Amplitude `event_type` for CLI/TUI product feedback.
  * Same string as `wizardCapture('Feedback Submitted', …)`.
  */
-export const WIZARD_FEEDBACK_EVENT_TYPE = 'wizard: feedback submitted';
+export const WIZARD_FEEDBACK_EVENT_TYPE = 'wizard cli: feedback submitted';
 
 export const analytics = new Analytics();
 
 /**
  * Unified wizard error telemetry (aligns with starter taxonomy “Error Encountered”).
- * Emits `wizard: error encountered` with category / message / context.
+ * Emits `wizard cli: error encountered` with category / message / context.
  */
 export function captureWizardError(
   errorCategory: string,
