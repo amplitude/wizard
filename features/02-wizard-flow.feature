@@ -50,12 +50,12 @@ Feature: Wizard flow
     And I select the "US" region
     Then I should proceed to the Data Setup flow
 
-  Scenario: /region slash command re-triggers region selection and data setup
+  Scenario: /region slash command re-triggers region selection and re-auth
     Given the wizard is active
     When I enter the slash command "/region"
     Then I should be taken back to region selection
     When I select the "EU" region
-    Then the data check should re-run for the new region
+    Then the wizard should prompt me to log in again
 
   Scenario: Returning user with credentials and existing data — goes to MCP then Slack
     Given I have valid credentials stored in "~/.ampli.json"
