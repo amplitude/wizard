@@ -300,13 +300,17 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     const zone = (session.region ??
       session.pendingAuthCloudRegion ??
       'us') as AmplitudeZone;
-    const url = OUTBOUND_URLS.projectsSettings(zone, session.selectedOrgId);
+    // Prefer the locally-resolved org — session.selectedOrgId is only set
+    // after the user picks both an org AND a workspace, so during the
+    // workspace picker it may still be null even though effectiveOrg is known.
+    const orgId = effectiveOrg?.id ?? session.selectedOrgId;
+    const url = OUTBOUND_URLS.projectsSettings(zone, orgId);
     analytics.wizardCapture('Create Project Link Opened', {
       from_screen: fromScreen,
     });
     opn(url, { wait: false }).catch(() => {});
     setPickerNotice(
-      `Opened ${url} — after you create your project, choose "Start over" to refresh the list.`,
+      `Opened ${url} — after you create your project, choose "Start over" to reload the list.`,
     );
   };
 
@@ -321,6 +325,24 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       { id: '', name: '' },
       session.installDir,
     );
+    // Clear stale project name — setOrgAndWorkspace doesn't touch it.
+    store.setSelectedProjectName(null);
+
+    // Re-fetch the org list so newly-created projects show up in the picker.
+    // Best-effort: silently ignore failures and fall back to the cached list.
+    const idToken = session.pendingAuthIdToken;
+    const zone = (session.region ??
+      session.pendingAuthCloudRegion ??
+      'us') as AmplitudeZone;
+    if (idToken) {
+      void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) =>
+        fetchAmplitudeUser(idToken, zone)
+          .then((info) => store.setPendingOrgs(info.orgs))
+          .catch(() => {
+            // Keep the cached list — Start Over still resets local selection.
+          }),
+      );
+    }
   };
 
   const handleApiKeySubmit = (value: string) => {
@@ -469,6 +491,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
                   return;
                 }
                 if (isPickerAction(picked)) return;
+                setPickerNotice(null);
                 setSelectedWorkspace(picked);
                 store.setOrgAndWorkspace(
                   effectiveOrg,
@@ -519,6 +542,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
                   return;
                 }
                 if (isPickerAction(picked)) return;
+                setPickerNotice(null);
                 setSelectedEnv(picked);
                 store.setSelectedProjectName(picked.name);
               }}
