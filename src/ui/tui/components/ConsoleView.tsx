@@ -16,7 +16,7 @@ import { SlashCommandInput } from '../primitives/index.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons, Layout } from '../styles.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { linkify } from '../utils/terminal-rendering.js';
+import { linkify, renderMarkdown } from '../utils/terminal-rendering.js';
 import { Overlay } from '../router.js';
 import {
   queryConsole,
@@ -387,7 +387,7 @@ export const ConsoleView = ({
             overflow="hidden"
           >
             <Text color={Colors.accent}>
-              {response ? linkify(response) : ''}
+              {response ? renderMarkdown(response).trimEnd() : ''}
             </Text>
             <Box marginTop={1}>
               <Text color={Colors.muted}>[Q / Esc] close</Text>
@@ -448,7 +448,7 @@ export const ConsoleView = ({
             <Spinner />
           ) : (
             <Text color={Colors.accent}>
-              {response ? linkify(response) : ''}
+              {response ? renderMarkdown(response).trimEnd() : ''}
             </Text>
           )}
         </Box>
