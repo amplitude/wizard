@@ -24,6 +24,7 @@ import type {
   McpInstallFailure,
 } from '../services/mcp-installer.js';
 import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
 
 const CLAUDE_CODE_CLIENT_NAME = 'Claude Code';
@@ -196,8 +197,12 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       installed.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    // Keep the Done frame longer when there's a failure so users can read it.
-    const dwell = installFailures.length > 0 ? 4000 : 2000;
+    // Longer dwell when there's failure text or plugin follow-up instructions
+    // to read. Plain MCP success stays snappy.
+    const hasExtraCopy =
+      installFailures.length > 0 ||
+      (ccMode === 'plugin' && installed.includes(CLAUDE_CODE_CLIENT_NAME));
+    const dwell = hasExtraCopy ? 4000 : 2000;
     timerRef.current = setTimeout(
       () => markDone(store, outcome, installed, standalone, onComplete),
       dwell,
@@ -401,6 +406,21 @@ export const McpScreen = ({
                           : ''}
                       </Text>
                     ))}
+                    {!isRemove &&
+                      claudeCodeMode === 'plugin' &&
+                      resultClients.includes(CLAUDE_CODE_CLIENT_NAME) && (
+                        <Box flexDirection="column" marginTop={1}>
+                          <Text color={Colors.muted}>
+                            In an open Claude Code session, run{' '}
+                            <Text color={Colors.body}>/reload-plugins</Text> to
+                            pick up the Amplitude slash commands. Then{' '}
+                            <Text color={Colors.body}>/mcp</Text> to sign in.
+                          </Text>
+                          <Text color={Colors.muted}>
+                            Docs: {OUTBOUND_URLS.claudePluginDocs}
+                          </Text>
+                        </Box>
+                      )}
                   </>
                 )}
                 {failures.length > 0 && (
