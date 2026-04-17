@@ -31,6 +31,15 @@ import { analytics, captureWizardError } from '../../../utils/analytics.js';
 
 type ClientStatus = 'pending' | 'working' | 'done' | 'failed';
 
+interface ClientProgress {
+  name: string;
+  status: ClientStatus;
+  /** Wall-clock ms when status → 'working'; populated once per row. */
+  startedAt?: number;
+  /** Wall-clock ms when status → 'done' / 'failed'. */
+  finishedAt?: number;
+}
+
 const CLAUDE_CODE_CLIENT_NAME = 'Claude Code';
 
 export type McpMode = 'install' | 'remove';
@@ -89,6 +98,15 @@ export const McpScreen = ({
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, []);
+
+  // Tick elapsed-time labels during the Working phase. Without this the
+  // screen looks frozen during the ~5s plugin install even though progress
+  // IS happening — the spinner + static list gives no sense of motion.
+  useEffect(() => {
+    if (phase !== Phase.Working) return;
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
   const { runPhase, amplitudePreDetected, amplitudePreDetectedChoicePending } =
     store.session;
   const dataSetupComplete = runPhase === RunPhase.Completed;
@@ -100,9 +118,9 @@ export const McpScreen = ({
   const [claudeCodeMode, setClaudeCodeMode] =
     useState<ClaudeCodeInstallMode>('plugin');
   /** Per-client progress shown during the Working phase. */
-  const [progress, setProgress] = useState<
-    Array<{ name: string; status: ClientStatus }>
-  >([]);
+  const [progress, setProgress] = useState<ClientProgress[]>([]);
+  /** Used to force a render once per second so elapsed-time labels tick. */
+  const [, setTick] = useState(0);
 
   // Sentinel values used in the multi-picker to split Claude Code into two
   // mutually-exclusive rows ("plugin" / "MCP server only").
@@ -256,10 +274,9 @@ export const McpScreen = ({
   };
 
   /**
-   * Fires when the user presses Enter on the Done screen. We keep a long
-   * fallback timer (20s) in case the user walks away, but the primary
-   * exit path is explicit — the old 5s auto-dismiss ejected people
-   * mid-read.
+   * Fires when the user presses Enter on the Done screen. Done waits
+   * indefinitely when there's content to read — no fallback timer.
+   * (Previously auto-dismissed after 2–5s, which ejected people mid-read.)
    */
   const advanceFromDone = () => {
     if (timerRef.current !== null) {
@@ -290,17 +307,25 @@ export const McpScreen = ({
       const result = await installer.install(names, {
         claudeCodeMode: ccMode,
         onClientStart: (name) => {
+          const started = Date.now();
           setProgress((prev) =>
             prev.map((p) =>
-              p.name === name ? { ...p, status: 'working' } : p,
+              p.name === name
+                ? { ...p, status: 'working', startedAt: started }
+                : p,
             ),
           );
         },
         onClientComplete: ({ name, success }) => {
+          const finished = Date.now();
           setProgress((prev) =>
             prev.map((p) =>
               p.name === name
-                ? { ...p, status: success ? 'done' : 'failed' }
+                ? {
+                    ...p,
+                    status: success ? 'done' : 'failed',
+                    finishedAt: finished,
+                  }
                 : p,
             ),
           );
@@ -325,17 +350,17 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       installed.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    // Long fallback only — the primary exit is user pressing Enter (see the
-    // useScreenInput hook above). We used to auto-advance after 2–5s, which
-    // ejected people mid-read. 20s gives anyone legit unattended time to
-    // scroll past; interactive users hit Enter whenever they're done.
+    // Only auto-advance when the screen is empty (user skipped / no work).
+    // When there's result or failure detail to read, wait for Enter — no
+    // fallback. Even 20s rug-pulled users who stepped away to open the tool.
     const hasNothingToRead =
       installed.length === 0 && installFailures.length === 0;
-    const fallback = hasNothingToRead ? 2000 : 20000;
-    timerRef.current = setTimeout(
-      () => markDone(store, outcome, installed, standalone, onComplete),
-      fallback,
-    );
+    if (hasNothingToRead) {
+      timerRef.current = setTimeout(
+        () => markDone(store, outcome, installed, standalone, onComplete),
+        2000,
+      );
+    }
   };
 
   const doRemove = async () => {
@@ -351,10 +376,13 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    timerRef.current = setTimeout(
-      () => markDone(store, outcome, result, standalone, onComplete),
-      20000,
-    );
+    // Nothing to read: auto-advance. Otherwise: wait for Enter.
+    if (result.length === 0) {
+      timerRef.current = setTimeout(
+        () => markDone(store, outcome, result, standalone, onComplete),
+        2000,
+      );
+    }
   };
 
   return (
@@ -505,35 +533,50 @@ export const McpScreen = ({
                 </Box>
                 {progress.length > 0 && (
                   <Box flexDirection="column" marginTop={1}>
-                    {progress.map((p, i) => (
-                      <Box key={i}>
-                        <Text
-                          color={
-                            p.status === 'done'
-                              ? Colors.success
+                    {progress.map((p, i) => {
+                      const elapsedMs =
+                        p.status === 'working' && p.startedAt
+                          ? Date.now() - p.startedAt
+                          : p.status !== 'pending' &&
+                            p.startedAt &&
+                            p.finishedAt
+                          ? p.finishedAt - p.startedAt
+                          : null;
+                      const elapsedLabel =
+                        elapsedMs != null
+                          ? ` (${(elapsedMs / 1000).toFixed(1)}s)`
+                          : '';
+                      return (
+                        <Box key={i}>
+                          <Text
+                            color={
+                              p.status === 'done'
+                                ? Colors.success
+                                : p.status === 'failed'
+                                ? Colors.error
+                                : p.status === 'working'
+                                ? Colors.active
+                                : Colors.muted
+                            }
+                          >
+                            {p.status === 'done'
+                              ? `  ${Icons.checkmark} `
                               : p.status === 'failed'
-                              ? Colors.error
+                              ? `  ${Icons.cross} `
                               : p.status === 'working'
-                              ? Colors.active
-                              : Colors.muted
-                          }
-                        >
-                          {p.status === 'done'
-                            ? `  ${Icons.checkmark} `
-                            : p.status === 'failed'
-                            ? `  ${Icons.cross} `
-                            : p.status === 'working'
-                            ? '  › '
-                            : '  · '}
-                          {p.name}
-                          {p.name === CLAUDE_CODE_CLIENT_NAME &&
-                          claudeCodeMode === 'plugin'
-                            ? ' (plugin)'
-                            : ''}
-                          {p.status === 'working' ? '…' : ''}
-                        </Text>
-                      </Box>
-                    ))}
+                              ? '  › '
+                              : '  · '}
+                            {p.name}
+                            {p.name === CLAUDE_CODE_CLIENT_NAME &&
+                            claudeCodeMode === 'plugin'
+                              ? ' (plugin)'
+                              : ''}
+                            {p.status === 'working' ? '…' : ''}
+                            {elapsedLabel}
+                          </Text>
+                        </Box>
+                      );
+                    })}
                   </Box>
                 )}
               </Box>
@@ -560,43 +603,36 @@ export const McpScreen = ({
                           : ''}
                       </Text>
                     ))}
-                    {!isRemove &&
-                      claudeCodeMode === 'plugin' &&
-                      resultClients.includes(CLAUDE_CODE_CLIENT_NAME) && (
-                        <Box flexDirection="column" marginTop={1}>
-                          <Text color={Colors.muted}>
-                            Next: open Claude Code and run{' '}
-                            <Text color={Colors.body}>/mcp</Text> to sign in,
-                            then ask “show me yesterday’s signups”.
-                          </Text>
-                          <Text color={Colors.muted}>
-                            Already have a session open? Run{' '}
-                            <Text color={Colors.body}>/reload-plugins</Text>{' '}
-                            first to pick up the new slash commands.
-                          </Text>
-                          <Text color={Colors.muted}>
-                            Plugin docs: {OUTBOUND_URLS.claudePluginDocs}
-                          </Text>
-                          <Text color={Colors.muted}>
-                            MCP docs: {OUTBOUND_URLS.mcpDocs}
-                          </Text>
-                        </Box>
-                      )}
-                    {!isRemove &&
-                      !(
-                        claudeCodeMode === 'plugin' &&
-                        resultClients.includes(CLAUDE_CODE_CLIENT_NAME)
-                      ) && (
-                        <Box flexDirection="column" marginTop={1}>
-                          <Text color={Colors.muted}>
-                            Next: open your AI tool and sign in when prompted,
-                            then ask “show me yesterday’s signups”.
-                          </Text>
-                          <Text color={Colors.muted}>
-                            MCP docs: {OUTBOUND_URLS.mcpDocs}
-                          </Text>
-                        </Box>
-                      )}
+                    {!isRemove && (
+                      <Box flexDirection="column" marginTop={1}>
+                        <Text color={Colors.muted}>
+                          Next: open{' '}
+                          {resultClients.length === 1
+                            ? resultClients[0]
+                            : 'any of the above'}
+                          , sign in when prompted, then ask “show me yesterday’s
+                          signups”.
+                        </Text>
+                        {claudeCodeMode === 'plugin' &&
+                          resultClients.includes(CLAUDE_CODE_CLIENT_NAME) && (
+                            <>
+                              <Text color={Colors.muted}>
+                                For Claude Code: run{' '}
+                                <Text color={Colors.body}>/mcp</Text> to sign
+                                in. If a session is already open, run{' '}
+                                <Text color={Colors.body}>/reload-plugins</Text>{' '}
+                                first to pick up the new slash commands.
+                              </Text>
+                              <Text color={Colors.muted}>
+                                Plugin docs: {OUTBOUND_URLS.claudePluginDocs}
+                              </Text>
+                            </>
+                          )}
+                        <Text color={Colors.muted}>
+                          MCP docs: {OUTBOUND_URLS.mcpDocs}
+                        </Text>
+                      </Box>
+                    )}
                   </>
                 )}
                 {failures.length > 0 && (
