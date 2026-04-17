@@ -35,8 +35,17 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+// Redirect fs-touching setters (setRegion, setOrgAndWorkspace) away from
+// the repo root so tests don't pollute the wizard's own ampli.json. Every
+// store gets a fresh isolated tmpdir; individual tests can override by
+// reassigning store.session.installDir.
+const createdDirs: string[] = [];
 function createStore(flow?: Flow): WizardStore {
-  return new WizardStore(flow);
+  const store = new WizardStore(flow);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-store-test-'));
+  createdDirs.push(dir);
+  store.session.installDir = dir;
+  return store;
 }
 
 const wizardCaptureMock = analytics.wizardCapture as Mock;
@@ -53,7 +62,12 @@ describe('WizardStore', () => {
       expect(store.version).toBe('');
       expect(store.statusMessages).toEqual([]);
       expect(store.tasks).toEqual([]);
-      expect(store.session).toEqual(buildSession({}));
+      // installDir is overridden by the test helper — compare the rest.
+      const { installDir: storeInstallDir, ...rest } = store.session;
+      const { installDir: defaultInstallDir, ...defaults } = buildSession({});
+      expect(rest).toEqual(defaults);
+      expect(storeInstallDir).toMatch(/wizard-store-test-/);
+      expect(defaultInstallDir).toBeDefined();
     });
 
     it('defaults to Wizard flow', () => {
@@ -320,50 +334,37 @@ describe('WizardStore', () => {
     });
 
     it('setRegion persists new zone to existing ampli.json even when org/workspace are cleared', async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-region-test-'));
-      try {
-        // Seed ampli.json as if from a prior completed SUSI
-        writeAmpliConfig(dir, {
-          OrgId: 'org-old',
-          WorkspaceId: 'ws-old',
-          Zone: 'us',
-          SourceId: 'src-1',
-        });
+      const store = createStore();
+      // Seed ampli.json in the store's tmpdir as if from a prior SUSI
+      writeAmpliConfig(store.session.installDir, {
+        OrgId: 'org-old',
+        WorkspaceId: 'ws-old',
+        Zone: 'us',
+        SourceId: 'src-1',
+      });
 
-        const store = createStore();
-        store.session.installDir = dir;
-        // Simulate user running /region — setRegionForced clears IDs
-        store.setRegionForced();
-        expect(store.session.selectedOrgId).toBeNull();
+      store.setRegionForced();
+      expect(store.session.selectedOrgId).toBeNull();
 
-        store.setRegion('eu');
+      store.setRegion('eu');
+      await new Promise((r) => setTimeout(r, 50));
 
-        // Wait for the async fs write to land
-        await new Promise((r) => setTimeout(r, 50));
-
-        const result = readAmpliConfig(dir);
-        expect(result.ok).toBe(true);
-        if (!result.ok) return;
-        expect(result.config.Zone).toBe('eu');
-        expect(result.config.OrgId).toBeUndefined();
-        expect(result.config.WorkspaceId).toBeUndefined();
-        expect(result.config.SourceId).toBe('src-1'); // unrelated fields preserved
-      } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
-      }
+      const result = readAmpliConfig(store.session.installDir);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.config.Zone).toBe('eu');
+      expect(result.config.OrgId).toBeUndefined();
+      expect(result.config.WorkspaceId).toBeUndefined();
+      expect(result.config.SourceId).toBe('src-1'); // unrelated fields preserved
     });
 
     it('setRegion does not create ampli.json when none exists', async () => {
-      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-region-test-'));
-      try {
-        const store = createStore();
-        store.session.installDir = dir;
-        store.setRegion('us');
-        await new Promise((r) => setTimeout(r, 50));
-        expect(fs.existsSync(path.join(dir, 'ampli.json'))).toBe(false);
-      } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
-      }
+      const store = createStore();
+      store.setRegion('us');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(
+        fs.existsSync(path.join(store.session.installDir, 'ampli.json')),
+      ).toBe(false);
     });
 
     it('/region mid-session routes back through RegionSelect then Auth', () => {
