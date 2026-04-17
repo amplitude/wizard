@@ -3,10 +3,8 @@ import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
 import { performDirectSignup } from '../direct-signup';
 
-const PROVISIONING_URL =
-  'https://app.amplitude.com/t/headless/provisioning/link-or-create-account';
-const EU_PROVISIONING_URL =
-  'https://app.eu.amplitude.com/t/headless/provisioning/link-or-create-account';
+const PROVISIONING_URL = 'https://app.amplitude.com/t/agentic/signup/v1';
+const EU_PROVISIONING_URL = 'https://app.eu.amplitude.com/t/agentic/signup/v1';
 const TOKEN_URL = 'https://auth.amplitude.com/oauth2/token';
 
 const VALID_TOKEN_RESPONSE = {
@@ -58,21 +56,6 @@ describe('performDirectSignup', () => {
             type: 'redirect',
             redirect: { url: 'https://amplitude.com/login' },
           },
-        }),
-      ),
-    );
-
-    const result = await performDirectSignup(INPUT);
-
-    expect(result.kind).toBe('requires_redirect');
-  });
-
-  it('returns requires_redirect on needs_information response', async () => {
-    server.use(
-      http.post(PROVISIONING_URL, () =>
-        HttpResponse.json({
-          type: 'needs_information',
-          needs_information: { schema: {} },
         }),
       ),
     );
@@ -235,9 +218,9 @@ describe('performDirectSignup', () => {
     expect(result.kind).toBe('error');
   });
 
-  it('honors AMPLITUDE_WIZARD_HEADLESS_URL override', async () => {
-    const original = process.env.AMPLITUDE_WIZARD_HEADLESS_URL;
-    process.env.AMPLITUDE_WIZARD_HEADLESS_URL =
+  it('honors AMPLITUDE_WIZARD_SIGNUP_URL override', async () => {
+    const original = process.env.AMPLITUDE_WIZARD_SIGNUP_URL;
+    process.env.AMPLITUDE_WIZARD_SIGNUP_URL =
       'http://localhost:9999/custom-path';
     let observedUrl = '';
     server.use(
@@ -262,9 +245,9 @@ describe('performDirectSignup', () => {
       expect(observedUrl).toBe('http://localhost:9999/custom-path');
     } finally {
       if (original === undefined) {
-        delete process.env.AMPLITUDE_WIZARD_HEADLESS_URL;
+        delete process.env.AMPLITUDE_WIZARD_SIGNUP_URL;
       } else {
-        process.env.AMPLITUDE_WIZARD_HEADLESS_URL = original;
+        process.env.AMPLITUDE_WIZARD_SIGNUP_URL = original;
       }
     }
   });
