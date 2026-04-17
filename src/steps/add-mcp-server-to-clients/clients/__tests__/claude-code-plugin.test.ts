@@ -204,6 +204,17 @@ describe('ClaudeCodePluginClient', () => {
       expect(result.error).toMatch(/claude code cli/i);
       expect(spawnMock).not.toHaveBeenCalled();
     });
+
+    it('refuses local=true without invoking the CLI (plugin only ships prod)', async () => {
+      mockClaudeBinaryFound();
+
+      const client = new ClaudeCodePluginClient();
+      const result = await client.addServer(undefined, undefined, true);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/local/i);
+      expect(spawnMock).not.toHaveBeenCalled();
+    });
   });
 
   describe('isServerInstalled', () => {
@@ -254,6 +265,17 @@ describe('ClaudeCodePluginClient', () => {
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/uninstall failed/);
       expect(analytics.captureException).toHaveBeenCalled();
+    });
+
+    it('refuses local=true without invoking the CLI', async () => {
+      mockClaudeBinaryFound();
+
+      const client = new ClaudeCodePluginClient();
+      const result = await client.removeServer(true);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/local/i);
+      expect(spawnMock).not.toHaveBeenCalled();
     });
   });
 });

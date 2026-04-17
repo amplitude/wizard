@@ -100,7 +100,23 @@ export class ClaudeCodePluginClient extends MCPClient {
     }
   }
 
-  async addServer(): Promise<AddServerResult> {
+  async addServer(
+    _apiKey?: string,
+    _selectedFeatures?: string[],
+    local?: boolean,
+  ): Promise<AddServerResult> {
+    // Defense in depth: the plugin marketplace only ships the production
+    // Amplitude MCP, so a `--local` request can never be honored here. Callers
+    // (resolveClientsForMode, addMCPServerToClientsStep) already route around
+    // this — but if a future refactor passes us local=true we'd silently
+    // install prod, which is the wrong dev-loop behavior. Fail loudly instead.
+    if (local) {
+      return {
+        success: false,
+        error:
+          'Claude Code plugin does not support --local. Use --local-mcp to install the bare amplitude-local MCP entry instead.',
+      };
+    }
     const binary = findClaudeBinary();
     if (!binary) {
       return {
@@ -160,7 +176,17 @@ export class ClaudeCodePluginClient extends MCPClient {
     return { success: true };
   }
 
-  async removeServer(): Promise<AddServerResult> {
+  async removeServer(local?: boolean): Promise<AddServerResult> {
+    // Same invariant as addServer: the plugin only manages the prod entry.
+    // `getInstalledClients(local)` already skips the plugin probe when local
+    // is set, but guard here too in case a caller bypasses that path.
+    if (local) {
+      return {
+        success: false,
+        error:
+          'Claude Code plugin does not support --local. Use --local-mcp to manage the amplitude-local MCP entry.',
+      };
+    }
     const binary = findClaudeBinary();
     if (!binary) {
       return {
