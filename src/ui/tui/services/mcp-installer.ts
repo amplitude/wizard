@@ -32,11 +32,21 @@ interface RawMCPClient {
     apiKey: string | undefined,
     features: string[],
     local: boolean,
-  ): Promise<{ success: boolean } | undefined>;
+  ): Promise<{ success: boolean; error?: string } | undefined>;
 }
 
 export interface McpClientInfo {
   name: string;
+}
+
+export interface McpInstallFailure {
+  name: string;
+  error?: string;
+}
+
+export interface McpInstallResult {
+  installed: string[];
+  failures: McpInstallFailure[];
 }
 
 export interface McpInstallOptions {
@@ -53,11 +63,15 @@ export interface McpInstaller {
   /** Detect which MCP-capable editors are available on this machine. */
   detectClients(): Promise<McpClientInfo[]>;
 
-  /** Install the Amplitude MCP server to the given clients. Returns names of successfully installed clients. */
+  /**
+   * Install the Amplitude MCP server to the given clients.
+   * Returns per-client success/failure so callers can show actual error messages
+   * rather than collapsing everything into a single empty-result "skipped" state.
+   */
   install(
     clientNames: string[],
     options?: McpInstallOptions,
-  ): Promise<string[]>;
+  ): Promise<McpInstallResult>;
 
   /** Remove the Amplitude MCP server from all installed clients. Returns names of removed clients. */
   remove(): Promise<string[]>;
@@ -84,7 +98,7 @@ export function createMcpInstaller(local = false): McpInstaller {
     async install(
       clientNames: string[],
       options?: McpInstallOptions,
-    ): Promise<string[]> {
+    ): Promise<McpInstallResult> {
       const features = [...ALL_FEATURE_VALUES];
 
       // No access token — write URL only and let each editor handle OAuth on
@@ -118,29 +132,34 @@ export function createMcpInstaller(local = false): McpInstaller {
             clientNames,
           )}, cached=${JSON.stringify(cachedClients.map((c) => c.name))}`,
         );
-        return [];
+        return { installed: [], failures: [] };
       }
 
       const installed: string[] = [];
+      const failures: McpInstallFailure[] = [];
       for (const client of toInstall) {
         try {
           const result = await client.addServer(accessToken, features, local);
           if (result?.success) {
             installed.push(client.name);
           } else {
+            const errorMsg = result?.error;
             logToFile(
-              `[McpInstaller] addServer returned success=false for ${client.name}`,
+              `[McpInstaller] addServer failed for ${client.name}${
+                errorMsg ? `: ${errorMsg}` : ''
+              }`,
             );
+            failures.push({ name: client.name, error: errorMsg });
           }
         } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
           logToFile(
-            `[McpInstaller] addServer threw for ${client.name}: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
+            `[McpInstaller] addServer threw for ${client.name}: ${msg}`,
           );
+          failures.push({ name: client.name, error: msg });
         }
       }
-      return installed;
+      return { installed, failures };
     },
 
     async remove(): Promise<string[]> {

@@ -8,6 +8,12 @@ export type MCPServerConfig = Record<string, unknown>;
 
 const MCPConfigSchema = z.record(z.string(), z.record(z.string(), z.unknown()));
 
+/** Result of an addServer/removeServer call. `error` is a short, user-surfaceable message. */
+export interface AddServerResult {
+  success: boolean;
+  error?: string;
+}
+
 export abstract class MCPClient {
   name: string;
   abstract getConfigPath(): Promise<string>;
@@ -17,8 +23,8 @@ export abstract class MCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
-  ): Promise<{ success: boolean }>;
-  abstract removeServer(local?: boolean): Promise<{ success: boolean }>;
+  ): Promise<AddServerResult>;
+  abstract removeServer(local?: boolean): Promise<AddServerResult>;
   abstract isClientSupported(): Promise<boolean>;
 }
 
@@ -68,7 +74,7 @@ export abstract class DefaultMCPClient extends MCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
-  ): Promise<{ success: boolean }> {
+  ): Promise<AddServerResult> {
     return this._addServerType(apiKey, 'sse', selectedFeatures, local);
   }
 
@@ -77,7 +83,7 @@ export abstract class DefaultMCPClient extends MCPClient {
     type: 'sse' | 'streamable-http',
     selectedFeatures?: string[],
     local?: boolean,
-  ): Promise<{ success: boolean }> {
+  ): Promise<AddServerResult> {
     try {
       const configPath = await this.getConfigPath();
       const configDir = path.dirname(configPath);
@@ -123,12 +129,15 @@ export abstract class DefaultMCPClient extends MCPClient {
       await fs.promises.writeFile(configPath, modifiedContent, 'utf8');
 
       return { success: true };
-    } catch {
-      return { success: false };
+    } catch (err) {
+      return {
+        success: false,
+        error: err instanceof Error ? err.message : String(err),
+      };
     }
   }
 
-  async removeServer(local?: boolean): Promise<{ success: boolean }> {
+  async removeServer(local?: boolean): Promise<AddServerResult> {
     try {
       const configPath = await this.getConfigPath();
 

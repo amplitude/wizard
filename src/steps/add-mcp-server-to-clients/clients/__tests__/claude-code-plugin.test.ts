@@ -25,20 +25,34 @@ vi.mock('fs', async () => {
   return {
     ...actual,
     existsSync: vi.fn(),
-    readFileSync: vi.fn(),
-    writeFileSync: vi.fn(),
-    mkdirSync: vi.fn(),
   };
 });
 
 const spawnSyncMock = spawnSync as Mock;
 const existsSyncMock = fs.existsSync as unknown as Mock;
-const readFileSyncMock = fs.readFileSync as unknown as Mock;
-const writeFileSyncMock = fs.writeFileSync as unknown as Mock;
 
-// Helper: simulate a successful binary lookup without relying on real PATH.
+const ok = (stdout = '', stderr = '') => ({
+  status: 0,
+  stdout: Buffer.from(stdout),
+  stderr: Buffer.from(stderr),
+});
+const fail = (stderr = '', stdout = '') => ({
+  status: 1,
+  stdout: Buffer.from(stdout),
+  stderr: Buffer.from(stderr),
+});
+
 function mockClaudeBinaryFound() {
   existsSyncMock.mockImplementation((p: string) => p.endsWith('/claude'));
+}
+
+/** Find the spawnSync call whose argv starts with the given tokens. */
+function findCall(tokens: string[]) {
+  return spawnSyncMock.mock.calls.find((c) => {
+    const args = c[1];
+    if (!Array.isArray(args)) return false;
+    return tokens.every((t, i) => args[i] === t);
+  });
 }
 
 describe('ClaudeCodePluginClient', () => {
@@ -46,108 +60,40 @@ describe('ClaudeCodePluginClient', () => {
     vi.clearAllMocks();
     _resetClaudeBinaryCache();
     existsSyncMock.mockReturnValue(false);
-    readFileSyncMock.mockReturnValue('');
   });
 
   describe('addServer', () => {
-    it('writes marketplace to settings.json, installs plugin, reports success', async () => {
+    it('adds marketplace, installs plugin, reports success', async () => {
       mockClaudeBinaryFound();
-
-      // settings.json doesn't exist yet; plugin install succeeds; mcp list shows no stale entry.
       spawnSyncMock
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        }) // plugin install
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        }); // mcp list
+        .mockReturnValueOnce(ok('✔ Successfully added marketplace: amplitude')) // marketplace add
+        .mockReturnValueOnce(ok('✔ Successfully installed plugin')) // plugin install
+        .mockReturnValueOnce(ok('')); // mcp list (no stale)
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
 
       expect(result).toEqual({ success: true });
-
-      // marketplace written
-      expect(writeFileSyncMock).toHaveBeenCalledTimes(1);
-      const writtenContent = writeFileSyncMock.mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenContent);
-      expect(parsed.extraKnownMarketplaces.amplitude.source).toEqual({
-        source: 'github',
-        repo: 'amplitude/mcp-marketplace',
-      });
-
-      // plugin install invoked
-      expect(spawnSyncMock).toHaveBeenCalledWith(
-        expect.stringMatching(/claude$/),
-        ['plugin', 'install', 'amplitude@amplitude', '--scope', 'user'],
-        expect.objectContaining({ stdio: 'pipe' }),
-      );
+      expect(findCall(['plugin', 'marketplace', 'add'])).toBeDefined();
+      expect(
+        findCall([
+          'plugin',
+          'install',
+          'amplitude@amplitude',
+          '--scope',
+          'user',
+        ]),
+      ).toBeDefined();
     });
 
-    it('preserves existing keys when merging into settings.json', async () => {
+    it('treats an already-added marketplace as success', async () => {
       mockClaudeBinaryFound();
-
-      // settings.json exists with an unrelated key
-      existsSyncMock.mockImplementation((p: string) => {
-        if (typeof p === 'string' && p.endsWith('settings.json')) return true;
-        if (typeof p === 'string' && p.endsWith('/claude')) return true;
-        return false;
-      });
-      readFileSyncMock.mockReturnValue(
-        JSON.stringify(
-          {
-            theme: 'dark',
-            extraKnownMarketplaces: {
-              other: { source: { source: 'github', repo: 'foo/bar' } },
-            },
-          },
-          null,
-          2,
-        ),
-      );
-
       spawnSyncMock
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        })
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        });
-
-      const client = new ClaudeCodePluginClient();
-      await client.addServer();
-
-      const writtenContent = writeFileSyncMock.mock.calls[0][1] as string;
-      const parsed = JSON.parse(writtenContent);
-      expect(parsed.theme).toBe('dark');
-      expect(parsed.extraKnownMarketplaces.other.source.repo).toBe('foo/bar');
-      expect(parsed.extraKnownMarketplaces.amplitude.source.repo).toBe(
-        'amplitude/mcp-marketplace',
-      );
-    });
-
-    it('treats "already installed" as success', async () => {
-      mockClaudeBinaryFound();
-
-      spawnSyncMock
-        .mockReturnValueOnce({
-          status: 1,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from('Plugin already installed'),
-        })
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        });
+        .mockReturnValueOnce(
+          fail('Marketplace already on disk — declared in user settings'),
+        )
+        .mockReturnValueOnce(ok())
+        .mockReturnValueOnce(ok());
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
@@ -156,101 +102,93 @@ describe('ClaudeCodePluginClient', () => {
       expect(analytics.captureException).not.toHaveBeenCalled();
     });
 
-    it('returns failure without fallback when plugin install errors', async () => {
+    it('treats an already-installed plugin as success', async () => {
       mockClaudeBinaryFound();
-
-      spawnSyncMock.mockReturnValueOnce({
-        status: 1,
-        stdout: Buffer.from(''),
-        stderr: Buffer.from('marketplace unavailable'),
-      });
+      spawnSyncMock
+        .mockReturnValueOnce(ok())
+        .mockReturnValueOnce(fail('Plugin already installed'))
+        .mockReturnValueOnce(ok());
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
 
-      expect(result).toEqual({ success: false });
+      expect(result).toEqual({ success: true });
+      expect(analytics.captureException).not.toHaveBeenCalled();
+    });
+
+    it('returns failure + error string when marketplace add fails', async () => {
+      mockClaudeBinaryFound();
+      spawnSyncMock.mockReturnValueOnce(
+        fail('fatal: repository amplitude/mcp-marketplace not found'),
+      );
+
+      const client = new ClaudeCodePluginClient();
+      const result = await client.addServer();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/marketplace/i);
+      expect(result.error).toMatch(/not found/i);
       expect(analytics.captureException).toHaveBeenCalled();
-      // No second spawnSync call (no `claude mcp add` fallback)
-      const pluginCall = spawnSyncMock.mock.calls.find(
-        (c) => Array.isArray(c[1]) && c[1][0] === 'plugin',
-      );
-      const mcpCall = spawnSyncMock.mock.calls.find(
-        (c) => Array.isArray(c[1]) && c[1][0] === 'mcp' && c[1][1] === 'add',
-      );
-      expect(pluginCall).toBeDefined();
-      expect(mcpCall).toBeUndefined();
+      // No plugin install call should have been attempted.
+      expect(findCall(['plugin', 'install'])).toBeUndefined();
     });
 
-    it('removes stale bare `amplitude` MCP entry after successful plugin install', async () => {
+    it('returns failure + error string when plugin install fails (no fallback)', async () => {
       mockClaudeBinaryFound();
-
       spawnSyncMock
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        }) // plugin install
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from('amplitude: https://...\nother: ...\n'),
-          stderr: Buffer.from(''),
-        }) // mcp list
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        }); // mcp remove
+        .mockReturnValueOnce(ok())
+        .mockReturnValueOnce(fail('plugin manifest invalid'));
+
+      const client = new ClaudeCodePluginClient();
+      const result = await client.addServer();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/plugin install failed/i);
+      expect(result.error).toMatch(/manifest/);
+      expect(analytics.captureException).toHaveBeenCalled();
+      // No `claude mcp add` fallback.
+      expect(findCall(['mcp', 'add'])).toBeUndefined();
+    });
+
+    it('removes stale bare `amplitude` MCP entry after plugin install', async () => {
+      mockClaudeBinaryFound();
+      spawnSyncMock
+        .mockReturnValueOnce(ok())
+        .mockReturnValueOnce(ok())
+        .mockReturnValueOnce(ok('amplitude: https://...\nother: ...\n')) // mcp list
+        .mockReturnValueOnce(ok()); // mcp remove
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
 
       expect(result).toEqual({ success: true });
-      const mcpRemoveCall = spawnSyncMock.mock.calls.find(
-        (c) => Array.isArray(c[1]) && c[1][0] === 'mcp' && c[1][1] === 'remove',
-      );
-      expect(mcpRemoveCall).toBeDefined();
-      expect(mcpRemoveCall?.[1]).toEqual([
-        'mcp',
-        'remove',
-        '--scope',
-        'user',
-        'amplitude',
-      ]);
+      expect(
+        findCall(['mcp', 'remove', '--scope', 'user', 'amplitude']),
+      ).toBeDefined();
     });
 
-    it('does not remove `amplitude-local` when checking for stale entries', async () => {
+    it('does not touch `amplitude-local` when checking stale entries', async () => {
       mockClaudeBinaryFound();
-
       spawnSyncMock
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from(''),
-          stderr: Buffer.from(''),
-        })
-        .mockReturnValueOnce({
-          status: 0,
-          stdout: Buffer.from('amplitude-local: http://localhost\n'),
-          stderr: Buffer.from(''),
-        });
+        .mockReturnValueOnce(ok())
+        .mockReturnValueOnce(ok())
+        .mockReturnValueOnce(ok('amplitude-local: http://localhost\n'));
 
       const client = new ClaudeCodePluginClient();
-      const result = await client.addServer();
+      await client.addServer();
 
-      expect(result).toEqual({ success: true });
-      const mcpRemoveCall = spawnSyncMock.mock.calls.find(
-        (c) => Array.isArray(c[1]) && c[1][0] === 'mcp' && c[1][1] === 'remove',
-      );
-      expect(mcpRemoveCall).toBeUndefined();
+      expect(findCall(['mcp', 'remove'])).toBeUndefined();
     });
 
-    it('returns failure when claude binary is not found', async () => {
+    it('returns failure with a friendly error when claude binary is not on PATH', async () => {
       existsSyncMock.mockReturnValue(false);
       process.env.PATH = '';
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
 
-      expect(result).toEqual({ success: false });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/claude code cli/i);
       expect(spawnSyncMock).not.toHaveBeenCalled();
     });
   });
@@ -258,12 +196,7 @@ describe('ClaudeCodePluginClient', () => {
   describe('isServerInstalled', () => {
     it('returns true when `amplitude@amplitude` is in plugin list', async () => {
       mockClaudeBinaryFound();
-
-      spawnSyncMock.mockReturnValueOnce({
-        status: 0,
-        stdout: Buffer.from('amplitude@amplitude (user)\n'),
-        stderr: Buffer.from(''),
-      });
+      spawnSyncMock.mockReturnValueOnce(ok('amplitude@amplitude (user)\n'));
 
       const client = new ClaudeCodePluginClient();
       await expect(client.isServerInstalled()).resolves.toBe(true);
@@ -271,12 +204,7 @@ describe('ClaudeCodePluginClient', () => {
 
     it('returns false when plugin list is empty', async () => {
       mockClaudeBinaryFound();
-
-      spawnSyncMock.mockReturnValueOnce({
-        status: 0,
-        stdout: Buffer.from(''),
-        stderr: Buffer.from(''),
-      });
+      spawnSyncMock.mockReturnValueOnce(ok(''));
 
       const client = new ClaudeCodePluginClient();
       await expect(client.isServerInstalled()).resolves.toBe(false);
@@ -284,39 +212,34 @@ describe('ClaudeCodePluginClient', () => {
   });
 
   describe('removeServer', () => {
-    it('invokes `claude plugin uninstall`', async () => {
+    it('invokes `claude plugin uninstall` and returns success', async () => {
       mockClaudeBinaryFound();
-
-      spawnSyncMock.mockReturnValueOnce({
-        status: 0,
-        stdout: Buffer.from(''),
-        stderr: Buffer.from(''),
-      });
+      spawnSyncMock.mockReturnValueOnce(ok());
 
       const client = new ClaudeCodePluginClient();
       const result = await client.removeServer();
 
       expect(result).toEqual({ success: true });
-      expect(spawnSyncMock).toHaveBeenCalledWith(
-        expect.stringMatching(/claude$/),
-        ['plugin', 'uninstall', 'amplitude@amplitude', '--scope', 'user'],
-        expect.objectContaining({ stdio: 'pipe' }),
-      );
+      expect(
+        findCall([
+          'plugin',
+          'uninstall',
+          'amplitude@amplitude',
+          '--scope',
+          'user',
+        ]),
+      ).toBeDefined();
     });
 
-    it('captures exception and returns failure on non-zero exit', async () => {
+    it('returns failure with error on non-zero exit', async () => {
       mockClaudeBinaryFound();
-
-      spawnSyncMock.mockReturnValueOnce({
-        status: 1,
-        stdout: Buffer.from(''),
-        stderr: Buffer.from('boom'),
-      });
+      spawnSyncMock.mockReturnValueOnce(fail('uninstall failed'));
 
       const client = new ClaudeCodePluginClient();
       const result = await client.removeServer();
 
-      expect(result).toEqual({ success: false });
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/uninstall failed/);
       expect(analytics.captureException).toHaveBeenCalled();
     });
   });

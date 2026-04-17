@@ -1,9 +1,5 @@
 import { spawnSync } from 'child_process';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import * as jsonc from 'jsonc-parser';
-import { MCPClient } from '../MCPClient';
+import { MCPClient, type AddServerResult } from '../MCPClient';
 import { analytics } from '../../../utils/analytics';
 import { debug } from '../../../utils/debug';
 import {
@@ -14,10 +10,6 @@ import {
 import { findClaudeBinary } from './claude-binary';
 
 const PLUGIN_REF = `${CLAUDE_PLUGIN_ID}@${CLAUDE_PLUGIN_MARKETPLACE_NAME}`;
-
-function userSettingsPath(): string {
-  return path.join(os.homedir(), '.claude', 'settings.json');
-}
 
 /**
  * Install flow for the Amplitude Claude Code plugin (bundles the MCP server +
@@ -36,7 +28,7 @@ export class ClaudeCodePluginClient extends MCPClient {
   }
 
   getConfigPath(): Promise<string> {
-    return Promise.resolve(userSettingsPath());
+    throw new Error('Not implemented');
   }
 
   isClientSupported(): Promise<boolean> {
@@ -66,21 +58,36 @@ export class ClaudeCodePluginClient extends MCPClient {
     }
   }
 
-  addServer(): Promise<{ success: boolean }> {
+  addServer(): Promise<AddServerResult> {
     const binary = findClaudeBinary();
-    if (!binary) return Promise.resolve({ success: false });
+    if (!binary) {
+      return Promise.resolve({
+        success: false,
+        error: 'Claude Code CLI not found on PATH.',
+      });
+    }
 
-    try {
-      this.registerMarketplace();
-    } catch (err) {
-      analytics.captureException(
-        new Error(
-          `Failed to register Amplitude plugin marketplace: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        ),
+    const marketplaceResult = spawnSync(
+      binary,
+      ['plugin', 'marketplace', 'add', CLAUDE_PLUGIN_MARKETPLACE_REPO],
+      { stdio: 'pipe' },
+    );
+
+    if (
+      marketplaceResult.status !== 0 &&
+      !isAlreadyThere(marketplaceResult.stderr, marketplaceResult.stdout)
+    ) {
+      const err = stderrSummary(
+        marketplaceResult.stderr,
+        marketplaceResult.stdout,
       );
-      return Promise.resolve({ success: false });
+      analytics.captureException(
+        new Error(`Failed to add Amplitude plugin marketplace: ${err}`),
+      );
+      return Promise.resolve({
+        success: false,
+        error: `Could not register Amplitude marketplace: ${err}`,
+      });
     }
 
     const installResult = spawnSync(
@@ -90,14 +97,17 @@ export class ClaudeCodePluginClient extends MCPClient {
     );
 
     if (installResult.status !== 0) {
-      const stderr = installResult.stderr?.toString() ?? '';
-      if (/already installed/i.test(stderr)) {
+      if (isAlreadyThere(installResult.stderr, installResult.stdout)) {
         debug('  Amplitude plugin already installed — continuing.');
       } else {
+        const err = stderrSummary(installResult.stderr, installResult.stdout);
         analytics.captureException(
-          new Error(`Failed to install Amplitude plugin: ${stderr}`),
+          new Error(`Failed to install Amplitude plugin: ${err}`),
         );
-        return Promise.resolve({ success: false });
+        return Promise.resolve({
+          success: false,
+          error: `Plugin install failed: ${err}`,
+        });
       }
     }
 
@@ -105,9 +115,14 @@ export class ClaudeCodePluginClient extends MCPClient {
     return Promise.resolve({ success: true });
   }
 
-  removeServer(): Promise<{ success: boolean }> {
+  removeServer(): Promise<AddServerResult> {
     const binary = findClaudeBinary();
-    if (!binary) return Promise.resolve({ success: false });
+    if (!binary) {
+      return Promise.resolve({
+        success: false,
+        error: 'Claude Code CLI not found on PATH.',
+      });
+    }
 
     const result = spawnSync(
       binary,
@@ -116,48 +131,13 @@ export class ClaudeCodePluginClient extends MCPClient {
     );
 
     if (result.status !== 0) {
+      const err = stderrSummary(result.stderr, result.stdout);
       analytics.captureException(
-        new Error(
-          `Failed to uninstall Amplitude plugin: ${result.stderr?.toString()}`,
-        ),
+        new Error(`Failed to uninstall Amplitude plugin: ${err}`),
       );
-      return Promise.resolve({ success: false });
+      return Promise.resolve({ success: false, error: err });
     }
     return Promise.resolve({ success: true });
-  }
-
-  /**
-   * Register `amplitude/mcp-marketplace` in the user's Claude settings.
-   * Uses jsonc-parser to preserve existing keys, comments, and formatting.
-   */
-  private registerMarketplace(): void {
-    const settingsPath = userSettingsPath();
-    const settingsDir = path.dirname(settingsPath);
-    fs.mkdirSync(settingsDir, { recursive: true });
-
-    const existing = fs.existsSync(settingsPath)
-      ? fs.readFileSync(settingsPath, 'utf8')
-      : '';
-
-    const marketplaceValue = {
-      source: {
-        source: 'github',
-        repo: CLAUDE_PLUGIN_MARKETPLACE_REPO,
-      },
-    };
-
-    const edits = jsonc.modify(
-      existing,
-      ['extraKnownMarketplaces', CLAUDE_PLUGIN_MARKETPLACE_NAME],
-      marketplaceValue,
-      { formattingOptions: { tabSize: 2, insertSpaces: true } },
-    );
-
-    const next =
-      edits.length > 0 ? jsonc.applyEdits(existing, edits) : existing;
-    // jsonc.applyEdits returns "" for an empty file if no edits; ensure valid JSON.
-    const finalContent = next.trim() === '' ? '{}\n' : next;
-    fs.writeFileSync(settingsPath, finalContent, { mode: 0o644 });
   }
 
   /**
@@ -184,4 +164,24 @@ export class ClaudeCodePluginClient extends MCPClient {
       // best-effort
     }
   }
+}
+
+/** Some Claude CLI commands print "already..." but exit 0; others exit non-zero. */
+function isAlreadyThere(
+  stderr: Buffer | string | undefined,
+  stdout: Buffer | string | undefined,
+): boolean {
+  const text = `${stderr?.toString() ?? ''}\n${stdout?.toString() ?? ''}`;
+  return /already\b/i.test(text);
+}
+
+function stderrSummary(
+  stderr: Buffer | string | undefined,
+  stdout: Buffer | string | undefined,
+): string {
+  const text =
+    (stderr?.toString() ?? '').trim() || (stdout?.toString() ?? '').trim();
+  if (!text) return 'unknown error';
+  // Keep the first few lines — keep user-visible errors readable.
+  return text.split('\n').slice(0, 3).join(' ').slice(0, 300);
 }

@@ -18,7 +18,11 @@ import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
-import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
+import type {
+  McpInstaller,
+  McpClientInfo,
+  McpInstallFailure,
+} from '../services/mcp-installer.js';
 import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
 
@@ -88,6 +92,7 @@ export const McpScreen = ({
   const [phase, setPhase] = useState<Phase>(Phase.Detecting);
   const [clients, setClients] = useState<McpClientInfo[]>([]);
   const [resultClients, setResultClients] = useState<string[]>([]);
+  const [failures, setFailures] = useState<McpInstallFailure[]>([]);
   const [pendingInstallNames, setPendingInstallNames] = useState<string[]>([]);
   const [claudeCodeMode, setClaudeCodeMode] =
     useState<ClaudeCodeInstallMode>('plugin');
@@ -168,26 +173,34 @@ export const McpScreen = ({
   const doInstall = async (names: string[], ccMode: ClaudeCodeInstallMode) => {
     setClaudeCodeMode(ccMode);
     setPhase(Phase.Working);
-    let result: string[] = [];
+    let installed: string[] = [];
+    let installFailures: McpInstallFailure[];
     try {
-      result = await installer.install(names, { claudeCodeMode: ccMode });
-      setResultClients(result);
-    } catch {
-      setResultClients([]);
+      const result = await installer.install(names, { claudeCodeMode: ccMode });
+      installed = result.installed;
+      installFailures = result.failures;
+    } catch (err) {
+      installFailures = names.map((n) => ({
+        name: n,
+        error: err instanceof Error ? err.message : String(err),
+      }));
     }
-    const failed = names.filter((n) => !result.includes(n));
+    setResultClients(installed);
+    setFailures(installFailures);
     analytics.wizardCapture('MCP Install Complete', {
-      installed: result,
-      failed,
+      installed,
+      failed: installFailures.map((f) => f.name),
       attempted: names,
       claude_code_mode: ccMode,
     });
     setPhase(Phase.Done);
     const outcome =
-      result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
+      installed.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
+    // Keep the Done frame longer when there's a failure so users can read it.
+    const dwell = installFailures.length > 0 ? 4000 : 2000;
     timerRef.current = setTimeout(
-      () => markDone(store, outcome, result, standalone, onComplete),
-      2000,
+      () => markDone(store, outcome, installed, standalone, onComplete),
+      dwell,
     );
   };
 
@@ -319,6 +332,16 @@ export const McpScreen = ({
                   <Text color={Colors.body}>/amplitude:create-chart</Text> and{' '}
                   <Text color={Colors.body}>/amplitude:weekly-brief</Text>.
                 </Text>
+                {pendingInstallNames.length > 1 && (
+                  <Text color={Colors.muted}>
+                    This choice only affects Claude Code — other selected
+                    editors (
+                    {pendingInstallNames
+                      .filter((n) => n !== CLAUDE_CODE_CLIENT_NAME)
+                      .join(', ')}
+                    ) will install the standard MCP server.
+                  </Text>
+                )}
                 <Box marginTop={1}>
                   <PickerMenu
                     message="How would you like to set up Claude Code?"
@@ -356,7 +379,7 @@ export const McpScreen = ({
 
             {phase === Phase.Done && (
               <Box flexDirection="column">
-                {resultClients.length > 0 ? (
+                {resultClients.length > 0 && (
                   <>
                     <Text color={Colors.success} bold>
                       {Icons.checkmark}{' '}
@@ -379,7 +402,36 @@ export const McpScreen = ({
                       </Text>
                     ))}
                   </>
-                ) : (
+                )}
+                {failures.length > 0 && (
+                  <Box
+                    flexDirection="column"
+                    marginTop={resultClients.length > 0 ? 1 : 0}
+                  >
+                    <Text color={Colors.error} bold>
+                      {Icons.cross}{' '}
+                      {isRemove
+                        ? 'Could not remove from:'
+                        : 'Could not install for:'}
+                    </Text>
+                    {failures.map((f, i) => (
+                      <Box key={i} flexDirection="column">
+                        <Text color={Colors.body}>
+                          {' '}
+                          {Icons.bullet} {f.name}
+                        </Text>
+                        {f.error && (
+                          <Text color={Colors.muted}> {f.error}</Text>
+                        )}
+                      </Box>
+                    ))}
+                    <Text color={Colors.muted}>
+                      Run `npx @amplitude/wizard mcp` to try again, or pick “MCP
+                      server only” next time.
+                    </Text>
+                  </Box>
+                )}
+                {resultClients.length === 0 && failures.length === 0 && (
                   <Text color={Colors.muted}>
                     {isRemove ? 'Removal' : 'Installation'} skipped.
                   </Text>
