@@ -50,7 +50,10 @@ interface CreateProjectScreenProps {
 }
 
 type Phase =
-  | { kind: 'idle' }
+  // `lastTypedName` carries the user's most recent input across a retry so
+  // the idle TextInput can seed its defaultValue with it instead of
+  // falling back to the (often empty) session-suggested name.
+  | { kind: 'idle'; lastTypedName?: string }
   | { kind: 'submitting'; name: string }
   | {
       kind: 'error';
@@ -63,16 +66,18 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
   useWizardStore(store);
 
   const { session } = store;
-  const zone = (session.region ??
-    session.pendingAuthCloudRegion ??
-    'us') as AmplitudeZone;
+  // Normalize to a known zone — matches bin.ts's create-project path so an
+  // unexpected value defaults safely to 'us' instead of flowing into the
+  // proxy URL lookup as a cast string.
+  const zone: AmplitudeZone =
+    (session.region ?? session.pendingAuthCloudRegion) === 'eu' ? 'eu' : 'us';
   const orgId = session.selectedOrgId;
   const orgName = session.selectedOrgName;
   // /create-project can fire mid-SUSI (pending* tokens set, credentials
   // null) OR after the user is fully signed in (credentials set, pending*
   // may be null because bin.ts auto-selected a single environment). We need
-  // BOTH tokens: the access token authenticates against Thunder's wizard-
-  // proxy (Hydra introspection rejects id_tokens), and the id_token is what
+  // BOTH tokens: the access token authenticates against the wizard-proxy
+  // (Hydra introspection rejects id_tokens), and the id_token is what
   // fetchAmplitudeUser + the stored credentials use for the data-api.
   const accessToken =
     session.pendingAuthAccessToken || session.credentials?.accessToken || null;
@@ -162,8 +167,18 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       // advances to the data check. The apiKey is *not* stored on
       // session.createProject — it flows through credentials like every
       // other key.
+      //
+      // Persist inside its own try — the project already exists on the
+      // backend at this point, so a local write failure (FS permission
+      // etc.) must not be treated as a create-project error.
       const { persistApiKey } = await import('../../../utils/api-key-store.js');
-      persistApiKey(result.apiKey, session.installDir);
+      try {
+        persistApiKey(result.apiKey, session.installDir);
+      } catch {
+        // In-memory credentials below still let the flow progress; a rerun
+        // will re-persist. Intentionally swallow — surfacing as a create
+        // error would misrepresent the backend state to the user.
+      }
 
       store.setSelectedProjectName(result.name);
       // Dash creates a same-named taxonomy workspace alongside the new app.
@@ -221,7 +236,8 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
   };
 
   const handleRetry = () => {
-    setPhase({ kind: 'idle' });
+    const lastTypedName = phase.kind === 'error' ? phase.name : undefined;
+    setPhase({ kind: 'idle', lastTypedName });
   };
 
   return (
@@ -247,7 +263,9 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
             </Text>
           </Box>
           <TextInput
-            defaultValue={suggestedName}
+            defaultValue={
+              (phase.kind === 'idle' && phase.lastTypedName) || suggestedName
+            }
             placeholder="My new project"
             onSubmit={(value) => {
               void handleSubmit(value);

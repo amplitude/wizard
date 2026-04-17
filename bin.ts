@@ -242,7 +242,20 @@ const resolveNonInteractiveCredentials = async (
         { orgId: org.id, name: projectName },
       );
 
-      persistApiKey(created.apiKey, session.installDir);
+      // Persist outside the API's error path — the project exists on the
+      // backend at this point. A local persist failure (FS permission, etc.)
+      // must not be reported as a create-project error, because the
+      // orchestrator retry would then hit NAME_TAKEN.
+      try {
+        persistApiKey(created.apiKey, session.installDir);
+      } catch (persistErr) {
+        const msg =
+          persistErr instanceof Error ? persistErr.message : String(persistErr);
+        getUI().log.warn(
+          `Project created but failed to persist API key locally: ${msg}. ` +
+            `Set AMPLITUDE_API_KEY=<key> manually or rerun once the issue is resolved.`,
+        );
+      }
       session.selectedOrgId = org.id;
       session.selectedOrgName = org.name;
       session.selectedProjectName = created.name;
