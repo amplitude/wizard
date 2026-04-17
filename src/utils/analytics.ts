@@ -2,6 +2,7 @@ import { createInstance, Identify } from '@amplitude/analytics-node';
 import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
+import { IS_DEV } from '../lib/constants';
 import { getSessionId, getRunId, setSentryUser } from '../lib/observability';
 import {
   initFeatureFlags,
@@ -12,7 +13,11 @@ import {
   FLAG_AGENT_ANALYTICS,
 } from '../lib/feature-flags';
 
-const DEFAULT_TELEMETRY_API_KEY = 'e5a2c9bdffe949f7da77e6b481e118fa';
+// Telemetry keys mirror Lightning's ampli config in amplitude/javascript
+// (packages/instrumentation/src/lightning/{agents,wormhole}/src/ampli/index.ts).
+// Both keys point at the main `amplitude/Amplitude` project.
+const DEV_TELEMETRY_API_KEY = 'ce58b28cace35f7df0eb241b0cd72044';
+const PROD_TELEMETRY_API_KEY = 'e5a2c9bdffe949f7da77e6b481e118fa';
 
 /**
  * Telemetry project API key. Empty or whitespace-only env value means “no key”
@@ -20,7 +25,8 @@ const DEFAULT_TELEMETRY_API_KEY = 'e5a2c9bdffe949f7da77e6b481e118fa';
  */
 export function resolveTelemetryApiKey(): string {
   const fromEnv = process.env.AMPLITUDE_API_KEY;
-  const raw = fromEnv !== undefined ? fromEnv : DEFAULT_TELEMETRY_API_KEY;
+  const defaultKey = IS_DEV ? DEV_TELEMETRY_API_KEY : PROD_TELEMETRY_API_KEY;
+  const raw = fromEnv !== undefined ? fromEnv : defaultKey;
   return raw.trim();
 }
 
@@ -39,12 +45,12 @@ export function sessionProperties(
 ): Record<string, unknown> {
   return {
     integration: session.integration,
-    detected_framework: session.detectedFrameworkLabel,
+    'detected framework': session.detectedFrameworkLabel,
     typescript: session.typescript,
-    project_id: session.credentials?.projectId,
-    discovered_features: session.discoveredFeatures,
-    additional_features: session.additionalFeatureQueue,
-    run_phase: session.runPhase,
+    'project id': session.credentials?.projectId,
+    'discovered features': session.discoveredFeatures,
+    'additional features': session.additionalFeatureQueue,
+    'run phase': session.runPhase,
   };
 }
 
@@ -57,9 +63,9 @@ export function sessionPropertiesCompact(
 ): Record<string, unknown> {
   return {
     integration: session.integration,
-    detected_framework: session.detectedFrameworkLabel,
-    run_phase: session.runPhase,
-    project_id: session.credentials?.projectId,
+    'detected framework': session.detectedFrameworkLabel,
+    'run phase': session.runPhase,
+    'project id': session.credentials?.projectId,
   };
 }
 
@@ -157,6 +163,7 @@ export class Analytics {
 
       const groupProps = new Identify();
       if (properties.org_name) groupProps.set('org name', properties.org_name);
+      groupProps.set('last used wizard', new Date().toISOString());
       this.client.groupIdentify(
         'org id',
         properties.org_id,
@@ -195,8 +202,8 @@ export class Analytics {
   captureException(error: Error, properties: Record<string, unknown> = {}) {
     this.capture('$error', {
       ...properties,
-      error_message: error.message,
-      error_name: error.name,
+      'error message': error.message,
+      'error name': error.name,
     });
   }
 
@@ -210,8 +217,8 @@ export class Analytics {
     this.ensureInitStarted();
     const eventProps = {
       ...this.sessionProperties,
-      session_id: getSessionId(),
-      run_id: getRunId(),
+      'session id': getSessionId(),
+      'run id': getRunId(),
       ...properties,
     };
     const options: { device_id: string; user_id?: string } = {
@@ -226,13 +233,13 @@ export class Analytics {
   }
 
   /**
-   * Capture a wizard-specific event. Automatically prepends "wizard: " to the event name.
+   * Capture a wizard-specific event. Automatically prepends "wizard cli: " to the event name.
    * All new wizard analytics should use this method instead of capture() directly.
    * Use lowercase with spaces for eventName (e.g. "agent started", "api key submitted")
    * per Amplitude quickstart taxonomy guidelines.
    */
   wizardCapture(eventName: string, properties?: Record<string, unknown>): void {
-    this.capture(`wizard: ${eventName}`, properties);
+    this.capture(`wizard cli: ${eventName}`, properties);
   }
 
   /**
@@ -321,9 +328,9 @@ export class Analytics {
   }
 
   async shutdown(status: 'success' | 'error' | 'cancelled') {
-    this.wizardCapture('Session Ended', {
+    this.wizardCapture('session ended', {
       status,
-      session_duration_ms: Date.now() - this.startedAt,
+      'session duration ms': Date.now() - this.startedAt,
     });
     if (this.initPromise === null) {
       return;
@@ -339,15 +346,15 @@ export class Analytics {
 
 /**
  * Full Amplitude `event_type` for CLI/TUI product feedback.
- * Same string as `wizardCapture('Feedback Submitted', …)`.
+ * Same string as `wizardCapture('feedback submitted', …)`.
  */
-export const WIZARD_FEEDBACK_EVENT_TYPE = 'wizard: feedback submitted';
+export const WIZARD_FEEDBACK_EVENT_TYPE = 'wizard cli: feedback submitted';
 
 export const analytics = new Analytics();
 
 /**
  * Unified wizard error telemetry (aligns with starter taxonomy “Error Encountered”).
- * Emits `wizard: error encountered` with category / message / context.
+ * Emits `wizard cli: error encountered` with category / message / context.
  */
 export function captureWizardError(
   errorCategory: string,
@@ -355,10 +362,10 @@ export function captureWizardError(
   errorContext: string,
   extra?: Record<string, unknown>,
 ): void {
-  analytics.wizardCapture('Error Encountered', {
-    error_category: errorCategory,
-    error_message: errorMessage,
-    error_context: errorContext,
+  analytics.wizardCapture('error encountered', {
+    'error category': errorCategory,
+    'error message': errorMessage,
+    'error context': errorContext,
     ...extra,
   });
 }

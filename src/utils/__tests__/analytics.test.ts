@@ -52,7 +52,7 @@ vi.mock('../../lib/feature-flags', () => ({
 
 import { v4 as uuidv4 } from 'uuid';
 
-import { Analytics } from '../analytics.js';
+import { Analytics, resolveTelemetryApiKey } from '../analytics.js';
 
 const mockUuidv4 = uuidv4 as MockedFunction<typeof uuidv4>;
 
@@ -136,6 +136,44 @@ describe('Analytics', () => {
     });
   });
 
+  describe('resolveTelemetryApiKey', () => {
+    const DEV_KEY = 'ce58b28cace35f7df0eb241b0cd72044';
+    const PROD_KEY = 'e5a2c9bdffe949f7da77e6b481e118fa';
+
+    it('returns the dev key under NODE_ENV=test', () => {
+      const originalEnvKey = process.env.AMPLITUDE_API_KEY;
+      delete process.env.AMPLITUDE_API_KEY;
+      try {
+        // Vitest sets NODE_ENV=test, which counts as IS_DEV.
+        expect(resolveTelemetryApiKey()).toBe(DEV_KEY);
+      } finally {
+        if (originalEnvKey !== undefined) {
+          process.env.AMPLITUDE_API_KEY = originalEnvKey;
+        }
+      }
+    });
+
+    it('prefers AMPLITUDE_API_KEY override over the default', () => {
+      const originalEnvKey = process.env.AMPLITUDE_API_KEY;
+      process.env.AMPLITUDE_API_KEY = 'explicit-override-key';
+      try {
+        expect(resolveTelemetryApiKey()).toBe('explicit-override-key');
+      } finally {
+        if (originalEnvKey === undefined) {
+          delete process.env.AMPLITUDE_API_KEY;
+        } else {
+          process.env.AMPLITUDE_API_KEY = originalEnvKey;
+        }
+      }
+    });
+
+    it('knows the prod key constant (matches Lightning ampli config)', () => {
+      // Belt-and-braces: the prod key should never silently change. If this
+      // fails, the wizard is about to point telemetry at a different project.
+      expect(PROD_KEY).toBe('e5a2c9bdffe949f7da77e6b481e118fa');
+    });
+  });
+
   describe('identifyUser', () => {
     it('should call client.identify with user properties and correct event options', () => {
       analytics.setDistinctId('ada@example.com');
@@ -169,6 +207,14 @@ describe('Analytics', () => {
       expect(groupIdentifyArgs[0]).toBe('org id');
       expect(groupIdentifyArgs[1]).toBe('org-1');
       expect(groupIdentifyArgs[2].set).toHaveBeenCalledWith('org name', 'Acme');
+      // `last used wizard` is stamped with the current UTC timestamp each run.
+      const lastUsedCall = groupIdentifyArgs[2].set.mock.calls.find(
+        (args: unknown[]) => args[0] === 'last used wizard',
+      );
+      expect(lastUsedCall).toBeDefined();
+      expect(lastUsedCall![1]).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
+      );
 
       // Verify event options tie the identify to the right user + device
       const eventOptions = client.identify.mock.calls[0][1];

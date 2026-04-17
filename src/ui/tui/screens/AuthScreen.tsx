@@ -191,8 +191,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const local = readApiKeyWithSource(s.installDir);
       if (local) {
         setSavedKeySource(local.source);
-        analytics.wizardCapture('API Key Submitted', {
-          key_source: local.source,
+        analytics.wizardCapture('api key submitted', {
+          'key source': local.source,
         });
         // Resolve env name from the key when we can — the header slot is
         // informational, not required for Auth to complete.
@@ -224,8 +224,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         if (cancelled || store.session.credentials !== null) return;
 
         persistApiKey(apiKey, s.installDir);
-        analytics.wizardCapture('API Key Submitted', {
-          key_source: 'environment_picker',
+        analytics.wizardCapture('api key submitted', {
+          'key source': 'environment_picker',
         });
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
@@ -261,8 +261,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
       if (projectApiKey) {
         persistApiKey(projectApiKey, s.installDir);
-        analytics.wizardCapture('API Key Submitted', {
-          key_source: 'backend_fetch',
+        analytics.wizardCapture('api key submitted', {
+          'key source': 'backend_fetch',
         });
         // Resolve env name from the returned key when possible. Not required
         // for Auth to complete.
@@ -333,15 +333,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         session.installDir,
       );
     }
-    analytics.wizardCapture('Create Project Link Opened', {
-      from_screen: fromScreen,
+    analytics.wizardCapture('create project link opened', {
+      'from screen': fromScreen,
     });
     setPickerNotice(null);
     store.startCreateProject(fromScreen);
   };
 
   const handleStartOver = (fromScreen: 'workspace' | 'project') => {
-    analytics.wizardCapture('Picker Start Over', { from_screen: fromScreen });
+    analytics.wizardCapture('picker start over', { 'from screen': fromScreen });
     setSelectedOrg(null);
     setSelectedWorkspace(null);
     setSelectedEnv(null);
@@ -378,8 +378,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       return;
     }
     setApiKeyError('');
-    analytics.wizardCapture('API Key Submitted', {
-      key_source: 'manual_entry',
+    analytics.wizardCapture('api key submitted', {
+      'key source': 'manual_entry',
     });
     store.setApiKeyNotice(null);
     // Env name stays null for manually-entered keys — we can't determine
