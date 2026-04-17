@@ -19,7 +19,11 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
+import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
+import { CLAUDE_PLUGIN_ENABLED } from '../../../lib/constants.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
+
+const CLAUDE_CODE_CLIENT_NAME = 'Claude Code';
 
 export type McpMode = 'install' | 'remove';
 
@@ -37,6 +41,7 @@ enum Phase {
   Detecting = 'detecting',
   Ask = 'ask',
   Pick = 'pick',
+  ChooseClaudeCodeMode = 'chooseClaudeCodeMode',
   Working = 'working',
   Done = 'done',
   None = 'none',
@@ -84,6 +89,9 @@ export const McpScreen = ({
   const [phase, setPhase] = useState<Phase>(Phase.Detecting);
   const [clients, setClients] = useState<McpClientInfo[]>([]);
   const [resultClients, setResultClients] = useState<string[]>([]);
+  const [pendingInstallNames, setPendingInstallNames] = useState<string[]>([]);
+  const [claudeCodeMode, setClaudeCodeMode] =
+    useState<ClaudeCodeInstallMode>('plugin');
 
   useEffect(() => {
     if (amplitudePreDetectedChoicePending) {
@@ -125,6 +133,18 @@ export const McpScreen = ({
     })();
   }, [installer, amplitudePreDetectedChoicePending]);
 
+  const proceedWithNames = (names: string[]) => {
+    if (CLAUDE_PLUGIN_ENABLED && names.includes(CLAUDE_CODE_CLIENT_NAME)) {
+      analytics.wizardCapture('MCP Claude Code Mode Picker Shown', {
+        clients: names,
+      });
+      setPendingInstallNames(names);
+      setPhase(Phase.ChooseClaudeCodeMode);
+      return;
+    }
+    void doInstall(names, 'mcp');
+  };
+
   const handleConfirm = () => {
     if (isRemove) {
       analytics.wizardCapture('MCP Remove Confirmed');
@@ -132,7 +152,7 @@ export const McpScreen = ({
     } else if (clients.length === 1) {
       const names = clients.map((c) => c.name);
       analytics.wizardCapture('MCP Install Confirmed', { clients: names });
-      void doInstall(names);
+      proceedWithNames(names);
     } else {
       analytics.wizardCapture('MCP Client Picker Shown', {
         available_clients: clients.map((c) => c.name),
@@ -146,11 +166,12 @@ export const McpScreen = ({
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
-  const doInstall = async (names: string[]) => {
+  const doInstall = async (names: string[], ccMode: ClaudeCodeInstallMode) => {
+    setClaudeCodeMode(ccMode);
     setPhase(Phase.Working);
     let result: string[] = [];
     try {
-      result = await installer.install(names);
+      result = await installer.install(names, { claudeCodeMode: ccMode });
       setResultClients(result);
     } catch {
       setResultClients([]);
@@ -160,6 +181,7 @@ export const McpScreen = ({
       installed: result,
       failed,
       attempted: names,
+      claude_code_mode: ccMode,
     });
     setPhase(Phase.Done);
     const outcome =
@@ -285,9 +307,45 @@ export const McpScreen = ({
                     selected_clients: names,
                     available_clients: clients.map((c) => c.name),
                   });
-                  void doInstall(names);
+                  proceedWithNames(names);
                 }}
               />
+            )}
+
+            {phase === Phase.ChooseClaudeCodeMode && (
+              <Box flexDirection="column">
+                <Text color={Colors.secondary}>
+                  Claude Code supports a richer install: the Amplitude plugin
+                  bundles the MCP server plus slash commands like{' '}
+                  <Text color={Colors.body}>/amplitude:create-chart</Text> and{' '}
+                  <Text color={Colors.body}>/amplitude:weekly-brief</Text>.
+                </Text>
+                <Box marginTop={1}>
+                  <PickerMenu
+                    message="How would you like to set up Claude Code?"
+                    options={[
+                      {
+                        label:
+                          'Amplitude plugin — slash commands + MCP (recommended)',
+                        value: 'plugin' as const,
+                      },
+                      {
+                        label: 'MCP server only',
+                        value: 'mcp' as const,
+                      },
+                    ]}
+                    onSelect={(value) => {
+                      const chosen = (
+                        Array.isArray(value) ? value[0] : value
+                      ) as ClaudeCodeInstallMode;
+                      analytics.wizardCapture('MCP Claude Code Mode Selected', {
+                        claude_code_mode: chosen,
+                      });
+                      void doInstall(pendingInstallNames, chosen);
+                    }}
+                  />
+                </Box>
+              </Box>
             )}
 
             {phase === Phase.Working && (
@@ -302,13 +360,23 @@ export const McpScreen = ({
                 {resultClients.length > 0 ? (
                   <>
                     <Text color={Colors.success} bold>
-                      {Icons.checkmark} MCP server{' '}
-                      {isRemove ? 'removed from' : 'installed for'}:
+                      {Icons.checkmark}{' '}
+                      {isRemove
+                        ? 'MCP server removed from:'
+                        : claudeCodeMode === 'plugin' &&
+                          resultClients.includes(CLAUDE_CODE_CLIENT_NAME)
+                        ? 'Amplitude installed for:'
+                        : 'MCP server installed for:'}
                     </Text>
                     {resultClients.map((name, i) => (
                       <Text key={i} color={Colors.body}>
                         {' '}
                         {Icons.bullet} {name}
+                        {!isRemove &&
+                        name === CLAUDE_CODE_CLIENT_NAME &&
+                        claudeCodeMode === 'plugin'
+                          ? ' (plugin)'
+                          : ''}
                       </Text>
                     ))}
                   </>

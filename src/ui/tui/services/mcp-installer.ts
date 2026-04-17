@@ -10,7 +10,10 @@ import {
   getSupportedClients,
   removeMCPServer,
   getInstalledClients,
+  resolveClientsForMode,
+  type ClaudeCodeInstallMode,
 } from '../../../steps/add-mcp-server-to-clients/index.js';
+import type { MCPClient } from '../../../steps/add-mcp-server-to-clients/MCPClient.js';
 import { ALL_FEATURE_VALUES } from '../../../steps/add-mcp-server-to-clients/defaults.js';
 import { logToFile } from '../../../utils/debug.js';
 
@@ -36,12 +39,25 @@ export interface McpClientInfo {
   name: string;
 }
 
+export interface McpInstallOptions {
+  /**
+   * How to install on Claude Code:
+   *  - 'plugin' (default): install the Amplitude Claude Code plugin (bundles MCP + slash commands)
+   *  - 'mcp': install only the raw MCP server entry
+   * Ignored for other editors.
+   */
+  claudeCodeMode?: ClaudeCodeInstallMode;
+}
+
 export interface McpInstaller {
   /** Detect which MCP-capable editors are available on this machine. */
   detectClients(): Promise<McpClientInfo[]>;
 
   /** Install the Amplitude MCP server to the given clients. Returns names of successfully installed clients. */
-  install(clientNames: string[]): Promise<string[]>;
+  install(
+    clientNames: string[],
+    options?: McpInstallOptions,
+  ): Promise<string[]>;
 
   /** Remove the Amplitude MCP server from all installed clients. Returns names of removed clients. */
   remove(): Promise<string[]>;
@@ -65,14 +81,17 @@ export function createMcpInstaller(local = false): McpInstaller {
       return supported.map((c) => ({ name: c.name }));
     },
 
-    async install(clientNames: string[]): Promise<string[]> {
+    async install(
+      clientNames: string[],
+      options?: McpInstallOptions,
+    ): Promise<string[]> {
       const features = [...ALL_FEATURE_VALUES];
 
       // No access token — write URL only and let each editor handle OAuth on
       // first use. Pre-populating a token would break after 24 hours.
       const accessToken: string | undefined = undefined;
 
-      const toInstall: RawMCPClient[] = [];
+      const selectedClients: MCPClient[] = [];
       for (const c of cachedClients) {
         if (!clientNames.includes(c.name)) continue;
         const parsed = RawMCPClientSchema.safeParse(c.raw);
@@ -82,10 +101,16 @@ export function createMcpInstaller(local = false): McpInstaller {
           );
           continue;
         }
-        // Use the original instance, not parsed.data — Zod creates a plain-object
-        // copy which strips the prototype chain and breaks `this` inside class methods.
-        toInstall.push(c.raw as RawMCPClient);
+        // Use the original instance — Zod strips the prototype chain.
+        selectedClients.push(c.raw as MCPClient);
       }
+
+      // Swap Claude Code's MCP client for the plugin client when requested.
+      const mode = options?.claudeCodeMode ?? 'mcp';
+      const toInstall = resolveClientsForMode(
+        selectedClients,
+        mode,
+      ) as unknown as RawMCPClient[];
 
       if (toInstall.length === 0) {
         logToFile(

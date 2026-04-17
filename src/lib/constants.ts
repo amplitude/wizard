@@ -52,6 +52,19 @@ export const DEBUG = false;
 /** When set, limits the agent to at most 5 events for faster demo runs. */
 export const DEMO_MODE = process.env.DEMO_MODE_WIZARD === '1';
 
+/**
+ * Controls whether the MCP screen offers the Claude Code plugin option.
+ * Default on — set AMPLITUDE_WIZARD_CLAUDE_PLUGIN=0 to force raw MCP install
+ * on Claude Code (kill switch if the plugin marketplace or CLI regresses).
+ */
+export const CLAUDE_PLUGIN_ENABLED =
+  process.env.AMPLITUDE_WIZARD_CLAUDE_PLUGIN !== '0';
+
+/** Amplitude Claude Code plugin identifiers. */
+export const CLAUDE_PLUGIN_MARKETPLACE_NAME = 'amplitude';
+export const CLAUDE_PLUGIN_MARKETPLACE_REPO = 'amplitude/mcp-marketplace';
+export const CLAUDE_PLUGIN_ID = 'amplitude';
+
 // ── URLs ─────────────────────────────────────────────────────────────
 
 export const DEFAULT_URL = IS_DEV

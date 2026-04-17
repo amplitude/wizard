@@ -1,4 +1,4 @@
-import type { Integration } from '../../lib/constants';
+import { CLAUDE_PLUGIN_ENABLED, type Integration } from '../../lib/constants';
 import { traceStep } from '../../telemetry';
 import { analytics } from '../../utils/analytics';
 import { getUI } from '../../ui';
@@ -6,11 +6,30 @@ import { MCPClient } from './MCPClient';
 import { CursorMCPClient } from './clients/cursor';
 import { ClaudeMCPClient } from './clients/claude';
 import { ClaudeCodeMCPClient } from './clients/claude-code';
+import { ClaudeCodePluginClient } from './clients/claude-code-plugin';
 import { VisualStudioCodeClient } from './clients/visual-studio-code';
 import { ZedClient } from './clients/zed';
 import { CodexMCPClient } from './clients/codex';
 import { ALL_FEATURE_VALUES } from './defaults';
 import { debug } from '../../utils/debug';
+
+export type ClaudeCodeInstallMode = 'plugin' | 'mcp';
+
+/**
+ * When Claude Code is in the list and the caller wants plugin install,
+ * replace its MCP client with the plugin client. No-op for other editors.
+ */
+export const resolveClientsForMode = (
+  clients: MCPClient[],
+  mode: ClaudeCodeInstallMode,
+): MCPClient[] => {
+  if (mode !== 'plugin') return clients;
+  return clients.map((c) =>
+    c.name === 'Claude Code' && c instanceof ClaudeCodeMCPClient
+      ? new ClaudeCodePluginClient()
+      : c,
+  );
+};
 
 export const getSupportedClients = async (): Promise<MCPClient[]> => {
   const allClients = [
@@ -48,10 +67,12 @@ export const addMCPServerToClientsStep = async ({
   integration,
   local = false,
   ci = false,
+  claudeCodeMode,
 }: {
   integration?: Integration;
   local?: boolean;
   ci?: boolean;
+  claudeCodeMode?: ClaudeCodeInstallMode;
 }): Promise<string[]> => {
   const ui = getUI();
 
@@ -70,10 +91,14 @@ export const addMCPServerToClientsStep = async ({
     return [];
   }
 
+  const mode: ClaudeCodeInstallMode =
+    claudeCodeMode ?? (CLAUDE_PLUGIN_ENABLED ? 'plugin' : 'mcp');
+  const clientsToInstall = resolveClientsForMode(supportedClients, mode);
+
   // Auto-install to all supported clients
   await traceStep('adding mcp servers', async () => {
     await addMCPServer(
-      supportedClients,
+      clientsToInstall,
       undefined,
       [...ALL_FEATURE_VALUES],
       local,
