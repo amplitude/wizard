@@ -109,10 +109,18 @@ export const McpScreen = ({
   const [failures, setFailures] = useState<McpInstallFailure[]>([]);
   const [claudeCodeMode, setClaudeCodeMode] =
     useState<ClaudeCodeInstallMode>('plugin');
-  /** Per-client progress shown during the Working phase. */
-  const [progress, setProgress] = useState<ClientProgress[]>([]);
-  /** Used to force a render once per second so elapsed-time labels tick. */
+  /**
+   * Per-client progress. Stored in a ref (not useState) because
+   * onClientStart/onClientComplete fire from inside a Promise.all and
+   * React 18's auto-batching can collapse the functional setState calls
+   * — on a TUI we saw done-status updates never actually reach render
+   * state while the slow client was still running. The ref is the source
+   * of truth; `tick` forces a re-render whenever it mutates.
+   */
+  const progressRef = useRef<ClientProgress[]>([]);
+  /** Forces a re-render. Bumped on every progress mutation + once per sec. */
   const [, setTick] = useState(0);
+  const forceRender = () => setTick((t) => t + 1);
 
   // Tick elapsed-time labels during the Working phase. Without this the
   // screen looks frozen during the ~5s plugin install even though progress
@@ -301,41 +309,37 @@ export const McpScreen = ({
   const doInstall = async (names: string[], ccMode: ClaudeCodeInstallMode) => {
     setClaudeCodeMode(ccMode);
     setPhase(Phase.Working);
-    setProgress(names.map((name) => ({ name, status: 'pending' as const })));
+    progressRef.current = names.map((name) => ({ name, status: 'pending' }));
+    forceRender();
     let installed: string[] = [];
     let installFailures: McpInstallFailure[];
-    // CRITICAL: yield to the event loop before starting install. The Claude
-    // CLI clients use spawnSync, which BLOCKS the whole event loop for the
-    // ~5s plugin install. Without this yield, React never gets CPU time to
-    // paint the Working phase after setPhase() above, so the user stares at
-    // the stale picker until the whole install completes.
+    // Yield so Ink can paint the Working phase before any subprocess work
+    // kicks off and possibly starves the event loop.
     await new Promise<void>((resolve) => setImmediate(resolve));
     try {
       const result = await installer.install(names, {
         claudeCodeMode: ccMode,
         onClientStart: (name) => {
           const started = Date.now();
-          setProgress((prev) =>
-            prev.map((p) =>
-              p.name === name
-                ? { ...p, status: 'working', startedAt: started }
-                : p,
-            ),
+          progressRef.current = progressRef.current.map((p) =>
+            p.name === name
+              ? { ...p, status: 'working', startedAt: started }
+              : p,
           );
+          forceRender();
         },
         onClientComplete: ({ name, success }) => {
           const finished = Date.now();
-          setProgress((prev) =>
-            prev.map((p) =>
-              p.name === name
-                ? {
-                    ...p,
-                    status: success ? 'done' : 'failed',
-                    finishedAt: finished,
-                  }
-                : p,
-            ),
+          progressRef.current = progressRef.current.map((p) =>
+            p.name === name
+              ? {
+                  ...p,
+                  status: success ? 'done' : 'failed',
+                  finishedAt: finished,
+                }
+              : p,
           );
+          forceRender();
         },
       });
       installed = result.installed;
@@ -538,9 +542,9 @@ export const McpScreen = ({
                     {Icons.ellipsis}
                   </Text>
                 </Box>
-                {progress.length > 0 && (
+                {progressRef.current.length > 0 && (
                   <Box flexDirection="column" marginTop={1}>
-                    {progress.map((p, i) => {
+                    {progressRef.current.map((p, i) => {
                       const elapsedMs =
                         p.status === 'working' && p.startedAt
                           ? Date.now() - p.startedAt
