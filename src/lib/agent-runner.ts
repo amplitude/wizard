@@ -334,7 +334,7 @@ export async function runAgentWizard(
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {
         integration: config.metadata.integration,
-        error_type: AgentErrorType.AUTH_ERROR,
+        'error type': AgentErrorType.AUTH_ERROR,
       }),
     });
   }
@@ -344,7 +344,7 @@ export async function runAgentWizard(
       message: `Could not access the Amplitude MCP server\n\nThe wizard was unable to connect to the Amplitude MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
       error: new WizardError('Agent could not access Amplitude MCP server', {
         integration: config.metadata.integration,
-        error_type: AgentErrorType.MCP_MISSING,
+        'error type': AgentErrorType.MCP_MISSING,
         signal: AgentSignals.ERROR_MCP_MISSING,
       }),
     });
@@ -355,7 +355,7 @@ export async function runAgentWizard(
       message: `Could not access the setup resource\n\nThe wizard could not access the setup resource. This may indicate a version mismatch or a temporary service issue.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
       error: new WizardError('Agent could not access setup resource', {
         integration: config.metadata.integration,
-        error_type: AgentErrorType.RESOURCE_MISSING,
+        'error type': AgentErrorType.RESOURCE_MISSING,
         signal: AgentSignals.ERROR_RESOURCE_MISSING,
       }),
     });
@@ -371,7 +371,7 @@ export async function runAgentWizard(
       'agent-runner',
       {
         integration: config.metadata.integration,
-        error_type: agentResult.error,
+        'error type': agentResult.error,
       },
     );
 
@@ -381,7 +381,7 @@ export async function runAgentWizard(
       }\n\nPlease report this error to: wizard@amplitude.com`,
       error: new WizardError(`API error: ${agentResult.message ?? 'unknown'}`, {
         integration: config.metadata.integration,
-        error_type: agentResult.error,
+        'error type': agentResult.error,
       }),
     });
   }

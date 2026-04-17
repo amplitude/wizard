@@ -288,10 +288,10 @@ async function detectAndResolveIntegration(
     // Analytics: capture detection metrics
     analytics.wizardCapture('Framework Detection Complete', {
       winner: winner?.integration ?? 'none',
-      matchCount: detected.length,
-      durationMs: Math.max(...results.map((r) => r.durationMs)),
-      errorCount: results.filter((r) => r.error).length,
-      timedOutCount: results.filter((r) => r.timedOut).length,
+      'match count': detected.length,
+      'duration ms': Math.max(...results.map((r) => r.durationMs)),
+      'error count': results.filter((r) => r.error).length,
+      'timed out count': results.filter((r) => r.timedOut).length,
     });
 
     if (winner) {

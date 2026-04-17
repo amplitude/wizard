@@ -70,7 +70,7 @@ export async function runPrettierStep({
 
     analytics.wizardCapture('Prettier Ran', {
       integration,
-      prettier_installed: true,
+      'prettier installed': true,
     });
   });
 }

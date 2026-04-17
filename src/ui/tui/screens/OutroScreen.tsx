@@ -221,7 +221,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               const choice = Array.isArray(value) ? value[0] : value;
               analytics.wizardCapture('Outro Action', {
                 action: choice,
-                outro_kind: outroData.kind,
+                'outro kind': outroData.kind,
               });
               if (choice === 'report') {
                 setShowReport(true);

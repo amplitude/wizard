@@ -225,7 +225,7 @@ export class WizardStore {
       });
     }
     analytics.wizardCapture('Auth Complete', {
-      project_id: credentials?.projectId,
+      'project id': credentials?.projectId,
       region: session.region,
     });
     this.emitChange();
@@ -783,7 +783,7 @@ export class WizardStore {
 
   setOutroData(data: OutroData): void {
     this.$session.setKey('outroData', data);
-    analytics.wizardCapture('outro reached', { outro_kind: data.kind });
+    analytics.wizardCapture('outro reached', { 'outro kind': data.kind });
     this.emitChange();
   }
 

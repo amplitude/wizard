@@ -206,7 +206,7 @@ describe('detectAllPackageManagers', () => {
     const result = detectAllPackageManagers({ installDir: tmpDir });
     expect(result).toHaveLength(0);
     expect(analytics.setSessionProperty).toHaveBeenCalledWith(
-      'package-manager',
+      'package manager',
       'not-detected',
     );
   });

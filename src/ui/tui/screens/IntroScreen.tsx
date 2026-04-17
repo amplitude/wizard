@@ -122,7 +122,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 analytics.wizardCapture('Checkpoint Resume Action', {
                   action: choice,
                   integration: session.integration,
-                  detected_framework: session.detectedFrameworkLabel,
+                  'detected framework': session.detectedFrameworkLabel,
                 });
 
                 if (choice === 'resume') {
@@ -248,7 +248,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                   analytics.wizardCapture('Intro Action', {
                     action: choice,
                     integration: session.integration,
-                    detected_framework: session.detectedFrameworkLabel,
+                    'detected framework': session.detectedFrameworkLabel,
                   });
                   if (choice === 'cancel') {
                     store.setOutroData({

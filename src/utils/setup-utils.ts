@@ -204,8 +204,8 @@ export async function installPackage({
     );
 
     analytics.wizardCapture('Package Installed', {
-      package_name: packageName,
-      package_manager: pkgManager.name,
+      'package name': packageName,
+      'package manager': pkgManager.name,
       integration,
     });
 
@@ -300,12 +300,12 @@ export async function getPackageManager(
 
   if (detectedPackageManagers.length >= 1) {
     const selected = detectedPackageManagers[0];
-    analytics.setSessionProperty('package-manager', selected.name);
+    analytics.setSessionProperty('package manager', selected.name);
     return selected;
   }
 
   // No package manager detected — default to npm
-  analytics.setSessionProperty('package-manager', npm.name);
+  analytics.setSessionProperty('package manager', npm.name);
   return npm;
 }
 

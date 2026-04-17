@@ -334,14 +334,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       );
     }
     analytics.wizardCapture('Create Project Link Opened', {
-      from_screen: fromScreen,
+      'from screen': fromScreen,
     });
     setPickerNotice(null);
     store.startCreateProject(fromScreen);
   };
 
   const handleStartOver = (fromScreen: 'workspace' | 'project') => {
-    analytics.wizardCapture('Picker Start Over', { from_screen: fromScreen });
+    analytics.wizardCapture('Picker Start Over', { 'from screen': fromScreen });
     setSelectedOrg(null);
     setSelectedWorkspace(null);
     setSelectedEnv(null);

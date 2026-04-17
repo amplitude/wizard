@@ -281,7 +281,7 @@ describe('WizardStore', () => {
         projectId: 42,
       });
       expect(wizardCaptureMock).toHaveBeenCalledWith('Auth Complete', {
-        project_id: 42,
+        'project id': 42,
         region: null,
       });
     });

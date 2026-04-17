@@ -585,7 +585,7 @@ export function wizardCanUseTool(
       'Bash Policy',
       'Dangerous shell operators are not permitted',
       'wizardCanUseBash',
-      { deny_reason: 'dangerous operators', command },
+      { 'deny reason': 'dangerous operators', command },
     );
     return {
       behavior: 'deny',
@@ -609,7 +609,7 @@ export function wizardCanUseTool(
         'Bash Policy',
         'Multiple pipes are not permitted',
         'wizardCanUseBash',
-        { deny_reason: 'multiple pipes', command },
+        { 'deny reason': 'multiple pipes', command },
       );
       return {
         behavior: 'deny',
@@ -632,7 +632,7 @@ export function wizardCanUseTool(
       'Bash Policy',
       'Pipes are only allowed with tail/head',
       'wizardCanUseBash',
-      { deny_reason: 'disallowed pipe', command },
+      { 'deny reason': 'disallowed pipe', command },
     );
     return {
       behavior: 'deny',
@@ -653,7 +653,7 @@ export function wizardCanUseTool(
     'Bash Policy',
     'Command not in allowlist',
     'wizardCanUseBash',
-    { deny_reason: 'not in allowlist', command },
+    { 'deny reason': 'not in allowlist', command },
   );
   return {
     behavior: 'deny',
@@ -1006,8 +1006,8 @@ export async function runAgent(
     }
 
     analytics.wizardCapture('Agent Completed', {
-      duration_ms: durationMs,
-      duration_seconds: durationSeconds,
+      'duration ms': durationMs,
+      'duration seconds': durationSeconds,
     });
     try {
       if (lastResultMessage) {
@@ -1176,7 +1176,7 @@ export async function runAgent(
         );
         analytics.wizardCapture('Agent Stall Retry', {
           attempt,
-          backoff_ms: backoffMs,
+          'backoff ms': backoffMs,
         });
         getUI().pushStatus(
           `Retrying connection (attempt ${attempt + 1} of ${
@@ -1228,8 +1228,8 @@ export async function runAgent(
           );
           analytics.wizardCapture('Agent Stall Detected', {
             attempt: attempt + 1,
-            stall_timeout_ms: timeoutMs,
-            last_message_type: lastMessageType,
+            'stall timeout ms': timeoutMs,
+            'last message type': lastMessageType,
             phase: receivedFirstMessage ? 'active' : 'cold-start',
           });
           controller.abort('stall');
