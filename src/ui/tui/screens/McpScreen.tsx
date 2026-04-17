@@ -45,7 +45,6 @@ enum Phase {
   Detecting = 'detecting',
   Ask = 'ask',
   Pick = 'pick',
-  ChooseClaudeCodeMode = 'chooseClaudeCodeMode',
   Working = 'working',
   Done = 'done',
   None = 'none',
@@ -94,7 +93,6 @@ export const McpScreen = ({
   const [clients, setClients] = useState<McpClientInfo[]>([]);
   const [resultClients, setResultClients] = useState<string[]>([]);
   const [failures, setFailures] = useState<McpInstallFailure[]>([]);
-  const [pendingInstallNames, setPendingInstallNames] = useState<string[]>([]);
   const [claudeCodeMode, setClaudeCodeMode] =
     useState<ClaudeCodeInstallMode>('plugin');
 
@@ -139,22 +137,16 @@ export const McpScreen = ({
   }, [installer, amplitudePreDetectedChoicePending]);
 
   const proceedWithNames = (names: string[]) => {
-    // --local-mcp points every client at localhost for dev. The Amplitude
-    // plugin hardcodes production, so force MCP mode under --local-mcp
-    // to avoid silently installing a prod-pointing plugin.
-    if (store.session.localMcp) {
-      void doInstall(names, 'mcp');
-      return;
-    }
-    if (names.includes(CLAUDE_CODE_CLIENT_NAME)) {
-      analytics.wizardCapture('MCP Claude Code Mode Picker Shown', {
-        clients: names,
-      });
-      setPendingInstallNames(names);
-      setPhase(Phase.ChooseClaudeCodeMode);
-      return;
-    }
-    void doInstall(names, 'mcp');
+    // For Claude Code we default to the plugin (MCP + slash commands).
+    // Two escape hatches route to raw MCP instead:
+    //   - session.localMcp: --local-mcp points at localhost; plugin is prod-only.
+    //   - AMPLITUDE_WIZARD_MCP_ONLY=1: hidden knob for users who explicitly
+    //     don't want the plugin.
+    const forceMcp =
+      store.session.localMcp || process.env.AMPLITUDE_WIZARD_MCP_ONLY === '1';
+    const ccMode: ClaudeCodeInstallMode =
+      !forceMcp && names.includes(CLAUDE_CODE_CLIENT_NAME) ? 'plugin' : 'mcp';
+    void doInstall(names, ccMode);
   };
 
   const handleConfirm = () => {
@@ -209,7 +201,7 @@ export const McpScreen = ({
     const hasExtraCopy =
       installFailures.length > 0 ||
       (ccMode === 'plugin' && installed.includes(CLAUDE_CODE_CLIENT_NAME));
-    const dwell = hasExtraCopy ? 4000 : 2000;
+    const dwell = hasExtraCopy ? 5000 : 2000;
     timerRef.current = setTimeout(
       () => markDone(store, outcome, installed, standalone, onComplete),
       dwell,
@@ -250,15 +242,19 @@ export const McpScreen = ({
       {amplitudePreDetectedChoicePending && !isRemove && (
         <Box marginBottom={1} flexDirection="column">
           <Text color={Colors.secondary}>
-            The installer skipped the automated setup step because Amplitude is
-            already present. You can continue to editor MCP setup, or run the
-            full setup wizard if you want to review or change the integration.
+            Amplitude is already set up in this project, so we skipped the
+            automated setup step. You can continue and connect Amplitude to your
+            AI tools, or run the full setup wizard if you want to review or
+            change the integration.
           </Text>
           <Box marginTop={1}>
             <PickerMenu
               message="How would you like to proceed?"
               options={[
-                { label: 'Continue to MCP setup', value: 'continue' as const },
+                {
+                  label: 'Connect Amplitude to AI tools',
+                  value: 'continue' as const,
+                },
                 {
                   label: 'Run setup wizard anyway',
                   value: 'wizard' as const,
@@ -278,37 +274,48 @@ export const McpScreen = ({
       {!amplitudePreDetectedChoicePending && (
         <>
           <Text bold color={Colors.accent}>
-            {isRemove ? 'Remove Amplitude' : 'Amplitude Setup'}
+            {isRemove
+              ? 'Disconnect Amplitude from your AI tools'
+              : 'Connect Amplitude to your AI tools'}
           </Text>
+          {!isRemove && (
+            <Text color={Colors.muted}>
+              Ask about your analytics, build charts, and check metrics from
+              chat (e.g. “show me yesterday’s signups”) — without leaving Claude
+              Code, Cursor, and others.
+            </Text>
+          )}
 
           <Box marginTop={1} flexDirection="column">
             {phase === Phase.Detecting && (
               <Text color={Colors.muted}>
-                Detecting supported editors{Icons.ellipsis}
+                Looking for supported AI tools{Icons.ellipsis}
               </Text>
             )}
 
             {phase === Phase.None && (
               <Text color={Colors.muted}>
-                No {isRemove ? 'installed' : 'supported'} MCP clients detected.
-                Skipping{Icons.ellipsis}
+                {isRemove
+                  ? 'Amplitude isn’t installed in any detected AI tool. Skipping'
+                  : 'No supported AI tools found on this machine. Skipping'}
+                {Icons.ellipsis}
               </Text>
             )}
 
             {phase === Phase.Ask && (
               <>
                 <Text color={Colors.secondary}>
-                  Detected: {clients.map((c) => c.name).join(', ')}
+                  Found: {clients.map((c) => c.name).join(', ')}
                 </Text>
                 <Box marginTop={1}>
                   <ConfirmationInput
                     message={
                       isRemove
-                        ? 'Remove Amplitude from your editor?'
-                        : 'Install Amplitude in your editor?'
+                        ? 'Remove Amplitude from these tools?'
+                        : 'Connect Amplitude to these tools?'
                     }
-                    confirmLabel={isRemove ? 'Remove' : 'Install'}
-                    cancelLabel="No thanks"
+                    confirmLabel={isRemove ? 'Remove' : 'Connect'}
+                    cancelLabel="Skip for now"
                     onConfirm={handleConfirm}
                     onCancel={handleSkip}
                   />
@@ -318,7 +325,7 @@ export const McpScreen = ({
 
             {phase === Phase.Pick && (
               <PickerMenu
-                message="Select editors"
+                message="Pick which AI tools to connect"
                 options={clients.map((c) => ({
                   label: c.name,
                   value: c.name,
@@ -336,55 +343,9 @@ export const McpScreen = ({
               />
             )}
 
-            {phase === Phase.ChooseClaudeCodeMode && (
-              <Box flexDirection="column">
-                <Text color={Colors.secondary}>
-                  Claude Code supports a richer install: the Amplitude plugin
-                  bundles the MCP server plus slash commands like{' '}
-                  <Text color={Colors.body}>/amplitude:create-chart</Text> and{' '}
-                  <Text color={Colors.body}>/amplitude:weekly-brief</Text>.
-                </Text>
-                {pendingInstallNames.length > 1 && (
-                  <Text color={Colors.muted}>
-                    This choice only affects Claude Code — other selected
-                    editors (
-                    {pendingInstallNames
-                      .filter((n) => n !== CLAUDE_CODE_CLIENT_NAME)
-                      .join(', ')}
-                    ) will install the standard MCP server.
-                  </Text>
-                )}
-                <Box marginTop={1}>
-                  <PickerMenu
-                    message="How would you like to set up Claude Code?"
-                    options={[
-                      {
-                        label:
-                          'Amplitude plugin — slash commands + MCP (recommended)',
-                        value: 'plugin' as const,
-                      },
-                      {
-                        label: 'MCP server only',
-                        value: 'mcp' as const,
-                      },
-                    ]}
-                    onSelect={(value) => {
-                      const chosen = (
-                        Array.isArray(value) ? value[0] : value
-                      ) as ClaudeCodeInstallMode;
-                      analytics.wizardCapture('MCP Claude Code Mode Selected', {
-                        claude_code_mode: chosen,
-                      });
-                      void doInstall(pendingInstallNames, chosen);
-                    }}
-                  />
-                </Box>
-              </Box>
-            )}
-
             {phase === Phase.Working && (
               <Text color={Colors.active}>
-                {isRemove ? 'Removing' : 'Installing'} Amplitude
+                {isRemove ? 'Disconnecting' : 'Connecting'} Amplitude
                 {Icons.ellipsis}
               </Text>
             )}
@@ -397,7 +358,7 @@ export const McpScreen = ({
                       {Icons.checkmark}{' '}
                       {isRemove
                         ? 'Amplitude removed from:'
-                        : 'Amplitude installed for:'}
+                        : 'Amplitude connected to:'}
                     </Text>
                     {resultClients.map((name, i) => (
                       <Text key={i} color={Colors.body}>
@@ -415,10 +376,14 @@ export const McpScreen = ({
                       resultClients.includes(CLAUDE_CODE_CLIENT_NAME) && (
                         <Box flexDirection="column" marginTop={1}>
                           <Text color={Colors.muted}>
-                            In an open Claude Code session, run{' '}
-                            <Text color={Colors.body}>/reload-plugins</Text> to
-                            pick up the Amplitude slash commands. Then{' '}
-                            <Text color={Colors.body}>/mcp</Text> to sign in.
+                            Next: open Claude Code and run{' '}
+                            <Text color={Colors.body}>/mcp</Text> to sign in,
+                            then ask “show me yesterday’s signups”.
+                          </Text>
+                          <Text color={Colors.muted}>
+                            Already have a session open? Run{' '}
+                            <Text color={Colors.body}>/reload-plugins</Text>{' '}
+                            first to pick up the new slash commands.
                           </Text>
                           <Text color={Colors.muted}>
                             Docs: {OUTBOUND_URLS.claudePluginDocs}
@@ -436,7 +401,7 @@ export const McpScreen = ({
                       {Icons.cross}{' '}
                       {isRemove
                         ? 'Could not remove from:'
-                        : 'Could not install for:'}
+                        : 'Could not connect:'}
                     </Text>
                     {failures.map((f, i) => (
                       <Box key={i} flexDirection="column">
@@ -450,14 +415,13 @@ export const McpScreen = ({
                       </Box>
                     ))}
                     <Text color={Colors.muted}>
-                      Run `npx @amplitude/wizard mcp` to try again, or pick “MCP
-                      server only” next time.
+                      Retry any time with `npx @amplitude/wizard mcp`.
                     </Text>
                   </Box>
                 )}
                 {resultClients.length === 0 && failures.length === 0 && (
                   <Text color={Colors.muted}>
-                    {isRemove ? 'Removal' : 'Installation'} skipped.
+                    {isRemove ? 'Removal' : 'Setup'} skipped.
                   </Text>
                 )}
               </Box>
