@@ -1,7 +1,7 @@
 /**
  * HeaderBar — minimal header line.
  *
- * "Amplitude Wizard" left, org/project right with dot separator.
+ * "Amplitude Wizard" left, org / project / env right with dot separator.
  */
 
 import { Box, Text } from 'ink';
@@ -13,12 +13,19 @@ const HEADER_TITLE = brandGradient('Amplitude Wizard');
 interface HeaderBarProps {
   width: number;
   orgName?: string | null;
+  workspaceName?: string | null;
   projectName?: string | null;
 }
 
-export const HeaderBar = ({ width, orgName, projectName }: HeaderBarProps) => {
+export const HeaderBar = ({
+  width,
+  orgName,
+  workspaceName,
+  projectName,
+}: HeaderBarProps) => {
   const contextParts: string[] = [];
   if (orgName) contextParts.push(orgName);
+  if (workspaceName) contextParts.push(workspaceName);
   if (projectName) contextParts.push(projectName);
   const context = contextParts.join(' / ');
 

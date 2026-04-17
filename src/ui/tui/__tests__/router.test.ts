@@ -34,6 +34,9 @@ function sessionAtRun(): WizardSession {
     introConcluded: true,
     region: 'us',
     credentials: CREDS,
+    selectedOrgName: 'Acme',
+    selectedWorkspaceName: 'Amplitude',
+    selectedProjectName: 'Production',
     projectHasData: false,
   });
 }
@@ -69,14 +72,46 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('advances from Auth to DataSetup when credentials are set', () => {
+    it('advances from Auth to DataSetup when credentials and all three names are set', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
         credentials: CREDS,
+        selectedOrgName: 'Acme',
+        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
+    });
+
+    it('stays on Auth when credentials set but project (workspace) name is missing', () => {
+      const router = new WizardRouter();
+      // Cached API key + ampli.json IDs can set credentials without resolving
+      // the workspace name. The flow must not advance until all three of
+      // org / workspace / env names are known.
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        credentials: CREDS,
+        selectedOrgName: 'Acme',
+        selectedWorkspaceName: null,
+        selectedProjectName: 'Production',
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('stays on Auth when credentials set but env name is missing', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        credentials: CREDS,
+        selectedOrgName: 'Acme',
+        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: null,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
     it('advances from DataSetup to Run when projectHasData is set', () => {

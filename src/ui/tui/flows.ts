@@ -84,10 +84,20 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
+    //
+    //    Auth is complete when we have credentials AND all three levels of the
+    //    org → project (workspace) → env identity are resolved. Without this
+    //    guard a cached API key + pre-populated ampli.json IDs can let the
+    //    wizard advance to Setup with only org and env names — confusing the
+    //    user and breaking assumptions in the agent run.
     {
       screen: Screen.Auth,
       show: (s) => s.runPhase !== RunPhase.Error,
-      isComplete: (s) => s.credentials !== null,
+      isComplete: (s) =>
+        s.credentials !== null &&
+        s.selectedOrgName !== null &&
+        s.selectedWorkspaceName !== null &&
+        s.selectedProjectName !== null,
     },
     // 4. Data check — is the project already ingesting events?
     {

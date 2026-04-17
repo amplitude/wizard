@@ -118,14 +118,26 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     selectedWorkspace ?? singleWorkspace ?? prePopulatedWorkspace ?? null;
 
   useEffect(() => {
-    if (effectiveOrg && effectiveWorkspace && !session.selectedWorkspaceId) {
+    if (
+      effectiveOrg &&
+      effectiveWorkspace &&
+      (!session.selectedWorkspaceId ||
+        !session.selectedOrgName ||
+        !session.selectedWorkspaceName)
+    ) {
       store.setOrgAndWorkspace(
         effectiveOrg,
         effectiveWorkspace,
         session.installDir,
       );
     }
-  }, [effectiveOrg?.id, effectiveWorkspace?.id, session.selectedWorkspaceId]);
+  }, [
+    effectiveOrg?.id,
+    effectiveWorkspace?.id,
+    session.selectedWorkspaceId,
+    session.selectedOrgName,
+    session.selectedWorkspaceName,
+  ]);
 
   // workspaceChosen requires the local workspace object (effectiveWorkspace)
   // rather than just session.selectedWorkspaceId, because we need the

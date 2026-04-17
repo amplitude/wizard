@@ -166,6 +166,68 @@ export async function resolveCredentials(
         };
         session.activationLevel = 'none';
         session.projectHasData = false;
+
+        // Hydrate org / workspace / env names when ampli.json has IDs but names
+        // are still null. Without this the wizard can reach Setup with only
+        // IDs resolved, so the header and /whoami can't show the project.
+        const storedOrgId = projectConfig.ok
+          ? projectConfig.config.OrgId
+          : undefined;
+        const storedWorkspaceId = projectConfig.ok
+          ? projectConfig.config.WorkspaceId
+          : undefined;
+        const needsNameHydration =
+          !session.selectedOrgName ||
+          !session.selectedWorkspaceName ||
+          !session.selectedProjectName;
+        if (needsNameHydration && (storedOrgId || storedWorkspaceId)) {
+          try {
+            const { fetchAmplitudeUser } = await import('./api.js');
+            const userInfo = await fetchAmplitudeUser(
+              storedToken.idToken,
+              zone as AmplitudeZone,
+            );
+            if (!session.userEmail && userInfo.email) {
+              session.userEmail = userInfo.email;
+            }
+            for (const org of userInfo.orgs) {
+              if (storedOrgId && org.id !== storedOrgId) continue;
+              const ws = storedWorkspaceId
+                ? org.workspaces.find((w) => w.id === storedWorkspaceId)
+                : org.workspaces[0];
+              if (!ws) continue;
+              const sortedEnvs = (ws.environments ?? [])
+                .slice()
+                .sort((a, b) => a.rank - b.rank);
+              const matchedEnv =
+                sortedEnvs.find((e) => e.app?.apiKey === localKey.key) ??
+                sortedEnvs[0];
+              session.selectedOrgId = org.id;
+              session.selectedOrgName = org.name;
+              session.selectedWorkspaceId = ws.id;
+              session.selectedWorkspaceName = ws.name;
+              if (matchedEnv) {
+                session.selectedProjectName = matchedEnv.name;
+                const projectId = extractProjectId(ws);
+                if (projectId) session.selectedProjectId = projectId;
+              }
+              logToFile(
+                `[credential-resolution] hydrated names from local key: ${
+                  org.name
+                } / ${ws.name} / ${matchedEnv?.name ?? '(env unknown)'}`,
+              );
+              break;
+            }
+          } catch (err) {
+            // Non-fatal — credentials are already set; AuthScreen or /whoami
+            // can backfill later.
+            logToFile(
+              `[credential-resolution] name hydration failed: ${
+                err instanceof Error ? err.message : String(err)
+              }`,
+            );
+          }
+        }
       } else {
         // Fetch user data to check how many environments are available.
         const { fetchAmplitudeUser } = await import('./api.js');
