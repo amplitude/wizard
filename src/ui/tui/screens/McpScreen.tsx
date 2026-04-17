@@ -139,6 +139,13 @@ export const McpScreen = ({
   }, [installer, amplitudePreDetectedChoicePending]);
 
   const proceedWithNames = (names: string[]) => {
+    // --local-mcp points every client at localhost for dev. The Amplitude
+    // plugin hardcodes production, so force MCP mode under --local-mcp
+    // to avoid silently installing a prod-pointing plugin.
+    if (store.session.localMcp) {
+      void doInstall(names, 'mcp');
+      return;
+    }
     if (names.includes(CLAUDE_CODE_CLIENT_NAME)) {
       analytics.wizardCapture('MCP Claude Code Mode Picker Shown', {
         clients: names,
