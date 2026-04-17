@@ -95,6 +95,13 @@ export function getFlag(flagKey: string): string | undefined {
  * Returns `false` when the flag is absent or the client is not initialized.
  */
 export function isFlagEnabled(flagKey: string): boolean {
+  // Dev/testing override — force-enable direct signup without server config.
+  if (
+    flagKey === FLAG_DIRECT_SIGNUP &&
+    process.env.AMPLITUDE_WIZARD_FORCE_DIRECT_SIGNUP === '1'
+  ) {
+    return true;
+  }
   const value = cachedFlags[flagKey];
   return value === 'on' || value === 'true';
 }
