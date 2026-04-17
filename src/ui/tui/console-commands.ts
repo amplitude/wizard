@@ -12,6 +12,10 @@ export const COMMANDS = [
   { cmd: '/login', desc: 'Re-authenticate' },
   { cmd: '/logout', desc: 'Clear stored credentials' },
   { cmd: '/whoami', desc: 'Show current user, org, and project' },
+  {
+    cmd: '/create-project',
+    desc: 'Create a new Amplitude project inline',
+  },
   { cmd: '/mcp', desc: 'Install or remove the Amplitude MCP server' },
   { cmd: '/slack', desc: 'Set up Amplitude Slack integration' },
   {
@@ -21,6 +25,17 @@ export const COMMANDS = [
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
+
+/**
+ * Parses `/create-project <name>` from a slash command line.
+ * Returns the trimmed name, or an empty string when no name was given.
+ * Returns `undefined` if the line isn't a `/create-project` command.
+ */
+export function parseCreateProjectSlashInput(raw: string): string | undefined {
+  const m = /^\s*\/create-project(?:\s+(.*))?\s*$/i.exec(raw);
+  if (!m) return undefined;
+  return (m[1] ?? '').trim();
+}
 
 /** Returns the feedback text for the /whoami command. */
 export function getWhoamiText(

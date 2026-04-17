@@ -19,6 +19,7 @@ export enum Screen {
   Intro = 'intro',
   Setup = 'setup',
   Auth = 'auth',
+  CreateProject = 'create-project',
   RegionSelect = 'region-select',
   DataSetup = 'data-setup',
   Options = 'options',
@@ -95,13 +96,24 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     //    transient network error), we'd otherwise deadlock on the Auth
     //    spinner. Accepting IDs as an alternative degrades header text but
     //    lets the flow continue.
+    //
+    //    Skipped while the user is in the inline create-project flow.
     {
       screen: Screen.Auth,
-      show: (s) => s.runPhase !== RunPhase.Error,
+      show: (s) => s.runPhase !== RunPhase.Error && !s.createProject.pending,
       isComplete: (s) =>
         s.credentials !== null &&
         (s.selectedOrgName !== null || s.selectedOrgId !== null) &&
         (s.selectedWorkspaceName !== null || s.selectedWorkspaceId !== null),
+    },
+    // 3b. Create-project interrupt. Shown when the user picks "Create new
+    //     project…" from the Auth picker or runs /create-project. Sits
+    //     between Auth and the data check so success routes directly to
+    //     framework detection after `setCredentials()` fires.
+    {
+      screen: Screen.CreateProject,
+      show: (s) => s.runPhase !== RunPhase.Error && s.createProject.pending,
+      isComplete: (s) => !s.createProject.pending,
     },
     // 4. Data check — is the project already ingesting events?
     {

@@ -549,6 +549,51 @@ export class WizardStore {
   }
 
   /**
+   * Enter the create-project flow. Sets `session.createProject.pending = true`
+   * so the router resolves to CreateProjectScreen.
+   *
+   * @param source which picker or invocation triggered creation
+   * @param suggestedName optional pre-filled name (e.g. from /create-project <name> or --project-name)
+   */
+  startCreateProject(
+    source: 'workspace' | 'project' | 'slash' | 'cli-flag',
+    suggestedName?: string | null,
+  ): void {
+    this.$session.setKey('createProject', {
+      pending: true,
+      source,
+      suggestedName: suggestedName ?? null,
+    });
+    analytics.wizardCapture('Create Project Started', { source });
+    this.emitChange();
+  }
+
+  /** Exit the create-project flow without creating a project. */
+  cancelCreateProject(): void {
+    this.$session.setKey('createProject', {
+      pending: false,
+      source: null,
+      suggestedName: null,
+    });
+    analytics.wizardCapture('Create Project Cancelled', {});
+    this.emitChange();
+  }
+
+  /**
+   * Finish the create-project flow successfully. Clears the pending flag
+   * — the caller is responsible for calling `setCredentials()` with the
+   * returned apiKey so the rest of the auth flow stays consistent.
+   */
+  completeCreateProject(): void {
+    this.$session.setKey('createProject', {
+      pending: false,
+      source: null,
+      suggestedName: null,
+    });
+    this.emitChange();
+  }
+
+  /**
    * Called from AuthScreen when the user finishes org + workspace selection.
    * Writes ampli.json and records org/workspace on the session.
    */

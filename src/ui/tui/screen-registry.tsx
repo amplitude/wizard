@@ -11,6 +11,7 @@ import { SettingsOverrideScreen } from './screens/SettingsOverrideScreen.js';
 import { IntroScreen } from './screens/IntroScreen.js';
 import { SetupScreen } from './screens/SetupScreen.js';
 import { AuthScreen } from './screens/AuthScreen.js';
+import { CreateProjectScreen } from './screens/CreateProjectScreen.js';
 import { RegionSelectScreen } from './screens/RegionSelectScreen.js';
 import { DataSetupScreen } from './screens/DataSetupScreen.js';
 import { ActivationOptionsScreen } from './screens/ActivationOptionsScreen.js';
@@ -80,6 +81,7 @@ export function createScreens(
     [Screen.Intro]: <IntroScreen store={store} />,
     [Screen.Setup]: <SetupScreen store={store} />,
     [Screen.Auth]: <AuthScreen store={store} />,
+    [Screen.CreateProject]: <CreateProjectScreen store={store} />,
     [Screen.RegionSelect]: <RegionSelectScreen store={store} />,
     [Screen.DataSetup]: <DataSetupScreen store={store} />,
     [Screen.ActivationOptions]: <ActivationOptionsScreen store={store} />,

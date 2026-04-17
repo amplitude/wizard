@@ -15,7 +15,6 @@
 import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
 import { TextInput } from '@inkjs/ui';
-import opn from 'opn';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
@@ -23,7 +22,6 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import {
   DEFAULT_HOST_URL,
-  OUTBOUND_URLS,
   type AmplitudeZone,
 } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
@@ -325,21 +323,21 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     !selectedEnv?.app?.apiKey;
 
   const handleCreateProject = (fromScreen: 'workspace' | 'project') => {
-    const zone = (session.region ??
-      session.pendingAuthCloudRegion ??
-      'us') as AmplitudeZone;
-    // Prefer the locally-resolved org — session.selectedOrgId is only set
-    // after the user picks both an org AND a workspace, so during the
-    // workspace picker it may still be null even though effectiveOrg is known.
-    const orgId = effectiveOrg?.id ?? session.selectedOrgId;
-    const url = OUTBOUND_URLS.projectsSettings(zone, orgId);
+    // Pre-resolve the org: during the workspace picker, session.selectedOrgId
+    // may still be null even though effectiveOrg is known. Commit it now so
+    // CreateProjectScreen has the orgId it needs to POST /projects.
+    if (effectiveOrg && !session.selectedOrgId) {
+      store.setOrgAndWorkspace(
+        effectiveOrg,
+        effectiveWorkspace ?? { id: '', name: '' },
+        session.installDir,
+      );
+    }
     analytics.wizardCapture('Create Project Link Opened', {
       from_screen: fromScreen,
     });
-    opn(url, { wait: false }).catch(() => {});
-    setPickerNotice(
-      `Opened ${url} — after you create your project, choose "Start over" to reload the list.`,
-    );
+    setPickerNotice(null);
+    store.startCreateProject(fromScreen);
   };
 
   const handleStartOver = (fromScreen: 'workspace' | 'project') => {

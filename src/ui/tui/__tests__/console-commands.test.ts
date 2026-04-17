@@ -1,5 +1,31 @@
 import { describe, expect, it } from 'vitest';
-import { parseFeedbackSlashInput, getWhoamiText } from '../console-commands.js';
+import {
+  parseFeedbackSlashInput,
+  parseCreateProjectSlashInput,
+  getWhoamiText,
+} from '../console-commands.js';
+
+describe('parseCreateProjectSlashInput', () => {
+  it('returns the trimmed name after /create-project', () => {
+    expect(parseCreateProjectSlashInput('/create-project My Project')).toBe(
+      'My Project',
+    );
+  });
+
+  it('returns empty string when no name is given', () => {
+    expect(parseCreateProjectSlashInput('/create-project')).toBe('');
+    expect(parseCreateProjectSlashInput('/create-project   ')).toBe('');
+  });
+
+  it('is case-insensitive on the command prefix', () => {
+    expect(parseCreateProjectSlashInput('/Create-Project Foo')).toBe('Foo');
+  });
+
+  it('returns undefined for other commands', () => {
+    expect(parseCreateProjectSlashInput('/feedback hi')).toBeUndefined();
+    expect(parseCreateProjectSlashInput('/help')).toBeUndefined();
+  });
+});
 
 describe('parseFeedbackSlashInput', () => {
   it('returns the message after /feedback', () => {
