@@ -25,6 +25,10 @@ import type {
   McpClientInfo,
   McpInstallFailure,
 } from '../services/mcp-installer.js';
+import {
+  copyToClipboard,
+  launchAppForClient,
+} from '../services/post-install-helpers.js';
 import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
@@ -121,6 +125,10 @@ export const McpScreen = ({
   /** Forces a re-render. Bumped on every progress mutation + once per sec. */
   const [, setTick] = useState(0);
   const forceRender = () => setTick((t) => t + 1);
+  /** Set to true once we've auto-copied /mcp to the clipboard on success. */
+  const [mcpCommandCopied, setMcpCommandCopied] = useState(false);
+  /** Set to true once the user has pressed `o` to launch installed apps. */
+  const [appsLaunched, setAppsLaunched] = useState(false);
 
   // Tick elapsed-time labels during the Working phase. Without this the
   // screen looks frozen during the ~5s plugin install even though progress
@@ -298,13 +306,41 @@ export const McpScreen = ({
   };
 
   useScreenInput(
-    (_input, key) => {
+    (input, key) => {
       if (key.return) {
         advanceFromDone();
+        return;
+      }
+      if ((input === 'o' || input === 'O') && !appsLaunched) {
+        // Launch every GUI app the user just connected. Claude Code is a
+        // terminal app and has no `open -a` equivalent, so we skip it.
+        let launched = 0;
+        for (const name of resultClients) {
+          if (name === CLAUDE_CODE_CLIENT_NAME) continue;
+          if (launchAppForClient(name)) launched += 1;
+        }
+        if (launched > 0) setAppsLaunched(true);
+        analytics.wizardCapture('MCP Post-Install Launch', {
+          launched,
+          clients: resultClients,
+        });
       }
     },
     { isActive: phase === Phase.Done },
   );
+
+  // Auto-copy the Claude Code sign-in command to the clipboard when plugin
+  // install succeeded. One less thing for the user to type.
+  useEffect(() => {
+    if (phase !== Phase.Done) return;
+    if (mcpCommandCopied) return;
+    if (
+      claudeCodeMode === 'plugin' &&
+      resultClients.includes(CLAUDE_CODE_CLIENT_NAME)
+    ) {
+      if (copyToClipboard('/mcp')) setMcpCommandCopied(true);
+    }
+  }, [phase, claudeCodeMode, resultClients, mcpCommandCopied]);
 
   const doInstall = async (names: string[], ccMode: ClaudeCodeInstallMode) => {
     setClaudeCodeMode(ccMode);
@@ -629,8 +665,11 @@ export const McpScreen = ({
                             <>
                               <Text color={Colors.muted}>
                                 For Claude Code: run{' '}
-                                <Text color={Colors.body}>/mcp</Text> to sign
-                                in. If a session is already open, run{' '}
+                                <Text color={Colors.body}>/mcp</Text>
+                                {mcpCommandCopied
+                                  ? ' (copied to clipboard)'
+                                  : ''}{' '}
+                                to sign in. If a session is already open, run{' '}
                                 <Text color={Colors.body}>/reload-plugins</Text>{' '}
                                 first to pick up the new slash commands.
                               </Text>
@@ -642,6 +681,15 @@ export const McpScreen = ({
                         <Text color={Colors.muted}>
                           MCP docs: {OUTBOUND_URLS.mcpDocs}
                         </Text>
+                        {resultClients.some(
+                          (n) => n !== CLAUDE_CODE_CLIENT_NAME,
+                        ) && (
+                          <Text color={Colors.muted}>
+                            {appsLaunched
+                              ? 'Launched — switch to the app and sign in when prompted.'
+                              : 'Press o to open the installed apps now.'}
+                          </Text>
+                        )}
                       </Box>
                     )}
                   </>
