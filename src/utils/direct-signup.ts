@@ -28,13 +28,6 @@ const RedirectSchema = z.object({
   }),
 });
 
-const NeedsInformationSchema = z.object({
-  type: z.literal('needs_information'),
-  needs_information: z.object({
-    schema: z.record(z.string(), z.unknown()),
-  }),
-});
-
 const ErrorSchema = z.object({
   type: z.literal('error'),
   error: z.object({ code: z.string(), message: z.string() }),
@@ -55,9 +48,9 @@ const OAuthErrorBodySchema = z.object({
 
 function provisioningUrl(zone: AmplitudeZone): string {
   // Dev/testing override — full URL (no /t/ prefix added). Unset in prod.
-  const override = process.env.AMPLITUDE_WIZARD_HEADLESS_URL;
+  const override = process.env.AMPLITUDE_WIZARD_SIGNUP_URL;
   if (override) return override;
-  return `${OUTBOUND_URLS.app[zone]}/t/headless/provisioning/link-or-create-account`;
+  return `${OUTBOUND_URLS.app[zone]}/t/agentic/signup/v1`;
 }
 
 export interface DirectSignupInput {
@@ -123,14 +116,6 @@ export async function performDirectSignup(
 
   const parsedRedirect = RedirectSchema.safeParse(response.data);
   if (parsedRedirect.success) return { kind: 'requires_redirect' };
-
-  const parsedNeedsInfo = NeedsInformationSchema.safeParse(response.data);
-  if (parsedNeedsInfo.success) {
-    log.warn(
-      '[direct-signup] server requested additional information; falling back to OAuth',
-    );
-    return { kind: 'requires_redirect' };
-  }
 
   const parsedError = ErrorSchema.safeParse(response.data);
   if (parsedError.success) {
