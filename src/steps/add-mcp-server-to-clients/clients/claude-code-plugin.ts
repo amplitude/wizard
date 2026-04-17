@@ -66,8 +66,23 @@ export class ClaudeCodePluginClient extends MCPClient {
         debug('  Claude Code not found.');
         return Promise.resolve(false);
       }
-      const result = spawnSync(binary, ['--version'], { stdio: 'pipe' });
-      return Promise.resolve(result.status === 0);
+      const versionResult = spawnSync(binary, ['--version'], { stdio: 'pipe' });
+      if (versionResult.status !== 0) return Promise.resolve(false);
+      // Guard against older Claude Code versions that don't have the
+      // `plugin` subcommand. Without this probe they'd pass --version
+      // and then fail opaquely during `claude plugin marketplace add`
+      // with "unknown command". Returning false here keeps
+      // resolveClientsForMode from swapping in the plugin client.
+      const pluginHelp = spawnSync(binary, ['plugin', '--help'], {
+        stdio: 'pipe',
+      });
+      if (pluginHelp.status !== 0) {
+        debug(
+          '  Claude Code is missing the `plugin` subcommand — skipping plugin client.',
+        );
+        return Promise.resolve(false);
+      }
+      return Promise.resolve(true);
     } catch {
       return Promise.resolve(false);
     }

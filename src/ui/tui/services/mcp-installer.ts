@@ -26,15 +26,6 @@ const RawMCPClientSchema = z
     message: 'addServer must be a function',
   });
 
-interface RawMCPClient {
-  name: string;
-  addServer(
-    apiKey: string | undefined,
-    features: string[],
-    local: boolean,
-  ): Promise<{ success: boolean; error?: string } | undefined>;
-}
-
 export interface McpClientInfo {
   name: string;
 }
@@ -131,10 +122,7 @@ export function createMcpInstaller(local = false): McpInstaller {
 
       // Swap Claude Code's MCP client for the plugin client when requested.
       const mode = options?.claudeCodeMode ?? 'mcp';
-      const toInstall = resolveClientsForMode(
-        selectedClients,
-        mode,
-      ) as unknown as RawMCPClient[];
+      const toInstall = await resolveClientsForMode(selectedClients, mode);
 
       if (toInstall.length === 0) {
         logToFile(

@@ -330,12 +330,21 @@ const MultiPickerMenu = <T,>({
       });
     }
     if (key.return) {
-      const values = [...selected].sort().map((i) => options[i].value);
-      if (values.length === 0) {
-        // Nothing toggled — fall back to the focused item so Enter always submits
+      // Numeric sort — default Array.prototype.sort is lexicographic and
+      // would put index 10 before index 2.
+      const values = [...selected]
+        .sort((a, b) => a - b)
+        .map((i) => options[i].value);
+      if (values.length === 0 && !defaultSelected?.length) {
+        // Nothing was ever pre-selected and user pressed Enter without
+        // toggling anything — treat that as "use the focused row" so the
+        // picker always submits something. (This was the original behavior.)
         const focusedOpt = options[focused];
         if (focusedOpt) onSelect([focusedOpt.value]);
       } else {
+        // If the caller pre-selected items, an empty set means the user
+        // deliberately unchecked everything — pass [] so the caller can
+        // treat it as "skip" or whatever they want.
         onSelect(values);
       }
     }

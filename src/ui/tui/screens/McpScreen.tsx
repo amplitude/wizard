@@ -208,8 +208,12 @@ export const McpScreen = ({
     const others = selected.filter(
       (v) => v !== CC_PLUGIN_VALUE && v !== CC_MCP_VALUE,
     );
-    const ccMode: ClaudeCodeInstallMode =
-      wantsPlugin || !wantsMcp ? 'plugin' : 'mcp';
+    // Explicit semantics: plugin only if the plugin row is checked.
+    // If both are somehow checked, plugin wins (it's the richer install).
+    // If neither is checked, Claude Code is omitted from `names` entirely
+    // and ccMode is moot — we still default it to 'mcp' so callers who
+    // don't check `names` don't get misleading 'plugin' back.
+    const ccMode: ClaudeCodeInstallMode = wantsPlugin ? 'plugin' : 'mcp';
     const names =
       wantsPlugin || wantsMcp ? [...others, CLAUDE_CODE_CLIENT_NAME] : others;
     return { names, ccMode };
@@ -237,10 +241,19 @@ export const McpScreen = ({
             count: detected.length,
           });
           setClients(detected);
-          // Single tool: simple yes/no confirm (nothing meaningful to pick
-          // between). 2+ tools: jump straight to the multi-select so users
-          // can uncheck anything they don't want in this install.
-          setPhase(detected.length === 1 || isRemove ? Phase.Ask : Phase.Pick);
+          // Route to Phase.Pick for install whenever there's anything the
+          // user might want to toggle — that's 2+ tools, OR a single Claude
+          // Code (which splits into plugin-vs-MCP rows). Phase.Ask (simple
+          // yes/no) is only for: remove flows, or a single non-Claude-Code
+          // tool with no sub-choice.
+          const soloClaudeCode =
+            detected.length === 1 &&
+            detected[0].name === CLAUDE_CODE_CLIENT_NAME &&
+            !store.session.localMcp &&
+            process.env.AMPLITUDE_WIZARD_MCP_ONLY !== '1';
+          const needsPicker =
+            !isRemove && (detected.length > 1 || soloClaudeCode);
+          setPhase(needsPicker ? Phase.Pick : Phase.Ask);
         }
       } catch {
         captureWizardError(

@@ -18,16 +18,22 @@ export type ClaudeCodeInstallMode = 'plugin' | 'mcp';
 /**
  * When Claude Code is in the list and the caller wants plugin install,
  * replace its MCP client with the plugin client. No-op for other editors.
+ *
+ * Async because the plugin client has to probe `claude plugin --help` to
+ * confirm the subcommand exists — older Claude Code CLIs would accept the
+ * --version check but fail opaquely during marketplace add. If plugin
+ * support is missing we quietly keep the raw MCP client.
  */
-export const resolveClientsForMode = (
+export const resolveClientsForMode = async (
   clients: MCPClient[],
   mode: ClaudeCodeInstallMode,
-): MCPClient[] => {
+): Promise<MCPClient[]> => {
   if (mode !== 'plugin') return clients;
+  const plugin = new ClaudeCodePluginClient();
+  const pluginSupported = await plugin.isClientSupported();
+  if (!pluginSupported) return clients;
   return clients.map((c) =>
-    c.name === 'Claude Code' && c instanceof ClaudeCodeMCPClient
-      ? new ClaudeCodePluginClient()
-      : c,
+    c.name === 'Claude Code' && c instanceof ClaudeCodeMCPClient ? plugin : c,
   );
 };
 
@@ -98,8 +104,12 @@ export const addMCPServerToClientsStep = async ({
     return [];
   }
 
-  const mode: ClaudeCodeInstallMode = claudeCodeMode ?? 'plugin';
-  const clientsToInstall = resolveClientsForMode(supportedClients, mode);
+  // Default 'mcp' for the non-interactive entry point — this fallback runs
+  // when the TUI isn't available, so the user never saw the plugin picker.
+  // Silently installing the plugin would surprise them. `--local-mcp` also
+  // forces MCP mode (the plugin hardcodes the prod URL).
+  const mode: ClaudeCodeInstallMode = local ? 'mcp' : claudeCodeMode ?? 'mcp';
+  const clientsToInstall = await resolveClientsForMode(supportedClients, mode);
 
   // Auto-install to all supported clients
   await traceStep('adding mcp servers', async () => {
@@ -160,6 +170,18 @@ export const getInstalledClients = async (
   const installedClients: MCPClient[] = [];
 
   for (const client of clients) {
+    // Claude Code can be installed two different ways — bare MCP entry
+    // (ClaudeCodeMCPClient) or the Amplitude plugin (ClaudeCodePluginClient).
+    // Detection-time only creates ClaudeCodeMCPClient, so probe for a plugin
+    // install separately and substitute the plugin client when appropriate.
+    // Without this, `wizard mcp remove` can never uninstall the plugin.
+    if (client instanceof ClaudeCodeMCPClient) {
+      const plugin = new ClaudeCodePluginClient();
+      if (await plugin.isServerInstalled()) {
+        installedClients.push(plugin);
+        continue;
+      }
+    }
     if (await client.isServerInstalled(local)) {
       installedClients.push(client);
     }
