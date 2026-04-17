@@ -72,13 +72,29 @@ export interface SignupOrAuthInput {
 }
 
 /**
+ * Result of {@link performSignupOrAuth}. Extends {@link AmplitudeAuthResult}
+ * with the user profile fetched inside the function, so callers can skip a
+ * redundant `fetchAmplitudeUser` call.
+ *
+ * `userInfo` is:
+ * - populated on the direct-signup success path when the internal fetch
+ *   (with provisioning retry) succeeded
+ * - `null` on the pending-sentinel path (internal fetch failed) and on the
+ *   OAuth fallback path — the caller is responsible for fetching userInfo
+ *   itself in those cases
+ */
+export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
+  userInfo: AmplitudeUserInfo | null;
+};
+
+/**
  * Chooses between direct signup (when gated flag on, --signup set, and
  * email + fullName provided) and the existing OAuth flow. Falls back to
  * OAuth when direct signup returns requires_redirect or error.
  */
 export async function performSignupOrAuth(
   input: SignupOrAuthInput,
-): Promise<AmplitudeAuthResult> {
+): Promise<PerformSignupOrAuthResult> {
   const shouldAttemptDirect =
     input.signup &&
     isFlagEnabled(FLAG_DIRECT_SIGNUP) &&
@@ -87,10 +103,11 @@ export async function performSignupOrAuth(
 
   if (!shouldAttemptDirect) {
     log.debug('skipping direct signup, using OAuth');
-    return performAmplitudeAuth({
+    const auth = await performAmplitudeAuth({
       zone: input.zone,
       forceFresh: input.forceFresh,
     });
+    return { ...auth, userInfo: null };
   }
 
   log.debug('attempting direct signup');
@@ -113,8 +130,9 @@ export async function performSignupOrAuth(
     // sentinel on fetch failure — the next wizard run will patch the entry.
     // The fetch retries briefly on the "no env with API key yet" case to
     // absorb post-signup provisioning lag.
+    let userInfo: AmplitudeUserInfo | null = null;
     try {
-      const userInfo = await fetchUserWithProvisioningRetry(
+      userInfo = await fetchUserWithProvisioningRetry(
         tokens.idToken,
         input.zone,
       );
@@ -149,12 +167,14 @@ export async function performSignupOrAuth(
       accessToken: tokens.accessToken,
       refreshToken: tokens.refreshToken,
       zone: result.tokens.zone,
+      userInfo,
     };
   }
 
   log.debug('falling back to OAuth', { kind: result.kind });
-  return performAmplitudeAuth({
+  const auth = await performAmplitudeAuth({
     zone: input.zone,
     forceFresh: input.forceFresh,
   });
+  return { ...auth, userInfo: null };
 }
