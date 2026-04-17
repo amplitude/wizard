@@ -72,7 +72,7 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('advances from Auth to DataSetup when credentials and all three names are set', () => {
+    it('advances from Auth to DataSetup when credentials + org + workspace are set', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
@@ -85,11 +85,11 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
 
-    it('stays on Auth when credentials set but project (workspace) name is missing', () => {
+    it('stays on Auth when credentials set but workspace name is missing', () => {
       const router = new WizardRouter();
       // Cached API key + ampli.json IDs can set credentials without resolving
-      // the workspace name. The flow must not advance until all three of
-      // org / workspace / env names are known.
+      // the workspace name. Workspace is what users call the "project" and
+      // is required before advancing.
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
@@ -101,8 +101,10 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('stays on Auth when credentials set but env name is missing', () => {
+    it('advances from Auth to DataSetup when env name is missing (env is optional)', () => {
       const router = new WizardRouter();
+      // Manual API key entry can't resolve the env. As long as org and
+      // workspace are known, Auth is considered complete.
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
@@ -111,7 +113,7 @@ describe('WizardRouter', () => {
         selectedWorkspaceName: 'Amplitude',
         selectedProjectName: null,
       });
-      expect(router.resolve(session)).toBe(Screen.Auth);
+      expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
 
     it('advances from DataSetup to Run when projectHasData is set', () => {

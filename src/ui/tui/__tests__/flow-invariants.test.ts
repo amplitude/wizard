@@ -45,9 +45,9 @@ function mockCredentials() {
 }
 
 /**
- * Apply a complete authenticated state to a session: credentials plus all
- * three resolved names (org, workspace, env). Auth.isComplete requires all
- * four fields so the flow can advance past AuthScreen.
+ * Apply a complete authenticated state to a session: credentials plus org
+ * and workspace names (the two required by Auth.isComplete). Env name is
+ * set too — it's optional for Auth but realistic for a fully-resolved flow.
  */
 function applyAuthComplete(s: WizardSession) {
   s.credentials = mockCredentials();
