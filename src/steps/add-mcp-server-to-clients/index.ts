@@ -175,7 +175,13 @@ export const getInstalledClients = async (
     // Detection-time only creates ClaudeCodeMCPClient, so probe for a plugin
     // install separately and substitute the plugin client when appropriate.
     // Without this, `wizard mcp remove` can never uninstall the plugin.
-    if (client instanceof ClaudeCodeMCPClient) {
+    //
+    // Skip the plugin probe when --local is set — the plugin only ever
+    // registers the production MCP, so a `remove --local` must target the
+    // bare ClaudeCodeMCPClient (which is the only path that knows about
+    // `amplitude-local`). Otherwise we'd uninstall the prod plugin in
+    // response to a local-scoped remove request.
+    if (!local && client instanceof ClaudeCodeMCPClient) {
       const plugin = new ClaudeCodePluginClient();
       if (await plugin.isServerInstalled()) {
         installedClients.push(plugin);
