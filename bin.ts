@@ -607,6 +607,13 @@ void yargs(hideBin(process.argv))
 
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
+
+          // Attempt direct signup before falling through to cached-token
+          // resolution. CI mode has no browser, so a null result continues to
+          // resolveNonInteractiveCredentials, which handles cached tokens or
+          // exits cleanly with AUTH_REQUIRED.
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
+
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
