@@ -145,42 +145,48 @@ export function createMcpInstaller(local = false): McpInstaller {
         return { installed: [], failures: [] };
       }
 
-      const installed: string[] = [];
-      const failures: McpInstallFailure[] = [];
-      for (const client of toInstall) {
-        options?.onClientStart?.(client.name);
-        try {
-          const result = await client.addServer(accessToken, features, local);
-          if (result?.success) {
-            installed.push(client.name);
-            options?.onClientComplete?.({ name: client.name, success: true });
-          } else {
-            const errorMsg = result?.error;
+      // Installs are independent — each client writes its own config or
+      // shells out to its own CLI. Run in parallel so one slow client
+      // (typically Claude Code's plugin install, which clones a marketplace
+      // git repo on first run) doesn't block the others.
+      const outcomes = await Promise.all(
+        toInstall.map(async (client) => {
+          options?.onClientStart?.(client.name);
+          try {
+            const result = await client.addServer(accessToken, features, local);
+            const success = !!result?.success;
+            const error = success ? undefined : result?.error;
+            if (!success) {
+              logToFile(
+                `[McpInstaller] addServer failed for ${client.name}${
+                  error ? `: ${error}` : ''
+                }`,
+              );
+            }
+            options?.onClientComplete?.({
+              name: client.name,
+              success,
+              error,
+            });
+            return { name: client.name, success, error };
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
             logToFile(
-              `[McpInstaller] addServer failed for ${client.name}${
-                errorMsg ? `: ${errorMsg}` : ''
-              }`,
+              `[McpInstaller] addServer threw for ${client.name}: ${msg}`,
             );
-            failures.push({ name: client.name, error: errorMsg });
             options?.onClientComplete?.({
               name: client.name,
               success: false,
-              error: errorMsg,
+              error: msg,
             });
+            return { name: client.name, success: false, error: msg };
           }
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err);
-          logToFile(
-            `[McpInstaller] addServer threw for ${client.name}: ${msg}`,
-          );
-          failures.push({ name: client.name, error: msg });
-          options?.onClientComplete?.({
-            name: client.name,
-            success: false,
-            error: msg,
-          });
-        }
-      }
+        }),
+      );
+      const installed = outcomes.filter((o) => o.success).map((o) => o.name);
+      const failures: McpInstallFailure[] = outcomes
+        .filter((o) => !o.success)
+        .map((o) => ({ name: o.name, error: o.error }));
       return { installed, failures };
     },
 

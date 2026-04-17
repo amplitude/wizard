@@ -408,6 +408,10 @@ export const McpScreen = ({
                             ? '  › '
                             : '  · '}
                           {p.name}
+                          {p.name === CLAUDE_CODE_CLIENT_NAME &&
+                          claudeCodeMode === 'plugin'
+                            ? ' (plugin)'
+                            : ''}
                           {p.status === 'working' ? '…' : ''}
                         </Text>
                       </Box>
