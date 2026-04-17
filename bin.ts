@@ -395,8 +395,11 @@ void yargs(hideBin(process.argv))
     },
     'local-mcp': {
       default: false,
+      // Internal dev escape hatch — points the wizard at a locally running
+      // MCP server (localhost:8787). Hidden from public --help.
       describe: 'connect to a local MCP server for development',
       type: 'boolean',
+      hidden: true,
     },
     ci: {
       default: false,
@@ -1703,6 +1706,7 @@ void yargs(hideBin(process.argv))
               default: false,
               describe: 'use a local MCP server for development',
               type: 'boolean',
+              hidden: true,
             },
           });
         },
@@ -1744,6 +1748,7 @@ void yargs(hideBin(process.argv))
               default: false,
               describe: 'remove a local MCP server',
               type: 'boolean',
+              hidden: true,
             },
           });
         },
