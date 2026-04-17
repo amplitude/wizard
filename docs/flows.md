@@ -16,7 +16,7 @@ actions.
 | `/whoami`    | Show current user, org, and project                               |
 | `/mcp`       | Install or remove the Amplitude MCP server                        |
 | `/slack`     | Set up Amplitude Slack integration                                |
-| `/feedback`  | Send product feedback (event `wizard cli: feedback submitted`)    |
+| `/feedback`  | Send product feedback                                             |
 | `/test`      | Run a prompt-skill demo (confirm + choose)                        |
 | `/snake`     | Play Snake                                                        |
 | `/exit`      | Exit the wizard                                                   |
@@ -43,7 +43,7 @@ flowchart TD
     CMD --> WIZARD["wizard (default)"]
     CMD --> AGENT["wizard --agent<br/>(structured JSON output for automation)"]
 
-    FEEDBACK --> FEEDBACK_SEND["Track wizard cli: feedback submitted via Node SDK"]
+    FEEDBACK --> FEEDBACK_SEND["Send feedback via Node SDK"]
 
     AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
     AGENT_UI --> AGENT_RUN["SDK installation agent run"]

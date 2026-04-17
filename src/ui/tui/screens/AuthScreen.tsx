@@ -192,7 +192,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       if (local) {
         setSavedKeySource(local.source);
         analytics.wizardCapture('api key submitted', {
-          key_source: local.source,
+          'key source': local.source,
         });
         // Resolve env name from the key when we can — the header slot is
         // informational, not required for Auth to complete.
@@ -225,7 +225,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
         persistApiKey(apiKey, s.installDir);
         analytics.wizardCapture('api key submitted', {
-          key_source: 'environment_picker',
+          'key source': 'environment_picker',
         });
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
@@ -262,7 +262,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       if (projectApiKey) {
         persistApiKey(projectApiKey, s.installDir);
         analytics.wizardCapture('api key submitted', {
-          key_source: 'backend_fetch',
+          'key source': 'backend_fetch',
         });
         // Resolve env name from the returned key when possible. Not required
         // for Auth to complete.
@@ -379,7 +379,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     }
     setApiKeyError('');
     analytics.wizardCapture('api key submitted', {
-      key_source: 'manual_entry',
+      'key source': 'manual_entry',
     });
     store.setApiKeyNotice(null);
     // Env name stays null for manually-entered keys — we can't determine

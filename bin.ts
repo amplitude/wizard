@@ -9,6 +9,20 @@
 import { sanitizeNestedClaudeEnv } from './src/lib/sanitize-claude-env';
 sanitizeNestedClaudeEnv();
 
+// Dev-mode marker: `pnpm dev` writes dist/.dev-mode after the initial build;
+// `pnpm build` wipes dist/ so the marker is absent for published / prod runs.
+// When present, set NODE_ENV=development so IS_DEV (src/lib/constants.ts)
+// picks the dev telemetry key. Must run before any import that reads NODE_ENV
+// at module-load time.
+import { existsSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
+if (
+  process.env.NODE_ENV === undefined &&
+  existsSync(resolvePath(__dirname, '.dev-mode'))
+) {
+  process.env.NODE_ENV = 'development';
+}
+
 import { satisfies } from 'semver';
 import { red } from './src/utils/logging';
 import { config as loadDotenv } from 'dotenv';
