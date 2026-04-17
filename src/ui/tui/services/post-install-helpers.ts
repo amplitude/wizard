@@ -1,49 +1,13 @@
 /**
  * Small helpers we run after MCP install to reduce the number of things the
- * user has to do manually: copy sign-in commands to the clipboard, launch
- * each installed GUI app so the user just has to click Allow in the OAuth
- * dialog, etc.
+ * user has to do manually (launch each installed GUI app so the user just
+ * has to click Allow in the OAuth dialog, etc.).
  *
  * All helpers are best-effort: they return a boolean for the UI, and any
- * failure (missing `pbcopy`, unknown app name, etc.) is silently swallowed.
+ * failure (unknown app name, etc.) is silently swallowed.
  */
 
 import { spawn } from 'child_process';
-
-/** Best-effort clipboard copy. Returns true if we could issue the command. */
-export function copyToClipboard(text: string): boolean {
-  try {
-    if (process.platform === 'darwin') {
-      const proc = spawn('pbcopy', [], { stdio: ['pipe', 'ignore', 'ignore'] });
-      proc.stdin.end(text);
-      return true;
-    }
-    if (process.platform === 'win32') {
-      const proc = spawn('clip', [], { stdio: ['pipe', 'ignore', 'ignore'] });
-      proc.stdin.end(text);
-      return true;
-    }
-    // Linux: try xclip, then xsel. Either missing is fine.
-    const linuxCandidates: Array<[string, string[]]> = [
-      ['xclip', ['-selection', 'clipboard']],
-      ['xsel', ['--clipboard', '--input']],
-    ];
-    for (const [bin, args] of linuxCandidates) {
-      try {
-        const proc = spawn(bin, args, {
-          stdio: ['pipe', 'ignore', 'ignore'],
-        });
-        proc.stdin.end(text);
-        return true;
-      } catch {
-        // try next
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
-}
 
 /** Map our detected-client names to the OS-level launcher command. */
 const CLIENT_APP_NAMES: Record<string, string> = {
