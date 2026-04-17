@@ -28,6 +28,7 @@ import {
   COMMANDS,
   getWhoamiText,
   parseFeedbackSlashInput,
+  parseCreateProjectSlashInput,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
@@ -110,6 +111,29 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/mcp':
       store.showMcpOverlay();
       break;
+    case '/create-project': {
+      // Requires an authenticated session with a selected org so the proxy
+      // call has an orgId. Surface a friendly message otherwise.
+      const hasAuth = Boolean(
+        store.session.pendingAuthIdToken || store.session.credentials?.idToken,
+      );
+      const hasOrg = Boolean(store.session.selectedOrgId);
+      if (!hasAuth) {
+        store.setCommandFeedback(
+          'Sign in first (/login) before creating a project.',
+        );
+        break;
+      }
+      if (!hasOrg) {
+        store.setCommandFeedback(
+          'Pick an organization first (the Auth screen) before creating a project.',
+        );
+        break;
+      }
+      const suggested = parseCreateProjectSlashInput(raw);
+      store.startCreateProject('slash', suggested || null);
+      break;
+    }
     case '/snake':
       store.showSnakeOverlay();
       break;

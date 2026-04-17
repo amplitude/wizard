@@ -8,6 +8,7 @@ import {
   type AmplitudeZone,
 } from './constants.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
+import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
 
 // ── App API URL helper ────────────────────────────────────────────────
 
@@ -130,11 +131,12 @@ query orgs {
   }
 }`;
 
-class ApiError extends Error {
+export class ApiError extends Error {
   constructor(
     message: string,
     public readonly statusCode?: number,
     public readonly endpoint?: string,
+    public readonly code?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -182,6 +184,228 @@ export async function fetchAmplitudeUser(
   } catch (error) {
     const apiError = handleApiError(error, 'fetch Amplitude user data');
     analytics.captureException(apiError, { endpoint: dataApiUrl });
+    throw apiError;
+  }
+}
+
+// ── Create App / Project ─────────────────────────────────────────────
+
+/**
+ * Error codes returned by the wizard proxy `POST /projects` endpoint.
+ * Match the contract defined with the backend agent.
+ */
+export type CreateProjectErrorCode =
+  | 'NAME_TAKEN'
+  | 'QUOTA_REACHED'
+  | 'FORBIDDEN'
+  | 'INVALID_REQUEST'
+  | 'INTERNAL';
+
+const CreateProjectSuccessSchema = z.object({
+  appId: z.string(),
+  apiKey: z.string(),
+  name: z.string(),
+});
+
+const CreateProjectErrorSchema = z.object({
+  error: z.object({
+    code: z.enum([
+      'NAME_TAKEN',
+      'QUOTA_REACHED',
+      'FORBIDDEN',
+      'INVALID_REQUEST',
+      'INTERNAL',
+    ]),
+    message: z.string(),
+  }),
+});
+
+export interface CreateProjectResult {
+  appId: string;
+  apiKey: string;
+  name: string;
+}
+
+/** Max project-name length accepted by the backend (inclusive). */
+export const PROJECT_NAME_MAX_LENGTH = 255;
+
+/**
+ * Shape of validation errors returned by `validateProjectName`. Null = ok.
+ * Callers surface the human-readable `message` inline in the UI.
+ */
+export interface ProjectNameValidationIssue {
+  code: 'empty' | 'too_long' | 'control_chars';
+  message: string;
+}
+
+/**
+ * Local-only validation for a project name. Mirrors the backend rules
+ * (1–255 chars trimmed, no control chars) so the UI can reject bad input
+ * without a round-trip.
+ */
+export function validateProjectName(
+  name: string,
+): ProjectNameValidationIssue | null {
+  const trimmed = name.trim();
+  if (trimmed.length === 0) {
+    return { code: 'empty', message: 'Project name cannot be empty.' };
+  }
+  if (trimmed.length > PROJECT_NAME_MAX_LENGTH) {
+    return {
+      code: 'too_long',
+      message: `Project name must be ${PROJECT_NAME_MAX_LENGTH} characters or fewer.`,
+    };
+  }
+  // Reject ASCII control characters (C0 + DEL) — names are shown in UI and URLs.
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(trimmed)) {
+    return {
+      code: 'control_chars',
+      message: 'Project name cannot contain control characters.',
+    };
+  }
+  return null;
+}
+
+/**
+ * Derive the wizard proxy base URL (e.g. `https://core.amplitude.com/wizard`)
+ * from a zone by starting from the API host and stripping any trailing
+ * `/v1/messages` suffix the gateway appends for the Claude SDK.
+ *
+ * Exported so callers + tests can assert the exact endpoint.
+ */
+export function getWizardProxyBase(zone: AmplitudeZone): string {
+  const gateway = getLlmGatewayUrlFromHost(getHostFromRegion(zone));
+  // getLlmGatewayUrlFromHost returns the base without `/v1/messages`, but if a
+  // WIZARD_LLM_PROXY_URL override includes it we need to strip it so the base
+  // stays consistent.
+  return gateway.replace(/\/v1\/messages\/?$/, '').replace(/\/$/, '');
+}
+
+/**
+ * Create a new Amplitude analytics project (app) in the given org via the
+ * wizard proxy.
+ *
+ * - Expects an OAuth *access token* (not the id_token) — sent as
+ *   `Authorization: Bearer <token>`. The wizard-proxy validates it
+ *   against Hydra introspection, which only accepts access tokens.
+ * - Errors from the backend are surfaced as `ApiError` with `code` set to one
+ *   of `CreateProjectErrorCode` so callers can branch (NAME_TAKEN → retry,
+ *   QUOTA_REACHED → fallback, etc.).
+ *
+ * Returns `{ appId, apiKey, name }` on success. `apiKey` is sensitive — never
+ * log it, and redact it from any analytics/NDJSON output.
+ */
+export async function createAmplitudeApp(
+  accessToken: string,
+  zone: AmplitudeZone,
+  input: { orgId: string; name: string; description?: string },
+): Promise<CreateProjectResult> {
+  const base = getWizardProxyBase(zone);
+  const url = `${base}/projects`;
+
+  // Validate locally first so we fail fast and don't hit the network with a
+  // payload the backend will reject.
+  const issue = validateProjectName(input.name);
+  if (issue) {
+    throw new ApiError(issue.message, 400, url, 'INVALID_REQUEST');
+  }
+  if (!input.orgId || input.orgId.trim() === '') {
+    throw new ApiError('orgId is required', 400, url, 'INVALID_REQUEST');
+  }
+
+  try {
+    const response = await axios.post(
+      url,
+      {
+        orgId: input.orgId,
+        name: input.name.trim(),
+        // Only send description when provided to keep the payload minimal.
+        ...(input.description ? { description: input.description } : {}),
+      },
+      {
+        headers: {
+          // The wizard-proxy auth middleware introspects via Hydra, which
+          // only accepts OAuth access tokens (not id_tokens), sent with
+          // the `Bearer ` prefix.
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'User-Agent': WIZARD_USER_AGENT,
+        },
+        // Treat 4xx/5xx as normal responses so we can surface the backend's
+        // structured error payload without axios re-wrapping it.
+        validateStatus: () => true,
+        timeout: 20_000,
+      },
+    );
+
+    if (response.status >= 200 && response.status < 300) {
+      const parsed = CreateProjectSuccessSchema.parse(response.data);
+      // Best-effort analytics — `apiKey` intentionally omitted so it never
+      // leaves this function in plaintext.
+      analytics.wizardCapture('Project Created', {
+        source: 'wizard_cli',
+        app_id: parsed.appId,
+        zone,
+        org_id: input.orgId,
+      });
+      return parsed;
+    }
+
+    // Attempt to parse the structured error body. If it doesn't match the
+    // schema, fall through to a generic INTERNAL error so callers still get a
+    // usable code.
+    const errBody = CreateProjectErrorSchema.safeParse(response.data);
+    if (errBody.success) {
+      const { code, message } = errBody.data.error;
+      throw new ApiError(message, response.status, url, code);
+    }
+
+    throw new ApiError(
+      `Failed to create project (HTTP ${response.status})`,
+      response.status,
+      url,
+      'INTERNAL',
+    );
+  } catch (error) {
+    // Re-throw our own ApiError instances untouched.
+    if (error instanceof ApiError) {
+      analytics.captureException(error, { endpoint: url, code: error.code });
+      throw error;
+    }
+
+    // Axios errors from network failures (DNS, timeout, etc.) — map to INTERNAL.
+    if (axios.isAxiosError(error)) {
+      const apiError = new ApiError(
+        error.message || 'Network error creating project',
+        error.response?.status,
+        url,
+        'INTERNAL',
+      );
+      analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
+      throw apiError;
+    }
+
+    if (error instanceof z.ZodError) {
+      const apiError = new ApiError(
+        'Invalid response from create-project endpoint',
+        undefined,
+        url,
+        'INTERNAL',
+      );
+      analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
+      throw apiError;
+    }
+
+    const apiError = new ApiError(
+      `Unexpected error creating project: ${
+        error instanceof Error ? error.message : 'Unknown error'
+      }`,
+      undefined,
+      url,
+      'INTERNAL',
+    );
+    analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
     throw apiError;
   }
 }

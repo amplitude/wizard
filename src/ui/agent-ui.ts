@@ -120,6 +120,60 @@ export class AgentUI implements WizardUI {
   }
 
   /**
+   * NDJSON events for the inline create-project flow. Emitted at each phase
+   * so orchestrators can track progress. The `apiKey` is intentionally
+   * REDACTED from the success payload — only `appId` and `name` are emitted.
+   */
+  emitProjectCreateStart(data: { orgId: string; name: string }): void {
+    emit('lifecycle', `Creating Amplitude project "${data.name}"`, {
+      data: {
+        event: 'project_create_start',
+        orgId: data.orgId,
+        name: data.name,
+      },
+    });
+  }
+
+  emitProjectCreateSuccess(data: {
+    appId: string;
+    name: string;
+    orgId: string;
+  }): void {
+    // SECURITY: apiKey intentionally omitted from NDJSON. The orchestrator
+    // can read it from the project-local .env.local / keychain if needed.
+    emit('result', `project_created: ${data.name}`, {
+      data: {
+        event: 'project_create_success',
+        appId: data.appId,
+        name: data.name,
+        orgId: data.orgId,
+      },
+    });
+  }
+
+  emitProjectCreateError(data: {
+    code:
+      | 'NAME_TAKEN'
+      | 'QUOTA_REACHED'
+      | 'FORBIDDEN'
+      | 'INVALID_REQUEST'
+      | 'INTERNAL'
+      | 'MISSING_NAME'
+      | 'MISSING_ORG';
+    message: string;
+    name?: string;
+  }): void {
+    emit('error', data.message, {
+      level: 'error',
+      data: {
+        event: 'project_create_error',
+        code: data.code,
+        name: data.name,
+      },
+    });
+  }
+
+  /**
    * Emit a structured nested_agent lifecycle event when the wizard is
    * invoked from inside another Claude Code / Claude Agent SDK session.
    * The wizard sanitizes inherited Claude env vars before spawning its

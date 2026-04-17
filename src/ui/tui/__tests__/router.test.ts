@@ -214,6 +214,52 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
+    it('routes to CreateProject when createProject.pending is true', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        createProject: {
+          pending: true,
+          source: 'workspace',
+          suggestedName: null,
+        },
+      });
+      expect(router.resolve(session)).toBe(Screen.CreateProject);
+    });
+
+    it('returns to Auth when createProject is cancelled (pending=false, no creds)', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        createProject: {
+          pending: false,
+          source: null,
+          suggestedName: null,
+        },
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('skips past CreateProject once credentials are set (success path)', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        credentials: CREDS,
+        selectedOrgName: 'Acme',
+        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Production',
+        createProject: {
+          pending: false,
+          source: null,
+          suggestedName: null,
+        },
+      });
+      expect(router.resolve(session)).toBe(Screen.DataSetup);
+    });
+
     it('Auth skips on error (runPhase === Error)', () => {
       const router = new WizardRouter();
       const session = sessionWith({

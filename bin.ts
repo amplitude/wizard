@@ -129,6 +129,7 @@ const buildSessionFromOptions = async (
     >[0]['integration'],
     benchmark: options.benchmark as boolean | undefined,
     projectId: options.projectId as string | undefined,
+    projectName: options.projectName as string | undefined,
   });
 };
 
@@ -186,6 +187,129 @@ const resolveNonInteractiveCredentials = async (
     accessTokenOverride: envAccessToken,
   });
 
+  // ── Non-interactive create-project ────────────────────────────────
+  // `--project-name <name>` triggers an inline project creation when the
+  // authenticated user has an org but no projects to choose from (or when
+  // the orchestrator explicitly asks for a fresh project). Must not prompt.
+  const projectName = (options.projectName as string | undefined)?.trim();
+  if (
+    projectName &&
+    session.pendingOrgs &&
+    !session.credentials &&
+    session.pendingAuthIdToken &&
+    session.pendingAuthAccessToken
+  ) {
+    const { createAmplitudeApp, ApiError } = await import('./src/lib/api.js');
+    const { getHostFromRegion } = await import('./src/utils/urls.js');
+    const { persistApiKey } = await import('./src/utils/api-key-store.js');
+
+    // Pick an org: --org flag if provided, else the first org with access.
+    const orgFlag = (options.org as string | undefined)?.toLowerCase();
+    const org =
+      (orgFlag &&
+        session.pendingOrgs.find(
+          (o) =>
+            o.name.toLowerCase() === orgFlag || o.id.toLowerCase() === orgFlag,
+        )) ||
+      session.pendingOrgs[0];
+
+    if (!org) {
+      if (mode === 'agent' && agentUI) {
+        agentUI.emitProjectCreateError({
+          code: 'MISSING_ORG',
+          message:
+            'No Amplitude organization available to create a project in.',
+          name: projectName,
+        });
+      } else {
+        getUI().log.error(
+          'No Amplitude organization available to create a project in.',
+        );
+      }
+      process.exit(ExitCode.AUTH_REQUIRED);
+    }
+
+    const zone =
+      (session.region ?? session.pendingAuthCloudRegion ?? 'us') === 'eu'
+        ? 'eu'
+        : 'us';
+    if (mode === 'agent' && agentUI) {
+      agentUI.emitProjectCreateStart({ orgId: org.id, name: projectName });
+    } else {
+      getUI().log.info(
+        `Creating Amplitude project "${projectName}" in ${org.name}…`,
+      );
+    }
+
+    try {
+      const created = await createAmplitudeApp(
+        session.pendingAuthAccessToken,
+        zone,
+        { orgId: org.id, name: projectName },
+      );
+
+      // Persist outside the API's error path — the project exists on the
+      // backend at this point. A local persist failure (FS permission, etc.)
+      // must not be reported as a create-project error, because the
+      // orchestrator retry would then hit NAME_TAKEN.
+      try {
+        persistApiKey(created.apiKey, session.installDir);
+      } catch (persistErr) {
+        const msg =
+          persistErr instanceof Error ? persistErr.message : String(persistErr);
+        getUI().log.warn(
+          `Project created but failed to persist API key locally: ${msg}. ` +
+            `Set AMPLITUDE_API_KEY=<key> manually or rerun once the issue is resolved.`,
+        );
+      }
+      session.selectedOrgId = org.id;
+      session.selectedOrgName = org.name;
+      session.selectedProjectName = created.name;
+      session.credentials = {
+        accessToken: session.pendingAuthAccessToken ?? '',
+        idToken: session.pendingAuthIdToken,
+        projectApiKey: created.apiKey,
+        host: getHostFromRegion(zone),
+        projectId: Number.parseInt(created.appId, 10) || 0,
+      };
+      session.projectHasData = false;
+
+      if (mode === 'agent' && agentUI) {
+        agentUI.emitProjectCreateSuccess({
+          appId: created.appId,
+          name: created.name,
+          orgId: org.id,
+        });
+      } else {
+        getUI().log.info(`Project created: ${created.name} (${created.appId})`);
+      }
+    } catch (err) {
+      const isApi = err instanceof ApiError;
+      const code = isApi && err.code ? err.code : 'INTERNAL';
+      const message = err instanceof Error ? err.message : String(err);
+
+      if (mode === 'agent' && agentUI) {
+        agentUI.emitProjectCreateError({
+          code: code as Parameters<
+            typeof agentUI.emitProjectCreateError
+          >[0]['code'],
+          message,
+          name: projectName,
+        });
+      } else {
+        getUI().log.error(`Create project failed (${code}): ${message}`);
+      }
+
+      // NAME_TAKEN gets a dedicated exit code so orchestrators can
+      // distinguish "pick a new name" from generic failures.
+      if (code === 'NAME_TAKEN') process.exit(ExitCode.PROJECT_NAME_TAKEN);
+      if (code === 'FORBIDDEN' || code === 'QUOTA_REACHED')
+        process.exit(ExitCode.AUTH_REQUIRED);
+      if (code === 'INVALID_REQUEST') process.exit(ExitCode.INVALID_ARGS);
+      process.exit(ExitCode.AGENT_FAILED);
+    }
+  }
+
   // Handle multiple environments
   if (session.pendingOrgs && !session.credentials) {
     if (mode === 'ci') {
@@ -208,6 +332,25 @@ const resolveNonInteractiveCredentials = async (
           }
         }
         if (session.credentials) break;
+      }
+      if (!session.credentials) {
+        if (projectName) {
+          // --project-name was provided but the create-project block was
+          // skipped (e.g. missing idToken). Surface a clear error instead
+          // of silently continuing without credentials.
+          process.stderr.write(
+            'Error: could not create project — authentication token is missing or expired. ' +
+              `Run \`${CLI_INVOCATION} login\` and re-run.\n`,
+          );
+          process.exit(ExitCode.AUTH_REQUIRED);
+        } else {
+          process.stderr.write(
+            'Error: no Amplitude projects with API keys available. ' +
+              'Pass `--project-name "<name>"` to create one, or create one ' +
+              'in the Amplitude UI and re-run.\n',
+          );
+          process.exit(ExitCode.INVALID_ARGS);
+        }
       }
     } else if (agentUI) {
       // Agent mode: emit a structured prompt event with the full
@@ -419,6 +562,11 @@ void yargs(hideBin(process.argv))
     'project-id': {
       describe:
         'Amplitude project ID (numeric, e.g. 769610) — unambiguous selector',
+      type: 'string',
+    },
+    'project-name': {
+      describe:
+        'Name for a new Amplitude project (creates a project if no projects exist, or when used with --ci/--agent)',
       type: 'string',
     },
     'workspace-id': {

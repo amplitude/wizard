@@ -5,6 +5,13 @@ export const ExitCode = {
   AUTH_REQUIRED: 3,
   NETWORK_ERROR: 4,
   AGENT_FAILED: 10,
+  /**
+   * `--project-name` conflicted with an existing project (NAME_TAKEN in
+   * non-interactive modes, where no retry prompt is possible). Dedicated so
+   * orchestrators can script a rename + re-run without confusing it with
+   * generic agent failures.
+   */
+  PROJECT_NAME_TAKEN: 11,
   USER_CANCELLED: 130,
 } as const;
 

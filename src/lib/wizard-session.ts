@@ -41,6 +41,7 @@ export const CliArgsSchema = z.object({
   benchmark: z.boolean().default(false),
   apiKey: z.string().optional(),
   integration: z.string().optional(),
+  projectName: z.string().optional(),
 });
 
 /**
@@ -345,6 +346,30 @@ export interface WizardSession {
    * instead of the normal detection flow.
    */
   _restoredFromCheckpoint: boolean;
+
+  /**
+   * Create-project flow state.
+   *
+   * `pending` = the user has chosen "Create new project…" from the Auth
+   *   picker or invoked `/create-project`. The CreateProjectScreen should
+   *   render and collect a name.
+   * `null` = not in the create-project flow (default).
+   *
+   * The picker that triggered the flow is tracked for analytics + so we
+   * can route back to the right picker on cancel.
+   *
+   * We intentionally do NOT store the returned apiKey on the session
+   * here — it flows through `setCredentials()` instead (same path as all
+   * other API keys) so redaction and persistence stay consistent.
+   */
+  createProject: {
+    /** True when the CreateProjectScreen should be shown. */
+    pending: boolean;
+    /** Which picker triggered it — used for analytics + cancel routing. */
+    source: 'workspace' | 'project' | 'slash' | 'cli-flag' | null;
+    /** Pre-filled name (e.g. from --project-name CLI flag). */
+    suggestedName: string | null;
+  };
 }
 
 /**
@@ -363,6 +388,8 @@ export function buildSession(args: {
   integration?: Integration;
   benchmark?: boolean;
   projectId?: string;
+  /** From --project-name CLI flag — pre-fills CreateProjectScreen. */
+  projectName?: string;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -442,5 +469,11 @@ export function buildSession(args: {
 
     userEmail: null,
     _restoredFromCheckpoint: false,
+
+    createProject: {
+      pending: false,
+      source: args.projectName ? 'cli-flag' : null,
+      suggestedName: args.projectName ?? null,
+    },
   };
 }
