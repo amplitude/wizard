@@ -199,3 +199,20 @@ export function writeAmpliConfig(dir: string, config: AmpliConfig): void {
     'utf-8',
   );
 }
+
+/**
+ * Remove org/workspace/zone bindings from a project's ampli.json. Called on
+ * logout so a subsequent login doesn't auto-select the previous user's org
+ * and workspace. Tracking-plan fields (SourceId, Branch, Version, etc.) are
+ * preserved — they're not auth state. No-op if ampli.json is missing or
+ * malformed.
+ */
+export function clearAuthFieldsInAmpliConfig(dir: string): void {
+  const result = readAmpliConfig(dir);
+  if (!result.ok) return;
+  const next: AmpliConfig = { ...result.config };
+  delete next.OrgId;
+  delete next.WorkspaceId;
+  delete next.Zone;
+  writeAmpliConfig(dir, next);
+}

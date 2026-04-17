@@ -150,7 +150,10 @@ export function persistApiKey(
 
 /**
  * Remove the stored API key for this project directory from the system
- * keychain (macOS / Linux). Has no effect if no key is stored.
+ * keychain (macOS / Linux) AND from .env.local. Has no effect if no key
+ * is stored. Clears every storage backend because readApiKeyWithSource
+ * falls through them in order — leaving one populated would silently
+ * re-use the previous login's key on the next run.
  */
 export function clearApiKey(installDir: string): void {
   const account = projectHandle(installDir);
@@ -176,6 +179,17 @@ export function clearApiKey(installDir: string): void {
       // Key wasn't in keyring — ignore
     }
   }
+
+  // Strip the key from .env.local without deleting the file — users may
+  // have other env vars there.
+  const envPath = join(installDir, '.env.local');
+  if (!existsSync(envPath)) return;
+  const contents = readFileSync(envPath, 'utf8');
+  if (!contents.includes(`${ENV_KEY_NAME}=`)) return;
+  const stripped = contents
+    .replace(new RegExp(`^${ENV_KEY_NAME}=.*\\r?\\n?`, 'm'), '')
+    .replace(/\n{3,}/g, '\n\n');
+  writeFileSync(envPath, stripped, 'utf8');
 }
 
 /**

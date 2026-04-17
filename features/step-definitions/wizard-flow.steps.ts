@@ -36,6 +36,12 @@ function mockCredentials(): WizardSession['credentials'] {
   };
 }
 
+function ensureIdentityNames(s: WizardSession): void {
+  s.selectedOrgName = s.selectedOrgName ?? 'Test Org';
+  s.selectedWorkspaceName = s.selectedWorkspaceName ?? 'Default';
+  s.selectedProjectName = s.selectedProjectName ?? 'Default';
+}
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Before(function () {
@@ -63,6 +69,7 @@ After(function () {
 Given('I have reached the RunScreen', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
@@ -84,6 +91,7 @@ Given('I have just authenticated', function () {
   session.introConcluded = true;
   session.region = 'us';
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
 });
 
 Given('my region is already set to {string}', function (region: string) {
@@ -122,6 +130,7 @@ Then('I should proceed to the Data Setup flow', function () {
 Given('the wizard is active', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
@@ -130,6 +139,7 @@ Given('the wizard is active', function () {
 Given('the wizard is active at any screen', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
@@ -138,6 +148,7 @@ Given('the wizard is active at any screen', function () {
 Given('I am on the options menu for an existing project', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.projectHasData = true;
 });
@@ -160,6 +171,7 @@ When('the wizard launches', function () {
     const token = getStoredToken(undefined, 'us', sharedConfigPath);
     if (token) {
       session.credentials = mockCredentials();
+      ensureIdentityNames(session);
     }
   }
   // session.introConcluded remains false — IntroScreen is always shown first
@@ -205,6 +217,7 @@ Then('I should go through the Activation Check flow', function () {
 Then('I should go through the Data Setup flow', function () {
   // Simulate SUSI + region selection completing
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   const screen = router.resolve(session);
   assert.strictEqual(
@@ -217,6 +230,7 @@ Then('I should go through the Data Setup flow', function () {
 When('the Data Setup check runs', function () {
   // Simulate SUSI completing so the router advances to DataSetup
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
 });
 
 Then('the project should have no existing data', function () {
@@ -331,6 +345,7 @@ Given('I am in agent mode', function () {
   session.agent = true;
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.activationLevel = 'none';
   session.projectHasData = false;
@@ -343,6 +358,7 @@ Given('I am running in CI mode', function () {
   session.ci = true;
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.activationLevel = 'none';
   session.projectHasData = false;
@@ -384,6 +400,7 @@ Then('I should be on the Checklist screen', function () {
 Given('I am on the DataIngestionCheck screen', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.activationLevel = 'none';
   session.projectHasData = false;
@@ -396,6 +413,7 @@ Given('I am on the DataIngestionCheck screen', function () {
 Given('I am on the Checklist screen', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.activationLevel = 'none';
   session.projectHasData = false;
@@ -409,6 +427,7 @@ Given('I am on the Checklist screen', function () {
 Given('I have completed MCP setup on a fully-activated project', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
+  ensureIdentityNames(session);
   session.region = 'us';
   session.projectHasData = true;
   session.activationLevel = 'full';

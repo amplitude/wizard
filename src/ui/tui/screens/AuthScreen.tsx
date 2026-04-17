@@ -129,14 +129,26 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     selectedWorkspace ?? singleWorkspace ?? prePopulatedWorkspace ?? null;
 
   useEffect(() => {
-    if (effectiveOrg && effectiveWorkspace && !session.selectedWorkspaceId) {
+    if (
+      effectiveOrg &&
+      effectiveWorkspace &&
+      (!session.selectedWorkspaceId ||
+        !session.selectedOrgName ||
+        !session.selectedWorkspaceName)
+    ) {
       store.setOrgAndWorkspace(
         effectiveOrg,
         effectiveWorkspace,
         session.installDir,
       );
     }
-  }, [effectiveOrg?.id, effectiveWorkspace?.id, session.selectedWorkspaceId]);
+  }, [
+    effectiveOrg?.id,
+    effectiveWorkspace?.id,
+    session.selectedWorkspaceId,
+    session.selectedOrgName,
+    session.selectedWorkspaceName,
+  ]);
 
   // workspaceChosen requires the local workspace object (effectiveWorkspace)
   // rather than just session.selectedWorkspaceId, because we need the
@@ -184,6 +196,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('API Key Submitted', {
           key_source: local.source,
         });
+        // Resolve env name from the key when we can — the header slot is
+        // informational, not required for Auth to complete.
+        if (!s.selectedProjectName && effectiveWorkspace) {
+          const match = (effectiveWorkspace.environments ?? []).find(
+            (e) => e.app?.apiKey === local.key,
+          );
+          if (match) store.setSelectedProjectName(match.name);
+        }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
@@ -246,6 +266,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('API Key Submitted', {
           key_source: 'backend_fetch',
         });
+        // Resolve env name from the returned key when possible. Not required
+        // for Auth to complete.
+        if (!store.session.selectedProjectName && effectiveWorkspace) {
+          const match = (effectiveWorkspace.environments ?? []).find(
+            (e) => e.app?.apiKey === projectApiKey,
+          );
+          if (match) store.setSelectedProjectName(match.name);
+        }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
@@ -356,6 +384,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       key_source: 'manual_entry',
     });
     store.setApiKeyNotice(null);
+    // Env name stays null for manually-entered keys — we can't determine
+    // which environment the key belongs to without an extra backend call.
+    // The header will render org / workspace only, which is acceptable.
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       idToken: session.pendingAuthIdToken ?? undefined,

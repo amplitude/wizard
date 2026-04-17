@@ -151,6 +151,11 @@ When('I select a workspace', function () {
 
 When('I enter a valid Amplitude API key', function () {
   const key = 'my-amplitude-api-key-12345';
+  session.selectedOrgName = session.selectedOrgName ?? MOCK_ORG.name;
+  session.selectedWorkspaceName =
+    session.selectedWorkspaceName ?? MOCK_ORG.workspaces[0].name;
+  session.selectedProjectName =
+    session.selectedProjectName ?? MOCK_ORG.workspaces[0].name;
   session.credentials = {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: key,
@@ -278,6 +283,11 @@ Then('I should proceed automatically with the saved key', function () {
   // Simulate what AuthScreen useEffect does: reads key and sets credentials
   const result = readApiKeyWithSource(projectDir);
   assert.ok(result, 'Expected saved key');
+  session.selectedOrgName = session.selectedOrgName ?? MOCK_ORG.name;
+  session.selectedWorkspaceName =
+    session.selectedWorkspaceName ?? MOCK_ORG.workspaces[0].name;
+  session.selectedProjectName =
+    session.selectedProjectName ?? MOCK_ORG.workspaces[0].name;
   session.credentials = {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: result.key,

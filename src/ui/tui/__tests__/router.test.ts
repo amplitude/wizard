@@ -34,6 +34,9 @@ function sessionAtRun(): WizardSession {
     introConcluded: true,
     region: 'us',
     credentials: CREDS,
+    selectedOrgName: 'Acme',
+    selectedWorkspaceName: 'Amplitude',
+    selectedProjectName: 'Production',
     projectHasData: false,
   });
 }
@@ -69,12 +72,65 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('advances from Auth to DataSetup when credentials are set', () => {
+    it('advances from Auth to DataSetup when credentials + org + workspace are set', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
         credentials: CREDS,
+        selectedOrgName: 'Acme',
+        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Production',
+      });
+      expect(router.resolve(session)).toBe(Screen.DataSetup);
+    });
+
+    it('stays on Auth when credentials set but workspace name AND id are missing', () => {
+      const router = new WizardRouter();
+      // With neither name nor ID resolved, the identity isn't known at all —
+      // user must complete selection.
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        credentials: CREDS,
+        selectedOrgName: 'Acme',
+        selectedOrgId: 'org-1',
+        selectedWorkspaceName: null,
+        selectedWorkspaceId: null,
+        selectedProjectName: 'Production',
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('advances when names are missing but IDs are set (hydration fallback)', () => {
+      const router = new WizardRouter();
+      // Failure mode: fetchAmplitudeUser couldn't populate names, but ampli.json
+      // gave us the IDs. Auth must not deadlock on the spinner — accept IDs as
+      // a degraded-but-valid identity.
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        credentials: CREDS,
+        selectedOrgName: null,
+        selectedOrgId: 'org-1',
+        selectedWorkspaceName: null,
+        selectedWorkspaceId: 'ws-1',
+        selectedProjectName: null,
+      });
+      expect(router.resolve(session)).toBe(Screen.DataSetup);
+    });
+
+    it('advances from Auth to DataSetup when env name is missing (env is optional)', () => {
+      const router = new WizardRouter();
+      // Manual API key entry can't resolve the env. As long as org and
+      // workspace are known, Auth is considered complete.
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        credentials: CREDS,
+        selectedOrgName: 'Acme',
+        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: null,
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
