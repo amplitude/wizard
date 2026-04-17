@@ -126,7 +126,7 @@ describe('AgentUI.emitNestedAgent', () => {
     ui.emitNestedAgent({
       signal: 'claude_code_cli',
       envVar: 'CLAUDECODE',
-      instruction: 'Refusing to run nested.',
+      instruction: 'Detected nested agent — sanitized env.',
       bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
     });
 
@@ -134,7 +134,7 @@ describe('AgentUI.emitNestedAgent', () => {
     expect(event.v).toBe(1);
     expect(event.type).toBe('lifecycle');
     expect(event.level).toBe('info');
-    expect(event.message).toBe('Refusing to run nested.');
+    expect(event.message).toBe('Detected nested agent — sanitized env.');
     expect(event.data).toMatchObject({
       event: 'nested_agent',
       signal: 'claude_code_cli',
@@ -148,7 +148,7 @@ describe('AgentUI.emitNestedAgent', () => {
     ui.emitNestedAgent({
       signal: 'claude_agent_sdk',
       envVar: 'CLAUDE_CODE_ENTRYPOINT',
-      instruction: 'Refusing to run nested.',
+      instruction: 'Detected nested agent — sanitized env.',
       bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
     });
 
