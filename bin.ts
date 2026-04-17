@@ -190,7 +190,8 @@ const resolveNonInteractiveCredentials = async (
     projectName &&
     session.pendingOrgs &&
     !session.credentials &&
-    session.pendingAuthIdToken
+    session.pendingAuthIdToken &&
+    session.pendingAuthAccessToken
   ) {
     const { createAmplitudeApp, ApiError } = await import('./src/lib/api.js');
     const { getHostFromRegion } = await import('./src/utils/urls.js');
@@ -236,7 +237,7 @@ const resolveNonInteractiveCredentials = async (
 
     try {
       const created = await createAmplitudeApp(
-        session.pendingAuthIdToken,
+        session.pendingAuthAccessToken,
         zone,
         { orgId: org.id, name: projectName },
       );

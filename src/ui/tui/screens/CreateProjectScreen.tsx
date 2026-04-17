@@ -68,6 +68,16 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
     'us') as AmplitudeZone;
   const orgId = session.selectedOrgId;
   const orgName = session.selectedOrgName;
+  // /create-project can fire mid-SUSI (pending* tokens set, credentials
+  // null) OR after the user is fully signed in (credentials set, pending*
+  // may be null because bin.ts auto-selected a single environment). We need
+  // BOTH tokens: the access token authenticates against Thunder's wizard-
+  // proxy (Hydra introspection rejects id_tokens), and the id_token is what
+  // fetchAmplitudeUser + the stored credentials use for the data-api.
+  const accessToken =
+    session.pendingAuthAccessToken || session.credentials?.accessToken || null;
+  const idToken =
+    session.pendingAuthIdToken || session.credentials?.idToken || null;
 
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' });
   // Uncontrolled TextInput — we only read the value on submit. We seed
@@ -85,7 +95,8 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       !suggestedName ||
       !(session.agent || session.ci) ||
       !orgId ||
-      !session.pendingAuthIdToken
+      !accessToken ||
+      !idToken
     ) {
       return;
     }
@@ -124,8 +135,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       return;
     }
 
-    const idToken = session.pendingAuthIdToken;
-    if (!idToken) {
+    if (!accessToken || !idToken) {
       setPhase({
         kind: 'error',
         name,
@@ -142,7 +152,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
     });
 
     try {
-      const result = await createAmplitudeApp(idToken, zone, {
+      const result = await createAmplitudeApp(accessToken, zone, {
         orgId,
         name,
       });
@@ -162,7 +172,10 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       // next fetchAmplitudeUser refresh.
       store.restoreSessionIds({ workspaceName: result.name });
       store.setCredentials({
-        accessToken: session.pendingAuthAccessToken ?? '',
+        accessToken:
+          session.pendingAuthAccessToken ??
+          session.credentials?.accessToken ??
+          '',
         idToken,
         projectApiKey: result.apiKey,
         host: getHostFromRegion(zone),

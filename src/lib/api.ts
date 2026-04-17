@@ -286,9 +286,9 @@ export function getWizardProxyBase(zone: AmplitudeZone): string {
  * Create a new Amplitude analytics project (app) in the given org via the
  * wizard proxy.
  *
- * - Uses the raw OAuth `id_token` as the Authorization header (no `Bearer `
- *   prefix) to match `fetchAmplitudeUser` and the existing wizard auth
- *   convention.
+ * - Expects an OAuth *access token* (not the id_token) — sent as
+ *   `Authorization: Bearer <token>`. Thunder's wizard-proxy validates it
+ *   against Hydra introspection, which only accepts access tokens.
  * - Errors from the backend are surfaced as `ApiError` with `code` set to one
  *   of `CreateProjectErrorCode` so callers can branch (NAME_TAKEN → retry,
  *   QUOTA_REACHED → fallback, etc.).
@@ -297,7 +297,7 @@ export function getWizardProxyBase(zone: AmplitudeZone): string {
  * log it, and redact it from any analytics/NDJSON output.
  */
 export async function createAmplitudeApp(
-  idToken: string,
+  accessToken: string,
   zone: AmplitudeZone,
   input: { orgId: string; name: string; description?: string },
 ): Promise<CreateProjectResult> {
@@ -325,7 +325,10 @@ export async function createAmplitudeApp(
       },
       {
         headers: {
-          Authorization: idToken,
+          // Thunder's wizard-proxy auth middleware introspects via Hydra,
+          // which only accepts OAuth access tokens (not id_tokens), sent
+          // with the `Bearer ` prefix.
+          Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },

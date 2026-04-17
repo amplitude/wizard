@@ -97,13 +97,13 @@ describe('createAmplitudeApp', () => {
     vi.clearAllMocks();
   });
 
-  it('POSTs to {base}/projects with the raw id_token in Authorization', async () => {
+  it('POSTs to {base}/projects with a Bearer access token in Authorization', async () => {
     mockedAxios.post.mockResolvedValueOnce({
       status: 200,
       data: { appId: '12345', apiKey: 'secret-key', name: 'My Project' },
     });
 
-    const result = await createAmplitudeApp('id-token-abc', 'us', {
+    const result = await createAmplitudeApp('access-token-abc', 'us', {
       orgId: 'org-1',
       name: 'My Project',
     });
@@ -116,8 +116,9 @@ describe('createAmplitudeApp', () => {
     expect(mockedAxios.post).toHaveBeenCalledTimes(1);
     const [url, body, config] = mockedAxios.post.mock.calls[0];
     expect(String(url).endsWith('/projects')).toBe(true);
-    // id_token must be raw — no Bearer prefix.
-    expect(config.headers.Authorization).toBe('id-token-abc');
+    // Thunder's wizard-proxy auth middleware introspects via Hydra — needs
+    // an OAuth access token with the `Bearer ` prefix.
+    expect(config.headers.Authorization).toBe('Bearer access-token-abc');
     expect(config.headers['Content-Type']).toBe('application/json');
     expect(config.headers['User-Agent']).toMatch(/amplitude\/wizard/);
     expect(body).toEqual({ orgId: 'org-1', name: 'My Project' });
