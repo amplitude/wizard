@@ -196,11 +196,10 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       installed.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    // Longer dwell when there's failure text or plugin follow-up instructions
-    // to read. Plain MCP success stays snappy.
-    const hasExtraCopy =
-      installFailures.length > 0 ||
-      (ccMode === 'plugin' && installed.includes(CLAUDE_CODE_CLIENT_NAME));
+    // Every successful install now shows follow-up copy + docs links, and
+    // failure rows show stderr. Give readers time; snappy only when there's
+    // literally nothing interesting to read.
+    const hasExtraCopy = installFailures.length > 0 || installed.length > 0;
     const dwell = hasExtraCopy ? 5000 : 2000;
     timerRef.current = setTimeout(
       () => markDone(store, outcome, installed, standalone, onComplete),
@@ -386,7 +385,25 @@ export const McpScreen = ({
                             first to pick up the new slash commands.
                           </Text>
                           <Text color={Colors.muted}>
-                            Docs: {OUTBOUND_URLS.claudePluginDocs}
+                            Plugin docs: {OUTBOUND_URLS.claudePluginDocs}
+                          </Text>
+                          <Text color={Colors.muted}>
+                            MCP docs: {OUTBOUND_URLS.mcpDocs}
+                          </Text>
+                        </Box>
+                      )}
+                    {!isRemove &&
+                      !(
+                        claudeCodeMode === 'plugin' &&
+                        resultClients.includes(CLAUDE_CODE_CLIENT_NAME)
+                      ) && (
+                        <Box flexDirection="column" marginTop={1}>
+                          <Text color={Colors.muted}>
+                            Next: open your AI tool and sign in when prompted,
+                            then ask “show me yesterday’s signups”.
+                          </Text>
+                          <Text color={Colors.muted}>
+                            MCP docs: {OUTBOUND_URLS.mcpDocs}
                           </Text>
                         </Box>
                       )}

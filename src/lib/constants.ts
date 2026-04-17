@@ -176,7 +176,10 @@ export const OUTBOUND_URLS = {
   /** SDK overview — opened from the Activation Options screen. */
   sdkDocs: 'https://amplitude.com/docs/sdks',
 
-  /** Claude Code plugin docs — shown after a successful plugin install. */
+  /** Amplitude MCP docs — shown after a successful raw MCP install. */
+  mcpDocs: 'https://amplitude.com/docs/amplitude-ai/amplitude-mcp',
+
+  /** Claude Code plugin docs (deep-link into the MCP doc) — shown after plugin install. */
   claudePluginDocs:
     'https://amplitude.com/docs/amplitude-ai/amplitude-mcp#plugins',
 
