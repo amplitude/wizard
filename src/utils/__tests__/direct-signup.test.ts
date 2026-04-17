@@ -234,4 +234,38 @@ describe('performDirectSignup', () => {
 
     expect(result.kind).toBe('error');
   });
+
+  it('honors AMPLITUDE_WIZARD_HEADLESS_URL override', async () => {
+    const original = process.env.AMPLITUDE_WIZARD_HEADLESS_URL;
+    process.env.AMPLITUDE_WIZARD_HEADLESS_URL =
+      'http://localhost:9999/custom-path';
+    let observedUrl = '';
+    server.use(
+      http.post('http://localhost:9999/custom-path', ({ request }) => {
+        observedUrl = request.url;
+        return HttpResponse.json({
+          type: 'requires_auth',
+          requires_auth: {
+            type: 'redirect',
+            redirect: { url: 'https://example.com' },
+          },
+        });
+      }),
+    );
+
+    try {
+      await performDirectSignup({
+        email: 'ada@example.com',
+        fullName: 'Ada Lovelace',
+        zone: 'us',
+      });
+      expect(observedUrl).toBe('http://localhost:9999/custom-path');
+    } finally {
+      if (original === undefined) {
+        delete process.env.AMPLITUDE_WIZARD_HEADLESS_URL;
+      } else {
+        process.env.AMPLITUDE_WIZARD_HEADLESS_URL = original;
+      }
+    }
+  });
 });
