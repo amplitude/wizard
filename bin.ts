@@ -1162,7 +1162,11 @@ void yargs(hideBin(process.argv))
                 );
 
                 try {
-                  await runOAuthCycle(true);
+                  // forceFresh: false lets performAmplitudeAuth reuse a
+                  // stored per-zone token silently when the user has
+                  // previously signed into the target region. Only users
+                  // switching to a never-visited zone see the browser.
+                  await runOAuthCycle(false);
                 } catch (err) {
                   if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
                     console.error('Re-auth error:', err);
