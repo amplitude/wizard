@@ -46,7 +46,25 @@ describe('agent mode + --signup + direct signup integration', () => {
       lastName: 'Lovelace',
       email: 'ada@example.com',
       zone: 'us',
-      orgs: [],
+      orgs: [
+        {
+          id: 'org-1',
+          name: 'Org',
+          workspaces: [
+            {
+              id: 'ws-1',
+              name: 'Default',
+              environments: [
+                {
+                  name: 'Production',
+                  rank: 0,
+                  app: { id: 'p1', apiKey: 'key-1' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
     });
 
     const { buildSession } = await import('../lib/wizard-session.js');

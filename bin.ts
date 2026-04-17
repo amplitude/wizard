@@ -260,6 +260,48 @@ const resolveNonInteractiveCredentials = async (
   }
 };
 
+/**
+ * Run the direct-signup wrapper for agent / CI / classic modes.
+ *
+ * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
+ * set. On a non-null result, optionally runs `onSuccess` (classic uses this
+ * to populate `session.credentials` via `resolveCredentials`). On null or
+ * thrown errors, logs a human message that points at the mode's fallback
+ * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
+ */
+const runDirectSignupIfRequested = async (
+  session: import('./src/lib/wizard-session').WizardSession,
+  fallbackLabel: string,
+  onSuccess?: () => Promise<void>,
+): Promise<void> => {
+  if (!session.signup || !session.signupEmail || !session.signupFullName) {
+    return;
+  }
+  const { performSignupOrAuth } = await import('./src/utils/signup-or-auth.js');
+  const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+  const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
+  try {
+    const tokens = await performSignupOrAuth({
+      email: session.signupEmail,
+      fullName: session.signupFullName,
+      zone,
+    });
+    if (tokens === null) {
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+    } else if (onSuccess) {
+      await onSuccess();
+    }
+  } catch (err) {
+    getUI().log.warn(
+      `Direct signup errored: ${
+        err instanceof Error ? err.message : String(err)
+      }. Continuing to ${fallbackLabel}.`,
+    );
+  }
+};
+
 // ── Observability bootstrap ─────────────────────────────────────────
 // Initialize structured logging early so all code paths can use it.
 // The terminal sink routes log output through the UI singleton (getUI()),
@@ -541,39 +583,11 @@ void yargs(hideBin(process.argv))
           const session = await buildSessionFromOptions(options);
           session.agent = true;
 
-          // Attempt direct signup before falling through to cached-token resolution.
-          // performSignupOrAuth returns null when the flag is off, when inputs are
-          // missing, or when the server returns a non-success response. We do NOT
-          // attempt OAuth here — agent mode has no browser. On null, we continue to
-          // resolveNonInteractiveCredentials, which handles cached tokens or exits
-          // cleanly with AUTH_REQUIRED.
-          if (session.signup && session.signupEmail && session.signupFullName) {
-            const { performSignupOrAuth } = await import(
-              './src/utils/signup-or-auth.js'
-            );
-            const { DEFAULT_AMPLITUDE_ZONE } = await import(
-              './src/lib/constants.js'
-            );
-            const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
-            try {
-              const tokens = await performSignupOrAuth({
-                email: session.signupEmail,
-                fullName: session.signupFullName,
-                zone,
-              });
-              if (tokens === null) {
-                getUI().log.info(
-                  'Direct signup did not produce credentials; continuing to cached-token resolution.',
-                );
-              }
-            } catch (err) {
-              getUI().log.warn(
-                `Direct signup errored: ${
-                  err instanceof Error ? err.message : String(err)
-                }. Continuing to cached-token resolution.`,
-              );
-            }
-          }
+          // Attempt direct signup before falling through to cached-token
+          // resolution. Agent mode has no browser, so a null result continues
+          // to resolveNonInteractiveCredentials, which handles cached tokens
+          // or exits cleanly with AUTH_REQUIRED.
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
 
           await resolveNonInteractiveCredentials(
             session,
@@ -594,39 +608,11 @@ void yargs(hideBin(process.argv))
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
 
-          // Attempt direct signup before falling through to cached-token resolution.
-          // performSignupOrAuth returns null when the flag is off, inputs are
-          // missing, or the server returns a non-success response. We do NOT
-          // attempt OAuth here — CI mode has no browser. On null, we continue to
+          // Attempt direct signup before falling through to cached-token
+          // resolution. CI mode has no browser, so a null result continues to
           // resolveNonInteractiveCredentials, which handles cached tokens or
           // exits cleanly with AUTH_REQUIRED.
-          if (session.signup && session.signupEmail && session.signupFullName) {
-            const { performSignupOrAuth } = await import(
-              './src/utils/signup-or-auth.js'
-            );
-            const { DEFAULT_AMPLITUDE_ZONE } = await import(
-              './src/lib/constants.js'
-            );
-            const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
-            try {
-              const tokens = await performSignupOrAuth({
-                email: session.signupEmail,
-                fullName: session.signupFullName,
-                zone,
-              });
-              if (tokens === null) {
-                getUI().log.info(
-                  'Direct signup did not produce credentials; continuing to cached-token resolution.',
-                );
-              }
-            } catch (err) {
-              getUI().log.warn(
-                `Direct signup errored: ${
-                  err instanceof Error ? err.message : String(err)
-                }. Continuing to cached-token resolution.`,
-              );
-            }
-          }
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
 
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
@@ -642,48 +628,17 @@ void yargs(hideBin(process.argv))
         void (async () => {
           const session = await buildSessionFromOptions(options);
 
-          // Attempt direct signup before falling through to OAuth browser flow.
-          // performSignupOrAuth returns null when the flag is off, inputs are
-          // missing, or the server returns a non-success response. On success,
-          // it writes the real StoredUser + tokens to ~/.ampli.json, and we then
-          // run resolveCredentials to populate session.credentials so agent-runner
-          // skips getOrAskForProjectData (which would otherwise open a browser).
-          // On null/failure, classic mode proceeds normally — getOrAskForProjectData
-          // will call performAmplitudeAuth, which opens a browser (valid for classic).
-          if (session.signup && session.signupEmail && session.signupFullName) {
-            const { performSignupOrAuth } = await import(
-              './src/utils/signup-or-auth.js'
+          // Attempt direct signup before falling through to OAuth browser
+          // flow. On success, run resolveCredentials so agent-runner's
+          // !session.credentials guard skips the OAuth call. On null/failure,
+          // classic mode proceeds normally — getOrAskForProjectData calls
+          // performAmplitudeAuth, which opens a browser (valid for classic).
+          await runDirectSignupIfRequested(session, 'OAuth', async () => {
+            const { resolveCredentials } = await import(
+              './src/lib/credential-resolution.js'
             );
-            const { DEFAULT_AMPLITUDE_ZONE } = await import(
-              './src/lib/constants.js'
-            );
-            const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
-            try {
-              const tokens = await performSignupOrAuth({
-                email: session.signupEmail,
-                fullName: session.signupFullName,
-                zone,
-              });
-              if (tokens !== null) {
-                // Populate session.credentials from the stored user/token so
-                // agent-runner's !session.credentials guard skips the OAuth call.
-                const { resolveCredentials } = await import(
-                  './src/lib/credential-resolution.js'
-                );
-                await resolveCredentials(session);
-              } else {
-                getUI().log.info(
-                  'Direct signup did not produce credentials; continuing to OAuth.',
-                );
-              }
-            } catch (err) {
-              getUI().log.warn(
-                `Direct signup errored: ${
-                  err instanceof Error ? err.message : String(err)
-                }. Continuing to OAuth.`,
-              );
-            }
-          }
+            await resolveCredentials(session);
+          });
 
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],

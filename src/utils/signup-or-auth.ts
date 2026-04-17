@@ -2,11 +2,47 @@ import type { AmplitudeAuthResult } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
 import { FLAG_DIRECT_SIGNUP, isFlagEnabled } from '../lib/feature-flags.js';
 import { storeToken, type StoredUser } from './ampli-settings.js';
-import { fetchAmplitudeUser } from '../lib/api.js';
+import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
 
 const log = createLogger('signup-or-auth');
+
+// Retry delays for post-signup provisioning: worst-case total wait ~3.5s.
+const PROVISIONING_RETRY_DELAYS_MS = [500, 1000, 2000];
+
+function hasEnvWithApiKey(userInfo: AmplitudeUserInfo): boolean {
+  return userInfo.orgs.some((org) =>
+    org.workspaces.some((ws) =>
+      (ws.environments ?? []).some((e) => e.app?.apiKey),
+    ),
+  );
+}
+
+/**
+ * After a successful direct signup, the backend may not have finished
+ * provisioning the default org/workspace/environment. Retry the user
+ * fetch a few times so downstream credential resolution finds an env
+ * with a project API key, instead of mis-reporting "no_stored_credentials".
+ *
+ * Only retries on the no-env-with-apiKey condition — network errors
+ * propagate to the caller's pending-sentinel fallback unchanged.
+ */
+async function fetchUserWithProvisioningRetry(
+  idToken: string,
+  zone: AmplitudeZone,
+): Promise<AmplitudeUserInfo> {
+  let userInfo = await fetchAmplitudeUser(idToken, zone);
+  for (const delayMs of PROVISIONING_RETRY_DELAYS_MS) {
+    if (hasEnvWithApiKey(userInfo)) return userInfo;
+    log.debug('signup provisioning incomplete; retrying user fetch', {
+      delayMs,
+    });
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    userInfo = await fetchAmplitudeUser(idToken, zone);
+  }
+  return userInfo;
+}
 
 export interface SignupOrAuthInput {
   email: string | null;
@@ -27,7 +63,8 @@ export interface SignupOrAuthInput {
  * `StoredUser` + tokens to `~/.ampli.json` so downstream
  * `resolveCredentials()` can populate `session.credentials` via the
  * standard path. Falls back to the `id:'pending'` sentinel if the
- * user fetch fails.
+ * user fetch fails. The user fetch retries briefly on the "no env with
+ * API key yet" case to absorb post-signup provisioning lag.
  *
  * This function does NOT fall back to `performAmplitudeAuth()`. Callers
  * that want OAuth fallback (e.g. the TUI path) must call it explicitly
@@ -70,7 +107,10 @@ export async function performSignupOrAuth(
   // sentinel on fetch failure — the next wizard run will patch the entry.
   let user: StoredUser;
   try {
-    const userInfo = await fetchAmplitudeUser(tokens.idToken, input.zone);
+    const userInfo = await fetchUserWithProvisioningRetry(
+      tokens.idToken,
+      input.zone,
+    );
     user = {
       id: userInfo.id,
       firstName: userInfo.firstName,
