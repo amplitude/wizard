@@ -68,16 +68,16 @@ export async function performSignupOrAuth(
   // Fetch the real user profile so resolveCredentials() downstream can find
   // a non-pending stored user with a valid zone. Fall back to the pending
   // sentinel on fetch failure — the next wizard run will patch the entry.
+  let user: StoredUser;
   try {
     const userInfo = await fetchAmplitudeUser(tokens.idToken, input.zone);
-    const user: StoredUser = {
+    user = {
       id: userInfo.id,
       firstName: userInfo.firstName,
       lastName: userInfo.lastName,
       email: userInfo.email,
       zone: input.zone,
     };
-    storeToken(user, tokens);
   } catch {
     log.warn(
       'fetchAmplitudeUser failed after direct signup; falling back to pending sentinel',
@@ -86,15 +86,15 @@ export async function performSignupOrAuth(
       },
     );
     const parts = input.fullName.trim().split(/\s+/);
-    const pendingUser: StoredUser = {
+    user = {
       id: 'pending',
       firstName: parts[0] ?? '',
       lastName: parts.slice(1).join(' '),
       email: input.email,
       zone: input.zone,
     };
-    storeToken(pendingUser, tokens);
   }
+  storeToken(user, tokens);
 
   return {
     idToken: tokens.idToken,
