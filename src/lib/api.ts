@@ -8,7 +8,7 @@ import {
   type AmplitudeZone,
 } from './constants.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
-import { getLlmGatewayUrlFromHost } from '../utils/urls.js';
+import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
 
 // ── App API URL helper ────────────────────────────────────────────────
 
@@ -275,11 +275,7 @@ export function validateProjectName(
  * Exported so callers + tests can assert the exact endpoint.
  */
 export function getWizardProxyBase(zone: AmplitudeZone): string {
-  const hostFromRegion =
-    zone === 'eu'
-      ? 'https://api.eu.amplitude.com'
-      : 'https://api2.amplitude.com';
-  const gateway = getLlmGatewayUrlFromHost(hostFromRegion);
+  const gateway = getLlmGatewayUrlFromHost(getHostFromRegion(zone));
   // getLlmGatewayUrlFromHost returns the base without `/v1/messages`, but if a
   // WIZARD_LLM_PROXY_URL override includes it we need to strip it so the base
   // stays consistent.

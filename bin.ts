@@ -313,15 +313,24 @@ const resolveNonInteractiveCredentials = async (
         }
         if (session.credentials) break;
       }
-      // If we couldn't auto-select an env AND the user didn't pass
-      // --project-name, we need to tell them. Prompting would block CI.
-      if (!session.credentials && !projectName) {
-        process.stderr.write(
-          'Error: no Amplitude projects with API keys available. ' +
-            'Pass `--project-name "<name>"` to create one, or create one ' +
-            'in the Amplitude UI and re-run.\n',
-        );
-        process.exit(ExitCode.INVALID_ARGS);
+      if (!session.credentials) {
+        if (projectName) {
+          // --project-name was provided but the create-project block was
+          // skipped (e.g. missing idToken). Surface a clear error instead
+          // of silently continuing without credentials.
+          process.stderr.write(
+            'Error: could not create project — authentication token is missing or expired. ' +
+              `Run \`${CLI_INVOCATION} login\` and re-run.\n`,
+          );
+          process.exit(ExitCode.AUTH_REQUIRED);
+        } else {
+          process.stderr.write(
+            'Error: no Amplitude projects with API keys available. ' +
+              'Pass `--project-name "<name>"` to create one, or create one ' +
+              'in the Amplitude UI and re-run.\n',
+          );
+          process.exit(ExitCode.INVALID_ARGS);
+        }
       }
     } else if (agentUI) {
       // Agent mode: emit a structured prompt event with the full
