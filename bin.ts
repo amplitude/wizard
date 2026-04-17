@@ -625,7 +625,26 @@ void yargs(hideBin(process.argv))
         process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
       ) {
         // Classic mode: interactive prompts without the rich TUI
-        void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
+        void (async () => {
+          const session = await buildSessionFromOptions(options);
+
+          // Attempt direct signup before falling through to OAuth browser
+          // flow. On success, run resolveCredentials so agent-runner's
+          // !session.credentials guard skips the OAuth call. On null/failure,
+          // classic mode proceeds normally — getOrAskForProjectData calls
+          // performAmplitudeAuth, which opens a browser (valid for classic).
+          await runDirectSignupIfRequested(session, 'OAuth', async () => {
+            const { resolveCredentials } = await import(
+              './src/lib/credential-resolution.js'
+            );
+            await resolveCredentials(session);
+          });
+
+          await lazyRunWizard(
+            options as Parameters<typeof lazyRunWizard>[0],
+            session,
+          );
+        })();
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
