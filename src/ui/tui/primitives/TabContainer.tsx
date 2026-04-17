@@ -7,6 +7,7 @@ import { Box, Text } from 'ink';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useState, useEffect, type ReactNode } from 'react';
 import { Colors, Icons } from '../styles.js';
+import { linkify } from '../utils/terminal-rendering.js';
 
 export interface TabDefinition {
   id: string;
@@ -78,7 +79,7 @@ export const TabContainer = ({
             overflow="hidden"
           >
             <Text color={Colors.muted}>
-              {Icons.diamondOpen} {statusMessage}
+              {Icons.diamondOpen} {linkify(statusMessage)}
             </Text>
           </Box>
         )}
