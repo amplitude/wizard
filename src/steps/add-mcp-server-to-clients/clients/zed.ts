@@ -1,4 +1,5 @@
 import z from 'zod';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
@@ -35,10 +36,17 @@ export class ZedClient extends DefaultMCPClient {
     return 'context_servers';
   }
 
-  async isClientSupported(): Promise<boolean> {
-    return Promise.resolve(
-      process.platform === 'darwin' || process.platform === 'linux',
-    );
+  isClientSupported(): Promise<boolean> {
+    // Zed creates its config dir on first launch.
+    if (process.platform !== 'darwin' && process.platform !== 'linux') {
+      return Promise.resolve(false);
+    }
+    const xdgConfigHome = process.env.XDG_CONFIG_HOME;
+    const zedDir =
+      process.platform === 'linux' && xdgConfigHome
+        ? path.join(xdgConfigHome, 'zed')
+        : path.join(os.homedir(), '.config', 'zed');
+    return Promise.resolve(fs.existsSync(zedDir));
   }
 
   async getConfigPath(): Promise<string> {
