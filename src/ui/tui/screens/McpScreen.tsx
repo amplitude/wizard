@@ -18,6 +18,7 @@ import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import type {
   McpInstaller,
   McpClientInfo,
@@ -26,6 +27,8 @@ import type {
 import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
+
+type ClientStatus = 'pending' | 'working' | 'done' | 'failed';
 
 const CLAUDE_CODE_CLIENT_NAME = 'Claude Code';
 
@@ -95,9 +98,19 @@ export const McpScreen = ({
   const [failures, setFailures] = useState<McpInstallFailure[]>([]);
   const [claudeCodeMode, setClaudeCodeMode] =
     useState<ClaudeCodeInstallMode>('plugin');
+  /** Per-client progress shown during the Working phase. */
+  const [progress, setProgress] = useState<
+    Array<{ name: string; status: ClientStatus }>
+  >([]);
+
+  // When shown as an /mcp slash-command overlay, onComplete is provided and
+  // the user explicitly asked for MCP setup. Don't hijack their request with
+  // the pre-detected picker (that's meant for the main wizard flow only).
+  const isOverlay = onComplete !== undefined;
+  const showPreDetectedChoice = amplitudePreDetectedChoicePending && !isOverlay;
 
   useEffect(() => {
-    if (amplitudePreDetectedChoicePending) {
+    if (showPreDetectedChoice) {
       return;
     }
     void (async () => {
@@ -134,7 +147,7 @@ export const McpScreen = ({
         );
       }
     })();
-  }, [installer, amplitudePreDetectedChoicePending]);
+  }, [installer, showPreDetectedChoice]);
 
   const proceedWithNames = (names: string[]) => {
     // For Claude Code we default to the plugin (MCP + slash commands).
@@ -173,10 +186,29 @@ export const McpScreen = ({
   const doInstall = async (names: string[], ccMode: ClaudeCodeInstallMode) => {
     setClaudeCodeMode(ccMode);
     setPhase(Phase.Working);
+    setProgress(names.map((name) => ({ name, status: 'pending' as const })));
     let installed: string[] = [];
     let installFailures: McpInstallFailure[];
     try {
-      const result = await installer.install(names, { claudeCodeMode: ccMode });
+      const result = await installer.install(names, {
+        claudeCodeMode: ccMode,
+        onClientStart: (name) => {
+          setProgress((prev) =>
+            prev.map((p) =>
+              p.name === name ? { ...p, status: 'working' } : p,
+            ),
+          );
+        },
+        onClientComplete: ({ name, success }) => {
+          setProgress((prev) =>
+            prev.map((p) =>
+              p.name === name
+                ? { ...p, status: success ? 'done' : 'failed' }
+                : p,
+            ),
+          );
+        },
+      });
       installed = result.installed;
       installFailures = result.failures;
     } catch (err) {
@@ -238,7 +270,7 @@ export const McpScreen = ({
           </Text>
         </Box>
       )}
-      {amplitudePreDetectedChoicePending && !isRemove && (
+      {showPreDetectedChoice && !isRemove && (
         <Box marginBottom={1} flexDirection="column">
           <Text color={Colors.secondary}>
             Amplitude is already set up in this project, so we skipped the
@@ -270,18 +302,19 @@ export const McpScreen = ({
           </Box>
         </Box>
       )}
-      {!amplitudePreDetectedChoicePending && (
+      {!showPreDetectedChoice && (
         <>
           <Text bold color={Colors.accent}>
             {isRemove
-              ? 'Disconnect Amplitude from your AI tools'
-              : 'Connect Amplitude to your AI tools'}
+              ? 'Remove Amplitude from your AI tools'
+              : 'Chat with your Amplitude data'}
           </Text>
           {!isRemove && (
             <Text color={Colors.muted}>
-              Ask about your analytics, build charts, and check metrics from
-              chat (e.g. “show me yesterday’s signups”) — without leaving Claude
-              Code, Cursor, and others.
+              We’ll wire the Amplitude MCP into Claude Code, Cursor, Claude
+              Desktop, and other AI tools you have installed. You can then ask
+              questions, build charts, and check metrics from chat (e.g. “show
+              me yesterday’s signups”).
             </Text>
           )}
 
@@ -343,10 +376,45 @@ export const McpScreen = ({
             )}
 
             {phase === Phase.Working && (
-              <Text color={Colors.active}>
-                {isRemove ? 'Disconnecting' : 'Connecting'} Amplitude
-                {Icons.ellipsis}
-              </Text>
+              <Box flexDirection="column">
+                <Box>
+                  <BrailleSpinner color={Colors.active} />
+                  <Text color={Colors.active}>
+                    {' '}
+                    {isRemove ? 'Removing' : 'Installing'} Amplitude
+                    {Icons.ellipsis}
+                  </Text>
+                </Box>
+                {progress.length > 0 && (
+                  <Box flexDirection="column" marginTop={1}>
+                    {progress.map((p, i) => (
+                      <Box key={i}>
+                        <Text
+                          color={
+                            p.status === 'done'
+                              ? Colors.success
+                              : p.status === 'failed'
+                              ? Colors.error
+                              : p.status === 'working'
+                              ? Colors.active
+                              : Colors.muted
+                          }
+                        >
+                          {p.status === 'done'
+                            ? `  ${Icons.checkmark} `
+                            : p.status === 'failed'
+                            ? `  ${Icons.cross} `
+                            : p.status === 'working'
+                            ? '  › '
+                            : '  · '}
+                          {p.name}
+                          {p.status === 'working' ? '…' : ''}
+                        </Text>
+                      </Box>
+                    ))}
+                  </Box>
+                )}
+              </Box>
             )}
 
             {phase === Phase.Done && (

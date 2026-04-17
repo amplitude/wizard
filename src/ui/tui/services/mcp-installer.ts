@@ -57,6 +57,16 @@ export interface McpInstallOptions {
    * Ignored for other editors.
    */
   claudeCodeMode?: ClaudeCodeInstallMode;
+
+  /** Called right before install of each client so the UI can show "connecting to X…". */
+  onClientStart?: (name: string) => void;
+
+  /** Called after each client finishes so the UI can tick it off live. */
+  onClientComplete?: (result: {
+    name: string;
+    success: boolean;
+    error?: string;
+  }) => void;
 }
 
 export interface McpInstaller {
@@ -138,10 +148,12 @@ export function createMcpInstaller(local = false): McpInstaller {
       const installed: string[] = [];
       const failures: McpInstallFailure[] = [];
       for (const client of toInstall) {
+        options?.onClientStart?.(client.name);
         try {
           const result = await client.addServer(accessToken, features, local);
           if (result?.success) {
             installed.push(client.name);
+            options?.onClientComplete?.({ name: client.name, success: true });
           } else {
             const errorMsg = result?.error;
             logToFile(
@@ -150,6 +162,11 @@ export function createMcpInstaller(local = false): McpInstaller {
               }`,
             );
             failures.push({ name: client.name, error: errorMsg });
+            options?.onClientComplete?.({
+              name: client.name,
+              success: false,
+              error: errorMsg,
+            });
           }
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
@@ -157,6 +174,11 @@ export function createMcpInstaller(local = false): McpInstaller {
             `[McpInstaller] addServer threw for ${client.name}: ${msg}`,
           );
           failures.push({ name: client.name, error: msg });
+          options?.onClientComplete?.({
+            name: client.name,
+            success: false,
+            error: msg,
+          });
         }
       }
       return { installed, failures };
