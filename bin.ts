@@ -423,6 +423,48 @@ const resolveNonInteractiveCredentials = async (
   }
 };
 
+/**
+ * Run the direct-signup wrapper for agent / CI / classic modes.
+ *
+ * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
+ * set. On a non-null result, optionally runs `onSuccess` (classic uses this
+ * to populate `session.credentials` via `resolveCredentials`). On null or
+ * thrown errors, logs a human message that points at the mode's fallback
+ * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
+ */
+const runDirectSignupIfRequested = async (
+  session: import('./src/lib/wizard-session').WizardSession,
+  fallbackLabel: string,
+  onSuccess?: () => Promise<void>,
+): Promise<void> => {
+  if (!session.signup || !session.signupEmail || !session.signupFullName) {
+    return;
+  }
+  const { performSignupOrAuth } = await import('./src/utils/signup-or-auth.js');
+  const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+  const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
+  try {
+    const tokens = await performSignupOrAuth({
+      email: session.signupEmail,
+      fullName: session.signupFullName,
+      zone,
+    });
+    if (tokens === null) {
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+    } else if (onSuccess) {
+      await onSuccess();
+    }
+  } catch (err) {
+    getUI().log.warn(
+      `Direct signup errored: ${
+        err instanceof Error ? err.message : String(err)
+      }. Continuing to ${fallbackLabel}.`,
+    );
+  }
+};
+
 // ── Observability bootstrap ─────────────────────────────────────────
 // Initialize structured logging early so all code paths can use it.
 // The terminal sink routes log output through the UI singleton (getUI()),
@@ -711,6 +753,13 @@ void yargs(hideBin(process.argv))
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
+
+          // Attempt direct signup before falling through to cached-token
+          // resolution. Agent mode has no browser, so a null result continues
+          // to resolveNonInteractiveCredentials, which handles cached tokens
+          // or exits cleanly with AUTH_REQUIRED.
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
+
           await resolveNonInteractiveCredentials(
             session,
             options,
