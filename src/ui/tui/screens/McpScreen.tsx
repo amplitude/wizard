@@ -16,6 +16,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -98,6 +99,11 @@ export const McpScreen = ({
   const [failures, setFailures] = useState<McpInstallFailure[]>([]);
   const [claudeCodeMode, setClaudeCodeMode] =
     useState<ClaudeCodeInstallMode>('plugin');
+  /**
+   * User pressed `m` to downgrade Claude Code to raw MCP in this run
+   * (equivalent to setting AMPLITUDE_WIZARD_MCP_ONLY=1 for this install only).
+   */
+  const [overrideMcpOnly, setOverrideMcpOnly] = useState(false);
   /** Per-client progress shown during the Working phase. */
   const [progress, setProgress] = useState<
     Array<{ name: string; status: ClientStatus }>
@@ -110,12 +116,37 @@ export const McpScreen = ({
   const showPreDetectedChoice = amplitudePreDetectedChoicePending && !isOverlay;
 
   /** True when Claude Code will get the richer plugin install. */
-  const claudeCodeUsesPlugin =
-    !store.session.localMcp && process.env.AMPLITUDE_WIZARD_MCP_ONLY !== '1';
+  const forcedMcpOnly =
+    store.session.localMcp || process.env.AMPLITUDE_WIZARD_MCP_ONLY === '1';
+  const claudeCodeUsesPlugin = !forcedMcpOnly && !overrideMcpOnly;
+  const claudeCodeDetected = clients.some(
+    (c) => c.name === CLAUDE_CODE_CLIENT_NAME,
+  );
+  /** Toggle is only meaningful when Claude Code is present AND there's no forced env-var override. */
+  const showPluginToggle =
+    claudeCodeDetected &&
+    !forcedMcpOnly &&
+    !isRemove &&
+    (phase === Phase.Ask || phase === Phase.Pick);
   const labelFor = (name: string) =>
     name === CLAUDE_CODE_CLIENT_NAME && claudeCodeUsesPlugin
       ? `${name} (plugin — slash commands + MCP)`
       : `${name} (MCP server)`;
+
+  useScreenInput(
+    (input) => {
+      if (input === 'm' || input === 'M') {
+        setOverrideMcpOnly((v) => {
+          analytics.wizardCapture('MCP Claude Code Mode Toggled', {
+            from: v ? 'mcp' : 'plugin',
+            to: v ? 'plugin' : 'mcp',
+          });
+          return !v;
+        });
+      }
+    },
+    { isActive: showPluginToggle },
+  );
 
   useEffect(() => {
     if (showPreDetectedChoice) {
@@ -353,6 +384,15 @@ export const McpScreen = ({
                     {Icons.bullet} {isRemove ? c.name : labelFor(c.name)}
                   </Text>
                 ))}
+                {showPluginToggle && (
+                  <Text color={Colors.muted}>
+                    {'  '}
+                    [m]{' '}
+                    {claudeCodeUsesPlugin
+                      ? 'Use MCP server only for Claude Code (no slash commands)'
+                      : 'Use the Amplitude plugin for Claude Code (slash commands + MCP)'}
+                  </Text>
+                )}
                 <Box marginTop={1}>
                   <ConfirmationInput
                     message={
@@ -369,6 +409,14 @@ export const McpScreen = ({
               </>
             )}
 
+            {phase === Phase.Pick && showPluginToggle && (
+              <Text color={Colors.muted}>
+                [m]{' '}
+                {claudeCodeUsesPlugin
+                  ? 'Use MCP server only for Claude Code (no slash commands)'
+                  : 'Use the Amplitude plugin for Claude Code (slash commands + MCP)'}
+              </Text>
+            )}
             {phase === Phase.Pick && (
               <PickerMenu
                 message="Pick which AI tools to connect"
