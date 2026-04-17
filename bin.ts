@@ -1,11 +1,17 @@
 #!/usr/bin/env node
-// Sanitize inherited Claude Code / Agent SDK env vars BEFORE anything else
-// loads. The wizard spawns its own Claude Agent SDK subprocess and any
-// transitive import that snapshots env at module init would otherwise see
-// the outer session's CLAUDECODE / CLAUDE_CODE_* / CLAUDE_AGENT_SDK_* vars
-// and route auth to the wrong place (400 at our LLM gateway). The project
-// compiles to CommonJS (see tsconfig.build.json), so these imports execute
-// inline in source order — this call must run before any import below.
+// Detect nesting FIRST, then sanitize inherited Claude Code / Agent SDK env
+// vars BEFORE anything else loads. Detection must run before sanitization
+// because both inspect the same env vars (CLAUDECODE, CLAUDE_CODE_*, etc.).
+// detect-nested-agent has zero imports, so loading it here is safe.
+//
+// The wizard spawns its own Claude Agent SDK subprocess and any transitive
+// import that snapshots env at module init would otherwise see the outer
+// session's CLAUDECODE / CLAUDE_CODE_* / CLAUDE_AGENT_SDK_* vars and route
+// auth to the wrong place (400 at our LLM gateway). The project compiles to
+// CommonJS (see tsconfig.build.json), so these imports execute inline in
+// source order — the sanitize call must run before any import below.
+import { detectNestedAgent as _detectNestedAgentEarly } from './src/lib/detect-nested-agent';
+const _earlyNestedDetection = _detectNestedAgentEarly();
 import { sanitizeNestedClaudeEnv } from './src/lib/sanitize-claude-env';
 sanitizeNestedClaudeEnv();
 
@@ -64,7 +70,6 @@ import {
 } from './src/utils/shell-completions';
 import { analytics } from './src/utils/analytics';
 import { ExitCode } from './src/lib/exit-codes';
-import { detectNestedAgent } from './src/lib/detect-nested-agent';
 import { AgentUI } from './src/ui/agent-ui';
 import {
   initLogger,
@@ -329,13 +334,11 @@ const resolveNonInteractiveCredentials = async (
     getUI().log.info(`Log file: ${getLogFilePath()}`);
   }
 
-  // Detect nested invocation inside another Claude Code / Claude Agent SDK
-  // session. Inherited env vars (CLAUDECODE, CLAUDE_CODE_*, CLAUDE_AGENT_SDK_*)
-  // were already sanitized at the top of this file before any import could
-  // snapshot them. This block is diagnostic-only: it surfaces the signal so
-  // outer agent orchestrators can log it, and gives humans debugging auth
-  // weirdness a breadcrumb.
-  const nested = detectNestedAgent();
+  // Diagnostic: surface the nested-agent detection captured at the top of
+  // this file (before sanitization wiped the env vars). This block is
+  // diagnostic-only: it surfaces the signal so outer agent orchestrators
+  // can log it, and gives humans debugging auth weirdness a breadcrumb.
+  const nested = _earlyNestedDetection;
   if (nested) {
     const detail =
       `Detected nested agent invocation via ${nested.envVar}=${nested.envValue}. ` +
