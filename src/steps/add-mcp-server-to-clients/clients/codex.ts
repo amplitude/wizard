@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { execSync, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
@@ -18,12 +21,15 @@ export class CodexMCPClient extends DefaultMCPClient {
   }
 
   isClientSupported(): Promise<boolean> {
+    // Require BOTH the binary on PATH and the ~/.codex/ user-data dir.
+    // Without the dir check, any unrelated `codex` binary on PATH (there
+    // are a few in the wild) would make us claim Codex is installed.
     try {
       execSync('codex --version', { stdio: 'ignore' });
-      return Promise.resolve(true);
     } catch {
       return Promise.resolve(false);
     }
+    return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.codex')));
   }
 
   getConfigPath(): Promise<string> {

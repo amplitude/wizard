@@ -37,16 +37,19 @@ export class ZedClient extends DefaultMCPClient {
   }
 
   isClientSupported(): Promise<boolean> {
-    // Zed creates its config dir on first launch.
-    if (process.platform !== 'darwin' && process.platform !== 'linux') {
-      return Promise.resolve(false);
+    // macOS: require the actual app bundle — ~/.config/zed/ can linger from
+    // past installs or be created by unrelated dotfile setups.
+    if (process.platform === 'darwin') {
+      return Promise.resolve(fs.existsSync('/Applications/Zed.app'));
     }
-    const xdgConfigHome = process.env.XDG_CONFIG_HOME;
-    const zedDir =
-      process.platform === 'linux' && xdgConfigHome
+    if (process.platform === 'linux') {
+      const xdgConfigHome = process.env.XDG_CONFIG_HOME;
+      const zedDir = xdgConfigHome
         ? path.join(xdgConfigHome, 'zed')
         : path.join(os.homedir(), '.config', 'zed');
-    return Promise.resolve(fs.existsSync(zedDir));
+      return Promise.resolve(fs.existsSync(zedDir));
+    }
+    return Promise.resolve(false);
   }
 
   async getConfigPath(): Promise<string> {
