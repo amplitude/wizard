@@ -639,7 +639,57 @@ void yargs(hideBin(process.argv))
         process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
       ) {
         // Classic mode: interactive prompts without the rich TUI
-        void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
+        void (async () => {
+          const session = await buildSessionFromOptions(options);
+
+          // Attempt direct signup before falling through to OAuth browser flow.
+          // performSignupOrAuth returns null when the flag is off, inputs are
+          // missing, or the server returns a non-success response. On success,
+          // it writes the real StoredUser + tokens to ~/.ampli.json, and we then
+          // run resolveCredentials to populate session.credentials so agent-runner
+          // skips getOrAskForProjectData (which would otherwise open a browser).
+          // On null/failure, classic mode proceeds normally — getOrAskForProjectData
+          // will call performAmplitudeAuth, which opens a browser (valid for classic).
+          if (session.signup && session.signupEmail && session.signupFullName) {
+            const { performSignupOrAuth } = await import(
+              './src/utils/signup-or-auth.js'
+            );
+            const { DEFAULT_AMPLITUDE_ZONE } = await import(
+              './src/lib/constants.js'
+            );
+            const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
+            try {
+              const tokens = await performSignupOrAuth({
+                email: session.signupEmail,
+                fullName: session.signupFullName,
+                zone,
+              });
+              if (tokens !== null) {
+                // Populate session.credentials from the stored user/token so
+                // agent-runner's !session.credentials guard skips the OAuth call.
+                const { resolveCredentials } = await import(
+                  './src/lib/credential-resolution.js'
+                );
+                await resolveCredentials(session);
+              } else {
+                getUI().log.info(
+                  'Direct signup did not produce credentials; continuing to OAuth.',
+                );
+              }
+            } catch (err) {
+              getUI().log.warn(
+                `Direct signup errored: ${
+                  err instanceof Error ? err.message : String(err)
+                }. Continuing to OAuth.`,
+              );
+            }
+          }
+
+          await lazyRunWizard(
+            options as Parameters<typeof lazyRunWizard>[0],
+            session,
+          );
+        })();
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
