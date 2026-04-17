@@ -1,4 +1,4 @@
-import { CLAUDE_PLUGIN_ENABLED, type Integration } from '../../lib/constants';
+import type { Integration } from '../../lib/constants';
 import { traceStep } from '../../telemetry';
 import { analytics } from '../../utils/analytics';
 import { getUI } from '../../ui';
@@ -91,8 +91,7 @@ export const addMCPServerToClientsStep = async ({
     return [];
   }
 
-  const mode: ClaudeCodeInstallMode =
-    claudeCodeMode ?? (CLAUDE_PLUGIN_ENABLED ? 'plugin' : 'mcp');
+  const mode: ClaudeCodeInstallMode = claudeCodeMode ?? 'plugin';
   const clientsToInstall = resolveClientsForMode(supportedClients, mode);
 
   // Auto-install to all supported clients

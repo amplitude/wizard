@@ -20,7 +20,6 @@ import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
 import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
-import { CLAUDE_PLUGIN_ENABLED } from '../../../lib/constants.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
 
 const CLAUDE_CODE_CLIENT_NAME = 'Claude Code';
@@ -134,7 +133,7 @@ export const McpScreen = ({
   }, [installer, amplitudePreDetectedChoicePending]);
 
   const proceedWithNames = (names: string[]) => {
-    if (CLAUDE_PLUGIN_ENABLED && names.includes(CLAUDE_CODE_CLIENT_NAME)) {
+    if (names.includes(CLAUDE_CODE_CLIENT_NAME)) {
       analytics.wizardCapture('MCP Claude Code Mode Picker Shown', {
         clients: names,
       });
