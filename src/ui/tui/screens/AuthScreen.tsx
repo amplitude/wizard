@@ -185,6 +185,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('API Key Submitted', {
           key_source: local.source,
         });
+        if (!s.selectedProjectName) {
+          store.setSelectedProjectName(
+            effectiveWorkspace?.name ?? s.selectedWorkspaceName ?? 'Project',
+          );
+        }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
@@ -247,6 +252,13 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('API Key Submitted', {
           key_source: 'backend_fetch',
         });
+        if (!store.session.selectedProjectName) {
+          store.setSelectedProjectName(
+            effectiveWorkspace?.name ??
+              store.session.selectedWorkspaceName ??
+              'Project',
+          );
+        }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
@@ -308,6 +320,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       key_source: 'manual_entry',
     });
     store.setApiKeyNotice(null);
+    if (!session.selectedProjectName) {
+      store.setSelectedProjectName(
+        effectiveWorkspace?.name ?? session.selectedWorkspaceName ?? 'Project',
+      );
+    }
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       idToken: session.pendingAuthIdToken ?? undefined,

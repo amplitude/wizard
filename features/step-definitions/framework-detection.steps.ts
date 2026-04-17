@@ -68,6 +68,9 @@ function advancePastAuth(s: WizardSession): void {
     host: 'https://api.amplitude.com',
     projectId: 0,
   };
+  s.selectedOrgName = 'Test Org';
+  s.selectedWorkspaceName = 'Default';
+  s.selectedProjectName = 'Default';
   s.region = 'us';
   s.projectHasData = false;
 }
