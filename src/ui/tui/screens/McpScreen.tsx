@@ -16,6 +16,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -254,6 +255,31 @@ export const McpScreen = ({
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
+  /**
+   * Fires when the user presses Enter on the Done screen. We keep a long
+   * fallback timer (20s) in case the user walks away, but the primary
+   * exit path is explicit — the old 5s auto-dismiss ejected people
+   * mid-read.
+   */
+  const advanceFromDone = () => {
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    const outcome =
+      resultClients.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
+    markDone(store, outcome, resultClients, standalone, onComplete);
+  };
+
+  useScreenInput(
+    (_input, key) => {
+      if (key.return) {
+        advanceFromDone();
+      }
+    },
+    { isActive: phase === Phase.Done },
+  );
+
   const doInstall = async (names: string[], ccMode: ClaudeCodeInstallMode) => {
     setClaudeCodeMode(ccMode);
     setPhase(Phase.Working);
@@ -299,14 +325,16 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       installed.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
-    // Every successful install now shows follow-up copy + docs links, and
-    // failure rows show stderr. Give readers time; snappy only when there's
-    // literally nothing interesting to read.
-    const hasExtraCopy = installFailures.length > 0 || installed.length > 0;
-    const dwell = hasExtraCopy ? 5000 : 2000;
+    // Long fallback only — the primary exit is user pressing Enter (see the
+    // useScreenInput hook above). We used to auto-advance after 2–5s, which
+    // ejected people mid-read. 20s gives anyone legit unattended time to
+    // scroll past; interactive users hit Enter whenever they're done.
+    const hasNothingToRead =
+      installed.length === 0 && installFailures.length === 0;
+    const fallback = hasNothingToRead ? 2000 : 20000;
     timerRef.current = setTimeout(
       () => markDone(store, outcome, installed, standalone, onComplete),
-      dwell,
+      fallback,
     );
   };
 
@@ -325,7 +353,7 @@ export const McpScreen = ({
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
     timerRef.current = setTimeout(
       () => markDone(store, outcome, result, standalone, onComplete),
-      2000,
+      20000,
     );
   };
 
@@ -391,9 +419,13 @@ export const McpScreen = ({
 
           <Box marginTop={1} flexDirection="column">
             {phase === Phase.Detecting && (
-              <Text color={Colors.muted}>
-                Looking for supported AI tools{Icons.ellipsis}
-              </Text>
+              <Box>
+                <BrailleSpinner color={Colors.muted} />
+                <Text color={Colors.muted}>
+                  {' '}
+                  Looking for supported AI tools{Icons.ellipsis}
+                </Text>
+              </Box>
             )}
 
             {phase === Phase.None && (
@@ -598,6 +630,13 @@ export const McpScreen = ({
                   <Text color={Colors.muted}>
                     {isRemove ? 'Removal' : 'Setup'} skipped.
                   </Text>
+                )}
+                {(resultClients.length > 0 || failures.length > 0) && (
+                  <Box marginTop={1}>
+                    <Text color={Colors.muted}>
+                      Press <Text color={Colors.body}>Enter</Text> to continue.
+                    </Text>
+                  </Box>
                 )}
               </Box>
             )}
