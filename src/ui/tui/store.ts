@@ -775,7 +775,7 @@ export class WizardStore {
     this.$session.setKey('slackComplete', true);
     this.$session.setKey('slackOutcome', outcome);
     analytics.wizardCapture('Slack Complete', {
-      slack_outcome: outcome,
+      'slack outcome': outcome,
       ...sessionPropertiesCompact(this.session),
     });
     this.emitChange();

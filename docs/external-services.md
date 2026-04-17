@@ -190,7 +190,7 @@ Both use a 5000ms timeout (`src/lib/health-checks/endpoints.ts`):
 
 ## Telemetry
 
-The wizard reports its own usage analytics to the main `amplitude/Amplitude` project — the same project Lightning, Thunder, Hermes, and ampli all use.
+The wizard reports its own usage analytics to the main `amplitude/Amplitude` project — the same project the rest of the Amplitude app writes to.
 
 | Setting | Value |
 |---------|-------|
