@@ -83,4 +83,16 @@ describe('linkify', () => {
     );
     expect(out).toContain(makeLink('label', 'https://b.example/two'));
   });
+
+  it('does not swallow a placeholder when a bare URL abuts a markdown link', () => {
+    // Adjacent with no separator — the bare-URL pass must stop at the NUL
+    // placeholder sentinel emitted by the markdown pass, otherwise the
+    // markdown link is lost during restoration.
+    const raw = 'https://a.example[label](https://b.example)';
+    const out = linkify(raw);
+    expect(out).toContain(makeLink('https://a.example', 'https://a.example'));
+    expect(out).toContain(makeLink('label', 'https://b.example'));
+    expect(out).not.toContain('LINKIFIED');
+    expect(out).not.toContain('\u0000');
+  });
 });

@@ -29,10 +29,12 @@ export function makeLink(text: string, url: string): string {
 // non-paren. Used before the bare-URL pass so we don't double-wrap.
 const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
 
-// Bare http(s) URL. Stops at whitespace, quotes, brackets, or parens so we
-// don't swallow JSON/markdown artifacts. Trailing punctuation is stripped
-// after the match so links at end of a sentence still work.
-const BARE_URL_RE = /https?:\/\/[^\s"'<>()[\]{}]+/g;
+// Bare http(s) URL. Stops at whitespace, quotes, brackets, parens, and the
+// NUL placeholder sentinel used by the markdown pass so we don't swallow
+// JSON/markdown artifacts or already-linkified placeholders. Trailing
+// punctuation is stripped after the match so links at end of a sentence
+// still work.
+const BARE_URL_RE = /https?:\/\/[^\s"'<>()[\]{}\0]+/g;
 const TRAILING_PUNCT_RE = /[.,;:!?)>\]]+$/;
 
 /**
