@@ -24,12 +24,13 @@ export function copyToClipboard(text: string): boolean {
       return true;
     }
     // Linux: try xclip, then xsel. Either missing is fine.
-    for (const cmd of [
+    const linuxCandidates: Array<[string, string[]]> = [
       ['xclip', ['-selection', 'clipboard']],
       ['xsel', ['--clipboard', '--input']],
-    ] as const) {
+    ];
+    for (const [bin, args] of linuxCandidates) {
       try {
-        const proc = spawn(cmd[0], cmd[1] as string[], {
+        const proc = spawn(bin, args, {
           stdio: ['pipe', 'ignore', 'ignore'],
         });
         proc.stdin.end(text);
