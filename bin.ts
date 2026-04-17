@@ -1124,11 +1124,16 @@ void yargs(hideBin(process.argv))
             })();
 
             // Fire-and-forget watcher that re-runs OAuth whenever a mid-session
-            // /region (or /login) clears credentials. Without this the user
-            // would hang on AuthScreen's "Waiting for authentication..."
-            // spinner after switching regions. Never resolves — the process
-            // exit (via SIGINT or normal completion) tears it down.
+            // /region clears credentials. Without this the user would hang on
+            // AuthScreen's "Waiting for authentication..." spinner after
+            // switching regions. Never resolves — the process exit (via SIGINT
+            // or normal completion) tears it down.
+            //
+            // Deferred until authTask resolves so the watcher doesn't add a
+            // second subscribe during the initial-auth window.
             void (async () => {
+              await authTask;
+              const { Overlay } = await import('./src/ui/tui/router.js');
               while (true) {
                 // Wait for credentials to be populated first — either by the
                 // initial authTask above or by AuthScreen's SUSI pickers.
@@ -1140,12 +1145,20 @@ void yargs(hideBin(process.argv))
                 // picked a new region (so we don't fire while RegionSelect
                 // is still open). setRegionForced clears credentials; the
                 // subsequent setRegion clears regionForced.
+                //
+                // Skip when the Logout overlay is active or an outro is
+                // queued — /logout clears credentials immediately and
+                // process.exit()s 1.5s later; without this guard the
+                // watcher would race the exit and open a browser during the
+                // "Logged out" confirmation.
                 await waitForSessionState(
                   () =>
                     tui.store.session.credentials === null &&
                     tui.store.session.region !== null &&
                     !tui.store.session.regionForced &&
-                    tui.store.session.introConcluded,
+                    tui.store.session.introConcluded &&
+                    tui.store.currentScreen !== Overlay.Logout &&
+                    tui.store.session.outroData === null,
                 );
 
                 try {
