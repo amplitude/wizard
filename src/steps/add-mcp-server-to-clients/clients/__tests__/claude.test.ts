@@ -79,20 +79,41 @@ describe('ClaudeMCPClient', () => {
   });
 
   describe('isClientSupported', () => {
-    it('should return true for macOS', async () => {
+    it('should return true for macOS when the app data dir exists', async () => {
       Object.defineProperty(process, 'platform', {
         value: 'darwin',
         writable: true,
       });
+      existsSyncMock.mockReturnValue(true);
       await expect(client.isClientSupported()).resolves.toBe(true);
+      expect(existsSyncMock).toHaveBeenCalledWith(
+        path.join(mockHomeDir, 'Library', 'Application Support', 'Claude'),
+      );
     });
 
-    it('should return true for Windows', async () => {
+    it('should return false for macOS when the app data dir is missing', async () => {
+      Object.defineProperty(process, 'platform', {
+        value: 'darwin',
+        writable: true,
+      });
+      existsSyncMock.mockReturnValue(false);
+      await expect(client.isClientSupported()).resolves.toBe(false);
+    });
+
+    it('should return true for Windows when the app data dir exists', async () => {
       Object.defineProperty(process, 'platform', {
         value: 'win32',
         writable: true,
       });
-      await expect(client.isClientSupported()).resolves.toBe(true);
+      const originalAppData = process.env.APPDATA;
+      process.env.APPDATA = 'C:/Users/Test/AppData/Roaming';
+      existsSyncMock.mockReturnValue(true);
+      try {
+        await expect(client.isClientSupported()).resolves.toBe(true);
+      } finally {
+        if (originalAppData === undefined) delete process.env.APPDATA;
+        else process.env.APPDATA = originalAppData;
+      }
     });
 
     it('should return false for Linux', async () => {

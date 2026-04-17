@@ -1,4 +1,5 @@
 import z from 'zod';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
@@ -35,10 +36,20 @@ export class ZedClient extends DefaultMCPClient {
     return 'context_servers';
   }
 
-  async isClientSupported(): Promise<boolean> {
-    return Promise.resolve(
-      process.platform === 'darwin' || process.platform === 'linux',
-    );
+  isClientSupported(): Promise<boolean> {
+    // macOS: require the actual app bundle — ~/.config/zed/ can linger from
+    // past installs or be created by unrelated dotfile setups.
+    if (process.platform === 'darwin') {
+      return Promise.resolve(fs.existsSync('/Applications/Zed.app'));
+    }
+    if (process.platform === 'linux') {
+      const xdgConfigHome = process.env.XDG_CONFIG_HOME;
+      const zedDir = xdgConfigHome
+        ? path.join(xdgConfigHome, 'zed')
+        : path.join(os.homedir(), '.config', 'zed');
+      return Promise.resolve(fs.existsSync(zedDir));
+    }
+    return Promise.resolve(false);
   }
 
   async getConfigPath(): Promise<string> {

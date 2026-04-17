@@ -1,5 +1,8 @@
 import { z } from 'zod';
 import { execSync, spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as os from 'node:os';
 
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
@@ -18,12 +21,31 @@ export class CodexMCPClient extends DefaultMCPClient {
   }
 
   isClientSupported(): Promise<boolean> {
+    // Require the binary on PATH, the ~/.codex/ user-data dir, AND (on
+    // macOS) that the binary wasn't silently bundled by an outer tool
+    // (Conductor et al. ship their own `codex`; the user didn't install
+    // it and would be surprised to see Codex pop up in the picker).
+    let resolved: string;
     try {
-      execSync('codex --version', { stdio: 'ignore' });
-      return Promise.resolve(true);
+      // `where` on Windows, `command -v` on POSIX. execSync always runs
+      // through the platform's default shell, so the builtin resolves.
+      // `where` can return multiple paths separated by newlines; take the first.
+      const probe =
+        process.platform === 'win32' ? 'where codex' : 'command -v codex';
+      resolved = execSync(probe, { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
     } catch {
       return Promise.resolve(false);
     }
+    if (!resolved) return Promise.resolve(false);
+    // macOS-only guard — the bundled-by-host problem is specific to GUI
+    // wrapper apps that ship their own Codex CLI.
+    if (
+      process.platform === 'darwin' &&
+      /\/Library\/Application Support\//i.test(resolved)
+    ) {
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.codex')));
   }
 
   getConfigPath(): Promise<string> {

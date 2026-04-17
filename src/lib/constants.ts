@@ -52,6 +52,11 @@ export const DEBUG = false;
 /** When set, limits the agent to at most 5 events for faster demo runs. */
 export const DEMO_MODE = process.env.DEMO_MODE_WIZARD === '1';
 
+/** Amplitude Claude Code plugin identifiers. */
+export const CLAUDE_PLUGIN_MARKETPLACE_NAME = 'amplitude';
+export const CLAUDE_PLUGIN_MARKETPLACE_REPO = 'amplitude/mcp-marketplace';
+export const CLAUDE_PLUGIN_ID = 'amplitude';
+
 // ── URLs ─────────────────────────────────────────────────────────────
 
 export const DEFAULT_URL = IS_DEV
@@ -170,6 +175,13 @@ export const OUTBOUND_URLS = {
 
   /** SDK overview — opened from the Activation Options screen. */
   sdkDocs: 'https://amplitude.com/docs/sdks',
+
+  /** Amplitude MCP docs — shown after a successful raw MCP install. */
+  mcpDocs: 'https://amplitude.com/docs/amplitude-ai/amplitude-mcp',
+
+  /** Claude Code plugin docs (deep-link into the MCP doc) — shown after plugin install. */
+  claudePluginDocs:
+    'https://amplitude.com/docs/amplitude-ai/amplitude-mcp#plugins',
 
   /** Per-framework SDK docs — referenced in agent prompts and post-run links. */
   frameworkDocs: {

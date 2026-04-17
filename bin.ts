@@ -18,6 +18,12 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import chalk from 'chalk';
 
+/**
+ * Dev mode toggle — when set (e.g. via `pnpm try` / `pnpm dev`), internal
+ * flags like --local-mcp show up in --help. End users never see them.
+ */
+const IS_WIZARD_DEV = process.env.AMPLITUDE_WIZARD_DEV === '1';
+
 import { readFileSync } from 'fs';
 import { resolve, dirname, join } from 'path';
 import { z } from 'zod';
@@ -395,8 +401,11 @@ void yargs(hideBin(process.argv))
     },
     'local-mcp': {
       default: false,
+      // Internal dev escape hatch — points the wizard at a locally running
+      // MCP server (localhost:8787). Hidden from public --help.
       describe: 'connect to a local MCP server for development',
       type: 'boolean',
+      hidden: !IS_WIZARD_DEV,
     },
     ci: {
       default: false,
@@ -1703,6 +1712,7 @@ void yargs(hideBin(process.argv))
               default: false,
               describe: 'use a local MCP server for development',
               type: 'boolean',
+              hidden: !IS_WIZARD_DEV,
             },
           });
         },
@@ -1744,6 +1754,7 @@ void yargs(hideBin(process.argv))
               default: false,
               describe: 'remove a local MCP server',
               type: 'boolean',
+              hidden: !IS_WIZARD_DEV,
             },
           });
         },
