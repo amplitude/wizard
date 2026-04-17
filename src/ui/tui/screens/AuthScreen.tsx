@@ -15,6 +15,7 @@
 import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
 import { TextInput } from '@inkjs/ui';
+import opn from 'opn';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
@@ -22,9 +23,18 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import {
   DEFAULT_HOST_URL,
+  OUTBOUND_URLS,
   type AmplitudeZone,
 } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
+
+const CREATE_ACTION = '__create__' as const;
+const RESTART_ACTION = '__restart__' as const;
+type PickerAction = typeof CREATE_ACTION | typeof RESTART_ACTION;
+
+function isPickerAction(value: unknown): value is PickerAction {
+  return value === CREATE_ACTION || value === RESTART_ACTION;
+}
 
 interface AuthScreenProps {
   store: WizardStore;
@@ -74,6 +84,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const [savedKeySource, setSavedKeySource] = useState<
     'keychain' | 'env' | null
   >(null);
+  const [pickerNotice, setPickerNotice] = useState<string | null>(null);
 
   const pendingOrgs = session.pendingOrgs;
 
@@ -285,6 +296,33 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     // (either no envs available, or the env had no key)
     !selectedEnv?.app?.apiKey;
 
+  const handleCreateProject = (fromScreen: 'workspace' | 'project') => {
+    const zone = (session.region ??
+      session.pendingAuthCloudRegion ??
+      'us') as AmplitudeZone;
+    const url = OUTBOUND_URLS.projectsSettings(zone, session.selectedOrgId);
+    analytics.wizardCapture('Create Project Link Opened', {
+      from_screen: fromScreen,
+    });
+    opn(url, { wait: false }).catch(() => {});
+    setPickerNotice(
+      `Opened ${url} — after you create your project, choose "Start over" to refresh the list.`,
+    );
+  };
+
+  const handleStartOver = (fromScreen: 'workspace' | 'project') => {
+    analytics.wizardCapture('Picker Start Over', { from_screen: fromScreen });
+    setSelectedOrg(null);
+    setSelectedWorkspace(null);
+    setSelectedEnv(null);
+    setPickerNotice(null);
+    store.setOrgAndWorkspace(
+      { id: '', name: '' },
+      { id: '', name: '' },
+      session.installDir,
+    );
+  };
+
   const handleApiKeySubmit = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -395,16 +433,48 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           <Text color={Colors.secondary}>
             in <Text color={Colors.body}>{effectiveOrg.name}</Text>
           </Text>
+          {pickerNotice && (
+            <Box marginTop={1}>
+              <Text color={Colors.warning}>{pickerNotice}</Text>
+            </Box>
+          )}
           <Box marginTop={1}>
-            <PickerMenu<OrgEntry['workspaces'][number]>
-              options={effectiveOrg.workspaces.map((ws) => ({
-                label: ws.name,
-                value: ws,
-              }))}
+            <PickerMenu<OrgEntry['workspaces'][number] | PickerAction>
+              options={[
+                ...effectiveOrg.workspaces.map((ws) => ({
+                  label: ws.name,
+                  value: ws as OrgEntry['workspaces'][number] | PickerAction,
+                })),
+                {
+                  label: 'Create new project\u2026',
+                  value: CREATE_ACTION as PickerAction,
+                },
+                ...(pendingOrgs && pendingOrgs.length > 1
+                  ? [
+                      {
+                        label: 'Start over',
+                        value: RESTART_ACTION as PickerAction,
+                      },
+                    ]
+                  : []),
+              ]}
               onSelect={(value) => {
-                const ws = Array.isArray(value) ? value[0] : value;
-                setSelectedWorkspace(ws);
-                store.setOrgAndWorkspace(effectiveOrg, ws, session.installDir);
+                const picked = Array.isArray(value) ? value[0] : value;
+                if (picked === CREATE_ACTION) {
+                  handleCreateProject('workspace');
+                  return;
+                }
+                if (picked === RESTART_ACTION) {
+                  handleStartOver('workspace');
+                  return;
+                }
+                if (isPickerAction(picked)) return;
+                setSelectedWorkspace(picked);
+                store.setOrgAndWorkspace(
+                  effectiveOrg,
+                  picked,
+                  session.installDir,
+                );
               }}
             />
           </Box>
@@ -417,16 +487,40 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           <Text bold color={Colors.heading}>
             Select a project
           </Text>
+          {pickerNotice && (
+            <Box marginTop={1}>
+              <Text color={Colors.warning}>{pickerNotice}</Text>
+            </Box>
+          )}
           <Box marginTop={1}>
-            <PickerMenu<EnvironmentEntry>
-              options={selectableEnvs.map((env) => ({
-                label: env.name,
-                value: env,
-              }))}
+            <PickerMenu<EnvironmentEntry | PickerAction>
+              options={[
+                ...selectableEnvs.map((env) => ({
+                  label: env.name,
+                  value: env as EnvironmentEntry | PickerAction,
+                })),
+                {
+                  label: 'Create new project\u2026',
+                  value: CREATE_ACTION as PickerAction,
+                },
+                {
+                  label: 'Start over',
+                  value: RESTART_ACTION as PickerAction,
+                },
+              ]}
               onSelect={(value) => {
-                const env = Array.isArray(value) ? value[0] : value;
-                setSelectedEnv(env);
-                store.setSelectedProjectName(env.name);
+                const picked = Array.isArray(value) ? value[0] : value;
+                if (picked === CREATE_ACTION) {
+                  handleCreateProject('project');
+                  return;
+                }
+                if (picked === RESTART_ACTION) {
+                  handleStartOver('project');
+                  return;
+                }
+                if (isPickerAction(picked)) return;
+                setSelectedEnv(picked);
+                store.setSelectedProjectName(picked.name);
               }}
             />
           </Box>
