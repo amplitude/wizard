@@ -54,6 +54,9 @@ const OAuthErrorBodySchema = z.object({
 });
 
 function provisioningUrl(zone: AmplitudeZone): string {
+  // Dev/testing override — full URL (no /t/ prefix added). Unset in prod.
+  const override = process.env.AMPLITUDE_WIZARD_HEADLESS_URL;
+  if (override) return override;
   return `${OUTBOUND_URLS.app[zone]}/t/headless/provisioning/link-or-create-account`;
 }
 
