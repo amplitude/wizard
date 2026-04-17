@@ -8,10 +8,17 @@ import {
   McpOutcome,
 } from '../store.js';
 import { vi, describe, it, expect, type Mock, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { OutroKind, AdditionalFeature } from '../../../lib/wizard-session.js';
 import { buildSession } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
+import {
+  readAmpliConfig,
+  writeAmpliConfig,
+} from '../../../lib/ampli-config.js';
 
 vi.mock('../../../utils/analytics.js', () => ({
   analytics: {
@@ -310,6 +317,53 @@ describe('WizardStore', () => {
       expect(store.session.pendingAuthAccessToken).toBeNull();
       expect(store.session.pendingAuthCloudRegion).toBeNull();
       expect(store.session.apiKeyNotice).toBeNull();
+    });
+
+    it('setRegion persists new zone to existing ampli.json even when org/workspace are cleared', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-region-test-'));
+      try {
+        // Seed ampli.json as if from a prior completed SUSI
+        writeAmpliConfig(dir, {
+          OrgId: 'org-old',
+          WorkspaceId: 'ws-old',
+          Zone: 'us',
+          SourceId: 'src-1',
+        });
+
+        const store = createStore();
+        store.session.installDir = dir;
+        // Simulate user running /region — setRegionForced clears IDs
+        store.setRegionForced();
+        expect(store.session.selectedOrgId).toBeNull();
+
+        store.setRegion('eu');
+
+        // Wait for the async fs write to land
+        await new Promise((r) => setTimeout(r, 50));
+
+        const result = readAmpliConfig(dir);
+        expect(result.ok).toBe(true);
+        if (!result.ok) return;
+        expect(result.config.Zone).toBe('eu');
+        expect(result.config.OrgId).toBeUndefined();
+        expect(result.config.WorkspaceId).toBeUndefined();
+        expect(result.config.SourceId).toBe('src-1'); // unrelated fields preserved
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    });
+
+    it('setRegion does not create ampli.json when none exists', async () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-region-test-'));
+      try {
+        const store = createStore();
+        store.session.installDir = dir;
+        store.setRegion('us');
+        await new Promise((r) => setTimeout(r, 50));
+        expect(fs.existsSync(path.join(dir, 'ampli.json'))).toBe(false);
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
     });
 
     it('/region mid-session routes back through RegionSelect then Auth', () => {

@@ -276,19 +276,34 @@ export class WizardStore {
     this.$session.setKey('regionForced', false);
     analytics.wizardCapture('region selected', { region });
 
-    // Persist region to project-level ampli.json so next run uses the right zone.
-    // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
-    // would create a partial config).
+    // Persist the chosen zone to project-level ampli.json so the next
+    // wizard run uses the right zone — even if the user exits before
+    // completing SUSI. When the user is switching regions via /region the
+    // prior OrgId/WorkspaceId are invalid in the new zone; drop them so
+    // resolveCredentials doesn't silently steer back to a stale workspace.
+    //
+    // Only updates an existing ampli.json; never creates one. Fresh
+    // projects have their zone persisted later by setOrgAndWorkspace()
+    // once the full SUSI flow completes.
     const session = this.$session.get();
-    if (session.selectedOrgId && session.selectedWorkspaceId) {
-      void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-        writeAmpliConfig(session.installDir, {
-          OrgId: session.selectedOrgId!,
-          WorkspaceId: session.selectedWorkspaceId!,
-          Zone: region as 'us' | 'eu',
-        });
-      });
-    }
+    const typedZone = region as 'us' | 'eu';
+    void (async () => {
+      const { readAmpliConfig, writeAmpliConfig } = await import(
+        '../../lib/ampli-config.js'
+      );
+      const prior = readAmpliConfig(session.installDir);
+      if (!prior.ok) return; // no existing ampli.json — nothing to update
+      const next = { ...prior.config, Zone: typedZone };
+      if (session.selectedOrgId && session.selectedWorkspaceId) {
+        next.OrgId = session.selectedOrgId;
+        next.WorkspaceId = session.selectedWorkspaceId;
+      } else {
+        // Cleared by setRegionForced — IDs from the old zone are invalid.
+        delete next.OrgId;
+        delete next.WorkspaceId;
+      }
+      writeAmpliConfig(session.installDir, next);
+    })();
 
     this.emitChange();
   }
