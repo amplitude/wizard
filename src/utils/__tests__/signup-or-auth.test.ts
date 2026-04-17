@@ -23,6 +23,25 @@ vi.mock('../../lib/api.js', () => ({
   fetchAmplitudeUser: vi.fn(),
 }));
 
+// Minimal provisioned-account shape: one org / workspace / env with an
+// apiKey. Having this is the signal that backend provisioning finished,
+// so fetchUserWithProvisioningRetry returns on the first call (no delays).
+const provisionedOrgs = [
+  {
+    id: 'org-1',
+    name: 'Org',
+    workspaces: [
+      {
+        id: 'ws-1',
+        name: 'Default',
+        environments: [
+          { name: 'Production', rank: 0, app: { id: 'p1', apiKey: 'key-1' } },
+        ],
+      },
+    ],
+  },
+];
+
 describe('performSignupOrAuth', () => {
   beforeEach(() => vi.clearAllMocks());
 
@@ -153,7 +172,7 @@ describe('performSignupOrAuth', () => {
       firstName: 'Ada',
       lastName: 'Lovelace',
       email: 'ada@example.com',
-      orgs: [],
+      orgs: provisionedOrgs,
     });
     const { performAmplitudeAuth } = await import('../oauth.js');
     const { storeToken } = await import('../ampli-settings.js');
@@ -190,7 +209,7 @@ describe('performSignupOrAuth', () => {
       firstName: 'Ada',
       lastName: 'Lovelace',
       email: 'ada@example.com',
-      orgs: [],
+      orgs: provisionedOrgs,
     });
     const { storeToken } = await import('../ampli-settings.js');
 
@@ -233,7 +252,7 @@ describe('performSignupOrAuth', () => {
       firstName: 'Ada',
       lastName: 'Lovelace',
       email: 'ada@example.com',
-      orgs: [],
+      orgs: provisionedOrgs,
     });
     const { storeToken } = await import('../ampli-settings.js');
 
@@ -286,5 +305,66 @@ describe('performSignupOrAuth', () => {
     );
     expect(result.accessToken).toBe('direct-access');
     expect(performAmplitudeAuth).not.toHaveBeenCalled();
+  });
+
+  it('retries fetchAmplitudeUser when the new account has no env with an API key yet', async () => {
+    vi.useFakeTimers();
+    try {
+      const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+      vi.mocked(isFlagEnabled).mockReturnValue(true);
+      const { performDirectSignup } = await import('../direct-signup.js');
+      vi.mocked(performDirectSignup).mockResolvedValue({
+        kind: 'success',
+        tokens: {
+          accessToken: 'a',
+          idToken: 'i',
+          refreshToken: 'r',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          zone: 'us',
+        },
+      });
+      const { fetchAmplitudeUser } = await import('../../lib/api.js');
+      vi.mocked(fetchAmplitudeUser)
+        .mockResolvedValueOnce({
+          id: 'u',
+          firstName: 'A',
+          lastName: 'B',
+          email: 'a@b.com',
+          orgs: [],
+        })
+        .mockResolvedValueOnce({
+          id: 'u',
+          firstName: 'A',
+          lastName: 'B',
+          email: 'a@b.com',
+          orgs: [
+            {
+              id: 'org-1',
+              name: 'Org',
+              workspaces: [{ id: 'ws-1', name: 'Default', environments: [] }],
+            },
+          ],
+        })
+        .mockResolvedValueOnce({
+          id: 'u',
+          firstName: 'A',
+          lastName: 'B',
+          email: 'a@b.com',
+          orgs: provisionedOrgs,
+        });
+
+      const pending = performSignupOrAuth({
+        signup: true,
+        email: 'a@b.com',
+        fullName: 'A B',
+        zone: 'us',
+      });
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(fetchAmplitudeUser).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
