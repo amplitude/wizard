@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+// Sanitize inherited Claude Code / Agent SDK env vars BEFORE anything else
+// loads. The wizard spawns its own Claude Agent SDK subprocess and any
+// transitive import that snapshots env at module init would otherwise see
+// the outer session's CLAUDECODE / CLAUDE_CODE_* / CLAUDE_AGENT_SDK_* vars
+// and route auth to the wrong place (400 at our LLM gateway). The project
+// compiles to CommonJS (see tsconfig.build.json), so these imports execute
+// inline in source order — this call must run before any import below.
+import { sanitizeNestedClaudeEnv } from './src/lib/sanitize-claude-env';
+sanitizeNestedClaudeEnv();
+
 import { satisfies } from 'semver';
 import { red } from './src/utils/logging';
 import { config as loadDotenv } from 'dotenv';
@@ -55,6 +65,7 @@ import {
 import { analytics } from './src/utils/analytics';
 import { ExitCode } from './src/lib/exit-codes';
 import { detectNestedAgent } from './src/lib/detect-nested-agent';
+import { AgentUI } from './src/ui/agent-ui';
 import {
   initLogger,
   initCorrelation,
@@ -319,30 +330,27 @@ const resolveNonInteractiveCredentials = async (
   }
 
   // Detect nested invocation inside another Claude Code / Claude Agent SDK
-  // session. We used to refuse to run because inherited env vars
-  // (CLAUDECODE, CLAUDE_CODE_ENTRYPOINT, CLAUDE_CODE_OAUTH_TOKEN, etc.) leaked
-  // into the Claude Agent SDK subprocess we spawn for the setup agent and
-  // caused the LLM gateway to reject requests. Those vars are now sanitized
-  // in `initializeAgent()` before the SDK boots, so nesting is supported.
-  //
-  // We still detect and surface it as a diagnostic so outer agent
-  // orchestrators (Claude Code) can log the signal, and so humans debugging
-  // auth weirdness have a breadcrumb.
+  // session. Inherited env vars (CLAUDECODE, CLAUDE_CODE_*, CLAUDE_AGENT_SDK_*)
+  // were already sanitized at the top of this file before any import could
+  // snapshot them. This block is diagnostic-only: it surfaces the signal so
+  // outer agent orchestrators can log it, and gives humans debugging auth
+  // weirdness a breadcrumb.
   const nested = detectNestedAgent();
   if (nested) {
     const detail =
-      `Detected nested Claude Code / Claude Agent SDK invocation via ${nested.envVar}=${nested.envValue}. ` +
-      `Inherited Claude env vars will be sanitized before the setup agent spawns.`;
+      `Detected nested agent invocation via ${nested.envVar}=${nested.envValue}. ` +
+      `Inherited outer-agent env vars were sanitized; the setup agent will run normally.`;
     if (mode === 'agent') {
-      const { AgentUI } =
-        require('./src/ui/agent-ui.js') as typeof import('./src/ui/agent-ui');
       new AgentUI().emitNestedAgent({
         signal: nested.signal,
         envVar: nested.envVar,
         instruction: detail,
         bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
       });
-    } else if (isDebug) {
+    } else {
+      // Surface a soft breadcrumb for interactive + CI users too, not just
+      // --debug. If sanitization ever regresses, this is the only signal a
+      // non-agent caller will see.
       getUI().log.info(detail);
     }
   }

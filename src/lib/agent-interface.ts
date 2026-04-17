@@ -692,8 +692,15 @@ export async function initializeAgent(
     const useLocalClaude = !config.amplitudeBearerToken && !useDirectApiKey;
 
     if (useDirectApiKey) {
+      // An inherited ANTHROPIC_AUTH_TOKEN from an outer agent session would
+      // override ANTHROPIC_API_KEY in some SDK paths. Clear it so the user's
+      // explicit API key wins unambiguously.
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
       logToFile('ANTHROPIC_API_KEY found — bypassing Amplitude gateway');
     } else if (useLocalClaude) {
+      // The local claude CLI has its own auth; inherited ANTHROPIC_AUTH_TOKEN
+      // from an outer session would route requests with the wrong credentials.
+      delete process.env.ANTHROPIC_AUTH_TOKEN;
       logToFile('No Amplitude API key — using local claude CLI');
     } else {
       // Configure LLM gateway environment variables (inherited by SDK subprocess)
