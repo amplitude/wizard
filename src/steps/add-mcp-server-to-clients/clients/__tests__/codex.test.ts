@@ -44,11 +44,26 @@ describe('CodexMCPClient', () => {
     });
 
     it('returns false when codex is bundled under /Library/Application Support (e.g. Conductor)', async () => {
+      // macOS-only guard — on Linux CI runners, process.platform !== 'darwin'
+      // so the /Library/Application Support/ check is skipped and detection
+      // falls through to the ~/.codex existence check (mocked true).
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', {
+        value: 'darwin',
+        writable: true,
+      });
       execSyncMock.mockReturnValue(
         '/Users/u/Library/Application Support/com.conductor.app/bin/codex\n',
       );
-      const client = new CodexMCPClient();
-      await expect(client.isClientSupported()).resolves.toBe(false);
+      try {
+        const client = new CodexMCPClient();
+        await expect(client.isClientSupported()).resolves.toBe(false);
+      } finally {
+        Object.defineProperty(process, 'platform', {
+          value: originalPlatform,
+          writable: true,
+        });
+      }
     });
   });
 
