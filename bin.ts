@@ -118,6 +118,8 @@ const buildSessionFromOptions = async (
     localMcp: options.localMcp as boolean | undefined,
     apiKey: options.apiKey as string | undefined,
     menu: options.menu as boolean | undefined,
+    signupEmail: options.email as string | undefined,
+    signupFullName: options['full-name'] as string | undefined,
     integration: options.integration as Parameters<
       typeof buildSession
     >[0]['integration'],
@@ -255,6 +257,48 @@ const resolveNonInteractiveCredentials = async (
     if (parts.length > 0) {
       getUI().log.info(`Using: ${parts.join(' / ')}`);
     }
+  }
+};
+
+/**
+ * Run the direct-signup wrapper for agent / CI / classic modes.
+ *
+ * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
+ * set. On a non-null result, optionally runs `onSuccess` (classic uses this
+ * to populate `session.credentials` via `resolveCredentials`). On null or
+ * thrown errors, logs a human message that points at the mode's fallback
+ * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
+ */
+const runDirectSignupIfRequested = async (
+  session: import('./src/lib/wizard-session').WizardSession,
+  fallbackLabel: string,
+  onSuccess?: () => Promise<void>,
+): Promise<void> => {
+  if (!session.signup || !session.signupEmail || !session.signupFullName) {
+    return;
+  }
+  const { performSignupOrAuth } = await import('./src/utils/signup-or-auth.js');
+  const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+  const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
+  try {
+    const tokens = await performSignupOrAuth({
+      email: session.signupEmail,
+      fullName: session.signupFullName,
+      zone,
+    });
+    if (tokens === null) {
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+    } else if (onSuccess) {
+      await onSuccess();
+    }
+  } catch (err) {
+    getUI().log.warn(
+      `Direct signup errored: ${
+        err instanceof Error ? err.message : String(err)
+      }. Continuing to ${fallbackLabel}.`,
+    );
   }
 };
 
@@ -434,6 +478,29 @@ void yargs(hideBin(process.argv))
       describe: 'force human-readable output (overrides --json auto-detect)',
       type: 'boolean',
     },
+    email: {
+      describe: 'email to use when creating a new account (requires --signup)',
+      type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+          throw new Error(`Invalid email: "${value}"`);
+        }
+        return value;
+      },
+    },
+    'full-name': {
+      describe:
+        'full name to use when creating a new account (requires --signup)',
+      type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (value.trim().length === 0) {
+          throw new Error('--full-name cannot be empty');
+        }
+        return value;
+      },
+    },
   })
   .command(
     ['$0'],
@@ -515,6 +582,13 @@ void yargs(hideBin(process.argv))
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
+
+          // Attempt direct signup before falling through to cached-token
+          // resolution. Agent mode has no browser, so a null result continues
+          // to resolveNonInteractiveCredentials, which handles cached tokens
+          // or exits cleanly with AUTH_REQUIRED.
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
+
           await resolveNonInteractiveCredentials(
             session,
             options,
@@ -533,6 +607,13 @@ void yargs(hideBin(process.argv))
 
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
+
+          // Attempt direct signup before falling through to cached-token
+          // resolution. CI mode has no browser, so a null result continues to
+          // resolveNonInteractiveCredentials, which handles cached tokens or
+          // exits cleanly with AUTH_REQUIRED.
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
+
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
@@ -544,7 +625,26 @@ void yargs(hideBin(process.argv))
         process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
       ) {
         // Classic mode: interactive prompts without the rich TUI
-        void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
+        void (async () => {
+          const session = await buildSessionFromOptions(options);
+
+          // Attempt direct signup before falling through to OAuth browser
+          // flow. On success, run resolveCredentials so agent-runner's
+          // !session.credentials guard skips the OAuth call. On null/failure,
+          // classic mode proceeds normally — getOrAskForProjectData calls
+          // performAmplitudeAuth, which opens a browser (valid for classic).
+          await runDirectSignupIfRequested(session, 'OAuth', async () => {
+            const { resolveCredentials } = await import(
+              './src/lib/credential-resolution.js'
+            );
+            await resolveCredentials(session);
+          });
+
+          await lazyRunWizard(
+            options as Parameters<typeof lazyRunWizard>[0],
+            session,
+          );
+        })();
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
@@ -824,10 +924,50 @@ void yargs(hideBin(process.argv))
                     ? 'eu'
                     : DEFAULT_AMPLITUDE_ZONE;
 
-                let auth = await performAmplitudeAuth({
-                  zone,
-                  forceFresh,
-                });
+                // Try direct signup first when --signup + email + fullName are provided
+                // and the feature flag is enabled. performSignupOrAuth returns null when
+                // any of those gates are missing, or when the server returns a non-success
+                // response — in which case we fall through to the existing OAuth flow
+                // (TUI has a browser; this fallback is valid).
+                //
+                // On signup success, the wrapper already fetched the real user
+                // profile (with provisioning retry) and persisted tokens to
+                // ~/.ampli.json — so we carry its userInfo through and skip the
+                // redundant fetch + storeToken below.
+                let auth: Awaited<
+                  ReturnType<typeof performAmplitudeAuth>
+                > | null = null;
+                let signupUserInfo: Awaited<
+                  ReturnType<typeof fetchAmplitudeUser>
+                > | null = null;
+                const s = tui.store.session;
+                if (s.signup && s.signupEmail && s.signupFullName) {
+                  try {
+                    const { performSignupOrAuth } = await import(
+                      './src/utils/signup-or-auth.js'
+                    );
+                    const signupResult = await performSignupOrAuth({
+                      email: s.signupEmail,
+                      fullName: s.signupFullName,
+                      zone,
+                    });
+                    if (signupResult !== null) {
+                      auth = signupResult;
+                      signupUserInfo = signupResult.userInfo;
+                    }
+                  } catch (err) {
+                    getUI().log.warn(
+                      `Direct signup errored: ${
+                        err instanceof Error ? err.message : String(err)
+                      }. Falling back to OAuth.`,
+                    );
+                    auth = null;
+                  }
+                }
+
+                if (auth === null) {
+                  auth = await performAmplitudeAuth({ zone, forceFresh });
+                }
 
                 // Update login URL (clears the "copy this URL" hint)
                 tui.store.setLoginUrl(null);
@@ -836,37 +976,47 @@ void yargs(hideBin(process.argv))
                 const cloudRegion = zone;
 
                 let userInfo;
-                try {
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
-                  );
-                } catch {
-                  // Token may be expired — re-open the browser for a fresh login
-                  tui.store.setLoginUrl(null);
-                  auth = await performAmplitudeAuth({ zone, forceFresh: true });
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
+                if (signupUserInfo) {
+                  // Wrapper already fetched userInfo and stored tokens — no
+                  // redundant network call, no browser fallback needed.
+                  userInfo = signupUserInfo;
+                } else {
+                  try {
+                    userInfo = await fetchAmplitudeUser(
+                      auth.idToken,
+                      cloudRegion,
+                    );
+                  } catch {
+                    // Token may be expired — re-open the browser for a fresh login
+                    tui.store.setLoginUrl(null);
+                    auth = await performAmplitudeAuth({
+                      zone,
+                      forceFresh: true,
+                    });
+                    userInfo = await fetchAmplitudeUser(
+                      auth.idToken,
+                      cloudRegion,
+                    );
+                  }
+                  // Persist to ~/.ampli.json (signup path already did this)
+                  storeToken(
+                    {
+                      id: userInfo.id,
+                      firstName: userInfo.firstName,
+                      lastName: userInfo.lastName,
+                      email: userInfo.email,
+                      zone: auth.zone,
+                    },
+                    {
+                      accessToken: auth.accessToken,
+                      idToken: auth.idToken,
+                      refreshToken: auth.refreshToken,
+                      expiresAt: new Date(
+                        Date.now() + 3600 * 1000,
+                      ).toISOString(),
+                    },
                   );
                 }
-
-                // Persist to ~/.ampli.json
-                storeToken(
-                  {
-                    id: userInfo.id,
-                    firstName: userInfo.firstName,
-                    lastName: userInfo.lastName,
-                    email: userInfo.email,
-                    zone: auth.zone,
-                  },
-                  {
-                    accessToken: auth.accessToken,
-                    idToken: auth.idToken,
-                    refreshToken: auth.refreshToken,
-                    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-                  },
-                );
 
                 // Populate user email for /whoami display
                 session.userEmail = userInfo.email;

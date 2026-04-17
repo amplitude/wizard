@@ -763,6 +763,106 @@ describe('feedback command', () => {
   });
 });
 
+// ── --email / --full-name flags ───────────────────────────────────────────────
+
+describe('--email and --full-name flags', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+  });
+
+  test('errors when --email is malformed', async () => {
+    // Silence yargs error output for this test
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada',
+        '--full-name',
+        'Ada Lovelace',
+        '--install-dir',
+        '/tmp/test',
+      ]);
+
+      // Give any async handlers time to fire
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    // The key invariant: a malformed email must NOT reach runWizard.
+    // yargs' coerce failure prevents the command handler from running.
+    expect(mockRunWizard).not.toHaveBeenCalled();
+  });
+
+  test('errors when --full-name is empty', async () => {
+    // Silence yargs error output for this test
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada@example.com',
+        '--full-name',
+        '',
+        '--install-dir',
+        '/tmp/test',
+      ]);
+
+      // Give any async handlers time to fire
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    // The key invariant: an empty full-name must NOT reach runWizard.
+    // yargs' coerce failure prevents the command handler from running.
+    expect(mockRunWizard).not.toHaveBeenCalled();
+  });
+
+  test('accepts --email and --full-name on the default command', async () => {
+    await runCLI([
+      '--signup',
+      '--ci',
+      '--email',
+      'ada@example.com',
+      '--full-name',
+      'Ada Lovelace',
+      '--install-dir',
+      '/tmp/test',
+    ]);
+
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+
+    // Second arg is the WizardSession built by buildSession — check it contains
+    // the signup profile fields passed on the command line.
+    expect(mockRunWizard).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        signupEmail: 'ada@example.com',
+        signupFullName: 'Ada Lovelace',
+      }),
+    );
+  });
+});
+
 // ── Legacy / argument parsing (kept for regression coverage) ──────────────────
 
 describe.skip('CLI argument parsing', () => {
