@@ -258,6 +258,85 @@ describe('WizardStore', () => {
 
       expect(cb).toHaveBeenCalledTimes(11);
     });
+
+    it('setRegionForced clears all region-tied state so Auth re-runs', () => {
+      const store = createStore();
+      // Simulate an authenticated user mid-session in US.
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        projectId: 42,
+      });
+      store.session.userEmail = 'user@example.com';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedWorkspaceId = 'ws-1';
+      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectId = '769610';
+      store.session.selectedProjectName = 'Production';
+      store.session.projectHasData = true;
+      store.session.activationLevel = 'full';
+      store.session.activationOptionsComplete = true;
+      store.session.dataIngestionConfirmed = true;
+      store.session.mcpComplete = true;
+      store.session.mcpOutcome = McpOutcome.Installed;
+      store.session.pendingOrgs = [];
+      store.session.pendingAuthIdToken = 'idt';
+      store.session.pendingAuthAccessToken = 'at';
+      store.session.pendingAuthCloudRegion = 'us';
+      store.session.apiKeyNotice = 'stale';
+
+      store.setRegionForced();
+
+      expect(store.session.regionForced).toBe(true);
+      expect(store.session.credentials).toBeNull();
+      expect(store.session.userEmail).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedOrgName).toBeNull();
+      expect(store.session.selectedWorkspaceId).toBeNull();
+      expect(store.session.selectedWorkspaceName).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+      expect(store.session.selectedProjectName).toBeNull();
+      expect(store.session.projectHasData).toBeNull();
+      expect(store.session.activationLevel).toBeNull();
+      expect(store.session.activationOptionsComplete).toBe(false);
+      expect(store.session.dataIngestionConfirmed).toBe(false);
+      expect(store.session.mcpComplete).toBe(false);
+      expect(store.session.mcpOutcome).toBeNull();
+      expect(store.session.pendingOrgs).toBeNull();
+      expect(store.session.pendingAuthIdToken).toBeNull();
+      expect(store.session.pendingAuthAccessToken).toBeNull();
+      expect(store.session.pendingAuthCloudRegion).toBeNull();
+      expect(store.session.apiKeyNotice).toBeNull();
+    });
+
+    it('/region mid-session routes back through RegionSelect then Auth', () => {
+      const store = createStore();
+      // Walk into a post-auth state.
+      store.concludeIntro();
+      store.setRegion('us');
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        projectId: 1,
+      });
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedWorkspaceId = 'ws-1';
+      store.setSelectedProjectName('Production');
+      store.setProjectHasData(false);
+      expect(store.currentScreen).toBe(Screen.Run);
+
+      store.setRegionForced();
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
+
+      store.setRegion('eu');
+      expect(store.currentScreen).toBe(Screen.Auth);
+    });
   });
 
   // ── Setter analytics events ────────────────────────────────────

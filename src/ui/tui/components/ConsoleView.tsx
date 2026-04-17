@@ -201,6 +201,8 @@ export const ConsoleView = ({
   const responseIsLong = !!response && response.split('\n').length > 3;
   const pendingPrompt = store.pendingPrompt;
 
+  const showConsoleChrome = store.session.introConcluded;
+
   // Watch for activation keys while the input is dormant
   useInput(
     (char, key) => {
@@ -218,6 +220,7 @@ export const ConsoleView = ({
         store.clearScreenError();
         return;
       }
+      if (!showConsoleChrome) return;
       if (char === '/') {
         activate('/');
       } else if (
@@ -483,35 +486,44 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Key hints + console input */}
-      <KeyHintBar
-        hints={screenHints}
-        width={innerWidth}
-        showAskHint={
-          store.session.credentials !== null && store.session.introConcluded
-        }
-      />
-      <Box paddingX={Layout.paddingX}>
-        <Text color={inputActive ? Colors.accent : Colors.muted}>
-          {Icons.prompt}{' '}
-        </Text>
-        {inputActive ? (
-          <SlashCommandInput
-            key={inputKey}
-            commands={COMMANDS}
-            isActive={inputActive}
-            initialValue={initialValue}
-            onSubmit={handleSubmit}
-            onDeactivate={deactivate}
+      {/* Key hints + console input — hidden on Intro to keep focus on the
+          framework picker. Render a fixed-height placeholder so the content
+          area doesn't jump when Continue transitions to the next screen. */}
+      {showConsoleChrome ? (
+        <>
+          <KeyHintBar
+            hints={screenHints}
+            width={innerWidth}
+            showAskHint={
+              store.session.credentials !== null && store.session.introConcluded
+            }
           />
-        ) : (
-          <Text color={Colors.disabled}>
-            {store.session.credentials !== null && store.session.introConcluded
-              ? 'Press / for commands or Tab to ask a question'
-              : 'Press / for commands'}
-          </Text>
-        )}
-      </Box>
+          <Box paddingX={Layout.paddingX}>
+            <Text color={inputActive ? Colors.accent : Colors.muted}>
+              {Icons.prompt}{' '}
+            </Text>
+            {inputActive ? (
+              <SlashCommandInput
+                key={inputKey}
+                commands={COMMANDS}
+                isActive={inputActive}
+                initialValue={initialValue}
+                onSubmit={handleSubmit}
+                onDeactivate={deactivate}
+              />
+            ) : (
+              <Text color={Colors.disabled}>
+                {store.session.credentials !== null &&
+                store.session.introConcluded
+                  ? 'Press / for commands or Tab to ask a question'
+                  : 'Press / for commands'}
+              </Text>
+            )}
+          </Box>
+        </>
+      ) : (
+        <Box height={2} />
+      )}
     </Box>
   );
 };

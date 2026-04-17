@@ -293,11 +293,45 @@ export class WizardStore {
     this.emitChange();
   }
 
-  /** Force the RegionSelect screen to re-appear (/region command). */
+  /**
+   * Force the RegionSelect screen to re-appear (/region command).
+   *
+   * A mid-session region change is equivalent to logging out and logging back
+   * in against the other data center: OAuth tokens are zone-scoped, and every
+   * org/workspace/environment the user has picked lives in the old region.
+   * Clear all of that so the Auth screen reappears once a new region is
+   * picked, forcing a fresh login. Stored tokens in ~/.ampli.json are kept
+   * per-zone and will be silently reused if the user already signed into the
+   * target region previously.
+   */
   setRegionForced(): void {
     this.$session.setKey('regionForced', true);
-    // Reset data check so it re-runs after region changes
+
+    // Credentials and OAuth intermediates (all zone-scoped)
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('pendingOrgs', null);
+    this.$session.setKey('pendingAuthIdToken', null);
+    this.$session.setKey('pendingAuthAccessToken', null);
+    this.$session.setKey('pendingAuthCloudRegion', null);
+    this.$session.setKey('apiKeyNotice', null);
+
+    // User / org / workspace / project selection — all lived in the old zone
+    this.$session.setKey('userEmail', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedWorkspaceId', null);
+    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedProjectId', null);
+
+    // Downstream flow state that depends on the old zone's data
     this.$session.setKey('projectHasData', null);
+    this.$session.setKey('activationLevel', null);
+    this.$session.setKey('activationOptionsComplete', false);
+    this.$session.setKey('dataIngestionConfirmed', false);
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+
     this.emitChange();
   }
 
