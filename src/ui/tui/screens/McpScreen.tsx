@@ -278,7 +278,7 @@ export const McpScreen = ({
       {!amplitudePreDetectedChoicePending && (
         <>
           <Text bold color={Colors.accent}>
-            MCP Server {isRemove ? 'Removal' : 'Setup'}
+            {isRemove ? 'Remove Amplitude' : 'Amplitude Setup'}
           </Text>
 
           <Box marginTop={1} flexDirection="column">
@@ -304,10 +304,10 @@ export const McpScreen = ({
                   <ConfirmationInput
                     message={
                       isRemove
-                        ? 'Remove the Amplitude MCP server from your editor?'
-                        : 'Install the Amplitude MCP server to your editor?'
+                        ? 'Remove Amplitude from your editor?'
+                        : 'Install Amplitude in your editor?'
                     }
-                    confirmLabel={isRemove ? 'Remove MCP' : 'Install MCP'}
+                    confirmLabel={isRemove ? 'Remove' : 'Install'}
                     cancelLabel="No thanks"
                     onConfirm={handleConfirm}
                     onCancel={handleSkip}
@@ -318,7 +318,7 @@ export const McpScreen = ({
 
             {phase === Phase.Pick && (
               <PickerMenu
-                message="Select editor to install MCP server"
+                message="Select editors"
                 options={clients.map((c) => ({
                   label: c.name,
                   value: c.name,
@@ -384,7 +384,7 @@ export const McpScreen = ({
 
             {phase === Phase.Working && (
               <Text color={Colors.active}>
-                {isRemove ? 'Removing' : 'Installing'} MCP server
+                {isRemove ? 'Removing' : 'Installing'} Amplitude
                 {Icons.ellipsis}
               </Text>
             )}
@@ -396,11 +396,8 @@ export const McpScreen = ({
                     <Text color={Colors.success} bold>
                       {Icons.checkmark}{' '}
                       {isRemove
-                        ? 'MCP server removed from:'
-                        : claudeCodeMode === 'plugin' &&
-                          resultClients.includes(CLAUDE_CODE_CLIENT_NAME)
-                        ? 'Amplitude installed for:'
-                        : 'MCP server installed for:'}
+                        ? 'Amplitude removed from:'
+                        : 'Amplitude installed for:'}
                     </Text>
                     {resultClients.map((name, i) => (
                       <Text key={i} color={Colors.body}>
