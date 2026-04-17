@@ -16,7 +16,6 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { useScreenInput } from '../hooks/useScreenInput.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -99,15 +98,15 @@ export const McpScreen = ({
   const [failures, setFailures] = useState<McpInstallFailure[]>([]);
   const [claudeCodeMode, setClaudeCodeMode] =
     useState<ClaudeCodeInstallMode>('plugin');
-  /**
-   * User pressed `m` to downgrade Claude Code to raw MCP in this run
-   * (equivalent to setting AMPLITUDE_WIZARD_MCP_ONLY=1 for this install only).
-   */
-  const [overrideMcpOnly, setOverrideMcpOnly] = useState(false);
   /** Per-client progress shown during the Working phase. */
   const [progress, setProgress] = useState<
     Array<{ name: string; status: ClientStatus }>
   >([]);
+
+  // Sentinel values used in the multi-picker to split Claude Code into two
+  // mutually-exclusive rows ("plugin" / "MCP server only").
+  const CC_PLUGIN_VALUE = '__claude-code:plugin__';
+  const CC_MCP_VALUE = '__claude-code:mcp__';
 
   // When shown as an /mcp slash-command overlay, onComplete is provided and
   // the user explicitly asked for MCP setup. Don't hijack their request with
@@ -115,38 +114,70 @@ export const McpScreen = ({
   const isOverlay = onComplete !== undefined;
   const showPreDetectedChoice = amplitudePreDetectedChoicePending && !isOverlay;
 
-  /** True when Claude Code will get the richer plugin install. */
+  /** True when any escape hatch is forcing raw MCP on Claude Code. */
   const forcedMcpOnly =
     store.session.localMcp || process.env.AMPLITUDE_WIZARD_MCP_ONLY === '1';
-  const claudeCodeUsesPlugin = !forcedMcpOnly && !overrideMcpOnly;
   const claudeCodeDetected = clients.some(
     (c) => c.name === CLAUDE_CODE_CLIENT_NAME,
   );
-  /** Toggle is only meaningful when Claude Code is present AND there's no forced env-var override. */
-  const showPluginToggle =
-    claudeCodeDetected &&
-    !forcedMcpOnly &&
-    !isRemove &&
-    (phase === Phase.Ask || phase === Phase.Pick);
-  const labelFor = (name: string) =>
-    name === CLAUDE_CODE_CLIENT_NAME && claudeCodeUsesPlugin
-      ? `${name} (plugin — slash commands + MCP)`
-      : `${name} (MCP server)`;
+  /** Claude Code should be split into two picker rows when plugin is an option. */
+  const splitClaudeCode = !isRemove && claudeCodeDetected && !forcedMcpOnly;
 
-  useScreenInput(
-    (input) => {
-      if (input === 'm' || input === 'M') {
-        setOverrideMcpOnly((v) => {
-          analytics.wizardCapture('MCP Claude Code Mode Toggled', {
-            from: v ? 'mcp' : 'plugin',
-            to: v ? 'plugin' : 'mcp',
-          });
-          return !v;
+  /**
+   * Build the options for the multi-picker. Claude Code gets two rows when
+   * it's installable as a plugin, so users can pick their flavor explicitly
+   * instead of having to find a hidden `[m]` keybind.
+   */
+  const buildPickerOptions = (): Array<{ label: string; value: string }> => {
+    const options: Array<{ label: string; value: string }> = [];
+    for (const c of clients) {
+      if (c.name === CLAUDE_CODE_CLIENT_NAME && splitClaudeCode) {
+        options.push({
+          label: 'Claude Code (Amplitude plugin — slash commands + MCP)',
+          value: CC_PLUGIN_VALUE,
         });
+        options.push({
+          label: 'Claude Code (MCP server only, no slash commands)',
+          value: CC_MCP_VALUE,
+        });
+      } else if (c.name === CLAUDE_CODE_CLIENT_NAME) {
+        options.push({ label: 'Claude Code (MCP server)', value: c.name });
+      } else {
+        options.push({ label: `${c.name} (MCP server)`, value: c.name });
       }
-    },
-    { isActive: showPluginToggle },
-  );
+    }
+    return options;
+  };
+
+  /** Pre-check plugin row for Claude Code + every other tool. */
+  const buildDefaultSelected = (): string[] => {
+    return clients.map((c) =>
+      c.name === CLAUDE_CODE_CLIENT_NAME && splitClaudeCode
+        ? CC_PLUGIN_VALUE
+        : c.name,
+    );
+  };
+
+  /**
+   * Turn the set of selected sentinels/names into the (names, ccMode)
+   * pair the installer needs. If a user somehow checks both Claude Code
+   * rows we default to plugin; if neither is checked, Claude Code is
+   * silently omitted from the install.
+   */
+  const resolveSelection = (
+    selected: string[],
+  ): { names: string[]; ccMode: ClaudeCodeInstallMode } => {
+    const wantsPlugin = selected.includes(CC_PLUGIN_VALUE);
+    const wantsMcp = selected.includes(CC_MCP_VALUE);
+    const others = selected.filter(
+      (v) => v !== CC_PLUGIN_VALUE && v !== CC_MCP_VALUE,
+    );
+    const ccMode: ClaudeCodeInstallMode =
+      wantsPlugin || !wantsMcp ? 'plugin' : 'mcp';
+    const names =
+      wantsPlugin || wantsMcp ? [...others, CLAUDE_CODE_CLIENT_NAME] : others;
+    return { names, ccMode };
+  };
 
   useEffect(() => {
     if (showPreDetectedChoice) {
@@ -191,16 +222,18 @@ export const McpScreen = ({
     })();
   }, [installer, showPreDetectedChoice]);
 
-  const proceedWithNames = (names: string[]) => {
-    // For Claude Code we default to the plugin (MCP + slash commands).
-    // Three escape hatches route to raw MCP instead:
-    //   - session.localMcp: --local-mcp points at localhost; plugin is prod-only.
-    //   - AMPLITUDE_WIZARD_MCP_ONLY=1: hidden env knob.
-    //   - overrideMcpOnly: user pressed `m` in this run.
-    const useMcp = forcedMcpOnly || overrideMcpOnly;
-    const ccMode: ClaudeCodeInstallMode =
-      !useMcp && names.includes(CLAUDE_CODE_CLIENT_NAME) ? 'plugin' : 'mcp';
-    void doInstall(names, ccMode);
+  const proceedWithNames = (
+    names: string[],
+    ccMode: ClaudeCodeInstallMode = 'plugin',
+  ) => {
+    // Environment escape hatches always win over the user's selection
+    // (prod plugin can't talk to localhost, and AMPLITUDE_WIZARD_MCP_ONLY
+    // is an explicit opt-out).
+    const finalMode: ClaudeCodeInstallMode =
+      forcedMcpOnly || !names.includes(CLAUDE_CODE_CLIENT_NAME)
+        ? 'mcp'
+        : ccMode;
+    void doInstall(names, finalMode);
   };
 
   const handleConfirm = () => {
@@ -375,23 +408,14 @@ export const McpScreen = ({
             {phase === Phase.Ask && (
               <>
                 <Text color={Colors.secondary}>
-                  {isRemove ? 'Found:' : 'We’ll install:'}
+                  {isRemove ? 'Found:' : 'We’ll install in:'}
                 </Text>
                 {clients.map((c, i) => (
                   <Text key={i} color={Colors.body}>
                     {'  '}
-                    {Icons.bullet} {isRemove ? c.name : labelFor(c.name)}
+                    {Icons.bullet} {c.name}
                   </Text>
                 ))}
-                {showPluginToggle && (
-                  <Text color={Colors.muted}>
-                    {'  '}
-                    [m]{' '}
-                    {claudeCodeUsesPlugin
-                      ? 'Use MCP server only for Claude Code (no slash commands)'
-                      : 'Use the Amplitude plugin for Claude Code (slash commands + MCP)'}
-                  </Text>
-                )}
                 <Box marginTop={1}>
                   <ConfirmationInput
                     message={
@@ -411,39 +435,27 @@ export const McpScreen = ({
             {phase === Phase.Pick && (
               <>
                 <Text color={Colors.secondary}>
-                  All detected tools are selected — press space to uncheck any
-                  you don’t want, then Enter to continue.
+                  Everything is pre-selected. Space to uncheck anything you
+                  don’t want, then Enter to continue.
                 </Text>
-                {showPluginToggle && (
-                  <Text color={Colors.muted}>
-                    [m]{' '}
-                    {claudeCodeUsesPlugin
-                      ? 'Use MCP server only for Claude Code (no slash commands)'
-                      : 'Use the Amplitude plugin for Claude Code (slash commands + MCP)'}
-                  </Text>
-                )}
                 <PickerMenu
                   message="Connect Amplitude to:"
-                  options={clients.map((c) => ({
-                    label: isRemove ? c.name : labelFor(c.name),
-                    value: c.name,
-                  }))}
+                  options={buildPickerOptions()}
                   mode="multi"
-                  defaultSelected={clients.map((c) => c.name)}
+                  defaultSelected={buildDefaultSelected()}
                   onSelect={(selected) => {
-                    const names = Array.isArray(selected)
-                      ? selected
-                      : [selected];
+                    const raw = Array.isArray(selected) ? selected : [selected];
+                    const { names, ccMode } = resolveSelection(raw);
                     analytics.wizardCapture('MCP Clients Selected', {
                       selected_clients: names,
                       available_clients: clients.map((c) => c.name),
+                      claude_code_mode: ccMode,
                     });
                     if (names.length === 0) {
-                      // User unchecked everything — treat as skip.
                       handleSkip();
                       return;
                     }
-                    proceedWithNames(names);
+                    proceedWithNames(names, ccMode);
                   }}
                 />
               </>
