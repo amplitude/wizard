@@ -1,4 +1,4 @@
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { MCPClient, type AddServerResult } from '../MCPClient';
 import { analytics } from '../../../utils/analytics';
 import { debug } from '../../../utils/debug';
@@ -10,6 +10,34 @@ import {
 import { findClaudeBinary } from './claude-binary';
 
 const PLUGIN_REF = `${CLAUDE_PLUGIN_ID}@${CLAUDE_PLUGIN_MARKETPLACE_NAME}`;
+
+/** Async wrapper around spawn that captures stdout/stderr and returns a spawnSync-shaped result. */
+function runCli(
+  binary: string,
+  args: string[],
+): Promise<{ status: number; stdout: Buffer; stderr: Buffer }> {
+  return new Promise((resolve) => {
+    const proc = spawn(binary, args, { stdio: 'pipe' });
+    const stdoutChunks: Buffer[] = [];
+    const stderrChunks: Buffer[] = [];
+    proc.stdout?.on('data', (d: Buffer) => stdoutChunks.push(d));
+    proc.stderr?.on('data', (d: Buffer) => stderrChunks.push(d));
+    proc.on('error', (err) => {
+      resolve({
+        status: -1,
+        stdout: Buffer.concat(stdoutChunks),
+        stderr: Buffer.from(err.message),
+      });
+    });
+    proc.on('close', (status) => {
+      resolve({
+        status: status ?? 0,
+        stdout: Buffer.concat(stdoutChunks),
+        stderr: Buffer.concat(stderrChunks),
+      });
+    });
+  });
+}
 
 /**
  * Install flow for the Amplitude Claude Code plugin (bundles the MCP server +
@@ -45,33 +73,33 @@ export class ClaudeCodePluginClient extends MCPClient {
     }
   }
 
-  isServerInstalled(): Promise<boolean> {
+  async isServerInstalled(): Promise<boolean> {
     const binary = findClaudeBinary();
-    if (!binary) return Promise.resolve(false);
+    if (!binary) return false;
     try {
-      const result = spawnSync(binary, ['plugin', 'list'], { stdio: 'pipe' });
-      if (result.status !== 0) return Promise.resolve(false);
-      const output = result.stdout?.toString() ?? '';
-      return Promise.resolve(output.includes(PLUGIN_REF));
+      const result = await runCli(binary, ['plugin', 'list']);
+      if (result.status !== 0) return false;
+      return result.stdout.toString().includes(PLUGIN_REF);
     } catch {
-      return Promise.resolve(false);
+      return false;
     }
   }
 
-  addServer(): Promise<AddServerResult> {
+  async addServer(): Promise<AddServerResult> {
     const binary = findClaudeBinary();
     if (!binary) {
-      return Promise.resolve({
+      return {
         success: false,
         error: 'Claude Code CLI not found on PATH.',
-      });
+      };
     }
 
-    const marketplaceResult = spawnSync(
-      binary,
-      ['plugin', 'marketplace', 'add', CLAUDE_PLUGIN_MARKETPLACE_REPO],
-      { stdio: 'pipe' },
-    );
+    const marketplaceResult = await runCli(binary, [
+      'plugin',
+      'marketplace',
+      'add',
+      CLAUDE_PLUGIN_MARKETPLACE_REPO,
+    ]);
 
     if (
       marketplaceResult.status !== 0 &&
@@ -84,17 +112,19 @@ export class ClaudeCodePluginClient extends MCPClient {
       analytics.captureException(
         new Error(`Failed to add Amplitude plugin marketplace: ${err}`),
       );
-      return Promise.resolve({
+      return {
         success: false,
         error: `Could not register Amplitude marketplace: ${err}`,
-      });
+      };
     }
 
-    const installResult = spawnSync(
-      binary,
-      ['plugin', 'install', PLUGIN_REF, '--scope', 'user'],
-      { stdio: 'pipe' },
-    );
+    const installResult = await runCli(binary, [
+      'plugin',
+      'install',
+      PLUGIN_REF,
+      '--scope',
+      'user',
+    ]);
 
     if (installResult.status !== 0) {
       if (isAlreadyThere(installResult.stderr, installResult.stdout)) {
@@ -104,40 +134,42 @@ export class ClaudeCodePluginClient extends MCPClient {
         analytics.captureException(
           new Error(`Failed to install Amplitude plugin: ${err}`),
         );
-        return Promise.resolve({
+        return {
           success: false,
           error: `Plugin install failed: ${err}`,
-        });
+        };
       }
     }
 
-    this.removeStaleMcpEntry(binary);
-    return Promise.resolve({ success: true });
+    await this.removeStaleMcpEntry(binary);
+    return { success: true };
   }
 
-  removeServer(): Promise<AddServerResult> {
+  async removeServer(): Promise<AddServerResult> {
     const binary = findClaudeBinary();
     if (!binary) {
-      return Promise.resolve({
+      return {
         success: false,
         error: 'Claude Code CLI not found on PATH.',
-      });
+      };
     }
 
-    const result = spawnSync(
-      binary,
-      ['plugin', 'uninstall', PLUGIN_REF, '--scope', 'user'],
-      { stdio: 'pipe' },
-    );
+    const result = await runCli(binary, [
+      'plugin',
+      'uninstall',
+      PLUGIN_REF,
+      '--scope',
+      'user',
+    ]);
 
     if (result.status !== 0) {
       const err = stderrSummary(result.stderr, result.stdout);
       analytics.captureException(
         new Error(`Failed to uninstall Amplitude plugin: ${err}`),
       );
-      return Promise.resolve({ success: false, error: err });
+      return { success: false, error: err };
     }
-    return Promise.resolve({ success: true });
+    return { success: true };
   }
 
   /**
@@ -145,11 +177,11 @@ export class ClaudeCodePluginClient extends MCPClient {
    * that the plugin provides the same server. Best-effort — don't fail install
    * if this step errors.
    */
-  private removeStaleMcpEntry(binary: string): void {
+  private async removeStaleMcpEntry(binary: string): Promise<void> {
     try {
-      const list = spawnSync(binary, ['mcp', 'list'], { stdio: 'pipe' });
+      const list = await runCli(binary, ['mcp', 'list']);
       if (list.status !== 0) return;
-      const output = list.stdout?.toString() ?? '';
+      const output = list.stdout.toString();
       // Match a top-level `amplitude` server entry (not `amplitude-local`).
       const hasBareEntry = /^amplitude(?:\s|:)/m.test(output);
       if (!hasBareEntry) return;
@@ -157,9 +189,7 @@ export class ClaudeCodePluginClient extends MCPClient {
       debug(
         '  Removing stale bare `amplitude` MCP entry (superseded by plugin).',
       );
-      spawnSync(binary, ['mcp', 'remove', '--scope', 'user', 'amplitude'], {
-        stdio: 'pipe',
-      });
+      await runCli(binary, ['mcp', 'remove', '--scope', 'user', 'amplitude']);
     } catch {
       // best-effort
     }

@@ -304,6 +304,12 @@ export const McpScreen = ({
     setProgress(names.map((name) => ({ name, status: 'pending' as const })));
     let installed: string[] = [];
     let installFailures: McpInstallFailure[];
+    // CRITICAL: yield to the event loop before starting install. The Claude
+    // CLI clients use spawnSync, which BLOCKS the whole event loop for the
+    // ~5s plugin install. Without this yield, React never gets CPU time to
+    // paint the Working phase after setPhase() above, so the user stares at
+    // the stale picker until the whole install completes.
+    await new Promise<void>((resolve) => setImmediate(resolve));
     try {
       const result = await installer.install(names, {
         claudeCodeMode: ccMode,

@@ -1,12 +1,18 @@
 import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
-import { spawnSync } from 'child_process';
+import { EventEmitter } from 'events';
+import { spawn } from 'child_process';
 import * as fs from 'fs';
 import { ClaudeCodePluginClient } from '../claude-code-plugin';
 import { analytics } from '../../../../utils/analytics';
 import { _resetClaudeBinaryCache } from '../claude-binary';
 
 vi.mock('child_process', () => ({
-  spawnSync: vi.fn(),
+  spawnSync: vi.fn(() => ({
+    status: 0,
+    stdout: Buffer.from(''),
+    stderr: Buffer.from(''),
+  })),
+  spawn: vi.fn(),
 }));
 
 vi.mock('../../../../utils/analytics', () => ({
@@ -28,27 +34,46 @@ vi.mock('fs', async () => {
   };
 });
 
-const spawnSyncMock = spawnSync as Mock;
+const spawnMock = spawn as Mock;
 const existsSyncMock = fs.existsSync as unknown as Mock;
 
-const ok = (stdout = '', stderr = '') => ({
-  status: 0,
-  stdout: Buffer.from(stdout),
-  stderr: Buffer.from(stderr),
-});
-const fail = (stderr = '', stdout = '') => ({
-  status: 1,
-  stdout: Buffer.from(stdout),
-  stderr: Buffer.from(stderr),
-});
+/**
+ * Queue a mock `spawn()` response. The next call to spawn() will resolve with
+ * the given status and stdout/stderr. Because runCli listens on stream 'data'
+ * + 'close' events, we fake a minimal EventEmitter-backed ChildProcess.
+ */
+function queueSpawn(
+  status: number,
+  { stdout = '', stderr = '' }: { stdout?: string; stderr?: string } = {},
+) {
+  spawnMock.mockImplementationOnce(() => {
+    const proc = new EventEmitter() as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    proc.stdout = new EventEmitter();
+    proc.stderr = new EventEmitter();
+    // Fire async so callers get a chance to register listeners.
+    setImmediate(() => {
+      if (stdout) proc.stdout.emit('data', Buffer.from(stdout));
+      if (stderr) proc.stderr.emit('data', Buffer.from(stderr));
+      proc.emit('close', status);
+    });
+    return proc;
+  });
+}
+
+const okSpawn = (stdout = '', stderr = '') => queueSpawn(0, { stdout, stderr });
+const failSpawn = (stderr = '', stdout = '') =>
+  queueSpawn(1, { stdout, stderr });
 
 function mockClaudeBinaryFound() {
   existsSyncMock.mockImplementation((p: string) => p.endsWith('/claude'));
 }
 
-/** Find the spawnSync call whose argv starts with the given tokens. */
-function findCall(tokens: string[]) {
-  return spawnSyncMock.mock.calls.find((c) => {
+/** Find the spawn call whose argv matches the given tokens (args = calls[i][1]). */
+function findSpawnCall(tokens: string[]) {
+  return spawnMock.mock.calls.find((c) => {
     const args = c[1];
     if (!Array.isArray(args)) return false;
     return tokens.every((t, i) => args[i] === t);
@@ -65,18 +90,17 @@ describe('ClaudeCodePluginClient', () => {
   describe('addServer', () => {
     it('adds marketplace, installs plugin, reports success', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock
-        .mockReturnValueOnce(ok('✔ Successfully added marketplace: amplitude')) // marketplace add
-        .mockReturnValueOnce(ok('✔ Successfully installed plugin')) // plugin install
-        .mockReturnValueOnce(ok('')); // mcp list (no stale)
+      okSpawn('✔ Successfully added marketplace: amplitude'); // marketplace add
+      okSpawn('✔ Successfully installed plugin'); // plugin install
+      okSpawn(''); // mcp list (no stale)
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
 
       expect(result).toEqual({ success: true });
-      expect(findCall(['plugin', 'marketplace', 'add'])).toBeDefined();
+      expect(findSpawnCall(['plugin', 'marketplace', 'add'])).toBeDefined();
       expect(
-        findCall([
+        findSpawnCall([
           'plugin',
           'install',
           'amplitude@amplitude',
@@ -88,12 +112,9 @@ describe('ClaudeCodePluginClient', () => {
 
     it('treats an already-added marketplace as success', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock
-        .mockReturnValueOnce(
-          fail('Marketplace already on disk — declared in user settings'),
-        )
-        .mockReturnValueOnce(ok())
-        .mockReturnValueOnce(ok());
+      failSpawn('Marketplace already on disk — declared in user settings');
+      okSpawn();
+      okSpawn();
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
@@ -104,10 +125,9 @@ describe('ClaudeCodePluginClient', () => {
 
     it('treats an already-installed plugin as success', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock
-        .mockReturnValueOnce(ok())
-        .mockReturnValueOnce(fail('Plugin already installed'))
-        .mockReturnValueOnce(ok());
+      okSpawn();
+      failSpawn('Plugin already installed');
+      okSpawn();
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
@@ -118,9 +138,7 @@ describe('ClaudeCodePluginClient', () => {
 
     it('returns failure + error string when marketplace add fails', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock.mockReturnValueOnce(
-        fail('fatal: repository amplitude/mcp-marketplace not found'),
-      );
+      failSpawn('fatal: repository amplitude/mcp-marketplace not found');
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
@@ -129,15 +147,13 @@ describe('ClaudeCodePluginClient', () => {
       expect(result.error).toMatch(/marketplace/i);
       expect(result.error).toMatch(/not found/i);
       expect(analytics.captureException).toHaveBeenCalled();
-      // No plugin install call should have been attempted.
-      expect(findCall(['plugin', 'install'])).toBeUndefined();
+      expect(findSpawnCall(['plugin', 'install'])).toBeUndefined();
     });
 
     it('returns failure + error string when plugin install fails (no fallback)', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock
-        .mockReturnValueOnce(ok())
-        .mockReturnValueOnce(fail('plugin manifest invalid'));
+      okSpawn();
+      failSpawn('plugin manifest invalid');
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
@@ -146,38 +162,35 @@ describe('ClaudeCodePluginClient', () => {
       expect(result.error).toMatch(/plugin install failed/i);
       expect(result.error).toMatch(/manifest/);
       expect(analytics.captureException).toHaveBeenCalled();
-      // No `claude mcp add` fallback.
-      expect(findCall(['mcp', 'add'])).toBeUndefined();
+      expect(findSpawnCall(['mcp', 'add'])).toBeUndefined();
     });
 
     it('removes stale bare `amplitude` MCP entry after plugin install', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock
-        .mockReturnValueOnce(ok())
-        .mockReturnValueOnce(ok())
-        .mockReturnValueOnce(ok('amplitude: https://...\nother: ...\n')) // mcp list
-        .mockReturnValueOnce(ok()); // mcp remove
+      okSpawn();
+      okSpawn();
+      okSpawn('amplitude: https://...\nother: ...\n'); // mcp list
+      okSpawn(); // mcp remove
 
       const client = new ClaudeCodePluginClient();
       const result = await client.addServer();
 
       expect(result).toEqual({ success: true });
       expect(
-        findCall(['mcp', 'remove', '--scope', 'user', 'amplitude']),
+        findSpawnCall(['mcp', 'remove', '--scope', 'user', 'amplitude']),
       ).toBeDefined();
     });
 
     it('does not touch `amplitude-local` when checking stale entries', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock
-        .mockReturnValueOnce(ok())
-        .mockReturnValueOnce(ok())
-        .mockReturnValueOnce(ok('amplitude-local: http://localhost\n'));
+      okSpawn();
+      okSpawn();
+      okSpawn('amplitude-local: http://localhost\n');
 
       const client = new ClaudeCodePluginClient();
       await client.addServer();
 
-      expect(findCall(['mcp', 'remove'])).toBeUndefined();
+      expect(findSpawnCall(['mcp', 'remove'])).toBeUndefined();
     });
 
     it('returns failure with a friendly error when claude binary is not on PATH', async () => {
@@ -189,14 +202,14 @@ describe('ClaudeCodePluginClient', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/claude code cli/i);
-      expect(spawnSyncMock).not.toHaveBeenCalled();
+      expect(spawnMock).not.toHaveBeenCalled();
     });
   });
 
   describe('isServerInstalled', () => {
     it('returns true when `amplitude@amplitude` is in plugin list', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock.mockReturnValueOnce(ok('amplitude@amplitude (user)\n'));
+      okSpawn('amplitude@amplitude (user)\n');
 
       const client = new ClaudeCodePluginClient();
       await expect(client.isServerInstalled()).resolves.toBe(true);
@@ -204,7 +217,7 @@ describe('ClaudeCodePluginClient', () => {
 
     it('returns false when plugin list is empty', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock.mockReturnValueOnce(ok(''));
+      okSpawn('');
 
       const client = new ClaudeCodePluginClient();
       await expect(client.isServerInstalled()).resolves.toBe(false);
@@ -214,14 +227,14 @@ describe('ClaudeCodePluginClient', () => {
   describe('removeServer', () => {
     it('invokes `claude plugin uninstall` and returns success', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock.mockReturnValueOnce(ok());
+      okSpawn();
 
       const client = new ClaudeCodePluginClient();
       const result = await client.removeServer();
 
       expect(result).toEqual({ success: true });
       expect(
-        findCall([
+        findSpawnCall([
           'plugin',
           'uninstall',
           'amplitude@amplitude',
@@ -233,7 +246,7 @@ describe('ClaudeCodePluginClient', () => {
 
     it('returns failure with error on non-zero exit', async () => {
       mockClaudeBinaryFound();
-      spawnSyncMock.mockReturnValueOnce(fail('uninstall failed'));
+      failSpawn('uninstall failed');
 
       const client = new ClaudeCodePluginClient();
       const result = await client.removeServer();
