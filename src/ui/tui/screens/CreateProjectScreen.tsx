@@ -156,6 +156,11 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       persistApiKey(result.apiKey, session.installDir);
 
       store.setSelectedProjectName(result.name);
+      // Dash creates a same-named taxonomy workspace alongside the new app.
+      // Setting the workspace name satisfies Auth.isComplete so the router
+      // can advance past Auth; the real workspace id will appear on the
+      // next fetchAmplitudeUser refresh.
+      store.restoreSessionIds({ workspaceName: result.name });
       store.setCredentials({
         accessToken: session.pendingAuthAccessToken ?? '',
         idToken,
