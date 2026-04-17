@@ -99,14 +99,6 @@ export const McpScreen = ({
     };
   }, []);
 
-  // Tick elapsed-time labels during the Working phase. Without this the
-  // screen looks frozen during the ~5s plugin install even though progress
-  // IS happening — the spinner + static list gives no sense of motion.
-  useEffect(() => {
-    if (phase !== Phase.Working) return;
-    const interval = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(interval);
-  }, [phase]);
   const { runPhase, amplitudePreDetected, amplitudePreDetectedChoicePending } =
     store.session;
   const dataSetupComplete = runPhase === RunPhase.Completed;
@@ -121,6 +113,15 @@ export const McpScreen = ({
   const [progress, setProgress] = useState<ClientProgress[]>([]);
   /** Used to force a render once per second so elapsed-time labels tick. */
   const [, setTick] = useState(0);
+
+  // Tick elapsed-time labels during the Working phase. Without this the
+  // screen looks frozen during the ~5s plugin install even though progress
+  // IS happening — the spinner + static list gives no sense of motion.
+  useEffect(() => {
+    if (phase !== Phase.Working) return;
+    const interval = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(interval);
+  }, [phase]);
 
   // Sentinel values used in the multi-picker to split Claude Code into two
   // mutually-exclusive rows ("plugin" / "MCP server only").
