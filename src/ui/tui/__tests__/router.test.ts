@@ -85,20 +85,39 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
 
-    it('stays on Auth when credentials set but workspace name is missing', () => {
+    it('stays on Auth when credentials set but workspace name AND id are missing', () => {
       const router = new WizardRouter();
-      // Cached API key + ampli.json IDs can set credentials without resolving
-      // the workspace name. Workspace is what users call the "project" and
-      // is required before advancing.
+      // With neither name nor ID resolved, the identity isn't known at all —
+      // user must complete selection.
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
         credentials: CREDS,
         selectedOrgName: 'Acme',
+        selectedOrgId: 'org-1',
         selectedWorkspaceName: null,
+        selectedWorkspaceId: null,
         selectedProjectName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('advances when names are missing but IDs are set (hydration fallback)', () => {
+      const router = new WizardRouter();
+      // Failure mode: fetchAmplitudeUser couldn't populate names, but ampli.json
+      // gave us the IDs. Auth must not deadlock on the spinner — accept IDs as
+      // a degraded-but-valid identity.
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        credentials: CREDS,
+        selectedOrgName: null,
+        selectedOrgId: 'org-1',
+        selectedWorkspaceName: null,
+        selectedWorkspaceId: 'ws-1',
+        selectedProjectName: null,
+      });
+      expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
 
     it('advances from Auth to DataSetup when env name is missing (env is optional)', () => {

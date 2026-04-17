@@ -89,13 +89,19 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     //    (what users call the "project") are resolved. Env name is bonus —
     //    it can't always be determined (e.g., manual API key entry), and the
     //    header renders 2 or 3 segments gracefully depending on what's known.
+    //
+    //    IDs count as a resolved identity too. If ampli.json has OrgId /
+    //    WorkspaceId but fetchAmplitudeUser fails to hydrate the names (e.g.,
+    //    transient network error), we'd otherwise deadlock on the Auth
+    //    spinner. Accepting IDs as an alternative degrades header text but
+    //    lets the flow continue.
     {
       screen: Screen.Auth,
       show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) =>
         s.credentials !== null &&
-        s.selectedOrgName !== null &&
-        s.selectedWorkspaceName !== null,
+        (s.selectedOrgName !== null || s.selectedOrgId !== null) &&
+        (s.selectedWorkspaceName !== null || s.selectedWorkspaceId !== null),
     },
     // 4. Data check — is the project already ingesting events?
     {
