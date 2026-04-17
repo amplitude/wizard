@@ -11,6 +11,7 @@ import type { WizardOptions } from '../utils/types';
 import { analytics, captureWizardError } from '../utils/analytics';
 import {
   AMPLITUDE_PROPERTY_HEADER_PREFIX,
+  DEFAULT_AMPLITUDE_ZONE,
   WIZARD_VARIANT_FLAG_KEY,
   WIZARD_VARIANTS,
   WIZARD_USER_AGENT,
@@ -23,7 +24,6 @@ import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
-import { DEFAULT_AMPLITUDE_ZONE } from './constants';
 import { LINTING_TOOLS } from './safe-tools';
 import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
