@@ -13,19 +13,22 @@
 import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { z } from 'zod';
 import { getAttemptId, getRunId } from './observability';
 import { logToFile } from '../utils/debug';
 
+const SerializedAgentStateSchema = z.object({
+  schema: z.literal('amplitude-wizard-agent-state/1'),
+  runId: z.string(),
+  attemptId: z.string(),
+  timestamp: z.string(),
+  modifiedFiles: z.array(z.string()),
+  lastStatus: z.object({ code: z.string(), detail: z.string() }).nullable(),
+  compactionCount: z.number(),
+});
+
 /** Serialized shape written to disk on PreCompact. */
-export interface SerializedAgentState {
-  schema: 'amplitude-wizard-agent-state/1';
-  runId: string;
-  attemptId: string;
-  timestamp: string;
-  modifiedFiles: string[];
-  lastStatus: { code: string; detail: string } | null;
-  compactionCount: number;
-}
+export type SerializedAgentState = z.infer<typeof SerializedAgentStateSchema>;
 
 export class AgentState {
   /** Files the agent has written or edited during this attempt. */
@@ -84,19 +87,19 @@ export class AgentState {
 
 /**
  * Read a previously-persisted snapshot. Returns null on any failure so the
- * caller can fall back to a cold start. Validates only the schema tag — full
- * field validation is left to the consumer for forward compatibility.
+ * caller can fall back to a cold start. Uses zod validation to ensure all
+ * required fields are present and correctly typed.
  */
 export function loadSnapshot(path: string): SerializedAgentState | null {
   try {
     if (!existsSync(path)) return null;
     const raw = readFileSync(path, 'utf8');
-    const parsed = JSON.parse(raw) as Partial<SerializedAgentState>;
-    if (parsed.schema !== 'amplitude-wizard-agent-state/1') {
-      logToFile(`loadSnapshot: schema mismatch — got ${String(parsed.schema)}`);
+    const result = SerializedAgentStateSchema.safeParse(JSON.parse(raw));
+    if (!result.success) {
+      logToFile(`loadSnapshot: validation failed — ${result.error.message}`);
       return null;
     }
-    return parsed as SerializedAgentState;
+    return result.data;
   } catch (err) {
     logToFile(
       `loadSnapshot: read/parse failed: ${
