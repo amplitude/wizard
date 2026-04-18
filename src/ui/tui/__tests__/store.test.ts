@@ -288,15 +288,15 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://api2.amplitude.com',
-        projectId: 42,
+        appId: 42,
       });
       store.session.userEmail = 'user@example.com';
       store.session.selectedOrgId = 'org-1';
       store.session.selectedOrgName = 'Acme';
       store.session.selectedWorkspaceId = 'ws-1';
       store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedProjectId = '769610';
-      store.session.selectedProjectName = 'Production';
+      store.session.selectedAppId = '769610';
+      store.session.selectedEnvName = 'Production';
       store.session.projectHasData = true;
       store.session.activationLevel = 'full';
       store.session.activationOptionsComplete = true;
@@ -319,6 +319,7 @@ describe('WizardStore', () => {
       expect(store.session.selectedWorkspaceId).toBeNull();
       expect(store.session.selectedWorkspaceName).toBeNull();
       expect(store.session.selectedAppId).toBeNull();
+      expect(store.session.selectedEnvName).toBeNull();
       expect(store.session.projectHasData).toBeNull();
       expect(store.session.activationLevel).toBeNull();
       expect(store.session.activationOptionsComplete).toBe(false);
@@ -375,7 +376,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://api2.amplitude.com',
-        projectId: 1,
+        appId: 1,
       });
       store.session.selectedOrgName = 'Acme';
       store.session.selectedOrgId = 'org-1';

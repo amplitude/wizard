@@ -79,8 +79,8 @@ When('I enter the slash command {string}', function (command: string) {
     s.selectedOrgName = null;
     s.selectedWorkspaceId = null;
     s.selectedWorkspaceName = null;
-    s.selectedProjectName = null;
-    s.selectedProjectId = null;
+    s.selectedEnvName = null;
+    s.selectedAppId = null;
     s.projectHasData = null;
     s.activationLevel = null;
     s.activationOptionsComplete = false;
