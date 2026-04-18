@@ -537,7 +537,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {needsProjectPick && (
         <Box flexDirection="column">
           <Text bold color={Colors.heading}>
-            Select environment
+            Select an environment
           </Text>
           {pickerNotice && (
             <Box marginTop={1}>
