@@ -318,8 +318,7 @@ describe('WizardStore', () => {
       expect(store.session.selectedOrgName).toBeNull();
       expect(store.session.selectedWorkspaceId).toBeNull();
       expect(store.session.selectedWorkspaceName).toBeNull();
-      expect(store.session.selectedProjectId).toBeNull();
-      expect(store.session.selectedProjectName).toBeNull();
+      expect(store.session.selectedAppId).toBeNull();
       expect(store.session.projectHasData).toBeNull();
       expect(store.session.activationLevel).toBeNull();
       expect(store.session.activationOptionsComplete).toBe(false);
@@ -382,7 +381,7 @@ describe('WizardStore', () => {
       store.session.selectedOrgId = 'org-1';
       store.session.selectedWorkspaceName = 'Amplitude';
       store.session.selectedWorkspaceId = 'ws-1';
-      store.setSelectedProjectName('Production');
+      store.session.selectedAppId = 'app-1';
       store.setProjectHasData(false);
       expect(store.currentScreen).toBe(Screen.Run);
 

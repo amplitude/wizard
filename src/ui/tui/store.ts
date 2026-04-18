@@ -336,8 +336,7 @@ export class WizardStore {
     this.$session.setKey('selectedOrgName', null);
     this.$session.setKey('selectedWorkspaceId', null);
     this.$session.setKey('selectedWorkspaceName', null);
-    this.$session.setKey('selectedProjectName', null);
-    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedAppId', null);
 
     // Downstream flow state that depends on the old zone's data
     this.$session.setKey('projectHasData', null);
