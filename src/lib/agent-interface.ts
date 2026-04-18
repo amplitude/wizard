@@ -1530,7 +1530,10 @@ export async function runAgent(
               // Per-run values (projectApiKey, projectId, framework version)
               // already live in the first user message built by
               // buildIntegrationPrompt, not in this system prefix.
-              excludeDynamicSections: true,
+              // Set AMPLITUDE_WIZARD_DISABLE_CACHE=1 to disable — kill
+              // switch for the Slice 1 kill criterion (<40% hit rate).
+              excludeDynamicSections:
+                process.env.AMPLITUDE_WIZARD_DISABLE_CACHE !== '1',
             },
             env: {
               ...process.env,
