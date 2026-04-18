@@ -373,7 +373,7 @@ describe('WizardStore', () => {
     // trigger setOrgAndWorkspace's ampli.json write).
     store.session.selectedOrgName = 'Acme';
     store.session.selectedWorkspaceName = 'Amplitude';
-    store.setSelectedProjectName('Production');
+    store.setSelectedEnvName('Production');
     // DataSetup: set projectHasData (DataSetup screen isComplete)
     store.setProjectHasData(false);
   }
@@ -750,7 +750,7 @@ describe('WizardStore', () => {
       // triggering an ampli.json write.
       store.session.selectedOrgName = 'Acme';
       store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedProjectName = 'Production';
+      store.session.selectedEnvName = 'Production';
       store.setCredentials({
         // -> outage (overlay still on top)
         accessToken: 'tok',
@@ -946,7 +946,7 @@ describe('WizardStore', () => {
       // checks names, not IDs, and omitting IDs avoids side effects.
       store.session.selectedOrgName = 'Acme';
       store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedProjectName = 'Production';
+      store.session.selectedEnvName = 'Production';
       store.setCredentials({
         accessToken: 'tok',
         projectApiKey: 'pk',

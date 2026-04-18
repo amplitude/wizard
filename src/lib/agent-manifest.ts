@@ -84,27 +84,27 @@ export function getAgentManifest(): AgentManifest {
         {
           term: 'org',
           describe:
-            'An Amplitude organization (account-level). Identified by a UUID; select with --org <name>.',
+            'An Amplitude organization (account-level). Identified by a UUID. Auto-derived from --project-id — agents should not pass --org directly.',
         },
         {
           term: 'workspace',
           describe:
-            'A top-level grouping inside an org. Identified by a UUID; select with --workspace-id <uuid>.',
+            'A grouping inside an org. Identified by a UUID. Auto-derived from --project-id — agents should not pass --workspace-id directly.',
         },
         {
           term: 'project',
           describe:
-            'An Amplitude project — the ingestion surface that owns an API key and a set of events. Identified by a numeric ID (e.g. 769610); select with --project-id <id>. This is the most unambiguous selector.',
+            'An Amplitude project — the ingestion surface that owns an API key and a set of events. Identified by a numeric ID (e.g. 769610). Pass --project-id <id> — this is the only scope flag agents need; org, workspace, and environment are derived automatically.',
         },
         {
           term: 'environment',
           describe:
-            'A named runtime mode of a project (e.g. "Production", "Development", "Staging"). Not a POSIX environment variable. Select with --env <name> alongside --project-id or --workspace-id.',
+            'A named runtime mode of a project (e.g. "Production", "Development", "Staging"). Not a POSIX environment variable. Auto-selected from --project-id.',
         },
         {
           term: 'API key',
           describe:
-            'A project-level ingestion key embedded into client code (amplitude.init("<key>")). Passed with --api-key or AMPLITUDE_WIZARD_API_KEY. Not the same as an OAuth access token.',
+            'A project-level ingestion key embedded into client code (amplitude.init("<key>")). Fetched automatically after `amplitude-wizard login`; agents should not pass one directly.',
         },
         {
           term: 'access token',
@@ -141,11 +141,6 @@ export function getAgentManifest(): AgentManifest {
         default: false,
       },
       {
-        name: '--api-key',
-        describe: 'Amplitude API key (skips browser login)',
-        type: 'string',
-      },
-      {
         name: '--install-dir',
         describe: 'Project directory to inspect or instrument',
         type: 'string',
@@ -153,24 +148,13 @@ export function getAgentManifest(): AgentManifest {
       {
         name: '--project-id',
         describe:
-          'Amplitude project ID (numeric, e.g. 769610) — unambiguous selector. See concepts.glossary.',
+          'Amplitude project ID (numeric, e.g. 769610). The only scope flag agents need — org, workspace, and environment are derived automatically. See concepts.glossary.',
         type: 'string',
       },
       {
-        name: '--workspace-id',
+        name: '--project-name',
         describe:
-          'Amplitude workspace ID (UUID). Narrow to one workspace when env names collide.',
-        type: 'string',
-      },
-      {
-        name: '--org',
-        describe: 'Amplitude org name (case-insensitive partial match)',
-        type: 'string',
-      },
-      {
-        name: '--env',
-        describe:
-          'Amplitude environment name (e.g. "Production"). NOT a POSIX env var.',
+          'Name for a new Amplitude project (creates one when no projects exist, or with --ci/--agent).',
         type: 'string',
       },
       {
@@ -189,10 +173,6 @@ export function getAgentManifest(): AgentManifest {
       {
         name: 'AMPLITUDE_WIZARD_TOKEN',
         describe: 'Alias for AMPLITUDE_TOKEN',
-      },
-      {
-        name: 'AMPLITUDE_WIZARD_API_KEY',
-        describe: 'Amplitude project API key (alias of --api-key)',
       },
       {
         name: 'AMPLITUDE_WIZARD_AGENT',

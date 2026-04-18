@@ -39,12 +39,14 @@ describe('getAgentManifest', () => {
     expect(names).toContain('--ci');
   });
 
-  it('lists Amplitude-hierarchy selector flags', () => {
+  it('surfaces --project-id as the single scope selector for agents', () => {
     const names = manifest.globalFlags.map((f) => f.name);
     expect(names).toContain('--project-id');
-    expect(names).toContain('--workspace-id');
-    expect(names).toContain('--org');
-    expect(names).toContain('--env');
+    // Legacy --workspace-id / --org / --env are intentionally NOT advertised
+    // in the manifest — agents should select scope via --project-id alone.
+    expect(names).not.toContain('--workspace-id');
+    expect(names).not.toContain('--org');
+    expect(names).not.toContain('--env');
   });
 
   it('documents the Amplitude data-model hierarchy', () => {

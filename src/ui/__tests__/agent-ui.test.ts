@@ -312,11 +312,8 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       resumeFlags: Array<{ label: string; flags: string[] }>;
     };
     expect(data.resumeFlags).toHaveLength(1);
-    expect(data.resumeFlags[0].flags).toEqual([
-      '--project-id',
-      '100002',
-      '--env',
-      'Development',
-    ]);
+    // --project-id alone is sufficient — it's globally unique and resolves
+    // to one (org, workspace, env) tuple server-side. No --env / --org noise.
+    expect(data.resumeFlags[0].flags).toEqual(['--project-id', '100002']);
   });
 });

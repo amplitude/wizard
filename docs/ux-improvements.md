@@ -204,12 +204,13 @@ The codebase uses "projects," "environments," "workspaces," and "apps"
 inconsistently:
 
 - AuthScreen calls them "projects" in the picker
-- Amplitude API returns "environments" with "apps" inside them
-- Session stores `selectedProjectName` but it's actually an environment name
-- `project-id` CLI flag vs `selectedWorkspaceId` in session
+- Amplitude Data API returns Org → Workspace → Environment → App (with apiKey)
+- `project-id` CLI flag is really an environment-scoped `app.id`
+- User-facing `/whoami` surfaces "project" for workspace and "env" for environment
 
-**Recommendation:** Pick one user-facing term and stick to it across all screens.
-Amplitude's official terms are: Organization → Workspace → Project (environment).
+**Partially resolved:** Session field `selectedProjectName` renamed to `selectedEnvName`
+to match the Data API's actual shape. `--env` CLI flag deprecated — it's redundant
+with `--project-id` since each `app.id` identifies exactly one environment.
 
 ### 15. Number key shortcuts in PickerMenu not discoverable
 

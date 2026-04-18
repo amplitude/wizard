@@ -31,7 +31,7 @@ function advancePastMcp(s: WizardSession): void {
   s.credentials = mockCredentials();
   s.selectedOrgName = 'Test Org';
   s.selectedWorkspaceName = 'Default';
-  s.selectedProjectName = 'Default';
+  s.selectedEnvName = 'Default';
   s.region = 'us';
   s.projectHasData = false;
   s.setupConfirmed = true;

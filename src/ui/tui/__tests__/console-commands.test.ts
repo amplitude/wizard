@@ -57,7 +57,7 @@ describe('getWhoamiText', () => {
     selectedOrgId: null as string | null,
     selectedOrgName: null as string | null,
     selectedWorkspaceName: null as string | null,
-    selectedProjectName: null as string | null,
+    selectedEnvName: null as string | null,
     region: null as string | null,
     credentials: null as {
       accessToken: string;
@@ -78,7 +78,7 @@ describe('getWhoamiText', () => {
       ...base,
       selectedOrgName: 'Amplitude Website (Portfolio)',
       selectedWorkspaceName: 'Amplitude',
-      selectedProjectName: 'Production',
+      selectedEnvName: 'Production',
       region: 'us',
       credentials: {
         accessToken: 'tok',
@@ -117,7 +117,7 @@ describe('getWhoamiText', () => {
     const result = getWhoamiText({
       ...base,
       selectedOrgName: 'Acme',
-      selectedProjectName: 'Staging',
+      selectedEnvName: 'Staging',
       region: 'us',
       credentials: {
         accessToken: 'tok',

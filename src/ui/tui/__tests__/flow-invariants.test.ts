@@ -53,7 +53,7 @@ function applyAuthComplete(s: WizardSession) {
   s.credentials = mockCredentials();
   s.selectedOrgName = 'Acme';
   s.selectedWorkspaceName = 'Amplitude';
-  s.selectedProjectName = 'Production';
+  s.selectedEnvName = 'Production';
 }
 
 // ── Model + Real system ──────────────────────────────────────────────

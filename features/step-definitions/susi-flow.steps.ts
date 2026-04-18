@@ -154,8 +154,8 @@ When('I enter a valid Amplitude API key', function () {
   session.selectedOrgName = session.selectedOrgName ?? MOCK_ORG.name;
   session.selectedWorkspaceName =
     session.selectedWorkspaceName ?? MOCK_ORG.workspaces[0].name;
-  session.selectedProjectName =
-    session.selectedProjectName ?? MOCK_ORG.workspaces[0].name;
+  session.selectedEnvName =
+    session.selectedEnvName ?? MOCK_ORG.workspaces[0].name;
   session.credentials = {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: key,
@@ -286,8 +286,8 @@ Then('I should proceed automatically with the saved key', function () {
   session.selectedOrgName = session.selectedOrgName ?? MOCK_ORG.name;
   session.selectedWorkspaceName =
     session.selectedWorkspaceName ?? MOCK_ORG.workspaces[0].name;
-  session.selectedProjectName =
-    session.selectedProjectName ?? MOCK_ORG.workspaces[0].name;
+  session.selectedEnvName =
+    session.selectedEnvName ?? MOCK_ORG.workspaces[0].name;
   session.credentials = {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: result.key,

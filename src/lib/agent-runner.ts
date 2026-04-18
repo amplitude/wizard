@@ -178,7 +178,14 @@ export async function runAgentWizard(
       host: authResult.host,
       projectId: authResult.projectId,
     };
-    getUI().setCredentials(session.credentials);
+    getUI().setCredentials({
+      ...session.credentials,
+      orgId: session.selectedOrgId,
+      orgName: session.selectedOrgName,
+      workspaceId: session.selectedWorkspaceId,
+      workspaceName: session.selectedWorkspaceName,
+      envName: session.selectedEnvName,
+    });
     getUI().setRegion(authResult.cloudRegion);
     getUI().setProjectHasData(false);
   }

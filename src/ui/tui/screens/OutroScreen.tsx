@@ -88,8 +88,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             <Text color={Colors.body}>
               {store.eventPlan.length} event
               {store.eventPlan.length !== 1 ? 's' : ''} instrumented
-              {store.session.selectedProjectName
-                ? ` in ${store.session.selectedProjectName}`
+              {store.session.selectedEnvName
+                ? ` in ${store.session.selectedEnvName}`
                 : ''}
               .
             </Text>

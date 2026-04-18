@@ -288,12 +288,24 @@ export class AgentUI implements WizardUI {
     projectApiKey: string;
     host: string;
     projectId: number;
+    orgId?: string | null;
+    orgName?: string | null;
+    workspaceId?: string | null;
+    workspaceName?: string | null;
+    envName?: string | null;
   }): void {
     emit('session_state', 'credentials_set', {
       data: {
         field: 'credentials',
         host: credentials.host,
+        // projectId is the Amplitude env-scoped app ID (what Amplitude's UI
+        // calls "Project ID"). envName is the env label (Production/Dev/etc).
         projectId: credentials.projectId,
+        orgId: credentials.orgId ?? null,
+        orgName: credentials.orgName ?? null,
+        workspaceId: credentials.workspaceId ?? null,
+        workspaceName: credentials.workspaceName ?? null,
+        envName: credentials.envName ?? null,
       },
     });
   }
@@ -414,8 +426,13 @@ export class AgentUI implements WizardUI {
    *
    * Expected stdin response:
    * ```json
-   * { "orgId": "...", "workspaceId": "...", "env": "Production" }
+   * { "projectId": "769610" }
    * ```
+   *
+   * `projectId` alone is sufficient — it's globally unique and resolves to
+   * exactly one (org, workspace, project, env) tuple. The legacy
+   * `{ orgId, workspaceId, env }` shape is still accepted for one release
+   * so existing orchestrators keep working.
    *
    * Falls back to auto-selecting the first environment if stdin is closed
    * or no response is received within 60 seconds.
@@ -485,42 +502,53 @@ export class AgentUI implements WizardUI {
           promptType: 'environment_selection',
           // Must stay aligned with the manifest's concepts.hierarchy so
           // agents don't see one shape in the manifest and a different
-          // shape in the prompt. Each choice carries projectId, which is
-          // the unambiguous selector when env names collide.
+          // shape in the prompt. Each choice carries projectId, the
+          // unambiguous selector.
           hierarchy: ['org', 'workspace', 'project', 'environment'],
           choices,
           orgs: sanitizedOrgs,
           // Agents should reply on stdin with one JSON line matching this shape:
           responseSchema: {
-            orgId: 'string (required, from choices[].orgId)',
-            workspaceId: 'string (required, from choices[].workspaceId)',
-            env: 'string (required, from choices[].envName)',
+            projectId: 'string (required, from choices[].projectId)',
           },
-          // Or re-invoke with CLI flags. Prefer --project-id for unambiguous
-          // selection when env names collide across workspaces.
+          // Or re-invoke with a single CLI flag:
           resumeFlags: choices.map((c) => ({
             label: c.label,
-            flags: [
-              '--project-id',
-              String(c.projectId ?? ''),
-              '--env',
-              c.envName,
-            ],
+            flags: ['--project-id', String(c.projectId ?? '')],
           })),
         },
       },
     );
 
-    // Read one line from stdin
+    // Read one line from stdin. Accept either the canonical
+    // { projectId } shape or the legacy { orgId, workspaceId, env } triple.
     try {
       const line = await readStdinLine(60_000);
       if (line) {
         const parsed = JSON.parse(line) as {
+          projectId?: string;
           orgId?: string;
           workspaceId?: string;
           env?: string;
         };
+        if (parsed.projectId) {
+          const match = choices.find(
+            (c) => String(c.projectId) === String(parsed.projectId),
+          );
+          if (match) {
+            return {
+              orgId: match.orgId,
+              workspaceId: match.workspaceId,
+              env: match.envName,
+            };
+          }
+        }
         if (parsed.orgId && parsed.workspaceId && parsed.env) {
+          emit(
+            'log',
+            'Legacy { orgId, workspaceId, env } selection shape is deprecated — prefer { projectId }.',
+            { level: 'warn' },
+          );
           return {
             orgId: parsed.orgId,
             workspaceId: parsed.workspaceId,

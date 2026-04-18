@@ -611,6 +611,7 @@ async function askForWizardLogin(
   // can grab it directly from the workspace data we already fetched.
   // Falls back to manual prompt if not found.
   let projectApiKey: string | undefined;
+  let selectedProjectId: string | null = null;
 
   if (selectedWorkspace) {
     // Get environments that have an app with an API key, sorted by rank (lowest = primary)
@@ -620,6 +621,7 @@ async function askForWizardLogin(
 
     if (envsWithKey.length === 1) {
       projectApiKey = envsWithKey[0].app!.apiKey!;
+      selectedProjectId = envsWithKey[0].app?.id ?? null;
       getUI().log.success(
         chalk.dim(
           `Retrieved API key for ${chalk.bold(
@@ -638,6 +640,7 @@ async function askForWizardLogin(
       });
 
       projectApiKey = selectedEnv.app!.apiKey!;
+      selectedProjectId = selectedEnv.app?.id ?? null;
       getUI().log.success(
         chalk.dim(
           `Retrieved API key for ${chalk.bold(selectedEnv.name)} environment`,
@@ -669,7 +672,7 @@ async function askForWizardLogin(
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',
-    projectId: 0,
+    projectId: selectedProjectId ? Number(selectedProjectId) || 0 : 0,
     cloudRegion,
   };
 }

@@ -64,12 +64,24 @@ export interface WizardUI {
    */
   setRunError(error: Error): Promise<boolean>;
 
-  /** Store OAuth/API credentials. Resolves past AuthScreen in TUI. */
+  /**
+   * Store OAuth/API credentials and (optionally) the resolved scope context
+   * that goes with them. Scope fields are used for display + NDJSON emission;
+   * they're optional because manually-entered API keys can't always be
+   * resolved to an org/workspace. Resolves past AuthScreen in TUI.
+   */
   setCredentials(credentials: {
     accessToken: string;
     projectApiKey: string;
     host: string;
+    /** Env-scoped app ID (Amplitude UI's "Project ID"). */
     projectId: number;
+    orgId?: string | null;
+    orgName?: string | null;
+    workspaceId?: string | null;
+    workspaceName?: string | null;
+    /** Amplitude environment name ("Production", "Development", etc.). */
+    envName?: string | null;
   }): void;
 
   /** Show service degradation (pushes outage overlay in TUI). */

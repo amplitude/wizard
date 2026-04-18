@@ -111,7 +111,7 @@ When('the user cancels', function () {
 
 When('the create-project call succeeds and credentials are set', function () {
   // Emulate what CreateProjectScreen does on success.
-  session.selectedProjectName = 'My New Project';
+  session.selectedEnvName = 'My New Project';
   session.selectedWorkspaceName = 'My New Project';
   session.credentials = { ...CREDS, projectId: 999 };
   session.projectHasData = false;

@@ -42,7 +42,7 @@ const CheckpointSchema = z.object({
   selectedOrgName: z.string().nullable(),
   selectedWorkspaceId: z.string().nullable(),
   selectedWorkspaceName: z.string().nullable(),
-  selectedProjectName: z.string().nullable(),
+  selectedEnvName: z.string().nullable(),
 
   // Framework detection
   integration: z.string().nullable(),
@@ -72,7 +72,7 @@ export function saveCheckpoint(session: WizardSession): void {
     selectedOrgName: session.selectedOrgName,
     selectedWorkspaceId: session.selectedWorkspaceId,
     selectedWorkspaceName: session.selectedWorkspaceName,
-    selectedProjectName: session.selectedProjectName,
+    selectedEnvName: session.selectedEnvName,
 
     integration: session.integration,
     detectedFrameworkLabel: session.detectedFrameworkLabel,
@@ -129,7 +129,7 @@ export function loadCheckpoint(
     selectedOrgName: checkpoint.selectedOrgName,
     selectedWorkspaceId: checkpoint.selectedWorkspaceId,
     selectedWorkspaceName: checkpoint.selectedWorkspaceName,
-    selectedProjectName: checkpoint.selectedProjectName,
+    selectedEnvName: checkpoint.selectedEnvName,
     integration: checkpoint.integration as WizardSession['integration'],
     detectedFrameworkLabel: checkpoint.detectedFrameworkLabel,
     detectionComplete: checkpoint.detectionComplete,

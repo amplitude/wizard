@@ -251,8 +251,17 @@ export interface WizardSession {
   selectedWorkspaceId: string | null;
   selectedWorkspaceName: string | null;
 
-  /** Project/environment selected during SUSI (displayed in TitleBar). */
-  selectedProjectName: string | null;
+  /**
+   * Amplitude environment name (e.g. "Production", "Development", "Staging")
+   * for the selected workspace — displayed in the TitleBar.
+   *
+   * NOTE: Amplitude's data model is Org → Workspace → Environment → App;
+   * there is no separate "project" layer in the Data API. What Amplitude's
+   * UI calls a "Project ID" is actually an environment's `app.id` — so each
+   * environment has its own ID and its own API key. This field stores the
+   * env NAME, not a separate project name.
+   */
+  selectedEnvName: string | null;
 
   /**
    * Numeric analytics project ID for the selected workspace (e.g. "769610").
@@ -450,7 +459,7 @@ export function buildSession(args: {
     selectedOrgName: null,
     selectedWorkspaceId: null,
     selectedWorkspaceName: null,
-    selectedProjectName: null,
+    selectedEnvName: null,
     selectedProjectId: null,
     loginUrl: null,
     credentials: null,

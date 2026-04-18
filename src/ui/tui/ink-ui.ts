@@ -50,8 +50,21 @@ export class InkUI implements WizardUI {
     projectApiKey: string;
     host: string;
     projectId: number;
+    orgId?: string | null;
+    orgName?: string | null;
+    workspaceId?: string | null;
+    workspaceName?: string | null;
+    envName?: string | null;
   }): void {
-    this.store.setCredentials(credentials);
+    // The store-level WizardSession.credentials type only carries the four
+    // core fields; org/workspace names live elsewhere on the session. Scope
+    // fields here are for the NDJSON layer only — the TUI path ignores them.
+    this.store.setCredentials({
+      accessToken: credentials.accessToken,
+      projectApiKey: credentials.projectApiKey,
+      host: credentials.host,
+      projectId: credentials.projectId,
+    });
   }
 
   setDetectedFramework(label: string): void {

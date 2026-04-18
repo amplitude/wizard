@@ -219,7 +219,10 @@ export class WizardStore {
         workspace_id: session.selectedWorkspaceId ?? undefined,
         workspace_name: session.selectedWorkspaceName ?? undefined,
         project_id: session.selectedProjectId ?? credentials?.projectId,
-        project_name: session.selectedProjectName,
+        // Telemetry key kept as `project_name` for analytics history continuity.
+        // Value is the env name (Production/Dev/Staging) — matches Amplitude's
+        // Data API shape where each env has its own app ID and API key.
+        project_name: session.selectedEnvName,
         region: session.region,
         integration: session.integration,
       });
@@ -236,8 +239,8 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setSelectedProjectName(name: string | null): void {
-    this.$session.setKey('selectedProjectName', name);
+  setSelectedEnvName(name: string | null): void {
+    this.$session.setKey('selectedEnvName', name);
     this.emitChange();
   }
 

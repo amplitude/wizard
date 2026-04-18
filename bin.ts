@@ -278,7 +278,7 @@ const resolveNonInteractiveCredentials = async (
       }
       session.selectedOrgId = org.id;
       session.selectedOrgName = org.name;
-      session.selectedProjectName = created.name;
+      session.selectedEnvName = created.name;
       session.credentials = {
         accessToken: session.pendingAuthAccessToken ?? '',
         idToken: session.pendingAuthIdToken,
@@ -413,7 +413,7 @@ const resolveNonInteractiveCredentials = async (
     const parts = [
       session.selectedOrgName,
       session.selectedWorkspaceName,
-      session.selectedProjectName,
+      session.selectedEnvName,
     ].filter(Boolean);
     if (parts.length > 0) {
       getUI().log.info(`Using: ${parts.join(' / ')}`);
@@ -570,12 +570,17 @@ void yargs(hideBin(process.argv))
       type: 'boolean',
     },
     'api-key': {
-      describe: 'Amplitude API key (skips browser login)',
+      // Dev-only escape hatch. In normal flows the wizard fetches the
+      // project's API key via OAuth — the user should never have to paste one.
+      // Hidden from public --help unless AMPLITUDE_WIZARD_DEV=1.
+      describe:
+        'Amplitude API key (dev escape hatch; prefer `amplitude-wizard login`)',
       type: 'string',
+      hidden: !IS_WIZARD_DEV,
     },
     'project-id': {
       describe:
-        'Amplitude project ID (numeric, e.g. 769610) — unambiguous selector',
+        'Amplitude project ID (numeric, e.g. 769610) — the only scope flag needed in agent mode',
       type: 'string',
     },
     'project-name': {
@@ -583,17 +588,23 @@ void yargs(hideBin(process.argv))
         'Name for a new Amplitude project (creates a project if no projects exist, or when used with --ci/--agent)',
       type: 'string',
     },
+    // --workspace-id / --org / --env remain parseable (yargs env fallbacks,
+    // interactive legacy, CI scripts). Hidden from public help — agents should
+    // use --project-id, which is globally unique and unambiguous.
     'workspace-id': {
-      describe: 'Amplitude workspace ID (UUID) for multi-workspace orgs',
+      describe: 'Amplitude workspace ID (UUID) — legacy; prefer --project-id',
       type: 'string',
+      hidden: true,
     },
     org: {
-      describe: 'Amplitude org name (for multi-org accounts)',
+      describe: 'Amplitude org name — legacy; prefer --project-id',
       type: 'string',
+      hidden: true,
     },
     env: {
-      describe: 'environment name, e.g. "Production"',
+      describe: 'Amplitude environment name — legacy; prefer --project-id',
       type: 'string',
+      hidden: true,
     },
     json: {
       default: false,
@@ -666,6 +677,26 @@ void yargs(hideBin(process.argv))
     (argv) => {
       const options = { ...argv };
 
+      // --env is redundant with --project-id (each Amplitude env has its own
+      // app.id, so the numeric project-id already identifies the env). Keep
+      // the flag parseable for legacy scripts, but nudge callers toward
+      // --project-id. Fires once per invocation, before mode dispatch so
+      // interactive + CI + agent all see the same message.
+      if (options.env) {
+        const envWarning =
+          '[deprecation] --env is redundant with --project-id — prefer ' +
+          '--project-id <id> (globally unique, identifies the env directly). ' +
+          '--env will be removed in a future release.';
+        if (options.agent || process.env.AMPLITUDE_WIZARD_AGENT === '1') {
+          // Emit via AgentUI once it's constructed below; here we stash on
+          // options so the agent branch can surface it as a structured log.
+          (options as Record<string, unknown>)._envDeprecationWarning =
+            envWarning;
+        } else {
+          process.stderr.write(`${envWarning}\n`);
+        }
+      }
+
       // CI mode validation and TTY check
       if (
         options.agent ||
@@ -683,6 +714,14 @@ void yargs(hideBin(process.argv))
           const agentUI = new AgentUI();
           setUI(agentUI);
           if (!options.installDir) options.installDir = process.cwd();
+
+          // Surface the --env deprecation warning as a structured log event
+          // so orchestrators can parse it (raw stderr would mix with NDJSON).
+          const envDeprecationWarning = (options as Record<string, unknown>)
+            ._envDeprecationWarning;
+          if (typeof envDeprecationWarning === 'string') {
+            agentUI.log.warn(envDeprecationWarning);
+          }
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
@@ -810,7 +849,7 @@ void yargs(hideBin(process.argv))
                           workspace_name:
                             session.selectedWorkspaceName ?? undefined,
                           project_id: session.selectedProjectId,
-                          project_name: session.selectedProjectName,
+                          project_name: session.selectedEnvName,
                           region: session.region,
                           integration: session.integration,
                         });
@@ -2002,9 +2041,9 @@ void yargs(hideBin(process.argv))
     },
   )
   .example('$0', 'Run the interactive setup wizard')
-  .example('$0 --ci --api-key <key> --install-dir .', 'Run in CI mode')
+  .example('$0 --ci --install-dir .', 'Run in CI mode (OAuth + auto-select)')
   .example(
-    '$0 --agent --install-dir .',
+    '$0 --agent --project-id <id> --install-dir .',
     'Run with structured NDJSON output for automation',
   )
   .example('$0 detect --json', 'Detect the framework; output JSON')
