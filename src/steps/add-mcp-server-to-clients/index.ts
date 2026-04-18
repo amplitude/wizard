@@ -10,6 +10,11 @@ import { ClaudeCodePluginClient } from './clients/claude-code-plugin';
 import { VisualStudioCodeClient } from './clients/visual-studio-code';
 import { ZedClient } from './clients/zed';
 import { CodexMCPClient } from './clients/codex';
+import { GeminiCLIMCPClient } from './clients/gemini-cli';
+import { WindsurfMCPClient } from './clients/windsurf';
+import { ClineMCPClient } from './clients/cline';
+import { AmpMCPClient } from './clients/amp';
+import { OpenCodeMCPClient } from './clients/opencode';
 import { ALL_FEATURE_VALUES } from './defaults';
 import { debug } from '../../utils/debug';
 
@@ -45,6 +50,11 @@ export const getSupportedClients = async (): Promise<MCPClient[]> => {
     new VisualStudioCodeClient(),
     new ZedClient(),
     new CodexMCPClient(),
+    new GeminiCLIMCPClient(),
+    new WindsurfMCPClient(),
+    new ClineMCPClient(),
+    new AmpMCPClient(),
+    new OpenCodeMCPClient(),
   ];
 
   debug('Checking for supported MCP clients...');
