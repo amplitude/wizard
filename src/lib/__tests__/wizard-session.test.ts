@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { buildSession, RunPhase } from '../wizard-session.js';
 
-// ── buildSession / parseProjectIdArg ──────────────────────────────────────────
+// ── buildSession / parseAppIdArg ──────────────────────────────────────────
 
 describe('buildSession', () => {
   it('uses sensible defaults when called with no args', () => {
@@ -12,7 +12,7 @@ describe('buildSession', () => {
     expect(session.credentials).toBeNull();
     expect(session.runPhase).toBe(RunPhase.Idle);
     expect(session.introConcluded).toBe(false);
-    expect(session.projectId).toBeUndefined();
+    expect(session.appId).toBeUndefined();
   });
 
   it('passes through known args', () => {
@@ -26,37 +26,37 @@ describe('buildSession', () => {
     expect(session.installDir).toBe('/tmp/foo');
   });
 
-  // ── parseProjectIdArg (exercised via buildSession projectId) ────────────────
+  // ── parseAppIdArg (exercised via buildSession appId) ────────────────
 
-  it('parses a valid positive integer string as projectId', () => {
-    expect(buildSession({ projectId: '42' }).projectId).toBe(42);
+  it('parses a valid positive integer string as appId', () => {
+    expect(buildSession({ appId: '42' }).appId).toBe(42);
   });
 
-  it('parses "1" as projectId', () => {
-    expect(buildSession({ projectId: '1' }).projectId).toBe(1);
+  it('parses "1" as appId', () => {
+    expect(buildSession({ appId: '1' }).appId).toBe(1);
   });
 
-  it('returns undefined projectId for non-numeric string', () => {
-    expect(buildSession({ projectId: 'abc' }).projectId).toBeUndefined();
+  it('returns undefined appId for non-numeric string', () => {
+    expect(buildSession({ appId: 'abc' }).appId).toBeUndefined();
   });
 
-  it('returns undefined projectId for empty string', () => {
-    expect(buildSession({ projectId: '' }).projectId).toBeUndefined();
+  it('returns undefined appId for empty string', () => {
+    expect(buildSession({ appId: '' }).appId).toBeUndefined();
   });
 
-  it('returns undefined projectId for zero', () => {
-    expect(buildSession({ projectId: '0' }).projectId).toBeUndefined();
+  it('returns undefined appId for zero', () => {
+    expect(buildSession({ appId: '0' }).appId).toBeUndefined();
   });
 
-  it('returns undefined projectId for negative integer', () => {
-    expect(buildSession({ projectId: '-5' }).projectId).toBeUndefined();
+  it('returns undefined appId for negative integer', () => {
+    expect(buildSession({ appId: '-5' }).appId).toBeUndefined();
   });
 
-  it('returns undefined projectId for non-integer float', () => {
-    expect(buildSession({ projectId: '1.5' }).projectId).toBeUndefined();
+  it('returns undefined appId for non-integer float', () => {
+    expect(buildSession({ appId: '1.5' }).appId).toBeUndefined();
   });
 
-  it('returns undefined when projectId arg is omitted', () => {
-    expect(buildSession({}).projectId).toBeUndefined();
+  it('returns undefined when appId arg is omitted', () => {
+    expect(buildSession({}).appId).toBeUndefined();
   });
 });

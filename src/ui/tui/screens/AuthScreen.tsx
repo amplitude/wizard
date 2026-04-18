@@ -163,7 +163,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   useEffect(() => {
     if (workspaceChosen && !selectedEnv && selectableEnvs.length === 1) {
       setSelectedEnv(selectableEnvs[0]);
-      store.setSelectedProjectName(selectableEnvs[0].name);
+      store.setSelectedEnvName(selectableEnvs[0].name);
     }
   }, [workspaceChosen, selectedEnv, selectableEnvs.length]);
 
@@ -194,20 +194,24 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('api key submitted', {
           'key source': local.source,
         });
-        // Resolve env name from the key when we can — the header slot is
-        // informational, not required for Auth to complete.
-        if (!s.selectedProjectName && effectiveWorkspace) {
+        // Resolve env name + appId from the key when we can — the header
+        // slot is informational, not required for Auth to complete.
+        let matchedAppId: string | null = null;
+        if (effectiveWorkspace) {
           const match = (effectiveWorkspace.environments ?? []).find(
             (e) => e.app?.apiKey === local.key,
           );
-          if (match) store.setSelectedProjectName(match.name);
+          if (match) {
+            if (!s.selectedEnvName) store.setSelectedEnvName(match.name);
+            matchedAppId = match.app?.id ?? null;
+          }
         }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: local.key,
           host: DEFAULT_HOST_URL,
-          projectId: 0,
+          appId: matchedAppId ? Number(matchedAppId) || 0 : 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -217,6 +221,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       // 2. Use the API key from the selected environment
       if (selectedEnv?.app?.apiKey) {
         const apiKey = selectedEnv.app.apiKey;
+        const envAppId = selectedEnv.app.id ?? null;
         const zone = (s.region ??
           s.pendingAuthCloudRegion ??
           'us') as AmplitudeZone;
@@ -232,7 +237,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: apiKey,
           host: getHostFromRegion(zone),
-          projectId: 0,
+          appId: envAppId ? Number(envAppId) || 0 : 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -264,20 +269,26 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('api key submitted', {
           'key source': 'backend_fetch',
         });
-        // Resolve env name from the returned key when possible. Not required
-        // for Auth to complete.
-        if (!store.session.selectedProjectName && effectiveWorkspace) {
+        // Resolve env name + appId from the returned key when possible.
+        // Not required for Auth to complete.
+        let fetchedAppId: string | null = null;
+        if (effectiveWorkspace) {
           const match = (effectiveWorkspace.environments ?? []).find(
             (e) => e.app?.apiKey === projectApiKey,
           );
-          if (match) store.setSelectedProjectName(match.name);
+          if (match) {
+            if (!store.session.selectedEnvName) {
+              store.setSelectedEnvName(match.name);
+            }
+            fetchedAppId = match.app?.id ?? null;
+          }
         }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey,
           host: getHostFromRegion(zone),
-          projectId: 0,
+          appId: fetchedAppId ? Number(fetchedAppId) || 0 : 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -352,7 +363,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       session.installDir,
     );
     // Clear stale project name — setOrgAndWorkspace doesn't touch it.
-    store.setSelectedProjectName(null);
+    store.setSelectedEnvName(null);
 
     // Re-fetch the org list so newly-created projects show up in the picker.
     // Best-effort: silently ignore failures and fall back to the cached list.
@@ -390,7 +401,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       idToken: session.pendingAuthIdToken ?? undefined,
       projectApiKey: trimmed,
       host: DEFAULT_HOST_URL,
-      projectId: 0,
+      appId: 0,
     });
     // Fresh project: no existing event data — advance past DataSetup
     store.setProjectHasData(false);
@@ -573,7 +584,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
                 if (isPickerAction(picked)) return;
                 setPickerNotice(null);
                 setSelectedEnv(picked);
-                store.setSelectedProjectName(picked.name);
+                store.setSelectedEnvName(picked.name);
               }}
             />
           </Box>

@@ -468,7 +468,7 @@ WizardSession
 ├─ OAuth / auth state
 │   pendingOrgs, pendingAuthIdToken, pendingAuthAccessToken,
 │   pendingAuthCloudRegion, selectedOrgId, selectedOrgName,
-│   selectedWorkspaceId, selectedWorkspaceName, selectedProjectName,
+│   selectedWorkspaceId, selectedWorkspaceName, selectedEnvName,
 │   apiKeyNotice
 │
 ├─ Credentials (set when auth completes)

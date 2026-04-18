@@ -183,7 +183,7 @@ export interface PromptConfig<
   buildPrompt?: (context: {
     projectApiKey: string;
     host: string;
-    projectId: number;
+    appId: number;
     typescript: boolean;
     frameworkVersion: string;
     frameworkContext: TContext;

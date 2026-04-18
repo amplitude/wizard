@@ -57,13 +57,13 @@ describe('getWhoamiText', () => {
     selectedOrgId: null as string | null,
     selectedOrgName: null as string | null,
     selectedWorkspaceName: null as string | null,
-    selectedProjectName: null as string | null,
+    selectedEnvName: null as string | null,
     region: null as string | null,
     credentials: null as {
       accessToken: string;
       projectApiKey: string;
       host: string;
-      projectId: number;
+      appId: number;
     } | null,
     userEmail: null as string | null,
   };
@@ -78,13 +78,13 @@ describe('getWhoamiText', () => {
       ...base,
       selectedOrgName: 'Amplitude Website (Portfolio)',
       selectedWorkspaceName: 'Amplitude',
-      selectedProjectName: 'Production',
+      selectedEnvName: 'Production',
       region: 'us',
       credentials: {
         accessToken: 'tok',
         projectApiKey: 'abcd1234efgh5678',
         host: 'https://api.amplitude.com',
-        projectId: 187520,
+        appId: 187520,
       },
       userEmail: 'kelson.warner@amplitude.com',
     });
@@ -106,24 +106,24 @@ describe('getWhoamiText', () => {
         accessToken: 'tok',
         projectApiKey: 'key12345',
         host: 'https://api.amplitude.com',
-        projectId: 99,
+        appId: 99,
       },
     });
     expect(result).toContain('org: 12345');
     expect(result).toContain('env: 99');
   });
 
-  it('shows env name without ID when projectId is 0', () => {
+  it('shows env name without ID when appId is 0', () => {
     const result = getWhoamiText({
       ...base,
       selectedOrgName: 'Acme',
-      selectedProjectName: 'Staging',
+      selectedEnvName: 'Staging',
       region: 'us',
       credentials: {
         accessToken: 'tok',
         projectApiKey: 'key12345',
         host: 'https://api.amplitude.com',
-        projectId: 0,
+        appId: 0,
       },
     });
     expect(result).toContain('env: Staging');

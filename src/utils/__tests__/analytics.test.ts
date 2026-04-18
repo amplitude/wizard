@@ -249,15 +249,15 @@ describe('Analytics', () => {
       }
     });
 
-    it('should stringify numeric project_id', () => {
+    it('should stringify numeric app_id', () => {
       analytics.setDistinctId('ada@example.com');
       analytics.identifyUser({
-        project_id: 42,
+        app_id: 42,
       });
 
       const client = mockCreateInstance.mock.results[0].value;
       const identifyObj = client.identify.mock.calls[0][0];
-      expect(identifyObj.set).toHaveBeenCalledWith('project id', '42');
+      expect(identifyObj.set).toHaveBeenCalledWith('app id', '42');
     });
 
     it('should skip null/undefined properties', () => {
@@ -265,7 +265,7 @@ describe('Analytics', () => {
       analytics.identifyUser({
         email: 'ada@example.com',
         org_id: undefined,
-        project_id: null,
+        app_id: null,
         region: null,
       });
 
@@ -275,13 +275,13 @@ describe('Analytics', () => {
         'email',
         'ada@example.com',
       );
-      // org id, project id, and region should not have been set
+      // org id, app id, and region should not have been set
       expect(identifyObj.set).not.toHaveBeenCalledWith(
         'org id',
         expect.anything(),
       );
       expect(identifyObj.set).not.toHaveBeenCalledWith(
-        'project id',
+        'app id',
         expect.anything(),
       );
       expect(identifyObj.set).not.toHaveBeenCalledWith(

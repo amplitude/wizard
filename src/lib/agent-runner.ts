@@ -48,7 +48,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
     ci: session.ci,
     menu: session.menu,
     benchmark: session.benchmark,
-    projectId: session.projectId,
+    appId: session.appId,
     apiKey: session.apiKey,
   };
 }
@@ -168,7 +168,7 @@ export async function runAgentWizard(
       signup: session.signup,
       ci: session.ci,
       apiKey: session.apiKey,
-      projectId: session.projectId,
+      appId: session.appId,
       installDir: session.installDir,
     });
 
@@ -176,9 +176,16 @@ export async function runAgentWizard(
       accessToken: authResult.accessToken,
       projectApiKey: authResult.projectApiKey,
       host: authResult.host,
-      projectId: authResult.projectId,
+      appId: authResult.appId,
     };
-    getUI().setCredentials(session.credentials);
+    getUI().setCredentials({
+      ...session.credentials,
+      orgId: session.selectedOrgId,
+      orgName: session.selectedOrgName,
+      workspaceId: session.selectedWorkspaceId,
+      workspaceName: session.selectedWorkspaceName,
+      envName: session.selectedEnvName,
+    });
     getUI().setRegion(authResult.cloudRegion);
     getUI().setProjectHasData(false);
   }
@@ -187,7 +194,7 @@ export async function runAgentWizard(
     accessToken: rawAccessToken,
     projectApiKey,
     host,
-    projectId,
+    appId,
   } = session.credentials;
   // The TUI's AuthScreen may have stored the id_token instead of the
   // OAuth access token (the field names were swapped historically).
@@ -248,7 +255,7 @@ export async function runAgentWizard(
       typescript: typeScriptDetected,
       projectApiKey,
       host,
-      projectId,
+      appId,
     },
     frameworkContext,
     skipAmplitudeMcp,
@@ -465,12 +472,12 @@ async function pollForDataIngestion(
   const MAX_WAIT_MS =
     Number(process.env.DATA_INGESTION_TIMEOUT_MS) || 30 * 60 * 1000;
 
-  // Resolve the numeric analytics project ID.
+  // Resolve the numeric Amplitude app ID.
   // It is set by resolveEnvironmentSelection for the environment-picker path,
   // and by the fire-and-forget in bin.ts for the TUI path.
   // If still missing, try a single fetchAmplitudeUser call.
-  let projectId = session.selectedProjectId ?? null;
-  if (!projectId) {
+  let appId = session.selectedAppId ?? null;
+  if (!appId) {
     try {
       const userInfo = await fetchAmplitudeUser(
         accessToken,
@@ -483,23 +490,23 @@ async function pollForDataIngestion(
         org && session.selectedWorkspaceId
           ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
           : org?.workspaces[0];
-      projectId =
+      appId =
         ws?.environments
           ?.slice()
           .sort((a, b) => a.rank - b.rank)
           .find((e) => e.app?.id)?.app?.id ?? null;
-      if (projectId) session.selectedProjectId = projectId;
+      if (appId) session.selectedAppId = appId;
     } catch (err) {
       logToFile(
-        `[pollForDataIngestion] could not resolve projectId: ${
+        `[pollForDataIngestion] could not resolve appId: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
     }
   }
 
-  if (!projectId) {
-    logToFile('[pollForDataIngestion] no projectId — skipping ingestion check');
+  if (!appId) {
+    logToFile('[pollForDataIngestion] no appId — skipping ingestion check');
     return;
   }
 
@@ -511,12 +518,10 @@ async function pollForDataIngestion(
 
   while (Date.now() < deadline) {
     pollCount++;
-    logToFile(
-      `[pollForDataIngestion] poll #${pollCount} projectId=${projectId}`,
-    );
+    logToFile(`[pollForDataIngestion] poll #${pollCount} appId=${appId}`);
 
     try {
-      const result = await fetchHasAnyEventsMcp(accessToken, projectId);
+      const result = await fetchHasAnyEventsMcp(accessToken, appId);
       if (result.hasEvents) {
         logToFile(
           `[pollForDataIngestion] events detected: ${result.activeEventNames.join(
@@ -568,7 +573,7 @@ function buildIntegrationPrompt(
     typescript: boolean;
     projectApiKey: string;
     host: string;
-    projectId: number;
+    appId: number;
   },
   frameworkContext: Record<string, unknown>,
   skipAmplitudeMcp: boolean,
@@ -604,7 +609,7 @@ function buildIntegrationPrompt(
   } project. Use the wizard-tools MCP server to load and install skills.
 
 Project context:
-- Amplitude Project ID: ${context.projectId}
+- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}
 - Framework: ${config.metadata.name} ${context.frameworkVersion}
 - TypeScript: ${context.typescript ? 'Yes' : 'No'}
 - Amplitude public token: ${context.projectApiKey}

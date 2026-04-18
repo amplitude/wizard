@@ -40,7 +40,7 @@ function mockCredentials() {
     idToken: 'test-id-token',
     projectApiKey: 'test-api-key',
     host: 'https://api.amplitude.com',
-    projectId: 12345,
+    appId: 12345,
   };
 }
 
@@ -53,7 +53,7 @@ function applyAuthComplete(s: WizardSession) {
   s.credentials = mockCredentials();
   s.selectedOrgName = 'Acme';
   s.selectedWorkspaceName = 'Amplitude';
-  s.selectedProjectName = 'Production';
+  s.selectedEnvName = 'Production';
 }
 
 // ── Model + Real system ──────────────────────────────────────────────

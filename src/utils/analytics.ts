@@ -47,7 +47,7 @@ export function sessionProperties(
     integration: session.integration,
     'detected framework': session.detectedFrameworkLabel,
     typescript: session.typescript,
-    'project id': session.credentials?.projectId,
+    'app id': session.credentials?.appId,
     'discovered features': session.discoveredFeatures,
     'additional features': session.additionalFeatureQueue,
     'run phase': session.runPhase,
@@ -65,7 +65,7 @@ export function sessionPropertiesCompact(
     integration: session.integration,
     'detected framework': session.detectedFrameworkLabel,
     'run phase': session.runPhase,
-    'project id': session.credentials?.projectId,
+    'app id': session.credentials?.appId,
   };
 }
 
@@ -118,8 +118,8 @@ export class Analytics {
     org_name?: string;
     workspace_id?: string;
     workspace_name?: string;
-    project_id?: string | number | null;
-    project_name?: string | null;
+    app_id?: string | number | null;
+    env_name?: string | null;
     region?: string | null;
     integration?: string | null;
   }): void {
@@ -142,10 +142,9 @@ export class Analytics {
       identifyObj.set('workspace id', properties.workspace_id);
     if (properties.workspace_name)
       identifyObj.set('workspace name', properties.workspace_name);
-    if (properties.project_id != null)
-      identifyObj.set('project id', String(properties.project_id));
-    if (properties.project_name)
-      identifyObj.set('project name', properties.project_name);
+    if (properties.app_id != null)
+      identifyObj.set('app id', String(properties.app_id));
+    if (properties.env_name) identifyObj.set('env name', properties.env_name);
     if (properties.region) identifyObj.set('region', properties.region);
     if (properties.integration)
       identifyObj.set('integration', properties.integration);

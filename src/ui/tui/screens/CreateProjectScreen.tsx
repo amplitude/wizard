@@ -180,7 +180,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         // error would misrepresent the backend state to the user.
       }
 
-      store.setSelectedProjectName(result.name);
+      store.setSelectedEnvName(result.name);
       // Dash creates a same-named taxonomy workspace alongside the new app.
       // Setting the workspace name satisfies Auth.isComplete so the router
       // can advance past Auth; the real workspace id will appear on the
@@ -194,10 +194,10 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         idToken,
         projectApiKey: result.apiKey,
         host: getHostFromRegion(zone),
-        // The proxy returns `appId` as a string; credentials.projectId is
+        // The proxy returns `appId` as a string; credentials.appId is
         // numeric. Attempt a coercion — fall back to 0 if the backend ever
         // returns a non-numeric id.
-        projectId: Number.parseInt(result.appId, 10) || 0,
+        appId: Number.parseInt(result.appId, 10) || 0,
       });
       store.setProjectHasData(false);
       store.setApiKeyNotice(null);

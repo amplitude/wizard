@@ -17,11 +17,11 @@ import type { FrameworkConfig } from './framework-config';
 
 /**
  * Zod schema for CLI args passed to `buildSession()`.
- * Coerces `projectId` from string to positive integer.
+ * Coerces `appId` from string to positive integer.
  * All boolean flags default to false; `installDir` defaults to cwd.
  */
 export const CliArgsSchema = z.object({
-  projectId: z
+  appId: z
     .union([z.string(), z.number()])
     .optional()
     .transform((v) => {
@@ -41,7 +41,7 @@ export const CliArgsSchema = z.object({
   benchmark: z.boolean().default(false),
   apiKey: z.string().optional(),
   integration: z.string().optional(),
-  projectName: z.string().optional(),
+  appName: z.string().optional(),
 });
 
 /**
@@ -53,10 +53,11 @@ export const CredentialsSchema = z.object({
   idToken: z.string().optional(),
   projectApiKey: z.string().min(1, 'projectApiKey is required'),
   host: z.string().url('host must be a valid URL'),
-  projectId: z.number(),
+  /** Numeric Amplitude app ID (canonical). */
+  appId: z.number(),
 });
 
-function parseProjectIdArg(value: string | undefined): number | undefined {
+function parseAppIdArg(value: string | undefined): number | undefined {
   if (value === undefined || value === '') return undefined;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : undefined;
@@ -153,7 +154,11 @@ export interface WizardSession {
   apiKey?: string;
   menu: boolean;
   benchmark: boolean;
-  projectId?: number;
+  /**
+   * Numeric Amplitude app ID from --app-id (or --project-id alias).
+   * Matches `app.id` in the Data API and `app_id` in the Python monorepo.
+   */
+  appId?: number;
 
   // From detection + screens
   setupConfirmed: boolean;
@@ -251,15 +256,26 @@ export interface WizardSession {
   selectedWorkspaceId: string | null;
   selectedWorkspaceName: string | null;
 
-  /** Project/environment selected during SUSI (displayed in TitleBar). */
-  selectedProjectName: string | null;
+  /**
+   * Amplitude environment name (e.g. "Production", "Development", "Staging")
+   * for the selected workspace — displayed in the TitleBar.
+   *
+   * NOTE: Amplitude's data model is Org → Workspace → Environment → App;
+   * there is no separate "project" layer in the Data API. What Amplitude's
+   * UI calls a "Project ID" is actually an environment's `app.id` — so each
+   * environment has its own ID and its own API key. This field stores the
+   * env NAME, not a separate project name.
+   */
+  selectedEnvName: string | null;
 
   /**
-   * Numeric analytics project ID for the selected workspace (e.g. "769610").
-   * Sourced from workspace.environments[*].app.id at project selection time.
-   * Used by DataIngestionCheckScreen to call query_dataset via MCP.
+   * Numeric Amplitude app ID for the selected environment (e.g. "769610").
+   * Sourced from `workspace.environments[*].app.id`. Canonical term across
+   * amplitude/amplitude (Python `app_id`) and amplitude/javascript
+   * (TS `appId`, GraphQL `App.id`). Used by DataIngestionCheckScreen to
+   * call query_dataset via MCP.
    */
-  selectedProjectId: string | null;
+  selectedAppId: string | null;
 
   /**
    * Notice shown on the API key entry step of AuthScreen.
@@ -275,7 +291,8 @@ export interface WizardSession {
     idToken?: string;
     projectApiKey: string;
     host: string;
-    projectId: number;
+    /** Numeric Amplitude app ID (canonical); 0 when unknown. */
+    appId: number;
   } | null;
 
   // Lifecycle
@@ -387,9 +404,10 @@ export function buildSession(args: {
   menu?: boolean;
   integration?: Integration;
   benchmark?: boolean;
-  projectId?: string;
-  /** From --project-name CLI flag — pre-fills CreateProjectScreen. */
-  projectName?: string;
+  /** From --app-id / --project-id CLI flag. */
+  appId?: string;
+  /** From --app-name / --project-name CLI flag — pre-fills CreateAppScreen. */
+  appName?: string;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -401,7 +419,7 @@ export function buildSession(args: {
     );
   }
 
-  // Use Zod-validated data (with coerced projectId and defaults) when available
+  // Use Zod-validated data (with coerced appId and defaults) when available
   const validated = parsed.success ? parsed.data : args;
 
   return {
@@ -416,9 +434,7 @@ export function buildSession(args: {
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
     benchmark: validated.benchmark ?? false,
-    projectId: parsed.success
-      ? parsed.data.projectId
-      : parseProjectIdArg(args.projectId),
+    appId: parsed.success ? parsed.data.appId : parseAppIdArg(args.appId),
 
     setupConfirmed: false,
     integration: (validated.integration as Integration) ?? null,
@@ -450,8 +466,8 @@ export function buildSession(args: {
     selectedOrgName: null,
     selectedWorkspaceId: null,
     selectedWorkspaceName: null,
-    selectedProjectName: null,
-    selectedProjectId: null,
+    selectedEnvName: null,
+    selectedAppId: null,
     loginUrl: null,
     credentials: null,
     apiKeyNotice: null,
@@ -472,8 +488,8 @@ export function buildSession(args: {
 
     createProject: {
       pending: false,
-      source: args.projectName ? 'cli-flag' : null,
-      suggestedName: args.projectName ?? null,
+      source: args.appName ? 'cli-flag' : null,
+      suggestedName: args.appName ?? null,
     },
   };
 }

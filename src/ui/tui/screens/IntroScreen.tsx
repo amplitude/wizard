@@ -144,7 +144,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     selectedOrgName: null,
                     selectedWorkspaceId: null,
                     selectedWorkspaceName: null,
-                    selectedProjectName: null,
+                    selectedEnvName: null,
                   };
                   setShowResume(false);
                 } else {

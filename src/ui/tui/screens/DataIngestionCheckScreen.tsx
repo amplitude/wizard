@@ -18,7 +18,7 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
-  extractProjectId,
+  extractAppId,
   fetchAmplitudeUser,
   fetchHasAnyEventsMcp,
   fetchProjectActivationStatus,
@@ -64,7 +64,7 @@ export const DataIngestionCheckScreen = ({
     null,
   );
   // Cache a lazily-resolved project ID across poll cycles.
-  const resolvedProjectIdRef = useRef<string | null>(null);
+  const resolvedAppIdRef = useRef<string | null>(null);
   const [apiUnavailable, setApiUnavailable] = useState(false);
   const [eventTypes, setEventTypes] = useState<string[] | null>(null);
   const [celebrating, setCelebrating] = useState(false);
@@ -135,7 +135,7 @@ export const DataIngestionCheckScreen = ({
       return;
     }
     const appId =
-      currentCredentials.projectId || currentSession.selectedWorkspaceId;
+      currentCredentials.appId || currentSession.selectedWorkspaceId;
     if (!appId) {
       setApiUnavailable(true);
       return;
@@ -154,11 +154,11 @@ export const DataIngestionCheckScreen = ({
     // Uses _all event type so any custom track() calls are detected.
     // Requires the numeric analytics project ID from workspace.environments[].app.id.
     //
-    // selectedProjectId may be null if the startup fire-and-forget fetchAmplitudeUser
+    // selectedAppId may be null if the startup fire-and-forget fetchAmplitudeUser
     // failed (e.g. due to an expired token). Resolve lazily using the now-fresh token.
-    let effectiveProjectId =
-      currentSession.selectedProjectId ?? resolvedProjectIdRef.current;
-    if (!effectiveProjectId) {
+    let effectiveAppId =
+      currentSession.selectedAppId ?? resolvedAppIdRef.current;
+    if (!effectiveAppId) {
       const tryResolve = async () => {
         const userInfo = await fetchAmplitudeUser(
           freshCredentials.idToken ?? freshCredentials.accessToken,
@@ -190,12 +190,12 @@ export const DataIngestionCheckScreen = ({
           logToFile(`[DataIngestionCheck] lazily set workspaceId=${ws.id}`);
         }
 
-        effectiveProjectId = ws ? extractProjectId(ws) : null;
-        if (effectiveProjectId) {
-          resolvedProjectIdRef.current = effectiveProjectId;
-          restoredFields.projectId = effectiveProjectId;
+        effectiveAppId = ws ? extractAppId(ws) : null;
+        if (effectiveAppId) {
+          resolvedAppIdRef.current = effectiveAppId;
+          restoredFields.appId = effectiveAppId;
           logToFile(
-            `[DataIngestionCheck] lazily resolved projectId=${effectiveProjectId}`,
+            `[DataIngestionCheck] lazily resolved appId=${effectiveAppId}`,
           );
         } else {
           logToFile(
@@ -237,13 +237,13 @@ export const DataIngestionCheckScreen = ({
       }
     }
 
-    if (effectiveProjectId) {
+    if (effectiveAppId) {
       const result = await fetchHasAnyEventsMcp(
         freshCredentials.accessToken,
-        effectiveProjectId,
+        effectiveAppId,
       );
       logToFile(
-        `[DataIngestionCheck] MCP check: hasEvents=${result.hasEvents} projectId=${effectiveProjectId} events=${result.activeEventNames.length}`,
+        `[DataIngestionCheck] MCP check: hasEvents=${result.hasEvents} appId=${effectiveAppId} events=${result.activeEventNames.length}`,
       );
       if (result.hasEvents) {
         setApiUnavailable(false);
@@ -251,9 +251,7 @@ export const DataIngestionCheckScreen = ({
         return;
       }
     } else {
-      logToFile(
-        '[DataIngestionCheck] MCP check skipped: no projectId resolved',
-      );
+      logToFile('[DataIngestionCheck] MCP check skipped: no appId resolved');
     }
 
     // Step 2: Try activation status via Thunder (org-scoped, autocapture events only).

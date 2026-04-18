@@ -32,14 +32,14 @@ function mockCredentials(): WizardSession['credentials'] {
     accessToken: 'access-abc',
     projectApiKey: 'api-key-xyz',
     host: 'https://api.amplitude.com',
-    projectId: 123456,
+    appId: 123456,
   };
 }
 
 function ensureIdentityNames(s: WizardSession): void {
   s.selectedOrgName = s.selectedOrgName ?? 'Test Org';
   s.selectedWorkspaceName = s.selectedWorkspaceName ?? 'Default';
-  s.selectedProjectName = s.selectedProjectName ?? 'Default';
+  s.selectedEnvName = s.selectedEnvName ?? 'Default';
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────

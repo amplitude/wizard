@@ -218,14 +218,17 @@ export class WizardStore {
         org_name: session.selectedOrgName ?? undefined,
         workspace_id: session.selectedWorkspaceId ?? undefined,
         workspace_name: session.selectedWorkspaceName ?? undefined,
-        project_id: session.selectedProjectId ?? credentials?.projectId,
-        project_name: session.selectedProjectName,
+        // Canonical telemetry keys: `app_id` matches Python `app_id` and
+        // TS `appId`; `env_name` matches the Amplitude data-model shape
+        // (Org → Workspace → Environment → App).
+        app_id: session.selectedAppId ?? credentials?.appId,
+        env_name: session.selectedEnvName,
         region: session.region,
         integration: session.integration,
       });
     }
     analytics.wizardCapture('auth complete', {
-      'project id': credentials?.projectId,
+      'app id': credentials?.appId,
       region: session.region,
     });
     this.emitChange();
@@ -236,8 +239,8 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setSelectedProjectName(name: string | null): void {
-    this.$session.setKey('selectedProjectName', name);
+  setSelectedEnvName(name: string | null): void {
+    this.$session.setKey('selectedEnvName', name);
     this.emitChange();
   }
 
@@ -440,7 +443,7 @@ export class WizardStore {
   }
 
   /**
-   * Restore org/workspace/project session IDs that weren't populated at startup
+   * Restore org/workspace/app session IDs that weren't populated at startup
    * (e.g. because the fire-and-forget fetchAmplitudeUser failed due to expired token).
    * Only updates fields that are provided.
    */
@@ -449,7 +452,7 @@ export class WizardStore {
     orgName?: string;
     workspaceId?: string;
     workspaceName?: string;
-    projectId?: string | null;
+    appId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
       this.$session.setKey('selectedOrgId', fields.orgId);
@@ -459,8 +462,8 @@ export class WizardStore {
       this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
     if (fields.workspaceName !== undefined)
       this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
-    if (fields.projectId !== undefined)
-      this.$session.setKey('selectedProjectId', fields.projectId);
+    if (fields.appId !== undefined)
+      this.$session.setKey('selectedAppId', fields.appId);
     this.emitChange();
   }
 
@@ -614,13 +617,13 @@ export class WizardStore {
     this.$session.setKey('selectedWorkspaceId', workspace.id);
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
-    // Extract the analytics project ID from the lowest-rank environment.
-    const projectId =
+    // Extract the Amplitude app ID from the lowest-rank environment.
+    const appId =
       workspace.environments
         ?.slice()
         .sort((a, b) => a.rank - b.rank)
         .find((e) => e.app?.id)?.app?.id ?? null;
-    this.$session.setKey('selectedProjectId', projectId);
+    this.$session.setKey('selectedAppId', appId);
 
     // Write ampli.json to the project directory.
     // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)
