@@ -1386,6 +1386,7 @@ export async function runAgent(
         collectedText.length = 0;
         recentStatuses.length = 0;
         authErrorDetected = false;
+        agentState.reset();
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received

@@ -45,6 +45,13 @@ export class AgentState {
     this.compactionCount += 1;
   }
 
+  /** Reset all mutable state for a fresh retry attempt. */
+  reset(): void {
+    this.modifiedFiles.clear();
+    this.lastStatus = null;
+    this.compactionCount = 0;
+  }
+
   snapshot(): SerializedAgentState {
     return {
       schema: 'amplitude-wizard-agent-state/1',
