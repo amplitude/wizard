@@ -1390,6 +1390,14 @@ export async function runAgent(
               // Append wizard-wide commandments (from YAML) rather than replacing
               // the preset so we keep default Claude Code behaviors.
               append: getWizardCommandments(),
+              // Strip per-run / per-machine sections (date, cwd) from the
+              // preset so the static prefix is identical across runs. This
+              // is the supported SDK path for prompt caching — the SDK
+              // attaches cache_control internally when the prefix is stable.
+              // Per-run values (projectApiKey, projectId, framework version)
+              // already live in the first user message built by
+              // buildIntegrationPrompt, not in this system prefix.
+              excludeDynamicSections: true,
             },
             env: {
               ...process.env,
