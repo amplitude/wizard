@@ -29,6 +29,11 @@ import { getStoredToken } from '../utils/ampli-settings';
 import { nextAttemptId } from './observability/correlation';
 import { ToolCallCounters } from './tool-call-counters';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
+import {
+  shouldEmitCacheMissAnomaly,
+  WARM_RUN_TOKEN_FLOOR,
+  CACHE_MISS_THRESHOLD,
+} from './cache-anomaly';
 import { LINTING_TOOLS } from './safe-tools';
 import {
   createWizardToolsServer,
@@ -1229,13 +1234,7 @@ export async function runAgent(
     // emit a separate anomaly event so Amplitude can alert + Sentry can
     // surface the pattern. Skipped on cold runs (first invocation or small
     // prompts) where the cache can't possibly have warmed up.
-    const WARM_RUN_TOKEN_FLOOR = 5000;
-    const CACHE_MISS_THRESHOLD = 0.4;
-    if (
-      cacheHitRate !== null &&
-      inputTokens >= WARM_RUN_TOKEN_FLOOR &&
-      cacheHitRate < CACHE_MISS_THRESHOLD
-    ) {
+    if (shouldEmitCacheMissAnomaly({ cacheHitRate, inputTokens })) {
       analytics.wizardCapture('cache miss anomaly', {
         'cache hit rate': cacheHitRate,
         'input tokens': inputTokens,
