@@ -39,21 +39,26 @@ describe('getAgentManifest', () => {
     expect(names).toContain('--ci');
   });
 
-  it('surfaces --project-id as the single scope selector for agents', () => {
+  it('surfaces --app-id as the single scope selector for agents', () => {
     const names = manifest.globalFlags.map((f) => f.name);
-    expect(names).toContain('--project-id');
-    // Legacy --workspace-id / --org / --env are intentionally NOT advertised
-    // in the manifest — agents should select scope via --project-id alone.
+    expect(names).toContain('--app-id');
+    // Canonical term: `app` / `app_id` across both monorepos.
+    // Legacy --project-id is a parseable alias but NOT advertised in the
+    // manifest, nor are --workspace-id / --org / --env — agents should
+    // select scope via --app-id alone.
+    expect(names).not.toContain('--project-id');
     expect(names).not.toContain('--workspace-id');
     expect(names).not.toContain('--org');
     expect(names).not.toContain('--env');
   });
 
   it('documents the Amplitude data-model hierarchy', () => {
+    // Canonical hierarchy from amplitude/amplitude (Python `orgs`/`app_id`)
+    // and amplitude/javascript (stargate `Org { workspaces → environments → app }`).
     expect(manifest.concepts.hierarchy).toEqual([
       'org',
       'workspace',
-      'project',
+      'app',
       'environment',
     ]);
   });

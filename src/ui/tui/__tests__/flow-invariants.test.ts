@@ -40,7 +40,7 @@ function mockCredentials() {
     idToken: 'test-id-token',
     projectApiKey: 'test-api-key',
     host: 'https://api.amplitude.com',
-    projectId: 12345,
+    appId: 12345,
   };
 }
 

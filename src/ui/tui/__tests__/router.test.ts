@@ -25,7 +25,7 @@ const CREDS = {
   accessToken: 'tok',
   projectApiKey: 'pk',
   host: 'https://app.amplitude.com',
-  projectId: 1,
+  appId: 1,
 };
 
 /** Build a session that has completed through intro + region + auth + dataSetup (ready for Run). */

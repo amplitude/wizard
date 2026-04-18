@@ -160,7 +160,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
-        projectId: 42,
+        appId: 42,
       };
       store.setCredentials(creds);
       expect(store.session.credentials).toEqual(creds);
@@ -278,10 +278,10 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        projectId: 42,
+        appId: 42,
       });
       expect(wizardCaptureMock).toHaveBeenCalledWith('auth complete', {
-        'project id': 42,
+        'app id': 42,
         region: null,
       });
     });
@@ -295,7 +295,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        projectId: 42,
+        appId: 42,
       });
       expect(analytics.setDistinctId).toHaveBeenCalledWith('ada@example.com');
       expect(analytics.identifyUser).toHaveBeenCalledWith(
@@ -303,7 +303,7 @@ describe('WizardStore', () => {
           email: 'ada@example.com',
           org_id: 'org-1',
           org_name: 'Acme',
-          project_id: 42,
+          app_id: 42,
         }),
       );
     });
@@ -314,7 +314,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        projectId: 42,
+        appId: 42,
       });
       expect(analytics.setDistinctId).not.toHaveBeenCalled();
       expect(analytics.identifyUser).not.toHaveBeenCalled();
@@ -366,7 +366,7 @@ describe('WizardStore', () => {
       accessToken: 'tok',
       projectApiKey: 'pk',
       host: 'h',
-      projectId: 1,
+      appId: 1,
     });
     // Set org/workspace/env names directly to satisfy Auth.isComplete
     // (it only checks names, not IDs — so we don't have to set IDs and
@@ -390,7 +390,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        projectId: 1,
+        appId: 1,
       });
       store.setRegion('us');
       store.setProjectHasData(false);
@@ -756,7 +756,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        projectId: 1,
+        appId: 1,
       });
       store.setRegion('us'); // -> outage (overlay still on top)
       store.popOverlay(); // -> data-setup (next incomplete screen after credentials+region)
@@ -951,7 +951,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
-        projectId: 1,
+        appId: 1,
       });
       expect(store.currentScreen).toBe(Screen.DataSetup);
 

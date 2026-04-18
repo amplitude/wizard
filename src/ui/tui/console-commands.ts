@@ -77,8 +77,8 @@ export function getWhoamiText(
 
   const envName = session.selectedEnvName;
   const envId =
-    session.credentials?.projectId && session.credentials.projectId !== 0
-      ? String(session.credentials.projectId)
+    session.credentials?.appId && session.credentials.appId !== 0
+      ? String(session.credentials.appId)
       : null;
   if (envName && envId) {
     parts.push(`env: ${envName} (${envId})`);

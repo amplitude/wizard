@@ -67,10 +67,8 @@ function executeCommand(raw: string, store: WizardStore): string | void {
                   workspace_id: store.session.selectedWorkspaceId ?? undefined,
                   workspace_name:
                     store.session.selectedWorkspaceName ?? undefined,
-                  project_id: store.session.selectedProjectId,
-                  // Telemetry key kept as `project_name` for analytics history
-                  // continuity. Value is the Amplitude env name.
-                  project_name: store.session.selectedEnvName,
+                  app_id: store.session.selectedAppId,
+                  env_name: store.session.selectedEnvName,
                   region: store.session.region,
                   integration: store.session.integration,
                 });

@@ -42,11 +42,14 @@ export interface AgentManifest {
   }>;
   description: string;
   /**
-   * Amplitude's data-model terminology — surfaces the hierarchy so
-   * agents reading the manifest know that `workspace`, `project`, and
-   * `environment` are nested, not synonyms. Without this, agents tend
-   * to confuse `--env` (Amplitude environment) with environment
-   * variables, or `workspace` with a directory path.
+   * Amplitude's data-model terminology — surfaces the hierarchy so agents
+   * reading the manifest know that `org`, `workspace`, `app`, and
+   * `environment` are nested, not synonyms. Without this, agents tend to
+   * confuse `--env` (Amplitude environment) with environment variables, or
+   * `workspace` with a directory path. Canonical terms align with the
+   * amplitude/amplitude (Python `app_id`, `orgs` table) and
+   * amplitude/javascript (`App` GraphQL type, `appId`) monorepos — not
+   * Amplitude's UI surface, which sometimes says "Project ID" for app.id.
    */
   concepts: {
     hierarchy: string[];
@@ -79,32 +82,32 @@ export function getAgentManifest(): AgentManifest {
     description:
       'Interactive CLI that instruments apps with Amplitude analytics.',
     concepts: {
-      hierarchy: ['org', 'workspace', 'project', 'environment'],
+      hierarchy: ['org', 'workspace', 'app', 'environment'],
       glossary: [
         {
           term: 'org',
           describe:
-            'An Amplitude organization (account-level). Identified by a UUID. Auto-derived from --project-id — agents should not pass --org directly.',
+            'An Amplitude organization (account-level). Identified by a UUID. Canonical backend term: `org_id` (Python) / `orgId` (TS). Auto-derived from --app-id — agents should not pass --org directly.',
         },
         {
           term: 'workspace',
           describe:
-            'A grouping inside an org. Identified by a UUID. Auto-derived from --project-id — agents should not pass --workspace-id directly.',
+            'A tracking-plan container inside an org (holds branches, tickets, and observed schema). Identified by a UUID. Auto-derived from --app-id — agents should not pass --workspace-id directly.',
         },
         {
-          term: 'project',
+          term: 'app',
           describe:
-            'An Amplitude project — the ingestion surface that owns an API key and a set of events. Identified by a numeric ID (e.g. 769610). Pass --project-id <id> — this is the only scope flag agents need; org, workspace, and environment are derived automatically.',
+            'An Amplitude app — the ingestion surface that owns an API key and receives events. Identified by a numeric ID (e.g. 769610). Canonical across amplitude/amplitude (`app_id`, `orgs` table has `supports_cross_app`) and amplitude/javascript (`export type App`, `appId`). Amplitude\'s UI labels the same numeric ID "Project ID". Pass --app-id <id> (--project-id is a legacy alias) — this is the only scope flag agents need.',
         },
         {
           term: 'environment',
           describe:
-            'A named runtime mode of a project (e.g. "Production", "Development", "Staging"). Not a POSIX environment variable. Auto-selected from --project-id.',
+            'A named runtime mode of an app (e.g. "Production", "Development", "Staging"). Not a POSIX environment variable. Each env has its own app.id and API key, so --app-id already identifies one env. Auto-selected from --app-id.',
         },
         {
           term: 'API key',
           describe:
-            'A project-level ingestion key embedded into client code (amplitude.init("<key>")). Fetched automatically after `amplitude-wizard login`; agents should not pass one directly.',
+            'An app-level ingestion key embedded into client code (amplitude.init("<key>")). Fetched automatically after `amplitude-wizard login`; agents should not pass one directly.',
         },
         {
           term: 'access token',
@@ -146,15 +149,15 @@ export function getAgentManifest(): AgentManifest {
         type: 'string',
       },
       {
-        name: '--project-id',
+        name: '--app-id',
         describe:
-          'Amplitude project ID (numeric, e.g. 769610). The only scope flag agents need — org, workspace, and environment are derived automatically. See concepts.glossary.',
+          'Amplitude app ID (numeric, e.g. 769610). The only scope flag agents need — org, workspace, and environment are derived automatically. --project-id is a legacy alias for this flag. See concepts.glossary.',
         type: 'string',
       },
       {
-        name: '--project-name',
+        name: '--app-name',
         describe:
-          'Name for a new Amplitude project (creates one when no projects exist, or with --ci/--agent).',
+          'Name for a new Amplitude app (creates one when no apps exist, or with --ci/--agent). --project-name is a legacy alias.',
         type: 'string',
       },
       {

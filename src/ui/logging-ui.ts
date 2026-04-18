@@ -151,7 +151,7 @@ export class LoggingUI implements WizardUI {
     accessToken: string;
     projectApiKey: string;
     host: string;
-    projectId: number;
+    appId: number;
     orgId?: string | null;
     orgName?: string | null;
     workspaceId?: string | null;

@@ -63,7 +63,7 @@ describe('getWhoamiText', () => {
       accessToken: string;
       projectApiKey: string;
       host: string;
-      projectId: number;
+      appId: number;
     } | null,
     userEmail: null as string | null,
   };
@@ -84,7 +84,7 @@ describe('getWhoamiText', () => {
         accessToken: 'tok',
         projectApiKey: 'abcd1234efgh5678',
         host: 'https://api.amplitude.com',
-        projectId: 187520,
+        appId: 187520,
       },
       userEmail: 'kelson.warner@amplitude.com',
     });
@@ -106,14 +106,14 @@ describe('getWhoamiText', () => {
         accessToken: 'tok',
         projectApiKey: 'key12345',
         host: 'https://api.amplitude.com',
-        projectId: 99,
+        appId: 99,
       },
     });
     expect(result).toContain('org: 12345');
     expect(result).toContain('env: 99');
   });
 
-  it('shows env name without ID when projectId is 0', () => {
+  it('shows env name without ID when appId is 0', () => {
     const result = getWhoamiText({
       ...base,
       selectedOrgName: 'Acme',
@@ -123,7 +123,7 @@ describe('getWhoamiText', () => {
         accessToken: 'tok',
         projectApiKey: 'key12345',
         host: 'https://api.amplitude.com',
-        projectId: 0,
+        appId: 0,
       },
     });
     expect(result).toContain('env: Staging');

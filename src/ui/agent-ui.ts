@@ -287,7 +287,7 @@ export class AgentUI implements WizardUI {
     accessToken: string;
     projectApiKey: string;
     host: string;
-    projectId: number;
+    appId: number;
     orgId?: string | null;
     orgName?: string | null;
     workspaceId?: string | null;
@@ -298,9 +298,9 @@ export class AgentUI implements WizardUI {
       data: {
         field: 'credentials',
         host: credentials.host,
-        // projectId is the Amplitude env-scoped app ID (what Amplitude's UI
-        // calls "Project ID"). envName is the env label (Production/Dev/etc).
-        projectId: credentials.projectId,
+        // appId is the canonical Amplitude app ID (Amplitude's UI labels this
+        // "Project ID"). envName is the env label (Production/Dev/etc).
+        appId: credentials.appId,
         orgId: credentials.orgId ?? null,
         orgName: credentials.orgName ?? null,
         workspaceId: credentials.workspaceId ?? null,
@@ -466,7 +466,7 @@ export class AgentUI implements WizardUI {
           .map((e) => ({
             name: e.name,
             rank: e.rank,
-            projectId: e.app?.id ?? null,
+            appId: e.app?.id ?? null,
             hasApiKey: Boolean(e.app?.apiKey),
           })),
       })),
@@ -474,8 +474,8 @@ export class AgentUI implements WizardUI {
 
     // Also emit a flat list of every selectable env so agents can pick
     // without traversing the tree. Each entry is unique by
-    // (orgId, workspaceId, envName) and carries the numeric projectId
-    // that callers can pass as --project-id for unambiguous selection.
+    // (orgId, workspaceId, envName) and carries the numeric appId
+    // that callers can pass as --app-id for unambiguous selection.
     const choices = orgs.flatMap((org) =>
       org.workspaces.flatMap((ws) =>
         (ws.environments ?? [])
@@ -486,7 +486,7 @@ export class AgentUI implements WizardUI {
             orgName: org.name,
             workspaceId: ws.id,
             workspaceName: ws.name,
-            projectId: e.app?.id ?? null,
+            appId: e.app?.id ?? null,
             envName: e.name,
             rank: e.rank,
             label: `${org.name} / ${ws.name} / ${e.name}`,
@@ -502,38 +502,47 @@ export class AgentUI implements WizardUI {
           promptType: 'environment_selection',
           // Must stay aligned with the manifest's concepts.hierarchy so
           // agents don't see one shape in the manifest and a different
-          // shape in the prompt. Each choice carries projectId, the
+          // shape in the prompt. Each choice carries appId, the
           // unambiguous selector.
-          hierarchy: ['org', 'workspace', 'project', 'environment'],
+          hierarchy: ['org', 'workspace', 'app', 'environment'],
           choices,
           orgs: sanitizedOrgs,
           // Agents should reply on stdin with one JSON line matching this shape:
           responseSchema: {
-            projectId: 'string (required, from choices[].projectId)',
+            appId: 'string (required, from choices[].appId)',
           },
           // Or re-invoke with a single CLI flag:
           resumeFlags: choices.map((c) => ({
             label: c.label,
-            flags: ['--project-id', String(c.projectId ?? '')],
+            flags: ['--app-id', String(c.appId ?? '')],
           })),
         },
       },
     );
 
-    // Read one line from stdin. Accept either the canonical
-    // { projectId } shape or the legacy { orgId, workspaceId, env } triple.
+    // Read one line from stdin. Accept either the canonical { appId } shape
+    // or the legacy { orgId, workspaceId, env } triple or { projectId } alias.
     try {
       const line = await readStdinLine(60_000);
       if (line) {
         const parsed = JSON.parse(line) as {
+          appId?: string;
           projectId?: string;
           orgId?: string;
           workspaceId?: string;
           env?: string;
         };
-        if (parsed.projectId) {
+        const selectedAppId = parsed.appId ?? parsed.projectId;
+        if (selectedAppId) {
+          if (parsed.projectId && !parsed.appId) {
+            emit(
+              'log',
+              'Legacy { projectId } selection shape is deprecated — prefer { appId }.',
+              { level: 'warn' },
+            );
+          }
           const match = choices.find(
-            (c) => String(c.projectId) === String(parsed.projectId),
+            (c) => String(c.appId) === String(selectedAppId),
           );
           if (match) {
             return {
@@ -546,7 +555,7 @@ export class AgentUI implements WizardUI {
         if (parsed.orgId && parsed.workspaceId && parsed.env) {
           emit(
             'log',
-            'Legacy { orgId, workspaceId, env } selection shape is deprecated — prefer { projectId }.',
+            'Legacy { orgId, workspaceId, env } selection shape is deprecated — prefer { appId }.',
             { level: 'warn' },
           );
           return {

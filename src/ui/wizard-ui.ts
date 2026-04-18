@@ -74,8 +74,12 @@ export interface WizardUI {
     accessToken: string;
     projectApiKey: string;
     host: string;
-    /** Env-scoped app ID (Amplitude UI's "Project ID"). */
-    projectId: number;
+    /**
+     * Numeric Amplitude app ID. Canonical per amplitude/amplitude (`app_id`)
+     * and amplitude/javascript (`appId`, GraphQL `App.id`). Amplitude's UI
+     * also labels this "Project ID".
+     */
+    appId: number;
     orgId?: string | null;
     orgName?: string | null;
     workspaceId?: string | null;

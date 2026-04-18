@@ -33,7 +33,7 @@ interface ProjectData {
   accessToken: string;
   host: string;
   distinctId: string;
-  projectId: number;
+  appId: number;
   cloudRegion: CloudRegion;
 }
 
@@ -394,14 +394,14 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
  * authenticates and picks the right Amplitude account for this project.
  */
 export async function getOrAskForProjectData(
-  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'projectId'> & {
+  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'appId'> & {
     installDir?: string;
   },
 ): Promise<{
   host: string;
   projectApiKey: string;
   accessToken: string;
-  projectId: number;
+  appId: number;
   cloudRegion: CloudRegion;
 }> {
   // If an API key is provided (via --api-key flag, any mode), bypass OAuth entirely.
@@ -413,7 +413,7 @@ export async function getOrAskForProjectData(
       host: DEFAULT_HOST_URL,
       projectApiKey: _options.apiKey,
       accessToken: _options.apiKey,
-      projectId: _options.projectId ?? 0,
+      appId: _options.appId ?? 0,
       cloudRegion: 'us',
     };
   }
@@ -439,7 +439,7 @@ export async function getOrAskForProjectData(
           host: resolved.host,
           projectApiKey: resolved.projectApiKey,
           accessToken: resolved.accessToken,
-          projectId: _options.projectId ?? 0,
+          appId: _options.appId ?? 0,
           cloudRegion: resolved.cloudRegion,
         };
       }
@@ -479,7 +479,7 @@ export async function getOrAskForProjectData(
     accessToken: result.accessToken,
     host: DEFAULT_HOST_URL,
     projectApiKey: result.projectApiKey,
-    projectId: result.projectId,
+    appId: result.appId,
     cloudRegion: result.cloudRegion,
   };
 }
@@ -611,7 +611,7 @@ async function askForWizardLogin(
   // can grab it directly from the workspace data we already fetched.
   // Falls back to manual prompt if not found.
   let projectApiKey: string | undefined;
-  let selectedProjectId: string | null = null;
+  let selectedAppId: string | null = null;
 
   if (selectedWorkspace) {
     // Get environments that have an app with an API key, sorted by rank (lowest = primary)
@@ -621,7 +621,7 @@ async function askForWizardLogin(
 
     if (envsWithKey.length === 1) {
       projectApiKey = envsWithKey[0].app!.apiKey!;
-      selectedProjectId = envsWithKey[0].app?.id ?? null;
+      selectedAppId = envsWithKey[0].app?.id ?? null;
       getUI().log.success(
         chalk.dim(
           `Retrieved API key for ${chalk.bold(
@@ -640,7 +640,7 @@ async function askForWizardLogin(
       });
 
       projectApiKey = selectedEnv.app!.apiKey!;
-      selectedProjectId = selectedEnv.app?.id ?? null;
+      selectedAppId = selectedEnv.app?.id ?? null;
       getUI().log.success(
         chalk.dim(
           `Retrieved API key for ${chalk.bold(selectedEnv.name)} environment`,
@@ -672,7 +672,7 @@ async function askForWizardLogin(
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',
-    projectId: selectedProjectId ? Number(selectedProjectId) || 0 : 0,
+    appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
     cloudRegion,
   };
 }

@@ -237,25 +237,20 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
         orgName: string;
         workspaceId: string;
         workspaceName: string;
-        projectId: string | null;
+        appId: string | null;
         envName: string;
         label: string;
       }>;
     };
     expect(data.promptType).toBe('environment_selection');
-    expect(data.hierarchy).toEqual([
-      'org',
-      'workspace',
-      'project',
-      'environment',
-    ]);
+    expect(data.hierarchy).toEqual(['org', 'workspace', 'app', 'environment']);
     expect(data.choices).toHaveLength(2);
     expect(data.choices[0]).toMatchObject({
       orgId: 'org-1',
       orgName: 'DevX',
       workspaceId: 'ws-a',
       workspaceName: 'Sandbox',
-      projectId: '100001',
+      appId: '100001',
       envName: 'Production',
       label: 'DevX / Sandbox / Production',
     });
@@ -286,7 +281,7 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
     expect(writes[0]).not.toContain('super-secret-key');
   });
 
-  it('surfaces resumeFlags with --project-id for unambiguous re-invocation', async () => {
+  it('surfaces resumeFlags with --app-id for unambiguous re-invocation', async () => {
     const ui = new AgentUI();
     const event = await runPromptAndGetFirst(ui, [
       {
@@ -314,6 +309,6 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
     expect(data.resumeFlags).toHaveLength(1);
     // --project-id alone is sufficient — it's globally unique and resolves
     // to one (org, workspace, env) tuple server-side. No --env / --org noise.
-    expect(data.resumeFlags[0].flags).toEqual(['--project-id', '100002']);
+    expect(data.resumeFlags[0].flags).toEqual(['--app-id', '100002']);
   });
 });

@@ -49,7 +49,7 @@ export class InkUI implements WizardUI {
     accessToken: string;
     projectApiKey: string;
     host: string;
-    projectId: number;
+    appId: number;
     orgId?: string | null;
     orgName?: string | null;
     workspaceId?: string | null;
@@ -63,7 +63,7 @@ export class InkUI implements WizardUI {
       accessToken: credentials.accessToken,
       projectApiKey: credentials.projectApiKey,
       host: credentials.host,
-      projectId: credentials.projectId,
+      appId: credentials.appId,
     });
   }
 

@@ -194,16 +194,16 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('api key submitted', {
           'key source': local.source,
         });
-        // Resolve env name + projectId from the key when we can — the header
+        // Resolve env name + appId from the key when we can — the header
         // slot is informational, not required for Auth to complete.
-        let matchedProjectId: string | null = null;
+        let matchedAppId: string | null = null;
         if (effectiveWorkspace) {
           const match = (effectiveWorkspace.environments ?? []).find(
             (e) => e.app?.apiKey === local.key,
           );
           if (match) {
             if (!s.selectedEnvName) store.setSelectedEnvName(match.name);
-            matchedProjectId = match.app?.id ?? null;
+            matchedAppId = match.app?.id ?? null;
           }
         }
         store.setCredentials({
@@ -211,7 +211,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: local.key,
           host: DEFAULT_HOST_URL,
-          projectId: matchedProjectId ? Number(matchedProjectId) || 0 : 0,
+          appId: matchedAppId ? Number(matchedAppId) || 0 : 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -221,7 +221,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       // 2. Use the API key from the selected environment
       if (selectedEnv?.app?.apiKey) {
         const apiKey = selectedEnv.app.apiKey;
-        const envProjectId = selectedEnv.app.id ?? null;
+        const envAppId = selectedEnv.app.id ?? null;
         const zone = (s.region ??
           s.pendingAuthCloudRegion ??
           'us') as AmplitudeZone;
@@ -237,7 +237,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: apiKey,
           host: getHostFromRegion(zone),
-          projectId: envProjectId ? Number(envProjectId) || 0 : 0,
+          appId: envAppId ? Number(envAppId) || 0 : 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -269,9 +269,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('api key submitted', {
           'key source': 'backend_fetch',
         });
-        // Resolve env name + projectId from the returned key when possible.
+        // Resolve env name + appId from the returned key when possible.
         // Not required for Auth to complete.
-        let fetchedProjectId: string | null = null;
+        let fetchedAppId: string | null = null;
         if (effectiveWorkspace) {
           const match = (effectiveWorkspace.environments ?? []).find(
             (e) => e.app?.apiKey === projectApiKey,
@@ -280,7 +280,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             if (!store.session.selectedEnvName) {
               store.setSelectedEnvName(match.name);
             }
-            fetchedProjectId = match.app?.id ?? null;
+            fetchedAppId = match.app?.id ?? null;
           }
         }
         store.setCredentials({
@@ -288,7 +288,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey,
           host: getHostFromRegion(zone),
-          projectId: fetchedProjectId ? Number(fetchedProjectId) || 0 : 0,
+          appId: fetchedAppId ? Number(fetchedAppId) || 0 : 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -401,7 +401,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       idToken: session.pendingAuthIdToken ?? undefined,
       projectApiKey: trimmed,
       host: DEFAULT_HOST_URL,
-      projectId: 0,
+      appId: 0,
     });
     // Fresh project: no existing event data — advance past DataSetup
     store.setProjectHasData(false);
