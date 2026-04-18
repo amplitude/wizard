@@ -70,11 +70,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   };
 
   // Any-key-to-exit for non-success states; success uses the picker.
-  // Exception: on error, 'u' or 'U' uploads the diagnostic bundle instead of exiting.
+  // Exceptions on error: 'u'/'U' uploads the diagnostic bundle, 'l'/'L'
+  // opens the log file in the OS-default handler. Both keep the process
+  // alive so the user can review the outro after the action completes.
   useScreenInput((input, key) => {
     if (!isSuccess) {
       if (isError && (input === 'u' || input === 'U')) {
         runUpload();
+        return;
+      }
+      if (isError && (input === 'l' || input === 'L')) {
+        analytics.wizardCapture('error outro log opened', {});
+        opn(getLogFilePath(), { wait: false }).catch(() => {
+          /* opn fails on some headless terminals — non-fatal */
+        });
         return;
       }
       process.exit(0);
@@ -205,7 +214,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text bold>--debug</Text> for more detail
             </Text>
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>
+              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>{' '}
+              <Text color={Colors.muted}>(press L to open)</Text>
             </Text>
             {outroData.docsUrl && (
               <Text color={Colors.secondary}>
