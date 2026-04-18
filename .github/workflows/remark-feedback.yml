@@ -1,0 +1,69 @@
+name: Wizard Remark Feedback
+
+# Reads the last 7 days of `wizard cli: wizard remark` events from Amplitude,
+# clusters them into prompt-weakness themes, and opens a draft PR with
+# suggested edits to src/lib/commandments.ts for human review.
+#
+# Currently scaffolded only — the clustering script (scripts/cluster-remarks.ts)
+# stubs fetchRemarks and clusterRemarks until AMPLITUDE_ANALYTICS_API_KEY +
+# ANTHROPIC_API_KEY secrets are configured. Flip the `if:` guard below on the
+# `cluster` job once credentials land.
+
+on:
+  schedule:
+    # Every Monday at 14:00 UTC (07:00 PT) — lands in inbox before standup.
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+
+jobs:
+  cluster:
+    name: Cluster wizard remarks
+    runs-on: ubuntu-latest
+    # Guard kept closed until the scaffold's stubbed credential path is
+    # replaced with a real Amplitude query. Flip to `true` (or remove) then.
+    if: ${{ false }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3
+
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Cluster remarks
+        id: cluster
+        run: |
+          REPORT_PATH=$(pnpm --silent tsx scripts/cluster-remarks.ts)
+          echo "report=$REPORT_PATH" >> "$GITHUB_OUTPUT"
+        env:
+          AMPLITUDE_ANALYTICS_API_KEY: ${{ secrets.AMPLITUDE_ANALYTICS_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Open draft pull request
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          BRANCH="chore/remark-feedback-$(date -u +%Y-%m-%d)"
+          git checkout -b "$BRANCH"
+          git add .github/remark-feedback-*.md
+          git commit -m "chore: weekly wizard remark feedback"
+          git push --force origin "$BRANCH"
+          gh pr create \
+            --draft \
+            --title "chore: weekly wizard remark feedback" \
+            --body-file "${{ steps.cluster.outputs.report }}" \
+            --head "$BRANCH" \
+            || echo "PR already exists"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
