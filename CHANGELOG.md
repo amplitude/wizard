@@ -1,5 +1,82 @@
 # Changelog
 
+## [1.3.0](https://github.com/amplitude/wizard/compare/wizard-v1.2.0...wizard-v1.3.0) (2026-04-18)
+
+
+### Features
+
+* --project-name flag for agent + CI modes, NDJSON create-project events ([3038466](https://github.com/amplitude/wizard/commit/303846627eb5e1abf8a62a1e6acacfe64d3a7656))
+* add create-project and start-over options to auth picker, stack confirm buttons vertically ([0ff5e8c](https://github.com/amplitude/wizard/commit/0ff5e8c57580d70d03829bbf8bb479714503e98e))
+* add createAmplitudeApp helper + exit code for NAME_TAKEN ([4a4a835](https://github.com/amplitude/wizard/commit/4a4a8356acb0e9629ba331088cd688dad21f76a8))
+* add observability module with structured logging, Sentry, and analytics audit ([#87](https://github.com/amplitude/wizard/issues/87)) ([961536d](https://github.com/amplitude/wizard/commit/961536d9e89e3e9a11ebcd33dffc8d303ff9eff3))
+* add terminal rendering libraries for richer TUI output ([#85](https://github.com/amplitude/wizard/issues/85)) ([0d24d93](https://github.com/amplitude/wizard/commit/0d24d93bcb82f03bddd1c45afce48a6e5458fb72))
+* AMP-152511 split dev/prod telemetry keys and adopt space-separated property names ([9005a92](https://github.com/amplitude/wizard/commit/9005a92b05cda118330982bb55bb220f2bd434ef))
+* AMP-152511 split dev/prod telemetry keys and adopt space-separated property names ([0dc3593](https://github.com/amplitude/wizard/commit/0dc35938b73ae8e9accf78741c401a34e28290fa))
+* auto-install Amplitude Claude Code plugin (AMP-152163) ([882aa33](https://github.com/amplitude/wizard/commit/882aa3335a2a88cb244ee8bdff2cbb3485a51528))
+* auto-install Amplitude Claude Code plugin (AMP-152163) ([83d6f50](https://github.com/amplitude/wizard/commit/83d6f505b4557219754940c8916a67640df9a615))
+* expose wizard ops over MCP via `amplitude-wizard mcp serve` ([#98](https://github.com/amplitude/wizard/issues/98)) ([5e2450a](https://github.com/amplitude/wizard/commit/5e2450ac24d90236050dcaaf5b611a1364e88e5a))
+* inline Create Project flow across TUI / agent / CI modes ([f7cf31a](https://github.com/amplitude/wizard/commit/f7cf31a77b806c2bd5ec488fbdf33cbca771c2fe))
+* inline Create Project screen + /create-project slash command ([0a995e6](https://github.com/amplitude/wizard/commit/0a995e680a0d0d24363f0eb0907187703b4053c9))
+* link docs on every MCP install success ([13669f6](https://github.com/amplitude/wizard/commit/13669f6f58dd8282f63ffc394d1da013a2227b1b))
+* linkify URLs in TUI log viewer and status surfaces ([12bff72](https://github.com/amplitude/wizard/commit/12bff72151be6dfafa060b56d9a33f5d33bfd34c))
+* linkify URLs in TUI log viewer and status surfaces ([86093fb](https://github.com/amplitude/wizard/commit/86093fbd29098921565306b671a2a4a6fd089b1d))
+* make the wizard agent-native with verbs, JSON output, and CLI manifest ([#95](https://github.com/amplitude/wizard/issues/95)) ([bf82233](https://github.com/amplitude/wizard/commit/bf82233668637140970b01288844ca83da9a12b8))
+* **mcp-screen:** auto-copy /mcp + 'o' to launch installed GUI apps ([4f0f451](https://github.com/amplitude/wizard/commit/4f0f451e928ab8c36beebd5c0cec396c008c3fa9))
+* **mcp-screen:** let users toggle plugin/MCP for Claude Code with `m` ([3188fbb](https://github.com/amplitude/wizard/commit/3188fbbb1ac5e0f3944f8e2e3f3ed186f01e02bd))
+* **mcp-screen:** let users uncheck tools directly in one step ([6aab644](https://github.com/amplitude/wizard/commit/6aab644263d612d6d4b6e572dc7cebf6bada44d7))
+* point users to plugin docs + /reload-plugins after install ([08b7740](https://github.com/amplitude/wizard/commit/08b7740968742ab7602285c985326fc25f65b3cf))
+* render markdown in Ask-a-question response ([5cb7ef6](https://github.com/amplitude/wizard/commit/5cb7ef67829dbbdfa7fd9b3d0acbba29d111349f))
+* restore logo animation on RunScreen, driven by spinner tick ([#83](https://github.com/amplitude/wizard/issues/83)) ([25e0182](https://github.com/amplitude/wizard/commit/25e0182e08d8b369cb8af99819f892480021ae26))
+* structured env selection and disambiguation flags for agent mode ([#100](https://github.com/amplitude/wizard/issues/100)) ([de5c2ee](https://github.com/amplitude/wizard/commit/de5c2eeb5a5151786e856f6ecea825793229cd3f))
+* upgrade agent SDK and harden Vertex AI resilience ([#90](https://github.com/amplitude/wizard/issues/90)) ([3c47ade](https://github.com/amplitude/wizard/commit/3c47ade9c5ca11d329f32cebffe7ae1efaae0723))
+
+
+### Bug Fixes
+
+* accept IDs as alternative identity in Auth gate ([52804d4](https://github.com/amplitude/wizard/commit/52804d44f8c2d9036d8ccd94bdcd5e588598b84d))
+* actually honor the `m` toggle in proceedWithNames ([22eecb0](https://github.com/amplitude/wizard/commit/22eecb04a1bc8b6bc16a1c546a23935edfb64229))
+* address bugbot findings — scrub Thunder codename and rename slack_outcome ([8ad38d5](https://github.com/amplitude/wizard/commit/8ad38d50d99b3474a917bccb115cf8a3a6e355bd))
+* address bugbot findings on auth picker PR ([d31cb82](https://github.com/amplitude/wizard/commit/d31cb8240870c0211dadedf43180782033629366))
+* address Bugbot review comments on PR [#110](https://github.com/amplitude/wizard/issues/110) ([7917949](https://github.com/amplitude/wizard/commit/79179492bff9d78c407940bf1eac77bfe531832c))
+* address second round of bugbot findings ([ce2d988](https://github.com/amplitude/wizard/commit/ce2d988f344110749b4137a39516dbee91800a41))
+* align Amplitude Node SDK usage with best practices for CLI lifecycle ([#93](https://github.com/amplitude/wizard/issues/93)) ([201ad3b](https://github.com/amplitude/wizard/commit/201ad3bece3f49b2d126411b03c1d26a002a5b68))
+* align identify property casing with main product and add groupIdentify ([#89](https://github.com/amplitude/wizard/issues/89)) ([c1dbc29](https://github.com/amplitude/wizard/commit/c1dbc2979689a2e6209b4f3de023557af321540f))
+* allow nested Claude Code / Agent SDK invocation by default ([#102](https://github.com/amplitude/wizard/issues/102)) ([60ee812](https://github.com/amplitude/wizard/commit/60ee8126e60d0539fe8b63434011a077f5c26679))
+* AMP-152519 drop autocapture-covered events from the instrumentation plan ([e4e9fb8](https://github.com/amplitude/wizard/commit/e4e9fb89280331252ff02b4cabd71d268af810eb))
+* AMP-152519 drop autocapture-covered events from the instrumentation plan ([1d56b72](https://github.com/amplitude/wizard/commit/1d56b72acde7a11d802e9f1f77a87391fa0caef9))
+* **ci:** force platform=darwin in Codex bundled-path test ([0e4c484](https://github.com/amplitude/wizard/commit/0e4c484d5420b55a5d7396ca051820694ddfa1d3))
+* **ci:** readonly tuple cast in post-install-helpers tripped tsc ([949e4a7](https://github.com/amplitude/wizard/commit/949e4a7b27daf23793e6f65a5cc41af753fa3f98))
+* condition the autocapture rule on whether autocapture is actually enabled ([6413bce](https://github.com/amplitude/wizard/commit/6413bce7f4f70195a8acd9bfcc10d14decde7e4d))
+* detect AI tools by user-data dir, not just platform ([5d20980](https://github.com/amplitude/wizard/commit/5d20980a09072fd14fb72c8b6ecdbfbcd9177fa8))
+* don't short-circuit to plugin when --local remove is requested ([ebf23f5](https://github.com/amplitude/wizard/commit/ebf23f51348cd0a4938d27424f12a507f717a7ac))
+* force MCP mode under --local-mcp (plugin is prod-only) ([898ad2a](https://github.com/amplitude/wizard/commit/898ad2ac246618c8a737ad08f67511d549b1c391))
+* make env name optional for Auth and resolve it by key match ([b199579](https://github.com/amplitude/wizard/commit/b19957900a8940ba3d7b563a3bea43cfd1f3411d))
+* make plugin install visible before user confirms ([d432687](https://github.com/amplitude/wizard/commit/d4326876357e3e9fb2ac6a293abcf834b220670c))
+* **mcp-screen:** 3 UX bugs — stalling spinner, vague title, overlay hijack ([72b81eb](https://github.com/amplitude/wizard/commit/72b81eb4ab8a0f00fae95b9b4eb1939db6487ae7))
+* **mcp-screen:** declare phase/setTick before the tick useEffect uses them ([b934296](https://github.com/amplitude/wizard/commit/b9342960064bc67dc016ab5678e99a2c0f03b827))
+* **mcp-screen:** stop auto-ejecting the Done screen; spinner on Detecting ([57bca8f](https://github.com/amplitude/wizard/commit/57bca8fa53b93e600d0091a7e5144cd8285ecdc3))
+* **mcp-screen:** unified next-steps, wait-for-Enter, elapsed time ([f8242ad](https://github.com/amplitude/wizard/commit/f8242ad0b6d3ea018244d5a6e9d0d28ffb3d967c))
+* **mcp-screen:** use ref for per-client progress to dodge React batching ([837df1e](https://github.com/amplitude/wizard/commit/837df1e8a75910adf705c20215357d0d91a9087b))
+* **pr-112:** address review feedback (defaults, remove path, windows, picker) ([45f34e1](https://github.com/amplitude/wizard/commit/45f34e16dccd38aea56742741b07e9c26d1efed5))
+* prevent Node.js CLI projects from being detected as JavaScript Web ([#91](https://github.com/amplitude/wizard/issues/91)) ([b6f7f3e](https://github.com/amplitude/wizard/commit/b6f7f3e803daa2b4b838acc068ee044c36e50106))
+* refuse local=true in plugin client (defense in depth) ([7a578da](https://github.com/amplitude/wizard/commit/7a578da9702d24ec04d2aa4dc4e664a03301505e))
+* resolve dev-mode proxy bypass and CI silent credential failure ([b59a449](https://github.com/amplitude/wizard/commit/b59a449e3dde215924d9c6fcd92f7499c5a8273f))
+* set selectedProjectName in all credential paths to unblock Auth gate ([eb9225e](https://github.com/amplitude/wizard/commit/eb9225e2a0ededbbde1e382d0fbdb0d28d69ce43))
+* set workspace name on create-project success so Auth advances ([f6cf1ab](https://github.com/amplitude/wizard/commit/f6cf1abb99bf476352efb89d48f446cb1e12bdbb))
+* show project in header and clear all auth state on logout ([2bcf523](https://github.com/amplitude/wizard/commit/2bcf52340135c30bcfa7afcb7135f0ae33561aec))
+* show project in header and clear all auth state on logout ([ce37ed0](https://github.com/amplitude/wizard/commit/ce37ed0fe56681cfe1ff36588a2163e0464432c3))
+* skip Codex when its binary is bundled by a host app ([9b4dea2](https://github.com/amplitude/wizard/commit/9b4dea29c9d1b6efd753225fd579d84254f6c2d3))
+* stop bare-URL pass from swallowing markdown placeholders ([04557fc](https://github.com/amplitude/wizard/commit/04557fc266a529c76bf79297cbaa3387d89e6f30))
+* stricter detection for Zed (macOS) and Codex ([502676d](https://github.com/amplitude/wizard/commit/502676daf361ce94b49765c8ddfd3455e27400f1))
+* use `claude plugin marketplace add` CLI + surface install errors ([4679fc4](https://github.com/amplitude/wizard/commit/4679fc45bf4290455b5254e055c183ad15139ccd))
+* use OAuth access token for project-creation proxy + credentials fallback ([46e54ef](https://github.com/amplitude/wizard/commit/46e54efa0788613f40a114b13393846a2402fc26))
+
+
+### Performance Improvements
+
+* **mcp-screen:** unblock the event loop during plugin install ([c1d7d42](https://github.com/amplitude/wizard/commit/c1d7d429be2a1d7c7020edbe0b882e12c09bdfc2))
+* parallelize MCP client detection + install ([1eefcf1](https://github.com/amplitude/wizard/commit/1eefcf11546545e1978d2c62aeca7053710bbbe2))
+
 ## [1.2.0](https://github.com/amplitude/wizard/compare/wizard-v1.1.0...wizard-v1.2.0) (2026-04-15)
 
 

@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/wizard",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "homepage": "https://github.com/amplitude/wizard",
   "repository": "https://github.com/amplitude/wizard",
   "description": "The Amplitude wizard helps you to configure your project",
