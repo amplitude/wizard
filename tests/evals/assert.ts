@@ -63,18 +63,28 @@ function assertEmittedEvent(
   };
 }
 
+function redactSecretAssertion(
+  assertion: Extract<EvalAssertion, { kind: 'no-secret-leakage' }>,
+): EvalAssertion {
+  return {
+    kind: assertion.kind,
+    forbiddenStrings: assertion.forbiddenStrings.map(
+      (s) => `${s.slice(0, 8)}…`,
+    ),
+  };
+}
+
 function assertNoSecretLeakage(
   assertion: Extract<EvalAssertion, { kind: 'no-secret-leakage' }>,
   run: ObservedRun,
 ): EvalAssertionResult {
+  const redacted = redactSecretAssertion(assertion);
   for (const forbidden of assertion.forbiddenStrings) {
     const match = run.writtenStrings.find((w) => w.includes(forbidden));
     if (match) {
       return {
-        assertion,
+        assertion: redacted,
         passed: false,
-        // Redact the actual secret in the error detail — report only
-        // which forbidden pattern leaked, not its value.
         detail: `forbidden literal "${forbidden.slice(
           0,
           8,
@@ -82,7 +92,7 @@ function assertNoSecretLeakage(
       };
     }
   }
-  return { assertion, passed: true };
+  return { assertion: redacted, passed: true };
 }
 
 function assertFinalOutcome(
