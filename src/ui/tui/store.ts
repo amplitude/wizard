@@ -870,7 +870,11 @@ export class WizardStore {
     // (e.g. completeSetup inside an onEnterScreen hook) see prev === next and
     // don't re-fire the same hooks, preventing infinite recursion.
     this._lastScreen = next;
-    if (prev !== null && next !== prev) {
+    if (prev === null) {
+      if (next !== null) this._lastScreenEnteredAt = Date.now();
+      return;
+    }
+    if (next !== prev) {
       const now = Date.now();
       const enteredAt = this._lastScreenEnteredAt;
       this._lastScreenEnteredAt = now;
