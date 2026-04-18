@@ -1,4 +1,5 @@
 import { ServiceHealthStatus, type BaseHealthResult } from './types';
+import { createTracingHeaders } from '../../utils/custom-headers';
 
 // ---------------------------------------------------------------------------
 // Direct endpoint health checks
@@ -27,7 +28,10 @@ async function fetchEndpointHealth(
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: createTracingHeaders(),
+    });
     clearTimeout(tid);
 
     if (res.status === expectedStatus) {

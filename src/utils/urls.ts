@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { IS_DEV, WIZARD_USER_AGENT } from '../lib/constants';
+import { createTracingHeaders } from './custom-headers';
 import type { CloudRegion } from './types';
 
 export const getHostFromRegion = (region: CloudRegion) => {
@@ -32,6 +33,7 @@ export async function detectRegionFromToken(
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     'User-Agent': WIZARD_USER_AGENT,
+    ...createTracingHeaders(),
   };
 
   const [usResult, euResult] = await Promise.allSettled([

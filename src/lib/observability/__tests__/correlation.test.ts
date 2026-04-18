@@ -3,7 +3,8 @@ import {
   initCorrelation,
   getSessionId,
   getRunId,
-  rotateRunId,
+  getAttemptId,
+  nextAttemptId,
 } from '../correlation';
 
 describe('correlation', () => {
@@ -19,12 +20,35 @@ describe('correlation', () => {
     expect(runId.length).toBe(8); // short UUID prefix
   });
 
-  it('rotates the run ID', () => {
+  it('provides an attempt ID after initialization', () => {
     initCorrelation('session');
-    const first = getRunId();
-    const second = rotateRunId();
+    const attemptId = getAttemptId();
+    expect(attemptId).toBeDefined();
+    expect(attemptId.length).toBe(8);
+  });
+
+  it('freezes the run ID across nextAttemptId() calls', () => {
+    initCorrelation('session');
+    const runBefore = getRunId();
+    nextAttemptId();
+    nextAttemptId();
+    expect(getRunId()).toBe(runBefore);
+  });
+
+  it('rotates the attempt ID', () => {
+    initCorrelation('session');
+    const first = getAttemptId();
+    const second = nextAttemptId();
     expect(second).not.toBe(first);
-    expect(getRunId()).toBe(second);
+    expect(getAttemptId()).toBe(second);
+  });
+
+  it('re-initializes to a fresh run ID when initCorrelation is called again', () => {
+    initCorrelation('session-a');
+    const runA = getRunId();
+    initCorrelation('session-b');
+    const runB = getRunId();
+    expect(runB).not.toBe(runA);
   });
 
   it('returns "unknown" before initialization', () => {
@@ -33,5 +57,6 @@ describe('correlation', () => {
     // the default value path.
     expect(typeof getSessionId()).toBe('string');
     expect(typeof getRunId()).toBe('string');
+    expect(typeof getAttemptId()).toBe('string');
   });
 });

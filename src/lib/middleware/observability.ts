@@ -17,7 +17,6 @@ import type {
 } from './types';
 import { createLogger } from '../observability/logger';
 import { addBreadcrumb, setSentryTag } from '../observability/sentry';
-import { rotateRunId } from '../observability/correlation';
 
 const log = createLogger('agent');
 
@@ -40,8 +39,6 @@ export function createObservabilityMiddleware(): Middleware {
     onInit() {
       totalToolCalls = 0;
       totalMessages = 0;
-      // Rotate the run ID so retries get distinct correlation
-      rotateRunId();
       log.info('Agent run started');
       addBreadcrumb('agent', 'Agent run started');
     },
