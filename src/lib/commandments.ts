@@ -34,6 +34,8 @@ CRITICAL — confirm_event_plan format:
   RIGHT name: "product viewed"
   Names longer than 50 characters will be automatically truncated.`,
 
+  `Autocapture is enabled by default on every SDK the wizard installs. It already tracks element clicks/taps on buttons and links, form interactions, page/screen views, sessions, app lifecycle events, and file downloads. Do NOT propose custom events that merely duplicate these — names like "[X] Clicked", "[X] Tapped", "[X] Pressed", "Form Submitted", "Form Started", "Input Changed", "Page Viewed", or "Screen Viewed" are redundant and must not appear in confirm_event_plan. Only propose custom events for business outcomes, state changes, async success/failure, and multi-step flow milestones that autocapture cannot infer (see skills/instrumentation/discover-event-surfaces/references/best-practices.md section R4). If the project is a landing page or starter template whose only interactions are plain clicks and links, prefer a minimal or empty plan and let autocapture do the work — confirm_event_plan still requires at least one event, so pick the single most meaningful state change or skip instrumentation entirely.`,
+
   `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 
   ...(DEMO_MODE
