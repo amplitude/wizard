@@ -27,6 +27,7 @@ import {
   uploadBundle,
   type UploadResult,
 } from '../../../lib/diagnostic-upload.js';
+import { getLogFilePath } from '../../../lib/observability/index.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -202,6 +203,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             <Text color={Colors.secondary}>
               {Icons.arrowRight} Run the wizard again with{' '}
               <Text bold>--debug</Text> for more detail
+            </Text>
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>
             </Text>
             {outroData.docsUrl && (
               <Text color={Colors.secondary}>
