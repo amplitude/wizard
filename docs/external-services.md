@@ -214,6 +214,44 @@ Both keys mirror Lightning's ampli config (`packages/instrumentation/src/lightni
 
 **Opt-out:** Controlled by the `FLAG_AGENT_ANALYTICS` feature flag.
 
+### Diagnostic Uploads
+
+On the error outro, the user can press `U` to upload a session-trace bundle
+for support triage. The bundle is a gzip-compressed JSON payload containing:
+
+- The last 256 KB of the structured log (`/tmp/amplitude-wizard.logl`)
+- The last 50 Sentry breadcrumbs from the in-process buffer
+- A redacted snapshot of wizard state (screen, flow, outcome markers)
+- Environment metadata (wizard version, Node version, platform, run/attempt/session IDs)
+
+**Endpoint contract:** The uploader POSTs to `${wizardProxyBase}/diagnostics`
+(e.g. `https://gateway.us.amplitude.com/wizard/diagnostics`).
+
+| Field | Value |
+|-------|-------|
+| Method | POST |
+| Body | gzip bytes (binary) |
+| Content-Type | `application/gzip` |
+| Content-Encoding | `gzip` |
+| Authorization | `Bearer <access_token>` — optional; unauth uploads are accepted |
+| X-Wizard-Diagnostic-Run-Id | Short run id (matches `X-Wizard-Run-Id`) |
+| Tracing headers | W3C `traceparent` + `X-Wizard-*` (same as every other request) |
+
+**Expected response (2xx):** `{ "url": string, "id": string }`. The wizard
+surfaces the URL in the error outro so the user can share a link.
+
+**Fallback behavior:** If the endpoint returns 404 or 501, or the upload
+throws, the client writes the bundle to `/tmp/amplitude-wizard-diagnostic-<runId>.gz`
+and surfaces the local path instead. This lets the client ship ahead of the
+backend.
+
+**Opt-out:** Honors `DO_NOT_TRACK=1` and `AMPLITUDE_WIZARD_NO_TELEMETRY=1` —
+no bundle is built or uploaded when either is set.
+
+**PII:** Bundle content passes through the same `redact()` pass used for
+structured logs before gzip. No credentials, tokens, or user-typed strings
+should appear in the payload.
+
 ---
 
 ## Feature Flags

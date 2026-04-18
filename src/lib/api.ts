@@ -9,6 +9,7 @@ import {
 } from './constants.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
 import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
+import { createTracingHeaders } from '../utils/custom-headers.js';
 
 // ── App API URL helper ────────────────────────────────────────────────
 
@@ -161,6 +162,7 @@ export async function fetchAmplitudeUser(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -331,6 +333,7 @@ export async function createAmplitudeApp(
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
         // Treat 4xx/5xx as normal responses so we can surface the backend's
         // structured error payload without axios re-wrapping it.
@@ -343,11 +346,11 @@ export async function createAmplitudeApp(
       const parsed = CreateProjectSuccessSchema.parse(response.data);
       // Best-effort analytics — `apiKey` intentionally omitted so it never
       // leaves this function in plaintext.
-      analytics.wizardCapture('Project Created', {
+      analytics.wizardCapture('project created', {
         source: 'wizard_cli',
-        app_id: parsed.appId,
+        'app id': parsed.appId,
         zone,
-        org_id: input.orgId,
+        'org id': input.orgId,
       });
       return parsed;
     }
@@ -471,6 +474,7 @@ export async function fetchBranches(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -556,6 +560,7 @@ export async function fetchWorkspaceEventTypes(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -616,6 +621,7 @@ export async function fetchOwnedDashboards(
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -732,6 +738,7 @@ export async function fetchSources(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -974,6 +981,7 @@ export async function fetchProjectActivationStatus(opts: {
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -1034,6 +1042,7 @@ export async function fetchSlackInstallUrl(
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
         timeout: 10_000,
       },
@@ -1094,6 +1103,7 @@ export async function fetchSlackConnectionStatus(
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
         timeout: 10_000,
       },

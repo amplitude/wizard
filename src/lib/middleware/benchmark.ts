@@ -105,3 +105,33 @@ export function createBenchmarkPipeline(
     autoDetectPhases: true,
   });
 }
+
+/**
+ * Always-on pipeline — same tracker plugins as --benchmark (turns, tokens,
+ * cache, compactions, contextSize, cost, duration) but WITHOUT the
+ * `summary` (stdout output) or `jsonWriter` (benchmark JSON file) plugins.
+ *
+ * Runs on every wizard session so `agent completed` analytics always has
+ * the full cost/token breakdown available, not just when --benchmark is set.
+ */
+export function createAlwaysOnPipeline(
+  options: WizardOptions,
+): MiddlewarePipeline {
+  const config = loadBenchmarkConfig(options.installDir);
+  // Force off the two user-visible plugins — they're opt-in via --benchmark only.
+  const alwaysOnConfig: BenchmarkConfig = {
+    ...config,
+    plugins: {
+      ...config.plugins,
+      summary: false,
+      jsonWriter: false,
+    },
+  };
+  const plugins = createPluginsFromConfig(alwaysOnConfig, {
+    phased: false,
+  });
+  return new MiddlewarePipeline([createObservabilityMiddleware(), ...plugins], {
+    phaseDetector: new PhaseDetector(),
+    autoDetectPhases: true,
+  });
+}

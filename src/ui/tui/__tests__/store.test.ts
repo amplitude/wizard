@@ -28,6 +28,11 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+vi.mock('../../../lib/experiments.js', () => ({
+  useExperiment: vi.fn().mockReturnValue('on'),
+  EXP_LLM_ANALYTICS: { key: 'wizard-llm-analytics', defaultVariant: 'off' },
+}));
+
 function createStore(flow?: Flow): WizardStore {
   return new WizardStore(flow);
 }

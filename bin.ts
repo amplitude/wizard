@@ -93,6 +93,7 @@ import {
   setTerminalSink,
   getLogFilePath,
 } from './src/lib/observability';
+import { setExecutionMode } from './src/lib/mode-config';
 import type { LogLevel } from './src/lib/observability';
 
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
@@ -444,6 +445,9 @@ const resolveNonInteractiveCredentials = async (
     process.env.AMPLITUDE_WIZARD_VERBOSE === '1';
 
   const mode = isAgent ? 'agent' : isCi ? 'ci' : 'interactive';
+  // Populate mode-config so createTracingHeaders() picks up the correct
+  // X-Wizard-Mode before any outbound HTTP runs.
+  setExecutionMode(mode);
 
   initLogger({
     mode,

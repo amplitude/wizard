@@ -14,6 +14,7 @@ import { logToFile } from '../utils/debug';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
+import { createTracingHeaders } from '../utils/custom-headers';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -41,7 +42,7 @@ export async function fetchSkillMenu(
   try {
     const menuUrl = `${skillsBaseUrl}/skill-menu.json`;
     logToFile(`fetchSkillMenu: fetching from ${menuUrl}`);
-    const resp = await fetch(menuUrl);
+    const resp = await fetch(menuUrl, { headers: createTracingHeaders() });
     if (resp.ok) {
       const data = (await resp.json()) as SkillMenu;
       logToFile(

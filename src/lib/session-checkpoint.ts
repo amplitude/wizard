@@ -14,6 +14,7 @@ import { join } from 'path';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
+import { getAssignments, setAssignments } from './experiments';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -52,6 +53,13 @@ const CheckpointSchema = z.object({
 
   // Intro
   introConcluded: z.boolean(),
+
+  /**
+   * Experiment variant assignments resolved during this run. Restoring
+   * these on resume keeps the user in the same bucket and prevents the
+   * checkpoint from breaking experiment stickiness.
+   */
+  flagAssignments: z.record(z.string(), z.string()).default({}),
 });
 
 type Checkpoint = z.infer<typeof CheckpointSchema>;
@@ -80,6 +88,8 @@ export function saveCheckpoint(session: WizardSession): void {
     frameworkContext: session.frameworkContext,
 
     introConcluded: session.introConcluded,
+
+    flagAssignments: getAssignments(),
   };
 
   atomicWriteJSON(checkpointPath(session.installDir), checkpoint, 0o600);
@@ -118,6 +128,13 @@ export function loadCheckpoint(
 
   // Must match the current project directory
   if (checkpoint.installDir !== installDir) return null;
+
+  // Hydrate experiment assignments so useExperiment() sees the same bucket
+  // the original run did. Done as a side-effect here because assignments
+  // are module-state, not part of WizardSession.
+  if (checkpoint.flagAssignments) {
+    setAssignments(checkpoint.flagAssignments);
+  }
 
   // Return only the fields that are safe to restore.
   // Credentials, runPhase, activation state, and post-run steps are

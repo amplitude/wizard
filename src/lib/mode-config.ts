@@ -38,10 +38,31 @@ export function resolveMode(opts: ResolveModeOpts): ModeConfig {
     ? false
     : Boolean(opts.json) || isAgent || !opts.isTTY;
 
-  return {
+  const config: ModeConfig = {
     mode: isAgent ? 'agent' : isInteractive ? 'interactive' : 'ci',
     autoApprove,
     jsonOutput,
     quiet: !opts.isTTY,
   };
+
+  _activeMode = config.mode;
+  return config;
+}
+
+// Module-level store of the resolved mode so header/trace builders scattered
+// across the codebase can read it without threading ModeConfig through every
+// call signature.
+let _activeMode: ExecutionMode | null = null;
+
+/** Read the mode resolved by the most recent resolveMode() call. */
+export function getExecutionMode(): ExecutionMode {
+  return _activeMode ?? 'interactive';
+}
+
+/**
+ * Manually set the resolved mode. Used by early bootstrap code that needs to
+ * pre-populate the header-builder state before yargs runs its handlers.
+ */
+export function setExecutionMode(mode: ExecutionMode): void {
+  _activeMode = mode;
 }

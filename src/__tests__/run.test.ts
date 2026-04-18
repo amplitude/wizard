@@ -94,7 +94,10 @@ describe('runWizard error handling', () => {
 
     expect(mockAnalytics.captureException).toHaveBeenCalledWith(testError, {});
 
-    expect(mockAnalytics.shutdown).toHaveBeenCalledWith('error');
+    expect(mockAnalytics.shutdown).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({ outcome: 'error' }),
+    );
   });
 
   it('should not call captureException when wizard succeeds', async () => {
