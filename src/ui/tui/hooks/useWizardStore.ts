@@ -2,16 +2,19 @@
  * useWizardStore — eliminates repeated useSyncExternalStore boilerplate.
  *
  * Every screen had the same 4-line subscription pattern. This hook
- * replaces it with a single call. Uses .bind() for stable references
- * to avoid unnecessary resubscription on render.
+ * replaces it with a single call. Memoizes the subscribe/getSnapshot
+ * callbacks per-store so useSyncExternalStore doesn't resubscribe on
+ * every render.
  */
 
-import { useSyncExternalStore } from 'react';
+import { useCallback, useSyncExternalStore } from 'react';
 import type { WizardStore } from '../store.js';
 
 export function useWizardStore(store: WizardStore): void {
-  useSyncExternalStore(
-    store.subscribe.bind(store),
-    store.getSnapshot.bind(store),
+  const subscribe = useCallback(
+    (onStoreChange: () => void) => store.subscribe(onStoreChange),
+    [store],
   );
+  const getSnapshot = useCallback(() => store.getSnapshot(), [store]);
+  useSyncExternalStore(subscribe, getSnapshot);
 }
