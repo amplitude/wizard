@@ -45,7 +45,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     | { kind: 'uploading' }
     | { kind: 'done'; result: UploadResult }
   >({ kind: 'idle' });
-  const [bugReportPath, setBugReportPath] = useState<string | null>(null);
+  const [bugReportPath, setBugReportPath] = useState<string | false | null>(
+    null,
+  );
 
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
   const isError = store.session.outroData?.kind === OutroKind.Error;
@@ -96,7 +98,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         analytics.wizardCapture('error outro bug report written', {
           success: written !== null,
         });
-        setBugReportPath(written);
+        setBugReportPath(written ?? false);
         return;
       }
       process.exit(0);
@@ -238,6 +240,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.success}>
                 {Icons.checkmark} Bug report written to{' '}
                 <Text bold>{bugReportPath}</Text>
+              </Text>
+            )}
+            {bugReportPath === false && (
+              <Text color={Colors.error}>
+                {Icons.cross} Failed to write bug report
               </Text>
             )}
             {outroData.docsUrl && (
