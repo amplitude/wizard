@@ -10,6 +10,8 @@ import { analytics } from './utils/analytics';
 import { runAgentWizard } from './lib/agent-runner';
 import {
   getStoredFirstRunAt,
+  getStoredLastRunAt,
+  storeLastRunAt,
   getPriorRunMetadata,
   incrementPriorRunsCount,
 } from './utils/ampli-settings';
@@ -99,13 +101,16 @@ export async function runWizard(argv: Args, session?: WizardSession) {
   };
 
   const firstRunAt = getStoredFirstRunAt();
+  const lastRunAt = getStoredLastRunAt();
   const priorMeta = getPriorRunMetadata();
   const isFirstRun = !firstRunAt && priorMeta.priorRunsCount === 0;
-  const daysSinceLastRun = firstRunAt
+  const daysSinceLastRun = lastRunAt
     ? Math.floor(
-        (Date.now() - new Date(firstRunAt).getTime()) / (24 * 60 * 60 * 1000),
+        (Date.now() - new Date(lastRunAt).getTime()) / (24 * 60 * 60 * 1000),
       )
     : 0;
+
+  storeLastRunAt(new Date().toISOString());
 
   // New canonical funnel event. `session started` continues to emit
   // alongside for the 30-day deprecation window (removed in PR 4).

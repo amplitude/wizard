@@ -182,6 +182,7 @@ const WIZARD_SETTINGS_KEY = 'wizard';
 const WizardSettingsSchema = z.object({
   deviceId: z.string().optional(),
   firstRunAt: z.string().optional(),
+  lastRunAt: z.string().optional(),
   priorRunsCount: z.number().optional(),
   priorOutcome: z.string().optional(),
 });
@@ -224,6 +225,17 @@ export function storeFirstRunAt(iso: string, configPath?: string): void {
   const current = readWizardSettings(configPath);
   if (current.firstRunAt) return;
   writeWizardSettings({ ...current, firstRunAt: iso }, configPath);
+}
+
+/** Returns the ISO timestamp of the most recent wizard run, if set. */
+export function getStoredLastRunAt(configPath?: string): string | undefined {
+  return readWizardSettings(configPath).lastRunAt;
+}
+
+/** Records the current run timestamp. Updated on every run. */
+export function storeLastRunAt(iso: string, configPath?: string): void {
+  const current = readWizardSettings(configPath);
+  writeWizardSettings({ ...current, lastRunAt: iso }, configPath);
 }
 
 /** Returns prior-run metadata for populating `run started`. */
