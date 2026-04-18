@@ -29,7 +29,7 @@ wizard
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) | `mcpServers` | streamable-http via `npx mcp-remote` |
 | Claude Code | CLI — `claude mcp add` | — | streamable-http |
 | Codex | CLI — `codex mcp add` | — | streamable-http |
-| Gemini CLI | `~/.gemini/settings.json` | `mcpServers` (uses `httpUrl`) | streamable-http (native) |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers` | streamable-http (native) |
 | Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` (uses `serverUrl`) | streamable-http (native) |
 | Cline | `~/…/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | `mcpServers` | streamable-http (native) |
 | Amp | `~/.config/amp/settings.json` | `amp.mcpServers` (flat dotted key) | streamable-http (native) |

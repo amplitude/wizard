@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
-import { buildMCPUrl } from '../defaults';
+import { getNativeHTTPServerConfig } from '../defaults';
 
 export const GeminiCLIMCPConfig = z
   .object({
@@ -11,7 +11,6 @@ export const GeminiCLIMCPConfig = z
       z.string(),
       z.union([
         z.object({
-          httpUrl: z.string().optional(),
           url: z.string().optional(),
           headers: z.record(z.string(), z.string()).optional(),
         }),
@@ -48,14 +47,7 @@ export class GeminiCLIMCPClient extends DefaultMCPClient {
     selectedFeatures?: string[],
     local?: boolean,
   ): MCPServerConfig {
-    // Gemini CLI uses `httpUrl` (not `url`) for streamable-http transport.
-    const config: MCPServerConfig = {
-      httpUrl: buildMCPUrl(type, selectedFeatures, local),
-    };
-    if (apiKey) {
-      config.headers = { Authorization: `Bearer ${apiKey}` };
-    }
-    return config;
+    return getNativeHTTPServerConfig(apiKey, type, selectedFeatures, local);
   }
 
   async addServer(
