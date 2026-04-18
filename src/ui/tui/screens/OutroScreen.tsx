@@ -51,7 +51,13 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     if (uploadState.kind !== 'idle') return;
     setUploadState({ kind: 'uploading' });
     analytics.wizardCapture('diagnostic upload started', {});
-    const bundle = buildBundle();
+    let bundle: ReturnType<typeof buildBundle>;
+    try {
+      bundle = buildBundle();
+    } catch {
+      setUploadState({ kind: 'idle' });
+      return;
+    }
     const zone = (store.session.region ?? 'us') as AmplitudeZone;
     const accessToken = store.session.credentials?.accessToken;
     void uploadBundle(bundle, { zone, accessToken })

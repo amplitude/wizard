@@ -1079,11 +1079,16 @@ export async function runAgent(
         const MAX_REMARK_BYTES = 4096;
         const truncated =
           Buffer.byteLength(fullRemark, 'utf8') > MAX_REMARK_BYTES;
-        const remark = truncated
-          ? Buffer.from(fullRemark, 'utf8')
-              .subarray(0, MAX_REMARK_BYTES)
-              .toString('utf8')
-          : fullRemark;
+        let remark: string;
+        if (truncated) {
+          const buf = Buffer.from(fullRemark, 'utf8');
+          let end = MAX_REMARK_BYTES;
+          // Walk back to a valid UTF-8 character boundary.
+          while (end > 0 && (buf[end] & 0xc0) === 0x80) end--;
+          remark = buf.subarray(0, end).toString('utf8');
+        } else {
+          remark = fullRemark;
+        }
         analytics.wizardCapture('wizard remark', {
           remark,
           'remark length': fullRemark.length,
