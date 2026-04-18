@@ -160,7 +160,7 @@ When('I enter a valid Amplitude API key', function () {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: key,
     host: 'https://api.amplitude.com',
-    projectId: 0,
+    appId: 0,
   };
   // Persist — file fallback since keychain is not available in tests
   persistApiKey(key, projectDir);
@@ -292,7 +292,7 @@ Then('I should proceed automatically with the saved key', function () {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: result.key,
     host: 'https://api.amplitude.com',
-    projectId: 0,
+    appId: 0,
   };
   session.projectHasData = false;
   // With credentials set, router should advance past Auth

@@ -6,6 +6,175 @@
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
 import { createInterface } from 'readline';
+import { z } from 'zod';
+
+/**
+ * Stdin response schema for `promptEnvironmentSelection`.
+ *
+ * External input (from AI orchestrators) — parse with zod rather than an
+ * `as` cast so bad shapes get rejected instead of silently falling through
+ * to auto-select.
+ *
+ * Canonical shape: `{ appId }`.
+ * Legacy shapes still accepted (with a deprecation warning):
+ *   - `{ projectId }` (old name for appId)
+ *   - `{ orgId, workspaceId, env }` (pre-appId triple)
+ */
+const EnvSelectionStdinSchema = z.object({
+  appId: z.string().optional(),
+  projectId: z.string().optional(),
+  orgId: z.string().optional(),
+  workspaceId: z.string().optional(),
+  env: z.string().optional(),
+});
+type EnvSelectionStdin = z.infer<typeof EnvSelectionStdinSchema>;
+
+/** Flat choice shape exposed in the prompt event and matched against stdin. */
+export interface EnvSelectionChoice {
+  orgId: string;
+  orgName: string;
+  workspaceId: string;
+  workspaceName: string;
+  appId: string | null;
+  envName: string;
+  rank: number;
+  label: string;
+}
+
+/** Resolved selection returned from the env-selection prompt. */
+export interface EnvSelection {
+  orgId: string;
+  workspaceId: string;
+  env: string;
+}
+
+/**
+ * Structured outcome of interpreting a parsed stdin payload against the
+ * available choices. Pulled out as a pure function so the matching /
+ * rejection logic can be unit-tested without stdin or readline mocks.
+ *
+ * - `kind: 'selected'` — a valid matching selector was provided.
+ * - `kind: 'auto'` — no selector (empty object / missing fields); caller
+ *   should auto-select the first environment.
+ * - `kind: 'mismatch'` — a selector was provided but didn't match any
+ *   choice; caller MUST NOT silently auto-select (throw / error).
+ * - `warnings` — deprecation notices the caller should surface as log events.
+ */
+export type EnvSelectionResolution =
+  | {
+      kind: 'selected';
+      selection: EnvSelection;
+      warnings: string[];
+    }
+  | {
+      kind: 'auto';
+      warnings: string[];
+    }
+  | {
+      kind: 'mismatch';
+      reason: string;
+      warnings: string[];
+    };
+
+export function resolveEnvSelectionFromStdin(
+  parsed: EnvSelectionStdin | null,
+  choices: EnvSelectionChoice[],
+): EnvSelectionResolution {
+  const warnings: string[] = [];
+  if (!parsed) return { kind: 'auto', warnings };
+
+  const selectedAppId = parsed.appId ?? parsed.projectId;
+  if (selectedAppId) {
+    if (parsed.projectId && !parsed.appId) {
+      warnings.push(
+        'Legacy { projectId } selection shape is deprecated — prefer { appId }.',
+      );
+    }
+    const match = choices.find(
+      (c) => String(c.appId) === String(selectedAppId),
+    );
+    if (match) {
+      return {
+        kind: 'selected',
+        selection: {
+          orgId: match.orgId,
+          workspaceId: match.workspaceId,
+          env: match.envName,
+        },
+        warnings,
+      };
+    }
+    return {
+      kind: 'mismatch',
+      reason: `Environment selection appId=${selectedAppId} did not match any of the ${choices.length} available environments.`,
+      warnings,
+    };
+  }
+
+  if (parsed.orgId && parsed.workspaceId && parsed.env) {
+    warnings.push(
+      'Legacy { orgId, workspaceId, env } selection shape is deprecated — prefer { appId }.',
+    );
+    const envLower = parsed.env.toLowerCase();
+    const match = choices.find(
+      (c) =>
+        c.orgId === parsed.orgId &&
+        c.workspaceId === parsed.workspaceId &&
+        c.envName.toLowerCase() === envLower,
+    );
+    if (!match) {
+      return {
+        kind: 'mismatch',
+        reason: `Environment selection { orgId: ${parsed.orgId}, workspaceId: ${parsed.workspaceId}, env: ${parsed.env} } did not match any of the ${choices.length} available environments.`,
+        warnings,
+      };
+    }
+    return {
+      kind: 'selected',
+      selection: {
+        orgId: parsed.orgId,
+        workspaceId: parsed.workspaceId,
+        env: parsed.env,
+      },
+      warnings,
+    };
+  }
+
+  // Parsed an object with no usable selector — treat like no input.
+  return { kind: 'auto', warnings };
+}
+
+/**
+ * Parse one JSON line from the agent orchestrator. Returns a structured
+ * result with any zod rejection issues so the caller can surface them as
+ * warning logs. Exported for unit tests.
+ */
+export function parseEnvSelectionStdinLine(line: string | null | undefined): {
+  parsed: EnvSelectionStdin | null;
+  rejectionMessage: string | null;
+} {
+  if (!line) return { parsed: null, rejectionMessage: null };
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return {
+      parsed: null,
+      rejectionMessage:
+        'Environment-selection stdin response is not valid JSON.',
+    };
+  }
+  const result = EnvSelectionStdinSchema.safeParse(raw);
+  if (!result.success) {
+    return {
+      parsed: null,
+      rejectionMessage: `Environment-selection stdin response rejected: ${result.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ')}`,
+    };
+  }
+  return { parsed: result.data, rejectionMessage: null };
+}
 
 // ── NDJSON event types ──────────────────────────────────────────────
 
@@ -520,53 +689,28 @@ export class AgentUI implements WizardUI {
       },
     );
 
-    // Read one line from stdin. Accept either the canonical { appId } shape
-    // or the legacy { orgId, workspaceId, env } triple or { projectId } alias.
-    try {
-      const line = await readStdinLine(60_000);
-      if (line) {
-        const parsed = JSON.parse(line) as {
-          appId?: string;
-          projectId?: string;
-          orgId?: string;
-          workspaceId?: string;
-          env?: string;
-        };
-        const selectedAppId = parsed.appId ?? parsed.projectId;
-        if (selectedAppId) {
-          if (parsed.projectId && !parsed.appId) {
-            emit(
-              'log',
-              'Legacy { projectId } selection shape is deprecated — prefer { appId }.',
-              { level: 'warn' },
-            );
-          }
-          const match = choices.find(
-            (c) => String(c.appId) === String(selectedAppId),
-          );
-          if (match) {
-            return {
-              orgId: match.orgId,
-              workspaceId: match.workspaceId,
-              env: match.envName,
-            };
-          }
-        }
-        if (parsed.orgId && parsed.workspaceId && parsed.env) {
-          emit(
-            'log',
-            'Legacy { orgId, workspaceId, env } selection shape is deprecated — prefer { appId }.',
-            { level: 'warn' },
-          );
-          return {
-            orgId: parsed.orgId,
-            workspaceId: parsed.workspaceId,
-            env: parsed.env,
-          };
-        }
-      }
-    } catch {
-      // Stdin closed, timeout, or invalid JSON — fall through to auto-select
+    // Read one line from stdin. Parsing + matching is a pure helper so tests
+    // can exercise it without stdin mocking. Outcomes:
+    //   - no line / timeout / invalid JSON / empty object → auto-select
+    //   - specific appId or legacy triple that matches → return it
+    //   - selector provided but doesn't match → throw, so the caller emits
+    //     `auth_required: env_selection_failed` instead of silently picking
+    //     the wrong environment (a data-integrity risk).
+    const line = await readStdinLine(60_000).catch(() => null);
+    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine(line);
+    if (rejectionMessage) {
+      emit('log', rejectionMessage, { level: 'warn' });
+    }
+
+    const outcome = resolveEnvSelectionFromStdin(parsed, choices);
+    for (const warning of outcome.warnings) {
+      emit('log', warning, { level: 'warn' });
+    }
+    if (outcome.kind === 'selected') {
+      return outcome.selection;
+    }
+    if (outcome.kind === 'mismatch') {
+      throw new Error(outcome.reason);
     }
 
     // Fallback: auto-select the first environment

@@ -21,7 +21,7 @@ function mockCredentials(): WizardSession['credentials'] {
     accessToken: 'access-abc',
     projectApiKey: 'api-key-xyz',
     host: 'https://api.amplitude.com',
-    projectId: 123456,
+    appId: 123456,
   };
 }
 
