@@ -10,7 +10,7 @@
  * without a cyclic import through agent-interface.
  */
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { getAttemptId, getRunId } from './observability';
@@ -80,4 +80,71 @@ export class AgentState {
       return null;
     }
   }
+}
+
+/**
+ * Read a previously-persisted snapshot. Returns null on any failure so the
+ * caller can fall back to a cold start. Validates only the schema tag — full
+ * field validation is left to the consumer for forward compatibility.
+ */
+export function loadSnapshot(path: string): SerializedAgentState | null {
+  try {
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<SerializedAgentState>;
+    if (parsed.schema !== 'amplitude-wizard-agent-state/1') {
+      logToFile(`loadSnapshot: schema mismatch — got ${String(parsed.schema)}`);
+      return null;
+    }
+    return parsed as SerializedAgentState;
+  } catch (err) {
+    logToFile(
+      `loadSnapshot: read/parse failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Load + delete a snapshot in one step so restoration fires only once per
+ * compaction cycle. Non-throwing.
+ */
+export function consumeSnapshot(path: string): SerializedAgentState | null {
+  const snap = loadSnapshot(path);
+  if (!snap) return null;
+  try {
+    unlinkSync(path);
+  } catch {
+    // Best-effort cleanup; a leftover file won't cause incorrect behavior
+    // because the next compaction will overwrite it.
+  }
+  return snap;
+}
+
+/**
+ * Render a compact recovery note to prepend to a user prompt after
+ * compaction. Keeps the block short so it doesn't eat context budget —
+ * only the signals an LLM actually needs to re-orient.
+ */
+export function buildRecoveryNote(snap: SerializedAgentState): string {
+  const lines: string[] = [
+    '<post-compaction-recovery>',
+    `You are resuming a wizard run after a context compaction. The ${snap.compactionCount}x compaction summary may have dropped detail from earlier turns. Treat the list below as authoritative; do not re-edit files already modified unless the skill workflow requires it.`,
+  ];
+  if (snap.modifiedFiles.length > 0) {
+    lines.push('', 'Files you have already modified in this run:');
+    for (const file of snap.modifiedFiles) lines.push(`  - ${file}`);
+  } else {
+    lines.push('', 'No files have been modified yet in this run.');
+  }
+  if (snap.lastStatus) {
+    lines.push(
+      '',
+      `Last reported status: [${snap.lastStatus.code}] ${snap.lastStatus.detail}`,
+    );
+  }
+  lines.push('</post-compaction-recovery>', '');
+  return lines.join('\n');
 }

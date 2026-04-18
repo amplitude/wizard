@@ -28,7 +28,7 @@ import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
 import { nextAttemptId } from './observability/correlation';
 import { ToolCallCounters } from './tool-call-counters';
-import { AgentState } from './agent-state';
+import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { LINTING_TOOLS } from './safe-tools';
 import {
   createWizardToolsServer,
@@ -380,6 +380,41 @@ export function createPreCompactHook(
       state.persist();
     }
     return Promise.resolve({});
+  };
+}
+
+/**
+ * Factory: UserPromptSubmit hook — hydrates recovery context after a
+ * compaction.
+ *
+ * If a PreCompact snapshot exists at `state.serializationPath()`, the hook
+ * consumes it (reads + deletes) and returns a modified prompt that prepends
+ * a short recovery note listing modified files and the last status. The
+ * snapshot is deleted so hydration fires at most once per compaction cycle.
+ *
+ * When no snapshot exists (first turn, or no compaction has happened) the
+ * hook is a no-op and returns `{}` so the SDK uses the prompt unchanged.
+ */
+export function createUserPromptSubmitHook(state: AgentState): HookCallback {
+  return (
+    _input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const snap = consumeSnapshot(state.serializationPath());
+    if (!snap) return Promise.resolve({});
+
+    const note = buildRecoveryNote(snap);
+    logToFile(
+      `UserPromptSubmit: hydrated recovery note (${snap.modifiedFiles.length} files, compactionCount=${snap.compactionCount})`,
+    );
+    // Use the SDK's additionalContext injection point rather than rewriting
+    // the user's prompt verbatim — keeps the user's message intact and
+    // makes the recovery note appear as system-provided context.
+    return Promise.resolve({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: note,
+      },
+    });
   };
 }
 
@@ -1508,6 +1543,7 @@ export async function runAgent(
               PermissionRequest: createPermissionRequestHook(toolCounters),
               SubagentStart: createSubagentStartHook(toolCounters),
               PreCompact: createPreCompactHook(toolCounters, agentState),
+              UserPromptSubmit: createUserPromptSubmitHook(agentState),
             }),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
