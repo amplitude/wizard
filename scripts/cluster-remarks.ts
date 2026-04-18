@@ -93,7 +93,7 @@ async function clusterRemarks(
 // Reporter
 // ─────────────────────────────────────────────────────────────
 
-function renderMarkdown(report: ReportPayload): string {
+export function renderMarkdown(report: ReportPayload): string {
   const lines: string[] = [
     `# Wizard Remark Feedback — ${report.periodStart} → ${report.periodEnd}`,
     '',
