@@ -641,7 +641,7 @@ STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP se
    - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
 
 STEP 6: Add event tracking to this project using the instrumentation skills.
-   - Autocapture is already tracking element clicks, form interactions, page/screen views, sessions, and file downloads (you enabled it in the init config during integration). The events you propose to confirm_event_plan MUST exclude anything already covered — no "Clicked", "Tapped", "Submitted", or "Viewed" events. Propose only business-outcome and state-change events.
+   - If you enabled Amplitude Autocapture in the SDK init code during integration (typical for web SDKs, not for Swift unless the plugin was added, and not applicable to backend SDKs), the events you propose to confirm_event_plan MUST exclude anything Autocapture already covers for this platform — no "Clicked", "Tapped", "Submitted", or "Viewed" events. If Autocapture is off or unsupported, propose events normally but still favor business-outcome and state-change events over raw interaction events.
    - Call load_skill_menu with category "taxonomy" and install **amplitude-quickstart-taxonomy-agent** using install_skill. Load its SKILL.md and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
    - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
    - Install the "add-analytics-instrumentation" skill using install_skill.
