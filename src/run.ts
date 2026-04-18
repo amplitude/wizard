@@ -108,7 +108,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
     ? Math.floor(
         (Date.now() - new Date(lastRunAt).getTime()) / (24 * 60 * 60 * 1000),
       )
-    : 0;
+    : null;
 
   storeLastRunAt(new Date().toISOString());
 

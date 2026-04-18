@@ -232,7 +232,6 @@ for support triage. The bundle is a gzip-compressed JSON payload containing:
 | Method | POST |
 | Body | gzip bytes (binary) |
 | Content-Type | `application/gzip` |
-| Content-Encoding | `gzip` |
 | Authorization | `Bearer <access_token>` — optional; unauth uploads are accepted |
 | X-Wizard-Diagnostic-Run-Id | Short run id (matches `X-Wizard-Run-Id`) |
 | Tracing headers | W3C `traceparent` + `X-Wizard-*` (same as every other request) |

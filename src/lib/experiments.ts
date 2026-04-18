@@ -73,7 +73,7 @@ export function useExperiment<V extends string>(def: ExperimentDef<V>): V {
   // Prefer a pre-seeded assignment (from checkpoint hydration) so resumed
   // runs stay in the same bucket they started in.
   let variant: V | undefined = assignments.get(def.key) as V | undefined;
-  if (!variant) {
+  if (!variant || !(variant in def.variants)) {
     const raw = getFlag(def.key);
     variant =
       raw && (raw as V) in def.variants ? (raw as V) : def.defaultVariant;

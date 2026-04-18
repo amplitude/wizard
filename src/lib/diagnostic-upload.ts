@@ -62,7 +62,6 @@ export async function uploadBundle(
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/gzip',
-      'Content-Encoding': 'gzip',
       'User-Agent': WIZARD_USER_AGENT,
       ...createTracingHeaders(),
       'X-Wizard-Diagnostic-Run-Id': bundle.meta.runId,
