@@ -208,7 +208,7 @@ export async function resolveCredentials(
               session.selectedWorkspaceName = ws.name;
               if (matchedEnv) {
                 session.selectedEnvName = matchedEnv.name;
-                const projectId = extractProjectId(ws);
+                const projectId = matchedEnv.app?.id ?? extractProjectId(ws);
                 if (projectId) {
                   session.selectedProjectId = projectId;
                   if (session.credentials) {
