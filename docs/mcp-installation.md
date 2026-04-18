@@ -12,7 +12,8 @@ automatically.
 
 ```
 wizard
-  → detect supported editors (VS Code, Zed, Cursor, Claude Desktop, Claude Code, Codex)
+  → detect supported editors (VS Code, Zed, Cursor, Claude Desktop, Claude Code,
+    Codex, Gemini CLI, Windsurf, Cline, Amp, OpenCode)
   → confirm with user
   → write MCP server config (URL only, no auth header)
   → editor prompts user for OAuth on first tool call
@@ -28,6 +29,11 @@ wizard
 | Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` (Mac) | `mcpServers` | streamable-http via `npx mcp-remote` |
 | Claude Code | CLI — `claude mcp add` | — | streamable-http |
 | Codex | CLI — `codex mcp add` | — | streamable-http |
+| Gemini CLI | `~/.gemini/settings.json` | `mcpServers` (uses `httpUrl`) | streamable-http (native) |
+| Windsurf | `~/.codeium/windsurf/mcp_config.json` | `mcpServers` (uses `serverUrl`) | streamable-http (native) |
+| Cline | `~/…/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | `mcpServers` | streamable-http (native) |
+| Amp | `~/.config/amp/settings.json` | `amp.mcpServers` (flat dotted key) | streamable-http (native) |
+| OpenCode | `~/.config/opencode/opencode.json` | `mcp` (with `type: "remote"`) | streamable-http (native) |
 
 ## Server URL
 
@@ -60,6 +66,11 @@ src/steps/add-mcp-server-to-clients/
     claude.ts           — Claude Desktop
     claude-code.ts      — Claude Code CLI
     codex.ts            — Codex CLI
+    gemini-cli.ts       — Google Gemini CLI
+    windsurf.ts         — Codeium Windsurf
+    cline.ts            — Cline (VS Code extension)
+    amp.ts              — Sourcegraph Amp
+    opencode.ts         — OpenCode
 
 src/ui/tui/
   screens/McpScreen.tsx         — TUI screen (detect → confirm → pick → install)
