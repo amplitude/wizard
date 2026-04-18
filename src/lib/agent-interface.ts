@@ -1216,7 +1216,36 @@ export async function runAgent(
       turns: turns?.totalTurns ?? 0,
       model: agentConfig.model ?? null,
       'fallback used': Boolean(agentConfig.useLocalClaude),
+      // Phase attribution — today every run is one monolithic loop. Bet 2's
+      // three-phase pipeline (Planner → Integrator → Instrumenter) will
+      // split this into per-phase `agent completed` events. Keeping the
+      // property now future-proofs the event schema.
+      phase: 'monolithic',
     });
+
+    // Kill-criterion monitoring for Bet 2 Slice 1 (prompt caching): if the
+    // prefix has been warm long enough to be cached (input tokens above
+    // WARM_RUN_TOKEN_FLOOR) but the hit rate is below CACHE_MISS_THRESHOLD,
+    // emit a separate anomaly event so Amplitude can alert + Sentry can
+    // surface the pattern. Skipped on cold runs (first invocation or small
+    // prompts) where the cache can't possibly have warmed up.
+    const WARM_RUN_TOKEN_FLOOR = 5000;
+    const CACHE_MISS_THRESHOLD = 0.4;
+    if (
+      cacheHitRate !== null &&
+      inputTokens >= WARM_RUN_TOKEN_FLOOR &&
+      cacheHitRate < CACHE_MISS_THRESHOLD
+    ) {
+      analytics.wizardCapture('cache miss anomaly', {
+        'cache hit rate': cacheHitRate,
+        'input tokens': inputTokens,
+        'cache read input tokens': cacheRead,
+        'cache creation tokens': cacheCreation,
+        threshold: CACHE_MISS_THRESHOLD,
+        'warm run token floor': WARM_RUN_TOKEN_FLOOR,
+        model: agentConfig.model ?? null,
+      });
+    }
     spinner.stop(successMessage);
     return {};
   };
