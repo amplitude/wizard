@@ -80,7 +80,7 @@ describe('GeminiCLIMCPClient', () => {
   });
 
   describe('addServer', () => {
-    it('writes mcpServers entry with httpUrl and no header for OAuth mode', async () => {
+    it('writes mcpServers entry with url and no header for OAuth mode', async () => {
       existsSyncMock.mockReturnValue(false);
 
       await client.addServer();
@@ -94,7 +94,7 @@ describe('GeminiCLIMCPClient', () => {
       expect(parsed).toEqual({
         mcpServers: {
           amplitude: {
-            httpUrl: 'https://mcp.amplitude.com/mcp',
+            url: 'https://mcp.amplitude.com/mcp',
           },
         },
       });
@@ -108,7 +108,7 @@ describe('GeminiCLIMCPClient', () => {
       const [, written] = writeFileMock.mock.calls[0] as [string, string];
       const parsed = JSON.parse(written);
       expect(parsed.mcpServers.amplitude).toEqual({
-        httpUrl: 'https://mcp.amplitude.com/mcp',
+        url: 'https://mcp.amplitude.com/mcp',
         headers: { Authorization: `Bearer ${mockApiKey}` },
       });
     });
@@ -117,7 +117,7 @@ describe('GeminiCLIMCPClient', () => {
       existsSyncMock.mockReturnValue(true);
       readFileMock.mockResolvedValue(
         JSON.stringify({
-          mcpServers: { other: { httpUrl: 'https://other.example.com/mcp' } },
+          mcpServers: { other: { url: 'https://other.example.com/mcp' } },
         }),
       );
 
@@ -126,9 +126,9 @@ describe('GeminiCLIMCPClient', () => {
       const [, written] = writeFileMock.mock.calls[0] as [string, string];
       const parsed = JSON.parse(written);
       expect(parsed.mcpServers.other).toEqual({
-        httpUrl: 'https://other.example.com/mcp',
+        url: 'https://other.example.com/mcp',
       });
-      expect(parsed.mcpServers.amplitude.httpUrl).toBe(
+      expect(parsed.mcpServers.amplitude.url).toBe(
         'https://mcp.amplitude.com/mcp',
       );
     });
@@ -138,7 +138,7 @@ describe('GeminiCLIMCPClient', () => {
     it('returns true when the amplitude server is present', async () => {
       existsSyncMock.mockReturnValue(true);
       readFileMock.mockResolvedValue(
-        JSON.stringify({ mcpServers: { amplitude: { httpUrl: 'x' } } }),
+        JSON.stringify({ mcpServers: { amplitude: { url: 'x' } } }),
       );
       await expect(client.isServerInstalled()).resolves.toBe(true);
     });
@@ -146,7 +146,7 @@ describe('GeminiCLIMCPClient', () => {
     it('returns false when the amplitude server is absent', async () => {
       existsSyncMock.mockReturnValue(true);
       readFileMock.mockResolvedValue(
-        JSON.stringify({ mcpServers: { other: { httpUrl: 'x' } } }),
+        JSON.stringify({ mcpServers: { other: { url: 'x' } } }),
       );
       await expect(client.isServerInstalled()).resolves.toBe(false);
     });
@@ -158,8 +158,8 @@ describe('GeminiCLIMCPClient', () => {
       readFileMock.mockResolvedValue(
         JSON.stringify({
           mcpServers: {
-            amplitude: { httpUrl: 'https://mcp.amplitude.com/mcp' },
-            other: { httpUrl: 'https://other.example.com/mcp' },
+            amplitude: { url: 'https://mcp.amplitude.com/mcp' },
+            other: { url: 'https://other.example.com/mcp' },
           },
         }),
       );
@@ -170,7 +170,7 @@ describe('GeminiCLIMCPClient', () => {
       const parsed = JSON.parse(written);
       expect(parsed.mcpServers.amplitude).toBeUndefined();
       expect(parsed.mcpServers.other).toEqual({
-        httpUrl: 'https://other.example.com/mcp',
+        url: 'https://other.example.com/mcp',
       });
     });
   });

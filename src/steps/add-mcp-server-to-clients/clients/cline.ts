@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
-import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
+import { DefaultMCPClientConfig, getNativeHTTPServerConfig } from '../defaults';
 
 export const ClineMCPConfig = DefaultMCPClientConfig;
 
@@ -68,13 +68,7 @@ export class ClineMCPClient extends DefaultMCPClient {
     selectedFeatures?: string[],
     local?: boolean,
   ): MCPServerConfig {
-    const config: MCPServerConfig = {
-      url: buildMCPUrl(type, selectedFeatures, local),
-    };
-    if (apiKey) {
-      config.headers = { Authorization: `Bearer ${apiKey}` };
-    }
-    return config;
+    return getNativeHTTPServerConfig(apiKey, type, selectedFeatures, local);
   }
 
   async addServer(
