@@ -206,7 +206,7 @@ const resolveNonInteractiveCredentials = async (
   // `--project-name <name>` triggers an inline project creation when the
   // authenticated user has an org but no projects to choose from (or when
   // the orchestrator explicitly asks for a fresh project). Must not prompt.
-  const projectName = (options.projectName as string | undefined)?.trim();
+  const projectName = (options.appName as string | undefined)?.trim();
   if (
     projectName &&
     session.pendingOrgs &&
