@@ -28,6 +28,7 @@ import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
 import { nextAttemptId } from './observability/correlation';
 import { ToolCallCounters } from './tool-call-counters';
+import { AgentState } from './agent-state';
 import { LINTING_TOOLS } from './safe-tools';
 import {
   createWizardToolsServer,
@@ -298,14 +299,32 @@ export function createStopHook(
 /**
  * Factory: PostToolUse hook that increments the successful-tool-call counter.
  * Does NOT emit analytics per call — totals roll up into the Stop-hook summary.
+ * When a file-mutating tool (Write / Edit) succeeds, records the target file
+ * on the AgentState so PreCompact can persist it for post-compaction recovery.
  */
 export function createPostToolUseHook(
   counters: ToolCallCounters,
+  state?: AgentState,
 ): HookCallback {
   return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const toolName =
       typeof input.tool_name === 'string' ? input.tool_name : 'unknown';
     counters.recordToolCall(toolName, true);
+
+    if (state && (toolName === 'Write' || toolName === 'Edit')) {
+      const toolInput =
+        typeof input.tool_input === 'object' && input.tool_input !== null
+          ? (input.tool_input as Record<string, unknown>)
+          : {};
+      const filePath =
+        typeof toolInput.file_path === 'string'
+          ? toolInput.file_path
+          : typeof toolInput.path === 'string'
+          ? toolInput.path
+          : '';
+      if (filePath) state.recordModifiedFile(filePath);
+    }
+
     return Promise.resolve({});
   };
 }
@@ -342,10 +361,24 @@ export function createSubagentStartHook(
   };
 }
 
-/** Factory: PreCompact hook — counts one compaction. */
-export function createPreCompactHook(counters: ToolCallCounters): HookCallback {
+/**
+ * Factory: PreCompact hook — counts one compaction and persists agent state.
+ *
+ * Compaction drops earlier turns from the LLM's context window, which can
+ * erase the workflow step + list of files the agent has edited. Writing a
+ * small snapshot to disk before compaction runs gives a post-compaction
+ * recovery point that a future UserPromptSubmit hook can read.
+ */
+export function createPreCompactHook(
+  counters: ToolCallCounters,
+  state?: AgentState,
+): HookCallback {
   return (): Promise<Record<string, unknown>> => {
     counters.recordCompaction();
+    if (state) {
+      state.recordCompaction();
+      state.persist();
+    }
     return Promise.resolve({});
   };
 }
@@ -1302,6 +1335,11 @@ export async function runAgent(
     // these; Stop-hook emits the aggregated `tool summary` event once.
     const toolCounters = new ToolCallCounters();
 
+    // Per-attempt recovery bag: modified files + last status. PreCompact
+    // persists a snapshot to disk so context dropped by compaction stays
+    // recoverable.
+    const agentState = new AgentState();
+
     // Structured status state populated by the `report_status` MCP tool.
     // Replaces the legacy [STATUS] / [ERROR-*] text-marker regex scanner.
     let reportedError: StatusReport | null = null;
@@ -1310,6 +1348,7 @@ export async function runAgent(
         spinner.message(report.detail);
         recentStatuses.push(report.detail);
         if (recentStatuses.length > 3) recentStatuses.shift();
+        agentState.recordStatus(report.code, report.detail);
       },
       onError(report) {
         // First error wins — stall/retry loop reads this after the attempt.
@@ -1317,6 +1356,7 @@ export async function runAgent(
         logToFile(
           `Structured error reported: ${report.code} — ${report.detail}`,
         );
+        agentState.recordStatus(report.code, report.detail);
       },
     };
 
@@ -1463,11 +1503,11 @@ export async function runAgent(
                 () => authErrorDetected,
                 toolCounters,
               ),
-              PostToolUse: createPostToolUseHook(toolCounters),
+              PostToolUse: createPostToolUseHook(toolCounters, agentState),
               PostToolUseFailure: createPostToolUseFailureHook(toolCounters),
               PermissionRequest: createPermissionRequestHook(toolCounters),
               SubagentStart: createSubagentStartHook(toolCounters),
-              PreCompact: createPreCompactHook(toolCounters),
+              PreCompact: createPreCompactHook(toolCounters, agentState),
             }),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
