@@ -680,21 +680,17 @@ void yargs(hideBin(process.argv))
       // --env is redundant with --project-id (each Amplitude env has its own
       // app.id, so the numeric project-id already identifies the env). Keep
       // the flag parseable for legacy scripts, but nudge callers toward
-      // --project-id. Fires once per invocation, before mode dispatch so
-      // interactive + CI + agent all see the same message.
-      if (options.env) {
-        const envWarning =
-          '[deprecation] --env is redundant with --project-id — prefer ' +
+      // --project-id. Surfaced via stderr for interactive/CI; agent mode
+      // re-emits it as a structured NDJSON log event once AgentUI exists.
+      const envDeprecationWarning = options.env
+        ? '[deprecation] --env is redundant with --project-id — prefer ' +
           '--project-id <id> (globally unique, identifies the env directly). ' +
-          '--env will be removed in a future release.';
-        if (options.agent || process.env.AMPLITUDE_WIZARD_AGENT === '1') {
-          // Emit via AgentUI once it's constructed below; here we stash on
-          // options so the agent branch can surface it as a structured log.
-          (options as Record<string, unknown>)._envDeprecationWarning =
-            envWarning;
-        } else {
-          process.stderr.write(`${envWarning}\n`);
-        }
+          '--env will be removed in a future release.'
+        : null;
+      const willRunAsAgent =
+        options.agent || process.env.AMPLITUDE_WIZARD_AGENT === '1';
+      if (envDeprecationWarning && !willRunAsAgent) {
+        process.stderr.write(`${envDeprecationWarning}\n`);
       }
 
       // CI mode validation and TTY check
@@ -717,9 +713,7 @@ void yargs(hideBin(process.argv))
 
           // Surface the --env deprecation warning as a structured log event
           // so orchestrators can parse it (raw stderr would mix with NDJSON).
-          const envDeprecationWarning = (options as Record<string, unknown>)
-            ._envDeprecationWarning;
-          if (typeof envDeprecationWarning === 'string') {
+          if (envDeprecationWarning) {
             agentUI.log.warn(envDeprecationWarning);
           }
 
