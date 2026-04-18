@@ -84,6 +84,14 @@ export async function resolveCredentials(
   const storedUser = getStoredUser();
   const realUser =
     storedUser && storedUser.id !== 'pending' ? storedUser : null;
+  // Pending users are used only as a last-resort zone fallback. They're
+  // written during signup flows when fetchAmplitudeUser fails after a
+  // successful token grant — the tokens are valid, but the real user ID
+  // hasn't been populated yet. Without this fallback, zone resolution
+  // fails and the tokens can't be used on subsequent runs until the
+  // pending entry is patched.
+  const pendingUser =
+    storedUser && storedUser.id === 'pending' ? storedUser : null;
 
   if (realUser?.email) {
     session.userEmail = realUser.email;
@@ -93,11 +101,12 @@ export async function resolveCredentials(
   const projectZone = projectConfig.ok ? projectConfig.config.Zone : undefined;
 
   // Checkpoint region wins (user explicitly changed via /region),
-  // then project config, then global user zone.
+  // then project config, then global user zone, then pending user zone.
   const zone =
     (session._restoredFromCheckpoint ? session.region : null) ??
     projectZone ??
     realUser?.zone ??
+    pendingUser?.zone ??
     null;
 
   if (zone) {

@@ -42,6 +42,8 @@ export const CliArgsSchema = z.object({
   apiKey: z.string().optional(),
   integration: z.string().optional(),
   projectName: z.string().optional(),
+  signupEmail: z.string().email().nullable().optional().default(null),
+  signupFullName: z.string().nullable().optional().default(null),
 });
 
 /**
@@ -149,6 +151,8 @@ export interface WizardSession {
   ci: boolean;
   agent: boolean;
   signup: boolean;
+  signupEmail: string | null;
+  signupFullName: string | null;
   localMcp: boolean;
   apiKey?: string;
   menu: boolean;
@@ -390,6 +394,8 @@ export function buildSession(args: {
   projectId?: string;
   /** From --project-name CLI flag — pre-fills CreateProjectScreen. */
   projectName?: string;
+  signupEmail?: string;
+  signupFullName?: string;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -412,6 +418,12 @@ export function buildSession(args: {
     ci: validated.ci ?? false,
     agent: false,
     signup: validated.signup ?? false,
+    // On parse failure we intentionally reject raw args for the signup
+    // fields — otherwise a malformed email would skip zod's .email() check
+    // via the fallback and reach the signup endpoint. Null here means the
+    // signup wrapper short-circuits with "missing email or fullName".
+    signupEmail: parsed.success ? validated.signupEmail ?? null : null,
+    signupFullName: parsed.success ? validated.signupFullName ?? null : null,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
