@@ -15,6 +15,13 @@ Feature: Slash commands
     When I enter the slash command "/logout"
     Then the wizard should prompt me to log in again
 
+  Scenario: /region mid-session forces re-authentication against the new zone
+    Given I have just authenticated
+    When I enter the slash command "/region"
+    Then I should be taken back to region selection
+    When I select the "eu" region
+    Then the wizard should prompt me to log in again
+
   Scenario: /slack opens Amplitude settings to connect Slack
     Given the wizard is active
     When I enter the slash command "/slack"

@@ -11,6 +11,7 @@ import type { WizardOptions } from '../utils/types';
 import { analytics, captureWizardError } from '../utils/analytics';
 import {
   AMPLITUDE_PROPERTY_HEADER_PREFIX,
+  DEFAULT_AMPLITUDE_ZONE,
   WIZARD_VARIANT_FLAG_KEY,
   WIZARD_VARIANTS,
   WIZARD_USER_AGENT,
@@ -23,7 +24,7 @@ import {
 import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
-import { getStoredToken } from '../utils/ampli-settings';
+import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
 import { LINTING_TOOLS } from './safe-tools';
 import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
@@ -844,8 +845,16 @@ export async function initializeAgent(
 let _agentPromise: Promise<AgentRunConfig> | null = null;
 
 function buildDefaultAgentConfig(): AgentConfig {
-  const storedToken = getStoredToken()?.accessToken ?? '';
-  const host = getHostFromRegion('us');
+  // Resolve the user's active zone from ~/.ampli.json so EU users don't
+  // silently get routed to US hosts when no explicit config is threaded
+  // through. Fall back to the default zone if no stored user is found.
+  const storedUser = getStoredUser();
+  const zone =
+    storedUser && storedUser.id !== 'pending'
+      ? storedUser.zone
+      : DEFAULT_AMPLITUDE_ZONE;
+  const storedToken = getStoredToken(storedUser?.id, zone)?.accessToken ?? '';
+  const host = getHostFromRegion(zone);
   const mcpUrl = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
   return {
     workingDirectory: process.cwd(),
