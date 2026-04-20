@@ -367,22 +367,9 @@ export const DataIngestionCheckScreen = ({
         return;
       }
 
-      // Activation API only checks autocapture events. Fall back to the
-      // event catalog which includes all event types.
-      if (currentSession.selectedOrgId && currentSession.selectedProjectId) {
-        const catalogEvents = await fetchProjectEventTypes(
-          dataApiToken,
-          zone,
-          currentSession.selectedOrgId,
-          currentSession.selectedProjectId,
-        );
-        logToFile(
-          `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
-        );
-        if (catalogEvents.length > 0) {
-          confirmWithCelebration(catalogEvents);
-        }
-      }
+      // Do NOT treat the event catalog as a success signal — it reflects
+      // schema registrations, not real ingestion. A project with a taxonomy
+      // but zero live events will falsely celebrate. Keep polling instead.
     } catch (err) {
       logToFile(
         `[DataIngestionCheck] poll error: ${
