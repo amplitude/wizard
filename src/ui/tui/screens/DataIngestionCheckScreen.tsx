@@ -3,7 +3,7 @@
  *
  * Shown after MCP setup. Polls for events every 30 seconds:
  *   1. MCP query_dataset (Bearer auth, works for all users, detects any track() call)
- *   2. Thunder activation API (autocapture events only, session-cookie auth)
+ *   2. App API activation endpoint (autocapture events only, session-cookie auth)
  *   3. Data-API event catalog (taxonomy events as a proxy)
  *
  * Active guidance as prominent instruction with framework-aware hint.
@@ -254,7 +254,7 @@ export const DataIngestionCheckScreen = ({
       logToFile('[DataIngestionCheck] MCP check skipped: no appId resolved');
     }
 
-    // Step 2: Try activation status via Thunder (org-scoped, autocapture events only).
+    // Step 2: Try activation status via App API (org-scoped, autocapture events only).
     if (!currentSession.selectedOrgId) {
       setApiUnavailable(true);
       return;
