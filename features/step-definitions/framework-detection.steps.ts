@@ -66,11 +66,11 @@ function advancePastAuth(s: WizardSession): void {
     accessToken: 'tok',
     projectApiKey: 'key',
     host: 'https://api.amplitude.com',
-    appId: 0,
+    projectId: 0,
   };
   s.selectedOrgName = 'Test Org';
   s.selectedWorkspaceName = 'Default';
-  s.selectedEnvName = 'Default';
+  s.selectedProjectName = 'Default';
   s.region = 'us';
   s.projectHasData = false;
 }

@@ -73,7 +73,7 @@ export const App = ({ store }: AppProps) => {
             width={width}
             orgName={store.session.selectedOrgName}
             workspaceName={store.session.selectedWorkspaceName}
-            envName={store.session.selectedEnvName}
+            projectName={store.session.selectedProjectName}
           />
 
           {/* Top separator */}

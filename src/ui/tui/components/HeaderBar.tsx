@@ -14,19 +14,19 @@ interface HeaderBarProps {
   width: number;
   orgName?: string | null;
   workspaceName?: string | null;
-  envName?: string | null;
+  projectName?: string | null;
 }
 
 export const HeaderBar = ({
   width,
   orgName,
   workspaceName,
-  envName,
+  projectName,
 }: HeaderBarProps) => {
   const contextParts: string[] = [];
   if (orgName) contextParts.push(orgName);
   if (workspaceName) contextParts.push(workspaceName);
-  if (envName) contextParts.push(envName);
+  if (projectName) contextParts.push(projectName);
   const context = contextParts.join(' / ');
 
   return (

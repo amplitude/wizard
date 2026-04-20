@@ -21,7 +21,7 @@ function mockCredentials(): WizardSession['credentials'] {
     accessToken: 'access-abc',
     projectApiKey: 'api-key-xyz',
     host: 'https://api.amplitude.com',
-    appId: 123456,
+    projectId: 123456,
   };
 }
 
@@ -31,7 +31,7 @@ function advancePastMcp(s: WizardSession): void {
   s.credentials = mockCredentials();
   s.selectedOrgName = 'Test Org';
   s.selectedWorkspaceName = 'Default';
-  s.selectedEnvName = 'Default';
+  s.selectedProjectName = 'Default';
   s.region = 'us';
   s.projectHasData = false;
   s.setupConfirmed = true;

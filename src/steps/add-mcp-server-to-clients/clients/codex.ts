@@ -6,7 +6,6 @@ import * as os from 'node:os';
 
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
-import { isBundledByHostApp } from './bundled-binary';
 
 import { analytics } from '../../../utils/analytics';
 
@@ -38,7 +37,12 @@ export class CodexMCPClient extends DefaultMCPClient {
       return Promise.resolve(false);
     }
     if (!resolved) return Promise.resolve(false);
-    if (isBundledByHostApp(resolved)) {
+    // macOS-only guard — the bundled-by-host problem is specific to GUI
+    // wrapper apps that ship their own Codex CLI.
+    if (
+      process.platform === 'darwin' &&
+      /\/Library\/Application Support\//i.test(resolved)
+    ) {
       return Promise.resolve(false);
     }
     return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.codex')));

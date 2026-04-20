@@ -1,10 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  AgentUI,
-  parseEnvSelectionStdinLine,
-  resolveEnvSelectionFromStdin,
-  type EnvSelectionChoice,
-} from '../agent-ui.js';
+import { AgentUI } from '../agent-ui.js';
 
 interface NDJSONEvent {
   v: 1;
@@ -242,20 +237,25 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
         orgName: string;
         workspaceId: string;
         workspaceName: string;
-        appId: string | null;
+        projectId: string | null;
         envName: string;
         label: string;
       }>;
     };
     expect(data.promptType).toBe('environment_selection');
-    expect(data.hierarchy).toEqual(['org', 'workspace', 'app', 'environment']);
+    expect(data.hierarchy).toEqual([
+      'org',
+      'workspace',
+      'project',
+      'environment',
+    ]);
     expect(data.choices).toHaveLength(2);
     expect(data.choices[0]).toMatchObject({
       orgId: 'org-1',
       orgName: 'DevX',
       workspaceId: 'ws-a',
       workspaceName: 'Sandbox',
-      appId: '100001',
+      projectId: '100001',
       envName: 'Production',
       label: 'DevX / Sandbox / Production',
     });
@@ -286,7 +286,7 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
     expect(writes[0]).not.toContain('super-secret-key');
   });
 
-  it('surfaces resumeFlags with --app-id for unambiguous re-invocation', async () => {
+  it('surfaces resumeFlags with --project-id for unambiguous re-invocation', async () => {
     const ui = new AgentUI();
     const event = await runPromptAndGetFirst(ui, [
       {
@@ -312,145 +312,11 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       resumeFlags: Array<{ label: string; flags: string[] }>;
     };
     expect(data.resumeFlags).toHaveLength(1);
-    // --project-id alone is sufficient — it's globally unique and resolves
-    // to one (org, workspace, env) tuple server-side. No --env / --org noise.
-    expect(data.resumeFlags[0].flags).toEqual(['--app-id', '100002']);
-  });
-});
-
-describe('parseEnvSelectionStdinLine', () => {
-  it('returns parsed=null without error for null / empty input', () => {
-    expect(parseEnvSelectionStdinLine(null)).toEqual({
-      parsed: null,
-      rejectionMessage: null,
-    });
-    expect(parseEnvSelectionStdinLine('')).toEqual({
-      parsed: null,
-      rejectionMessage: null,
-    });
-  });
-
-  it('parses canonical { appId } shape via zod', () => {
-    const { parsed, rejectionMessage } =
-      parseEnvSelectionStdinLine('{"appId":"100002"}');
-    expect(rejectionMessage).toBeNull();
-    expect(parsed).toEqual({ appId: '100002' });
-  });
-
-  it('parses legacy { projectId } shape via zod', () => {
-    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine(
-      '{"projectId":"100001"}',
-    );
-    expect(rejectionMessage).toBeNull();
-    expect(parsed).toEqual({ projectId: '100001' });
-  });
-
-  it('rejects non-string appId (wrong type) and returns a descriptive reason', () => {
-    const { parsed, rejectionMessage } =
-      parseEnvSelectionStdinLine('{"appId":12345}');
-    expect(parsed).toBeNull();
-    expect(rejectionMessage).toMatch(/stdin response rejected/);
-    expect(rejectionMessage).toMatch(/appId/);
-  });
-
-  it('rejects invalid JSON with a descriptive reason', () => {
-    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine('not json');
-    expect(parsed).toBeNull();
-    expect(rejectionMessage).toMatch(/not valid JSON/);
-  });
-});
-
-describe('resolveEnvSelectionFromStdin', () => {
-  const CHOICES: EnvSelectionChoice[] = [
-    {
-      orgId: 'org-1',
-      orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
-      appId: '100001',
-      envName: 'Production',
-      rank: 1,
-      label: 'DevX / Sandbox / Production',
-    },
-    {
-      orgId: 'org-1',
-      orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
-      appId: '100002',
-      envName: 'Development',
-      rank: 2,
-      label: 'DevX / Sandbox / Development',
-    },
-  ];
-
-  it('returns kind=auto when no payload is parsed (callers auto-select)', () => {
-    expect(resolveEnvSelectionFromStdin(null, CHOICES)).toEqual({
-      kind: 'auto',
-      warnings: [],
-    });
-  });
-
-  it('returns kind=auto for an empty object (no usable selector)', () => {
-    expect(resolveEnvSelectionFromStdin({}, CHOICES)).toEqual({
-      kind: 'auto',
-      warnings: [],
-    });
-  });
-
-  it('resolves canonical { appId } to the matching choice without warnings', () => {
-    expect(resolveEnvSelectionFromStdin({ appId: '100002' }, CHOICES)).toEqual({
-      kind: 'selected',
-      selection: {
-        orgId: 'org-1',
-        workspaceId: 'ws-a',
-        env: 'Development',
-      },
-      warnings: [],
-    });
-  });
-
-  it('resolves legacy { projectId } alias AND surfaces a deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { projectId: '100001' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    if (outcome.kind === 'selected') {
-      expect(outcome.selection.env).toBe('Production');
-    }
-    expect(outcome.warnings.join('\n')).toMatch(/\{ projectId \}/);
-    expect(outcome.warnings.join('\n')).toMatch(/deprecated/);
-  });
-
-  it('returns kind=mismatch when a provided appId does not match any choice', () => {
-    const outcome = resolveEnvSelectionFromStdin({ appId: '999999' }, CHOICES);
-    expect(outcome.kind).toBe('mismatch');
-    if (outcome.kind === 'mismatch') {
-      expect(outcome.reason).toMatch(/999999/);
-      expect(outcome.reason).toMatch(/did not match/);
-    }
-  });
-
-  it('returns kind=mismatch when a legacy triple does not match any choice', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'ghost', workspaceId: 'none', env: 'Staging' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('mismatch');
-    if (outcome.kind === 'mismatch') {
-      expect(outcome.reason).toMatch(/ghost/);
-    }
-  });
-
-  it('accepts a matching legacy triple and emits the deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'org-1', workspaceId: 'ws-a', env: 'Production' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    expect(outcome.warnings.join('\n')).toMatch(
-      /\{ orgId, workspaceId, env \}/,
-    );
+    expect(data.resumeFlags[0].flags).toEqual([
+      '--project-id',
+      '100002',
+      '--env',
+      'Development',
+    ]);
   });
 });

@@ -28,9 +28,10 @@ import { OUTBOUND_URLS } from './constants.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { enableDebugLogs, logToFile } from '../utils/debug';
-import { createObservabilityMiddleware } from './middleware/observability';
-import { MiddlewarePipeline } from './middleware/pipeline';
-import { createBenchmarkPipeline } from './middleware/benchmark';
+import {
+  createBenchmarkPipeline,
+  createAlwaysOnPipeline,
+} from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
@@ -48,7 +49,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
     ci: session.ci,
     menu: session.menu,
     benchmark: session.benchmark,
-    appId: session.appId,
+    projectId: session.projectId,
     apiKey: session.apiKey,
   };
 }
@@ -148,13 +149,13 @@ export async function runAgentWizard(
     frameworkVersion = config.detection.getVersion(null);
   }
 
-  // Set analytics tags for framework version
+  // Set analytics tag for framework version. Single key (`framework version`)
+  // so every integration shares one column instead of sprawling into
+  // `nextjs-version` / `django-version` / etc. The `integration` session
+  // property already identifies which framework the bucket refers to.
   if (frameworkVersion && config.detection.getVersionBucket) {
     const versionBucket = config.detection.getVersionBucket(frameworkVersion);
-    analytics.setSessionProperty(
-      `${config.metadata.integration}-version`,
-      versionBucket,
-    );
+    analytics.setSessionProperty('framework version', versionBucket);
   }
 
   analytics.wizardCapture('agent started', {
@@ -168,7 +169,7 @@ export async function runAgentWizard(
       signup: session.signup,
       ci: session.ci,
       apiKey: session.apiKey,
-      appId: session.appId,
+      projectId: session.projectId,
       installDir: session.installDir,
     });
 
@@ -176,16 +177,9 @@ export async function runAgentWizard(
       accessToken: authResult.accessToken,
       projectApiKey: authResult.projectApiKey,
       host: authResult.host,
-      appId: authResult.appId,
+      projectId: authResult.projectId,
     };
-    getUI().setCredentials({
-      ...session.credentials,
-      orgId: session.selectedOrgId,
-      orgName: session.selectedOrgName,
-      workspaceId: session.selectedWorkspaceId,
-      workspaceName: session.selectedWorkspaceName,
-      envName: session.selectedEnvName,
-    });
+    getUI().setCredentials(session.credentials);
     getUI().setRegion(authResult.cloudRegion);
     getUI().setProjectHasData(false);
   }
@@ -194,7 +188,7 @@ export async function runAgentWizard(
     accessToken: rawAccessToken,
     projectApiKey,
     host,
-    appId,
+    projectId,
   } = session.credentials;
   // The TUI's AuthScreen may have stored the id_token instead of the
   // OAuth access token (the field names were swapped historically).
@@ -255,7 +249,7 @@ export async function runAgentWizard(
       typescript: typeScriptDetected,
       projectApiKey,
       host,
-      appId,
+      projectId,
     },
     frameworkContext,
     skipAmplitudeMcp,
@@ -300,11 +294,12 @@ export async function runAgentWizard(
     sessionToOptions(session),
   );
 
-  // Always run observability middleware for structured logging + Sentry breadcrumbs.
-  // Benchmark middleware (token/cost tracking) is opt-in via --benchmark.
+  // Cost/token/cache trackers run on every session so `agent completed`
+  // analytics always has the full breakdown. --benchmark adds the stdout
+  // summary + JSON-file writer on top of the always-on pipeline.
   const middleware = session.benchmark
     ? createBenchmarkPipeline(spinner, sessionToOptions(session))
-    : new MiddlewarePipeline([createObservabilityMiddleware()]);
+    : createAlwaysOnPipeline(sessionToOptions(session));
 
   const agentResult = await runAgent(
     agent,
@@ -440,7 +435,16 @@ export async function runAgentWizard(
 
   getUI().outro(`Successfully installed Amplitude!`);
 
-  await analytics.shutdown('success');
+  const activated = Boolean(
+    session.dataIngestionConfirmed && session.checklistDashboardUrl,
+  );
+  await analytics.shutdown('success', {
+    outcome: activated ? 'activated' : 'configured',
+    exitCode: 0,
+    mcpOutcome: session.mcpOutcome ?? null,
+    slackOutcome: session.slackOutcome ?? null,
+    activated,
+  });
 }
 
 /**
@@ -472,12 +476,12 @@ async function pollForDataIngestion(
   const MAX_WAIT_MS =
     Number(process.env.DATA_INGESTION_TIMEOUT_MS) || 30 * 60 * 1000;
 
-  // Resolve the numeric Amplitude app ID.
+  // Resolve the numeric analytics project ID.
   // It is set by resolveEnvironmentSelection for the environment-picker path,
   // and by the fire-and-forget in bin.ts for the TUI path.
   // If still missing, try a single fetchAmplitudeUser call.
-  let appId = session.selectedAppId ?? null;
-  if (!appId) {
+  let projectId = session.selectedProjectId ?? null;
+  if (!projectId) {
     try {
       const userInfo = await fetchAmplitudeUser(
         accessToken,
@@ -490,23 +494,23 @@ async function pollForDataIngestion(
         org && session.selectedWorkspaceId
           ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
           : org?.workspaces[0];
-      appId =
+      projectId =
         ws?.environments
           ?.slice()
           .sort((a, b) => a.rank - b.rank)
           .find((e) => e.app?.id)?.app?.id ?? null;
-      if (appId) session.selectedAppId = appId;
+      if (projectId) session.selectedProjectId = projectId;
     } catch (err) {
       logToFile(
-        `[pollForDataIngestion] could not resolve appId: ${
+        `[pollForDataIngestion] could not resolve projectId: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
     }
   }
 
-  if (!appId) {
-    logToFile('[pollForDataIngestion] no appId — skipping ingestion check');
+  if (!projectId) {
+    logToFile('[pollForDataIngestion] no projectId — skipping ingestion check');
     return;
   }
 
@@ -518,10 +522,12 @@ async function pollForDataIngestion(
 
   while (Date.now() < deadline) {
     pollCount++;
-    logToFile(`[pollForDataIngestion] poll #${pollCount} appId=${appId}`);
+    logToFile(
+      `[pollForDataIngestion] poll #${pollCount} projectId=${projectId}`,
+    );
 
     try {
-      const result = await fetchHasAnyEventsMcp(accessToken, appId);
+      const result = await fetchHasAnyEventsMcp(accessToken, projectId);
       if (result.hasEvents) {
         logToFile(
           `[pollForDataIngestion] events detected: ${result.activeEventNames.join(
@@ -573,7 +579,7 @@ function buildIntegrationPrompt(
     typescript: boolean;
     projectApiKey: string;
     host: string;
-    appId: number;
+    projectId: number;
   },
   frameworkContext: Record<string, unknown>,
   skipAmplitudeMcp: boolean,
@@ -609,7 +615,7 @@ function buildIntegrationPrompt(
   } project. Use the wizard-tools MCP server to load and install skills.
 
 Project context:
-- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}
+- Amplitude Project ID: ${context.projectId}
 - Framework: ${config.metadata.name} ${context.frameworkVersion}
 - TypeScript: ${context.typescript ? 'Yes' : 'No'}
 - Amplitude public token: ${context.projectApiKey}
@@ -646,7 +652,6 @@ STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP se
    - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
 
 STEP 6: Add event tracking to this project using the instrumentation skills.
-   - If you enabled Amplitude Autocapture in the SDK init code during integration (typical for web SDKs, not for Swift unless the plugin was added, and not applicable to backend SDKs), the events you propose to confirm_event_plan MUST exclude anything Autocapture already covers for this platform — no "Clicked", "Tapped", "Submitted", or "Viewed" events. If Autocapture is off or unsupported, propose events normally but still favor business-outcome and state-change events over raw interaction events.
    - Call load_skill_menu with category "taxonomy" and install **amplitude-quickstart-taxonomy-agent** using install_skill. Load its SKILL.md and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
    - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
    - Install the "add-analytics-instrumentation" skill using install_skill.

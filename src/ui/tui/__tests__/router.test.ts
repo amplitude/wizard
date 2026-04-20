@@ -25,7 +25,7 @@ const CREDS = {
   accessToken: 'tok',
   projectApiKey: 'pk',
   host: 'https://app.amplitude.com',
-  appId: 1,
+  projectId: 1,
 };
 
 /** Build a session that has completed through intro + region + auth + dataSetup (ready for Run). */
@@ -36,7 +36,7 @@ function sessionAtRun(): WizardSession {
     credentials: CREDS,
     selectedOrgName: 'Acme',
     selectedWorkspaceName: 'Amplitude',
-    selectedEnvName: 'Production',
+    selectedProjectName: 'Production',
     projectHasData: false,
   });
 }
@@ -80,7 +80,7 @@ describe('WizardRouter', () => {
         credentials: CREDS,
         selectedOrgName: 'Acme',
         selectedWorkspaceName: 'Amplitude',
-        selectedEnvName: 'Production',
+        selectedProjectName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
@@ -97,7 +97,7 @@ describe('WizardRouter', () => {
         selectedOrgId: 'org-1',
         selectedWorkspaceName: null,
         selectedWorkspaceId: null,
-        selectedEnvName: 'Production',
+        selectedProjectName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
@@ -115,7 +115,7 @@ describe('WizardRouter', () => {
         selectedOrgId: 'org-1',
         selectedWorkspaceName: null,
         selectedWorkspaceId: 'ws-1',
-        selectedEnvName: null,
+        selectedProjectName: null,
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
@@ -130,7 +130,7 @@ describe('WizardRouter', () => {
         credentials: CREDS,
         selectedOrgName: 'Acme',
         selectedWorkspaceName: 'Amplitude',
-        selectedEnvName: null,
+        selectedProjectName: null,
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
@@ -250,7 +250,7 @@ describe('WizardRouter', () => {
         credentials: CREDS,
         selectedOrgName: 'Acme',
         selectedWorkspaceName: 'Amplitude',
-        selectedEnvName: 'Production',
+        selectedProjectName: 'Production',
         createProject: {
           pending: false,
           source: null,

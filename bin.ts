@@ -93,6 +93,7 @@ import {
   setTerminalSink,
   getLogFilePath,
 } from './src/lib/observability';
+import { setExecutionMode } from './src/lib/mode-config';
 import type { LogLevel } from './src/lib/observability';
 
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
@@ -142,9 +143,8 @@ const buildSessionFromOptions = async (
       typeof buildSession
     >[0]['integration'],
     benchmark: options.benchmark as boolean | undefined,
-    // yargs normalizes --app-id (primary) / --project-id (alias) to `appId`.
-    appId: options.appId as string | undefined,
-    appName: options.appName as string | undefined,
+    projectId: options.projectId as string | undefined,
+    projectName: options.projectName as string | undefined,
   });
 };
 
@@ -177,7 +177,7 @@ const resolveNonInteractiveCredentials = async (
       accessToken: session.apiKey,
       projectApiKey: session.apiKey,
       host: DEFAULT_HOST_URL,
-      appId: session.appId ?? 0,
+      projectId: session.projectId ?? 0,
     };
     session.projectHasData = false;
     return;
@@ -198,7 +198,7 @@ const resolveNonInteractiveCredentials = async (
     org: options.org as string | undefined,
     env: options.env as string | undefined,
     workspaceId: options.workspaceId as string | undefined,
-    appId: options.appId as string | undefined,
+    projectId: options.projectId as string | undefined,
     accessTokenOverride: envAccessToken,
   });
 
@@ -206,7 +206,7 @@ const resolveNonInteractiveCredentials = async (
   // `--project-name <name>` triggers an inline project creation when the
   // authenticated user has an org but no projects to choose from (or when
   // the orchestrator explicitly asks for a fresh project). Must not prompt.
-  const projectName = (options.appName as string | undefined)?.trim();
+  const projectName = (options.projectName as string | undefined)?.trim();
   if (
     projectName &&
     session.pendingOrgs &&
@@ -279,13 +279,13 @@ const resolveNonInteractiveCredentials = async (
       }
       session.selectedOrgId = org.id;
       session.selectedOrgName = org.name;
-      session.selectedEnvName = created.name;
+      session.selectedProjectName = created.name;
       session.credentials = {
         accessToken: session.pendingAuthAccessToken ?? '',
         idToken: session.pendingAuthIdToken,
         projectApiKey: created.apiKey,
         host: getHostFromRegion(zone),
-        appId: Number.parseInt(created.appId, 10) || 0,
+        projectId: Number.parseInt(created.appId, 10) || 0,
       };
       session.projectHasData = false;
 
@@ -369,38 +369,20 @@ const resolveNonInteractiveCredentials = async (
       }
     } else if (agentUI) {
       // Agent mode: emit a structured prompt event with the full
-      // org/workspace/app/env hierarchy. The orchestrator can either
-      // reply on stdin with { appId } or re-invoke with --app-id (globally
-      // unique, identifies the env directly).
-      //
-      // If the orchestrator provides an unknown appId, promptEnvironmentSelection
-      // THROWS rather than silently picking a random env — we route that to
-      // env_selection_failed with the mismatch message in the instruction.
-      let selection: Awaited<
-        ReturnType<(typeof agentUI)['promptEnvironmentSelection']>
-      >;
-      try {
-        selection = await agentUI.promptEnvironmentSelection(
-          session.pendingOrgs,
-        );
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        agentUI.emitAuthRequired({
-          reason: 'env_selection_failed',
-          instruction:
-            `${detail} Re-run ${CLI_INVOCATION} with --app-id <id> set to ` +
-            'a value from the choices array in the last prompt event.',
-          loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
-        });
-        process.exit(ExitCode.AUTH_REQUIRED);
-      }
+      // org/workspace/project/env hierarchy. The orchestrator can either
+      // reply on stdin with { orgId, workspaceId, env } or re-invoke with
+      // --project-id / --env flags (which are unambiguous even when env
+      // names collide across workspaces).
+      const selection = await agentUI.promptEnvironmentSelection(
+        session.pendingOrgs,
+      );
       const resolved = await resolveEnvironmentSelection(session, selection);
       if (!resolved) {
         agentUI.emitAuthRequired({
           reason: 'env_selection_failed',
           instruction:
             'Could not resolve an Amplitude environment with an API key. ' +
-            `Pass --app-id <id> when re-running ${CLI_INVOCATION}.`,
+            `Pass --project-id <id> (preferred) or --env <name> + --org <name> when re-running ${CLI_INVOCATION}.`,
           loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
         });
         process.exit(ExitCode.AUTH_REQUIRED);
@@ -432,7 +414,7 @@ const resolveNonInteractiveCredentials = async (
     const parts = [
       session.selectedOrgName,
       session.selectedWorkspaceName,
-      session.selectedEnvName,
+      session.selectedProjectName,
     ].filter(Boolean);
     if (parts.length > 0) {
       getUI().log.info(`Using: ${parts.join(' / ')}`);
@@ -463,6 +445,9 @@ const resolveNonInteractiveCredentials = async (
     process.env.AMPLITUDE_WIZARD_VERBOSE === '1';
 
   const mode = isAgent ? 'agent' : isCi ? 'ci' : 'interactive';
+  // Populate mode-config so createTracingHeaders() picks up the correct
+  // X-Wizard-Mode before any outbound HTTP runs.
+  setExecutionMode(mode);
 
   initLogger({
     mode,
@@ -589,48 +574,30 @@ void yargs(hideBin(process.argv))
       type: 'boolean',
     },
     'api-key': {
-      // Dev-only escape hatch. In normal flows the wizard fetches the
-      // project's API key via OAuth — the user should never have to paste one.
-      // Hidden from public --help unless AMPLITUDE_WIZARD_DEV=1.
-      describe:
-        'Amplitude API key (dev escape hatch; prefer `amplitude-wizard login`)',
+      describe: 'Amplitude API key (skips browser login)',
       type: 'string',
-      hidden: !IS_WIZARD_DEV,
     },
-    'app-id': {
-      // Canonical term across amplitude/amplitude (Python `app_id`) and
-      // amplitude/javascript (TS `appId`). Numeric, e.g. 769610. The only
-      // scope flag agents need.
+    'project-id': {
       describe:
-        'Amplitude app ID (numeric, e.g. 769610) — the only scope flag needed in agent mode',
+        'Amplitude project ID (numeric, e.g. 769610) — unambiguous selector',
       type: 'string',
-      alias: 'project-id',
     },
-    'app-name': {
-      // `--project-name` kept as alias for existing callers; internally we
-      // create an app (the canonical term in the Data API and Python models).
+    'project-name': {
       describe:
-        'Name for a new Amplitude app (creates one if no apps exist, or when used with --ci/--agent)',
+        'Name for a new Amplitude project (creates a project if no projects exist, or when used with --ci/--agent)',
       type: 'string',
-      alias: 'project-name',
     },
-    // --workspace-id / --org / --env remain parseable (yargs env fallbacks,
-    // interactive legacy, CI scripts). Hidden from public help — agents should
-    // use --app-id, which is globally unique and unambiguous.
     'workspace-id': {
-      describe: 'Amplitude workspace ID (UUID) — legacy; prefer --app-id',
+      describe: 'Amplitude workspace ID (UUID) for multi-workspace orgs',
       type: 'string',
-      hidden: true,
     },
     org: {
-      describe: 'Amplitude org name — legacy; prefer --app-id',
+      describe: 'Amplitude org name (for multi-org accounts)',
       type: 'string',
-      hidden: true,
     },
     env: {
-      describe: 'Amplitude environment name — legacy; prefer --app-id',
+      describe: 'environment name, e.g. "Production"',
       type: 'string',
-      hidden: true,
     },
     json: {
       default: false,
@@ -703,22 +670,6 @@ void yargs(hideBin(process.argv))
     (argv) => {
       const options = { ...argv };
 
-      // --env is redundant with --app-id (each Amplitude env has its own
-      // app.id, so the numeric app-id already identifies the env). Keep the
-      // flag parseable for legacy scripts, but nudge callers toward --app-id.
-      // Surfaced via stderr for interactive/CI; agent mode re-emits it as a
-      // structured NDJSON log event once AgentUI exists.
-      const envDeprecationWarning = options.env
-        ? '[deprecation] --env is redundant with --app-id — prefer ' +
-          '--app-id <id> (globally unique, identifies the env directly). ' +
-          '--env will be removed in a future release.'
-        : null;
-      const willRunAsAgent =
-        options.agent || process.env.AMPLITUDE_WIZARD_AGENT === '1';
-      if (envDeprecationWarning && !willRunAsAgent) {
-        process.stderr.write(`${envDeprecationWarning}\n`);
-      }
-
       // CI mode validation and TTY check
       if (
         options.agent ||
@@ -736,12 +687,6 @@ void yargs(hideBin(process.argv))
           const agentUI = new AgentUI();
           setUI(agentUI);
           if (!options.installDir) options.installDir = process.cwd();
-
-          // Surface the --env deprecation warning as a structured log event
-          // so orchestrators can parse it (raw stderr would mix with NDJSON).
-          if (envDeprecationWarning) {
-            agentUI.log.warn(envDeprecationWarning);
-          }
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
@@ -800,7 +745,7 @@ void yargs(hideBin(process.argv))
                 accessToken: session.apiKey,
                 projectApiKey: session.apiKey,
                 host: DEFAULT_HOST_URL,
-                appId: session.appId ?? 0,
+                projectId: session.projectId ?? 0,
               };
               session.projectHasData = false;
             } else {
@@ -835,7 +780,7 @@ void yargs(hideBin(process.argv))
                 const { getStoredUser, getStoredToken } = await import(
                   './src/utils/ampli-settings.js'
                 );
-                const { fetchAmplitudeUser, extractAppId } = await import(
+                const { fetchAmplitudeUser, extractProjectId } = await import(
                   './src/lib/api.js'
                 );
                 const storedUser = getStoredUser();
@@ -868,8 +813,8 @@ void yargs(hideBin(process.argv))
                             session.selectedWorkspaceId ?? undefined,
                           workspace_name:
                             session.selectedWorkspaceName ?? undefined,
-                          app_id: session.selectedAppId,
-                          env_name: session.selectedEnvName,
+                          project_id: session.selectedProjectId,
+                          project_name: session.selectedProjectName,
                           region: session.region,
                           integration: session.integration,
                         });
@@ -899,17 +844,18 @@ void yargs(hideBin(process.argv))
                             : org.workspaces[0];
                           if (ws) {
                             session.selectedWorkspaceName = ws.name;
-                            // Extract the Amplitude app ID from the lowest-rank environment.
-                            const appId = extractAppId(ws);
+                            // Extract the analytics project ID from the lowest-rank environment.
+                            const projectId = extractProjectId(ws);
                             logToFile(
-                              `[bin] app ID resolution: environments=${
+                              `[bin] project ID resolution: environments=${
                                 ws.environments?.length ?? 'null'
-                              }, appId=${appId}`,
+                              }, projectId=${projectId}`,
                             );
-                            if (appId) session.selectedAppId = appId;
+                            if (projectId)
+                              session.selectedProjectId = projectId;
                           } else {
                             logToFile(
-                              `[bin] app ID resolution: no workspaces in org ${org.id}`,
+                              `[bin] project ID resolution: no workspaces in org ${org.id}`,
                             );
                           }
                         }
@@ -1670,7 +1616,7 @@ void yargs(hideBin(process.argv))
               idToken: storedToken.idToken,
               projectApiKey: '',
               host: getHostFromRegion(zone),
-              appId: 0,
+              projectId: 0,
             };
           }
 
@@ -2060,9 +2006,9 @@ void yargs(hideBin(process.argv))
     },
   )
   .example('$0', 'Run the interactive setup wizard')
-  .example('$0 --ci --install-dir .', 'Run in CI mode (OAuth + auto-select)')
+  .example('$0 --ci --api-key <key> --install-dir .', 'Run in CI mode')
   .example(
-    '$0 --agent --app-id <id> --install-dir .',
+    '$0 --agent --install-dir .',
     'Run with structured NDJSON output for automation',
   )
   .example('$0 detect --json', 'Detect the framework; output JSON')

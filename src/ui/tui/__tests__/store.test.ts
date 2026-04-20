@@ -28,6 +28,11 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+vi.mock('../../../lib/experiments.js', () => ({
+  useExperiment: vi.fn().mockReturnValue('on'),
+  EXP_LLM_ANALYTICS: { key: 'wizard-llm-analytics', defaultVariant: 'off' },
+}));
+
 function createStore(flow?: Flow): WizardStore {
   return new WizardStore(flow);
 }
@@ -160,7 +165,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
-        appId: 42,
+        projectId: 42,
       };
       store.setCredentials(creds);
       expect(store.session.credentials).toEqual(creds);
@@ -278,10 +283,10 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 42,
+        projectId: 42,
       });
       expect(wizardCaptureMock).toHaveBeenCalledWith('auth complete', {
-        'app id': 42,
+        'project id': 42,
         region: null,
       });
     });
@@ -295,7 +300,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 42,
+        projectId: 42,
       });
       expect(analytics.setDistinctId).toHaveBeenCalledWith('ada@example.com');
       expect(analytics.identifyUser).toHaveBeenCalledWith(
@@ -303,7 +308,7 @@ describe('WizardStore', () => {
           email: 'ada@example.com',
           org_id: 'org-1',
           org_name: 'Acme',
-          app_id: 42,
+          project_id: 42,
         }),
       );
     });
@@ -314,7 +319,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 42,
+        projectId: 42,
       });
       expect(analytics.setDistinctId).not.toHaveBeenCalled();
       expect(analytics.identifyUser).not.toHaveBeenCalled();
@@ -366,14 +371,14 @@ describe('WizardStore', () => {
       accessToken: 'tok',
       projectApiKey: 'pk',
       host: 'h',
-      appId: 1,
+      projectId: 1,
     });
     // Set org/workspace/env names directly to satisfy Auth.isComplete
     // (it only checks names, not IDs — so we don't have to set IDs and
     // trigger setOrgAndWorkspace's ampli.json write).
     store.session.selectedOrgName = 'Acme';
     store.session.selectedWorkspaceName = 'Amplitude';
-    store.setSelectedEnvName('Production');
+    store.setSelectedProjectName('Production');
     // DataSetup: set projectHasData (DataSetup screen isComplete)
     store.setProjectHasData(false);
   }
@@ -390,7 +395,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 1,
+        projectId: 1,
       });
       store.setRegion('us');
       store.setProjectHasData(false);
@@ -750,13 +755,13 @@ describe('WizardStore', () => {
       // triggering an ampli.json write.
       store.session.selectedOrgName = 'Acme';
       store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedEnvName = 'Production';
+      store.session.selectedProjectName = 'Production';
       store.setCredentials({
         // -> outage (overlay still on top)
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 1,
+        projectId: 1,
       });
       store.setRegion('us'); // -> outage (overlay still on top)
       store.popOverlay(); // -> data-setup (next incomplete screen after credentials+region)
@@ -946,12 +951,12 @@ describe('WizardStore', () => {
       // checks names, not IDs, and omitting IDs avoids side effects.
       store.session.selectedOrgName = 'Acme';
       store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedEnvName = 'Production';
+      store.session.selectedProjectName = 'Production';
       store.setCredentials({
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
-        appId: 1,
+        projectId: 1,
       });
       expect(store.currentScreen).toBe(Screen.DataSetup);
 

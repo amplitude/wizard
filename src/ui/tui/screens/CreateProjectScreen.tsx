@@ -152,7 +152,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
     }
 
     setPhase({ kind: 'submitting', name });
-    analytics.wizardCapture('Create Project Submit', {
+    analytics.wizardCapture('create project submit', {
       source: session.createProject.source,
     });
 
@@ -180,7 +180,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         // error would misrepresent the backend state to the user.
       }
 
-      store.setSelectedEnvName(result.name);
+      store.setSelectedProjectName(result.name);
       // Dash creates a same-named taxonomy workspace alongside the new app.
       // Setting the workspace name satisfies Auth.isComplete so the router
       // can advance past Auth; the real workspace id will appear on the
@@ -194,10 +194,10 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         idToken,
         projectApiKey: result.apiKey,
         host: getHostFromRegion(zone),
-        // The proxy returns `appId` as a string; credentials.appId is
+        // The proxy returns `appId` as a string; credentials.projectId is
         // numeric. Attempt a coercion — fall back to 0 if the backend ever
         // returns a non-numeric id.
-        appId: Number.parseInt(result.appId, 10) || 0,
+        projectId: Number.parseInt(result.appId, 10) || 0,
       });
       store.setProjectHasData(false);
       store.setApiKeyNotice(null);
@@ -222,14 +222,14 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         err instanceof Error
           ? err.message
           : 'Could not create project. Please try again.';
-      analytics.wizardCapture('Create Project Error', { code });
+      analytics.wizardCapture('create project error', { code });
       setPhase({ kind: 'error', name, code, message });
     }
   };
 
   const handleOpenFallback = () => {
     const url = OUTBOUND_URLS.projectsSettings(zone, orgId ?? undefined);
-    analytics.wizardCapture('Create Project Fallback Link Opened', {
+    analytics.wizardCapture('create project fallback link opened', {
       code: phase.kind === 'error' ? phase.code : 'unknown',
     });
     opn(url, { wait: false }).catch(() => {});

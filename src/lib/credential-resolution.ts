@@ -9,7 +9,7 @@
 
 import type { WizardSession } from './wizard-session';
 import type { AmplitudeZone } from './constants';
-import { extractAppId } from './api';
+import { extractProjectId } from './api';
 import { analytics } from '../utils/analytics';
 
 /**
@@ -44,11 +44,11 @@ export async function resolveCredentials(
      */
     workspaceId?: string;
     /**
-     * Numeric Amplitude app ID filter (from --app-id flag; --project-id is
-     * a legacy alias). Matches environment.app.id exactly. Globally unique
-     * — one app ID maps to exactly one (org, workspace, env) triple.
+     * Numeric project ID filter (from --project-id flag). Matches
+     * environment.app.id exactly. This is the most unambiguous selector
+     * — one project ID maps to exactly one (org, workspace, env) triple.
      */
-    appId?: string;
+    projectId?: string;
     /**
      * Optional OAuth access token (from AMPLITUDE_TOKEN env var).
      * When provided and a stored session exists, replaces the stored
@@ -162,7 +162,7 @@ export async function resolveCredentials(
           idToken: storedToken.idToken,
           projectApiKey: localKey.key,
           host: getHostFromRegion(zone as AmplitudeZone),
-          appId: 0,
+          projectId: 0,
         };
         session.activationLevel = 'none';
         session.projectHasData = false;
@@ -179,7 +179,7 @@ export async function resolveCredentials(
         const needsNameHydration =
           !session.selectedOrgName ||
           !session.selectedWorkspaceName ||
-          !session.selectedEnvName;
+          !session.selectedProjectName;
         if (needsNameHydration && (storedOrgId || storedWorkspaceId)) {
           try {
             const { fetchAmplitudeUser } = await import('./api.js');
@@ -207,17 +207,9 @@ export async function resolveCredentials(
               session.selectedWorkspaceId = ws.id;
               session.selectedWorkspaceName = ws.name;
               if (matchedEnv) {
-                session.selectedEnvName = matchedEnv.name;
-                // Prefer the matched env's app.id (exact env the user picked);
-                // fall back to extractAppId(ws) which returns the lowest-rank
-                // env's app when no env is selected.
-                const appId = matchedEnv.app?.id ?? extractAppId(ws);
-                if (appId) {
-                  session.selectedAppId = appId;
-                  if (session.credentials) {
-                    session.credentials.appId = Number(appId) || 0;
-                  }
-                }
+                session.selectedProjectName = matchedEnv.name;
+                const projectId = extractProjectId(ws);
+                if (projectId) session.selectedProjectId = projectId;
               }
               logToFile(
                 `[credential-resolution] hydrated names from local key: ${
@@ -269,26 +261,31 @@ export async function resolveCredentials(
             }
           }
 
-          // Scope resolution. The agent-mode public contract is `--project-id`
-          // only — project IDs are globally unique so one flag resolves to
-          // exactly one (org, workspace, env) tuple. Legacy filters
-          // (--org / --workspace-id / --env) still parse for CI scripts,
-          // but --project-id takes precedence when both are passed to
-          // avoid the "mismatching flags silently fall through" foot-gun.
-          const appIdFilter = options?.appId;
-          const envMatch = appIdFilter
-            ? undefined
-            : options?.env?.toLowerCase();
-          const orgFilter = appIdFilter
-            ? undefined
-            : options?.org?.toLowerCase();
-          const workspaceIdFilter = appIdFilter
-            ? undefined
-            : options?.workspaceId;
+          // Try to match across all orgs/workspaces using any combination of
+          // --project-id, --workspace-id, --env, and --org filters. All
+          // provided filters must match; the most-specific reaches credentials
+          // first.
+          //
+          //   --project-id <numeric>  → matches env.app.id exactly (unique)
+          //   --workspace-id <uuid>   → narrows to one workspace
+          //   --env <name>            → environment name (case-insensitive)
+          //   --org <name>            → case-insensitive partial match
+          //
+          // --org alone is NOT a specific-enough filter to silently pick one
+          // env — without a workspace/project/env disambiguator it would
+          // just grab the first env with a key, which can easily be the
+          // wrong one in multi-env orgs. We intentionally fall through to
+          // the pendingOrgs selection path in that case and only enter this
+          // filter loop when at least one specific filter is present.
           const hasSpecificFilter = Boolean(
-            appIdFilter || envMatch || workspaceIdFilter,
+            options?.env || options?.projectId || options?.workspaceId,
           );
           if (hasSpecificFilter) {
+            const envMatch = options?.env?.toLowerCase();
+            const orgFilter = options?.org?.toLowerCase();
+            const workspaceIdFilter = options?.workspaceId;
+            const projectIdFilter = options?.projectId;
+
             for (const org of userInfo.orgs) {
               if (orgFilter && !org.name.toLowerCase().includes(orgFilter)) {
                 continue;
@@ -304,7 +301,8 @@ export async function resolveCredentials(
                 const matchedEnv = (ws.environments ?? [])
                   .filter((e) => {
                     if (!e.app?.apiKey) return false;
-                    if (appIdFilter && e.app.id !== appIdFilter) return false;
+                    if (projectIdFilter && e.app.id !== projectIdFilter)
+                      return false;
                     if (envMatch && e.name.toLowerCase() !== envMatch)
                       return false;
                     return true;
@@ -316,8 +314,7 @@ export async function resolveCredentials(
                   session.selectedOrgName = org.name;
                   session.selectedWorkspaceId = ws.id;
                   session.selectedWorkspaceName = ws.name;
-                  session.selectedEnvName = matchedEnv.name;
-                  session.selectedAppId = matchedEnv.app.id;
+                  session.selectedProjectName = matchedEnv.name;
                   if (!session.userEmail && userInfo.email) {
                     session.userEmail = userInfo.email;
                   }
@@ -330,7 +327,7 @@ export async function resolveCredentials(
                     idToken: storedToken.idToken,
                     projectApiKey: apiKey,
                     host: getHostFromRegion(zone as AmplitudeZone),
-                    appId: Number(matchedEnv.app.id) || 0,
+                    projectId: 0,
                   };
                   session.activationLevel = 'none';
                   session.projectHasData = false;
@@ -342,8 +339,8 @@ export async function resolveCredentials(
 
             if (!session.credentials) {
               logToFile(
-                `[credential-resolution] filters did not match any env: app-id=${
-                  appIdFilter ?? '(none)'
+                `[credential-resolution] filters did not match any env: project-id=${
+                  projectIdFilter ?? '(none)'
                 }, workspace-id=${workspaceIdFilter ?? '(none)'}, env=${
                   options?.env ?? '(none)'
                 }, org=${options?.org ?? '(none)'}`,
@@ -358,11 +355,8 @@ export async function resolveCredentials(
             }
           } else if (envsWithKey.length === 1) {
             // Single environment — auto-select
-            const selectedEnv = envsWithKey[0];
-            const apiKey = selectedEnv.app!.apiKey!;
-            const selectedAppId = selectedEnv.app?.id ?? null;
-            session.selectedEnvName = selectedEnv.name;
-            session.selectedAppId = selectedAppId;
+            const apiKey = envsWithKey[0].app!.apiKey!;
+            session.selectedProjectName = envsWithKey[0].name;
 
             // Populate org/workspace names
             for (const org of userInfo.orgs) {
@@ -390,7 +384,7 @@ export async function resolveCredentials(
               idToken: storedToken.idToken,
               projectApiKey: apiKey,
               host: getHostFromRegion(zone as AmplitudeZone),
-              appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
+              projectId: 0,
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
@@ -431,9 +425,7 @@ export async function resolveCredentials(
               idToken: storedToken.idToken,
               projectApiKey,
               host: getHostFromRegion(zone as AmplitudeZone),
-              appId: session.selectedAppId
-                ? Number(session.selectedAppId) || 0
-                : 0,
+              projectId: 0,
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
@@ -529,14 +521,11 @@ export async function resolveEnvironmentSelection(
   session.selectedOrgName = org.name;
   session.selectedWorkspaceId = ws.id;
   session.selectedWorkspaceName = ws.name;
-  session.selectedEnvName = env.name;
+  session.selectedProjectName = env.name;
 
-  // Extract the numeric Amplitude app ID for MCP-based event detection.
-  // Prefer the selected env's app.id — it matches the chosen environment
-  // exactly, whereas extractAppId(ws) falls back to the lowest-ranked
-  // env's app when no env is selected.
-  const appId = env.app?.id ?? extractAppId(ws);
-  session.selectedAppId = appId;
+  // Extract the numeric analytics project ID for MCP-based event detection.
+  const projectId = extractProjectId(ws);
+  session.selectedProjectId = projectId;
 
   persistApiKey(apiKey, session.installDir);
   session.credentials = {
@@ -544,7 +533,7 @@ export async function resolveEnvironmentSelection(
     idToken: session.pendingAuthIdToken ?? undefined,
     projectApiKey: apiKey,
     host: getHostFromRegion(zone),
-    appId: appId ? Number(appId) || 0 : 0,
+    projectId: 0,
   };
   session.activationLevel = 'none';
   session.projectHasData = false;

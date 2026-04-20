@@ -3,7 +3,19 @@ import type { WizardSession } from '../lib/wizard-session';
 import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
 import { IS_DEV } from '../lib/constants';
-import { getSessionId, getRunId, setSentryUser } from '../lib/observability';
+import {
+  getSessionId,
+  getRunId,
+  getAttemptId,
+  setSentryUser,
+} from '../lib/observability';
+import {
+  getStoredDeviceId,
+  storeDeviceId,
+  getStoredFirstRunAt,
+  storeFirstRunAt,
+  storePriorOutcome,
+} from './ampli-settings';
 import {
   initFeatureFlags,
   refreshFlags,
@@ -47,7 +59,7 @@ export function sessionProperties(
     integration: session.integration,
     'detected framework': session.detectedFrameworkLabel,
     typescript: session.typescript,
-    'app id': session.credentials?.appId,
+    'project id': session.credentials?.projectId,
     'discovered features': session.discoveredFeatures,
     'additional features': session.additionalFeatureQueue,
     'run phase': session.runPhase,
@@ -65,7 +77,7 @@ export function sessionPropertiesCompact(
     integration: session.integration,
     'detected framework': session.detectedFrameworkLabel,
     'run phase': session.runPhase,
-    'app id': session.credentials?.appId,
+    'project id': session.credentials?.projectId,
   };
 }
 
@@ -93,7 +105,24 @@ export class Analytics {
 
   constructor() {
     this.sessionProperties = { $app_name: this.appName };
-    this.anonymousId = uuidv4();
+    // Persist anonymousId across runs so Experiment bucketing stays sticky.
+    // Fall back to a fresh uuid on any read/write error so analytics never
+    // crash the wizard.
+    let anonymousId: string | undefined;
+    try {
+      anonymousId = getStoredDeviceId();
+    } catch {
+      // File-read failures fall through to the fresh-id path.
+    }
+    if (!anonymousId) {
+      anonymousId = uuidv4();
+      try {
+        storeDeviceId(anonymousId);
+      } catch {
+        // Persistence failure is non-fatal — subsequent runs get a new id.
+      }
+    }
+    this.anonymousId = anonymousId;
     this.distinctId = undefined;
     this.client = createInstance();
   }
@@ -118,8 +147,8 @@ export class Analytics {
     org_name?: string;
     workspace_id?: string;
     workspace_name?: string;
-    app_id?: string | number | null;
-    env_name?: string | null;
+    project_id?: string | number | null;
+    project_name?: string | null;
     region?: string | null;
     integration?: string | null;
   }): void {
@@ -136,15 +165,30 @@ export class Analytics {
     if (properties.email) {
       identifyObj.setOnce('email', properties.email);
     }
+    // Set the first-run timestamp once. Derive from persisted state so the
+    // setOnce actually takes effect on the very first run on this device.
+    try {
+      const existing = getStoredFirstRunAt();
+      if (!existing) {
+        const nowIso = new Date().toISOString();
+        storeFirstRunAt(nowIso);
+        identifyObj.setOnce('first wizard run at', nowIso);
+      } else {
+        identifyObj.setOnce('first wizard run at', existing);
+      }
+    } catch {
+      // Persistence failure is non-fatal for identify.
+    }
     if (properties.org_id) identifyObj.set('org id', properties.org_id);
     if (properties.org_name) identifyObj.set('org name', properties.org_name);
     if (properties.workspace_id)
       identifyObj.set('workspace id', properties.workspace_id);
     if (properties.workspace_name)
       identifyObj.set('workspace name', properties.workspace_name);
-    if (properties.app_id != null)
-      identifyObj.set('app id', String(properties.app_id));
-    if (properties.env_name) identifyObj.set('env name', properties.env_name);
+    if (properties.project_id != null)
+      identifyObj.set('project id', String(properties.project_id));
+    if (properties.project_name)
+      identifyObj.set('project name', properties.project_name);
     if (properties.region) identifyObj.set('region', properties.region);
     if (properties.integration)
       identifyObj.set('integration', properties.integration);
@@ -218,6 +262,7 @@ export class Analytics {
       ...this.sessionProperties,
       'session id': getSessionId(),
       'run id': getRunId(),
+      'attempt id': getAttemptId(),
       ...properties,
     };
     const options: { device_id: string; user_id?: string } = {
@@ -326,11 +371,56 @@ export class Analytics {
     }
   }
 
-  async shutdown(status: 'success' | 'error' | 'cancelled') {
+  async shutdown(
+    status: 'success' | 'error' | 'cancelled',
+    metadata?: {
+      /** Canonical outcome: activated | configured | error | cancelled */
+      outcome?: 'activated' | 'configured' | 'error' | 'cancelled';
+      exitCode?: number;
+      failureCategory?: string;
+      failureSubcategory?: string;
+      mcpOutcome?: string | null;
+      slackOutcome?: string | null;
+      activated?: boolean;
+      timeToFirstEventMs?: number | null;
+      timeToActivationMs?: number | null;
+    },
+  ) {
+    const durationMs = Date.now() - this.startedAt;
+    const outcome =
+      metadata?.outcome ??
+      (status === 'success'
+        ? 'configured'
+        : status === 'error'
+        ? 'error'
+        : 'cancelled');
+
+    // Canonical funnel event.
+    this.wizardCapture('run ended', {
+      outcome,
+      status,
+      'duration ms': durationMs,
+      'exit code': metadata?.exitCode ?? null,
+      'failure category': metadata?.failureCategory ?? null,
+      'failure subcategory': metadata?.failureSubcategory ?? null,
+      'mcp outcome': metadata?.mcpOutcome ?? null,
+      'slack outcome': metadata?.slackOutcome ?? null,
+      activated: metadata?.activated ?? false,
+      'time to first event ms': metadata?.timeToFirstEventMs ?? null,
+      'time to activation ms': metadata?.timeToActivationMs ?? null,
+    });
+    try {
+      storePriorOutcome(outcome);
+    } catch {
+      // Non-fatal — next run will just see no prior outcome.
+    }
+
+    // Deprecated — keep for 30 days so downstream dashboards can migrate. Remove in PR 4.
     this.wizardCapture('session ended', {
       status,
-      'session duration ms': Date.now() - this.startedAt,
+      'session duration ms': durationMs,
     });
+
     if (this.initPromise === null) {
       return;
     }

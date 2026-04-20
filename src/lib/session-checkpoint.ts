@@ -14,6 +14,7 @@ import { join } from 'path';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
+import { getAssignments, setAssignments } from './experiments';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -29,39 +30,37 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // ── Schema ─────────────────────────────────────────────────────────────
 
-const CheckpointSchema = z
-  .object({
-    /** ISO-8601 timestamp of when the checkpoint was written. */
-    savedAt: z.string(),
+const CheckpointSchema = z.object({
+  /** ISO-8601 timestamp of when the checkpoint was written. */
+  savedAt: z.string(),
 
-    /** The project directory this checkpoint belongs to. */
-    installDir: z.string(),
+  /** The project directory this checkpoint belongs to. */
+  installDir: z.string(),
 
-    // Region + org/workspace/project selection
-    region: z.enum(['us', 'eu']).nullable(),
-    selectedOrgId: z.string().nullable(),
-    selectedOrgName: z.string().nullable(),
-    selectedWorkspaceId: z.string().nullable(),
-    selectedWorkspaceName: z.string().nullable(),
-    selectedEnvName: z.string().nullable().optional(),
-    selectedProjectName: z.string().nullable().optional(),
+  // Region + org/workspace/project selection
+  region: z.enum(['us', 'eu']).nullable(),
+  selectedOrgId: z.string().nullable(),
+  selectedOrgName: z.string().nullable(),
+  selectedWorkspaceId: z.string().nullable(),
+  selectedWorkspaceName: z.string().nullable(),
+  selectedProjectName: z.string().nullable(),
 
-    // Framework detection
-    integration: z.string().nullable(),
-    detectedFrameworkLabel: z.string().nullable(),
-    detectionComplete: z.boolean(),
-    frameworkContext: z.record(z.string(), z.unknown()),
+  // Framework detection
+  integration: z.string().nullable(),
+  detectedFrameworkLabel: z.string().nullable(),
+  detectionComplete: z.boolean(),
+  frameworkContext: z.record(z.string(), z.unknown()),
 
-    // Intro
-    introConcluded: z.boolean(),
-  })
-  .transform((data) => {
-    const { selectedProjectName, ...rest } = data;
-    return {
-      ...rest,
-      selectedEnvName: rest.selectedEnvName ?? selectedProjectName ?? null,
-    };
-  });
+  // Intro
+  introConcluded: z.boolean(),
+
+  /**
+   * Experiment variant assignments resolved during this run. Restoring
+   * these on resume keeps the user in the same bucket and prevents the
+   * checkpoint from breaking experiment stickiness.
+   */
+  flagAssignments: z.record(z.string(), z.string()).default({}),
+});
 
 type Checkpoint = z.infer<typeof CheckpointSchema>;
 
@@ -81,7 +80,7 @@ export function saveCheckpoint(session: WizardSession): void {
     selectedOrgName: session.selectedOrgName,
     selectedWorkspaceId: session.selectedWorkspaceId,
     selectedWorkspaceName: session.selectedWorkspaceName,
-    selectedEnvName: session.selectedEnvName,
+    selectedProjectName: session.selectedProjectName,
 
     integration: session.integration,
     detectedFrameworkLabel: session.detectedFrameworkLabel,
@@ -89,6 +88,8 @@ export function saveCheckpoint(session: WizardSession): void {
     frameworkContext: session.frameworkContext,
 
     introConcluded: session.introConcluded,
+
+    flagAssignments: getAssignments(),
   };
 
   atomicWriteJSON(checkpointPath(session.installDir), checkpoint, 0o600);
@@ -128,6 +129,13 @@ export function loadCheckpoint(
   // Must match the current project directory
   if (checkpoint.installDir !== installDir) return null;
 
+  // Hydrate experiment assignments so useExperiment() sees the same bucket
+  // the original run did. Done as a side-effect here because assignments
+  // are module-state, not part of WizardSession.
+  if (checkpoint.flagAssignments) {
+    setAssignments(checkpoint.flagAssignments);
+  }
+
   // Return only the fields that are safe to restore.
   // Credentials, runPhase, activation state, and post-run steps are
   // intentionally omitted so they get re-evaluated on resume.
@@ -138,7 +146,7 @@ export function loadCheckpoint(
     selectedOrgName: checkpoint.selectedOrgName,
     selectedWorkspaceId: checkpoint.selectedWorkspaceId,
     selectedWorkspaceName: checkpoint.selectedWorkspaceName,
-    selectedEnvName: checkpoint.selectedEnvName,
+    selectedProjectName: checkpoint.selectedProjectName,
     integration: checkpoint.integration as WizardSession['integration'],
     detectedFrameworkLabel: checkpoint.detectedFrameworkLabel,
     detectionComplete: checkpoint.detectionComplete,

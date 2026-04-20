@@ -9,6 +9,7 @@ import {
 } from './constants.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
 import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
+import { createTracingHeaders } from '../utils/custom-headers.js';
 
 // ── App API URL helper ────────────────────────────────────────────────
 
@@ -87,15 +88,11 @@ export type AmplitudeOrg = {
 export type AmplitudeWorkspace = AmplitudeOrg['workspaces'][number];
 
 /**
- * Extract the primary Amplitude app ID from a workspace.
+ * Extract the primary analytics project ID from a workspace.
  * Picks the lowest-rank environment that has an app ID.
  * Returns null if no such environment exists.
- *
- * Note: "app" is the canonical term for the ingestion surface that owns an
- * API key, per amplitude/amplitude (`app_id`) and amplitude/javascript
- * (`App` GraphQL type). Amplitude's UI also labels this "Project ID".
  */
-export function extractAppId(ws: AmplitudeWorkspace): string | null {
+export function extractProjectId(ws: AmplitudeWorkspace): string | null {
   return (
     (ws.environments ?? [])
       .slice()
@@ -165,6 +162,7 @@ export async function fetchAmplitudeUser(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -335,6 +333,7 @@ export async function createAmplitudeApp(
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
         // Treat 4xx/5xx as normal responses so we can surface the backend's
         // structured error payload without axios re-wrapping it.
@@ -347,11 +346,11 @@ export async function createAmplitudeApp(
       const parsed = CreateProjectSuccessSchema.parse(response.data);
       // Best-effort analytics — `apiKey` intentionally omitted so it never
       // leaves this function in plaintext.
-      analytics.wizardCapture('Project Created', {
+      analytics.wizardCapture('project created', {
         source: 'wizard_cli',
-        app_id: parsed.appId,
+        'app id': parsed.appId,
         zone,
-        org_id: input.orgId,
+        'org id': input.orgId,
       });
       return parsed;
     }
@@ -475,6 +474,7 @@ export async function fetchBranches(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -560,6 +560,7 @@ export async function fetchWorkspaceEventTypes(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -620,6 +621,7 @@ export async function fetchOwnedDashboards(
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -736,6 +738,7 @@ export async function fetchSources(
           Authorization: idToken,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -778,14 +781,12 @@ export interface McpEventsResult {
  * Falls back to a Claude agent with the Amplitude MCP configured if the direct
  * HTTP call fails, so the check survives MCP API drift.
  *
- * Requires the numeric Amplitude app ID (from workspace.environments[].app.id),
- * not the workspace UUID. The downstream Amplitude MCP tool API still accepts
- * this as a `projectId` parameter (external contract we don't control).
- * Returns false on any error so callers can fall through.
+ * Requires the numeric analytics project ID (from workspace.environments[].app.id),
+ * not the workspace UUID. Returns false on any error so callers can fall through.
  */
 export async function fetchHasAnyEventsMcp(
   accessToken: string,
-  appId: string,
+  projectId: string,
 ): Promise<McpEventsResult> {
   const NONE: McpEventsResult = {
     hasEvents: false,
@@ -801,10 +802,9 @@ export async function fetchHasAnyEventsMcp(
     direct: async (callTool) => {
       // get_users with _all — primary signal for whether any events have been received.
       // '_all' covers every event type without requiring taxonomy setup.
-      // metadata.userCount > 0 means at least one device has sent events to this app.
-      // NOTE: MCP tool param name is `projectId` (their API) — we pass our appId.
+      // metadata.userCount > 0 means at least one device has sent events to this project.
       const usersText = await callTool(1, 'get_users', {
-        projectId: appId,
+        projectId,
         event: { event_type: '_all', filters: [] },
         limit: 5,
       });
@@ -852,7 +852,7 @@ export async function fetchHasAnyEventsMcp(
       // get_events — fetch active event names for the celebration display.
       // isActive=true means events arrived within ~30 days.
       const eventsText = await callTool(2, 'get_events', {
-        projectId: appId,
+        projectId,
         limit: 10,
       });
       let activeEventNames: string[] = [];
@@ -885,7 +885,7 @@ export async function fetchHasAnyEventsMcp(
       return { hasEvents: true, csvRows: [], activeEventNames, activeUsers };
     },
 
-    agentPrompt: `Use the Amplitude MCP to check whether app ${appId} has received any events.
+    agentPrompt: `Use the Amplitude MCP to check whether project ${projectId} has received any events.
 Call get_users with event_type "_all" and limit 5. If userCount > 0, also call get_events with limit 10.
 Respond with JSON only — no prose, no markdown fences:
 {"hasEvents":true/false,"activeEventNames":["..."],"activeUsers":[{"amplitudeId":"...","userId":"..."}]}`,
@@ -981,6 +981,7 @@ export async function fetchProjectActivationStatus(opts: {
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
       },
     );
@@ -1041,6 +1042,7 @@ export async function fetchSlackInstallUrl(
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
         timeout: 10_000,
       },
@@ -1101,6 +1103,7 @@ export async function fetchSlackConnectionStatus(
           'x-amp-authorization': `Bearer ${accessToken}`,
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
+          ...createTracingHeaders(),
         },
         timeout: 10_000,
       },

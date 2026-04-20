@@ -32,8 +32,8 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
+import { EXP_LLM_ANALYTICS, useExperiment } from '../../lib/experiments.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
-const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
 export {
   TaskStatus,
@@ -96,6 +96,8 @@ export class WizardStore {
 
   /** Last screen seen — used to detect screen transitions for analytics. */
   private _lastScreen: ScreenName | null = null;
+  /** Timestamp the last screen was entered. Feeds `step completed` duration. */
+  private _lastScreenEnteredAt: number = Date.now();
 
   /** Hooks run when transitioning onto a screen. */
   private _enterScreenHooks = new Map<ScreenName, (() => void)[]>();
@@ -218,17 +220,14 @@ export class WizardStore {
         org_name: session.selectedOrgName ?? undefined,
         workspace_id: session.selectedWorkspaceId ?? undefined,
         workspace_name: session.selectedWorkspaceName ?? undefined,
-        // Canonical telemetry keys: `app_id` matches Python `app_id` and
-        // TS `appId`; `env_name` matches the Amplitude data-model shape
-        // (Org → Workspace → Environment → App).
-        app_id: session.selectedAppId ?? credentials?.appId,
-        env_name: session.selectedEnvName,
+        project_id: session.selectedProjectId ?? credentials?.projectId,
+        project_name: session.selectedProjectName,
         region: session.region,
         integration: session.integration,
       });
     }
     analytics.wizardCapture('auth complete', {
-      'app id': credentials?.appId,
+      'project id': credentials?.projectId,
       region: session.region,
     });
     this.emitChange();
@@ -239,8 +238,8 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setSelectedEnvName(name: string | null): void {
-    this.$session.setKey('selectedEnvName', name);
+  setSelectedProjectName(name: string | null): void {
+    this.$session.setKey('selectedProjectName', name);
     this.emitChange();
   }
 
@@ -443,7 +442,7 @@ export class WizardStore {
   }
 
   /**
-   * Restore org/workspace/app session IDs that weren't populated at startup
+   * Restore org/workspace/project session IDs that weren't populated at startup
    * (e.g. because the fire-and-forget fetchAmplitudeUser failed due to expired token).
    * Only updates fields that are provided.
    */
@@ -452,7 +451,7 @@ export class WizardStore {
     orgName?: string;
     workspaceId?: string;
     workspaceName?: string;
-    appId?: string | null;
+    projectId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
       this.$session.setKey('selectedOrgId', fields.orgId);
@@ -462,8 +461,8 @@ export class WizardStore {
       this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
     if (fields.workspaceName !== undefined)
       this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
-    if (fields.appId !== undefined)
-      this.$session.setKey('selectedAppId', fields.appId);
+    if (fields.projectId !== undefined)
+      this.$session.setKey('selectedProjectId', fields.projectId);
     this.emitChange();
   }
 
@@ -567,7 +566,7 @@ export class WizardStore {
       source,
       suggestedName: suggestedName ?? null,
     });
-    analytics.wizardCapture('Create Project Started', { source });
+    analytics.wizardCapture('create project started', { source });
     this.emitChange();
   }
 
@@ -578,7 +577,7 @@ export class WizardStore {
       source: null,
       suggestedName: null,
     });
-    analytics.wizardCapture('Create Project Cancelled', {});
+    analytics.wizardCapture('create project cancelled', {});
     this.emitChange();
   }
 
@@ -617,13 +616,13 @@ export class WizardStore {
     this.$session.setKey('selectedWorkspaceId', workspace.id);
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
-    // Extract the Amplitude app ID from the lowest-rank environment.
-    const appId =
+    // Extract the analytics project ID from the lowest-rank environment.
+    const projectId =
       workspace.environments
         ?.slice()
         .sort((a, b) => a.rank - b.rank)
         .find((e) => e.app?.id)?.app?.id ?? null;
-    this.$session.setKey('selectedAppId', appId);
+    this.$session.setKey('selectedProjectId', projectId);
 
     // Write ampli.json to the project directory.
     // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)
@@ -698,9 +697,11 @@ export class WizardStore {
    * flag is off the feature is silently skipped.
    */
   enableFeature(feature: AdditionalFeature): void {
-    // Gate LLM analytics behind the wizard-llm-analytics feature flag
+    // Gate LLM analytics behind the wizard-llm-analytics experiment.
+    // useExperiment() fires `experiment exposed` exactly once per run so we
+    // can measure downstream conversion by variant.
     if (feature === AdditionalFeature.LLM) {
-      if (!analytics.isFeatureFlagEnabled(FLAG_LLM_ANALYTICS)) {
+      if (useExperiment(EXP_LLM_ANALYTICS) !== 'on') {
         return;
       }
     }
@@ -867,6 +868,10 @@ export class WizardStore {
     // don't re-fire the same hooks, preventing infinite recursion.
     this._lastScreen = next;
     if (prev !== null && next !== prev) {
+      const now = Date.now();
+      const enteredAt = this._lastScreenEnteredAt;
+      this._lastScreenEnteredAt = now;
+
       const hooks = this._enterScreenHooks.get(next);
       if (hooks) {
         for (const fn of hooks) fn();
@@ -874,6 +879,16 @@ export class WizardStore {
       analytics.wizardCapture('wizard screen entered', {
         'screen name': next,
         'previous screen': prev,
+        ...sessionPropertiesCompact(this.session),
+      });
+      // Canonical funnel event — time the user spent on the screen they
+      // just left. `outcome` defaults to 'completed' for an organic exit;
+      // explicit cancel/error paths can fire their own step-completed event
+      // with the appropriate outcome before transitioning.
+      analytics.wizardCapture('step completed', {
+        step: prev,
+        outcome: 'completed',
+        'duration ms': now - enteredAt,
         ...sessionPropertiesCompact(this.session),
       });
     }

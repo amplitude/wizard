@@ -44,7 +44,7 @@ export function getWhoamiText(
     | 'selectedOrgId'
     | 'selectedOrgName'
     | 'selectedWorkspaceName'
-    | 'selectedEnvName'
+    | 'selectedProjectName'
     | 'region'
     | 'credentials'
     | 'userEmail'
@@ -75,10 +75,10 @@ export function getWhoamiText(
     parts.push(`project: ${session.selectedWorkspaceName}`);
   }
 
-  const envName = session.selectedEnvName;
+  const envName = session.selectedProjectName;
   const envId =
-    session.credentials?.appId && session.credentials.appId !== 0
-      ? String(session.credentials.appId)
+    session.credentials?.projectId && session.credentials.projectId !== 0
+      ? String(session.credentials.projectId)
       : null;
   if (envName && envId) {
     parts.push(`env: ${envName} (${envId})`);

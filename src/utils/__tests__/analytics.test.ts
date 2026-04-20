@@ -29,6 +29,7 @@ vi.mock('uuid', () => ({
 vi.mock('../../lib/observability', () => ({
   getSessionId: vi.fn().mockReturnValue('test-session-id'),
   getRunId: vi.fn().mockReturnValue('test-run-id'),
+  getAttemptId: vi.fn().mockReturnValue('test-attempt-id'),
   setSentryUser: vi.fn(),
   createLogger: vi.fn().mockReturnValue({
     debug: vi.fn(),
@@ -38,6 +39,13 @@ vi.mock('../../lib/observability', () => ({
   }),
   configureLogFile: vi.fn(),
   getLogFilePath: vi.fn().mockReturnValue('/tmp/test.log'),
+}));
+
+vi.mock('../ampli-settings', () => ({
+  getStoredDeviceId: vi.fn().mockReturnValue(undefined),
+  storeDeviceId: vi.fn(),
+  getStoredFirstRunAt: vi.fn().mockReturnValue(undefined),
+  storeFirstRunAt: vi.fn(),
 }));
 
 vi.mock('../../lib/feature-flags', () => ({
@@ -127,6 +135,107 @@ describe('Analytics', () => {
   describe('shutdown', () => {
     it('should not throw on shutdown', async () => {
       await expect(analytics.shutdown('success')).resolves.toBeUndefined();
+    });
+
+    it('emits `run ended` with outcome=configured when status=success', async () => {
+      process.env.AMPLITUDE_API_KEY = 'test-key';
+      const freshAnalytics = new Analytics();
+      const trackSpy = vi.spyOn(
+        (freshAnalytics as unknown as { client: { track: typeof vi.fn } })
+          .client,
+        'track',
+      );
+      await freshAnalytics.shutdown('success');
+      const runEndedCall = trackSpy.mock.calls.find(
+        (c) => c[0] === 'wizard cli: run ended',
+      );
+      expect(runEndedCall).toBeDefined();
+      expect(runEndedCall?.[1]).toMatchObject({
+        outcome: 'configured',
+        status: 'success',
+      });
+      delete process.env.AMPLITUDE_API_KEY;
+    });
+
+    it('emits `run ended` with outcome=activated when metadata flags activation', async () => {
+      process.env.AMPLITUDE_API_KEY = 'test-key';
+      const freshAnalytics = new Analytics();
+      const trackSpy = vi.spyOn(
+        (freshAnalytics as unknown as { client: { track: typeof vi.fn } })
+          .client,
+        'track',
+      );
+      await freshAnalytics.shutdown('success', {
+        outcome: 'activated',
+        activated: true,
+      });
+      const runEndedCall = trackSpy.mock.calls.find(
+        (c) => c[0] === 'wizard cli: run ended',
+      );
+      expect(runEndedCall?.[1]).toMatchObject({
+        outcome: 'activated',
+        activated: true,
+      });
+      delete process.env.AMPLITUDE_API_KEY;
+    });
+
+    it('emits `run ended` with outcome=error when status=error', async () => {
+      process.env.AMPLITUDE_API_KEY = 'test-key';
+      const freshAnalytics = new Analytics();
+      const trackSpy = vi.spyOn(
+        (freshAnalytics as unknown as { client: { track: typeof vi.fn } })
+          .client,
+        'track',
+      );
+      await freshAnalytics.shutdown('error', {
+        exitCode: 10,
+        failureCategory: 'auth',
+      });
+      const runEndedCall = trackSpy.mock.calls.find(
+        (c) => c[0] === 'wizard cli: run ended',
+      );
+      expect(runEndedCall?.[1]).toMatchObject({
+        outcome: 'error',
+        status: 'error',
+        'exit code': 10,
+        'failure category': 'auth',
+      });
+      delete process.env.AMPLITUDE_API_KEY;
+    });
+
+    it('emits `run ended` with outcome=cancelled when status=cancelled', async () => {
+      process.env.AMPLITUDE_API_KEY = 'test-key';
+      const freshAnalytics = new Analytics();
+      const trackSpy = vi.spyOn(
+        (freshAnalytics as unknown as { client: { track: typeof vi.fn } })
+          .client,
+        'track',
+      );
+      await freshAnalytics.shutdown('cancelled');
+      const runEndedCall = trackSpy.mock.calls.find(
+        (c) => c[0] === 'wizard cli: run ended',
+      );
+      expect(runEndedCall?.[1]).toMatchObject({
+        outcome: 'cancelled',
+        status: 'cancelled',
+      });
+      delete process.env.AMPLITUDE_API_KEY;
+    });
+
+    it('still emits deprecated `session ended` alongside `run ended`', async () => {
+      process.env.AMPLITUDE_API_KEY = 'test-key';
+      const freshAnalytics = new Analytics();
+      const trackSpy = vi.spyOn(
+        (freshAnalytics as unknown as { client: { track: typeof vi.fn } })
+          .client,
+        'track',
+      );
+      await freshAnalytics.shutdown('success');
+      const sessionEndedCall = trackSpy.mock.calls.find(
+        (c) => c[0] === 'wizard cli: session ended',
+      );
+      expect(sessionEndedCall).toBeDefined();
+      delete process.env.AMPLITUDE_API_KEY;
     });
   });
 
@@ -249,15 +358,15 @@ describe('Analytics', () => {
       }
     });
 
-    it('should stringify numeric app_id', () => {
+    it('should stringify numeric project_id', () => {
       analytics.setDistinctId('ada@example.com');
       analytics.identifyUser({
-        app_id: 42,
+        project_id: 42,
       });
 
       const client = mockCreateInstance.mock.results[0].value;
       const identifyObj = client.identify.mock.calls[0][0];
-      expect(identifyObj.set).toHaveBeenCalledWith('app id', '42');
+      expect(identifyObj.set).toHaveBeenCalledWith('project id', '42');
     });
 
     it('should skip null/undefined properties', () => {
@@ -265,7 +374,7 @@ describe('Analytics', () => {
       analytics.identifyUser({
         email: 'ada@example.com',
         org_id: undefined,
-        app_id: null,
+        project_id: null,
         region: null,
       });
 
@@ -275,13 +384,13 @@ describe('Analytics', () => {
         'email',
         'ada@example.com',
       );
-      // org id, app id, and region should not have been set
+      // org id, project id, and region should not have been set
       expect(identifyObj.set).not.toHaveBeenCalledWith(
         'org id',
         expect.anything(),
       );
       expect(identifyObj.set).not.toHaveBeenCalledWith(
-        'app id',
+        'project id',
         expect.anything(),
       );
       expect(identifyObj.set).not.toHaveBeenCalledWith(

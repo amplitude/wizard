@@ -74,6 +74,11 @@ export class MiddlewarePipeline {
     this.transitionPhase(name, freshContext);
   }
 
+  /** Read a value published by a plugin into the shared store. */
+  get<T>(key: string): T | undefined {
+    return this.store.get(key) as T | undefined;
+  }
+
   private transitionPhase(newPhase: string, freshContext: boolean): void {
     const oldPhase = this._currentPhase;
     this._currentPhase = newPhase;

@@ -160,13 +160,13 @@ describe('logger', () => {
     expect(lines[0]).toMatch(/no context$/);
   });
 
-  it('includes run_id in log lines', () => {
+  it('includes run_id and attempt_id in log lines', () => {
     const log = createLogger('corr');
     log.info('test');
 
     const lines = getLogLines();
-    // run_id is an 8-char hex string in brackets
-    expect(lines[0]).toMatch(/\[[a-f0-9]{8}\]/);
+    // Format: [run_id/attempt_id] — both 8-char hex.
+    expect(lines[0]).toMatch(/\[[a-f0-9]{8}\/[a-f0-9]{8}\]/);
   });
 
   it('never throws even if file write fails', () => {

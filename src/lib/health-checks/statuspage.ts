@@ -3,6 +3,7 @@ import {
   type BaseHealthResult,
   type ComponentHealthResult,
 } from './types';
+import { createTracingHeaders } from '../../utils/custom-headers';
 
 // ---------------------------------------------------------------------------
 // Statuspage.io v2 API helpers
@@ -62,7 +63,10 @@ async function fetchStatuspageIndicator(
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: createTracingHeaders(),
+    });
     clearTimeout(tid);
 
     if (!res.ok) return errResult(`HTTP ${res.status}`);
@@ -87,7 +91,10 @@ async function fetchStatuspageSummary(
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: createTracingHeaders(),
+    });
     clearTimeout(tid);
 
     if (!res.ok) return errResult(`HTTP ${res.status}`);

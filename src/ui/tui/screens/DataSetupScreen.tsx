@@ -33,9 +33,9 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
 
     const { credentials, region, selectedOrgId, selectedWorkspaceId } =
       store.session;
-    // credentials.appId is 0 for OAuth users; fall back to the workspace UUID
+    // credentials.projectId is 0 for OAuth users; fall back to the workspace UUID
     const appId =
-      store.session.credentials?.appId || selectedWorkspaceId || null;
+      store.session.credentials?.projectId || selectedWorkspaceId || null;
 
     // No credentials or project ID — can't check, fall through to Framework Detection
     if (!credentials || !appId || !selectedOrgId) {

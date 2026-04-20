@@ -47,13 +47,13 @@ describe('redact (deep)', () => {
       accessToken: 'secret-token-value',
       refreshToken: 'refresh-secret',
       host: 'https://api2.amplitude.com',
-      appId: 12345,
+      projectId: 12345,
     };
     const result = redact(input) as Record<string, unknown>;
     expect(result.accessToken).toBe('[REDACTED]');
     expect(result.refreshToken).toBe('[REDACTED]');
     expect(result.host).toBe('https://api2.amplitude.com');
-    expect(result.appId).toBe(12345);
+    expect(result.projectId).toBe(12345);
   });
 
   it('redacts nested objects', () => {

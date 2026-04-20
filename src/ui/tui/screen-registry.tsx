@@ -68,7 +68,7 @@ export function createScreens(
           store.session.selectedOrgName = null;
           store.session.selectedWorkspaceId = null;
           store.session.selectedWorkspaceName = null;
-          store.session.selectedEnvName = null;
+          store.session.selectedProjectName = null;
           store.emitChange();
         }}
       />

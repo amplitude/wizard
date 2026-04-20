@@ -82,7 +82,7 @@ export function createDiagnosticSnapshot(
       has_credentials: session.credentials !== null,
       has_pending_orgs: session.pendingOrgs !== null,
       selected_org: session.selectedOrgName,
-      selected_env: session.selectedEnvName,
+      selected_project: session.selectedProjectName,
     },
 
     // Counts

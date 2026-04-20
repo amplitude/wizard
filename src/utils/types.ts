@@ -52,11 +52,10 @@ export type WizardOptions = {
   apiKey?: string;
 
   /**
-   * Numeric Amplitude app ID (canonical: `app_id` in Python, `appId` in TS).
-   * When set (e.g. with `--app-id`, or the `--project-id` legacy alias), the
-   * wizard uses this app instead of the default from the API key or OAuth.
+   * Amplitude project ID. When set (e.g. in CI with --project-id), the wizard uses this project
+   * instead of the default from the API key or OAuth.
    */
-  appId?: number;
+  projectId?: number;
 
   /**
    * Whether to show the menu for manual integration selection instead of auto-detecting.

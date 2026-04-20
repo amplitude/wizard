@@ -55,7 +55,10 @@ describe('wizardAbort', () => {
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
     expect(getUI().cancel).toHaveBeenCalledWith('Wizard setup cancelled.');
-    expect(mockAnalytics.shutdown).toHaveBeenCalledWith('cancelled');
+    expect(mockAnalytics.shutdown).toHaveBeenCalledWith(
+      'cancelled',
+      expect.objectContaining({ outcome: 'cancelled', exitCode: 1 }),
+    );
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
@@ -74,7 +77,10 @@ describe('wizardAbort', () => {
     await expect(wizardAbort({ error })).rejects.toThrow('process.exit called');
 
     expect(mockAnalytics.captureException).toHaveBeenCalledWith(error, {});
-    expect(mockAnalytics.shutdown).toHaveBeenCalledWith('error');
+    expect(mockAnalytics.shutdown).toHaveBeenCalledWith(
+      'error',
+      expect.objectContaining({ outcome: 'error' }),
+    );
   });
 
   it('does not capture error when no error is provided', async () => {
@@ -134,7 +140,10 @@ describe('wizardAbort', () => {
       'process.exit called',
     );
 
-    expect(mockAnalytics.shutdown).toHaveBeenCalledWith('cancelled');
+    expect(mockAnalytics.shutdown).toHaveBeenCalledWith(
+      'cancelled',
+      expect.objectContaining({ outcome: 'cancelled' }),
+    );
   });
 });
 
