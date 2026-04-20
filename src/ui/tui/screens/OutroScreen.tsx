@@ -113,6 +113,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     );
   }
 
+  const zone = (store.session.region ?? 'us') as AmplitudeZone;
+  const dashboardUrl = store.session.checklistDashboardUrl;
+  const inviteUrl = dashboardUrl
+    ? OUTBOUND_URLS.teammateInvite(zone, dashboardUrl)
+    : null;
+
   // ── Main outro views ─────────────────────────────────────────────────
 
   return (
@@ -277,33 +283,26 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       <Box marginTop={1}>
         {isSuccess ? (
           <PickerMenu
-            options={(() => {
-              const zone = (store.session.region ?? 'us') as AmplitudeZone;
-              const dashboardUrl = store.session.checklistDashboardUrl;
-              const inviteUrl = dashboardUrl
-                ? OUTBOUND_URLS.teammateInvite(zone, dashboardUrl)
-                : null;
-              return [
-                { label: 'View setup report', value: 'report' },
-                {
-                  label: dashboardUrl
-                    ? 'Open your analytics dashboard'
-                    : 'Open Amplitude',
-                  value: 'dashboard',
-                  hint: dashboardUrl ? undefined : 'amplitude.com',
-                },
-                ...(inviteUrl
-                  ? [
-                      {
-                        label: 'Send this dashboard to a teammate',
-                        value: 'teammate-invite',
-                        hint: 'opens share link',
-                      },
-                    ]
-                  : []),
-                { label: 'Exit', value: 'exit' },
-              ];
-            })()}
+            options={[
+              { label: 'View setup report', value: 'report' },
+              {
+                label: dashboardUrl
+                  ? 'Open your analytics dashboard'
+                  : 'Open Amplitude',
+                value: 'dashboard',
+                hint: dashboardUrl ? undefined : 'amplitude.com',
+              },
+              ...(inviteUrl
+                ? [
+                    {
+                      label: 'Send this dashboard to a teammate',
+                      value: 'teammate-invite',
+                      hint: 'opens share link',
+                    },
+                  ]
+                : []),
+              { label: 'Exit', value: 'exit' },
+            ]}
             onSelect={(value) => {
               const choice = Array.isArray(value) ? value[0] : value;
               analytics.wizardCapture('outro action', {
@@ -313,19 +312,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               if (choice === 'report') {
                 setShowReport(true);
               } else if (choice === 'dashboard') {
-                const zone = (store.session.region ?? 'us') as AmplitudeZone;
-                const url =
-                  store.session.checklistDashboardUrl ??
-                  OUTBOUND_URLS.overview[zone];
+                const url = dashboardUrl ?? OUTBOUND_URLS.overview[zone];
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });
               } else if (choice === 'teammate-invite') {
-                const zone = (store.session.region ?? 'us') as AmplitudeZone;
-                const dashboardUrl = store.session.checklistDashboardUrl;
-                const inviteUrl = dashboardUrl
-                  ? OUTBOUND_URLS.teammateInvite(zone, dashboardUrl)
-                  : null;
                 if (inviteUrl) {
                   analytics.wizardCapture('teammate invite link opened', {
                     zone,
