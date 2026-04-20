@@ -3,6 +3,8 @@ import {
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
   getWhoamiText,
+  renderHelpText,
+  COMMANDS,
 } from '../console-commands.js';
 
 describe('parseCreateProjectSlashInput', () => {
@@ -149,5 +151,27 @@ describe('getWhoamiText', () => {
     });
     expect(result).toContain('ada@example.com');
     expect(result).toContain('(authenticating…)');
+  });
+});
+
+describe('renderHelpText', () => {
+  it('includes every registered command', () => {
+    const text = renderHelpText();
+    for (const { cmd } of COMMANDS) {
+      expect(text).toContain(cmd);
+    }
+  });
+
+  it('starts with the header', () => {
+    expect(renderHelpText()).toMatch(/^Available slash commands:/);
+  });
+
+  it('aligns descriptions by padding command column to the longest entry', () => {
+    const text = renderHelpText();
+    const longest = COMMANDS.reduce((n, c) => Math.max(n, c.cmd.length), 0);
+    // Pick one command and confirm its description sits at a predictable offset.
+    const region = COMMANDS.find((c) => c.cmd === '/region')!;
+    const expectedLine = '  ' + region.cmd.padEnd(longest) + '  ' + region.desc;
+    expect(text).toContain(expectedLine);
   });
 });
