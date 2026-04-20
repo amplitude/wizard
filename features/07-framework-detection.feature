@@ -1,0 +1,54 @@
+Feature: Framework Detection
+  As a developer
+  I want the wizard to detect or let me choose my framework
+  So that the agent can instrument my app correctly
+
+  Scenario: Framework is auto-detected and user confirms
+    Given I am in the Framework Detection flow
+    When the wizard successfully auto-detects my framework
+    Then I should see the detected framework displayed
+    When I confirm the detection
+    And there are no unresolved setup questions
+    Then I should proceed to the Agent Run
+
+  Scenario: Framework is auto-detected and user cancels
+    Given I am in the Framework Detection flow
+    When the wizard successfully auto-detects my framework
+    Then I should see the detected framework displayed
+    When I cancel
+    Then the wizard should exit
+
+  Scenario: Framework detection fails — generic wizard runs automatically
+    Given I am in the Framework Detection flow
+    When the wizard cannot auto-detect my framework
+    Then the generic integration should be selected automatically
+    When I confirm the detected framework
+    And there are no unresolved setup questions
+    Then I should proceed to the Agent Run
+
+  Scenario: Framework selected via --menu flag
+    Given I run the wizard with the "--menu" flag
+    Then I should see the framework picker menu without attempting auto-detection
+
+  Scenario: Setup questions are all auto-detectable
+    Given I am in the Framework Detection flow
+    And my framework has setup questions
+    When I confirm the detected framework
+    And all setup questions can be auto-detected
+    Then the answers should be filled in automatically
+    And I should proceed to the Agent Run without being prompted
+
+  Scenario: Setup screen is skipped when framework has empty setup questions
+    Given I am in the Framework Detection flow
+    And my framework has an empty setup questions list
+    When I confirm the detected framework
+    Then I should proceed to the Agent Run without being prompted
+
+  Scenario: Setup questions require user input
+    Given I am in the Framework Detection flow
+    And my framework has setup questions
+    When I confirm the detected framework
+    And some setup questions cannot be auto-detected
+    Then I should see a picker for each undetected question
+    When I answer all questions
+    Then I should proceed to the Agent Run

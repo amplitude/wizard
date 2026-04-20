@@ -1,0 +1,20 @@
+---
+title: Data Setup flow
+---
+flowchart TD
+    START["Project created"] --> CHOICE{How do you want<br/>to get started?}
+    CHOICE -->|data onboarding wizard| CONFIGURE["Data Setup (configure)"]
+    CHOICE -->|taxonomy agent| TAXONOMY["Taxonomy Agent"]
+
+    CONFIGURE --> INGESTED{Events successfully<br/>ingested?}
+    INGESTED -->|no| DONE["→ Wizard flow: data check"]
+    INGESTED -->|yes| CHECKLIST
+
+    TAXONOMY --> CHECKLIST
+
+    CHECKLIST["Checklist: taxonomy / first chart / first dash<br/>(show completed items, offer remaining)"]
+    CHECKLIST -->|run taxonomy agent| TAXONOMY_RUN["Taxonomy Agent"] --> CHECKLIST
+    CHECKLIST -->|create first chart| CHART_RUN["First Chart"] --> CHECKLIST
+    CHECKLIST -->|create first dash — unlocked after chart| DASH_RUN["First Dash"] --> CHECKLIST
+    CHECKLIST -->|all three complete| OPEN_SITE["Open dashboard in browser"]
+    OPEN_SITE --> DONE

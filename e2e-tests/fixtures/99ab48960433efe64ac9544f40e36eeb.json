@@ -1,0 +1,8 @@
+{
+  "files": [
+    "src/components/AmplitudeProvider.tsx",
+    "src/lib/amplitude.ts",
+    "next.config.mjs",
+    "src/app/layout.tsx"
+  ]
+}

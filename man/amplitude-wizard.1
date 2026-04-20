@@ -1,0 +1,170 @@
+.TH AMPLITUDE\-WIZARD 1 "2026" "@amplitude/wizard" "Amplitude Wizard"
+.SH NAME
+amplitude\-wizard \- instrument your app with Amplitude analytics
+.SH SYNOPSIS
+.B amplitude\-wizard
+[\fIOPTIONS\fR]
+.br
+.B amplitude\-wizard
+\fICOMMAND\fR [\fIOPTIONS\fR]
+.SH DESCRIPTION
+\fBamplitude\-wizard\fR is an interactive CLI that instruments applications with
+Amplitude analytics. It authenticates the user, detects the project framework,
+runs a Claude\-powered agent to set up the SDK and track events, and guides the
+user through their first chart and dashboard.
+.PP
+Run without arguments to launch the interactive TUI wizard. The wizard
+auto\-detects your framework (Next.js, React, Vue, Django, Flask, FastAPI, etc.)
+and writes the necessary SDK boilerplate.
+.SH COMMANDS
+.TP
+\fB(default)\fR
+Run the interactive Amplitude setup wizard. Launches a full\-screen TUI.
+.TP
+\fBlogin\fR
+Log in to your Amplitude account via browser OAuth. Credentials are stored in
+\fI~/.ampli.json\fR for subsequent runs.
+.TP
+\fBlogout\fR
+Remove the locally stored Amplitude credentials.
+.TP
+\fBwhoami\fR
+Print the currently logged\-in user and org.
+.TP
+\fBslack\fR
+Set up the Amplitude Slack integration.
+.TP
+\fBmcp add\fR
+Install the Amplitude MCP server into supported AI clients (Claude, Cursor, etc.).
+.TP
+\fBmcp remove\fR
+Remove the Amplitude MCP server from supported AI clients.
+.TP
+\fBcompletion\fR
+Print a shell completion script for bash or zsh. Source it in your shell rc:
+.RS
+.nf
+eval "$(amplitude\-wizard completion)"
+.fi
+.RE
+.SH OPTIONS
+.SS Global options
+.TP
+\fB\-\-debug\fR
+Enable verbose logging to the log file and console.
+Environment variable: \fBAMPLITUDE_WIZARD_DEBUG\fR
+.TP
+\fB\-\-verbose\fR
+Print diagnostic info (working directory, detected framework, config) to the
+run log.
+Environment variable: \fBAMPLITUDE_WIZARD_VERBOSE\fR
+.TP
+\fB\-\-signup\fR
+Create a new Amplitude account during setup instead of logging in.
+Environment variable: \fBAMPLITUDE_WIZARD_SIGNUP\fR
+.TP
+\fB\-\-ci\fR
+Enable non\-interactive CI mode. Requires \fB\-\-api\-key\fR and \fB\-\-install\-dir\fR.
+Environment variable: \fBAMPLITUDE_WIZARD_CI\fR
+.TP
+\fB\-\-api\-key\fR \fIKEY\fR
+Amplitude project API key. Skips the browser OAuth flow entirely.
+Environment variable: \fBAMPLITUDE_WIZARD_API_KEY\fR
+.TP
+\fB\-\-project\-id\fR \fIID\fR
+Amplitude project ID. Optional; defaults to the project associated with the
+API key or the saved OAuth session.
+Environment variable: \fBAMPLITUDE_WIZARD_PROJECT_ID\fR
+.TP
+\fB\-\-local\-mcp\fR
+Route MCP calls to a local server at \fIhttp://localhost:8787/mcp\fR instead of
+the production endpoint.
+Environment variable: \fBAMPLITUDE_WIZARD_LOCAL_MCP\fR
+.TP
+\fB\-h\fR, \fB\-\-help\fR
+Show help and exit.
+.TP
+\fB\-v\fR, \fB\-\-version\fR
+Print the package version and exit.
+.SS Wizard (default command) options
+.TP
+\fB\-\-integration\fR \fIFRAMEWORK\fR
+Skip auto\-detection and use the specified framework integration. Choices:
+\fBnextjs\fR, \fBvue\fR, \fBreact\-router\fR, \fBdjango\fR, \fBflask\fR, \fBfastapi\fR,
+\fBjavascript_web\fR, \fBjavascript_node\fR, \fBpython\fR.
+Environment variable: \fBAMPLITUDE_WIZARD_INTEGRATION\fR
+.TP
+\fB\-\-install\-dir\fR \fIDIR\fR
+Directory to install Amplitude in. Defaults to the current working directory.
+Environment variable: \fBAMPLITUDE_WIZARD_INSTALL_DIR\fR
+.TP
+\fB\-\-force\-install\fR
+Force package installation even if peer dependency checks fail.
+Environment variable: \fBAMPLITUDE_WIZARD_FORCE_INSTALL\fR
+.TP
+\fB\-\-menu\fR
+Show the framework selection menu instead of auto\-detecting.
+Environment variable: \fBAMPLITUDE_WIZARD_MENU\fR
+.TP
+\fB\-\-benchmark\fR
+Run in benchmark mode with per\-phase token tracking.
+Environment variable: \fBAMPLITUDE_WIZARD_BENCHMARK\fR
+.SS login options
+.TP
+\fB\-\-zone\fR \fIus\fR|\fIeu\fR
+Amplitude data center zone. Default: \fBus\fR.
+.SH ENVIRONMENT
+All flags can also be set as environment variables by prefixing with
+\fBAMPLITUDE_WIZARD_\fR and uppercasing. For example:
+.PP
+.nf
+export AMPLITUDE_WIZARD_API_KEY=my\-key
+export AMPLITUDE_WIZARD_CI=true
+amplitude\-wizard
+.fi
+.SH FILES
+.TP
+\fI~/.ampli.json\fR
+Stores the OAuth access token, refresh token, and user metadata (name, email,
+org, zone). Written by \fBlogin\fR and cleared by \fBlogout\fR.
+.TP
+\fI./ampli.json\fR
+Project\-level config written by the wizard after setup. Contains the Amplitude
+Source ID, Workspace ID, SDK runtime, and branch information.
+.TP
+\fI/tmp/amplitude\-wizard.log\fR
+Runtime log file. Captures verbose/debug output and agent traces.
+.SH EXAMPLES
+.TP
+Run the wizard in the current directory:
+.nf
+amplitude\-wizard
+.fi
+.TP
+Run the wizard against a specific directory:
+.nf
+amplitude\-wizard \-\-install\-dir /path/to/project
+.fi
+.TP
+Run in CI (non\-interactive):
+.nf
+amplitude\-wizard \-\-ci \-\-api\-key <key> \-\-install\-dir .
+.fi
+.TP
+Force Next.js integration without auto\-detection:
+.nf
+amplitude\-wizard \-\-integration nextjs
+.fi
+.TP
+Set up shell completions (bash/zsh):
+.nf
+echo 'eval "$(amplitude\-wizard completion)"' >> ~/.zshrc
+source ~/.zshrc
+.fi
+.TP
+Log in to the EU data center:
+.nf
+amplitude\-wizard login \-\-zone eu
+.fi
+.SH SEE ALSO
+Full documentation and source: \fIhttps://github.com/amplitude/wizard\fR

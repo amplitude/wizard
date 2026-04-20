@@ -1,0 +1,8 @@
+onlyBuiltDependencies:
+  - esbuild
+  - msw
+minimumReleaseAge: 10080
+
+
+packages:
+  - '!e2e-tests/**'

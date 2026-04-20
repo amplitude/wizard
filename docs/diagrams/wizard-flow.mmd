@@ -1,0 +1,38 @@
+---
+title: Wizard flow
+---
+flowchart TD
+    REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
+    REGION_SELECT --> AUTH
+
+    subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
+        SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
+    end
+
+    AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
+    DATA_SETUP --> DATA_CHECK{Project has data?}
+
+    DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
+    DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent"]
+
+    OPTIONS --> RUN
+    FRAMEWORK --> RUN
+
+    SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
+
+    subgraph AGENT_RUN ["Agent Run"]
+        RUN["RunScreen"] --> AGENT["Claude agent runs"]
+        AGENT --> FEATURES{Features discovered?}
+        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
+        FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
+        FEATURES -->|none| OUTCOME
+        AGENT --> OUTCOME{Outcome?}
+        OUTCOME -->|success| POST["Upload env vars to hosting"]
+        OUTCOME -->|error| ERR["Set error state"]
+    end
+
+    POST --> OUTRO["See: Outro flow"]
+    ERR --> OUTRO
+
+    SUSI -. overlay .-> OUTAGE["OutageScreen"]
+    SUSI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]

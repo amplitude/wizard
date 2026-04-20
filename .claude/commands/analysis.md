@@ -1,0 +1,2 @@
+Review the most recent contents of /tmp/amplitude-wizard.log. The log may be
+quite substantial, so prepare to tail or search it. Look for

@@ -1,0 +1,12 @@
+# Source code
+src/ @amplitude/growth
+
+# Release pipeline and CI/CD
+.github/workflows/ @amplitude/growth
+.github/CODEOWNERS @amplitude/growth
+
+# Package manifests and release config
+package.json @amplitude/growth
+pnpm-lock.yaml @amplitude/growth
+release-please-config.json @amplitude/growth
+.release-please-manifest.json @amplitude/growth

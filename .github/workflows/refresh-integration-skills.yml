@@ -1,0 +1,55 @@
+name: Refresh Integration Skills
+
+on:
+  schedule:
+    # Every Monday at 09:00 UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:
+  # TODO: add repository_dispatch trigger once context-hub's build-release.yml
+  # fires a dispatch event to this repo on release. Requires a PAT with repo
+  # scope stored as WIZARD_DISPATCH_TOKEN in context-hub secrets.
+
+jobs:
+  refresh:
+    name: Refresh integration skills from context-hub
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Refresh skills
+        run: bash scripts/refresh-integration-skills.sh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check for changes
+        id: diff
+        run: |
+          if git diff --quiet skills/integration/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open pull request
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b chore/refresh-integration-skills
+          git add skills/integration/
+          git commit -m "chore: refresh integration skills from context-hub"
+          git push --force origin chore/refresh-integration-skills
+          gh pr create \
+            --title "chore: refresh integration skills from context-hub" \
+            --body "Automated refresh of bundled integration skills from [amplitude/context-hub](https://github.com/amplitude/context-hub/releases/latest).
+
+          Triggered by: \`${{ github.event_name }}\`. Review the diff to confirm upstream changes look intentional before merging." \
+            --label dependencies \
+            --head chore/refresh-integration-skills \
+            || echo "PR already exists"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

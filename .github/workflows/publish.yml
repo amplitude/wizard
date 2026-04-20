@@ -1,0 +1,66 @@
+name: "Publish (manual)"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  check-package-version:
+    name: Check package version and detect an update
+    runs-on: ubuntu-24.04
+    outputs:
+      committed-version: ${{ steps.check.outputs.committed-version }}
+      published-version: ${{ steps.check.outputs.published-version }}
+      is-new-version: ${{ steps.check.outputs.is-new-version }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Check package version and detect an update
+        id: check
+        run: |
+          COMMITTED=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view @amplitude/wizard version 2>/dev/null || echo "0.0.0")
+          IS_NEW=$( [ "$COMMITTED" != "$PUBLISHED" ] && echo "true" || echo "false" )
+          echo "committed-version=$COMMITTED" >> "$GITHUB_OUTPUT"
+          echo "published-version=$PUBLISHED"  >> "$GITHUB_OUTPUT"
+          echo "is-new-version=$IS_NEW"         >> "$GITHUB_OUTPUT"
+          echo "Committed: $COMMITTED  Published: $PUBLISHED  New: $IS_NEW"
+
+  release:
+    name: Publish release if new version
+    runs-on: ubuntu-24.04
+    environment: npm-publish
+    needs: check-package-version
+    if: needs.check-package-version.outputs.is-new-version == 'true'
+    env:
+      COMMITTED_VERSION: ${{ needs.check-package-version.outputs.committed-version }}
+      PUBLISHED_VERSION: ${{ needs.check-package-version.outputs.published-version }}
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+        with:
+          run_install: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Install package.json dependencies with pnpm
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the package
+        run: pnpm build
+
+      - name: Publish the package to npm registry
+        run: pnpm publish --access public --no-git-checks

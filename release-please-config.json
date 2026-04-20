@@ -1,0 +1,14 @@
+{
+  "packages": {
+    ".": {
+      "release-type": "node",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "src/lib/constants.ts",
+          "glob": false
+        }
+      ]
+    }
+  }
+}

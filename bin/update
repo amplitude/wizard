@@ -1,0 +1,6 @@
+#!/bin/bash
+set -e
+
+# Update dependencies after a pull
+echo "Updating dependencies..."
+./bin/setup

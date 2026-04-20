@@ -1,0 +1,25 @@
+{
+    "cucumber.features": [
+        "features/**/*.feature"
+    ],
+    "cucumber.glue": [
+        "features/step-definitions/**/*.steps.ts"
+    ],
+    "[typescript]": {
+        "editor.formatOnSave": true
+    },
+    "[javascript]": {
+        "editor.formatOnSave": true
+    },
+    "prettier.typescriptEnable": [
+        "typescript",
+        "typescriptreact"
+    ],
+    "search.exclude": {
+        "**/node_modules": true,
+        "**/bower_components": true,
+        "**/dist/**": true
+    },
+    "tslint.autoFixOnSave": true,
+    "editor.tabSize": 2
+}
