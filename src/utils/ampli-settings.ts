@@ -187,7 +187,7 @@ const WizardSettingsSchema = z.object({
   /** Pre-focus targets for the collapsed org/workspace/env picker (Bet 5). */
   lastUsedOrgId: z.string().optional(),
   lastUsedWorkspaceId: z.string().optional(),
-  lastUsedProjectId: z.string().optional(),
+  lastUsedAppId: z.string().optional(),
 });
 
 export type WizardSettings = z.infer<typeof WizardSettingsSchema>;
@@ -251,30 +251,30 @@ export function incrementPriorRunsCount(configPath?: string): void {
   );
 }
 
-/** Returns the last-used org/workspace/project selection triple. Each field
+/** Returns the last-used org/workspace/app selection triple. Each field
  * is individually optional — a user who has never had a workspace picked can
  * still have an orgId from an org-only run. */
 export function getLastUsedSelection(configPath?: string): {
   orgId?: string;
   workspaceId?: string;
-  projectId?: string;
+  appId?: string;
 } {
   const s = readWizardSettings(configPath);
   return {
     orgId: s.lastUsedOrgId,
     workspaceId: s.lastUsedWorkspaceId,
-    projectId: s.lastUsedProjectId,
+    appId: s.lastUsedAppId,
   };
 }
 
 /** Persist the last-used selection triple. Pass undefined to clear a level
- * (e.g. when the user selects a different org, the old workspace/project
+ * (e.g. when the user selects a different org, the old workspace/app
  * shouldn't pre-focus the picker anymore). */
 export function storeLastUsedSelection(
   selection: {
     orgId?: string;
     workspaceId?: string;
-    projectId?: string;
+    appId?: string;
   },
   configPath?: string,
 ): void {
@@ -284,7 +284,7 @@ export function storeLastUsedSelection(
       ...current,
       lastUsedOrgId: selection.orgId,
       lastUsedWorkspaceId: selection.workspaceId,
-      lastUsedProjectId: selection.projectId,
+      lastUsedAppId: selection.appId,
     },
     configPath,
   );
