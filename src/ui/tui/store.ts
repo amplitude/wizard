@@ -347,6 +347,13 @@ export class WizardStore {
     this.$session.setKey('mcpComplete', false);
     this.$session.setKey('mcpOutcome', null);
 
+    // If the wizard had already reached Outro (success, error, or cancel)
+    // the outroData short-circuits router.resolve and would block the
+    // re-auth flow. A region switch is a hard reset — clear outroData so
+    // the user lands on RegionSelect → Auth → ... for the new zone.
+    this.$session.setKey('outroData', null);
+    this.$session.setKey('runPhase', RunPhase.Idle);
+
     this.emitChange();
   }
 

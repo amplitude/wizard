@@ -333,6 +333,24 @@ describe('WizardStore', () => {
       expect(store.session.apiKeyNotice).toBeNull();
     });
 
+    it('setRegionForced clears outroData and runPhase so /region works after setup completes', () => {
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      store.session.outroData = { kind: OutroKind.Success, message: 'Done' };
+      store.setRunPhase(RunPhase.Completed);
+
+      store.setRegionForced();
+
+      expect(store.session.outroData).toBeNull();
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+    });
+
     it('setRegion persists new zone to existing ampli.json even when org/workspace are cleared', async () => {
       const store = createStore();
       // Seed ampli.json in the store's tmpdir as if from a prior SUSI
