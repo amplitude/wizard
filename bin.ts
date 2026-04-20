@@ -138,6 +138,8 @@ const buildSessionFromOptions = async (
     localMcp: options.localMcp as boolean | undefined,
     apiKey: options.apiKey as string | undefined,
     menu: options.menu as boolean | undefined,
+    signupEmail: options.email as string | undefined,
+    signupFullName: options['full-name'] as string | undefined,
     integration: options.integration as Parameters<
       typeof buildSession
     >[0]['integration'],
@@ -641,6 +643,29 @@ void yargs(hideBin(process.argv))
       default: false,
       describe: 'force human-readable output (overrides --json auto-detect)',
       type: 'boolean',
+    },
+    email: {
+      describe: 'email to use when creating a new account (requires --signup)',
+      type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+          throw new Error(`Invalid email: "${value}"`);
+        }
+        return value;
+      },
+    },
+    'full-name': {
+      describe:
+        'full name to use when creating a new account (requires --signup)',
+      type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (value.trim().length === 0) {
+          throw new Error('--full-name cannot be empty');
+        }
+        return value;
+      },
     },
   })
   .command(
