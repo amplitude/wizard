@@ -87,14 +87,14 @@ SDK selection (choose the FIRST match):
     client.track(BaseEvent(event_type="Event", user_id="user"))
 - EU data residency: pass serverZone: 'EU' (JS) or client.configuration.server_zone = 'EU' (Python)
 - Angular: initialize OUTSIDE Angular's zone: ngZone.runOutsideAngular(() => amplitude.init(API_KEY, options))
-- SvelteKit/Astro: env var prefix is PUBLIC_ (e.g. PUBLIC_AMPLITUDE_API_KEY)
 
-Env var naming by framework:
-- Next.js: NEXT_PUBLIC_AMPLITUDE_API_KEY (browser), AMPLITUDE_API_KEY (server)
-- Vite / Vue: VITE_AMPLITUDE_API_KEY
-- SvelteKit / Astro: PUBLIC_AMPLITUDE_API_KEY
-- Create React App: REACT_APP_AMPLITUDE_API_KEY
-- Node.js / Python / generic server: AMPLITUDE_API_KEY
+Env var naming (only for frameworks that use env vars — see STEP 4 exceptions):
+- Node.js / Python / Ruby / Laravel / generic server: AMPLITUDE_API_KEY
+- React Native: AMPLITUDE_API_KEY (via react-native-config)
+- Expo: AMPLITUDE_API_KEY (via expo-constants)
+- Android: amplitude_api_key in gradle.properties (accessed via BuildConfig)
+- Flutter: AMPLITUDE_API_KEY (via --dart-define)
+- Swift: AMPLITUDE_API_KEY (via ProcessInfo)
 
 Use WebFetch to load the specific SDK docs if needed for exact API details.
 
