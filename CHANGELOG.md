@@ -1,20 +1,5 @@
 # Changelog
 
-## [1.4.0](https://github.com/amplitude/wizard/compare/wizard-v1.3.0...wizard-v1.4.0) (2026-04-18)
-
-
-### Features
-
-* install Amplitude MCP into 5 more AI coding agents ([54efb42](https://github.com/amplitude/wizard/commit/54efb42fa3c6da234caebad5c2afb4b33e23eda0))
-
-
-### Bug Fixes
-
-* read options.appName instead of stale options.projectName after yargs rename ([af8a746](https://github.com/amplitude/wizard/commit/af8a746b720ca156ea5fb8356b10dda5f11e6301))
-* resolve 4 Cursor Bugbot findings on agent-mode env selection ([49822f9](https://github.com/amplitude/wizard/commit/49822f94a77f91852ce635c9484250fc3f3b6837))
-* use matched env's project ID in hydration path and accept old checkpoint key ([68a098b](https://github.com/amplitude/wizard/commit/68a098b093a56a00917b4e82f369bcd32e817c7a))
-* use url field for Gemini CLI MCP config and dedupe native-http helper ([fd7ab03](https://github.com/amplitude/wizard/commit/fd7ab03ad1dcd9e9fd62cc3b590f4155cded49a8))
-
 ## [1.3.0](https://github.com/amplitude/wizard/compare/wizard-v1.2.0...wizard-v1.3.0) (2026-04-18)
 
 
