@@ -288,21 +288,30 @@ export class WizardStore {
     const session = this.$session.get();
     const typedZone = region as 'us' | 'eu';
     void (async () => {
-      const { readAmpliConfig, writeAmpliConfig } = await import(
-        '../../lib/ampli-config.js'
-      );
-      const prior = readAmpliConfig(session.installDir);
-      if (!prior.ok) return; // no existing ampli.json — nothing to update
-      const next = { ...prior.config, Zone: typedZone };
-      if (session.selectedOrgId && session.selectedWorkspaceId) {
-        next.OrgId = session.selectedOrgId;
-        next.WorkspaceId = session.selectedWorkspaceId;
-      } else {
-        // Cleared by setRegionForced — IDs from the old zone are invalid.
-        delete next.OrgId;
-        delete next.WorkspaceId;
+      try {
+        const { readAmpliConfig, writeAmpliConfig } = await import(
+          '../../lib/ampli-config.js'
+        );
+        const prior = readAmpliConfig(session.installDir);
+        if (!prior.ok) return; // no existing ampli.json — nothing to update
+        const next = { ...prior.config, Zone: typedZone };
+        if (session.selectedOrgId && session.selectedWorkspaceId) {
+          next.OrgId = session.selectedOrgId;
+          next.WorkspaceId = session.selectedWorkspaceId;
+        } else {
+          // Cleared by setRegionForced — IDs from the old zone are invalid.
+          delete next.OrgId;
+          delete next.WorkspaceId;
+        }
+        writeAmpliConfig(session.installDir, next);
+      } catch (err) {
+        // Non-fatal: ampli.json persistence is best-effort. On read-only
+        // filesystems or permission errors we'd leave the old Zone in place
+        // and users can still complete the current session.
+        analytics.captureException(
+          err instanceof Error ? err : new Error(String(err)),
+        );
       }
-      writeAmpliConfig(session.installDir, next);
     })();
 
     this.emitChange();
