@@ -161,6 +161,9 @@ async function runAgentFallback(
   // Combine the timeout with any external abort signal.
   // AbortSignal.any() requires Node 20.3+; we support 18.17+, so we wire it manually.
   const controller = new AbortController();
+  if (externalSignal?.aborted) {
+    controller.abort();
+  }
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   const onExternalAbort = (): void => controller.abort();
   externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
@@ -227,8 +230,12 @@ export interface CallAmplitudeMcpOptions<T> {
   /**
    * The direct MCP call path. Receives a `callTool` helper bound to an open
    * session. Return `null` to trigger the agent fallback.
+   *
+   * When omitted, the MCP session handshake is skipped entirely and the agent
+   * fallback runs immediately. Use this when there is no single MCP tool that
+   * can satisfy the request and orchestration must be done by the agent.
    */
-  direct: (callTool: CallToolFn) => Promise<T | null>;
+  direct?: (callTool: CallToolFn) => Promise<T | null>;
   /** Prompt sent to the Claude agent when the direct path returns null or throws. */
   agentPrompt: string;
   /** Extract the result from the agent's collected text output. Return null if unparseable. */
@@ -271,24 +278,29 @@ export async function callAmplitudeMcp<T>(
   let directResult: T | null = null;
   let useFallback = false;
 
-  const callTool = await openMcpSession(accessToken, mcpUrl, abortSignal);
-  if (callTool) {
-    try {
-      directResult = await direct(callTool);
-      if (directResult === null) {
-        logToFile(`[${label}] direct returned null — trying agent fallback`);
+  if (direct) {
+    const callTool = await openMcpSession(accessToken, mcpUrl, abortSignal);
+    if (callTool) {
+      try {
+        directResult = await direct(callTool);
+        if (directResult === null) {
+          logToFile(`[${label}] direct returned null — trying agent fallback`);
+          useFallback = true;
+        }
+      } catch (err) {
+        logToFile(
+          `[${label}] direct threw — trying agent fallback: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
         useFallback = true;
       }
-    } catch (err) {
-      logToFile(
-        `[${label}] direct threw — trying agent fallback: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
+    } else {
+      logToFile(`[${label}] MCP session failed — trying agent fallback`);
       useFallback = true;
     }
   } else {
-    logToFile(`[${label}] MCP session failed — trying agent fallback`);
+    logToFile(`[${label}] no direct path — using agent fallback`);
     useFallback = true;
   }
 

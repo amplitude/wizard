@@ -186,11 +186,8 @@ async function runCreateDashboard(args: {
 
   const agentPrompt = buildAgentPrompt(events, session);
 
-  // Bound the ENTIRE call with an abort signal, not just the agent subprocess.
-  // callAmplitudeMcp first opens a full MCP session (two HTTP fetches with no
-  // built-in timeout) before invoking `direct`; without this hard ceiling a
-  // slow session handshake could block for minutes and defeat the point of
-  // moving dashboard work out of the agent loop.
+  // Bound the ENTIRE call with an abort signal so a slow agent fallback cannot
+  // block the wizard indefinitely.
   const controller = new AbortController();
   const abortTimer = setTimeout(() => {
     logToFile(
@@ -206,10 +203,6 @@ async function runCreateDashboard(args: {
       label: 'createDashboard',
       agentTimeoutMs: DASHBOARD_TIMEOUT_MS,
       abortSignal: controller.signal,
-      // There's no single MCP tool that plans and creates the dashboard in one
-      // shot; chart-by-chart orchestration is what the skill covers. Skip the
-      // direct path and let the agent fallback handle it.
-      direct: () => Promise.resolve(null),
       agentPrompt,
       parseAgent: parseAgentOutput,
     });
