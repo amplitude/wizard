@@ -293,6 +293,16 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
             </Box>
           )}
 
+          {session.region && (
+            <Text>
+              <Text color={Colors.body}>Region </Text>
+              <Text color={Colors.secondary}>
+                {session.region.toUpperCase()}
+              </Text>
+              <Text color={Colors.success}> {Icons.checkmark}</Text>
+            </Text>
+          )}
+
           {showContinue && (
             <Box marginTop={compact ? 0 : 1}>
               <PickerMenu
@@ -303,6 +313,15 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     value: 'framework',
                     ...(narrow ? {} : { hint: 'pick manually' }),
                   },
+                  ...(session.region
+                    ? [
+                        {
+                          label: 'Change region',
+                          value: 'region',
+                          ...(narrow ? {} : { hint: 'pick US or EU' }),
+                        },
+                      ]
+                    : []),
                   {
                     label: 'Cancel',
                     value: 'cancel',
@@ -323,6 +342,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     });
                   } else if (choice === 'framework') {
                     setPickingFramework(true);
+                  } else if (choice === 'region') {
+                    // Force RegionSelect to appear after Continue. Must
+                    // conclude the intro so the main flow advances past it
+                    // into the (now re-shown) RegionSelect screen.
+                    store.setRegionForced();
+                    store.concludeIntro();
                   } else {
                     store.concludeIntro();
                   }

@@ -63,9 +63,29 @@ Then(
 
 When('I enter the slash command {string}', function (command: string) {
   if (command === '/region') {
-    session(this).regionForced = true;
-    // Reset data state so setup re-runs once the new region is confirmed
-    session(this).projectHasData = null;
+    // Mirror WizardStore.setRegionForced() — a mid-session region change
+    // is treated as a hard auth reset so the wizard doesn't keep running
+    // with credentials or org/workspace data from the old data center.
+    const s = session(this);
+    s.regionForced = true;
+    s.credentials = null;
+    s.pendingOrgs = null;
+    s.pendingAuthIdToken = null;
+    s.pendingAuthAccessToken = null;
+    s.apiKeyNotice = null;
+    s.userEmail = null;
+    s.selectedOrgId = null;
+    s.selectedOrgName = null;
+    s.selectedWorkspaceId = null;
+    s.selectedWorkspaceName = null;
+    s.selectedEnvName = null;
+    s.selectedAppId = null;
+    s.projectHasData = null;
+    s.activationLevel = null;
+    s.activationOptionsComplete = false;
+    s.dataIngestionConfirmed = false;
+    s.mcpComplete = false;
+    s.mcpOutcome = null;
   }
   if (command === '/logout') {
     session(this).credentials = null;
