@@ -7,9 +7,9 @@ import { DEMO_MODE } from './constants.js';
  * without extra files, copying, or runtime I/O.
  */
 const WIZARD_COMMANDMENTS = [
-  'Never hallucinate an Amplitude API key, host, or any other secret. Always use the real values that have been configured for this project (for example via environment variables).',
+  'Never hallucinate an Amplitude API key, host, or any other secret. Always use the real values that have been provided for this project.',
 
-  'Never write API keys, access tokens, or other secrets directly into source code. Always reference environment variables instead, and rely on the wizard-tools MCP server (check_env_keys / set_env_values) to create or update .env files.',
+  'The Amplitude public API key is NOT a secret — inline it directly into the SDK init() / initAll() call so it takes effect immediately without a dev-server restart. Exceptions, where the SDK reads the key from the environment at build or runtime: Swift (ProcessInfo), React Native (react-native-config), Expo (expo-constants), Android (gradle.properties / BuildConfig), Flutter (--dart-define), and server-side SDKs (Node.js, Python, Ruby, Laravel). For those, use the wizard-tools MCP server (check_env_keys / set_env_values) to populate the .env / platform config instead. Never inline access tokens, secret keys, or other real secrets — those always go through environment variables.',
 
   'Always use the detect_package_manager tool from the wizard-tools MCP server to determine the package manager. Do not guess based on lockfiles or hard-code npm, yarn, pnpm, bun, pip, etc.',
 
@@ -36,7 +36,7 @@ CRITICAL — confirm_event_plan format:
 
   `Autocapture — the Amplitude feature that automatically tracks element clicks, form interactions, page/screen views, sessions, app lifecycle events, and file downloads — is commonly enabled by the wizard for web SDKs (@amplitude/unified, @amplitude/analytics-browser) but is NOT available or not on by default for every SDK (e.g. Swift requires an opt-in plugin, backend SDKs don't track element interactions at all, and an existing project may have it disabled). Before proposing events in confirm_event_plan, check the SDK init code you just wrote (or that already exists) to see whether autocapture is on and what it covers for this platform. If it IS on, do NOT propose custom events that merely duplicate its coverage — names like "[X] Clicked", "[X] Tapped", "[X] Pressed", "Form Submitted", "Form Started", "Input Changed", "Page Viewed", or "Screen Viewed" are redundant and must be excluded. Either way, prefer events for business outcomes, state changes, async success/failure, and multi-step flow milestones over raw interaction events (see skills/instrumentation/discover-event-surfaces/references/best-practices.md section R4). If autocapture is on and the project is a landing page or starter template whose only interactions are plain clicks and links, lean toward a minimal plan and let autocapture do the work — confirm_event_plan still requires at least one event, so pick the single most meaningful state change.`,
 
-  `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
+  `After all event and identity instrumentation is complete, write a file named \`.amplitude-events.json\` at the project root. Shape: a top-level JSON array — \`[ { "name": "<exact event name>", "description": "<short description>", "file": "<path where instrumented>" } ]\`. Use the key \`name\` (matching the event_type you passed to track()) — not \`event\`, \`event_type\`, or \`eventName\`. Do NOT wrap the array in an object (e.g. \`{ "events": [...] }\`); the wizard's parsers expect a top-level array. Do NOT create charts or dashboards yourself — the wizard runs a dedicated post-agent step that reads this file and creates the dashboard with bounded timeouts and progress reporting. Your job ends at instrumentation + writing this file.`,
 
   ...(DEMO_MODE
     ? [

@@ -423,9 +423,6 @@ export async function runAgentWizard(
 
   const changes = [
     ...config.ui.getOutroChanges(frameworkContext),
-    Object.keys(envVars).length > 0
-      ? `Added environment variables to .env file`
-      : '',
     uploadedEnvVars.length > 0
       ? `Uploaded environment variables to your hosting provider`
       : '',
@@ -636,16 +633,11 @@ STEP 2: Call install_skill (from the wizard-tools MCP server) with the chosen sk
 
 STEP 3: Load the installed skill's SKILL.md file to understand what references are available.
 
-STEP 4: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
+STEP 4: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Inline the Amplitude public API key (${
+    context.projectApiKey
+  }) directly into the SDK init() call — the public key is not a secret. Exception — frameworks whose SDK reads the key from the environment at build or runtime (Swift via ProcessInfo, React Native via react-native-config, Expo via expo-constants, Android via gradle.properties / BuildConfig, Flutter via --dart-define, and server-side SDKs like Node/Python/Ruby/Laravel): use the wizard-tools MCP server's set_env_values tool to populate the platform-appropriate env file instead. Never inline access tokens or real secrets.
 
-STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
-   - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
-   - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
-     config.metadata.name
-   }, which you'll find in example code. The tool will also ensure .gitignore coverage. Don't assume the presence of keys means the value is up to date. Write the correct value each time.
-   - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
-
-STEP 6: Add event tracking to this project using the instrumentation skills.
+STEP 5: Add event tracking to this project using the instrumentation skills.
    - If you enabled Amplitude Autocapture in the SDK init code during integration (typical for web SDKs, not for Swift unless the plugin was added, and not applicable to backend SDKs), the events you propose to confirm_event_plan MUST exclude anything Autocapture already covers for this platform — no "Clicked", "Tapped", "Submitted", or "Viewed" events. If Autocapture is off or unsupported, propose events normally but still favor business-outcome and state-change events over raw interaction events.
    - Call load_skill_menu with category "taxonomy" and install **amplitude-quickstart-taxonomy-agent** using install_skill. Load its SKILL.md and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
    - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
