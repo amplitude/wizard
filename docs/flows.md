@@ -6,20 +6,20 @@ The CLI keeps a persistent prompt open at all times (like Claude). Slash
 commands can be run at any point during the wizard to change settings or trigger
 actions.
 
-| Command      | Description                                                       |
-| ------------ | ----------------------------------------------------------------- |
-| `/region`    | Switch the data-center region (US or EU) — re-triggers data setup |
-| `/org`       | Switch the active org                                             |
-| `/project`   | Switch the active project                                         |
-| `/login`     | Re-authenticate                                                   |
-| `/logout`    | Clear stored credentials                                          |
-| `/whoami`    | Show current user, org, and project                               |
-| `/mcp`       | Install or remove the Amplitude MCP server                        |
-| `/slack`     | Set up Amplitude Slack integration                                |
-| `/feedback`  | Send product feedback (event `wizard: feedback submitted`)        |
-| `/test`      | Run a prompt-skill demo (confirm + choose)                        |
-| `/snake`     | Play Snake                                                        |
-| `/exit`      | Exit the wizard                                                   |
+| Command     | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| `/region`   | Switch the data-center region (US or EU) — re-triggers data setup |
+| `/org`      | Switch the active org                                             |
+| `/project`  | Switch the active project                                         |
+| `/login`    | Re-authenticate                                                   |
+| `/logout`   | Clear stored credentials                                          |
+| `/whoami`   | Show current user, org, and project                               |
+| `/mcp`      | Install or remove the Amplitude MCP server                        |
+| `/slack`    | Set up Amplitude Slack integration                                |
+| `/feedback` | Send product feedback                                             |
+| `/test`     | Run a prompt-skill demo (confirm + choose)                        |
+| `/snake`    | Play Snake                                                        |
+| `/exit`     | Exit the wizard                                                   |
 
 ---
 
@@ -43,7 +43,7 @@ flowchart TD
     CMD --> WIZARD["wizard (default)"]
     CMD --> AGENT["wizard --agent<br/>(structured JSON output for automation)"]
 
-    FEEDBACK --> FEEDBACK_SEND["Track wizard: feedback submitted via Node SDK"]
+    FEEDBACK --> FEEDBACK_SEND["Send feedback via Node SDK"]
 
     AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
     AGENT_UI --> AGENT_RUN["SDK installation agent run"]
