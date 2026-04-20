@@ -102,7 +102,7 @@ STEP 4: Install and initialise the Amplitude SDK.
 [STATUS] Installing Amplitude SDK
 If the project uses a package manager: use the detect_package_manager tool to find it, then install the appropriate SDK package as a background task and proceed immediately.
 If the project is a static site with no server-side build pipeline (e.g. Zola, Hugo, Jekyll, Eleventy): use the CDN script tag approach instead, and store the API key in the site's config file (e.g. config.toml, config.yaml, _config.yml) — that is the correct pattern for static sites, not a .env file.
-For all other projects: reference env vars for the API key — never hardcode them in source files.
+For all other projects: inline the Amplitude public API key (${projectApiKey}) directly into the SDK init() / initAll() call — the public key is not a secret. Exception: server-side SDKs (Node.js, Python, Ruby, Laravel) should use env vars for the API key instead.
 
 Add a sample tracking call demonstrating the integration.
 
@@ -168,7 +168,7 @@ Run the project's build command and check it exits cleanly:
 - Static site generators: run the site's build command (e.g. zola build, hugo, jekyll build, mkdocs build, eleventy)
 If the build fails, read the error output, fix the issue, and run it again. Repeat until the build passes or you have exhausted reasonable fixes.
 
-Important: You must read a file immediately before writing it. Always use environment variables — never hardcode the public token.
+Important: You must read a file immediately before writing it. Never inline access tokens, secret keys, or other real secrets — those always go through environment variables.
 `.trim();
     },
   },
