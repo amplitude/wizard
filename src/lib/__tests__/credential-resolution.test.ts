@@ -42,7 +42,7 @@ vi.mock('../../utils/token-refresh.js', () => ({
 
 vi.mock('../api.js', () => ({
   fetchAmplitudeUser: vi.fn(),
-  extractProjectId: vi.fn(() => 0),
+  extractAppId: vi.fn(() => 0),
 }));
 
 vi.mock('../../utils/analytics.js', () => ({

@@ -163,7 +163,7 @@ if (session.signup && session.signupEmail && session.signupFullName) {
       idToken: auth.idToken,
       projectApiKey: '',
       host: DEFAULT_HOST_URL,
-      projectId: session.projectId ?? 0,
+      appId: session.appId ?? 0,
     };
   } catch (err) {
     getUI().log.warn(
