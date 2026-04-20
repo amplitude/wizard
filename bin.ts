@@ -373,9 +373,28 @@ const resolveNonInteractiveCredentials = async (
       // reply on stdin with { orgId, workspaceId, env } or re-invoke with
       // --project-id / --env flags (which are unambiguous even when env
       // names collide across workspaces).
-      const selection = await agentUI.promptEnvironmentSelection(
-        session.pendingOrgs,
-      );
+      //
+      // If the orchestrator provides an unknown ID, promptEnvironmentSelection
+      // THROWS rather than silently picking a random env — we route that to
+      // env_selection_failed with the mismatch message in the instruction.
+      let selection: Awaited<
+        ReturnType<(typeof agentUI)['promptEnvironmentSelection']>
+      >;
+      try {
+        selection = await agentUI.promptEnvironmentSelection(
+          session.pendingOrgs,
+        );
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        agentUI.emitAuthRequired({
+          reason: 'env_selection_failed',
+          instruction:
+            `${detail} Re-run ${CLI_INVOCATION} with --project-id <id> set to ` +
+            'a value from the choices array in the last prompt event.',
+          loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
+        });
+        process.exit(ExitCode.AUTH_REQUIRED);
+      }
       const resolved = await resolveEnvironmentSelection(session, selection);
       if (!resolved) {
         agentUI.emitAuthRequired({
