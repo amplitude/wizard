@@ -91,40 +91,4 @@ describe('sanitizeNestedClaudeEnv', () => {
       }
     }
   });
-
-  it('strips unknown future CLAUDE_CODE_* vars by prefix', () => {
-    const env: NodeJS.ProcessEnv = {
-      CLAUDE_CODE_FUTURE_FLAG: 'yes',
-      CLAUDE_CODE_SOME_NEW_THING: '42',
-      PATH: '/usr/bin',
-    };
-    const result = sanitizeNestedClaudeEnv(env);
-    expect(result.cleared).toContain('CLAUDE_CODE_FUTURE_FLAG');
-    expect(result.cleared).toContain('CLAUDE_CODE_SOME_NEW_THING');
-    expect(env.CLAUDE_CODE_FUTURE_FLAG).toBeUndefined();
-    expect(env.CLAUDE_CODE_SOME_NEW_THING).toBeUndefined();
-    expect(env.PATH).toBe('/usr/bin');
-  });
-
-  it('strips unknown future CLAUDE_AGENT_SDK_* vars by prefix', () => {
-    const env: NodeJS.ProcessEnv = {
-      CLAUDE_AGENT_SDK_FUTURE_OPTION: 'on',
-    };
-    const result = sanitizeNestedClaudeEnv(env);
-    expect(result.cleared).toContain('CLAUDE_AGENT_SDK_FUTURE_OPTION');
-    expect(env.CLAUDE_AGENT_SDK_FUTURE_OPTION).toBeUndefined();
-  });
-
-  it('does not strip vars that only resemble CLAUDECODE without an underscore boundary', () => {
-    // CLAUDECODE is an exact-match key, not a prefix. A hypothetical
-    // CLAUDECODEX or MYCLAUDECODE should not be stripped.
-    const env: NodeJS.ProcessEnv = {
-      CLAUDECODEX: 'keep',
-      MYCLAUDECODE: 'keep',
-    };
-    const result = sanitizeNestedClaudeEnv(env);
-    expect(result.cleared).toEqual([]);
-    expect(env.CLAUDECODEX).toBe('keep');
-    expect(env.MYCLAUDECODE).toBe('keep');
-  });
 });

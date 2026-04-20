@@ -160,7 +160,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
-        appId: 42,
+        projectId: 42,
       };
       store.setCredentials(creds);
       expect(store.session.credentials).toEqual(creds);
@@ -267,7 +267,7 @@ describe('WizardStore', () => {
       const store = createStore();
       store.completeSetup();
       expect(wizardCaptureMock).toHaveBeenCalledWith(
-        'setup confirmed',
+        'Setup Confirmed',
         expect.any(Object),
       );
     });
@@ -278,10 +278,10 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 42,
+        projectId: 42,
       });
-      expect(wizardCaptureMock).toHaveBeenCalledWith('auth complete', {
-        'app id': 42,
+      expect(wizardCaptureMock).toHaveBeenCalledWith('Auth Complete', {
+        project_id: 42,
         region: null,
       });
     });
@@ -295,7 +295,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 42,
+        projectId: 42,
       });
       expect(analytics.setDistinctId).toHaveBeenCalledWith('ada@example.com');
       expect(analytics.identifyUser).toHaveBeenCalledWith(
@@ -303,7 +303,7 @@ describe('WizardStore', () => {
           email: 'ada@example.com',
           org_id: 'org-1',
           org_name: 'Acme',
-          app_id: 42,
+          project_id: 42,
         }),
       );
     });
@@ -314,7 +314,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 42,
+        projectId: 42,
       });
       expect(analytics.setDistinctId).not.toHaveBeenCalled();
       expect(analytics.identifyUser).not.toHaveBeenCalled();
@@ -334,7 +334,7 @@ describe('WizardStore', () => {
     it('enableFeature fires feature enabled event', () => {
       const store = createStore();
       store.enableFeature(AdditionalFeature.LLM);
-      expect(wizardCaptureMock).toHaveBeenCalledWith('feature enabled', {
+      expect(wizardCaptureMock).toHaveBeenCalledWith('Feature Enabled', {
         feature: AdditionalFeature.LLM,
       });
     });
@@ -343,10 +343,10 @@ describe('WizardStore', () => {
       const store = createStore();
       store.setMcpComplete(McpOutcome.Installed, ['Cursor', 'VS Code']);
       expect(wizardCaptureMock).toHaveBeenCalledWith(
-        'mcp complete',
+        'MCP Complete',
         expect.objectContaining({
-          'mcp outcome': McpOutcome.Installed,
-          'mcp installed clients': ['Cursor', 'VS Code'],
+          mcp_outcome: McpOutcome.Installed,
+          mcp_installed_clients: ['Cursor', 'VS Code'],
         }),
       );
     });
@@ -360,20 +360,13 @@ describe('WizardStore', () => {
     store.concludeIntro();
     // RegionSelect: set region (skips it)
     store.setRegion('us');
-    // Auth: set credentials + org/workspace/env (Auth screen isComplete
-    // requires all four: credentials and all three names)
+    // Auth: set credentials (Auth screen isComplete)
     store.setCredentials({
       accessToken: 'tok',
       projectApiKey: 'pk',
       host: 'h',
-      appId: 1,
+      projectId: 1,
     });
-    // Set org/workspace/env names directly to satisfy Auth.isComplete
-    // (it only checks names, not IDs — so we don't have to set IDs and
-    // trigger setOrgAndWorkspace's ampli.json write).
-    store.session.selectedOrgName = 'Acme';
-    store.session.selectedWorkspaceName = 'Amplitude';
-    store.setSelectedEnvName('Production');
     // DataSetup: set projectHasData (DataSetup screen isComplete)
     store.setProjectHasData(false);
   }
@@ -390,7 +383,7 @@ describe('WizardStore', () => {
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 1,
+        projectId: 1,
       });
       store.setRegion('us');
       store.setProjectHasData(false);
@@ -743,20 +736,12 @@ describe('WizardStore', () => {
       });
 
       store.pushOverlay(Overlay.Outage); // -> outage
-      // Org/workspace/env names are required for Auth.isComplete. Assign
-      // directly so subscribers only fire for the three explicit mutations
-      // this test is exercising (setCredentials, setRegion, popOverlay).
-      // Only names — IDs intentionally omitted to avoid setRegion below
-      // triggering an ampli.json write.
-      store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedEnvName = 'Production';
       store.setCredentials({
         // -> outage (overlay still on top)
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'h',
-        appId: 1,
+        projectId: 1,
       });
       store.setRegion('us'); // -> outage (overlay still on top)
       store.popOverlay(); // -> data-setup (next incomplete screen after credentials+region)
@@ -939,19 +924,12 @@ describe('WizardStore', () => {
       store.setRegion('us');
       expect(store.currentScreen).toBe(Screen.Auth);
 
-      // Step 3: Authenticate (credentials set by AuthScreen SUSI flow).
-      // Org/workspace/env are resolved as part of the SUSI flow too; set them
-      // directly (no setter) so Auth.isComplete passes without bumping the
-      // version counter this test asserts on. Only names — Auth.isComplete
-      // checks names, not IDs, and omitting IDs avoids side effects.
-      store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedEnvName = 'Production';
+      // Step 3: Authenticate (credentials set by AuthScreen SUSI flow)
       store.setCredentials({
         accessToken: 'tok',
         projectApiKey: 'pk',
         host: 'https://app.amplitude.com',
-        appId: 1,
+        projectId: 1,
       });
       expect(store.currentScreen).toBe(Screen.DataSetup);
 

@@ -129,12 +129,6 @@ The wizard persists state across four layers, each with different scope and life
 
 This repo enforces **conventional commit** PR titles and commit messages. The type prefix must be one of: `feat`, `fix`, `docs`, `test`, `ci`, `refactor`, `perf`, `chore`, `revert`. Example: `feat: add org picker to auth flow`.
 
-## Analytics conventions
-
-- **Property-key naming.** Event properties, user properties, and group-identify keys are all lowercase-with-spaces: `'org id'`, `'duration ms'`, `'error message'`, `'detected framework'`. When adding a new `wizardCapture` / `captureWizardError` call, spell multi-word keys as quoted strings — don't use TypeScript property shorthand (`{ durationMs }`) for multi-word names. Single-word keys (`integration`, `status`, `attempt`, `region`, `mode`) and Amplitude-reserved keys starting with `$` (`$app_name`, `$error`) pass through untouched.
-- **Group analytics.** Every event is automatically associated with the `'org id'` group via `setGroup()` inside `identifyUser()` (`src/utils/analytics.ts`). Do **not** re-pass `orgId` per event.
-- **Dev vs prod telemetry.** Local dev runs (`NODE_ENV=development`, set by `pnpm try` / `pnpm dev`) route telemetry to the dev Amplitude project. Prod builds use the production key. Both keys mirror the App API's ampli config and point at the main `amplitude/Amplitude` project — same one the rest of the Amplitude app writes to.
-
 ## Key conventions
 
 - **Screens are passive.** Screens observe session state and render accordingly. They do not own navigation logic — the router derives the active screen from session state.

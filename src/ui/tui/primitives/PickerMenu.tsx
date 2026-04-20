@@ -25,8 +25,6 @@ interface PickerMenuProps<T> {
   mode?: 'single' | 'multi';
   centered?: boolean;
   columns?: 1 | 2 | 3 | 4;
-  /** In multi mode, values to start selected. Ignored in single mode. */
-  defaultSelected?: T[];
   onSelect: (value: T | T[]) => void;
 }
 
@@ -36,7 +34,6 @@ export const PickerMenu = <T,>({
   mode = 'single',
   centered = false,
   columns = 1,
-  defaultSelected,
   onSelect,
 }: PickerMenuProps<T>) => {
   if (mode === 'multi') {
@@ -46,7 +43,6 @@ export const PickerMenu = <T,>({
         options={options}
         centered={centered}
         columns={columns}
-        defaultSelected={defaultSelected}
         onSelect={onSelect}
       />
     );
@@ -251,25 +247,16 @@ const MultiPickerMenu = <T,>({
   options,
   centered = false,
   columns = 1,
-  defaultSelected,
   onSelect,
 }: {
   message?: string;
   options: PickerOption<T>[];
   centered?: boolean;
   columns?: number;
-  defaultSelected?: T[];
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
-  const [selected, setSelected] = useState<Set<number>>(() => {
-    if (!defaultSelected?.length) return new Set();
-    const initial = new Set<number>();
-    options.forEach((opt, i) => {
-      if (defaultSelected.includes(opt.value)) initial.add(i);
-    });
-    return initial;
-  });
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const rows = Math.ceil(options.length / columns);
 
   useScreenInput((input, key) => {
@@ -330,21 +317,12 @@ const MultiPickerMenu = <T,>({
       });
     }
     if (key.return) {
-      // Numeric sort — default Array.prototype.sort is lexicographic and
-      // would put index 10 before index 2.
-      const values = [...selected]
-        .sort((a, b) => a - b)
-        .map((i) => options[i].value);
-      if (values.length === 0 && !defaultSelected?.length) {
-        // Nothing was ever pre-selected and user pressed Enter without
-        // toggling anything — treat that as "use the focused row" so the
-        // picker always submits something. (This was the original behavior.)
+      const values = [...selected].sort().map((i) => options[i].value);
+      if (values.length === 0) {
+        // Nothing toggled — fall back to the focused item so Enter always submits
         const focusedOpt = options[focused];
         if (focusedOpt) onSelect([focusedOpt.value]);
       } else {
-        // If the caller pre-selected items, an empty set means the user
-        // deliberately unchecked everything — pass [] so the caller can
-        // treat it as "skip" or whatever they want.
         onSelect(values);
       }
     }

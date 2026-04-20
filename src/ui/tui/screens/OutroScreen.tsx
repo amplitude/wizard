@@ -88,8 +88,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             <Text color={Colors.body}>
               {store.eventPlan.length} event
               {store.eventPlan.length !== 1 ? 's' : ''} instrumented
-              {store.session.selectedEnvName
-                ? ` in ${store.session.selectedEnvName}`
+              {store.session.selectedProjectName
+                ? ` in ${store.session.selectedProjectName}`
                 : ''}
               .
             </Text>
@@ -219,9 +219,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             ]}
             onSelect={(value) => {
               const choice = Array.isArray(value) ? value[0] : value;
-              analytics.wizardCapture('outro action', {
+              analytics.wizardCapture('Outro Action', {
                 action: choice,
-                'outro kind': outroData.kind,
+                outro_kind: outroData.kind,
               });
               if (choice === 'report') {
                 setShowReport(true);

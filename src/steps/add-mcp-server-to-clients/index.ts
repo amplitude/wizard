@@ -6,41 +6,11 @@ import { MCPClient } from './MCPClient';
 import { CursorMCPClient } from './clients/cursor';
 import { ClaudeMCPClient } from './clients/claude';
 import { ClaudeCodeMCPClient } from './clients/claude-code';
-import { ClaudeCodePluginClient } from './clients/claude-code-plugin';
 import { VisualStudioCodeClient } from './clients/visual-studio-code';
 import { ZedClient } from './clients/zed';
 import { CodexMCPClient } from './clients/codex';
-import { GeminiCLIMCPClient } from './clients/gemini-cli';
-import { WindsurfMCPClient } from './clients/windsurf';
-import { ClineMCPClient } from './clients/cline';
-import { AmpMCPClient } from './clients/amp';
-import { OpenCodeMCPClient } from './clients/opencode';
 import { ALL_FEATURE_VALUES } from './defaults';
 import { debug } from '../../utils/debug';
-
-export type ClaudeCodeInstallMode = 'plugin' | 'mcp';
-
-/**
- * When Claude Code is in the list and the caller wants plugin install,
- * replace its MCP client with the plugin client. No-op for other editors.
- *
- * Async because the plugin client has to probe `claude plugin --help` to
- * confirm the subcommand exists — older Claude Code CLIs would accept the
- * --version check but fail opaquely during marketplace add. If plugin
- * support is missing we quietly keep the raw MCP client.
- */
-export const resolveClientsForMode = async (
-  clients: MCPClient[],
-  mode: ClaudeCodeInstallMode,
-): Promise<MCPClient[]> => {
-  if (mode !== 'plugin') return clients;
-  const plugin = new ClaudeCodePluginClient();
-  const pluginSupported = await plugin.isClientSupported();
-  if (!pluginSupported) return clients;
-  return clients.map((c) =>
-    c.name === 'Claude Code' && c instanceof ClaudeCodeMCPClient ? plugin : c,
-  );
-};
 
 export const getSupportedClients = async (): Promise<MCPClient[]> => {
   const allClients = [
@@ -50,29 +20,17 @@ export const getSupportedClients = async (): Promise<MCPClient[]> => {
     new VisualStudioCodeClient(),
     new ZedClient(),
     new CodexMCPClient(),
-    new GeminiCLIMCPClient(),
-    new WindsurfMCPClient(),
-    new ClineMCPClient(),
-    new AmpMCPClient(),
-    new OpenCodeMCPClient(),
   ];
+  const supportedClients: MCPClient[] = [];
 
   debug('Checking for supported MCP clients...');
-  // Parallelize — several clients shell out (claude --version, codex --version)
-  // and a sequential loop adds up.
-  const checks = await Promise.all(
-    allClients.map(async (client) => {
-      const isSupported = await client.isClientSupported();
-      debug(
-        `${client.name}: ${isSupported ? '✓ supported' : '✗ not supported'}`,
-      );
-      return { client, isSupported };
-    }),
-  );
-  // Preserve the declared order so the "Found:" list is stable.
-  const supportedClients = checks
-    .filter((c) => c.isSupported)
-    .map((c) => c.client);
+  for (const client of allClients) {
+    const isSupported = await client.isClientSupported();
+    debug(`${client.name}: ${isSupported ? '✓ supported' : '✗ not supported'}`);
+    if (isSupported) {
+      supportedClients.push(client);
+    }
+  }
   debug(
     `Found ${supportedClients.length} supported client(s): ${supportedClients
       .map((c) => c.name)
@@ -90,12 +48,10 @@ export const addMCPServerToClientsStep = async ({
   integration,
   local = false,
   ci = false,
-  claudeCodeMode,
 }: {
   integration?: Integration;
   local?: boolean;
   ci?: boolean;
-  claudeCodeMode?: ClaudeCodeInstallMode;
 }): Promise<string[]> => {
   const ui = getUI();
 
@@ -114,17 +70,10 @@ export const addMCPServerToClientsStep = async ({
     return [];
   }
 
-  // Default 'mcp' for the non-interactive entry point — this fallback runs
-  // when the TUI isn't available, so the user never saw the plugin picker.
-  // Silently installing the plugin would surprise them. `--local-mcp` also
-  // forces MCP mode (the plugin hardcodes the prod URL).
-  const mode: ClaudeCodeInstallMode = local ? 'mcp' : claudeCodeMode ?? 'mcp';
-  const clientsToInstall = await resolveClientsForMode(supportedClients, mode);
-
   // Auto-install to all supported clients
   await traceStep('adding mcp servers', async () => {
     await addMCPServer(
-      clientsToInstall,
+      supportedClients,
       undefined,
       [...ALL_FEATURE_VALUES],
       local,
@@ -136,7 +85,7 @@ export const addMCPServerToClientsStep = async ({
   ${supportedClients.map((c) => `- ${c.name}`).join('\n  ')} `,
   );
 
-  analytics.wizardCapture('mcp servers added', {
+  analytics.wizardCapture('MCP Servers Added', {
     clients: supportedClients.map((c) => c.name),
     integration,
   });
@@ -153,7 +102,7 @@ export const removeMCPServerFromClientsStep = async ({
 }): Promise<string[]> => {
   const installedClients = await getInstalledClients(local);
   if (installedClients.length === 0) {
-    analytics.wizardCapture('mcp no servers to remove', {
+    analytics.wizardCapture('MCP No Servers To Remove', {
       integration,
     });
     return [];
@@ -165,7 +114,7 @@ export const removeMCPServerFromClientsStep = async ({
     return installedClients.map((c) => c.name);
   });
 
-  analytics.wizardCapture('mcp servers removed', {
+  analytics.wizardCapture('MCP Servers Removed', {
     clients: results,
     integration,
   });
@@ -180,24 +129,6 @@ export const getInstalledClients = async (
   const installedClients: MCPClient[] = [];
 
   for (const client of clients) {
-    // Claude Code can be installed two different ways — bare MCP entry
-    // (ClaudeCodeMCPClient) or the Amplitude plugin (ClaudeCodePluginClient).
-    // Detection-time only creates ClaudeCodeMCPClient, so probe for a plugin
-    // install separately and substitute the plugin client when appropriate.
-    // Without this, `wizard mcp remove` can never uninstall the plugin.
-    //
-    // Skip the plugin probe when --local is set — the plugin only ever
-    // registers the production MCP, so a `remove --local` must target the
-    // bare ClaudeCodeMCPClient (which is the only path that knows about
-    // `amplitude-local`). Otherwise we'd uninstall the prod plugin in
-    // response to a local-scoped remove request.
-    if (!local && client instanceof ClaudeCodeMCPClient) {
-      const plugin = new ClaudeCodePluginClient();
-      if (await plugin.isServerInstalled()) {
-        installedClients.push(plugin);
-        continue;
-      }
-    }
     if (await client.isServerInstalled(local)) {
       installedClients.push(client);
     }

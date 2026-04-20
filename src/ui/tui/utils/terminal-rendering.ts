@@ -25,48 +25,6 @@ export function makeLink(text: string, url: string): string {
   });
 }
 
-// Markdown link: [label](url) — label is any non-bracket run, url is non-space
-// non-paren. Used before the bare-URL pass so we don't double-wrap.
-const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
-
-// Bare http(s) URL. Stops at whitespace, quotes, brackets, parens, and the
-// NUL placeholder sentinel used by the markdown pass so we don't swallow
-// JSON/markdown artifacts or already-linkified placeholders. Trailing
-// punctuation is stripped after the match so links at end of a sentence
-// still work.
-const BARE_URL_RE = /https?:\/\/[^\s"'<>()[\]{}\0]+/g;
-const TRAILING_PUNCT_RE = /[.,;:!?)>\]]+$/;
-
-/**
- * Replace `[label](url)` markdown links and bare `http(s)://…` URLs with OSC 8
- * clickable hyperlinks. Safe to call on plain strings — returns the input
- * unchanged if no URLs are present. Already-wrapped markdown links are handled
- * in the first pass so the bare-URL pass does not double-wrap their targets.
- */
-export function linkify(text: string): string {
-  const placeholder = '\u0000LINKIFIED\u0000';
-  const wrapped: string[] = [];
-
-  const afterMarkdown = text.replace(
-    MARKDOWN_LINK_RE,
-    (_match: string, label: string, url: string) => {
-      wrapped.push(makeLink(label, url));
-      return `${placeholder}${wrapped.length - 1}${placeholder}`;
-    },
-  );
-
-  const afterBare = afterMarkdown.replace(BARE_URL_RE, (url: string) => {
-    const trailing = url.match(TRAILING_PUNCT_RE)?.[0] ?? '';
-    const cleanUrl = trailing ? url.slice(0, -trailing.length) : url;
-    return makeLink(cleanUrl, cleanUrl) + trailing;
-  });
-
-  return afterBare.replace(
-    new RegExp(`${placeholder}(\\d+)${placeholder}`, 'g'),
-    (_match: string, idx: string) => wrapped[Number(idx)],
-  );
-}
-
 // ── Brand gradient ─────────────────────────────────────────────────────
 
 const brandGrad = gradient([Brand.blue, Brand.lilac, Brand.violet]);

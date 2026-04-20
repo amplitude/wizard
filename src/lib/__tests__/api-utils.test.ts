@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractAppId } from '../api';
+import { extractProjectId } from '../api';
 import type { AmplitudeWorkspace } from '../api';
 
 function makeWorkspace(
@@ -19,22 +19,22 @@ function makeWorkspace(
   };
 }
 
-describe('extractAppId', () => {
+describe('extractProjectId', () => {
   it('returns the app ID from the lowest-rank environment', () => {
     const ws = makeWorkspace([
-      { rank: 2, appId: 'app-high' },
-      { rank: 1, appId: 'app-low' },
-      { rank: 3, appId: 'app-higher' },
+      { rank: 2, appId: 'proj-high' },
+      { rank: 1, appId: 'proj-low' },
+      { rank: 3, appId: 'proj-higher' },
     ]);
-    expect(extractAppId(ws)).toBe('app-low');
+    expect(extractProjectId(ws)).toBe('proj-low');
   });
 
   it('skips environments where app is null', () => {
     const ws = makeWorkspace([
       { rank: 1, appId: null },
-      { rank: 2, appId: 'app-2' },
+      { rank: 2, appId: 'proj-2' },
     ]);
-    expect(extractAppId(ws)).toBe('app-2');
+    expect(extractProjectId(ws)).toBe('proj-2');
   });
 
   it('returns null when all environments have null app', () => {
@@ -42,24 +42,24 @@ describe('extractAppId', () => {
       { rank: 1, appId: null },
       { rank: 2, appId: null },
     ]);
-    expect(extractAppId(ws)).toBeNull();
+    expect(extractProjectId(ws)).toBeNull();
   });
 
   it('returns null when environments array is empty', () => {
-    expect(extractAppId(makeWorkspace([]))).toBeNull();
+    expect(extractProjectId(makeWorkspace([]))).toBeNull();
   });
 
   it('returns null when environments is null', () => {
-    expect(extractAppId(makeWorkspace(null))).toBeNull();
+    expect(extractProjectId(makeWorkspace(null))).toBeNull();
   });
 
   it('returns null when environments is undefined', () => {
-    expect(extractAppId(makeWorkspace(undefined))).toBeNull();
+    expect(extractProjectId(makeWorkspace(undefined))).toBeNull();
   });
 
   it('returns the only environment when there is one', () => {
-    const ws = makeWorkspace([{ rank: 5, appId: 'only-app' }]);
-    expect(extractAppId(ws)).toBe('only-app');
+    const ws = makeWorkspace([{ rank: 5, appId: 'only-proj' }]);
+    expect(extractProjectId(ws)).toBe('only-proj');
   });
 
   it('does not mutate the original environments array', () => {
@@ -68,7 +68,7 @@ describe('extractAppId', () => {
       { name: 'b', rank: 1, app: { id: 'y' } },
     ];
     const ws: AmplitudeWorkspace = { id: 'w', name: 'W', environments: envs };
-    extractAppId(ws);
+    extractProjectId(ws);
     expect(envs[0].rank).toBe(3);
     expect(envs[1].rank).toBe(1);
   });

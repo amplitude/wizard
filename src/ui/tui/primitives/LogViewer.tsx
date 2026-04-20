@@ -12,7 +12,6 @@ import { Colors } from '../styles.js';
 import { useState, useEffect } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
-import { linkify } from '../utils/terminal-rendering.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + spacer + separator + input + tab bar chrome */
 const CHROME_ROWS = 8;
@@ -93,7 +92,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
     <Box flexDirection="column" height={visibleLines}>
       {coloredLines.map(({ line, color }, i) => (
         <Text key={i} color={color} wrap="truncate">
-          {linkify(line)}
+          {line}
         </Text>
       ))}
     </Box>

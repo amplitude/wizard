@@ -40,20 +40,8 @@ function mockCredentials() {
     idToken: 'test-id-token',
     projectApiKey: 'test-api-key',
     host: 'https://api.amplitude.com',
-    appId: 12345,
+    projectId: 12345,
   };
-}
-
-/**
- * Apply a complete authenticated state to a session: credentials plus org
- * and workspace names (the two required by Auth.isComplete). Env name is
- * set too — it's optional for Auth but realistic for a fully-resolved flow.
- */
-function applyAuthComplete(s: WizardSession) {
-  s.credentials = mockCredentials();
-  s.selectedOrgName = 'Acme';
-  s.selectedWorkspaceName = 'Amplitude';
-  s.selectedEnvName = 'Production';
 }
 
 // ── Model + Real system ──────────────────────────────────────────────
@@ -108,7 +96,7 @@ class SetCredentialsCommand implements fc.Command<Model, Real> {
   }
   run(model: Model, real: Real) {
     model.mutations.push('credentials=mock');
-    applyAuthComplete(real.session);
+    real.session.credentials = mockCredentials();
   }
 }
 
@@ -360,7 +348,7 @@ describe('WizardRouter happy path transitions', () => {
       mutate: (s: WizardSession) => {
         s.introConcluded = true;
         s.region = 'us';
-        applyAuthComplete(s);
+        s.credentials = mockCredentials();
       },
       expected: Screen.DataSetup,
     },
@@ -369,7 +357,7 @@ describe('WizardRouter happy path transitions', () => {
       mutate: (s: WizardSession) => {
         s.introConcluded = true;
         s.region = 'us';
-        applyAuthComplete(s);
+        s.credentials = mockCredentials();
         s.projectHasData = false;
         s.activationLevel = 'none';
       },
@@ -380,7 +368,7 @@ describe('WizardRouter happy path transitions', () => {
       mutate: (s: WizardSession) => {
         s.introConcluded = true;
         s.region = 'us';
-        applyAuthComplete(s);
+        s.credentials = mockCredentials();
         s.projectHasData = false;
         s.activationLevel = 'none';
         s.runPhase = RunPhase.Completed;
@@ -392,7 +380,7 @@ describe('WizardRouter happy path transitions', () => {
       mutate: (s: WizardSession) => {
         s.introConcluded = true;
         s.region = 'us';
-        applyAuthComplete(s);
+        s.credentials = mockCredentials();
         s.projectHasData = false;
         s.activationLevel = 'none';
         s.runPhase = RunPhase.Completed;
@@ -405,7 +393,7 @@ describe('WizardRouter happy path transitions', () => {
       mutate: (s: WizardSession) => {
         s.introConcluded = true;
         s.region = 'us';
-        applyAuthComplete(s);
+        s.credentials = mockCredentials();
         s.projectHasData = false;
         s.activationLevel = 'none';
         s.runPhase = RunPhase.Completed;
@@ -419,7 +407,7 @@ describe('WizardRouter happy path transitions', () => {
       mutate: (s: WizardSession) => {
         s.introConcluded = true;
         s.region = 'us';
-        applyAuthComplete(s);
+        s.credentials = mockCredentials();
         s.projectHasData = false;
         s.activationLevel = 'none';
         s.runPhase = RunPhase.Completed;
@@ -446,7 +434,7 @@ describe('WizardRouter complete happy path', () => {
 
     session.introConcluded = true;
     session.region = 'us';
-    applyAuthComplete(session);
+    session.credentials = mockCredentials();
     session.projectHasData = false;
     session.activationLevel = 'none';
     session.runPhase = RunPhase.Completed;
@@ -464,7 +452,7 @@ describe('WizardRouter complete happy path', () => {
 
     session.introConcluded = true;
     session.region = 'us';
-    applyAuthComplete(session);
+    session.credentials = mockCredentials();
     session.projectHasData = false;
     session.activationLevel = 'none';
     session.runPhase = RunPhase.Error;
@@ -479,7 +467,7 @@ describe('WizardRouter complete happy path', () => {
 
     session.introConcluded = true;
     session.region = 'us';
-    applyAuthComplete(session);
+    session.credentials = mockCredentials();
     session.projectHasData = true;
     session.activationLevel = 'full';
     // Run is skipped for full activation
@@ -577,7 +565,7 @@ describe('WizardRouter error phase routing', () => {
     // Auth is hidden on error, DataSetup is next
     // projectHasData null means DataSetup shows but isn't complete
     // Let's complete everything up to the error-skipped screens
-    applyAuthComplete(session);
+    session.credentials = mockCredentials();
     session.projectHasData = false;
     session.activationLevel = 'none';
 

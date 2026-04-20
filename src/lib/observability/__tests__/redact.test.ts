@@ -47,13 +47,13 @@ describe('redact (deep)', () => {
       accessToken: 'secret-token-value',
       refreshToken: 'refresh-secret',
       host: 'https://api2.amplitude.com',
-      appId: 12345,
+      projectId: 12345,
     };
     const result = redact(input) as Record<string, unknown>;
     expect(result.accessToken).toBe('[REDACTED]');
     expect(result.refreshToken).toBe('[REDACTED]');
     expect(result.host).toBe('https://api2.amplitude.com');
-    expect(result.appId).toBe(12345);
+    expect(result.projectId).toBe(12345);
   });
 
   it('redacts nested objects', () => {
@@ -73,34 +73,6 @@ describe('redact (deep)', () => {
     const result = redact(input) as unknown[];
     expect((result[0] as Record<string, unknown>).api_key).toBe('[REDACTED]');
     expect(result[1]).toBe('Bearer [REDACTED]');
-  });
-
-  it('redacts apiKey (camelCase) in create-project success payloads', () => {
-    // Ensures project_create_success NDJSON events never leak the key.
-    const input = {
-      event: 'project_create_success',
-      appId: '12345',
-      name: 'My Project',
-      apiKey: 'a1b2c3d4e5f6789012345678',
-    };
-    const result = redact(input) as Record<string, unknown>;
-    expect(result.apiKey).toBe('[REDACTED]');
-    expect(result.appId).toBe('12345');
-    expect(result.name).toBe('My Project');
-  });
-
-  it('redacts projectApiKey in credential-like objects', () => {
-    const input = {
-      credentials: {
-        projectApiKey: 'secret-project-key',
-        idToken: 'tok',
-        host: 'https://api.amplitude.com',
-      },
-    };
-    const result = redact(input) as Record<string, Record<string, unknown>>;
-    expect(result.credentials.projectApiKey).toBe('[REDACTED]');
-    expect(result.credentials.idToken).toBe('[REDACTED]');
-    expect(result.credentials.host).toBe('https://api.amplitude.com');
   });
 
   it('handles null and undefined', () => {

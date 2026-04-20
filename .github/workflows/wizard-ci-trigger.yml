@@ -2,7 +2,7 @@ name: Wizard CI Trigger
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -22,7 +22,9 @@ jobs:
   # POST WELCOME: First-time hint with all available apps
   # ============================================================================
   post-welcome:
-    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    if: |
+      (github.event_name == 'pull_request' && github.event.action == 'opened') ||
+      github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Fetch available apps from wizard-workbench
@@ -197,3 +199,116 @@ jobs:
             });
 
             console.log(`Triggered wizard-ci for app: ${app}`);
+
+  # ============================================================================
+  # AUTO-TRIGGER: Fire wizard-ci automatically when framework-related files
+  # change. Runs on PR open + new pushes. Complements the manual /wizard-ci
+  # comment workflow (both can fire independently).
+  # ============================================================================
+  auto-trigger-on-framework-changes:
+    if: |
+      github.event_name == 'pull_request' &&
+      (github.event.action == 'opened' || github.event.action == 'synchronize')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Need full history so we can diff against the PR base.
+          fetch-depth: 0
+
+      - name: Detect framework-related file changes
+        id: detect
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          # Diff only the files changed in this PR.
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" || true)
+          echo "--- changed files ---"
+          echo "$CHANGED"
+          echo "---------------------"
+
+          MATCHED=false
+          while IFS= read -r file; do
+            case "$file" in
+              src/frameworks/*|\
+              skills/integration/*|\
+              src/lib/agent-runner.ts|\
+              src/lib/framework-config.ts|\
+              src/lib/registry.ts)
+                MATCHED=true
+                break
+                ;;
+            esac
+          done <<< "$CHANGED"
+
+          echo "matched=$MATCHED" >> "$GITHUB_OUTPUT"
+          if [ "$MATCHED" = "true" ]; then
+            echo "Framework-related files changed — will auto-trigger wizard-ci"
+          else
+            echo "No framework-related files changed — skipping auto-trigger"
+          fi
+
+      - name: Auto-trigger wizard-ci and post comment
+        if: steps.detect.outputs.matched == 'true'
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          github-token: ${{ secrets.WIZARD_WORKBENCH_TOKEN }}
+          script: |
+            const pr = context.payload.pull_request;
+
+            // Only auto-trigger on open PRs (including drafts).
+            if (pr.state !== 'open') {
+              console.log(`PR is ${pr.state}, skipping auto-trigger`);
+              return;
+            }
+
+            // Dispatch the workbench workflow — mirrors handle-command
+            // payload but uses app='all' as the default for an auto-run. Wrapped in
+            // try/catch so token permission issues don't block the PR — the
+            // comment-based /wizard-ci flow still works as a fallback.
+            try {
+              await github.rest.repos.createDispatchEvent({
+                owner: 'Amplitude',
+                repo: 'wizard-workbench',
+                event_type: 'wizard-ci-trigger',
+                client_payload: {
+                  app: 'all',
+                  source: 'wizard-pr-auto',
+                  source_repo: 'wizard',
+                  source_pr_number: pr.number,
+                  source_pr_url: pr.html_url,
+                  wizard_ref: pr.head.ref,
+                  notify_slack: 'false',
+                  notify_pr: 'true'
+                }
+              });
+              console.log(`Auto-triggered wizard-ci for PR #${pr.number} (app: all)`);
+            } catch (err) {
+              console.warn(`Auto-trigger failed (falling back to /wizard-ci comment flow): ${err.message}`);
+              return;
+            }
+
+            // Only post the explanatory comment on 'opened' — on 'synchronize'
+            // the PR already has a post-welcome comment and we don't want to
+            // spam every push.
+            if (context.payload.action !== 'opened') {
+              return;
+            }
+
+            const body = [
+              '## 🧙 Wizard CI — auto-triggered',
+              '',
+              'This PR modifies framework-related files, so `wizard-ci` was automatically dispatched against **all** workbench apps.',
+              '',
+              'Results will be posted here when complete. You can also re-run manually at any time with `/wizard-ci <app>`.'
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body
+            });

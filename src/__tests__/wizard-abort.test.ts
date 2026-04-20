@@ -86,14 +86,14 @@ describe('wizardAbort', () => {
   it('includes WizardError context in analytics capture', async () => {
     const error = new WizardError('MCP missing', {
       integration: 'nextjs',
-      'error type': 'MCP_MISSING',
+      error_type: 'MCP_MISSING',
     });
 
     await expect(wizardAbort({ error })).rejects.toThrow('process.exit called');
 
     expect(mockAnalytics.captureException).toHaveBeenCalledWith(error, {
       integration: 'nextjs',
-      'error type': 'MCP_MISSING',
+      error_type: 'MCP_MISSING',
     });
   });
 

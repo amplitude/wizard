@@ -190,27 +190,19 @@ Both use a 5000ms timeout (`src/lib/health-checks/endpoints.ts`):
 
 ## Telemetry
 
-The wizard reports its own usage analytics to the main `amplitude/Amplitude` project — the same project the rest of the Amplitude app writes to.
+The wizard reports its own usage analytics to an internal Amplitude project.
 
 | Setting | Value |
 |---------|-------|
 | SDK | `@amplitude/analytics-node` |
 | Server URL | `https://api2.amplitude.com/2/httpapi` (configurable via `AMPLITUDE_SERVER_URL`) |
-| Dev API Key | `ce58b28cace35f7df0eb241b0cd72044` (auto-selected when `NODE_ENV=development` or `test`) |
-| Prod API Key | `e5a2c9bdffe949f7da77e6b481e118fa` (default) |
-| Override | Set `AMPLITUDE_API_KEY` to override either default |
+| Default API Key | `e5a2c9bdffe949f7da77e6b481e118fa` (configurable via `AMPLITUDE_API_KEY`) |
 
-Both keys mirror Lightning's ampli config (`packages/instrumentation/src/lightning/{agents,wormhole}/src/ampli/index.ts` in `amplitude/javascript`). Local contributor builds invoked via `pnpm try` / `pnpm dev` automatically set `NODE_ENV=development` so they route to the dev project instead of flooding prod. Contributors who `pnpm link --global` and invoke `amplitude-wizard` directly (outside the `pnpm dev` script) need to `export NODE_ENV=development` themselves to hit dev.
+**Event namespace:** All events prefixed with `wizard: ` (e.g., `wizard: Session Ended`, `wizard: feedback submitted`, `wizard: error encountered`).
 
-**Event namespace:** All events prefixed with `wizard cli: ` (e.g., `wizard cli: Session Ended`, `wizard cli: feedback submitted`, `wizard cli: error encountered`).
+**Session properties (full):** `integration`, `detected_framework`, `typescript`, `project_id`, `discovered_features`, `additional_features`, `run_phase`.
 
-**Property-key convention:** All event-property, user-property, and group-identify keys are lowercase with spaces (`'org id'`, `'duration ms'`, `'error message'`). Keys starting with `$` (`$app_name`, `$error`) are Amplitude-reserved and stay untouched.
-
-**Session properties (full):** `integration`, `detected framework`, `typescript`, `project id`, `discovered features`, `additional features`, `run phase`.
-
-**Session properties (compact, for high-volume events):** `integration`, `detected framework`, `run phase`, `project id`.
-
-**Group analytics:** Every event is automatically associated with the `'org id'` group via `setGroup()` inside `identifyUser()`. Do not re-pass `orgId` per event.
+**Session properties (compact, for high-volume events):** `integration`, `detected_framework`, `run_phase`, `project_id`.
 
 **Opt-out:** Controlled by the `FLAG_AGENT_ANALYTICS` feature flag.
 
@@ -367,10 +359,10 @@ npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NODE_ENV` | — | `test`/`development` switches URLs to localhost and routes telemetry to the dev Amplitude project |
+| `NODE_ENV` | — | `test`/`development` switches URLs to localhost |
 | `OAUTH_HOST` | Zone-specific | Override OAuth host |
 | `OAUTH_CLIENT_ID` | Zone-specific | Override OAuth client ID |
-| `AMPLITUDE_API_KEY` | dev: `ce58b28cace35f7df0eb241b0cd72044` / prod: `e5a2c9bdffe949f7da77e6b481e118fa` | Telemetry project API key (auto-selected by `NODE_ENV`) |
+| `AMPLITUDE_API_KEY` | `e5a2c9bdffe949f7da77e6b481e118fa` | Telemetry project API key |
 | `AMPLITUDE_SERVER_URL` | `https://api2.amplitude.com` | Telemetry server URL |
 | `DEMO_MODE_WIZARD` | — | When `1`, limits agent to 5 events for demo runs |
 | `CI` | — | Non-interactive mode detection; also set to `1` when invoking Vercel CLI |

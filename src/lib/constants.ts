@@ -4,7 +4,7 @@
 
 // Kept in sync by release-please (x-release-please-version marker).
 // The prebuild script (sync-version.mjs) acts as a safety net.
-const VERSION = '1.4.0'; // x-release-please-version
+const VERSION = '1.2.0'; // x-release-please-version
 
 // ── Integration / CLI ───────────────────────────────────────────────
 
@@ -51,11 +51,6 @@ export const DEBUG = false;
 
 /** When set, limits the agent to at most 5 events for faster demo runs. */
 export const DEMO_MODE = process.env.DEMO_MODE_WIZARD === '1';
-
-/** Amplitude Claude Code plugin identifiers. */
-export const CLAUDE_PLUGIN_MARKETPLACE_NAME = 'amplitude';
-export const CLAUDE_PLUGIN_MARKETPLACE_REPO = 'amplitude/mcp-marketplace';
-export const CLAUDE_PLUGIN_ID = 'amplitude';
 
 // ── URLs ─────────────────────────────────────────────────────────────
 
@@ -158,15 +153,6 @@ export const OUTBOUND_URLS = {
     return `${base}/analytics/settings/profile`;
   },
 
-  /** Projects settings — opened when the user wants to create a new project. */
-  projectsSettings: (zone: AmplitudeZone, orgId?: string | null): string => {
-    const base = OUTBOUND_URLS.app[zone];
-    if (orgId) {
-      return `${base}/analytics/org/${orgId}/settings/projects`;
-    }
-    return `${base}/analytics/settings/projects`;
-  },
-
   /** Products page — shown in the Outro for sign-up users. */
   products: (zone: AmplitudeZone): string =>
     `${OUTBOUND_URLS.overview[zone]}/products?source=wizard`,
@@ -175,13 +161,6 @@ export const OUTBOUND_URLS = {
 
   /** SDK overview — opened from the Activation Options screen. */
   sdkDocs: 'https://amplitude.com/docs/sdks',
-
-  /** Amplitude MCP docs — shown after a successful raw MCP install. */
-  mcpDocs: 'https://amplitude.com/docs/amplitude-ai/amplitude-mcp',
-
-  /** Claude Code plugin docs (deep-link into the MCP doc) — shown after plugin install. */
-  claudePluginDocs:
-    'https://amplitude.com/docs/amplitude-ai/amplitude-mcp#plugins',
 
   /** Per-framework SDK docs — referenced in agent prompts and post-run links. */
   frameworkDocs: {

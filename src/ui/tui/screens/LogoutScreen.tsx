@@ -12,7 +12,6 @@ import { Colors } from '../styles.js';
 import { clearStoredCredentials } from '../../../utils/ampli-settings.js';
 import { clearApiKey } from '../../../utils/api-key-store.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
-import { clearAuthFieldsInAmpliConfig } from '../../../lib/ampli-config.js';
 
 interface LogoutScreenProps {
   onComplete: () => void;
@@ -45,9 +44,6 @@ export const LogoutScreen = ({
     clearStoredCredentials();
     clearApiKey(installDir);
     clearCheckpoint(installDir);
-    // Strip OrgId/WorkspaceId/Zone from ampli.json so the next login shows
-    // the org + workspace pickers instead of silently reusing stale IDs.
-    clearAuthFieldsInAmpliConfig(installDir);
     onLoggedOut?.();
     setPhase(Phase.Done);
     // Exit after a short delay so the user sees the confirmation

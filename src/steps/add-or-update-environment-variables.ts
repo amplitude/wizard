@@ -220,7 +220,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
       }
     }
 
-    analytics.wizardCapture('environment variables added', {
+    analytics.wizardCapture('Environment Variables Added', {
       integration,
     });
 

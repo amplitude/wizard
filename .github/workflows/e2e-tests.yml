@@ -1,0 +1,95 @@
+name: 'E2E Tests'
+
+# Runs the framework end-to-end tests in a matrix so each framework fails
+# independently. These tests build the wizard from source, spawn `dist/bin.js`
+# against the fixture apps in `e2e-tests/test-applications`, and replay
+# recorded LLM fixtures from `e2e-tests/fixtures`.
+#
+# The e2e-tests directory is its own pnpm workspace (see the root
+# `pnpm-workspace.yaml` which excludes `e2e-tests/**`), so we run
+# `pnpm install` twice: once at the repo root (so src/ deps like msw, ink,
+# and the Amplitude SDKs resolve) and once inside `e2e-tests/` (so jest and
+# ts-jest resolve).
+
+on:
+  push:
+    branches:
+      - main
+      - release/**
+  pull_request:
+  workflow_dispatch:
+
+# Cancel in-flight runs when a PR is updated — e2e tests are slow and there's
+# no value in keeping old runs going.
+concurrency:
+  group: e2e-tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-js:
+    name: E2E (${{ matrix.framework.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        framework:
+          # Agent-mode framework detection smoke tests. Each spawns the wizard
+          # with `--agent --api-key <test>`, asserts pre-LLM events (intro,
+          # setDetectedFramework), and tolerates LLM gateway failures since
+          # no fixtures are recorded yet.
+          - name: vue
+            filter: Vue
+          - name: react-router
+            filter: React Router
+          - name: javascript-web
+            filter: JavaScript \(Web\)
+          - name: javascript-node
+            filter: JavaScript \(Node\)
+          # Validates the --agent NDJSON envelope contract itself.
+          - name: agent-mode
+            filter: agent mode
+          # NOTE: nextjs-app-router and react-vite are NOT in this matrix.
+          # Those tests use TUI mode and hang on OAuth in CI (no
+          # pre-authenticated session available). Enabling them requires
+          # either a CI test credential or a refactor to use agent mode
+          # with recorded fixtures — tracked as follow-up work.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2
+        with:
+          version: 10.23.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: 'package.json'
+          cache: 'pnpm'
+
+      # Root install brings in msw, react, ink and the wizard's own runtime
+      # deps that the tests reach via `../../src/...` imports.
+      - name: Install root dependencies
+        run: pnpm install --frozen-lockfile
+
+      # e2e-tests is its own workspace (excluded from the root workspace).
+      # Jest, ts-jest, @types/jest, and dotenv live here.
+      - name: Install e2e-tests dependencies
+        working-directory: e2e-tests
+        run: pnpm install --frozen-lockfile
+
+      # Build the wizard — the e2e tests spawn `dist/bin.js` directly.
+      - name: Build wizard
+        run: pnpm build
+
+      - name: Run e2e test — ${{ matrix.framework.name }}
+        run: ./e2e-tests/run.sh "${{ matrix.framework.filter }}"
+        env:
+          # Never record fixtures in CI — fail loudly if one is missing.
+          RECORD_FIXTURES: 'false'
+          # Only cleanup unused fixtures when running the full suite.
+          CLEANUP_UNUSED_FIXTURES: 'false'

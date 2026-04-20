@@ -25,11 +25,8 @@ Before(function () {
     accessToken: 'tok',
     projectApiKey: 'key',
     host: 'https://api.amplitude.com',
-    appId: 0,
+    projectId: 0,
   };
-  session.selectedOrgName = 'Test Org';
-  session.selectedWorkspaceName = 'Default';
-  session.selectedEnvName = 'Default';
   session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;

@@ -48,7 +48,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
     ci: session.ci,
     menu: session.menu,
     benchmark: session.benchmark,
-    appId: session.appId,
+    projectId: session.projectId,
     apiKey: session.apiKey,
   };
 }
@@ -157,7 +157,7 @@ export async function runAgentWizard(
     );
   }
 
-  analytics.wizardCapture('agent started', {
+  analytics.wizardCapture('Agent Started', {
     integration: config.metadata.integration,
   });
 
@@ -168,7 +168,7 @@ export async function runAgentWizard(
       signup: session.signup,
       ci: session.ci,
       apiKey: session.apiKey,
-      appId: session.appId,
+      projectId: session.projectId,
       installDir: session.installDir,
     });
 
@@ -176,16 +176,9 @@ export async function runAgentWizard(
       accessToken: authResult.accessToken,
       projectApiKey: authResult.projectApiKey,
       host: authResult.host,
-      appId: authResult.appId,
+      projectId: authResult.projectId,
     };
-    getUI().setCredentials({
-      ...session.credentials,
-      orgId: session.selectedOrgId,
-      orgName: session.selectedOrgName,
-      workspaceId: session.selectedWorkspaceId,
-      workspaceName: session.selectedWorkspaceName,
-      envName: session.selectedEnvName,
-    });
+    getUI().setCredentials(session.credentials);
     getUI().setRegion(authResult.cloudRegion);
     getUI().setProjectHasData(false);
   }
@@ -194,7 +187,7 @@ export async function runAgentWizard(
     accessToken: rawAccessToken,
     projectApiKey,
     host,
-    appId,
+    projectId,
   } = session.credentials;
   // The TUI's AuthScreen may have stored the id_token instead of the
   // OAuth access token (the field names were swapped historically).
@@ -255,7 +248,7 @@ export async function runAgentWizard(
       typescript: typeScriptDetected,
       projectApiKey,
       host,
-      appId,
+      projectId,
     },
     frameworkContext,
     skipAmplitudeMcp,
@@ -341,7 +334,7 @@ export async function runAgentWizard(
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {
         integration: config.metadata.integration,
-        'error type': AgentErrorType.AUTH_ERROR,
+        error_type: AgentErrorType.AUTH_ERROR,
       }),
     });
   }
@@ -351,7 +344,7 @@ export async function runAgentWizard(
       message: `Could not access the Amplitude MCP server\n\nThe wizard was unable to connect to the Amplitude MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
       error: new WizardError('Agent could not access Amplitude MCP server', {
         integration: config.metadata.integration,
-        'error type': AgentErrorType.MCP_MISSING,
+        error_type: AgentErrorType.MCP_MISSING,
         signal: AgentSignals.ERROR_MCP_MISSING,
       }),
     });
@@ -362,7 +355,7 @@ export async function runAgentWizard(
       message: `Could not access the setup resource\n\nThe wizard could not access the setup resource. This may indicate a version mismatch or a temporary service issue.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
       error: new WizardError('Agent could not access setup resource', {
         integration: config.metadata.integration,
-        'error type': AgentErrorType.RESOURCE_MISSING,
+        error_type: AgentErrorType.RESOURCE_MISSING,
         signal: AgentSignals.ERROR_RESOURCE_MISSING,
       }),
     });
@@ -378,7 +371,7 @@ export async function runAgentWizard(
       'agent-runner',
       {
         integration: config.metadata.integration,
-        'error type': agentResult.error,
+        error_type: agentResult.error,
       },
     );
 
@@ -388,7 +381,7 @@ export async function runAgentWizard(
       }\n\nPlease report this error to: wizard@amplitude.com`,
       error: new WizardError(`API error: ${agentResult.message ?? 'unknown'}`, {
         integration: config.metadata.integration,
-        'error type': agentResult.error,
+        error_type: agentResult.error,
       }),
     });
   }
@@ -472,12 +465,12 @@ async function pollForDataIngestion(
   const MAX_WAIT_MS =
     Number(process.env.DATA_INGESTION_TIMEOUT_MS) || 30 * 60 * 1000;
 
-  // Resolve the numeric Amplitude app ID.
+  // Resolve the numeric analytics project ID.
   // It is set by resolveEnvironmentSelection for the environment-picker path,
   // and by the fire-and-forget in bin.ts for the TUI path.
   // If still missing, try a single fetchAmplitudeUser call.
-  let appId = session.selectedAppId ?? null;
-  if (!appId) {
+  let projectId = session.selectedProjectId ?? null;
+  if (!projectId) {
     try {
       const userInfo = await fetchAmplitudeUser(
         accessToken,
@@ -490,23 +483,23 @@ async function pollForDataIngestion(
         org && session.selectedWorkspaceId
           ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
           : org?.workspaces[0];
-      appId =
+      projectId =
         ws?.environments
           ?.slice()
           .sort((a, b) => a.rank - b.rank)
           .find((e) => e.app?.id)?.app?.id ?? null;
-      if (appId) session.selectedAppId = appId;
+      if (projectId) session.selectedProjectId = projectId;
     } catch (err) {
       logToFile(
-        `[pollForDataIngestion] could not resolve appId: ${
+        `[pollForDataIngestion] could not resolve projectId: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
     }
   }
 
-  if (!appId) {
-    logToFile('[pollForDataIngestion] no appId — skipping ingestion check');
+  if (!projectId) {
+    logToFile('[pollForDataIngestion] no projectId — skipping ingestion check');
     return;
   }
 
@@ -518,10 +511,12 @@ async function pollForDataIngestion(
 
   while (Date.now() < deadline) {
     pollCount++;
-    logToFile(`[pollForDataIngestion] poll #${pollCount} appId=${appId}`);
+    logToFile(
+      `[pollForDataIngestion] poll #${pollCount} projectId=${projectId}`,
+    );
 
     try {
-      const result = await fetchHasAnyEventsMcp(accessToken, appId);
+      const result = await fetchHasAnyEventsMcp(accessToken, projectId);
       if (result.hasEvents) {
         logToFile(
           `[pollForDataIngestion] events detected: ${result.activeEventNames.join(
@@ -573,7 +568,7 @@ function buildIntegrationPrompt(
     typescript: boolean;
     projectApiKey: string;
     host: string;
-    appId: number;
+    projectId: number;
   },
   frameworkContext: Record<string, unknown>,
   skipAmplitudeMcp: boolean,
@@ -609,7 +604,7 @@ function buildIntegrationPrompt(
   } project. Use the wizard-tools MCP server to load and install skills.
 
 Project context:
-- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}
+- Amplitude Project ID: ${context.projectId}
 - Framework: ${config.metadata.name} ${context.frameworkVersion}
 - TypeScript: ${context.typescript ? 'Yes' : 'No'}
 - Amplitude public token: ${context.projectApiKey}
@@ -646,7 +641,6 @@ STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP se
    - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
 
 STEP 6: Add event tracking to this project using the instrumentation skills.
-   - If you enabled Amplitude Autocapture in the SDK init code during integration (typical for web SDKs, not for Swift unless the plugin was added, and not applicable to backend SDKs), the events you propose to confirm_event_plan MUST exclude anything Autocapture already covers for this platform — no "Clicked", "Tapped", "Submitted", or "Viewed" events. If Autocapture is off or unsupported, propose events normally but still favor business-outcome and state-change events over raw interaction events.
    - Call load_skill_menu with category "taxonomy" and install **amplitude-quickstart-taxonomy-agent** using install_skill. Load its SKILL.md and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
    - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
    - Install the "add-analytics-instrumentation" skill using install_skill.
