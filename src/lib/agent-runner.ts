@@ -408,6 +408,26 @@ export async function runAgentWizard(
     });
   }
 
+  // Post-agent dashboard creation — bounded by its own timeout so a slow
+  // Amplitude MCP response can't hang the whole run. Gracefully degrades:
+  // agent success is not affected by dashboard-step failure.
+  try {
+    const { createDashboardStep } = await import(
+      '../steps/create-dashboard.js'
+    );
+    await createDashboardStep({
+      session,
+      accessToken,
+      integration: config.metadata.integration,
+    });
+  } catch (err) {
+    logToFile(
+      `[agent-runner] createDashboardStep threw: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
   // MCP installation is handled by McpScreen — no prompt here
 
   // Data ingestion check — agent mode only (not CI).
