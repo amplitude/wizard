@@ -60,3 +60,22 @@ describe('buildSession', () => {
     expect(buildSession({}).appId).toBeUndefined();
   });
 });
+
+// ── signup profile fields ─────────────────────────────────────────────────────
+
+describe('buildSession signup profile fields', () => {
+  it('defaults signupEmail and signupFullName to null', () => {
+    const s = buildSession({});
+    expect(s.signupEmail).toBeNull();
+    expect(s.signupFullName).toBeNull();
+  });
+
+  it('accepts signupEmail and signupFullName from options', () => {
+    const s = buildSession({
+      signupEmail: 'ada@example.com',
+      signupFullName: 'Ada Lovelace',
+    });
+    expect(s.signupEmail).toBe('ada@example.com');
+    expect(s.signupFullName).toBe('Ada Lovelace');
+  });
+});
