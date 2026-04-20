@@ -20,11 +20,22 @@ import {
   ADDITIONAL_FEATURE_PROMPTS,
 } from './wizard-session';
 import { registerCleanup } from '../utils/wizard-abort';
-import { createCustomHeaders } from '../utils/custom-headers';
+import {
+  createCustomHeaders,
+  createTracingHeaders,
+} from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
+import { nextAttemptId } from './observability/correlation';
+import { ToolCallCounters } from './tool-call-counters';
+import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { LINTING_TOOLS } from './safe-tools';
-import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
+import {
+  createWizardToolsServer,
+  WIZARD_TOOL_NAMES,
+  type StatusReport,
+  type StatusReporter,
+} from './wizard-tools';
 import { getWizardCommandments } from './commandments';
 import { sanitizeNestedClaudeEnv } from './sanitize-claude-env';
 import type { PackageManagerDetector } from './package-manager-detection';
@@ -85,13 +96,12 @@ function getClaudeCodeExecutablePath(): string {
 type McpServersConfig = Record<string, unknown>;
 
 export const AgentSignals = {
-  /** Signal emitted when the agent reports progress to the user */
-  STATUS: '[STATUS]',
-  /** Signal emitted when the agent cannot access the Amplitude MCP server */
-  ERROR_MCP_MISSING: '[ERROR-MCP-MISSING]',
-  /** Signal emitted when the agent cannot access the setup resource */
-  ERROR_RESOURCE_MISSING: '[ERROR-RESOURCE-MISSING]',
-  /** Signal emitted when the agent provides a remark about its run */
+  /**
+   * Signal emitted when the agent provides a remark about its run.
+   * Kept as a text marker because it bookends a multi-line reflection that
+   * the model writes into its final message; structured tool-call routing
+   * doesn't fit the free-form nature of the reflection payload.
+   */
   WIZARD_REMARK: '[WIZARD-REMARK]',
   /** Signal prefix for benchmark logging */
   BENCHMARK: '[BENCHMARK]',
@@ -117,6 +127,24 @@ export enum AgentErrorType {
 }
 
 const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
+
+const DEFAULT_MAX_TURNS = 200;
+
+/** Parse AMPLITUDE_WIZARD_MAX_TURNS as a positive integer. Falls back to the
+ * default on any invalid value so bad env state can't DoS the agent. */
+export function resolveMaxTurns(
+  envValue: string | undefined = process.env.AMPLITUDE_WIZARD_MAX_TURNS,
+): number {
+  if (!envValue) return DEFAULT_MAX_TURNS;
+  const parsed = Number.parseInt(envValue, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_TURNS;
+  return parsed;
+}
+
+// Active StatusReporter slot. runAgent sets this at the start of each attempt
+// and clears it afterwards so the in-process wizard-tools `report_status` tool
+// can route structured events back into the per-run state bag.
+let _activeStatusReporter: StatusReporter | undefined;
 
 /**
  * Check if .claude/settings.json in the project directory contains env
@@ -234,6 +262,7 @@ export type AgentConfig = {
 export function createStopHook(
   featureQueue: readonly AdditionalFeature[],
   isAuthError: () => boolean = () => false,
+  counters?: ToolCallCounters,
 ): HookCallback {
   let featureIndex = 0;
   let remarkRequested = false;
@@ -251,6 +280,7 @@ export function createStopHook(
     // make further API calls to process feature prompts or reflection requests.
     if (isAuthError()) {
       logToFile('Stop hook: allowing stop (auth error detected)');
+      counters?.emit();
       return Promise.resolve({});
     }
 
@@ -272,9 +302,132 @@ export function createStopHook(
       });
     }
 
-    // Phase 3: allow stop
+    // Phase 3: allow stop — emit the aggregated tool-call summary once.
     logToFile('Stop hook: allowing stop');
+    counters?.emit();
     return Promise.resolve({});
+  };
+}
+
+/**
+ * Factory: PostToolUse hook that increments the successful-tool-call counter.
+ * Does NOT emit analytics per call — totals roll up into the Stop-hook summary.
+ * When a file-mutating tool (Write / Edit) succeeds, records the target file
+ * on the AgentState so PreCompact can persist it for post-compaction recovery.
+ */
+export function createPostToolUseHook(
+  counters: ToolCallCounters,
+  state?: AgentState,
+): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const toolName =
+      typeof input.tool_name === 'string' ? input.tool_name : 'unknown';
+    counters.recordToolCall(toolName, true);
+
+    if (state && (toolName === 'Write' || toolName === 'Edit')) {
+      const toolInput =
+        typeof input.tool_input === 'object' && input.tool_input !== null
+          ? (input.tool_input as Record<string, unknown>)
+          : {};
+      const filePath =
+        typeof toolInput.file_path === 'string'
+          ? toolInput.file_path
+          : typeof toolInput.path === 'string'
+          ? toolInput.path
+          : '';
+      if (filePath) state.recordModifiedFile(filePath);
+    }
+
+    return Promise.resolve({});
+  };
+}
+
+/** Factory: PostToolUseFailure hook — counts the call as a failure. */
+export function createPostToolUseFailureHook(
+  counters: ToolCallCounters,
+): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const toolName =
+      typeof input.tool_name === 'string' ? input.tool_name : 'unknown';
+    counters.recordToolCall(toolName, false);
+    return Promise.resolve({});
+  };
+}
+
+/** Factory: PermissionRequest hook — counts one permission prompt. */
+export function createPermissionRequestHook(
+  counters: ToolCallCounters,
+): HookCallback {
+  return (): Promise<Record<string, unknown>> => {
+    counters.recordPermissionRequest();
+    return Promise.resolve({});
+  };
+}
+
+/** Factory: SubagentStart hook — counts one subagent spawn. */
+export function createSubagentStartHook(
+  counters: ToolCallCounters,
+): HookCallback {
+  return (): Promise<Record<string, unknown>> => {
+    counters.recordSubagentStart();
+    return Promise.resolve({});
+  };
+}
+
+/**
+ * Factory: PreCompact hook — counts one compaction and persists agent state.
+ *
+ * Compaction drops earlier turns from the LLM's context window, which can
+ * erase the workflow step + list of files the agent has edited. Writing a
+ * small snapshot to disk before compaction runs gives a post-compaction
+ * recovery point that a future UserPromptSubmit hook can read.
+ */
+export function createPreCompactHook(
+  counters: ToolCallCounters,
+  state?: AgentState,
+): HookCallback {
+  return (): Promise<Record<string, unknown>> => {
+    counters.recordCompaction();
+    if (state) {
+      state.recordCompaction();
+      state.persist();
+    }
+    return Promise.resolve({});
+  };
+}
+
+/**
+ * Factory: UserPromptSubmit hook — hydrates recovery context after a
+ * compaction.
+ *
+ * If a PreCompact snapshot exists at `state.serializationPath()`, the hook
+ * consumes it (reads + deletes) and returns a modified prompt that prepends
+ * a short recovery note listing modified files and the last status. The
+ * snapshot is deleted so hydration fires at most once per compaction cycle.
+ *
+ * When no snapshot exists (first turn, or no compaction has happened) the
+ * hook is a no-op and returns `{}` so the SDK uses the prompt unchanged.
+ */
+export function createUserPromptSubmitHook(state: AgentState): HookCallback {
+  return (
+    _input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const snap = consumeSnapshot(state.serializationPath());
+    if (!snap) return Promise.resolve({});
+
+    const note = buildRecoveryNote(snap);
+    logToFile(
+      `UserPromptSubmit: hydrated recovery note (${snap.modifiedFiles.length} files, compactionCount=${snap.compactionCount})`,
+    );
+    // Use the SDK's additionalContext injection point rather than rewriting
+    // the user's prompt verbatim — keeps the user's message intact and
+    // makes the recovery note appear as system-provided context.
+    return Promise.resolve({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: note,
+      },
+    });
   };
 }
 
@@ -304,7 +457,11 @@ async function checkGatewayLiveness(gatewayUrl: string): Promise<boolean> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), GATEWAY_LIVENESS_TIMEOUT_MS);
   try {
-    await fetch(gatewayUrl, { method: 'HEAD', signal: controller.signal });
+    await fetch(gatewayUrl, {
+      method: 'HEAD',
+      signal: controller.signal,
+      headers: createTracingHeaders(),
+    });
     return true;
   } catch {
     return false;
@@ -345,6 +502,11 @@ function buildAgentEnv(
   for (const [flagKey, variant] of Object.entries(wizardFlags)) {
     if (!flagKey.toLowerCase().startsWith('wizard')) continue;
     headers.addFlag(flagKey, variant);
+  }
+  // Propagate tracing headers so every request the agent subprocess makes
+  // can be correlated to this wizard run + attempt.
+  for (const [key, value] of Object.entries(createTracingHeaders())) {
+    headers.add(key, value);
   }
   const encoded = headers.encode();
   logToFile('ANTHROPIC_CUSTOM_HEADERS', encoded);
@@ -753,11 +915,13 @@ export async function initializeAgent(
       mcpServers[name] = { type: 'http', url };
     }
 
-    // Add in-process wizard tools (env files, package manager detection)
+    // Add in-process wizard tools (env files, package manager detection).
+    // The status reporter is wired up per-run by runAgent via setStatusReporter.
     const wizardToolsServer = await createWizardToolsServer({
       workingDirectory: config.workingDirectory,
       detectPackageManager: config.detectPackageManager,
       skillsBaseUrl: config.skillsBaseUrl,
+      statusReporter: () => _activeStatusReporter,
     });
     mcpServers['wizard-tools'] = wizardToolsServer;
 
@@ -930,6 +1094,7 @@ export async function runAgent(
   middleware?: {
     onMessage(message: SDKMessage): void;
     finalize(resultMessage: SDKMessage, totalDurationMs: number): unknown;
+    get?<T>(key: string): T | undefined;
   },
 ): Promise<{ error?: AgentErrorType; message?: string }> {
   const {
@@ -999,22 +1164,100 @@ export async function runAgent(
     );
     const remarkMatch = outputText.match(remarkRegex);
     if (remarkMatch && remarkMatch[1]) {
-      const remark = remarkMatch[1].trim();
-      if (remark) {
-        analytics.wizardCapture('wizard remark', { remark });
+      const fullRemark = remarkMatch[1].trim();
+      if (fullRemark) {
+        // Cap event-level payload at 4KB to keep property cardinality in check.
+        // The full reflection is preserved in the session-trace JSONL (PR 3).
+        const MAX_REMARK_BYTES = 4096;
+        const truncated =
+          Buffer.byteLength(fullRemark, 'utf8') > MAX_REMARK_BYTES;
+        const remark = truncated
+          ? Buffer.from(fullRemark, 'utf8')
+              .subarray(0, MAX_REMARK_BYTES)
+              .toString('utf8')
+          : fullRemark;
+        analytics.wizardCapture('wizard remark', {
+          remark,
+          'remark length': fullRemark.length,
+          'remark truncated': truncated,
+        });
       }
     }
 
-    analytics.wizardCapture('agent completed', {
-      'duration ms': durationMs,
-      'duration seconds': durationSeconds,
-    });
+    // Finalize middleware BEFORE emitting analytics so the token/cost/cache
+    // trackers have flushed their totals into the shared store.
     try {
       if (lastResultMessage) {
         middleware?.finalize(lastResultMessage, durationMs);
       }
     } catch (e) {
       logToFile(`${AgentSignals.BENCHMARK} Middleware finalize error:`, e);
+    }
+
+    const mwGet = <T>(key: string): T | undefined =>
+      middleware?.get ? middleware.get<T>(key) : undefined;
+    const tokens = mwGet<{ totalInput: number; totalOutput: number }>('tokens');
+    const cache = mwGet<{
+      totalRead: number;
+      totalCreation5m: number;
+      totalCreation1h: number;
+      totalCreation: number;
+    }>('cache');
+    const cost = mwGet<{ totalCost: number }>('cost');
+    const turns = mwGet<{ totalTurns: number }>('turns');
+
+    const inputTokens = tokens?.totalInput ?? 0;
+    const outputTokens = tokens?.totalOutput ?? 0;
+    const cacheRead = cache?.totalRead ?? 0;
+    const cacheCreation =
+      cache?.totalCreation ??
+      (cache?.totalCreation5m ?? 0) + (cache?.totalCreation1h ?? 0);
+    // Cache hit rate: read / (read + creation). Undefined when there's no cache usage at all.
+    const cacheTotal = cacheRead + cacheCreation;
+    const cacheHitRate = cacheTotal > 0 ? cacheRead / cacheTotal : null;
+
+    analytics.wizardCapture('agent completed', {
+      'duration ms': durationMs,
+      'duration seconds': durationSeconds,
+      'input tokens': inputTokens,
+      'output tokens': outputTokens,
+      'cache read input tokens': cacheRead,
+      'cache creation 5m tokens': cache?.totalCreation5m ?? 0,
+      'cache creation 1h tokens': cache?.totalCreation1h ?? 0,
+      'total cost usd': cost?.totalCost ?? 0,
+      'cache hit rate': cacheHitRate,
+      turns: turns?.totalTurns ?? 0,
+      model: agentConfig.model ?? null,
+      'fallback used': Boolean(agentConfig.useLocalClaude),
+      // Phase attribution — today every run is one monolithic loop. Bet 2's
+      // three-phase pipeline (Planner → Integrator → Instrumenter) will
+      // split this into per-phase `agent completed` events. Keeping the
+      // property now future-proofs the event schema.
+      phase: 'monolithic',
+    });
+
+    // Kill-criterion monitoring for Bet 2 Slice 1 (prompt caching): if the
+    // prefix has been warm long enough to be cached (input tokens above
+    // WARM_RUN_TOKEN_FLOOR) but the hit rate is below CACHE_MISS_THRESHOLD,
+    // emit a separate anomaly event so Amplitude can alert + Sentry can
+    // surface the pattern. Skipped on cold runs (first invocation or small
+    // prompts) where the cache can't possibly have warmed up.
+    const WARM_RUN_TOKEN_FLOOR = 5000;
+    const CACHE_MISS_THRESHOLD = 0.4;
+    if (
+      cacheHitRate !== null &&
+      inputTokens >= WARM_RUN_TOKEN_FLOOR &&
+      cacheHitRate < CACHE_MISS_THRESHOLD
+    ) {
+      analytics.wizardCapture('cache miss anomaly', {
+        'cache hit rate': cacheHitRate,
+        'input tokens': inputTokens,
+        'cache read input tokens': cacheRead,
+        'cache creation tokens': cacheCreation,
+        threshold: CACHE_MISS_THRESHOLD,
+        'warm run token floor': WARM_RUN_TOKEN_FLOOR,
+        model: agentConfig.model ?? null,
+      });
     }
     spinner.stop(successMessage);
     return {};
@@ -1165,8 +1408,40 @@ export async function runAgent(
     // Passed to createStopHook so it can skip reflection when auth is broken.
     let authErrorDetected = false;
 
+    // Tool-call + subagent + permission counters. Per-call hooks increment
+    // these; Stop-hook emits the aggregated `tool summary` event once.
+    const toolCounters = new ToolCallCounters();
+
+    // Per-attempt recovery bag: modified files + last status. PreCompact
+    // persists a snapshot to disk so context dropped by compaction stays
+    // recoverable.
+    const agentState = new AgentState();
+
+    // Structured status state populated by the `report_status` MCP tool.
+    // Replaces the legacy [STATUS] / [ERROR-*] text-marker regex scanner.
+    let reportedError: StatusReport | null = null;
+    _activeStatusReporter = {
+      onStatus(report) {
+        spinner.message(report.detail);
+        recentStatuses.push(report.detail);
+        if (recentStatuses.length > 3) recentStatuses.shift();
+        agentState.recordStatus(report.code, report.detail);
+      },
+      onError(report) {
+        // First error wins — stall/retry loop reads this after the attempt.
+        if (!reportedError) reportedError = report;
+        logToFile(
+          `Structured error reported: ${report.code} — ${report.detail}`,
+        );
+        agentState.recordStatus(report.code, report.detail);
+      },
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
+        // Rotate attempt_id so per-retry logs stay distinct while run_id
+        // remains frozen for the whole wizard process.
+        nextAttemptId();
         // Exponential backoff: 2s, 4s, 8s
         const backoffMs = Math.min(2_000 * Math.pow(2, attempt - 1), 8_000);
         logToFile(
@@ -1249,8 +1524,10 @@ export async function runAgent(
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
-            // Safety nets: cap runaway tool loops and token spend
-            maxTurns: 200,
+            // Safety nets: cap runaway tool loops and token spend.
+            // AMPLITUDE_WIZARD_MAX_TURNS env var overrides the default
+            // (useful for evals + quick iteration). Invalid values fall back.
+            maxTurns: resolveMaxTurns(),
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
@@ -1261,6 +1538,17 @@ export async function runAgent(
               // Append wizard-wide commandments (from YAML) rather than replacing
               // the preset so we keep default Claude Code behaviors.
               append: getWizardCommandments(),
+              // Strip per-run / per-machine sections (date, cwd) from the
+              // preset so the static prefix is identical across runs. This
+              // is the supported SDK path for prompt caching — the SDK
+              // attaches cache_control internally when the prefix is stable.
+              // Per-run values (projectApiKey, projectId, framework version)
+              // already live in the first user message built by
+              // buildIntegrationPrompt, not in this system prefix.
+              // Set AMPLITUDE_WIZARD_DISABLE_CACHE=1 to disable — kill
+              // switch for the Slice 1 kill criterion (<40% hit rate).
+              excludeDynamicSections:
+                process.env.AMPLITUDE_WIZARD_DISABLE_CACHE !== '1',
             },
             env: {
               ...process.env,
@@ -1295,7 +1583,14 @@ export async function runAgent(
               Stop: createStopHook(
                 config?.additionalFeatureQueue ?? [],
                 () => authErrorDetected,
+                toolCounters,
               ),
+              PostToolUse: createPostToolUseHook(toolCounters, agentState),
+              PostToolUseFailure: createPostToolUseFailureHook(toolCounters),
+              PermissionRequest: createPermissionRequestHook(toolCounters),
+              SubagentStart: createSubagentStartHook(toolCounters),
+              PreCompact: createPreCompactHook(toolCounters, agentState),
+              UserPromptSubmit: createUserPromptSubmitHook(agentState),
             }),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
@@ -1484,20 +1779,28 @@ export async function runAgent(
     if (authErrorDetected) {
       logToFile('Agent error: AUTH_ERROR');
       spinner.stop('Authentication failed');
+      _activeStatusReporter = undefined;
       return { error: AgentErrorType.AUTH_ERROR };
     }
 
-    // Check for error markers in the agent's output
-    if (outputText.includes(AgentSignals.ERROR_MCP_MISSING)) {
-      logToFile('Agent error: MCP_MISSING');
-      spinner.stop('Agent could not access Amplitude MCP');
-      return { error: AgentErrorType.MCP_MISSING };
-    }
-
-    if (outputText.includes(AgentSignals.ERROR_RESOURCE_MISSING)) {
-      logToFile('Agent error: RESOURCE_MISSING');
-      spinner.stop('Agent could not access setup resource');
-      return { error: AgentErrorType.RESOURCE_MISSING };
+    // Structured error signals via `report_status` (replaces text-marker regex).
+    if (reportedError) {
+      const { code, detail } = reportedError;
+      if (code === 'MCP_MISSING') {
+        logToFile('Agent error: MCP_MISSING');
+        spinner.stop(detail || 'Agent could not access Amplitude MCP');
+        _activeStatusReporter = undefined;
+        return { error: AgentErrorType.MCP_MISSING, message: detail };
+      }
+      if (code === 'RESOURCE_MISSING') {
+        logToFile('Agent error: RESOURCE_MISSING');
+        spinner.stop(detail || 'Agent could not access setup resource');
+        _activeStatusReporter = undefined;
+        return { error: AgentErrorType.RESOURCE_MISSING, message: detail };
+      }
+      // Unknown structured error code — log it, let the regex-driven API-error
+      // path below still run (API errors aren't reported via report_status).
+      logToFile(`Unhandled structured error code: ${code}`);
     }
 
     // Check for API errors (rate limits, etc.)
@@ -1565,6 +1868,7 @@ export async function runAgent(
     if (eventPlanInterval) clearInterval(eventPlanInterval);
     dashboardWatcher?.close();
     if (dashboardInterval) clearInterval(dashboardInterval);
+    _activeStatusReporter = undefined;
   }
 }
 
@@ -1581,7 +1885,7 @@ function handleSDKMessage(
   spinner: SpinnerHandle,
   collectedText: string[],
   receivedSuccessResult = false,
-  recentStatuses?: string[],
+  _recentStatuses?: string[],
 ): void {
   logToFile(`SDK Message: ${message.type}`, JSON.stringify(message, null, 2));
 
@@ -1597,24 +1901,9 @@ function handleSDKMessage(
         for (const block of content) {
           if (block.type === 'text' && typeof block.text === 'string') {
             collectedText.push(block.text);
-
-            // Check for [STATUS] markers
-            const statusRegex = new RegExp(
-              `^.*${AgentSignals.STATUS.replace(
-                /[.*+?^${}()|[\]\\]/g,
-                '\\$&',
-              )}\\s*(.+?)$`,
-              'm',
-            );
-            const statusMatch = block.text.match(statusRegex);
-            if (statusMatch) {
-              const statusText = statusMatch[1].trim();
-              spinner.message(statusText);
-              if (recentStatuses) {
-                recentStatuses.push(statusText);
-                if (recentStatuses.length > 3) recentStatuses.shift();
-              }
-            }
+            // Status updates now flow through the `report_status` MCP tool,
+            // wired to the spinner via StatusReporter in runAgent. No more
+            // [STATUS] text-marker scanning — see wizard-tools.ts.
           }
 
           // Intercept TodoWrite tool_use blocks for task progression

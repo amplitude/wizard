@@ -22,6 +22,11 @@ import type { AmplitudeZone } from '../../../lib/constants.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
+import { buildBundle } from '../../../lib/diagnostic-bundle.js';
+import {
+  uploadBundle,
+  type UploadResult,
+} from '../../../lib/diagnostic-upload.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -33,12 +38,46 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   useWizardStore(store);
 
   const [showReport, setShowReport] = useState(false);
+  const [uploadState, setUploadState] = useState<
+    | { kind: 'idle' }
+    | { kind: 'uploading' }
+    | { kind: 'done'; result: UploadResult }
+  >({ kind: 'idle' });
 
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
+  const isError = store.session.outroData?.kind === OutroKind.Error;
+
+  const runUpload = () => {
+    if (uploadState.kind !== 'idle') return;
+    setUploadState({ kind: 'uploading' });
+    analytics.wizardCapture('diagnostic upload started', {});
+    const bundle = buildBundle();
+    const zone = (store.session.region ?? 'us') as AmplitudeZone;
+    const accessToken = store.session.credentials?.accessToken;
+    void uploadBundle(bundle, { zone, accessToken })
+      .then((result) => {
+        setUploadState({ kind: 'done', result });
+        analytics.wizardCapture('diagnostic upload finished', {
+          outcome: result.kind,
+          ...(result.kind === 'uploaded' ? { id: result.id } : {}),
+          ...(result.kind === 'local' ? { reason: result.reason } : {}),
+        });
+      })
+      .catch(() => {
+        setUploadState({ kind: 'idle' });
+      });
+  };
 
   // Any-key-to-exit for non-success states; success uses the picker.
-  useScreenInput((_input, key) => {
-    if (!isSuccess) process.exit(0);
+  // Exception: on error, 'u' or 'U' uploads the diagnostic bundle instead of exiting.
+  useScreenInput((input, key) => {
+    if (!isSuccess) {
+      if (isError && (input === 'u' || input === 'U')) {
+        runUpload();
+        return;
+      }
+      process.exit(0);
+    }
     if (showReport && key.escape) setShowReport(false);
   });
 
@@ -172,6 +211,40 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                 </TerminalLink>
               </Text>
             )}
+          </Box>
+          <Box marginTop={1} flexDirection="column">
+            {uploadState.kind === 'idle' && (
+              <Text color={Colors.muted}>
+                Press <Text bold>U</Text> to upload a diagnostic trace
+              </Text>
+            )}
+            {uploadState.kind === 'uploading' && (
+              <Text color={Colors.muted}>
+                {Icons.ellipsis} Uploading diagnostic trace
+              </Text>
+            )}
+            {uploadState.kind === 'done' &&
+              uploadState.result.kind === 'uploaded' && (
+                <Text color={Colors.success}>
+                  {Icons.checkmark} Diagnostic uploaded:{' '}
+                  <TerminalLink url={uploadState.result.url}>
+                    {uploadState.result.url}
+                  </TerminalLink>
+                </Text>
+              )}
+            {uploadState.kind === 'done' &&
+              uploadState.result.kind === 'local' && (
+                <Text color={Colors.warning}>
+                  {Icons.arrowRight} Upload unavailable. Bundle saved to{' '}
+                  <Text bold>{uploadState.result.path}</Text>
+                </Text>
+              )}
+            {uploadState.kind === 'done' &&
+              uploadState.result.kind === 'skipped' && (
+                <Text color={Colors.muted}>
+                  {Icons.dash} Diagnostic upload skipped (telemetry disabled).
+                </Text>
+              )}
           </Box>
         </Box>
       )}

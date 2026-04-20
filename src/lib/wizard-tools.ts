@@ -14,6 +14,7 @@ import { logToFile } from '../utils/debug';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
+import { createTracingHeaders } from '../utils/custom-headers';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -41,7 +42,7 @@ export async function fetchSkillMenu(
   try {
     const menuUrl = `${skillsBaseUrl}/skill-menu.json`;
     logToFile(`fetchSkillMenu: fetching from ${menuUrl}`);
-    const resp = await fetch(menuUrl);
+    const resp = await fetch(menuUrl, { headers: createTracingHeaders() });
     if (resp.ok) {
       const data = (await resp.json()) as SkillMenu;
       logToFile(
@@ -248,6 +249,34 @@ export interface WizardToolsOptions {
    * Example: https://github.com/amplitude/context-hub/releases/latest/download
    */
   skillsBaseUrl?: string;
+
+  /**
+   * Returns the StatusReporter for the current agent run. A getter (rather
+   * than a direct reference) is used so `createWizardToolsServer` can be
+   * called once at process start while the reporter rotates per run/attempt.
+   */
+  statusReporter?: () => StatusReporter | undefined;
+}
+
+/** Structured status / error events emitted by the agent. */
+export type StatusKind = 'status' | 'error';
+
+export interface StatusReport {
+  kind: StatusKind;
+  /**
+   * Machine-readable code. For errors, one of the known AgentErrorType values
+   * (MCP_MISSING, RESOURCE_MISSING, API_ERROR, RATE_LIMIT, AUTH_ERROR). For
+   * status updates, a short identifier like 'skill-loaded' or 'events-drafted'.
+   */
+  code: string;
+  /** Short human-readable detail to surface in the spinner / error outro. */
+  detail: string;
+}
+
+/** Implemented by the caller (agent-interface) to route status events. */
+export interface StatusReporter {
+  onStatus(report: StatusReport): void;
+  onError(report: StatusReport): void;
 }
 
 // ---------------------------------------------------------------------------
@@ -357,7 +386,12 @@ const SERVER_NAME = 'wizard-tools';
  * Must be called asynchronously because the SDK is an ESM module loaded via dynamic import.
  */
 export async function createWizardToolsServer(options: WizardToolsOptions) {
-  const { workingDirectory, detectPackageManager, skillsBaseUrl } = options;
+  const {
+    workingDirectory,
+    detectPackageManager,
+    skillsBaseUrl,
+    statusReporter,
+  } = options;
   const { tool, createSdkMcpServer } = await getSDKModule();
 
   // Load skill menu: try remote first, fall back to bundled
@@ -683,6 +717,78 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
   );
 
+  // -- report_status --------------------------------------------------------
+  // Rate-limit per code: reject if the agent calls report_status for the same
+  // (kind, code) more than `RATE_LIMIT_MAX` times inside RATE_LIMIT_WINDOW_MS.
+  // Prevents the model from spamming status with duplicate reports.
+  const RATE_LIMIT_WINDOW_MS = 1000;
+  const RATE_LIMIT_MAX = 5;
+  const reportHistory = new Map<string, number[]>();
+
+  const reportStatus = tool(
+    'report_status',
+    'Report a structured status update (kind: "status") or a fatal error (kind: "error") to the wizard. Use instead of emitting [STATUS] or [ERROR-*] text markers in your output. The wizard routes status updates to the spinner and errors to the outro screen.',
+    {
+      kind: z
+        .enum(['status', 'error'])
+        .describe(
+          '"status" for in-progress progress updates shown in the spinner; "error" to signal a fatal condition the wizard should surface on the outro.',
+        ),
+      code: z
+        .string()
+        .min(1)
+        .max(64)
+        .describe(
+          'Machine-readable code. Errors: MCP_MISSING, RESOURCE_MISSING, API_ERROR, RATE_LIMIT, AUTH_ERROR. Status: short kebab-case identifier like "skill-loaded".',
+        ),
+      detail: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('Short human-readable message, shown verbatim to the user.'),
+    },
+    (args: { kind: StatusKind; code: string; detail: string }) => {
+      const now = Date.now();
+      const key = `${args.kind}:${args.code}`;
+      const history = reportHistory.get(key) ?? [];
+      // Drop events outside the rate window.
+      const fresh = history.filter((t) => now - t < RATE_LIMIT_WINDOW_MS);
+      if (fresh.length >= RATE_LIMIT_MAX) {
+        logToFile(
+          `report_status rate-limited: ${key} (${fresh.length} calls in ${RATE_LIMIT_WINDOW_MS}ms)`,
+        );
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: `rate_limited: pause before reporting ${key} again`,
+            },
+          ],
+        };
+      }
+      fresh.push(now);
+      reportHistory.set(key, fresh);
+
+      const report: StatusReport = {
+        kind: args.kind,
+        code: args.code,
+        detail: args.detail,
+      };
+      logToFile(`report_status: ${args.kind}/${args.code} — ${args.detail}`);
+      const reporter = statusReporter?.();
+      if (reporter) {
+        if (args.kind === 'error') {
+          reporter.onError(report);
+        } else {
+          reporter.onStatus(report);
+        }
+      }
+      return {
+        content: [{ type: 'text' as const, text: 'ok' }],
+      };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   return createSdkMcpServer({
@@ -697,6 +803,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       confirm,
       choose,
       confirmEventPlan,
+      reportStatus,
     ],
   });
 }
@@ -711,4 +818,5 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:confirm`,
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
+  `${SERVER_NAME}:report_status`,
 ];

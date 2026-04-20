@@ -16,7 +16,6 @@ import { getUI } from '../ui';
 import {
   getAgent,
   runAgent,
-  AgentSignals,
   AgentErrorType,
   buildWizardMetadata,
   checkClaudeSettingsOverrides,
@@ -28,9 +27,10 @@ import { OUTBOUND_URLS } from './constants.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { enableDebugLogs, logToFile } from '../utils/debug';
-import { createObservabilityMiddleware } from './middleware/observability';
-import { MiddlewarePipeline } from './middleware/pipeline';
-import { createBenchmarkPipeline } from './middleware/benchmark';
+import {
+  createBenchmarkPipeline,
+  createAlwaysOnPipeline,
+} from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
@@ -148,13 +148,13 @@ export async function runAgentWizard(
     frameworkVersion = config.detection.getVersion(null);
   }
 
-  // Set analytics tags for framework version
+  // Set analytics tag for framework version. Single key (`framework version`)
+  // so every integration shares one column instead of sprawling into
+  // `nextjs-version` / `django-version` / etc. The `integration` session
+  // property already identifies which framework the bucket refers to.
   if (frameworkVersion && config.detection.getVersionBucket) {
     const versionBucket = config.detection.getVersionBucket(frameworkVersion);
-    analytics.setSessionProperty(
-      `${config.metadata.integration}-version`,
-      versionBucket,
-    );
+    analytics.setSessionProperty('framework version', versionBucket);
   }
 
   analytics.wizardCapture('agent started', {
@@ -300,11 +300,12 @@ export async function runAgentWizard(
     sessionToOptions(session),
   );
 
-  // Always run observability middleware for structured logging + Sentry breadcrumbs.
-  // Benchmark middleware (token/cost tracking) is opt-in via --benchmark.
+  // Cost/token/cache trackers run on every session so `agent completed`
+  // analytics always has the full breakdown. --benchmark adds the stdout
+  // summary + JSON-file writer on top of the always-on pipeline.
   const middleware = session.benchmark
     ? createBenchmarkPipeline(spinner, sessionToOptions(session))
-    : new MiddlewarePipeline([createObservabilityMiddleware()]);
+    : createAlwaysOnPipeline(sessionToOptions(session));
 
   const agentResult = await runAgent(
     agent,
@@ -352,7 +353,6 @@ export async function runAgentWizard(
       error: new WizardError('Agent could not access Amplitude MCP server', {
         integration: config.metadata.integration,
         'error type': AgentErrorType.MCP_MISSING,
-        signal: AgentSignals.ERROR_MCP_MISSING,
       }),
     });
   }
@@ -363,7 +363,6 @@ export async function runAgentWizard(
       error: new WizardError('Agent could not access setup resource', {
         integration: config.metadata.integration,
         'error type': AgentErrorType.RESOURCE_MISSING,
-        signal: AgentSignals.ERROR_RESOURCE_MISSING,
       }),
     });
   }
@@ -440,7 +439,16 @@ export async function runAgentWizard(
 
   getUI().outro(`Successfully installed Amplitude!`);
 
-  await analytics.shutdown('success');
+  const activated = Boolean(
+    session.dataIngestionConfirmed && session.checklistDashboardUrl,
+  );
+  await analytics.shutdown('success', {
+    outcome: activated ? 'activated' : 'configured',
+    exitCode: 0,
+    mcpOutcome: session.mcpOutcome ?? null,
+    slackOutcome: session.slackOutcome ?? null,
+    activated,
+  });
 }
 
 /**
@@ -622,14 +630,10 @@ Project context:
 Instructions (follow these steps IN ORDER - do not skip or reorder):
 
 STEP 1: Call load_skill_menu (from the wizard-tools MCP server) to see available skills.
-   If the tool fails, emit: ${
-     AgentSignals.ERROR_MCP_MISSING
-   } Could not load skill menu and halt.
+   If the tool fails, call report_status with kind="error", code="MCP_MISSING", detail="Could not load skill menu" and halt.
 
    Choose a skill from the \`integration\` category that matches this project's framework. Do NOT pick skills from other categories (error-tracking, feature-flags, etc.) — those are handled separately.
-   If no suitable integration skill is found, emit: ${
-     AgentSignals.ERROR_RESOURCE_MISSING
-   } Could not find a suitable skill for this project.
+   If no suitable integration skill is found, call report_status with kind="error", code="RESOURCE_MISSING", detail="Could not find a suitable skill for this project" and halt.
 
 STEP 2: Call install_skill (from the wizard-tools MCP server) with the chosen skill ID (e.g., "integration-nextjs-app-router").
    Do NOT run any shell commands to install skills.

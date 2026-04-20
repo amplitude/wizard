@@ -152,7 +152,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
     }
 
     setPhase({ kind: 'submitting', name });
-    analytics.wizardCapture('Create Project Submit', {
+    analytics.wizardCapture('create project submit', {
       source: session.createProject.source,
     });
 
@@ -222,14 +222,14 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         err instanceof Error
           ? err.message
           : 'Could not create project. Please try again.';
-      analytics.wizardCapture('Create Project Error', { code });
+      analytics.wizardCapture('create project error', { code });
       setPhase({ kind: 'error', name, code, message });
     }
   };
 
   const handleOpenFallback = () => {
     const url = OUTBOUND_URLS.projectsSettings(zone, orgId ?? undefined);
-    analytics.wizardCapture('Create Project Fallback Link Opened', {
+    analytics.wizardCapture('create project fallback link opened', {
       code: phase.kind === 'error' ? phase.code : 'unknown',
     });
     opn(url, { wait: false }).catch(() => {});

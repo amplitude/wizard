@@ -12,6 +12,7 @@ import {
   type AmplitudeZone,
 } from '../lib/constants.js';
 import { logToFile } from './debug.js';
+import { createTracingHeaders } from './custom-headers.js';
 
 /** Five minutes in milliseconds — refresh proactively before actual expiry. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
@@ -67,7 +68,10 @@ export async function tryRefreshToken(
 
     const response = await fetch(`${oAuthHost}/oauth2/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...createTracingHeaders(),
+      },
       body: body.toString(),
     });
 
