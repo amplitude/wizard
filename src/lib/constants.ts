@@ -171,6 +171,29 @@ export const OUTBOUND_URLS = {
   products: (zone: AmplitudeZone): string =>
     `${OUTBOUND_URLS.overview[zone]}/products?source=wizard`,
 
+  /** Teammate invite deep-link (Bet 5 PLG loop). Opens Amplitude web's share
+   * flow for a specific dashboard. The `source=wizard-teammate-invite` query
+   * param lets web-side analytics detect the click → `teammate invite sent`
+   * event without the wizard process needing to stay alive. */
+  teammateInvite: (
+    zone: AmplitudeZone,
+    dashboardUrl: string,
+  ): string | null => {
+    // dashboardUrl examples:
+    //   https://app.amplitude.com/<orgId>/dashboard/<id>
+    //   https://app.eu.amplitude.com/<orgId>/dashboard/<id>
+    // Extract the numeric dashboard id and build a share link pointing at
+    // the correct zone's overview host. Returns null when we can't parse
+    // an id — callers fall back to opening the raw dashboard URL.
+    const match = dashboardUrl.match(/\/dashboard\/([^/?#]+)/);
+    if (!match) return null;
+    const dashboardId = match[1];
+    const base = OUTBOUND_URLS.overview[zone];
+    const url = new URL(`${base}/dashboard/${dashboardId}/share`);
+    url.searchParams.set('source', 'wizard-teammate-invite');
+    return url.toString();
+  },
+
   // ── Docs ─────────────────────────────────────────────────────────────────
 
   /** SDK overview — opened from the Activation Options screen. */
