@@ -25,16 +25,32 @@ const EVENTS_FILE = '.amplitude-events.json';
 const DASHBOARD_FILE = '.amplitude-dashboard.json';
 const DASHBOARD_TIMEOUT_MS = 90_000;
 
+// The agent is asked to write `{ events: [{ name, description, file }] }`,
+// but historically other skills have emitted `event`, `event_type`, or
+// `eventName` for the event-name key. Accept all of them and normalize to
+// `name` downstream. Mirrors the tolerance in bin.ts (setEventPlan).
+const EventEntrySchema = z
+  .object({
+    name: z.string().optional(),
+    event: z.string().optional(),
+    event_type: z.string().optional(),
+    eventName: z.string().optional(),
+    description: z.string().optional(),
+    eventDescriptionAndReasoning: z.string().optional(),
+    file: z.string().optional(),
+  })
+  .transform((e) => ({
+    name: (e.name ?? e.event ?? e.event_type ?? e.eventName ?? '').trim(),
+    description: e.description ?? e.eventDescriptionAndReasoning,
+    file: e.file,
+  }))
+  .refine((e) => e.name.length > 0, {
+    message:
+      'event must have a name (key: name, event, event_type, or eventName)',
+  });
+
 const EventsFileSchema = z.object({
-  events: z
-    .array(
-      z.object({
-        name: z.string().min(1),
-        description: z.string().optional(),
-        file: z.string().optional(),
-      }),
-    )
-    .min(1),
+  events: z.array(EventEntrySchema).min(1),
 });
 
 const DashboardFileSchema = z.object({
@@ -133,7 +149,13 @@ export async function createDashboardStep(
   });
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers (exported for testing) ─────────────────────────────────────────
+
+export const __test__ = {
+  EventsFileSchema,
+  parseAgentOutput,
+  extractJsonContaining,
+};
 
 function readEventsFile(eventsPath: string): EventsFile | null {
   if (!fs.existsSync(eventsPath)) return null;
@@ -206,13 +228,59 @@ Do not output anything after the result line. If chart creation fails partway, s
 
 function parseAgentOutput(text: string): DashboardResult | null {
   const match = text.match(/<<<WIZARD_DASHBOARD_RESULT>>>([\s\S]*?)<<<END>>>/);
-  if (!match) {
-    // Fallback: look for any JSON blob containing dashboardUrl.
-    const urlMatch = text.match(/\{[^{}]*"dashboardUrl"[^{}]*\}/);
-    if (!urlMatch) return null;
-    return safeParseDashboard(urlMatch[0]);
+  if (match) {
+    return safeParseDashboard(match[1].trim());
   }
-  return safeParseDashboard(match[1].trim());
+  // Fallback: agent forgot the markers. Find the first balanced JSON object
+  // that contains `"dashboardUrl"`. The dashboard result embeds a `charts`
+  // array of objects, so a flat `[^{}]*` regex won't work here — we walk
+  // braces manually accounting for string escapes.
+  const candidate = extractJsonContaining(text, '"dashboardUrl"');
+  if (!candidate) return null;
+  return safeParseDashboard(candidate);
+}
+
+/**
+ * Scan `text` for a balanced `{...}` substring that contains `needle`.
+ * Returns the first such substring, or null if none is found. Ignores
+ * braces that appear inside string literals.
+ */
+function extractJsonContaining(text: string, needle: string): string | null {
+  for (
+    let start = text.indexOf('{');
+    start !== -1;
+    start = text.indexOf('{', start + 1)
+  ) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\' && inString) {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = text.slice(start, i + 1);
+          if (candidate.includes(needle)) return candidate;
+          break;
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function safeParseDashboard(json: string): DashboardResult | null {
