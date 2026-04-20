@@ -63,4 +63,4 @@ jobs:
         run: pnpm build
 
       - name: Publish the package to npm registry
-        run: pnpm publish --access public --no-git-checks
+        run: pnpm publish --access public --no-git-checks --provenance
