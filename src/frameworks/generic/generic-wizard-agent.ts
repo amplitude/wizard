@@ -102,7 +102,7 @@ STEP 4: Install and initialise the Amplitude SDK.
 [STATUS] Installing Amplitude SDK
 If the project uses a package manager: use the detect_package_manager tool to find it, then install the appropriate SDK package as a background task and proceed immediately.
 If the project is a static site with no server-side build pipeline (e.g. Zola, Hugo, Jekyll, Eleventy): use the CDN script tag approach instead, and store the API key in the site's config file (e.g. config.toml, config.yaml, _config.yml) — that is the correct pattern for static sites, not a .env file.
-For all other projects: inline the Amplitude public API key (${projectApiKey}) directly into the SDK init() / initAll() call — the public key is not a secret. Exception: server-side SDKs (Node.js, Python, Ruby, Laravel) should use env vars for the API key instead.
+For all other projects: inline the Amplitude public API key (${projectApiKey}) directly into the SDK init() / initAll() call — the public key is not a secret. Exception — frameworks whose SDK reads the key from the environment at build or runtime: Swift (ProcessInfo), React Native (react-native-config), Expo (expo-constants), Android (gradle.properties / BuildConfig), Flutter (--dart-define), and server-side SDKs (Node.js, Python, Ruby, Laravel) — use env vars for the API key instead.
 
 Add a sample tracking call demonstrating the integration.
 
@@ -151,15 +151,15 @@ If any CSP is found, read the file and add the following to the relevant directi
 Update ALL locations where a CSP is defined (there may be more than one).
 If no CSP is found, skip to STEP 5.
 
-STEP 5: Set environment variables (skip for static sites that store config in a site config file).
+STEP 5: Set environment variables (only for projects that use env vars per the exceptions in STEP 4).
 [STATUS] Writing environment variables
-For projects that use env vars: use the wizard-tools MCP server.
+For projects where STEP 4 directed you to use env vars (Swift, React Native, Expo, Android, Flutter, and server-side SDKs): use the wizard-tools MCP server.
 - Use check_env_keys to see what already exists.
 - Use set_env_values to write the API key and server URL.
   The tool ensures .gitignore coverage automatically.
-  Use the naming convention for the framework (e.g. NEXT_PUBLIC_AMPLITUDE_API_KEY for Next.js, VITE_AMPLITUDE_API_KEY for Vite, AMPLITUDE_API_KEY for Node.js/Python/etc.).
-  For browser SDK projects, store AMPLITUDE_SERVER_URL=${browserApiUrl}.
+  Use the naming convention for the framework (e.g. AMPLITUDE_API_KEY for Node.js/Python/etc.).
   For server-side SDK projects, store AMPLITUDE_SERVER_URL=${host}.
+Skip this step for browser/frontend projects where you inlined the API key in STEP 4.
 
 STEP 6: Verify the build.
 [STATUS] Verifying build
