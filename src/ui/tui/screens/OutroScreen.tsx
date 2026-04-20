@@ -27,6 +27,8 @@ import {
   uploadBundle,
   type UploadResult,
 } from '../../../lib/diagnostic-upload.js';
+import { getLogFilePath } from '../../../lib/observability/index.js';
+import { writeBugReport } from '../../../lib/bug-report.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -43,6 +45,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     | { kind: 'uploading' }
     | { kind: 'done'; result: UploadResult }
   >({ kind: 'idle' });
+  const [bugReportPath, setBugReportPath] = useState<string | null>(null);
 
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
   const isError = store.session.outroData?.kind === OutroKind.Error;
@@ -69,11 +72,31 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   };
 
   // Any-key-to-exit for non-success states; success uses the picker.
-  // Exception: on error, 'u' or 'U' uploads the diagnostic bundle instead of exiting.
+  // Exceptions on error: 'u'/'U' uploads the diagnostic bundle, 'l'/'L'
+  // opens the log file in the OS-default handler. Both keep the process
+  // alive so the user can review the outro after the action completes.
   useScreenInput((input, key) => {
     if (!isSuccess) {
       if (isError && (input === 'u' || input === 'U')) {
         runUpload();
+        return;
+      }
+      if (isError && (input === 'l' || input === 'L')) {
+        analytics.wizardCapture('error outro log opened', {});
+        opn(getLogFilePath(), { wait: false }).catch(() => {
+          /* opn fails on some headless terminals — non-fatal */
+        });
+        return;
+      }
+      if (isError && (input === 'c' || input === 'C')) {
+        const written = writeBugReport({
+          errorMessage: store.session.outroData?.message ?? null,
+          integration: store.session.integration,
+        });
+        analytics.wizardCapture('error outro bug report written', {
+          success: written !== null,
+        });
+        setBugReportPath(written);
         return;
       }
       process.exit(0);
@@ -203,6 +226,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               {Icons.arrowRight} Run the wizard again with{' '}
               <Text bold>--debug</Text> for more detail
             </Text>
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>{' '}
+              <Text color={Colors.muted}>(press L to open)</Text>
+            </Text>
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Press <Text bold>C</Text> to write a sanitized
+              bug report
+            </Text>
+            {bugReportPath && (
+              <Text color={Colors.success}>
+                {Icons.checkmark} Bug report written to{' '}
+                <Text bold>{bugReportPath}</Text>
+              </Text>
+            )}
             {outroData.docsUrl && (
               <Text color={Colors.secondary}>
                 {Icons.arrowRight} Docs:{' '}
