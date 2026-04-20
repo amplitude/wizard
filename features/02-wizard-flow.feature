@@ -57,6 +57,14 @@ Feature: Wizard flow
     When I select the "EU" region
     Then the wizard should prompt me to log in again
 
+  Scenario: "Change region" on the intro re-triggers region selection and re-auth
+    Given I have valid credentials stored in "~/.ampli.json"
+    When the wizard launches
+    And I pick "Change region" on the intro
+    Then I should be taken back to region selection
+    When I select the "EU" region
+    Then the wizard should prompt me to log in again
+
   Scenario: Returning user with credentials and existing data — goes to MCP then Slack
     Given I have valid credentials stored in "~/.ampli.json"
     And the current project has existing data
