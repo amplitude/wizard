@@ -470,7 +470,23 @@ const runDirectSignupIfRequested = async (
   });
   const { performSignupOrAuth } = await import('./src/utils/signup-or-auth.js');
   const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
-  const zone = session.region ?? DEFAULT_AMPLITUDE_ZONE;
+
+  // Resolve zone from stored state so EU users aren't silently placed in US.
+  // In non-TUI modes session.region is null at this point because credential
+  // resolution hasn't run yet. Mirror the priority used by resolveCredentials:
+  // project config > stored user zone > default.
+  let zone = session.region;
+  if (!zone) {
+    const { getStoredUser } = await import('./src/utils/ampli-settings.js');
+    const { readAmpliConfig } = await import('./src/lib/ampli-config.js');
+    const projectConfig = readAmpliConfig(session.installDir);
+    const projectZone = projectConfig.ok
+      ? projectConfig.config.Zone
+      : undefined;
+    const storedUser = getStoredUser();
+    zone = projectZone ?? storedUser?.zone ?? DEFAULT_AMPLITUDE_ZONE;
+    session.region = zone;
+  }
   try {
     const tokens = await performSignupOrAuth({
       email: session.signupEmail,
