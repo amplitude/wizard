@@ -504,6 +504,10 @@ const runDirectSignupIfRequested = async (
       }
     }
   } catch (err) {
+    analytics.wizardCapture('agentic signup attempted', {
+      status: 'wrapper_exception',
+      zone,
+    });
     getUI().log.warn(
       `Direct signup errored: ${
         err instanceof Error ? err.message : String(err)
