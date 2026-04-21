@@ -379,6 +379,47 @@ describe('performSignupOrAuth', () => {
     }
   });
 
+  it('emits agentic signup attempted with status=user_fetch_failed when fetch retries exhaust', async () => {
+    vi.useFakeTimers();
+    try {
+      const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+      vi.mocked(isFlagEnabled).mockReturnValue(true);
+      const { performDirectSignup } = await import('../direct-signup.js');
+      vi.mocked(performDirectSignup).mockResolvedValue({
+        kind: 'success',
+        tokens: {
+          accessToken: 'a',
+          idToken: 'i',
+          refreshToken: 'r',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          zone: 'us',
+        },
+      });
+      const { fetchAmplitudeUser } = await import('../../lib/api.js');
+      vi.mocked(fetchAmplitudeUser).mockRejectedValue(new Error('network'));
+      const { analytics } = await import('../analytics');
+
+      const pending = performSignupOrAuth({
+        email: 'ada@example.com',
+        fullName: 'Ada Lovelace',
+        zone: 'us',
+      });
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(analytics.wizardCapture).toHaveBeenCalledWith(
+        'agentic signup attempted',
+        {
+          status: 'user_fetch_failed',
+          zone: 'us',
+          'user fetch retry count': 3,
+        },
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('retries fetchAmplitudeUser when the new account has no env with an API key yet', async () => {
     vi.useFakeTimers();
     try {

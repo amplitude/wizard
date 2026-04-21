@@ -237,6 +237,9 @@ export async function performSignupOrAuth(
       email: input.email,
       zone: input.zone,
     };
+    emitAttempted('user_fetch_failed', input.zone, {
+      userFetchRetryCount: fetchResult.retryCount,
+    });
   }
   storeToken(user, tokens);
 
