@@ -432,6 +432,15 @@ export async function runAgentWizard(
     );
   }
 
+  // Commit the instrumented event plan to the Amplitude tracking plan as
+  // planned events so the names show up in the Data tab immediately — even
+  // before any track() call fires in the user's app.
+  const plannedEventsSummary = await commitPlannedEventsStep(
+    agentResult.plannedEvents ?? [],
+    accessToken,
+    appId,
+  );
+
   // MCP installation is handled by McpScreen — no prompt here
 
   // Data ingestion check — agent mode only (not CI).
@@ -453,6 +462,7 @@ export async function runAgentWizard(
     uploadedEnvVars.length > 0
       ? `Uploaded environment variables to your hosting provider`
       : '',
+    plannedEventsSummary,
   ].filter(Boolean);
 
   session.outroData = {
@@ -688,4 +698,44 @@ Important: Use the detect_package_manager tool (from the wizard-tools MCP server
 
 
 `;
+}
+
+/**
+ * Push the agent's instrumented event plan into the Amplitude tracking plan as
+ * planned events. Returns an outro-ready summary string (empty if nothing was
+ * committed). Never throws — a failure here must not block the outro.
+ */
+async function commitPlannedEventsStep(
+  plannedEvents: Array<{ name: string; description: string }>,
+  accessToken: string,
+  appId: number | null | undefined,
+): Promise<string> {
+  if (!plannedEvents || plannedEvents.length === 0 || !appId) return '';
+
+  try {
+    const { commitPlannedEvents } = await import('./planned-events.js');
+    const result = await commitPlannedEvents({
+      accessToken,
+      appId: String(appId),
+      events: plannedEvents,
+    });
+
+    analytics.wizardCapture('planned events committed', {
+      attempted: result.attempted,
+      created: result.created,
+      described: result.described,
+      'error message': result.error ?? '',
+    });
+
+    if (result.created === 0) return '';
+    const eventWord = result.created === 1 ? 'event' : 'events';
+    return `Added ${result.created} planned ${eventWord} to your tracking plan`;
+  } catch (err) {
+    logToFile(
+      `[commitPlannedEventsStep] unexpected error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return '';
+  }
 }
