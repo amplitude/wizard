@@ -62,5 +62,10 @@ jobs:
       - name: Build the package
         run: pnpm build
 
+      # Authenticates to npm via OIDC Trusted Publishing (id-token: write at the
+      # workflow level). Trusted Publisher for @amplitude/wizard must be
+      # configured at https://www.npmjs.com/package/@amplitude/wizard/access
+      # to trust repo=amplitude/wizard, workflow=release-please.yml,
+      # environment=npm-publish. No NPM_TOKEN required.
       - name: Publish the package to npm registry
-        run: pnpm publish --access public --no-git-checks
+        run: pnpm publish --access public --no-git-checks --provenance
