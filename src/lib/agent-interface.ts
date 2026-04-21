@@ -23,6 +23,11 @@ import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
+import {
+  shouldEmitCacheMissAnomaly,
+  WARM_RUN_TOKEN_FLOOR,
+  CACHE_MISS_THRESHOLD,
+} from './cache-anomaly';
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import {
@@ -1060,6 +1065,66 @@ export async function runAgent(
       }
     } catch (e) {
       logToFile(`${AgentSignals.BENCHMARK} Middleware finalize error:`, e);
+    }
+
+    const mwGet = <T>(key: string): T | undefined =>
+      middleware?.get ? middleware.get<T>(key) : undefined;
+    const tokens = mwGet<{ totalInput: number; totalOutput: number }>('tokens');
+    const cache = mwGet<{
+      totalRead: number;
+      totalCreation5m: number;
+      totalCreation1h: number;
+      totalCreation: number;
+    }>('cache');
+    const cost = mwGet<{ totalCost: number }>('cost');
+    const turns = mwGet<{ totalTurns: number }>('turns');
+
+    const inputTokens = tokens?.totalInput ?? 0;
+    const outputTokens = tokens?.totalOutput ?? 0;
+    const cacheRead = cache?.totalRead ?? 0;
+    const cacheCreation =
+      cache?.totalCreation ??
+      (cache?.totalCreation5m ?? 0) + (cache?.totalCreation1h ?? 0);
+    // Cache hit rate: read / (read + creation). Undefined when there's no cache usage at all.
+    const cacheTotal = cacheRead + cacheCreation;
+    const cacheHitRate = cacheTotal > 0 ? cacheRead / cacheTotal : null;
+
+    analytics.wizardCapture('agent completed', {
+      'duration ms': durationMs,
+      'duration seconds': durationSeconds,
+      'input tokens': inputTokens,
+      'output tokens': outputTokens,
+      'cache read input tokens': cacheRead,
+      'cache creation 5m tokens': cache?.totalCreation5m ?? 0,
+      'cache creation 1h tokens': cache?.totalCreation1h ?? 0,
+      'total cost usd': cost?.totalCost ?? 0,
+      'cache hit rate': cacheHitRate,
+      turns: turns?.totalTurns ?? 0,
+      model: agentConfig.model ?? null,
+      'fallback used': Boolean(agentConfig.useLocalClaude),
+      // Phase attribution — today every run is one monolithic loop. Bet 2's
+      // three-phase pipeline (Planner → Integrator → Instrumenter) will
+      // split this into per-phase `agent completed` events. Keeping the
+      // property now future-proofs the event schema.
+      phase: 'monolithic',
+    });
+
+    // Kill-criterion monitoring for Bet 2 Slice 1 (prompt caching): if the
+    // prefix has been warm long enough to be cached (input tokens above
+    // WARM_RUN_TOKEN_FLOOR) but the hit rate is below CACHE_MISS_THRESHOLD,
+    // emit a separate anomaly event so Amplitude can alert + Sentry can
+    // surface the pattern. Skipped on cold runs (first invocation or small
+    // prompts) where the cache can't possibly have warmed up.
+    if (shouldEmitCacheMissAnomaly({ cacheHitRate, inputTokens })) {
+      analytics.wizardCapture('cache miss anomaly', {
+        'cache hit rate': cacheHitRate,
+        'input tokens': inputTokens,
+        'cache read input tokens': cacheRead,
+        'cache creation tokens': cacheCreation,
+        threshold: CACHE_MISS_THRESHOLD,
+        'warm run token floor': WARM_RUN_TOKEN_FLOOR,
+        model: agentConfig.model ?? null,
+      });
     }
     spinner.stop(successMessage);
     return {};
