@@ -176,6 +176,7 @@ export async function performSignupOrAuth(
     log.warn('direct signup threw unexpectedly', {
       message: err instanceof Error ? err.message : String(err),
     });
+    emitAttempted('signup_error', input.zone);
     return null;
   }
 

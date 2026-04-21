@@ -142,6 +142,47 @@ describe('performSignupOrAuth', () => {
     expect(result).toBeNull();
   });
 
+  it('emits agentic signup attempted with status=signup_error on error kind', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'error',
+      message: 'boom',
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      { status: 'signup_error', zone: 'us' },
+    );
+  });
+
+  it('emits agentic signup attempted with status=signup_error when performDirectSignup throws', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockRejectedValue(new Error('network'));
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      { status: 'signup_error', zone: 'us' },
+    );
+  });
+
   it('returns tokens on success without calling OAuth', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
