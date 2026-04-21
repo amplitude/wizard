@@ -6,9 +6,21 @@ E2E Tests can be run locally from the root of the project with:
 
 `pnpm test:e2e`
 
-To run a specific test application
+To run a specific test application, pass a regex that matches the `describe`
+block name. Examples:
 
-`pnpm test:e2e NextJS`
+```
+pnpm test:e2e NextJS                  # TUI-mode Next.js App Router test
+pnpm test:e2e Vite                    # TUI-mode React + Vite test
+pnpm test:e2e Vue                     # agent-mode Vue detection test
+pnpm test:e2e "React Router"          # agent-mode React Router detection test
+pnpm test:e2e "JavaScript \(Web\)"    # agent-mode JS/Web detection test
+pnpm test:e2e "JavaScript \(Node\)"   # agent-mode JS/Node detection test
+pnpm test:e2e "agent mode"            # --agent NDJSON envelope contract test
+```
+
+The CI matrix in `.github/workflows/e2e-tests.yml` runs each of these
+frameworks as an independent job so one failure doesn't block the others.
 
 To record new fixtures:
 

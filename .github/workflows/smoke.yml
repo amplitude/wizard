@@ -1,0 +1,114 @@
+name: 'Post-Publish Smoke Test'
+
+# Verifies that the published @amplitude/wizard binary can boot and respond to
+# basic CLI flags. Runs after every successful "Publish (manual)" workflow,
+# and can also be triggered manually from the Actions tab for debugging.
+#
+# This test intentionally uses no secrets — it only exercises the locally
+# resolvable surface (--version, --help, and --agent boot).
+
+on:
+  workflow_run:
+    # Must match the `name:` in publish.yml exactly.
+    workflows: ['Publish (manual)']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Smoke test published binary
+    # Only run on successful publishes (or manual dispatch).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2
+        with:
+          version: 10.23.0
+          run_install: false
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: 'package.json'
+          cache: 'pnpm'
+
+      # npm must be able to resolve @amplitude/wizard on the public registry.
+      # Give npm up to 2 minutes to account for registry propagation after publish.
+      - name: Wait for package availability
+        run: |
+          set -euo pipefail
+          for i in $(seq 1 12); do
+            if npm view @amplitude/wizard version >/dev/null 2>&1; then
+              echo "Package is resolvable on npm"
+              exit 0
+            fi
+            echo "Attempt $i: package not yet available, sleeping 10s..."
+            sleep 10
+          done
+          echo "::error::Package @amplitude/wizard was not resolvable on npm after 2 minutes"
+          exit 1
+
+      - name: Smoke — --version
+        run: |
+          set -euo pipefail
+          OUTPUT=$(npx --yes @amplitude/wizard --version)
+          echo "Output: $OUTPUT"
+          if [ -z "$OUTPUT" ]; then
+            echo "::error::--version produced no output"
+            exit 1
+          fi
+
+      - name: Smoke — --help
+        run: |
+          set -euo pipefail
+          OUTPUT=$(npx --yes @amplitude/wizard --help)
+          echo "$OUTPUT"
+          if ! echo "$OUTPUT" | grep -qiE 'usage|commands|options'; then
+            echo "::error::--help output did not contain expected 'Usage/Commands/Options' text"
+            exit 1
+          fi
+
+      # Boot the wizard in agent mode with a dummy API key in an empty
+      # temp dir. We only care that the process emits at least one valid
+      # NDJSON line — a non-zero exit after booting is acceptable.
+      - name: Smoke — agent mode boot
+        run: |
+          set -uo pipefail
+          TMPDIR_SMOKE=$(mktemp -d)
+          cd "$TMPDIR_SMOKE"
+          OUTPUT_FILE=$(mktemp)
+
+          # `timeout` bounds the run so the wizard can't hang on input.
+          # head -n 10 closes stdout early, causing the wizard to exit
+          # (SIGPIPE). We capture its output either way.
+          # The `|| true` absorbs non-zero exits from timeout/head/wizard
+          # since we only care about the NDJSON contents below.
+          timeout 30s npx --yes @amplitude/wizard \
+            --agent \
+            --install-dir . \
+            --api-key SMOKE_TEST 2>&1 | head -n 20 > "$OUTPUT_FILE" || true
+
+          echo "--- captured output ---"
+          cat "$OUTPUT_FILE"
+          echo "-----------------------"
+
+          # Require at least one line that parses as JSON. The NDJSON shape
+          # is `{"v":1, ...}` — we validate via jq so malformed lines fail.
+          VALID_COUNT=0
+          while IFS= read -r line; do
+            if [ -n "$line" ] && echo "$line" | jq -e . >/dev/null 2>&1; then
+              VALID_COUNT=$((VALID_COUNT + 1))
+            fi
+          done < "$OUTPUT_FILE"
+
+          echo "Valid NDJSON lines: $VALID_COUNT"
+          if [ "$VALID_COUNT" -lt 1 ]; then
+            echo "::error::Agent mode produced no valid NDJSON output"
+            exit 1
+          fi

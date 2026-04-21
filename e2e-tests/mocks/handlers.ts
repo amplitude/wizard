@@ -30,10 +30,18 @@ export const handlers = [
     async ({ request }) => {
       const requestBody = await request.clone().text();
 
-      const fixture = fixtureTracker.retrieveQueryFixture(requestBody);
+      // The framework scope is resolved inside the tracker; it will prefer
+      // the env var (`E2E_FIXTURE_FRAMEWORK`) so child test processes that
+      // set it before spawning the wizard get per-framework fixtures.
+      const framework = fixtureTracker.getCurrentFramework();
+
+      const fixture = fixtureTracker.retrieveQueryFixture(
+        requestBody,
+        framework,
+      );
 
       if (fixture) {
-        fixtureTracker.markFixtureAsUsed(requestBody);
+        fixtureTracker.markFixtureAsUsed(requestBody, framework);
         return HttpResponse.json({ data: fixture });
       }
 
