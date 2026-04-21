@@ -458,4 +458,27 @@ describe('updateStoredUser', () => {
     expect(written['User-pending'].OAuthAccessToken).toBe('us-access');
     expect(written['User-pending'].OAuthExpiresAt).toBe(US_EXPIRES);
   });
+
+  it('is a no-op when no matching entry exists', () => {
+    setupConfig({
+      'User-99': {
+        User: {
+          id: '99',
+          firstName: 'Someone',
+          lastName: 'Else',
+          email: 'someone@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'other-access',
+        OAuthIdToken: 'other-id',
+        OAuthRefreshToken: 'other-refresh',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+
+    updateStoredUser(realUser);
+
+    // No write should occur — neither pending nor real-id-42 exists
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
 });
