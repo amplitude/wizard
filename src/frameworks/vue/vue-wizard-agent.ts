@@ -43,7 +43,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
   },
 
   environment: {
-    uploadToHosting: true,
+    uploadToHosting: false,
     getEnvVars: (apiKey: string, _host: string) => ({
       VITE_AMPLITUDE_API_KEY: apiKey,
     }),

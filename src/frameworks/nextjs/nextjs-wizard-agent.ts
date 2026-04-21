@@ -77,7 +77,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
   },
 
   environment: {
-    uploadToHosting: true,
+    uploadToHosting: false,
     getEnvVars: (apiKey: string, _host: string) => ({
       NEXT_PUBLIC_AMPLITUDE_API_KEY: apiKey,
     }),
