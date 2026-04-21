@@ -81,6 +81,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
   analytics.wizardCapture('session started', {
     integration,
     ci: session.ci ?? false,
+    signup: session.signup ?? false,
   });
 
   const config = FRAMEWORK_REGISTRY[integration];
