@@ -23,11 +23,6 @@ import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
-import {
-  shouldEmitCacheMissAnomaly,
-  WARM_RUN_TOKEN_FLOOR,
-  CACHE_MISS_THRESHOLD,
-} from './cache-anomaly';
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import {
@@ -1115,7 +1110,13 @@ export async function runAgent(
     // emit a separate anomaly event so Amplitude can alert + Sentry can
     // surface the pattern. Skipped on cold runs (first invocation or small
     // prompts) where the cache can't possibly have warmed up.
-    if (shouldEmitCacheMissAnomaly({ cacheHitRate, inputTokens })) {
+    const WARM_RUN_TOKEN_FLOOR = 5000;
+    const CACHE_MISS_THRESHOLD = 0.4;
+    if (
+      cacheHitRate !== null &&
+      inputTokens >= WARM_RUN_TOKEN_FLOOR &&
+      cacheHitRate < CACHE_MISS_THRESHOLD
+    ) {
       analytics.wizardCapture('cache miss anomaly', {
         'cache hit rate': cacheHitRate,
         'input tokens': inputTokens,
@@ -1404,7 +1405,10 @@ export async function runAgent(
               // Per-run values (projectApiKey, projectId, framework version)
               // already live in the first user message built by
               // buildIntegrationPrompt, not in this system prefix.
-              excludeDynamicSections: true,
+              // Set AMPLITUDE_WIZARD_DISABLE_CACHE=1 to disable — kill
+              // switch for the Slice 1 kill criterion (<40% hit rate).
+              excludeDynamicSections:
+                process.env.AMPLITUDE_WIZARD_DISABLE_CACHE !== '1',
             },
             env: {
               ...process.env,
