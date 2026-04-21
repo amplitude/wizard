@@ -1195,7 +1195,7 @@ void yargs(hideBin(process.argv))
                 // On signup success, the wrapper already fetched the real user
                 // profile (with provisioning retry) and persisted tokens to
                 // ~/.ampli.json — so we carry its userInfo through and skip the
-                // redundant fetch + storeToken below.
+                // redundant fetch + updateStoredUser below.
                 let auth: Awaited<
                   ReturnType<typeof performAmplitudeAuth>
                 > | null = null;
@@ -1557,7 +1557,9 @@ void yargs(hideBin(process.argv))
         setUI(new LoggingUI());
         const { performAmplitudeAuth } = await import('./src/utils/oauth.js');
         const { fetchAmplitudeUser } = await import('./src/lib/api.js');
-        const { storeToken } = await import('./src/utils/ampli-settings.js');
+        const { updateStoredUser } = await import(
+          './src/utils/ampli-settings.js'
+        );
         const zone = argv.zone as 'us' | 'eu';
 
         try {
@@ -1582,21 +1584,16 @@ void yargs(hideBin(process.argv))
 
           const auth = await performAmplitudeAuth({ zone });
           const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
-          storeToken(
-            {
-              id: user.id,
-              firstName: user.firstName,
-              lastName: user.lastName,
-              email: user.email,
-              zone: auth.zone,
-            },
-            {
-              accessToken: auth.accessToken,
-              idToken: auth.idToken,
-              refreshToken: auth.refreshToken,
-              expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-            },
-          );
+          // performAmplitudeAuth already wrote tokens with the real expiresAt
+          // under the pending sentinel. Upgrade the User record only; leave
+          // OAuth fields (including expiresAt) untouched.
+          updateStoredUser({
+            id: user.id,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            email: user.email,
+            zone: auth.zone,
+          });
           console.log(
             chalk.green(
               `✔ Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
