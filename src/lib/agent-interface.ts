@@ -123,6 +123,19 @@ export enum AgentErrorType {
 
 const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
 
+const DEFAULT_MAX_TURNS = 200;
+
+/** Parse AMPLITUDE_WIZARD_MAX_TURNS as a positive integer. Falls back to the
+ * default on any invalid value so bad env state can't DoS the agent. */
+export function resolveMaxTurns(
+  envValue: string | undefined = process.env.AMPLITUDE_WIZARD_MAX_TURNS,
+): number {
+  if (!envValue) return DEFAULT_MAX_TURNS;
+  const parsed = Number.parseInt(envValue, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_TURNS;
+  return parsed;
+}
+
 // Active StatusReporter slot. runAgent sets this at the start of each attempt
 // and clears it afterwards so the in-process wizard-tools `report_status` tool
 // can route structured events back into the per-run state bag.
@@ -1386,8 +1399,10 @@ export async function runAgent(
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
-            // Safety nets: cap runaway tool loops and token spend
-            maxTurns: 200,
+            // Safety nets: cap runaway tool loops and token spend.
+            // AMPLITUDE_WIZARD_MAX_TURNS env var overrides the default
+            // (useful for evals + quick iteration). Invalid values fall back.
+            maxTurns: resolveMaxTurns(),
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
