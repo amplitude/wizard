@@ -26,14 +26,6 @@ import {
 } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
 
-const CREATE_ACTION = '__create__' as const;
-const RESTART_ACTION = '__restart__' as const;
-type PickerAction = typeof CREATE_ACTION | typeof RESTART_ACTION;
-
-function isPickerAction(value: unknown): value is PickerAction {
-  return value === CREATE_ACTION || value === RESTART_ACTION;
-}
-
 interface AuthScreenProps {
   store: WizardStore;
 }
@@ -82,7 +74,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const [savedKeySource, setSavedKeySource] = useState<
     'keychain' | 'env' | null
   >(null);
-  const [pickerNotice, setPickerNotice] = useState<string | null>(null);
 
   const pendingOrgs = session.pendingOrgs;
 
@@ -127,26 +118,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     selectedWorkspace ?? singleWorkspace ?? prePopulatedWorkspace ?? null;
 
   useEffect(() => {
-    if (
-      effectiveOrg &&
-      effectiveWorkspace &&
-      (!session.selectedWorkspaceId ||
-        !session.selectedOrgName ||
-        !session.selectedWorkspaceName)
-    ) {
+    if (effectiveOrg && effectiveWorkspace && !session.selectedWorkspaceId) {
       store.setOrgAndWorkspace(
         effectiveOrg,
         effectiveWorkspace,
         session.installDir,
       );
     }
-  }, [
-    effectiveOrg?.id,
-    effectiveWorkspace?.id,
-    session.selectedWorkspaceId,
-    session.selectedOrgName,
-    session.selectedWorkspaceName,
-  ]);
+  }, [effectiveOrg?.id, effectiveWorkspace?.id, session.selectedWorkspaceId]);
 
   // workspaceChosen requires the local workspace object (effectiveWorkspace)
   // rather than just session.selectedWorkspaceId, because we need the
@@ -163,7 +142,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   useEffect(() => {
     if (workspaceChosen && !selectedEnv && selectableEnvs.length === 1) {
       setSelectedEnv(selectableEnvs[0]);
-      store.setSelectedEnvName(selectableEnvs[0].name);
+      store.setSelectedProjectName(selectableEnvs[0].name);
     }
   }, [workspaceChosen, selectedEnv, selectableEnvs.length]);
 
@@ -191,27 +170,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const local = readApiKeyWithSource(s.installDir);
       if (local) {
         setSavedKeySource(local.source);
-        analytics.wizardCapture('api key submitted', {
-          'key source': local.source,
+        analytics.wizardCapture('API Key Submitted', {
+          key_source: local.source,
         });
-        // Resolve env name + appId from the key when we can — the header
-        // slot is informational, not required for Auth to complete.
-        let matchedAppId: string | null = null;
-        if (effectiveWorkspace) {
-          const match = (effectiveWorkspace.environments ?? []).find(
-            (e) => e.app?.apiKey === local.key,
-          );
-          if (match) {
-            if (!s.selectedEnvName) store.setSelectedEnvName(match.name);
-            matchedAppId = match.app?.id ?? null;
-          }
-        }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: local.key,
           host: DEFAULT_HOST_URL,
-          appId: matchedAppId ? Number(matchedAppId) || 0 : 0,
+          projectId: 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -221,7 +188,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       // 2. Use the API key from the selected environment
       if (selectedEnv?.app?.apiKey) {
         const apiKey = selectedEnv.app.apiKey;
-        const envAppId = selectedEnv.app.id ?? null;
         const zone = (s.region ??
           s.pendingAuthCloudRegion ??
           'us') as AmplitudeZone;
@@ -229,15 +195,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         if (cancelled || store.session.credentials !== null) return;
 
         persistApiKey(apiKey, s.installDir);
-        analytics.wizardCapture('api key submitted', {
-          'key source': 'environment_picker',
+        analytics.wizardCapture('API Key Submitted', {
+          key_source: 'environment_picker',
         });
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: apiKey,
           host: getHostFromRegion(zone),
-          appId: envAppId ? Number(envAppId) || 0 : 0,
+          projectId: 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -266,29 +232,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
       if (projectApiKey) {
         persistApiKey(projectApiKey, s.installDir);
-        analytics.wizardCapture('api key submitted', {
-          'key source': 'backend_fetch',
+        analytics.wizardCapture('API Key Submitted', {
+          key_source: 'backend_fetch',
         });
-        // Resolve env name + appId from the returned key when possible.
-        // Not required for Auth to complete.
-        let fetchedAppId: string | null = null;
-        if (effectiveWorkspace) {
-          const match = (effectiveWorkspace.environments ?? []).find(
-            (e) => e.app?.apiKey === projectApiKey,
-          );
-          if (match) {
-            if (!store.session.selectedEnvName) {
-              store.setSelectedEnvName(match.name);
-            }
-            fetchedAppId = match.app?.id ?? null;
-          }
-        }
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey,
           host: getHostFromRegion(zone),
-          appId: fetchedAppId ? Number(fetchedAppId) || 0 : 0,
+          projectId: 0,
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -333,55 +285,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     // (either no envs available, or the env had no key)
     !selectedEnv?.app?.apiKey;
 
-  const handleCreateProject = (fromScreen: 'workspace' | 'project') => {
-    // Pre-resolve the org: during the workspace picker, session.selectedOrgId
-    // may still be null even though effectiveOrg is known. Commit it now so
-    // CreateProjectScreen has the orgId it needs to POST /projects.
-    if (effectiveOrg && !session.selectedOrgId) {
-      store.setOrgAndWorkspace(
-        effectiveOrg,
-        effectiveWorkspace ?? { id: '', name: '' },
-        session.installDir,
-      );
-    }
-    analytics.wizardCapture('create project link opened', {
-      'from screen': fromScreen,
-    });
-    setPickerNotice(null);
-    store.startCreateProject(fromScreen);
-  };
-
-  const handleStartOver = (fromScreen: 'workspace' | 'project') => {
-    analytics.wizardCapture('picker start over', { 'from screen': fromScreen });
-    setSelectedOrg(null);
-    setSelectedWorkspace(null);
-    setSelectedEnv(null);
-    setPickerNotice(null);
-    store.setOrgAndWorkspace(
-      { id: '', name: '' },
-      { id: '', name: '' },
-      session.installDir,
-    );
-    // Clear stale project name — setOrgAndWorkspace doesn't touch it.
-    store.setSelectedEnvName(null);
-
-    // Re-fetch the org list so newly-created projects show up in the picker.
-    // Best-effort: silently ignore failures and fall back to the cached list.
-    const idToken = session.pendingAuthIdToken;
-    const zone = (session.region ??
-      session.pendingAuthCloudRegion ??
-      'us') as AmplitudeZone;
-    if (idToken) {
-      void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) =>
-        fetchAmplitudeUser(idToken, zone)
-          .then((info) => store.setPendingOrgs(info.orgs))
-          .catch(() => {
-            // Keep the cached list — Start Over still resets local selection.
-          }),
-      );
-    }
-  };
-
   const handleApiKeySubmit = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) {
@@ -389,19 +292,16 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       return;
     }
     setApiKeyError('');
-    analytics.wizardCapture('api key submitted', {
-      'key source': 'manual_entry',
+    analytics.wizardCapture('API Key Submitted', {
+      key_source: 'manual_entry',
     });
     store.setApiKeyNotice(null);
-    // Env name stays null for manually-entered keys — we can't determine
-    // which environment the key belongs to without an extra backend call.
-    // The header will render org / workspace only, which is acceptable.
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       idToken: session.pendingAuthIdToken ?? undefined,
       projectApiKey: trimmed,
       host: DEFAULT_HOST_URL,
-      appId: 0,
+      projectId: 0,
     });
     // Fresh project: no existing event data — advance past DataSetup
     store.setProjectHasData(false);
@@ -495,49 +395,16 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           <Text color={Colors.secondary}>
             in <Text color={Colors.body}>{effectiveOrg.name}</Text>
           </Text>
-          {pickerNotice && (
-            <Box marginTop={1}>
-              <Text color={Colors.warning}>{pickerNotice}</Text>
-            </Box>
-          )}
           <Box marginTop={1}>
-            <PickerMenu<OrgEntry['workspaces'][number] | PickerAction>
-              options={[
-                ...effectiveOrg.workspaces.map((ws) => ({
-                  label: ws.name,
-                  value: ws as OrgEntry['workspaces'][number] | PickerAction,
-                })),
-                {
-                  label: 'Create new project\u2026',
-                  value: CREATE_ACTION as PickerAction,
-                },
-                ...(pendingOrgs && pendingOrgs.length > 1
-                  ? [
-                      {
-                        label: 'Start over',
-                        value: RESTART_ACTION as PickerAction,
-                      },
-                    ]
-                  : []),
-              ]}
+            <PickerMenu<OrgEntry['workspaces'][number]>
+              options={effectiveOrg.workspaces.map((ws) => ({
+                label: ws.name,
+                value: ws,
+              }))}
               onSelect={(value) => {
-                const picked = Array.isArray(value) ? value[0] : value;
-                if (picked === CREATE_ACTION) {
-                  handleCreateProject('workspace');
-                  return;
-                }
-                if (picked === RESTART_ACTION) {
-                  handleStartOver('workspace');
-                  return;
-                }
-                if (isPickerAction(picked)) return;
-                setPickerNotice(null);
-                setSelectedWorkspace(picked);
-                store.setOrgAndWorkspace(
-                  effectiveOrg,
-                  picked,
-                  session.installDir,
-                );
+                const ws = Array.isArray(value) ? value[0] : value;
+                setSelectedWorkspace(ws);
+                store.setOrgAndWorkspace(effectiveOrg, ws, session.installDir);
               }}
             />
           </Box>
@@ -550,41 +417,16 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           <Text bold color={Colors.heading}>
             Select a project
           </Text>
-          {pickerNotice && (
-            <Box marginTop={1}>
-              <Text color={Colors.warning}>{pickerNotice}</Text>
-            </Box>
-          )}
           <Box marginTop={1}>
-            <PickerMenu<EnvironmentEntry | PickerAction>
-              options={[
-                ...selectableEnvs.map((env) => ({
-                  label: env.name,
-                  value: env as EnvironmentEntry | PickerAction,
-                })),
-                {
-                  label: 'Create new project\u2026',
-                  value: CREATE_ACTION as PickerAction,
-                },
-                {
-                  label: 'Start over',
-                  value: RESTART_ACTION as PickerAction,
-                },
-              ]}
+            <PickerMenu<EnvironmentEntry>
+              options={selectableEnvs.map((env) => ({
+                label: env.name,
+                value: env,
+              }))}
               onSelect={(value) => {
-                const picked = Array.isArray(value) ? value[0] : value;
-                if (picked === CREATE_ACTION) {
-                  handleCreateProject('project');
-                  return;
-                }
-                if (picked === RESTART_ACTION) {
-                  handleStartOver('project');
-                  return;
-                }
-                if (isPickerAction(picked)) return;
-                setPickerNotice(null);
-                setSelectedEnv(picked);
-                store.setSelectedEnvName(picked.name);
+                const env = Array.isArray(value) ? value[0] : value;
+                setSelectedEnv(env);
+                store.setSelectedProjectName(env.name);
               }}
             />
           </Box>

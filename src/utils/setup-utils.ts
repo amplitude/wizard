@@ -33,7 +33,7 @@ interface ProjectData {
   accessToken: string;
   host: string;
   distinctId: string;
-  appId: number;
+  projectId: number;
   cloudRegion: CloudRegion;
 }
 
@@ -203,9 +203,9 @@ export async function installPackage({
       )} with ${chalk.bold(pkgManager.label)}.`,
     );
 
-    analytics.wizardCapture('package installed', {
-      'package name': packageName,
-      'package manager': pkgManager.name,
+    analytics.wizardCapture('Package Installed', {
+      package_name: packageName,
+      package_manager: pkgManager.name,
       integration,
     });
 
@@ -300,12 +300,12 @@ export async function getPackageManager(
 
   if (detectedPackageManagers.length >= 1) {
     const selected = detectedPackageManagers[0];
-    analytics.setSessionProperty('package manager', selected.name);
+    analytics.setSessionProperty('package-manager', selected.name);
     return selected;
   }
 
   // No package manager detected — default to npm
-  analytics.setSessionProperty('package manager', npm.name);
+  analytics.setSessionProperty('package-manager', npm.name);
   return npm;
 }
 
@@ -394,14 +394,14 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
  * authenticates and picks the right Amplitude account for this project.
  */
 export async function getOrAskForProjectData(
-  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'appId'> & {
+  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'projectId'> & {
     installDir?: string;
   },
 ): Promise<{
   host: string;
   projectApiKey: string;
   accessToken: string;
-  appId: number;
+  projectId: number;
   cloudRegion: CloudRegion;
 }> {
   // If an API key is provided (via --api-key flag, any mode), bypass OAuth entirely.
@@ -413,7 +413,7 @@ export async function getOrAskForProjectData(
       host: DEFAULT_HOST_URL,
       projectApiKey: _options.apiKey,
       accessToken: _options.apiKey,
-      appId: _options.appId ?? 0,
+      projectId: _options.projectId ?? 0,
       cloudRegion: 'us',
     };
   }
@@ -439,7 +439,7 @@ export async function getOrAskForProjectData(
           host: resolved.host,
           projectApiKey: resolved.projectApiKey,
           accessToken: resolved.accessToken,
-          appId: _options.appId ?? 0,
+          projectId: _options.projectId ?? 0,
           cloudRegion: resolved.cloudRegion,
         };
       }
@@ -479,7 +479,7 @@ export async function getOrAskForProjectData(
     accessToken: result.accessToken,
     host: DEFAULT_HOST_URL,
     projectApiKey: result.projectApiKey,
-    appId: result.appId,
+    projectId: result.projectId,
     cloudRegion: result.cloudRegion,
   };
 }
@@ -575,7 +575,7 @@ async function askForWizardLogin(
       org_id: selectedOrg?.id,
       org_name: selectedOrg?.name,
     });
-    analytics.wizardCapture('wizard link opened');
+    analytics.wizardCapture('Wizard Link Opened');
   }
 
   // ── 4b. Workspace selection ───────────────────────────────────────
@@ -611,7 +611,6 @@ async function askForWizardLogin(
   // can grab it directly from the workspace data we already fetched.
   // Falls back to manual prompt if not found.
   let projectApiKey: string | undefined;
-  let selectedAppId: string | null = null;
 
   if (selectedWorkspace) {
     // Get environments that have an app with an API key, sorted by rank (lowest = primary)
@@ -621,7 +620,6 @@ async function askForWizardLogin(
 
     if (envsWithKey.length === 1) {
       projectApiKey = envsWithKey[0].app!.apiKey!;
-      selectedAppId = envsWithKey[0].app?.id ?? null;
       getUI().log.success(
         chalk.dim(
           `Retrieved API key for ${chalk.bold(
@@ -640,7 +638,6 @@ async function askForWizardLogin(
       });
 
       projectApiKey = selectedEnv.app!.apiKey!;
-      selectedAppId = selectedEnv.app?.id ?? null;
       getUI().log.success(
         chalk.dim(
           `Retrieved API key for ${chalk.bold(selectedEnv.name)} environment`,
@@ -672,7 +669,7 @@ async function askForWizardLogin(
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',
-    appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
+    projectId: 0,
     cloudRegion,
   };
 }

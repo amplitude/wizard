@@ -195,7 +195,7 @@ export class WizardStore {
   completeSetup(): void {
     this.$session.setKey('setupConfirmed', true);
     analytics.wizardCapture(
-      'setup confirmed',
+      'Setup Confirmed',
       sessionPropertiesCompact(this.session),
     );
     this._resolveSetup();
@@ -218,17 +218,14 @@ export class WizardStore {
         org_name: session.selectedOrgName ?? undefined,
         workspace_id: session.selectedWorkspaceId ?? undefined,
         workspace_name: session.selectedWorkspaceName ?? undefined,
-        // Canonical telemetry keys: `app_id` matches Python `app_id` and
-        // TS `appId`; `env_name` matches the Amplitude data-model shape
-        // (Org → Workspace → Environment → App).
-        app_id: session.selectedAppId ?? credentials?.appId,
-        env_name: session.selectedEnvName,
+        project_id: session.selectedProjectId ?? credentials?.projectId,
+        project_name: session.selectedProjectName,
         region: session.region,
         integration: session.integration,
       });
     }
-    analytics.wizardCapture('auth complete', {
-      'app id': credentials?.appId,
+    analytics.wizardCapture('Auth Complete', {
+      project_id: credentials?.projectId,
       region: session.region,
     });
     this.emitChange();
@@ -239,8 +236,8 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setSelectedEnvName(name: string | null): void {
-    this.$session.setKey('selectedEnvName', name);
+  setSelectedProjectName(name: string | null): void {
+    this.$session.setKey('selectedProjectName', name);
     this.emitChange();
   }
 
@@ -346,8 +343,8 @@ export class WizardStore {
   resolvePrompt(answer: boolean | string): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind === 'event-plan') return;
-    analytics.wizardCapture('prompt response', {
-      'prompt kind': prompt.kind,
+    analytics.wizardCapture('Prompt Response', {
+      prompt_kind: prompt.kind,
       response: String(answer),
     });
     this.$pendingPrompt.set(null);
@@ -371,8 +368,8 @@ export class WizardStore {
   resolveEventPlan(decision: EventPlanDecision): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind !== 'event-plan') return;
-    analytics.wizardCapture('prompt response', {
-      'prompt kind': 'event-plan',
+    analytics.wizardCapture('Prompt Response', {
+      prompt_kind: 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
     this.$pendingPrompt.set(null);
@@ -443,7 +440,7 @@ export class WizardStore {
   }
 
   /**
-   * Restore org/workspace/app session IDs that weren't populated at startup
+   * Restore org/workspace/project session IDs that weren't populated at startup
    * (e.g. because the fire-and-forget fetchAmplitudeUser failed due to expired token).
    * Only updates fields that are provided.
    */
@@ -452,7 +449,7 @@ export class WizardStore {
     orgName?: string;
     workspaceId?: string;
     workspaceName?: string;
-    appId?: string | null;
+    projectId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
       this.$session.setKey('selectedOrgId', fields.orgId);
@@ -462,8 +459,8 @@ export class WizardStore {
       this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
     if (fields.workspaceName !== undefined)
       this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
-    if (fields.appId !== undefined)
-      this.$session.setKey('selectedAppId', fields.appId);
+    if (fields.projectId !== undefined)
+      this.$session.setKey('selectedProjectId', fields.projectId);
     this.emitChange();
   }
 
@@ -507,7 +504,7 @@ export class WizardStore {
   setDataIngestionConfirmed(): void {
     this.$session.setKey('dataIngestionConfirmed', true);
     analytics.wizardCapture(
-      'data ingestion confirmed',
+      'Data Ingestion Confirmed',
       sessionPropertiesCompact(this.session),
     );
     this.emitChange();
@@ -545,57 +542,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  /** Replace the cached org list (used by Start Over to pick up newly-created projects). */
-  setPendingOrgs(orgs: WizardSession['pendingOrgs']): void {
-    this.$session.setKey('pendingOrgs', orgs);
-    this.emitChange();
-  }
-
-  /**
-   * Enter the create-project flow. Sets `session.createProject.pending = true`
-   * so the router resolves to CreateProjectScreen.
-   *
-   * @param source which picker or invocation triggered creation
-   * @param suggestedName optional pre-filled name (e.g. from /create-project <name> or --project-name)
-   */
-  startCreateProject(
-    source: 'workspace' | 'project' | 'slash' | 'cli-flag',
-    suggestedName?: string | null,
-  ): void {
-    this.$session.setKey('createProject', {
-      pending: true,
-      source,
-      suggestedName: suggestedName ?? null,
-    });
-    analytics.wizardCapture('Create Project Started', { source });
-    this.emitChange();
-  }
-
-  /** Exit the create-project flow without creating a project. */
-  cancelCreateProject(): void {
-    this.$session.setKey('createProject', {
-      pending: false,
-      source: null,
-      suggestedName: null,
-    });
-    analytics.wizardCapture('Create Project Cancelled', {});
-    this.emitChange();
-  }
-
-  /**
-   * Finish the create-project flow successfully. Clears the pending flag
-   * — the caller is responsible for calling `setCredentials()` with the
-   * returned apiKey so the rest of the auth flow stays consistent.
-   */
-  completeCreateProject(): void {
-    this.$session.setKey('createProject', {
-      pending: false,
-      source: null,
-      suggestedName: null,
-    });
-    this.emitChange();
-  }
-
   /**
    * Called from AuthScreen when the user finishes org + workspace selection.
    * Writes ampli.json and records org/workspace on the session.
@@ -617,13 +563,13 @@ export class WizardStore {
     this.$session.setKey('selectedWorkspaceId', workspace.id);
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
-    // Extract the Amplitude app ID from the lowest-rank environment.
-    const appId =
+    // Extract the analytics project ID from the lowest-rank environment.
+    const projectId =
       workspace.environments
         ?.slice()
         .sort((a, b) => a.rank - b.rank)
         .find((e) => e.app?.id)?.app?.id ?? null;
-    this.$session.setKey('selectedAppId', appId);
+    this.$session.setKey('selectedProjectId', projectId);
 
     // Write ampli.json to the project directory.
     // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)
@@ -715,7 +661,7 @@ export class WizardStore {
     if (feature === AdditionalFeature.LLM) {
       this.$session.setKey('llmOptIn', true);
     }
-    analytics.wizardCapture('feature enabled', { feature });
+    analytics.wizardCapture('Feature Enabled', { feature });
     this.emitChange();
   }
 
@@ -766,9 +712,9 @@ export class WizardStore {
     this.$session.setKey('mcpComplete', true);
     this.$session.setKey('mcpOutcome', outcome);
     this.$session.setKey('mcpInstalledClients', installedClients);
-    analytics.wizardCapture('mcp complete', {
-      'mcp outcome': outcome,
-      'mcp installed clients': installedClients,
+    analytics.wizardCapture('MCP Complete', {
+      mcp_outcome: outcome,
+      mcp_installed_clients: installedClients,
       ...sessionPropertiesCompact(this.session),
     });
     this.emitChange();
@@ -777,8 +723,8 @@ export class WizardStore {
   setSlackComplete(outcome: SlackOutcome = SlackOutcome.Skipped): void {
     this.$session.setKey('slackComplete', true);
     this.$session.setKey('slackOutcome', outcome);
-    analytics.wizardCapture('slack complete', {
-      'slack outcome': outcome,
+    analytics.wizardCapture('Slack Complete', {
+      slack_outcome: outcome,
       ...sessionPropertiesCompact(this.session),
     });
     this.emitChange();
@@ -786,7 +732,7 @@ export class WizardStore {
 
   setOutroData(data: OutroData): void {
     this.$session.setKey('outroData', data);
-    analytics.wizardCapture('outro reached', { 'outro kind': data.kind });
+    analytics.wizardCapture('outro reached', { outro_kind: data.kind });
     this.emitChange();
   }
 
@@ -871,9 +817,9 @@ export class WizardStore {
       if (hooks) {
         for (const fn of hooks) fn();
       }
-      analytics.wizardCapture('wizard screen entered', {
-        'screen name': next,
-        'previous screen': prev,
+      analytics.wizardCapture('Wizard Screen Entered', {
+        screen_name: next,
+        previous_screen: prev,
         ...sessionPropertiesCompact(this.session),
       });
     }

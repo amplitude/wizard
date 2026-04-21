@@ -17,11 +17,11 @@ import type { FrameworkConfig } from './framework-config';
 
 /**
  * Zod schema for CLI args passed to `buildSession()`.
- * Coerces `appId` from string to positive integer.
+ * Coerces `projectId` from string to positive integer.
  * All boolean flags default to false; `installDir` defaults to cwd.
  */
 export const CliArgsSchema = z.object({
-  appId: z
+  projectId: z
     .union([z.string(), z.number()])
     .optional()
     .transform((v) => {
@@ -41,7 +41,6 @@ export const CliArgsSchema = z.object({
   benchmark: z.boolean().default(false),
   apiKey: z.string().optional(),
   integration: z.string().optional(),
-  appName: z.string().optional(),
 });
 
 /**
@@ -53,11 +52,10 @@ export const CredentialsSchema = z.object({
   idToken: z.string().optional(),
   projectApiKey: z.string().min(1, 'projectApiKey is required'),
   host: z.string().url('host must be a valid URL'),
-  /** Numeric Amplitude app ID (canonical). */
-  appId: z.number(),
+  projectId: z.number(),
 });
 
-function parseAppIdArg(value: string | undefined): number | undefined {
+function parseProjectIdArg(value: string | undefined): number | undefined {
   if (value === undefined || value === '') return undefined;
   const n = Number(value);
   return Number.isInteger(n) && n > 0 ? n : undefined;
@@ -154,11 +152,7 @@ export interface WizardSession {
   apiKey?: string;
   menu: boolean;
   benchmark: boolean;
-  /**
-   * Numeric Amplitude app ID from --app-id (or --project-id alias).
-   * Matches `app.id` in the Data API and `app_id` in the Python monorepo.
-   */
-  appId?: number;
+  projectId?: number;
 
   // From detection + screens
   setupConfirmed: boolean;
@@ -256,26 +250,15 @@ export interface WizardSession {
   selectedWorkspaceId: string | null;
   selectedWorkspaceName: string | null;
 
-  /**
-   * Amplitude environment name (e.g. "Production", "Development", "Staging")
-   * for the selected workspace — displayed in the TitleBar.
-   *
-   * NOTE: Amplitude's data model is Org → Workspace → Environment → App;
-   * there is no separate "project" layer in the Data API. What Amplitude's
-   * UI calls a "Project ID" is actually an environment's `app.id` — so each
-   * environment has its own ID and its own API key. This field stores the
-   * env NAME, not a separate project name.
-   */
-  selectedEnvName: string | null;
+  /** Project/environment selected during SUSI (displayed in TitleBar). */
+  selectedProjectName: string | null;
 
   /**
-   * Numeric Amplitude app ID for the selected environment (e.g. "769610").
-   * Sourced from `workspace.environments[*].app.id`. Canonical term across
-   * amplitude/amplitude (Python `app_id`) and amplitude/javascript
-   * (TS `appId`, GraphQL `App.id`). Used by DataIngestionCheckScreen to
-   * call query_dataset via MCP.
+   * Numeric analytics project ID for the selected workspace (e.g. "769610").
+   * Sourced from workspace.environments[*].app.id at project selection time.
+   * Used by DataIngestionCheckScreen to call query_dataset via MCP.
    */
-  selectedAppId: string | null;
+  selectedProjectId: string | null;
 
   /**
    * Notice shown on the API key entry step of AuthScreen.
@@ -291,8 +274,7 @@ export interface WizardSession {
     idToken?: string;
     projectApiKey: string;
     host: string;
-    /** Numeric Amplitude app ID (canonical); 0 when unknown. */
-    appId: number;
+    projectId: number;
   } | null;
 
   // Lifecycle
@@ -363,30 +345,6 @@ export interface WizardSession {
    * instead of the normal detection flow.
    */
   _restoredFromCheckpoint: boolean;
-
-  /**
-   * Create-project flow state.
-   *
-   * `pending` = the user has chosen "Create new project…" from the Auth
-   *   picker or invoked `/create-project`. The CreateProjectScreen should
-   *   render and collect a name.
-   * `null` = not in the create-project flow (default).
-   *
-   * The picker that triggered the flow is tracked for analytics + so we
-   * can route back to the right picker on cancel.
-   *
-   * We intentionally do NOT store the returned apiKey on the session
-   * here — it flows through `setCredentials()` instead (same path as all
-   * other API keys) so redaction and persistence stay consistent.
-   */
-  createProject: {
-    /** True when the CreateProjectScreen should be shown. */
-    pending: boolean;
-    /** Which picker triggered it — used for analytics + cancel routing. */
-    source: 'workspace' | 'project' | 'slash' | 'cli-flag' | null;
-    /** Pre-filled name (e.g. from --project-name CLI flag). */
-    suggestedName: string | null;
-  };
 }
 
 /**
@@ -404,10 +362,7 @@ export function buildSession(args: {
   menu?: boolean;
   integration?: Integration;
   benchmark?: boolean;
-  /** From --app-id / --project-id CLI flag. */
-  appId?: string;
-  /** From --app-name / --project-name CLI flag — pre-fills CreateAppScreen. */
-  appName?: string;
+  projectId?: string;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -419,7 +374,7 @@ export function buildSession(args: {
     );
   }
 
-  // Use Zod-validated data (with coerced appId and defaults) when available
+  // Use Zod-validated data (with coerced projectId and defaults) when available
   const validated = parsed.success ? parsed.data : args;
 
   return {
@@ -434,7 +389,9 @@ export function buildSession(args: {
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
     benchmark: validated.benchmark ?? false,
-    appId: parsed.success ? parsed.data.appId : parseAppIdArg(args.appId),
+    projectId: parsed.success
+      ? parsed.data.projectId
+      : parseProjectIdArg(args.projectId),
 
     setupConfirmed: false,
     integration: (validated.integration as Integration) ?? null,
@@ -466,8 +423,8 @@ export function buildSession(args: {
     selectedOrgName: null,
     selectedWorkspaceId: null,
     selectedWorkspaceName: null,
-    selectedEnvName: null,
-    selectedAppId: null,
+    selectedProjectName: null,
+    selectedProjectId: null,
     loginUrl: null,
     credentials: null,
     apiKeyNotice: null,
@@ -485,11 +442,5 @@ export function buildSession(args: {
 
     userEmail: null,
     _restoredFromCheckpoint: false,
-
-    createProject: {
-      pending: false,
-      source: args.appName ? 'cli-flag' : null,
-      suggestedName: args.appName ?? null,
-    },
   };
 }

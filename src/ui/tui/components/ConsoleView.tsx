@@ -16,7 +16,6 @@ import { SlashCommandInput } from '../primitives/index.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons, Layout } from '../styles.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
-import { linkify, renderMarkdown } from '../utils/terminal-rendering.js';
 import { Overlay } from '../router.js';
 import {
   queryConsole,
@@ -28,7 +27,6 @@ import {
   COMMANDS,
   getWhoamiText,
   parseFeedbackSlashInput,
-  parseCreateProjectSlashInput,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
@@ -67,8 +65,8 @@ function executeCommand(raw: string, store: WizardStore): string | void {
                   workspace_id: store.session.selectedWorkspaceId ?? undefined,
                   workspace_name:
                     store.session.selectedWorkspaceName ?? undefined,
-                  app_id: store.session.selectedAppId,
-                  env_name: store.session.selectedEnvName,
+                  project_id: store.session.selectedProjectId,
+                  project_name: store.session.selectedProjectName,
                   region: store.session.region,
                   integration: store.session.integration,
                 });
@@ -111,29 +109,6 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/mcp':
       store.showMcpOverlay();
       break;
-    case '/create-project': {
-      // Requires an authenticated session with a selected org so the proxy
-      // call has an orgId. Surface a friendly message otherwise.
-      const hasAuth = Boolean(
-        store.session.pendingAuthIdToken || store.session.credentials?.idToken,
-      );
-      const hasOrg = Boolean(store.session.selectedOrgId);
-      if (!hasAuth) {
-        store.setCommandFeedback(
-          'Sign in first (/login) before creating a project.',
-        );
-        break;
-      }
-      if (!hasOrg) {
-        store.setCommandFeedback(
-          'Pick an organization first (the Auth screen) before creating a project.',
-        );
-        break;
-      }
-      const suggested = parseCreateProjectSlashInput(raw);
-      store.startCreateProject('slash', suggested || null);
-      break;
-    }
     case '/snake':
       store.showSnakeOverlay();
       break;
@@ -233,9 +208,9 @@ export const ConsoleView = ({
 
   const handleSubmit = (value: string) => {
     const isSlashCommand = value.startsWith('/');
-    analytics.wizardCapture('agent message sent', {
-      'message length': value.length,
-      'is slash command': isSlashCommand,
+    analytics.wizardCapture('Agent Message Sent', {
+      message_length: value.length,
+      is_slash_command: isSlashCommand,
     });
     if (isSlashCommand) {
       setResponse(null);
@@ -410,9 +385,7 @@ export const ConsoleView = ({
             paddingY={1}
             overflow="hidden"
           >
-            <Text color={Colors.accent}>
-              {response ? renderMarkdown(response).trimEnd() : ''}
-            </Text>
+            <Text color={Colors.accent}>{response}</Text>
             <Box marginTop={1}>
               <Text color={Colors.muted}>[Q / Esc] close</Text>
             </Box>
@@ -427,7 +400,7 @@ export const ConsoleView = ({
         <Box paddingX={Layout.paddingX} overflow="hidden">
           <Text color={Colors.muted}>{Icons.diamondOpen} </Text>
           <Text color={Colors.muted} wrap="truncate-end">
-            {linkify(lastStatus)}
+            {lastStatus}
           </Text>
         </Box>
       )}
@@ -471,9 +444,7 @@ export const ConsoleView = ({
           {loading ? (
             <Spinner />
           ) : (
-            <Text color={Colors.accent}>
-              {response ? renderMarkdown(response).trimEnd() : ''}
-            </Text>
+            <Text color={Colors.accent}>{response}</Text>
           )}
         </Box>
       )}

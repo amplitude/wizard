@@ -1,10 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import {
-  AgentUI,
-  parseEnvSelectionStdinLine,
-  resolveEnvSelectionFromStdin,
-  type EnvSelectionChoice,
-} from '../agent-ui.js';
+import { describe, it, test, expect, beforeEach, afterEach, vi } from 'vitest';
+import { AgentUI } from '../agent-ui.js';
+import { initCorrelation } from '../../lib/observability/correlation';
 
 interface NDJSONEvent {
   v: 1;
@@ -131,7 +127,7 @@ describe('AgentUI.emitNestedAgent', () => {
     ui.emitNestedAgent({
       signal: 'claude_code_cli',
       envVar: 'CLAUDECODE',
-      instruction: 'Detected nested agent — sanitized env.',
+      instruction: 'Refusing to run nested.',
       bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
     });
 
@@ -139,7 +135,7 @@ describe('AgentUI.emitNestedAgent', () => {
     expect(event.v).toBe(1);
     expect(event.type).toBe('lifecycle');
     expect(event.level).toBe('info');
-    expect(event.message).toBe('Detected nested agent — sanitized env.');
+    expect(event.message).toBe('Refusing to run nested.');
     expect(event.data).toMatchObject({
       event: 'nested_agent',
       signal: 'claude_code_cli',
@@ -153,7 +149,7 @@ describe('AgentUI.emitNestedAgent', () => {
     ui.emitNestedAgent({
       signal: 'claude_agent_sdk',
       envVar: 'CLAUDE_CODE_ENTRYPOINT',
-      instruction: 'Detected nested agent — sanitized env.',
+      instruction: 'Refusing to run nested.',
       bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
     });
 
@@ -242,20 +238,25 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
         orgName: string;
         workspaceId: string;
         workspaceName: string;
-        appId: string | null;
+        projectId: string | null;
         envName: string;
         label: string;
       }>;
     };
     expect(data.promptType).toBe('environment_selection');
-    expect(data.hierarchy).toEqual(['org', 'workspace', 'app', 'environment']);
+    expect(data.hierarchy).toEqual([
+      'org',
+      'workspace',
+      'project',
+      'environment',
+    ]);
     expect(data.choices).toHaveLength(2);
     expect(data.choices[0]).toMatchObject({
       orgId: 'org-1',
       orgName: 'DevX',
       workspaceId: 'ws-a',
       workspaceName: 'Sandbox',
-      appId: '100001',
+      projectId: '100001',
       envName: 'Production',
       label: 'DevX / Sandbox / Production',
     });
@@ -286,7 +287,7 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
     expect(writes[0]).not.toContain('super-secret-key');
   });
 
-  it('surfaces resumeFlags with --app-id for unambiguous re-invocation', async () => {
+  it('surfaces resumeFlags with --project-id for unambiguous re-invocation', async () => {
     const ui = new AgentUI();
     const event = await runPromptAndGetFirst(ui, [
       {
@@ -312,145 +313,423 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       resumeFlags: Array<{ label: string; flags: string[] }>;
     };
     expect(data.resumeFlags).toHaveLength(1);
-    // --project-id alone is sufficient — it's globally unique and resolves
-    // to one (org, workspace, env) tuple server-side. No --env / --org noise.
-    expect(data.resumeFlags[0].flags).toEqual(['--app-id', '100002']);
+    expect(data.resumeFlags[0].flags).toEqual([
+      '--project-id',
+      '100002',
+      '--env',
+      'Development',
+    ]);
   });
 });
+/**
+ * AgentUI NDJSON output tests.
+ *
+ * Every AgentUI method emits exactly one JSON line to stdout. These tests spy
+ * on process.stdout.write, instantiate AgentUI, invoke methods, and assert on
+ * the parsed NDJSON shape.
+ *
+ * Security-critical assertions:
+ *   - setCredentials() never leaks accessToken or projectApiKey in output
+ *   - setRunError() redacts absolute paths and URLs from error messages
+ */
 
-describe('parseEnvSelectionStdinLine', () => {
-  it('returns parsed=null without error for null / empty input', () => {
-    expect(parseEnvSelectionStdinLine(null)).toEqual({
-      parsed: null,
-      rejectionMessage: null,
+type StdoutWrite = typeof process.stdout.write;
+
+/**
+ * Captured NDJSON event parsed from the last stdout.write call.
+ * Includes newline presence assertion.
+ */
+interface CapturedEvent {
+  raw: string;
+  parsed: Record<string, unknown>;
+}
+
+function captureEvents(spy: ReturnType<typeof vi.spyOn>): CapturedEvent[] {
+  return spy.mock.calls.map((call) => {
+    const raw = String(call[0]);
+    // Every emit() call writes a single JSON line terminated by \n.
+    expect(raw.endsWith('\n')).toBe(true);
+    const line = raw.replace(/\n$/, '');
+    return { raw, parsed: JSON.parse(line) as Record<string, unknown> };
+  });
+}
+
+function single(spy: ReturnType<typeof vi.spyOn>): Record<string, unknown> {
+  const events = captureEvents(spy);
+  expect(events).toHaveLength(1);
+  return events[0].parsed;
+}
+
+/** Assert that the event has the common envelope fields (v, @timestamp, type, message, ids). */
+function assertEnvelope(
+  event: Record<string, unknown>,
+  expected: { type: string; messageLike?: string | RegExp },
+): void {
+  expect(event.v).toBe(1);
+  expect(typeof event['@timestamp']).toBe('string');
+  // ISO timestamp should be parseable.
+  const ts = new Date(event['@timestamp'] as string);
+  expect(Number.isNaN(ts.getTime())).toBe(false);
+  expect(event.type).toBe(expected.type);
+  expect(typeof event.message).toBe('string');
+  if (expected.messageLike instanceof RegExp) {
+    expect(event.message).toMatch(expected.messageLike);
+  } else if (typeof expected.messageLike === 'string') {
+    expect(event.message).toBe(expected.messageLike);
+  }
+  expect(typeof event.session_id).toBe('string');
+  expect(typeof event.run_id).toBe('string');
+  expect((event.session_id as string).length).toBeGreaterThan(0);
+  expect((event.run_id as string).length).toBeGreaterThan(0);
+}
+
+describe('AgentUI NDJSON output', () => {
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+  let ui: AgentUI;
+
+  beforeEach(() => {
+    // Deterministic correlation IDs so assertions don't depend on UUID generation.
+    initCorrelation('test-session-id');
+    stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((
+      _chunk: string | Uint8Array,
+      _encoding?: unknown,
+      cb?: (err?: Error | null) => void,
+    ) => {
+      if (typeof cb === 'function') cb();
+      return true;
+    }) as StdoutWrite);
+    ui = new AgentUI();
+  });
+
+  afterEach(() => {
+    stdoutSpy.mockRestore();
+  });
+
+  // ── Lifecycle ─────────────────────────────────────────────────────────
+
+  describe('lifecycle', () => {
+    test('intro() emits type=lifecycle with event=intro', () => {
+      ui.intro('Welcome to the wizard');
+      const event = single(stdoutSpy);
+      assertEnvelope(event, {
+        type: 'lifecycle',
+        messageLike: 'Welcome to the wizard',
+      });
+      expect(event.data).toEqual({ event: 'intro' });
     });
-    expect(parseEnvSelectionStdinLine('')).toEqual({
-      parsed: null,
-      rejectionMessage: null,
+
+    test('outro() emits type=lifecycle with event=outro', () => {
+      ui.outro('All done!');
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'lifecycle', messageLike: 'All done!' });
+      expect(event.data).toEqual({ event: 'outro' });
+    });
+
+    test('cancel() includes docsUrl in data', () => {
+      ui.cancel('Cancelled by user', { docsUrl: 'https://docs.amplitude.com' });
+      const event = single(stdoutSpy);
+      assertEnvelope(event, {
+        type: 'lifecycle',
+        messageLike: 'Cancelled by user',
+      });
+      expect(event.data).toEqual({
+        event: 'cancel',
+        docsUrl: 'https://docs.amplitude.com',
+      });
+    });
+
+    test('cancel() without options leaves docsUrl undefined', () => {
+      ui.cancel('Cancelled');
+      const event = single(stdoutSpy);
+      const data = event.data as Record<string, unknown>;
+      expect(data.event).toBe('cancel');
+      expect(data.docsUrl).toBeUndefined();
+    });
+
+    test('startRun() emits type=lifecycle with event=start_run', () => {
+      ui.startRun();
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'lifecycle' });
+      expect(event.data).toEqual({ event: 'start_run' });
     });
   });
 
-  it('parses canonical { appId } shape via zod', () => {
-    const { parsed, rejectionMessage } =
-      parseEnvSelectionStdinLine('{"appId":"100002"}');
-    expect(rejectionMessage).toBeNull();
-    expect(parsed).toEqual({ appId: '100002' });
-  });
+  // ── Logging ───────────────────────────────────────────────────────────
 
-  it('parses legacy { projectId } shape via zod', () => {
-    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine(
-      '{"projectId":"100001"}',
-    );
-    expect(rejectionMessage).toBeNull();
-    expect(parsed).toEqual({ projectId: '100001' });
-  });
-
-  it('rejects non-string appId (wrong type) and returns a descriptive reason', () => {
-    const { parsed, rejectionMessage } =
-      parseEnvSelectionStdinLine('{"appId":12345}');
-    expect(parsed).toBeNull();
-    expect(rejectionMessage).toMatch(/stdin response rejected/);
-    expect(rejectionMessage).toMatch(/appId/);
-  });
-
-  it('rejects invalid JSON with a descriptive reason', () => {
-    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine('not json');
-    expect(parsed).toBeNull();
-    expect(rejectionMessage).toMatch(/not valid JSON/);
-  });
-});
-
-describe('resolveEnvSelectionFromStdin', () => {
-  const CHOICES: EnvSelectionChoice[] = [
-    {
-      orgId: 'org-1',
-      orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
-      appId: '100001',
-      envName: 'Production',
-      rank: 1,
-      label: 'DevX / Sandbox / Production',
-    },
-    {
-      orgId: 'org-1',
-      orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
-      appId: '100002',
-      envName: 'Development',
-      rank: 2,
-      label: 'DevX / Sandbox / Development',
-    },
-  ];
-
-  it('returns kind=auto when no payload is parsed (callers auto-select)', () => {
-    expect(resolveEnvSelectionFromStdin(null, CHOICES)).toEqual({
-      kind: 'auto',
-      warnings: [],
+  describe('log', () => {
+    test.each([
+      ['info', 'info message'],
+      ['warn', 'warn message'],
+      ['error', 'error message'],
+      ['success', 'success message'],
+      ['step', 'step message'],
+    ] as const)('log.%s() emits type=log with correct level', (level, msg) => {
+      (ui.log as Record<string, (m: string) => void>)[level](msg);
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'log', messageLike: msg });
+      expect(event.level).toBe(level);
     });
   });
 
-  it('returns kind=auto for an empty object (no usable selector)', () => {
-    expect(resolveEnvSelectionFromStdin({}, CHOICES)).toEqual({
-      kind: 'auto',
-      warnings: [],
+  // ── Session state ─────────────────────────────────────────────────────
+
+  describe('session state', () => {
+    test('setRegion() emits session_state with field=region and value', () => {
+      ui.setRegion('US');
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'session_state' });
+      expect(event.data).toEqual({ field: 'region', value: 'US' });
+    });
+
+    test('setDetectedFramework() emits field=detectedFramework', () => {
+      ui.setDetectedFramework('nextjs');
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'session_state' });
+      expect(event.data).toEqual({
+        field: 'detectedFramework',
+        value: 'nextjs',
+      });
+    });
+
+    test('setProjectHasData(true) emits field=projectHasData with boolean', () => {
+      ui.setProjectHasData(true);
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'session_state' });
+      expect(event.data).toEqual({ field: 'projectHasData', value: true });
+    });
+
+    test('setProjectHasData(false) emits field=projectHasData with false', () => {
+      ui.setProjectHasData(false);
+      const event = single(stdoutSpy);
+      expect(event.data).toEqual({ field: 'projectHasData', value: false });
+    });
+
+    test('setLoginUrl(url) emits loginUrl field with value', () => {
+      ui.setLoginUrl('https://amplitude.com/login');
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'session_state' });
+      expect(event.data).toEqual({
+        field: 'loginUrl',
+        value: 'https://amplitude.com/login',
+      });
+    });
+
+    test('setLoginUrl(null) emits loginUrl field with null value', () => {
+      ui.setLoginUrl(null);
+      const event = single(stdoutSpy);
+      expect(event.data).toEqual({ field: 'loginUrl', value: null });
     });
   });
 
-  it('resolves canonical { appId } to the matching choice without warnings', () => {
-    expect(resolveEnvSelectionFromStdin({ appId: '100002' }, CHOICES)).toEqual({
-      kind: 'selected',
-      selection: {
-        orgId: 'org-1',
-        workspaceId: 'ws-a',
-        env: 'Development',
-      },
-      warnings: [],
+  // ── Redaction (security-critical) ─────────────────────────────────────
+
+  describe('redaction', () => {
+    test('setCredentials() never leaks accessToken or projectApiKey', () => {
+      const accessToken = 'supersecret-access-token-ABCDEF1234567890';
+      const projectApiKey = 'projapi-key-xyz-9876543210';
+      ui.setCredentials({
+        accessToken,
+        projectApiKey,
+        host: 'https://api2.amplitude.com',
+        projectId: 12345,
+      });
+
+      const events = captureEvents(stdoutSpy);
+      expect(events).toHaveLength(1);
+      const { raw, parsed } = events[0];
+
+      // Raw JSON string must not contain either credential substring, anywhere.
+      expect(raw).not.toContain(accessToken);
+      expect(raw).not.toContain(projectApiKey);
+      expect(raw).not.toContain('accessToken');
+      expect(raw).not.toContain('projectApiKey');
+
+      // Non-sensitive fields are preserved.
+      assertEnvelope(parsed, { type: 'session_state' });
+      const data = parsed.data as Record<string, unknown>;
+      expect(data.field).toBe('credentials');
+      expect(data.host).toBe('https://api2.amplitude.com');
+      expect(data.projectId).toBe(12345);
+    });
+
+    test('setRunError() redacts absolute paths and URLs from error messages', async () => {
+      const err = new Error(
+        'failed at /Users/foo/bar with https://secret.example.com',
+      );
+      await ui.setRunError(err);
+
+      const events = captureEvents(stdoutSpy);
+      expect(events).toHaveLength(1);
+      const { raw, parsed } = events[0];
+
+      // The raw emitted line must not contain the original path or URL.
+      expect(raw).not.toContain('/Users/foo/bar');
+      expect(raw).not.toContain('https://secret.example.com');
+
+      assertEnvelope(parsed, { type: 'error' });
+      expect(parsed.message).not.toContain('/Users/foo/bar');
+      expect(parsed.message).not.toContain('https://secret.example.com');
+      const data = parsed.data as Record<string, unknown>;
+      expect(data.name).toBe('Error');
+    });
+
+    test('setRunError() resolves to false (no retry in agent mode)', async () => {
+      const err = new Error('boom');
+      await expect(ui.setRunError(err)).resolves.toBe(false);
     });
   });
 
-  it('resolves legacy { projectId } alias AND surfaces a deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { projectId: '100001' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    if (outcome.kind === 'selected') {
-      expect(outcome.selection.env).toBe('Production');
-    }
-    expect(outcome.warnings.join('\n')).toMatch(/\{ projectId \}/);
-    expect(outcome.warnings.join('\n')).toMatch(/deprecated/);
+  // ── Prompts (auto-approve) ────────────────────────────────────────────
+
+  describe('prompts (auto-approve)', () => {
+    test('promptConfirm() resolves true and emits autoResult=true', async () => {
+      const result = await ui.promptConfirm('Proceed?');
+      expect(result).toBe(true);
+
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'prompt', messageLike: 'Proceed?' });
+      const data = event.data as Record<string, unknown>;
+      expect(data.promptType).toBe('confirm');
+      expect(data.autoResult).toBe(true);
+    });
+
+    test('promptChoice() resolves first option and emits autoResult', async () => {
+      const result = await ui.promptChoice('Pick one', ['a', 'b', 'c']);
+      expect(result).toBe('a');
+
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'prompt', messageLike: 'Pick one' });
+      const data = event.data as Record<string, unknown>;
+      expect(data.promptType).toBe('choice');
+      expect(data.options).toEqual(['a', 'b', 'c']);
+      expect(data.autoResult).toBe('a');
+    });
+
+    test('promptChoice() with empty options resolves to empty string', async () => {
+      const result = await ui.promptChoice('Pick one', []);
+      expect(result).toBe('');
+
+      const event = single(stdoutSpy);
+      const data = event.data as Record<string, unknown>;
+      expect(data.autoResult).toBe('');
+    });
+
+    test('promptEventPlan() resolves to { decision: approved }', async () => {
+      const events = [
+        { name: 'signup', description: 'user signs up' },
+        { name: 'purchase', description: 'user purchases' },
+      ];
+      const result = await ui.promptEventPlan(events);
+      expect(result).toEqual({ decision: 'approved' });
+
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'result' });
+      const data = event.data as Record<string, unknown>;
+      expect(data.event).toBe('event_plan');
+      expect(data.events).toEqual(events);
+    });
   });
 
-  it('returns kind=mismatch when a provided appId does not match any choice', () => {
-    const outcome = resolveEnvSelectionFromStdin({ appId: '999999' }, CHOICES);
-    expect(outcome.kind).toBe('mismatch');
-    if (outcome.kind === 'mismatch') {
-      expect(outcome.reason).toMatch(/999999/);
-      expect(outcome.reason).toMatch(/did not match/);
-    }
+  // ── Progress and results ──────────────────────────────────────────────
+
+  describe('progress and results', () => {
+    test('syncTodos() emits type=progress with data.todos', () => {
+      const todos = [
+        { content: 'Install SDK', status: 'completed' },
+        { content: 'Add events', status: 'in_progress' },
+      ];
+      ui.syncTodos(todos);
+
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'progress' });
+      expect(event.data).toEqual({ todos });
+    });
+
+    test('setEventPlan() emits type=result with event=event_plan_set', () => {
+      const events = [
+        { name: 'signup', description: 'user signs up' },
+        { name: 'checkout', description: 'user checks out' },
+      ];
+      ui.setEventPlan(events);
+
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'result' });
+      const data = event.data as Record<string, unknown>;
+      expect(data.event).toBe('event_plan_set');
+      expect(data.events).toEqual(events);
+    });
+
+    test('setEventIngestionDetected() emits event=events_detected with names', () => {
+      ui.setEventIngestionDetected(['signup', 'login']);
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'result' });
+      const data = event.data as Record<string, unknown>;
+      expect(data.event).toBe('events_detected');
+      expect(data.eventNames).toEqual(['signup', 'login']);
+    });
+
+    test('setDashboardUrl() emits type=result with dashboardUrl', () => {
+      const url = 'https://app.amplitude.com/dashboard/abc123';
+      ui.setDashboardUrl(url);
+
+      const event = single(stdoutSpy);
+      assertEnvelope(event, { type: 'result' });
+      const data = event.data as Record<string, unknown>;
+      expect(data.event).toBe('dashboard_created');
+      expect(data.dashboardUrl).toBe(url);
+    });
   });
 
-  it('returns kind=mismatch when a legacy triple does not match any choice', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'ghost', workspaceId: 'none', env: 'Staging' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('mismatch');
-    if (outcome.kind === 'mismatch') {
-      expect(outcome.reason).toMatch(/ghost/);
-    }
-  });
+  // ── Envelope invariants ───────────────────────────────────────────────
 
-  it('accepts a matching legacy triple and emits the deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'org-1', workspaceId: 'ws-a', env: 'Production' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    expect(outcome.warnings.join('\n')).toMatch(
-      /\{ orgId, workspaceId, env \}/,
-    );
+  describe('envelope invariants', () => {
+    test('every emitted event has v=1, ISO @timestamp, type, message', () => {
+      ui.intro('intro');
+      ui.log.info('info');
+      ui.setRegion('US');
+      ui.startRun();
+      ui.setEventPlan([{ name: 'x', description: 'y' }]);
+
+      const events = captureEvents(stdoutSpy);
+      expect(events).toHaveLength(5);
+      for (const { parsed } of events) {
+        expect(parsed.v).toBe(1);
+        expect(typeof parsed['@timestamp']).toBe('string');
+        expect(
+          Number.isNaN(new Date(parsed['@timestamp'] as string).getTime()),
+        ).toBe(false);
+        expect(typeof parsed.type).toBe('string');
+        expect(typeof parsed.message).toBe('string');
+      }
+    });
+
+    test('every emitted event has session_id and run_id', () => {
+      ui.log.info('hello');
+      ui.setRegion('EU');
+
+      const events = captureEvents(stdoutSpy);
+      expect(events).toHaveLength(2);
+      for (const { parsed } of events) {
+        expect(typeof parsed.session_id).toBe('string');
+        expect(typeof parsed.run_id).toBe('string');
+        expect((parsed.session_id as string).length).toBeGreaterThan(0);
+        expect((parsed.run_id as string).length).toBeGreaterThan(0);
+      }
+    });
+
+    test('emits exactly one newline-terminated JSON line per call', () => {
+      ui.log.info('a');
+      ui.log.warn('b');
+      ui.log.error('c');
+
+      expect(stdoutSpy).toHaveBeenCalledTimes(3);
+      for (const call of stdoutSpy.mock.calls) {
+        const chunk = String(call[0]);
+        expect(chunk.endsWith('\n')).toBe(true);
+        // Exactly one trailing newline (no intermediate newlines inside JSON).
+        expect(chunk.match(/\n/g)?.length).toBe(1);
+        expect(() => JSON.parse(chunk)).not.toThrow();
+      }
+    });
   });
 });

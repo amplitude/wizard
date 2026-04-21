@@ -26,7 +26,7 @@ type Args = {
   localMcp?: boolean;
   ci?: boolean;
   apiKey?: string;
-  appId?: string;
+  projectId?: string;
   menu?: boolean;
   benchmark?: boolean;
 };
@@ -61,7 +61,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
       menu: finalArgs.menu,
       integration: finalArgs.integration,
       benchmark: finalArgs.benchmark,
-      appId: finalArgs.appId,
+      projectId: finalArgs.projectId,
     });
   }
 
@@ -78,7 +78,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
 
   session.integration = integration;
   analytics.setSessionProperty('integration', integration);
-  analytics.wizardCapture('session started', {
+  analytics.wizardCapture('Session Started', {
     integration,
     ci: session.ci ?? false,
   });
@@ -286,12 +286,12 @@ async function detectAndResolveIntegration(
     const winner = detected[0];
 
     // Analytics: capture detection metrics
-    analytics.wizardCapture('framework detection complete', {
+    analytics.wizardCapture('Framework Detection Complete', {
       winner: winner?.integration ?? 'none',
-      'match count': detected.length,
-      'duration ms': Math.max(...results.map((r) => r.durationMs)),
-      'error count': results.filter((r) => r.error).length,
-      'timed out count': results.filter((r) => r.timedOut).length,
+      matchCount: detected.length,
+      durationMs: Math.max(...results.map((r) => r.durationMs)),
+      errorCount: results.filter((r) => r.error).length,
+      timedOutCount: results.filter((r) => r.timedOut).length,
     });
 
     if (winner) {
