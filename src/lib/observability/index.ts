@@ -27,7 +27,10 @@ export {
   initCorrelation,
   getSessionId,
   getRunId,
-  rotateRunId,
+  getRunIdHex,
+  getAttemptId,
+  getAttemptIdHex,
+  nextAttemptId,
 } from './correlation';
 
 // Sentry
@@ -35,6 +38,7 @@ export {
   initSentry,
   captureError,
   addBreadcrumb,
+  getBreadcrumbs,
   setSentryUser,
   setSentryTag,
   flushSentry,

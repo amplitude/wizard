@@ -32,8 +32,7 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
-// Inlined to avoid tsx ESM resolution bug with dynamic import().
-const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
+import { EXP_LLM_ANALYTICS, useExperiment } from '../../lib/experiments.js';
 
 export {
   TaskStatus,
@@ -96,6 +95,8 @@ export class WizardStore {
 
   /** Last screen seen — used to detect screen transitions for analytics. */
   private _lastScreen: ScreenName | null = null;
+  /** Timestamp the last screen was entered. Feeds `step completed` duration. */
+  private _lastScreenEnteredAt: number = Date.now();
 
   /** Hooks run when transitioning onto a screen. */
   private _enterScreenHooks = new Map<ScreenName, (() => void)[]>();
@@ -567,7 +568,7 @@ export class WizardStore {
       source,
       suggestedName: suggestedName ?? null,
     });
-    analytics.wizardCapture('Create Project Started', { source });
+    analytics.wizardCapture('create project started', { source });
     this.emitChange();
   }
 
@@ -578,7 +579,7 @@ export class WizardStore {
       source: null,
       suggestedName: null,
     });
-    analytics.wizardCapture('Create Project Cancelled', {});
+    analytics.wizardCapture('create project cancelled', {});
     this.emitChange();
   }
 
@@ -698,9 +699,11 @@ export class WizardStore {
    * flag is off the feature is silently skipped.
    */
   enableFeature(feature: AdditionalFeature): void {
-    // Gate LLM analytics behind the wizard-llm-analytics feature flag
+    // Gate LLM analytics behind the wizard-llm-analytics experiment.
+    // useExperiment() fires `experiment exposed` exactly once per run so we
+    // can measure downstream conversion by variant.
     if (feature === AdditionalFeature.LLM) {
-      if (!analytics.isFeatureFlagEnabled(FLAG_LLM_ANALYTICS)) {
+      if (useExperiment(EXP_LLM_ANALYTICS) !== 'on') {
         return;
       }
     }
@@ -867,6 +870,10 @@ export class WizardStore {
     // don't re-fire the same hooks, preventing infinite recursion.
     this._lastScreen = next;
     if (prev !== null && next !== prev) {
+      const now = Date.now();
+      const enteredAt = this._lastScreenEnteredAt;
+      this._lastScreenEnteredAt = now;
+
       const hooks = this._enterScreenHooks.get(next);
       if (hooks) {
         for (const fn of hooks) fn();
@@ -874,6 +881,16 @@ export class WizardStore {
       analytics.wizardCapture('wizard screen entered', {
         'screen name': next,
         'previous screen': prev,
+        ...sessionPropertiesCompact(this.session),
+      });
+      // Canonical funnel event — time the user spent on the screen they
+      // just left. `outcome` defaults to 'completed' for an organic exit;
+      // explicit cancel/error paths can fire their own step-completed event
+      // with the appropriate outcome before transitioning.
+      analytics.wizardCapture('step completed', {
+        step: prev,
+        outcome: 'completed',
+        'duration ms': now - enteredAt,
         ...sessionPropertiesCompact(this.session),
       });
     }

@@ -161,9 +161,96 @@ export function storeToken(
   writeConfig(config, configPath);
 }
 
-/** Clears all stored credentials by writing an empty config. */
+/** Clears all stored credentials. Preserves the wizard settings namespace so
+ * anonymousId and first-run state survive logout. */
 export function clearStoredCredentials(configPath?: string): void {
-  writeConfig({}, configPath);
+  const config = readConfig(configPath);
+  const preserved: Record<string, unknown> = {};
+  if (config[WIZARD_SETTINGS_KEY] !== undefined) {
+    preserved[WIZARD_SETTINGS_KEY] = config[WIZARD_SETTINGS_KEY];
+  }
+  writeConfig(preserved, configPath);
+}
+
+// ── Wizard-scoped settings (device id, first-run, run counter) ─────────
+//
+// Stored under a top-level `"wizard"` key so they survive logout (unlike the
+// `User-*` entries which get wiped by clearStoredCredentials).
+
+const WIZARD_SETTINGS_KEY = 'wizard';
+
+const WizardSettingsSchema = z.object({
+  deviceId: z.string().optional(),
+  firstRunAt: z.string().optional(),
+  priorRunsCount: z.number().optional(),
+  priorOutcome: z.string().optional(),
+});
+
+export type WizardSettings = z.infer<typeof WizardSettingsSchema>;
+
+function readWizardSettings(configPath?: string): WizardSettings {
+  const config = readConfig(configPath);
+  const parsed = WizardSettingsSchema.safeParse(config[WIZARD_SETTINGS_KEY]);
+  return parsed.success ? parsed.data : {};
+}
+
+function writeWizardSettings(
+  settings: WizardSettings,
+  configPath?: string,
+): void {
+  const config = readConfig(configPath);
+  config[WIZARD_SETTINGS_KEY] = settings;
+  writeConfig(config, configPath);
+}
+
+/** Returns the persisted anonymous device id, or undefined if never set. */
+export function getStoredDeviceId(configPath?: string): string | undefined {
+  return readWizardSettings(configPath).deviceId;
+}
+
+/** Persists the anonymous device id. */
+export function storeDeviceId(id: string, configPath?: string): void {
+  const current = readWizardSettings(configPath);
+  writeWizardSettings({ ...current, deviceId: id }, configPath);
+}
+
+/** Returns the ISO timestamp of the user's first-ever wizard run, if set. */
+export function getStoredFirstRunAt(configPath?: string): string | undefined {
+  return readWizardSettings(configPath).firstRunAt;
+}
+
+/** Records the first-ever wizard run timestamp. Idempotent — only sets once. */
+export function storeFirstRunAt(iso: string, configPath?: string): void {
+  const current = readWizardSettings(configPath);
+  if (current.firstRunAt) return;
+  writeWizardSettings({ ...current, firstRunAt: iso }, configPath);
+}
+
+/** Returns prior-run metadata for populating `run started`. */
+export function getPriorRunMetadata(configPath?: string): {
+  priorRunsCount: number;
+  priorOutcome: string | undefined;
+} {
+  const s = readWizardSettings(configPath);
+  return {
+    priorRunsCount: s.priorRunsCount ?? 0,
+    priorOutcome: s.priorOutcome,
+  };
+}
+
+/** Increments the prior-run counter. Call when a run starts. */
+export function incrementPriorRunsCount(configPath?: string): void {
+  const current = readWizardSettings(configPath);
+  writeWizardSettings(
+    { ...current, priorRunsCount: (current.priorRunsCount ?? 0) + 1 },
+    configPath,
+  );
+}
+
+/** Records the outcome of the most-recent run. Call on shutdown. */
+export function storePriorOutcome(outcome: string, configPath?: string): void {
+  const current = readWizardSettings(configPath);
+  writeWizardSettings({ ...current, priorOutcome: outcome }, configPath);
 }
 
 /**

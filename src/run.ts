@@ -8,6 +8,13 @@ import fs from 'node:fs/promises';
 import { FRAMEWORK_REGISTRY } from './lib/registry';
 import { analytics } from './utils/analytics';
 import { runAgentWizard } from './lib/agent-runner';
+import {
+  getStoredFirstRunAt,
+  getPriorRunMetadata,
+  incrementPriorRunsCount,
+} from './utils/ampli-settings';
+import { getExecutionMode } from './lib/mode-config';
+import { VERSION } from './lib/constants';
 import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
@@ -78,6 +85,45 @@ export async function runWizard(argv: Args, session?: WizardSession) {
 
   session.integration = integration;
   analytics.setSessionProperty('integration', integration);
+
+  // Sanitize CLI flags: include boolean/string flags that inform the funnel,
+  // drop anything that could leak user input (apiKey, projectId).
+  const sanitizedFlags: Record<string, unknown> = {
+    ci: session.ci ?? false,
+    signup: session.signup ?? false,
+    debug: session.debug ?? false,
+    forceInstall: session.forceInstall ?? false,
+    benchmark: session.benchmark ?? false,
+    menu: session.menu ?? false,
+    localMcp: session.localMcp ?? false,
+  };
+
+  const firstRunAt = getStoredFirstRunAt();
+  const priorMeta = getPriorRunMetadata();
+  const isFirstRun = !firstRunAt && priorMeta.priorRunsCount === 0;
+  const daysSinceLastRun = firstRunAt
+    ? Math.floor(
+        (Date.now() - new Date(firstRunAt).getTime()) / (24 * 60 * 60 * 1000),
+      )
+    : 0;
+
+  // New canonical funnel event. `session started` continues to emit
+  // alongside for the 30-day deprecation window (removed in PR 4).
+  analytics.wizardCapture('run started', {
+    integration,
+    mode: getExecutionMode(),
+    'wizard version': VERSION,
+    'node version': process.version,
+    os: process.platform,
+    'is first run': isFirstRun,
+    'days since last run': daysSinceLastRun,
+    'prior runs count': priorMeta.priorRunsCount,
+    'prior outcome': priorMeta.priorOutcome ?? null,
+    'cli flags': sanitizedFlags,
+  });
+  incrementPriorRunsCount();
+
+  // Deprecated — keep for 30 days so downstream dashboards can migrate. Remove in PR 4.
   analytics.wizardCapture('session started', {
     integration,
     ci: session.ci ?? false,

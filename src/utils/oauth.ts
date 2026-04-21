@@ -23,6 +23,7 @@ import {
 } from '../lib/constants.js';
 import { abort } from './setup-utils.js';
 import { analytics } from './analytics.js';
+import { createTracingHeaders } from './custom-headers.js';
 import {
   getStoredToken,
   storeToken,
@@ -200,7 +201,12 @@ async function exchangeCodeForToken(
       client_id: oAuthClientId,
       code_verifier: codeVerifier,
     }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...createTracingHeaders(),
+      },
+    },
   );
   return OAuthTokenResponseSchema.parse(response.data);
 }
@@ -395,7 +401,12 @@ export async function refreshAccessToken(
       refresh_token: refreshToken,
       client_id: oAuthClientId,
     }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...createTracingHeaders(),
+      },
+    },
   );
   const parsed = OAuthTokenResponseSchema.parse(response.data);
   return {

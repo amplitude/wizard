@@ -12,6 +12,7 @@ import path from 'path';
 import { logToFile } from '../utils/debug.js';
 import { WIZARD_USER_AGENT } from './constants.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
+import { createTracingHeaders } from '../utils/custom-headers.js';
 
 export const AMPLITUDE_MCP_URL =
   process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
@@ -54,6 +55,7 @@ async function openMcpSession(
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
     'User-Agent': WIZARD_USER_AGENT,
+    ...createTracingHeaders(),
   };
 
   let sessionId: string | undefined;

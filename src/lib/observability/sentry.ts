@@ -65,6 +65,20 @@ export interface SentryConfig {
 
 let initialized = false;
 
+/**
+ * In-process ring buffer mirroring every breadcrumb we send to Sentry.
+ * Exposed via getBreadcrumbs() so PR 3.1's diagnostic bundle can include the
+ * last N entries on upload. Capped to prevent memory growth on long runs.
+ */
+const BREADCRUMB_BUFFER_SIZE = 200;
+interface BreadcrumbEntry {
+  timestamp: string;
+  category: string;
+  message: string;
+  data?: Record<string, unknown>;
+}
+const breadcrumbBuffer: BreadcrumbEntry[] = [];
+
 // ── Telemetry opt-out ───────────────────────────────────────────────
 
 /**
@@ -248,23 +262,49 @@ export function captureError(
 
 /**
  * Add a breadcrumb to Sentry for debugging context.
+ * Also mirrors to an in-process ring buffer so the diagnostic uploader can
+ * include the last ~200 breadcrumbs in the bundle without re-reading Sentry.
  */
 export function addBreadcrumb(
   category: string,
   message: string,
   data?: Record<string, unknown>,
 ): void {
+  const redactedData = data
+    ? (redact(data) as Record<string, unknown>)
+    : undefined;
+  breadcrumbBuffer.push({
+    timestamp: new Date().toISOString(),
+    category,
+    message,
+    ...(redactedData ? { data: redactedData } : {}),
+  });
+  if (breadcrumbBuffer.length > BREADCRUMB_BUFFER_SIZE) {
+    breadcrumbBuffer.splice(
+      0,
+      breadcrumbBuffer.length - BREADCRUMB_BUFFER_SIZE,
+    );
+  }
+
   if (!initialized) return;
   try {
     Sentry.addBreadcrumb({
       category,
       message,
-      data: data ? (redact(data) as Record<string, unknown>) : undefined,
+      data: redactedData,
       level: 'info',
     });
   } catch {
     // Non-fatal
   }
+}
+
+/** Return the most recent breadcrumbs captured in-process. */
+export function getBreadcrumbs(limit = 50): BreadcrumbEntry[] {
+  if (limit >= breadcrumbBuffer.length) {
+    return [...breadcrumbBuffer];
+  }
+  return breadcrumbBuffer.slice(breadcrumbBuffer.length - limit);
 }
 
 /**

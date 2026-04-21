@@ -69,8 +69,22 @@ export async function wizardAbort(
   }
 
   // 3. Shutdown analytics and flush Sentry
+  const errorCtx =
+    error instanceof WizardError && error.context ? error.context : {};
   await Promise.all([
-    analytics.shutdown(error ? 'error' : 'cancelled'),
+    analytics.shutdown(error ? 'error' : 'cancelled', {
+      outcome: error ? 'error' : 'cancelled',
+      exitCode,
+      failureCategory:
+        typeof errorCtx['error category'] === 'string'
+          ? errorCtx['error category']
+          : undefined,
+      failureSubcategory:
+        typeof errorCtx['error type'] === 'string'
+          ? errorCtx['error type']
+          : undefined,
+      activated: false,
+    }),
     flushSentry().catch(() => {
       /* Sentry flush failure is non-fatal */
     }),
