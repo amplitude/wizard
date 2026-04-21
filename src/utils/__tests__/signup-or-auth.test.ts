@@ -103,6 +103,27 @@ describe('performSignupOrAuth', () => {
     expect(result).toBeNull();
   });
 
+  it('emits agentic signup attempted with status=requires_redirect on redirect path', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'requires_redirect',
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      { status: 'requires_redirect', zone: 'us' },
+    );
+  });
+
   it('returns null when direct signup returns error', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);

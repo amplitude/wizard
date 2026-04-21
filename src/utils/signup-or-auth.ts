@@ -179,8 +179,14 @@ export async function performSignupOrAuth(
     return null;
   }
 
-  if (result.kind !== 'success') {
+  if (result.kind === 'requires_redirect') {
     log.debug('direct signup did not succeed', { kind: result.kind });
+    emitAttempted('requires_redirect', input.zone);
+    return null;
+  }
+  if (result.kind === 'error') {
+    log.debug('direct signup did not succeed', { kind: result.kind });
+    emitAttempted('signup_error', input.zone);
     return null;
   }
 
