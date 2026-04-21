@@ -44,6 +44,7 @@ describe('performSignupOrAuth', () => {
 
   it('returns null when flag is off', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
+    const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
       email: 'ada@example.com',
@@ -53,12 +54,17 @@ describe('performSignupOrAuth', () => {
 
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      'agentic signup attempted',
+      expect.anything(),
+    );
   });
 
   it('returns null when flag is on but email is missing', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
+    const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
       email: null,
@@ -68,12 +74,17 @@ describe('performSignupOrAuth', () => {
 
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      'agentic signup attempted',
+      expect.anything(),
+    );
   });
 
   it('returns null when flag is on but fullName is missing', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
+    const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
       email: 'ada@example.com',
@@ -83,6 +94,10 @@ describe('performSignupOrAuth', () => {
 
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      'agentic signup attempted',
+      expect.anything(),
+    );
   });
 
   it('returns null when direct signup returns requires_redirect', async () => {
