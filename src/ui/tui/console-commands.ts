@@ -8,6 +8,7 @@
 import type { WizardSession } from '../../lib/wizard-session.js';
 
 export const COMMANDS = [
+  { cmd: '/help', desc: 'List all slash commands' },
   { cmd: '/region', desc: 'Switch data-center region (US or EU)' },
   { cmd: '/login', desc: 'Re-authenticate' },
   { cmd: '/logout', desc: 'Clear stored credentials' },
@@ -25,6 +26,17 @@ export const COMMANDS = [
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
+
+/** Renders the slash-command list as aligned two-column text. Exported so
+ * the ConsoleView `/help` handler + any future overlay can share the
+ * formatting. Stable output: columns aligned to the longest command. */
+export function renderHelpText(): string {
+  const maxCmd = COMMANDS.reduce((n, c) => Math.max(n, c.cmd.length), 0);
+  const lines = COMMANDS.map(
+    ({ cmd, desc }) => `  ${cmd.padEnd(maxCmd)}  ${desc}`,
+  );
+  return ['Available slash commands:', ...lines].join('\n');
+}
 
 /**
  * Parses `/create-project <name>` from a slash command line.
