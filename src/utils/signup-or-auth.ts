@@ -19,6 +19,15 @@ function hasEnvWithApiKey(userInfo: AmplitudeUserInfo): boolean {
   );
 }
 
+type FetchUserResult =
+  | {
+      ok: true;
+      userInfo: AmplitudeUserInfo;
+      retryCount: number;
+      hasEnvWithApiKey: boolean;
+    }
+  | { ok: false; retryCount: number; error: unknown };
+
 /**
  * After a successful direct signup, the backend may not have finished
  * provisioning the default org/workspace/environment. Retry the user
@@ -27,28 +36,32 @@ function hasEnvWithApiKey(userInfo: AmplitudeUserInfo): boolean {
  *
  * Retries on both "returned but no env with apiKey" and "threw" — the
  * Data API throws "No user data returned" when orgs is empty, which is
- * the most-likely brand-new-signup race condition. After exhausting
- * retries, the final attempt's result (or error) propagates to the
- * caller's pending-sentinel fallback.
+ * the most-likely brand-new-signup race condition. Returns a discriminated
+ * union so the caller can drive telemetry (retry count, env-with-apikey
+ * flag) without duplicating try/catch. Never throws.
  */
 async function fetchUserWithProvisioningRetry(
   idToken: string,
   zone: AmplitudeZone,
-): Promise<AmplitudeUserInfo> {
+): Promise<FetchUserResult> {
   let userInfo: AmplitudeUserInfo | null = null;
   let lastError: unknown = null;
+  let retryCount = 0;
   try {
     userInfo = await fetchAmplitudeUser(idToken, zone);
   } catch (err) {
     lastError = err;
   }
   for (const delayMs of PROVISIONING_RETRY_DELAYS_MS) {
-    if (userInfo && hasEnvWithApiKey(userInfo)) return userInfo;
+    if (userInfo && hasEnvWithApiKey(userInfo)) {
+      return { ok: true, userInfo, retryCount, hasEnvWithApiKey: true };
+    }
     log.debug('signup provisioning incomplete; retrying user fetch', {
       delayMs,
       threw: lastError !== null,
     });
     await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    retryCount += 1;
     try {
       userInfo = await fetchAmplitudeUser(idToken, zone);
       lastError = null;
@@ -59,8 +72,15 @@ async function fetchUserWithProvisioningRetry(
       lastError = err;
     }
   }
-  if (userInfo) return userInfo;
-  throw lastError;
+  if (userInfo) {
+    return {
+      ok: true,
+      userInfo,
+      retryCount,
+      hasEnvWithApiKey: hasEnvWithApiKey(userInfo),
+    };
+  }
+  return { ok: false, retryCount, error: lastError };
 }
 
 export interface SignupOrAuthInput {
@@ -156,8 +176,12 @@ export async function performSignupOrAuth(
   // absorb post-signup provisioning lag.
   let userInfo: AmplitudeUserInfo | null = null;
   let user: StoredUser;
-  try {
-    userInfo = await fetchUserWithProvisioningRetry(tokens.idToken, input.zone);
+  const fetchResult = await fetchUserWithProvisioningRetry(
+    tokens.idToken,
+    input.zone,
+  );
+  if (fetchResult.ok) {
+    userInfo = fetchResult.userInfo;
     user = {
       id: userInfo.id,
       firstName: userInfo.firstName,
@@ -165,7 +189,7 @@ export async function performSignupOrAuth(
       email: userInfo.email,
       zone: input.zone,
     };
-  } catch {
+  } else {
     log.warn(
       'fetchAmplitudeUser failed after direct signup; falling back to pending sentinel',
       {
