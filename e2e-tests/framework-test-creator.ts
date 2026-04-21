@@ -15,7 +15,7 @@ import type { NDJSONEvent } from '../src/ui/agent-ui';
 /**
  * Resolve the directory that holds the test application.
  *
- * - If `config.workbenchApp` is set, use `$WIZARD_WORKBENCH_DIR/apps/<workbenchApp>`.
+ * - If `config.workbenchApp` is set, use `$E2E_WORKBENCH_DIR/apps/<workbenchApp>`.
  *   Returns `{ skipReason }` when the env var is missing so the caller can
  *   skip the suite with a helpful message.
  * - Otherwise, use the in-repo `e2e-tests/test-applications/<projectDir>`.
@@ -27,16 +27,16 @@ function resolveProjectDir(config: FrameworkTestConfig): {
   skipReason?: string;
 } {
   if (config.workbenchApp) {
-    const workbenchDir = process.env.WIZARD_WORKBENCH_DIR;
+    const workbenchDir = process.env.E2E_WORKBENCH_DIR;
     if (!workbenchDir) {
       return {
-        skipReason: `${config.name}: set WIZARD_WORKBENCH_DIR to run this suite (wants workbench app "${config.workbenchApp}")`,
+        skipReason: `${config.name}: set E2E_WORKBENCH_DIR to run this suite (wants workbench app "${config.workbenchApp}")`,
       };
     }
     const resolved = path.join(workbenchDir, 'apps', config.workbenchApp);
     if (!fs.existsSync(resolved)) {
       throw new Error(
-        `${config.name}: workbench app not found at ${resolved}. Set $WIZARD_WORKBENCH_DIR to a valid checkout (currently "${workbenchDir}").`,
+        `${config.name}: workbench app not found at ${resolved}. Set $E2E_WORKBENCH_DIR to a valid checkout (currently "${workbenchDir}").`,
       );
     }
     return { projectDir: resolved };

@@ -30,11 +30,11 @@ export interface FrameworkTestConfig {
   /** Relative path to the test application directory */
   projectDir: string;
   /**
-   * If set, resolve the app from `$WIZARD_WORKBENCH_DIR/apps/<workbenchApp>`
+   * If set, resolve the app from `$E2E_WORKBENCH_DIR/apps/<workbenchApp>`
    * instead of from the in-repo `e2e-tests/test-applications/<projectDir>`.
    * Example: `'python/django'`.
    *
-   * When this is set but `WIZARD_WORKBENCH_DIR` is not defined, the test
+   * When this is set but `E2E_WORKBENCH_DIR` is not defined, the test
    * suite will be skipped with a helpful message.
    */
   workbenchApp?: string;
