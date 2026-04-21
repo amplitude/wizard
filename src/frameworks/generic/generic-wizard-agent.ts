@@ -102,7 +102,10 @@ STEP 4: Install and initialise the Amplitude SDK.
 [STATUS] Installing Amplitude SDK
 If the project uses a package manager: use the detect_package_manager tool to find it, then install the appropriate SDK package as a background task and proceed immediately.
 If the project is a static site with no server-side build pipeline (e.g. Zola, Hugo, Jekyll, Eleventy): use the CDN script tag approach instead, and store the API key in the site's config file (e.g. config.toml, config.yaml, _config.yml) — that is the correct pattern for static sites, not a .env file.
-For all other projects: inline the Amplitude public API key (${projectApiKey}) directly into the SDK init() / initAll() call — the public key is not a secret. Exception — frameworks whose SDK reads the key from the environment at build or runtime: Swift (ProcessInfo), React Native (react-native-config), Expo (expo-constants), Android (gradle.properties / BuildConfig), Flutter (--dart-define), and server-side SDKs (Node.js, Python, Ruby, Laravel) — use env vars for the API key instead.
+For all other projects: inline the Amplitude public API key (${projectApiKey}) directly into the SDK init() / initAll() call — the public key is not a secret. Exception — frameworks whose SDK reads the key from the environment at build or runtime:
+- Mobile: Swift (ProcessInfo), React Native (react-native-config), Expo (expo-constants), Android (gradle.properties / BuildConfig), Flutter (--dart-define)
+- Server-side: Node.js, Python, Ruby, Laravel
+For these, use env vars for the API key instead.
 
 Add a sample tracking call demonstrating the integration.
 

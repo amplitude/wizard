@@ -9,7 +9,10 @@ import { DEMO_MODE } from './constants.js';
 const WIZARD_COMMANDMENTS = [
   'Never hallucinate an Amplitude API key, host, or any other secret. Always use the real values that have been provided for this project.',
 
-  'The Amplitude public API key is NOT a secret — inline it directly into the SDK init() / initAll() call so it takes effect immediately without a dev-server restart. Exceptions, where the SDK reads the key from the environment at build or runtime: Swift (ProcessInfo), React Native (react-native-config), Expo (expo-constants), Android (gradle.properties / BuildConfig), Flutter (--dart-define), and server-side SDKs (Node.js, Python, Ruby, Laravel). For those, use the wizard-tools MCP server (check_env_keys / set_env_values) to populate the .env / platform config instead. Never inline access tokens, secret keys, or other real secrets — those always go through environment variables.',
+  `The Amplitude public API key is NOT a secret — inline it directly into the SDK init() / initAll() call so it takes effect immediately without a dev-server restart. Exceptions, where the SDK reads the key from the environment at build or runtime:
+- Mobile: Swift (ProcessInfo), React Native (react-native-config), Expo (expo-constants), Android (gradle.properties / BuildConfig), Flutter (--dart-define)
+- Server-side: Node.js, Python, Ruby, Laravel
+For those, use the wizard-tools MCP server (check_env_keys / set_env_values) to populate the .env / platform config instead. Never inline access tokens, secret keys, or other real secrets — those always go through environment variables.`,
 
   'Always use the detect_package_manager tool from the wizard-tools MCP server to determine the package manager. Do not guess based on lockfiles or hard-code npm, yarn, pnpm, bun, pip, etc.',
 
