@@ -81,12 +81,18 @@ export const McpScreen = ({
     store.session;
   const dataSetupComplete = runPhase === RunPhase.Completed;
 
+  // When shown as an /mcp slash-command overlay, onComplete is provided and
+  // the user explicitly asked for MCP setup. Don't hijack their request with
+  // the pre-detected picker (that's meant for the main wizard flow only).
+  const isOverlay = onComplete !== undefined;
+  const showPreDetectedChoice = amplitudePreDetectedChoicePending && !isOverlay;
+
   const [phase, setPhase] = useState<Phase>(Phase.Detecting);
   const [clients, setClients] = useState<McpClientInfo[]>([]);
   const [resultClients, setResultClients] = useState<string[]>([]);
 
   useEffect(() => {
-    if (amplitudePreDetectedChoicePending) {
+    if (showPreDetectedChoice) {
       return;
     }
     void (async () => {
@@ -123,7 +129,7 @@ export const McpScreen = ({
         );
       }
     })();
-  }, [installer, amplitudePreDetectedChoicePending]);
+  }, [installer, showPreDetectedChoice]);
 
   const handleConfirm = () => {
     if (isRemove) {
@@ -201,7 +207,7 @@ export const McpScreen = ({
           </Text>
         </Box>
       )}
-      {amplitudePreDetectedChoicePending && !isRemove && (
+      {showPreDetectedChoice && !isRemove && (
         <Box marginBottom={1} flexDirection="column">
           <Text color={Colors.secondary}>
             The installer skipped the automated setup step because Amplitude is
@@ -229,7 +235,7 @@ export const McpScreen = ({
           </Box>
         </Box>
       )}
-      {!amplitudePreDetectedChoicePending && (
+      {!showPreDetectedChoice && (
         <>
           <Text bold color={Colors.accent}>
             MCP Server {isRemove ? 'Removal' : 'Setup'}
@@ -278,6 +284,7 @@ export const McpScreen = ({
                   value: c.name,
                 }))}
                 mode="multi"
+                defaultSelected={clients.map((c) => c.name)}
                 onSelect={(selected) => {
                   const names = Array.isArray(selected) ? selected : [selected];
                   if (names.length === 0) return;
