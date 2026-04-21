@@ -1083,6 +1083,7 @@ export async function runAgent(
           ? Buffer.from(fullRemark, 'utf8')
               .subarray(0, MAX_REMARK_BYTES)
               .toString('utf8')
+              .replace(/\uFFFD+$/, '')
           : fullRemark;
         analytics.wizardCapture('wizard remark', {
           remark,
