@@ -24,6 +24,7 @@ import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
 import { LINTING_TOOLS } from './safe-tools';
+import { AgentState } from './agent-state';
 import {
   createWizardToolsServer,
   WIZARD_TOOL_NAMES,
@@ -1176,6 +1177,11 @@ export async function runAgent(
     // Passed to createStopHook so it can skip reflection when auth is broken.
     let authErrorDetected = false;
 
+    // Per-attempt recovery bag: modified files + last status. PreCompact
+    // persists a snapshot to disk so context dropped by compaction stays
+    // recoverable by a post-compaction hydration hook.
+    const agentState = new AgentState();
+
     // Structured status state populated by the `report_status` MCP tool.
     // Replaces the legacy [STATUS] / [ERROR-*] text-marker regex scanner.
     let reportedError: StatusReport | null = null;
@@ -1184,6 +1190,7 @@ export async function runAgent(
         spinner.message(report.detail);
         recentStatuses.push(report.detail);
         if (recentStatuses.length > 3) recentStatuses.shift();
+        agentState.recordStatus(report.code, report.detail);
       },
       onError(report) {
         // First error wins — stall/retry loop reads this after the attempt.
@@ -1195,6 +1202,7 @@ export async function runAgent(
     };
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      agentState.setAttemptId(`attempt-${attempt}`);
       if (attempt > 0) {
         // Exponential backoff: 2s, 4s, 8s
         const backoffMs = Math.min(2_000 * Math.pow(2, attempt - 1), 8_000);
@@ -1218,6 +1226,7 @@ export async function runAgent(
         recentStatuses.length = 0;
         authErrorDetected = false;
         reportedError = null;
+        agentState.reset();
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received
