@@ -374,6 +374,9 @@ npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
 | `AMPLITUDE_SERVER_URL` | `https://api2.amplitude.com` | Telemetry server URL |
 | `DEMO_MODE_WIZARD` | — | When `1`, limits agent to 5 events for demo runs |
 | `CI` | — | Non-interactive mode detection; also set to `1` when invoking Vercel CLI |
+| `AMPLITUDE_WIZARD_DISABLE_CACHE` | — | When `1`, disables Claude Agent SDK prompt caching (sets `excludeDynamicSections: false`). Kill switch for the Bet 2 Slice 1 caching change — revert individual runs without reverting the PR. |
+| `DO_NOT_TRACK` | — | Cross-tool opt-out convention; disables Amplitude telemetry, Sentry, and diagnostic uploads |
+| `AMPLITUDE_WIZARD_NO_TELEMETRY` | — | Same behavior as `DO_NOT_TRACK=1` but wizard-specific |
 
 ### Framework-Specific SDK Environment Variables
 
