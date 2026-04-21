@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/amplitude/wizard/compare/wizard-v1.4.0...wizard-v1.4.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* detect npx invocation when it resolves to a local install ([#183](https://github.com/amplitude/wizard/issues/183)) ([dae9bc9](https://github.com/amplitude/wizard/commit/dae9bc962bc5a928ec5a737d0868758382923ad2))
+
 ## [1.4.0](https://github.com/amplitude/wizard/compare/wizard-v1.3.0...wizard-v1.4.0) (2026-04-18)
 
 

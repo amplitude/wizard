@@ -4,7 +4,7 @@
 
 // Kept in sync by release-please (x-release-please-version marker).
 // The prebuild script (sync-version.mjs) acts as a safety net.
-const VERSION = '1.4.0'; // x-release-please-version
+const VERSION = '1.4.1'; // x-release-please-version
 
 // ── Integration / CLI ───────────────────────────────────────────────
 
