@@ -38,7 +38,7 @@ vi.mock('../../lib/api', () => ({
 }));
 
 vi.mock('../ampli-settings', () => ({
-  storeToken: vi.fn(),
+  updateStoredUser: vi.fn(),
 }));
 
 vi.mock('../urls', () => ({
@@ -64,7 +64,7 @@ vi.mock('@inquirer/prompts', () => ({
 import { performAmplitudeAuth } from '../oauth';
 import { fetchAmplitudeUser } from '../../lib/api';
 import { detectRegionFromToken } from '../urls';
-import { storeToken } from '../ampli-settings';
+import { updateStoredUser } from '../ampli-settings';
 import { getUI } from '../../ui';
 import type { AmplitudeUserInfo } from '../../lib/api';
 import * as inquirer from '@inquirer/prompts';
@@ -78,7 +78,9 @@ const mockFetchAmplitudeUser = fetchAmplitudeUser as MockedFunction<
 const mockDetectRegion = detectRegionFromToken as MockedFunction<
   typeof detectRegionFromToken
 >;
-const mockStoreToken = storeToken as MockedFunction<typeof storeToken>;
+const mockUpdateStoredUser = updateStoredUser as MockedFunction<
+  typeof updateStoredUser
+>;
 const mockSelect = inquirer.select as MockedFunction<typeof inquirer.select>;
 const mockInput = inquirer.input as MockedFunction<typeof inquirer.input>;
 
@@ -196,22 +198,17 @@ describe('login flow — org resolution', () => {
   });
 
   describe('token persistence', () => {
-    it('calls storeToken with user details after successful auth', async () => {
+    it('calls updateStoredUser with user details after successful auth', async () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
 
       await getOrAskForProjectData({ signup: false, ci: false });
 
-      expect(mockStoreToken).toHaveBeenCalledWith(
+      expect(mockUpdateStoredUser).toHaveBeenCalledWith(
         expect.objectContaining({
           id: 'user-1',
           email: 'ada@example.com',
           firstName: 'Ada',
           lastName: 'Lovelace',
-        }),
-        expect.objectContaining({
-          accessToken: AUTH_RESULT.accessToken,
-          idToken: AUTH_RESULT.idToken,
-          refreshToken: AUTH_RESULT.refreshToken,
         }),
       );
     });
@@ -279,12 +276,12 @@ describe('login flow — fetchAmplitudeUser failure', () => {
     expect(result.projectApiKey).toBe('amp-api-key-123');
   });
 
-  it('does not call storeToken when user info fetch fails', async () => {
+  it('does not call updateStoredUser when user info fetch fails', async () => {
     mockFetchAmplitudeUser.mockRejectedValue(new Error('API unavailable'));
 
     await getOrAskForProjectData({ signup: false, ci: false });
 
-    expect(mockStoreToken).not.toHaveBeenCalled();
+    expect(mockUpdateStoredUser).not.toHaveBeenCalled();
   });
 });
 

@@ -23,7 +23,7 @@ import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
 import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
-import { storeToken } from './ampli-settings';
+import { updateStoredUser } from './ampli-settings';
 import { detectRegionFromToken } from './urls';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
@@ -524,22 +524,16 @@ async function askForWizardLogin(
   let selectedOrg: AmplitudeOrg | undefined;
 
   if (userInfo) {
-    // Persist user details back to ~/.ampli.json (replaces the "pending" entry)
-    storeToken(
-      {
-        id: userInfo.id,
-        firstName: userInfo.firstName,
-        lastName: userInfo.lastName,
-        email: userInfo.email,
-        zone: auth.zone,
-      },
-      {
-        accessToken: auth.accessToken,
-        idToken: auth.idToken,
-        refreshToken: auth.refreshToken,
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-      },
-    );
+    // performAmplitudeAuth already wrote tokens with the real expiresAt
+    // under the pending sentinel. Upgrade the User record only; leave
+    // OAuth fields (including expiresAt) untouched.
+    updateStoredUser({
+      id: userInfo.id,
+      firstName: userInfo.firstName,
+      lastName: userInfo.lastName,
+      email: userInfo.email,
+      zone: auth.zone,
+    });
 
     // ── 4. Org resolution (flowchart: sign-in → determine destination org) ──
     if (userInfo.orgs.length === 0) {
