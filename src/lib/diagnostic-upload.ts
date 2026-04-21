@@ -13,6 +13,7 @@ import { writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import axios from 'axios';
+import { z } from 'zod';
 import { getWizardProxyBase } from './api';
 import { createTracingHeaders } from '../utils/custom-headers';
 import { WIZARD_USER_AGENT, type AmplitudeZone } from './constants';
@@ -85,9 +86,11 @@ export async function uploadBundle(
     }
 
     if (response.status >= 200 && response.status < 300) {
-      const data = response.data as { url?: string; id?: string } | undefined;
-      if (data && typeof data.url === 'string' && typeof data.id === 'string') {
-        return { kind: 'uploaded', url: data.url, id: data.id };
+      const parsed = z
+        .object({ url: z.string(), id: z.string() })
+        .safeParse(response.data);
+      if (parsed.success) {
+        return { kind: 'uploaded', url: parsed.data.url, id: parsed.data.id };
       }
       // Success but unexpected payload — still better to return a local copy
       // so the user can share something concrete.
