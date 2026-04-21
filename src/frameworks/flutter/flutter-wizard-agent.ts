@@ -10,6 +10,7 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
   metadata: {
     name: 'Flutter',
     integration: Integration.flutter,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/flutter/flutter-sdk-4',
   },

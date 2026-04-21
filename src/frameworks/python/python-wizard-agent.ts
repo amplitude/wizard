@@ -23,6 +23,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
   metadata: {
     name: 'Python Language',
     integration: Integration.python,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {

@@ -15,6 +15,7 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
   metadata: {
     name: 'Android',
     integration: Integration.android,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl:
       'https://amplitude.com/docs/sdks/analytics/android/android-kotlin-sdk',

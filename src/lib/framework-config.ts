@@ -50,6 +50,19 @@ export interface FrameworkMetadata<
   /** Integration type from constants */
   integration: Integration;
 
+  /**
+   * Whether the SDK enables autocapture by default for this framework.
+   *
+   * Web frameworks using `@amplitude/unified` or `@amplitude/analytics-browser`
+   * typically run with autocapture on (clicks, forms, page views). Backend and
+   * mobile SDKs do not. `null` means unknown/irrelevant — the dashboard
+   * planner treats that as "no autocapture" conservatively.
+   *
+   * Sent to Thunder's `POST /wizard/v1/dashboards` so the planner can skip
+   * chart types already covered by autocapture.
+   */
+  autocaptureEnabled?: boolean | null;
+
   /** URL to framework-specific Amplitude docs */
   docsUrl: string;
 

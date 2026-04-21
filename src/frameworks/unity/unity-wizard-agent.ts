@@ -13,6 +13,7 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
   metadata: {
     name: 'Unity',
     integration: Integration.unity,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unity/unity-sdk',
     preRunNotice:

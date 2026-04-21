@@ -19,6 +19,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   metadata: {
     name: 'JavaScript (Web)',
     integration: Integration.javascript_web,
+    autocaptureEnabled: true,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: (options: WizardOptions) => {

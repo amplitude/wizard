@@ -13,6 +13,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
   metadata: {
     name: 'Unreal Engine',
     integration: Integration.unreal,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unreal/unreal-sdk',
     preRunNotice:

@@ -13,6 +13,7 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
   metadata: {
     name: 'Java',
     integration: Integration.java,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/java/jre-java-sdk',
     gatherContext: (options) => {

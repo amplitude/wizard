@@ -13,6 +13,7 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
     metadata: {
       name: 'Node.js',
       integration: Integration.javascriptNode,
+      autocaptureEnabled: false,
       beta: true,
       docsUrl:
         'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',

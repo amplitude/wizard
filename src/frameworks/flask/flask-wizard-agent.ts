@@ -25,6 +25,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   metadata: {
     name: 'Flask',
     integration: Integration.flask,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:

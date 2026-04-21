@@ -51,6 +51,23 @@ const CheckpointSchema = z
     detectedFrameworkLabel: z.string().nullable(),
     detectionComplete: z.boolean(),
     frameworkContext: z.record(z.string(), z.unknown()),
+    autocaptureEnabled: z.boolean().nullable().optional(),
+
+    // Dashboard creation — persists idempotency key so retries + crash
+    // recovery reuse the same key (contract §5). No credentials here.
+    dashboardId: z.string().nullable().optional(),
+    dashboardUrl: z.string().nullable().optional(),
+    dashboardWarnings: z
+      .array(
+        z.object({
+          code: z.string(),
+          message: z.string(),
+          chartTitle: z.string().optional(),
+        }),
+      )
+      .nullable()
+      .optional(),
+    dashboardIdempotencyKey: z.string().nullable().optional(),
 
     // Intro
     introConcluded: z.boolean(),
@@ -87,6 +104,12 @@ export function saveCheckpoint(session: WizardSession): void {
     detectedFrameworkLabel: session.detectedFrameworkLabel,
     detectionComplete: session.detectionComplete,
     frameworkContext: session.frameworkContext,
+    autocaptureEnabled: session.autocaptureEnabled,
+
+    dashboardId: session.dashboardId,
+    dashboardUrl: session.dashboardUrl,
+    dashboardWarnings: session.dashboardWarnings,
+    dashboardIdempotencyKey: session.dashboardIdempotencyKey,
 
     introConcluded: session.introConcluded,
   };
@@ -143,6 +166,13 @@ export function loadCheckpoint(
     detectedFrameworkLabel: checkpoint.detectedFrameworkLabel,
     detectionComplete: checkpoint.detectionComplete,
     frameworkContext: checkpoint.frameworkContext,
+    autocaptureEnabled: checkpoint.autocaptureEnabled ?? null,
+    dashboardId: checkpoint.dashboardId ?? null,
+    dashboardUrl: checkpoint.dashboardUrl ?? null,
+    dashboardWarnings:
+      (checkpoint.dashboardWarnings as WizardSession['dashboardWarnings']) ??
+      null,
+    dashboardIdempotencyKey: checkpoint.dashboardIdempotencyKey ?? null,
     introConcluded: checkpoint.introConcluded,
   };
 }

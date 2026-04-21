@@ -513,8 +513,8 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setChecklistDashboardUrl(url: string): void {
-    this.$session.setKey('checklistDashboardUrl', url);
+  setDashboardUrl(url: string): void {
+    this.$session.setKey('dashboardUrl', url);
     this.emitChange();
   }
 

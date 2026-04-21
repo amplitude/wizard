@@ -142,15 +142,23 @@ export interface WizardUI {
   // ── Event plan from .amplitude-events.json ────────────────────
   setEventPlan(events: Array<{ name: string; description: string }>): void;
 
+  /**
+   * Read-only accessor for the most recently approved event plan. Populated by
+   * `setEventPlan` from the agent's `.amplitude-events.json` writes. Callers
+   * outside the TUI (CI / agent NDJSON modes) get back an empty array.
+   */
+  getEventPlan(): Array<{ name: string; description: string }>;
+
   // ── Data ingestion confirmation ────────────────────────────────
   /** Emitted by agent mode when MCP polling detects events flowing into the project. */
   setEventIngestionDetected(eventNames: string[]): void;
 
-  // ── Agent-created dashboard ────────────────────────────────────
+  // ── Wizard-created dashboard ───────────────────────────────────
   /**
-   * Called when the agent writes .amplitude-dashboard.json with the URL of
-   * the dashboard it created during the conclude phase. Surfaces the link in
-   * ChecklistScreen so users can open the dashboard immediately.
+   * Called by `createDashboardStep` after the wizard's REST call to Thunder
+   * returns a dashboard URL. Triggers a re-render so OutroScreen can surface
+   * the link as the primary CTA. Agent-mode (NDJSON) implementations emit a
+   * structured `dashboard_created` event.
    */
   setDashboardUrl(url: string): void;
 }

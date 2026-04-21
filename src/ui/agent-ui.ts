@@ -569,10 +569,17 @@ export class AgentUI implements WizardUI {
 
   // ── Event plan ──────────────────────────────────────────────────────
 
+  private _eventPlan: Array<{ name: string; description: string }> = [];
+
   setEventPlan(events: Array<{ name: string; description: string }>): void {
+    this._eventPlan = events;
     emit('result', `event_plan: ${events.length} events`, {
       data: { event: 'event_plan_set', events },
     });
+  }
+
+  getEventPlan(): Array<{ name: string; description: string }> {
+    return this._eventPlan;
   }
 
   setEventIngestionDetected(eventNames: string[]): void {

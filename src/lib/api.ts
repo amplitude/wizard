@@ -10,6 +10,27 @@ import {
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
 import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
 
+// Local timeout helper — cannot import the ESM `src/ui/tui/utils/with-timeout.ts`
+// from this CJS module without a module-boundary error.
+class TimeoutError extends Error {
+  constructor(label: string, ms: number) {
+    super(`${label} timed out after ${ms}ms`);
+    this.name = 'TimeoutError';
+  }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new TimeoutError(label, ms)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer!));
+}
+
 // ── App API URL helper ────────────────────────────────────────────────
 
 /**
@@ -411,6 +432,265 @@ export async function createAmplitudeApp(
     );
     analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
     throw apiError;
+  }
+}
+
+// ── Create Wizard Dashboard ──────────────────────────────────────────
+
+/**
+ * Error codes returned by the wizard proxy `POST /wizard/v1/dashboards` endpoint.
+ * Mirrors the enum defined in the Thunder handoff contract (§3).
+ */
+export type WizardDashboardErrorCode =
+  | 'INVALID_REQUEST'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'QUOTA_REACHED'
+  | 'RATE_LIMITED'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'UNAVAILABLE'
+  | 'INTERNAL';
+
+/**
+ * Warning codes the planner returns alongside a 200 response when a chart was
+ * skipped, capped, or deduplicated. Contract §3.
+ */
+export type WizardDashboardWarningCode =
+  | 'RETENTION_SKIPPED_NO_ANCHOR'
+  | 'FUNNEL_SKIPPED_TOO_FEW_EVENTS'
+  | 'DUPLICATE_EVENT_NAMES'
+  | 'ENGAGEMENT_EVENTS_CAPPED'
+  | 'CHART_CREATION_FAILED';
+
+const WizardDashboardWarningCodeSchema = z.enum([
+  'RETENTION_SKIPPED_NO_ANCHOR',
+  'FUNNEL_SKIPPED_TOO_FEW_EVENTS',
+  'DUPLICATE_EVENT_NAMES',
+  'ENGAGEMENT_EVENTS_CAPPED',
+  'CHART_CREATION_FAILED',
+]);
+
+const WizardDashboardErrorCodeSchema = z.enum([
+  'INVALID_REQUEST',
+  'UNAUTHENTICATED',
+  'FORBIDDEN',
+  'QUOTA_REACHED',
+  'RATE_LIMITED',
+  'IDEMPOTENCY_CONFLICT',
+  'UNAVAILABLE',
+  'INTERNAL',
+]);
+
+export type WizardDashboardEventCategory =
+  | 'SIGNUP'
+  | 'ACTIVATION'
+  | 'ENGAGEMENT'
+  | 'CONVERSION'
+  | 'OTHER';
+
+export interface CreateWizardDashboardRequest {
+  orgId: string;
+  appId: string;
+  product: {
+    name: string;
+    framework: string;
+    sdkVersion?: string;
+  };
+  events: Array<{
+    name: string;
+    description?: string;
+    category?: WizardDashboardEventCategory;
+  }>;
+  autocaptureEnabled: boolean;
+  dryRun?: boolean;
+}
+
+const CreateWizardDashboardSuccessSchema = z.object({
+  dashboard: z.object({
+    id: z.string(),
+    url: z.string().url(),
+    name: z.string(),
+  }),
+  charts: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      type: z.enum(['FUNNELS', 'RETENTION', 'EVENTS_SEGMENTATION']),
+      section: z.enum(['ACQUISITION', 'ACTIVATION', 'ENGAGEMENT', 'RETENTION']),
+      skipped: z.boolean(),
+    }),
+  ),
+  warnings: z.array(
+    z.object({
+      code: WizardDashboardWarningCodeSchema,
+      message: z.string(),
+      chartTitle: z.string().optional(),
+    }),
+  ),
+});
+
+const CreateWizardDashboardErrorSchema = z.object({
+  error: z.object({
+    code: WizardDashboardErrorCodeSchema,
+    message: z.string(),
+  }),
+});
+
+export type CreateWizardDashboardResult = z.infer<
+  typeof CreateWizardDashboardSuccessSchema
+>;
+
+/** Default maximum retry count for the whole helper (combined across statuses). */
+const DASHBOARD_MAX_RETRIES = 2;
+/** Base delay for exponential backoff (ms). Matches createAmplitudeApp style. */
+const DASHBOARD_BASE_BACKOFF_MS = 1_000;
+/** Upper bound on server-suggested Retry-After values we'll honor (seconds). */
+const MAX_RETRY_AFTER_SECONDS = 60;
+/** Client-side timeout. Contract §8: do NOT auto-retry on timeout. */
+const DASHBOARD_CLIENT_TIMEOUT_MS = 30_000;
+
+/** Parse a Retry-After header value (seconds or HTTP-date) into milliseconds. */
+function parseRetryAfterMs(header: unknown): number | null {
+  if (typeof header !== 'string' || header.trim() === '') return null;
+  const asNumber = Number(header);
+  if (Number.isFinite(asNumber) && asNumber >= 0) {
+    return Math.min(asNumber, MAX_RETRY_AFTER_SECONDS) * 1000;
+  }
+  const asDate = Date.parse(header);
+  if (!Number.isNaN(asDate)) {
+    const delta = asDate - Date.now();
+    if (delta <= 0) return 0;
+    return Math.min(delta, MAX_RETRY_AFTER_SECONDS * 1000);
+  }
+  return null;
+}
+
+/** Sleep helper that resolves after ms. */
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Create an Amplitude dashboard for the instrumented wizard run.
+ *
+ * Server endpoint: `POST {wizard-proxy-base}/v1/dashboards`.
+ * Retries 429/503 (max 2, exponential backoff honoring `Retry-After`) and 500
+ * (single retry), all with the same `Idempotency-Key` header. 401 is surfaced
+ * as `UNAUTHENTICATED` so the caller can refresh the token and re-invoke. Other
+ * 4xx codes are terminal.
+ *
+ * Client-side wall-clock timeout: 30s. Contract §8 forbids auto-retrying on
+ * timeout (the server's 24h idempotency window covers replays, but a second
+ * in-flight request could race the first — require explicit user action).
+ */
+export async function createWizardDashboard(
+  accessToken: string,
+  zone: AmplitudeZone,
+  body: CreateWizardDashboardRequest,
+  idempotencyKey: string,
+): Promise<CreateWizardDashboardResult> {
+  const base = getWizardProxyBase(zone);
+  const url = `${base}/v1/dashboards`;
+
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Idempotency-Key': idempotencyKey,
+    'Content-Type': 'application/json',
+    'User-Agent': WIZARD_USER_AGENT,
+  };
+
+  let attempt = 0;
+  let lastError: ApiError | undefined;
+
+  // Hand-rolled retry ladder — each transient status has its own bounded
+  // retry budget, all sharing the same idempotency key so the server can
+  // dedupe. Terminal codes (401/403/400/409/QUOTA_REACHED) throw immediately.
+  while (true) {
+    let response;
+    try {
+      response = await withTimeout(
+        axios.post(url, body, {
+          headers,
+          validateStatus: () => true,
+          // Axios timeout as a belt-and-suspenders with withTimeout.
+          timeout: DASHBOARD_CLIENT_TIMEOUT_MS,
+        }),
+        DASHBOARD_CLIENT_TIMEOUT_MS,
+        'createWizardDashboard',
+      );
+    } catch (err) {
+      if (err instanceof TimeoutError) {
+        // Contract §8: do NOT auto-retry on timeout.
+        throw new ApiError(err.message, undefined, url, 'INTERNAL');
+      }
+      if (axios.isAxiosError(err)) {
+        const apiError = new ApiError(
+          err.message || 'Network error creating dashboard',
+          err.response?.status,
+          url,
+          'INTERNAL',
+        );
+        throw apiError;
+      }
+      throw new ApiError(
+        `Unexpected error creating dashboard: ${
+          err instanceof Error ? err.message : 'Unknown error'
+        }`,
+        undefined,
+        url,
+        'INTERNAL',
+      );
+    }
+
+    // ── Success ──────────────────────────────────────────────────────
+    if (response.status >= 200 && response.status < 300) {
+      const parsed = CreateWizardDashboardSuccessSchema.safeParse(
+        response.data,
+      );
+      if (!parsed.success) {
+        throw new ApiError(
+          'Invalid response from create-dashboard endpoint',
+          response.status,
+          url,
+          'INTERNAL',
+        );
+      }
+      return parsed.data;
+    }
+
+    // ── Structured error body ────────────────────────────────────────
+    const errBody = CreateWizardDashboardErrorSchema.safeParse(response.data);
+    const code: WizardDashboardErrorCode = errBody.success
+      ? errBody.data.error.code
+      : 'INTERNAL';
+    const message = errBody.success
+      ? errBody.data.error.message
+      : `Failed to create dashboard (HTTP ${response.status})`;
+
+    lastError = new ApiError(message, response.status, url, code);
+
+    // ── Decide whether to retry ──────────────────────────────────────
+    const status = response.status;
+    const retryAfterMs = parseRetryAfterMs(response.headers?.['retry-after']);
+
+    // 401: terminal from this helper's POV — caller handles silent refresh.
+    // 403, 400, 409 (IDEMPOTENCY_CONFLICT/QUOTA_REACHED): terminal.
+    // 429: exp backoff honoring Retry-After, max 2.
+    // 503: exp backoff, max 2.
+    // 500: single retry.
+    const retryBudget =
+      status === 429 || status === 503
+        ? DASHBOARD_MAX_RETRIES
+        : status === 500
+        ? 1
+        : 0;
+
+    if (attempt >= retryBudget) throw lastError;
+
+    const baseBackoff = DASHBOARD_BASE_BACKOFF_MS * Math.pow(2, attempt);
+    const waitMs = retryAfterMs ?? baseBackoff;
+    await delay(waitMs);
+    attempt++;
   }
 }
 

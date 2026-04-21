@@ -25,6 +25,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
   metadata: {
     name: 'Django',
     integration: Integration.django,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:

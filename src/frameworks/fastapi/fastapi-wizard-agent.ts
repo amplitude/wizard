@@ -29,6 +29,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   metadata: {
     name: 'FastAPI',
     integration: Integration.fastapi,
+    autocaptureEnabled: false,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/python',

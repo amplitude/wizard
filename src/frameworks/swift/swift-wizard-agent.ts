@@ -16,6 +16,7 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
   metadata: {
     name: 'Swift',
     integration: Integration.swift,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/ios/unified-sdk',
     preRunNotice:
