@@ -117,6 +117,14 @@ const CLI_INVOCATION: string = (() => {
   if (scriptPath.includes('/_npx/') || scriptPath.includes('\\_npx\\')) {
     return 'npx @amplitude/wizard';
   }
+  // npm >= 7 implements `npx` as `npm exec`, which always sets
+  // npm_command=exec — even when npx resolves to an already-installed copy
+  // (e.g. running `npx @amplitude/wizard` from inside this repo, or from
+  // a project that depends on it). argv[1] doesn't contain /_npx/ in that
+  // case, so this catches it.
+  if (process.env.npm_command === 'exec') {
+    return 'npx @amplitude/wizard';
+  }
   return 'amplitude-wizard';
 })();
 
