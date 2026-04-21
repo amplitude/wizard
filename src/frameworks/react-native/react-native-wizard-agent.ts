@@ -15,6 +15,7 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
     glyph: '📱',
     glyphColor: '#61DAFB',
     integration: Integration.reactNative,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl:
       'https://amplitude.com/docs/sdks/analytics/react-native/react-native-sdk',

@@ -1118,10 +1118,6 @@ export async function runAgent(
   let eventPlanWatcher: fs.FSWatcher | undefined;
   let eventPlanInterval: ReturnType<typeof setInterval> | undefined;
 
-  // Dashboard file watcher — cleaned up in finally block
-  let dashboardWatcher: fs.FSWatcher | undefined;
-  let dashboardInterval: ReturnType<typeof setInterval> | undefined;
-
   try {
     // Tools needed for the wizard:
     // - File operations: Read, Write, Edit
@@ -1171,50 +1167,6 @@ export async function runAgent(
           clearInterval(eventPlanInterval);
           eventPlanInterval = undefined;
           eventPlanWatcher = fs.watch(eventPlanPath, () => readEventPlan());
-        } catch {
-          // Still waiting
-        }
-      }, 1000);
-    }
-
-    // Watch for .amplitude-dashboard.json written by the agent after dashboard creation.
-    // Parses the dashboard URL and forwards it to the UI so ChecklistScreen can
-    // surface a direct link without requiring any further user action.
-    // workingDirectory is the CLI install dir (process.cwd() or --install-dir),
-    // not untrusted network input. The filename is a hardcoded constant.
-    const dashboardFilePath = path.join(
-      agentConfig.workingDirectory,
-      '.amplitude-dashboard.json',
-    ); // nosemgrep
-    const dashboardFileSchema = z.object({
-      dashboardUrl: z.string().url(),
-    });
-    const readDashboardFile = () => {
-      try {
-        const content = fs.readFileSync(dashboardFilePath, 'utf-8');
-        const result = dashboardFileSchema.safeParse(JSON.parse(content));
-        if (result.success) {
-          getUI().setDashboardUrl(result.data.dashboardUrl);
-        }
-      } catch {
-        // File doesn't exist or isn't valid JSON yet
-      }
-    };
-
-    try {
-      dashboardWatcher = fs.watch(dashboardFilePath, () => readDashboardFile());
-      readDashboardFile();
-    } catch {
-      // File doesn't exist yet — poll until it appears
-      dashboardInterval = setInterval(() => {
-        try {
-          fs.accessSync(dashboardFilePath);
-          readDashboardFile();
-          clearInterval(dashboardInterval);
-          dashboardInterval = undefined;
-          dashboardWatcher = fs.watch(dashboardFilePath, () =>
-            readDashboardFile(),
-          );
         } catch {
           // Still waiting
         }
@@ -1655,8 +1607,6 @@ export async function runAgent(
     clearInterval(heartbeatInterval);
     eventPlanWatcher?.close();
     if (eventPlanInterval) clearInterval(eventPlanInterval);
-    dashboardWatcher?.close();
-    if (dashboardInterval) clearInterval(dashboardInterval);
     clearRetryBanner();
   }
 }

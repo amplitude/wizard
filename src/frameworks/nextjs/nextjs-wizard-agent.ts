@@ -29,6 +29,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
     glyphColor: BrandColors.gray10,
     integration: Integration.nextjs,
     targetsBrowser: true,
+    autocaptureEnabled: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',

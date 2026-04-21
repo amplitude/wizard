@@ -16,6 +16,7 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
     glyph: '🎮',
     glyphColor: BrandColors.gray10,
     integration: Integration.unity,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unity/unity-sdk',
     preRunNotice:

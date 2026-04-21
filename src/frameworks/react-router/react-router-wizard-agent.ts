@@ -73,6 +73,7 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     glyphColor: '#CA4245',
     integration: Integration.reactRouter,
     targetsBrowser: true,
+    autocaptureEnabled: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',

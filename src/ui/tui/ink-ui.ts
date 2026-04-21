@@ -208,11 +208,18 @@ export class InkUI implements WizardUI {
     this.store.setEventPlan(events);
   }
 
+  getEventPlan(): Array<{ name: string; description: string }> {
+    return this.store.eventPlan.map((e) => ({
+      name: e.name,
+      description: e.description,
+    }));
+  }
+
   setEventIngestionDetected(_eventNames: string[]): void {
     // In TUI mode, DataIngestionCheckScreen handles this via polling — no-op here.
   }
 
   setDashboardUrl(url: string): void {
-    this.store.setChecklistDashboardUrl(url);
+    this.store.setDashboardUrl(url);
   }
 }

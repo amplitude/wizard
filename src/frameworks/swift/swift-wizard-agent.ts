@@ -18,6 +18,7 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
     glyph: '🍎',
     glyphColor: '#F05138',
     integration: Integration.swift,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/ios/unified-sdk',
     preRunNotice:

@@ -223,8 +223,14 @@ export class LoggingUI implements WizardUI {
     }
   }
 
-  setEventPlan(_events: Array<{ name: string; description: string }>): void {
-    // No-op in CI mode
+  private _eventPlan: Array<{ name: string; description: string }> = [];
+
+  setEventPlan(events: Array<{ name: string; description: string }>): void {
+    this._eventPlan = events;
+  }
+
+  getEventPlan(): Array<{ name: string; description: string }> {
+    return this._eventPlan;
   }
 
   setEventIngestionDetected(_eventNames: string[]): void {

@@ -16,6 +16,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
     glyph: '🎬',
     glyphColor: BrandColors.gray40,
     integration: Integration.unreal,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unreal/unreal-sdk',
     preRunNotice:
