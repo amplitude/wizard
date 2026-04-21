@@ -14,6 +14,11 @@ vi.mock('../ampli-settings.js', () => ({
 vi.mock('../../lib/api.js', () => ({
   fetchAmplitudeUser: vi.fn(),
 }));
+vi.mock('../analytics', () => ({
+  analytics: {
+    wizardCapture: vi.fn(),
+  },
+}));
 
 // Minimal provisioned-account shape: one org / workspace / env with an
 // apiKey. Having this is the signal that backend provisioning finished,
@@ -149,6 +154,47 @@ describe('performSignupOrAuth', () => {
     expect(result).not.toBeNull();
     expect(result).toMatchObject({ accessToken: 'direct-access' });
     expect(storeToken).toHaveBeenCalledOnce();
+  });
+
+  it('emits agentic signup attempted with status=success on the success path', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      {
+        status: 'success',
+        zone: 'us',
+        'has env with api key': true,
+        'user fetch retry count': 0,
+      },
+    );
   });
 
   it('persists StoredUser with real user id from fetchAmplitudeUser', async () => {

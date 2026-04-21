@@ -5,6 +5,7 @@ import { storeToken, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
+import { analytics } from './analytics.js';
 
 const log = createLogger('signup-or-auth');
 
@@ -81,6 +82,27 @@ async function fetchUserWithProvisioningRetry(
     };
   }
   return { ok: false, retryCount, error: lastError };
+}
+
+type SignupAttemptStatus =
+  | 'success'
+  | 'requires_redirect'
+  | 'signup_error'
+  | 'user_fetch_failed';
+
+function emitAttempted(
+  status: SignupAttemptStatus,
+  zone: AmplitudeZone,
+  extras: { hasEnvWithApiKey?: boolean; userFetchRetryCount?: number } = {},
+): void {
+  const props: Record<string, unknown> = { status, zone };
+  if (extras.hasEnvWithApiKey !== undefined) {
+    props['has env with api key'] = extras.hasEnvWithApiKey;
+  }
+  if (extras.userFetchRetryCount !== undefined) {
+    props['user fetch retry count'] = extras.userFetchRetryCount;
+  }
+  analytics.wizardCapture('agentic signup attempted', props);
 }
 
 export interface SignupOrAuthInput {
@@ -189,6 +211,10 @@ export async function performSignupOrAuth(
       email: userInfo.email,
       zone: input.zone,
     };
+    emitAttempted('success', input.zone, {
+      hasEnvWithApiKey: fetchResult.hasEnvWithApiKey,
+      userFetchRetryCount: fetchResult.retryCount,
+    });
   } else {
     log.warn(
       'fetchAmplitudeUser failed after direct signup; falling back to pending sentinel',
