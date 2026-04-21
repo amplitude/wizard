@@ -1,5 +1,4 @@
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClientConfig, getNativeHTTPServerConfig } from '../defaults';
@@ -16,12 +15,10 @@ export class CursorMCPClient extends DefaultMCPClient {
     super();
   }
 
-  isClientSupported(): Promise<boolean> {
-    if (process.platform !== 'darwin' && process.platform !== 'win32') {
-      return Promise.resolve(false);
-    }
-    // Cursor creates ~/.cursor/ on first launch; absence == not installed.
-    return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.cursor')));
+  async isClientSupported(): Promise<boolean> {
+    return Promise.resolve(
+      process.platform === 'darwin' || process.platform === 'win32',
+    );
   }
 
   async getConfigPath(): Promise<string> {
