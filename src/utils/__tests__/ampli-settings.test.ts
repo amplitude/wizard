@@ -481,4 +481,29 @@ describe('updateStoredUser', () => {
     // No write should occur — neither pending nor real-id-42 exists
     expect(mockWriteFileSync).not.toHaveBeenCalled();
   });
+
+  it('regression: real expiresAt survives store-then-update (simulates OAuth → user upgrade)', () => {
+    // Simulate performAmplitudeAuth's write: pending user with the real
+    // 2-hour expires_in from the token response.
+    const REAL_EXPIRES_AT = new Date(Date.now() + 7200 * 1000).toISOString();
+    const pendingUser: StoredUser = {
+      id: 'pending',
+      firstName: '',
+      lastName: '',
+      email: '',
+      zone: 'us',
+    };
+    storeToken(pendingUser, {
+      accessToken: 'a',
+      idToken: 'i',
+      refreshToken: 'r',
+      expiresAt: REAL_EXPIRES_AT,
+    });
+
+    // Simulate the TUI else-branch: fetch real user, then upgrade.
+    updateStoredUser(realUser);
+
+    const retrieved = getStoredToken('42');
+    expect(retrieved?.expiresAt).toBe(REAL_EXPIRES_AT);
+  });
 });
