@@ -1154,7 +1154,7 @@ void yargs(hideBin(process.argv))
                 const { DEFAULT_AMPLITUDE_ZONE } = await import(
                   './src/lib/constants.js'
                 );
-                const { storeToken } = await import(
+                const { updateStoredUser } = await import(
                   './src/utils/ampli-settings.js'
                 );
 
@@ -1260,24 +1260,17 @@ void yargs(hideBin(process.argv))
                       cloudRegion,
                     );
                   }
-                  // Persist to ~/.ampli.json (signup path already did this)
-                  storeToken(
-                    {
-                      id: userInfo.id,
-                      firstName: userInfo.firstName,
-                      lastName: userInfo.lastName,
-                      email: userInfo.email,
-                      zone: auth.zone,
-                    },
-                    {
-                      accessToken: auth.accessToken,
-                      idToken: auth.idToken,
-                      refreshToken: auth.refreshToken,
-                      expiresAt: new Date(
-                        Date.now() + 3600 * 1000,
-                      ).toISOString(),
-                    },
-                  );
+                  // performAmplitudeAuth / performSignupOrAuth already persisted
+                  // the tokens with the real expiresAt under the pending sentinel.
+                  // Here we only need to upgrade the User record to the real user;
+                  // OAuth fields (including expiresAt) must be preserved untouched.
+                  updateStoredUser({
+                    id: userInfo.id,
+                    firstName: userInfo.firstName,
+                    lastName: userInfo.lastName,
+                    email: userInfo.email,
+                    zone: auth.zone,
+                  });
                 }
 
                 // Populate user email for /whoami display

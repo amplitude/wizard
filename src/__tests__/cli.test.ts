@@ -12,6 +12,7 @@ const {
   mockPerformAmplitudeAuth,
   mockFetchAmplitudeUser,
   mockStoreToken,
+  mockUpdateStoredUser,
   mockGetStoredUser,
   mockGetStoredToken,
   mockAmpliConfigExists,
@@ -42,6 +43,7 @@ const {
     mockPerformAmplitudeAuth: vi.fn(),
     mockFetchAmplitudeUser: vi.fn(),
     mockStoreToken: vi.fn(),
+    mockUpdateStoredUser: vi.fn(),
     mockGetStoredUser: vi.fn(),
     mockGetStoredToken: vi.fn(),
     mockAmpliConfigExists: vi.fn(),
@@ -95,6 +97,7 @@ vi.mock('../lib/api', () => ({
 }));
 vi.mock('../utils/ampli-settings', () => ({
   storeToken: mockStoreToken,
+  updateStoredUser: mockUpdateStoredUser,
   getStoredUser: mockGetStoredUser,
   getStoredToken: mockGetStoredToken,
   clearStoredCredentials: vi.fn(),
@@ -368,7 +371,7 @@ describe('TUI auth task: region determines OAuth zone', () => {
     await runCLI([]);
     await waitFor(() => mockStore.setOAuthComplete.mock.calls.length > 0);
 
-    expect(mockStoreToken).toHaveBeenCalled();
+    expect(mockUpdateStoredUser).toHaveBeenCalled();
     expect(mockStore.setOAuthComplete).toHaveBeenCalledWith(
       expect.objectContaining({
         accessToken: 'access-abc',
