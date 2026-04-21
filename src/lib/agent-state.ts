@@ -10,22 +10,26 @@
  * without a cyclic import through agent-interface.
  */
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { z } from 'zod';
 import { getRunId } from './observability';
 import { logToFile } from '../utils/debug';
 
-export interface SerializedAgentState {
-  schemaVersion: 'amplitude-wizard-agent-state/1';
-  runId: string | null;
-  attemptId: string | null;
-  modifiedFiles: string[];
-  lastStatus: { code: string; detail: string } | null;
-  compactionCount: number;
-  persistedAt: number;
-}
+const SerializedAgentStateSchema = z.object({
+  schemaVersion: z.literal('amplitude-wizard-agent-state/1'),
+  runId: z.string().nullable(),
+  attemptId: z.string().nullable(),
+  modifiedFiles: z.array(z.string()),
+  lastStatus: z.object({ code: z.string(), detail: z.string() }).nullable(),
+  compactionCount: z.number(),
+  persistedAt: z.number(),
+});
+
+/** Serialized shape written to disk on PreCompact. */
+export type SerializedAgentState = z.infer<typeof SerializedAgentStateSchema>;
 
 /**
  * Per-attempt agent recovery bag. Tracks which files the agent has written,
@@ -68,14 +72,21 @@ export class AgentState {
   }
 
   /** Persist the current state to the tmpdir path for this attempt. */
-  persist(): void {
+  persist(): string | null {
     const path = this.snapshotPath();
     try {
       writeFileSync(path, JSON.stringify(this.snapshot(), null, 2), {
         mode: 0o600,
       });
+      logToFile(`PreCompact: persisted agent state → ${path}`);
+      return path;
     } catch (err) {
-      logToFile(`AgentState persist failed: ${String(err)}`);
+      logToFile(
+        `PreCompact: failed to persist agent state: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      return null;
     }
   }
 
@@ -89,4 +100,71 @@ export class AgentState {
     this.lastStatus = null;
     this.compactionCount = 0;
   }
+}
+
+/**
+ * Read a previously-persisted snapshot. Returns null on any failure so the
+ * caller can fall back to a cold start. Uses zod validation to ensure all
+ * required fields are present and correctly typed.
+ */
+export function loadSnapshot(path: string): SerializedAgentState | null {
+  try {
+    if (!existsSync(path)) return null;
+    const raw = readFileSync(path, 'utf8');
+    const result = SerializedAgentStateSchema.safeParse(JSON.parse(raw));
+    if (!result.success) {
+      logToFile(`loadSnapshot: validation failed — ${result.error.message}`);
+      return null;
+    }
+    return result.data;
+  } catch (err) {
+    logToFile(
+      `loadSnapshot: read/parse failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Load + delete a snapshot in one step so restoration fires only once per
+ * compaction cycle. Non-throwing.
+ */
+export function consumeSnapshot(path: string): SerializedAgentState | null {
+  const snap = loadSnapshot(path);
+  if (!snap) return null;
+  try {
+    unlinkSync(path);
+  } catch {
+    // Best-effort cleanup; a leftover file won't cause incorrect behavior
+    // because the next compaction will overwrite it.
+  }
+  return snap;
+}
+
+/**
+ * Render a compact recovery note to prepend to a user prompt after
+ * compaction. Keeps the block short so it doesn't eat context budget —
+ * only the signals an LLM actually needs to re-orient.
+ */
+export function buildRecoveryNote(snap: SerializedAgentState): string {
+  const lines: string[] = [
+    '<post-compaction-recovery>',
+    `You are resuming a wizard run after a context compaction. The ${snap.compactionCount}x compaction summary may have dropped detail from earlier turns. Treat the list below as authoritative; do not re-edit files already modified unless the skill workflow requires it.`,
+  ];
+  if (snap.modifiedFiles.length > 0) {
+    lines.push('', 'Files you have already modified in this run:');
+    for (const file of snap.modifiedFiles) lines.push(`  - ${file}`);
+  } else {
+    lines.push('', 'No files have been modified yet in this run.');
+  }
+  if (snap.lastStatus) {
+    lines.push(
+      '',
+      `Last reported status: [${snap.lastStatus.code}] ${snap.lastStatus.detail}`,
+    );
+  }
+  lines.push('</post-compaction-recovery>', '');
+  return lines.join('\n');
 }
