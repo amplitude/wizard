@@ -407,4 +407,55 @@ describe('updateStoredUser', () => {
       OAuthExpiresAt: PRESERVED,
     });
   });
+
+  it('only migrates the pending entry matching the target zone', () => {
+    const US_EXPIRES = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    const EU_EXPIRES = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
+    setupConfig({
+      'User-pending': {
+        User: {
+          id: 'pending',
+          firstName: '',
+          lastName: '',
+          email: 'us-user@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'us-access',
+        OAuthIdToken: 'us-id',
+        OAuthRefreshToken: 'us-refresh',
+        OAuthExpiresAt: US_EXPIRES,
+      },
+      'User[eu]-pending': {
+        User: {
+          id: 'pending',
+          firstName: '',
+          lastName: '',
+          email: 'eu-user@example.com',
+          zone: 'eu',
+        },
+        OAuthAccessToken: 'eu-access',
+        OAuthIdToken: 'eu-id',
+        OAuthRefreshToken: 'eu-refresh',
+        OAuthExpiresAt: EU_EXPIRES,
+      },
+    });
+
+    updateStoredUser({
+      ...realUser,
+      zone: 'eu',
+      id: '99',
+      email: 'eu-user@example.com',
+    });
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    // EU pending migrated to real-id key
+    expect(written['User[eu]-pending']).toBeUndefined();
+    expect(written['User[eu]-99']).toBeDefined();
+    expect(written['User[eu]-99'].OAuthAccessToken).toBe('eu-access');
+    expect(written['User[eu]-99'].OAuthExpiresAt).toBe(EU_EXPIRES);
+    // US pending untouched
+    expect(written['User-pending']).toBeDefined();
+    expect(written['User-pending'].OAuthAccessToken).toBe('us-access');
+    expect(written['User-pending'].OAuthExpiresAt).toBe(US_EXPIRES);
+  });
 });
