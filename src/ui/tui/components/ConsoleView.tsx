@@ -29,7 +29,6 @@ import {
   getWhoamiText,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
-  renderHelpText,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
@@ -39,10 +38,6 @@ function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
 
   switch (cmd) {
-    case '/help':
-      store.setCommandFeedback(renderHelpText(), 30_000);
-      analytics.wizardCapture('help command invoked', {});
-      break;
     case '/region':
       store.setRegionForced();
       break;
