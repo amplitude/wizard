@@ -161,6 +161,29 @@ export function storeToken(
   writeConfig(config, configPath);
 }
 
+/**
+ * Updates the stored User record without touching OAuth token fields.
+ * Migrates a pending-sentinel entry to the real-id key while preserving the
+ * OAuth* fields written earlier by performAmplitudeAuth / performSignupOrAuth.
+ */
+export function updateStoredUser(user: StoredUser, configPath?: string): void {
+  const config = readConfig(configPath);
+  const pendingKey = userKey('pending', user.zone);
+  const realKey = userKey(user.id, user.zone);
+
+  if (config[pendingKey] !== undefined) {
+    const entry = config[pendingKey] as Record<string, unknown>;
+    if (pendingKey !== realKey) {
+      delete config[pendingKey];
+    }
+    config[realKey] = {
+      ...entry,
+      User: user,
+    };
+    writeConfig(config, configPath);
+  }
+}
+
 /** Clears all stored credentials by writing an empty config. */
 export function clearStoredCredentials(configPath?: string): void {
   writeConfig({}, configPath);

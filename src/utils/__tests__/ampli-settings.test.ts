@@ -24,6 +24,7 @@ import {
   getStoredUser,
   getStoredToken,
   storeToken,
+  updateStoredUser,
   clearStoredCredentials,
   type StoredUser,
   type StoredOAuthToken,
@@ -328,5 +329,52 @@ describe('clearStoredCredentials', () => {
   it('passes configPath through to fs', () => {
     clearStoredCredentials('/custom/path.json');
     expect(mockWriteFileSync.mock.calls[0][0]).toBe('/custom/path.json');
+  });
+});
+
+// ── updateStoredUser ───────────────────────────────────────────────────────
+
+describe('updateStoredUser', () => {
+  const realUser: StoredUser = {
+    id: '42',
+    firstName: 'Grace',
+    lastName: 'Hopper',
+    email: 'grace@example.com',
+    zone: 'us',
+  };
+
+  beforeEach(() => {
+    setupConfig({});
+  });
+
+  it('migrates a pending entry to the real-id key, preserving OAuth fields', () => {
+    const PRESERVED = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+    setupConfig({
+      'User-pending': {
+        User: {
+          id: 'pending',
+          firstName: 'Grace',
+          lastName: 'Hopper',
+          email: 'grace@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'real-access',
+        OAuthIdToken: 'real-id',
+        OAuthRefreshToken: 'real-refresh',
+        OAuthExpiresAt: PRESERVED,
+      },
+    });
+
+    updateStoredUser(realUser);
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-pending']).toBeUndefined();
+    expect(written['User-42']).toEqual({
+      User: realUser,
+      OAuthAccessToken: 'real-access',
+      OAuthIdToken: 'real-id',
+      OAuthRefreshToken: 'real-refresh',
+      OAuthExpiresAt: PRESERVED,
+    });
   });
 });
