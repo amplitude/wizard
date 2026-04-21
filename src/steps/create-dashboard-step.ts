@@ -1,5 +1,5 @@
 /**
- * createDashboardStep — POSTs to Thunder's `/wizard/v1/dashboards` endpoint
+ * createDashboardStep — POSTs to the App API's `/wizard/v1/dashboards` endpoint
  * after the agent finishes instrumentation, then stores the returned URL +
  * warnings on the session so OutroScreen can render them.
  *

@@ -27,7 +27,7 @@ const REPORT_FILE = 'amplitude-setup-report.md';
 
 /**
  * User-friendly copy for each `WizardDashboardWarningCode` returned by the
- * Thunder dashboard-creation endpoint. Keeps the outro readable when the
+ * App API dashboard-creation endpoint. Keeps the outro readable when the
  * planner had to skip, cap, or dedupe charts.
  */
 function formatDashboardWarning(warning: {

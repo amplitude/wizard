@@ -58,7 +58,7 @@ export interface FrameworkMetadata<
    * mobile SDKs do not. `null` means unknown/irrelevant — the dashboard
    * planner treats that as "no autocapture" conservatively.
    *
-   * Sent to Thunder's `POST /wizard/v1/dashboards` so the planner can skip
+   * Sent to the App API's `POST /wizard/v1/dashboards` so the planner can skip
    * chart types already covered by autocapture.
    */
   autocaptureEnabled?: boolean | null;

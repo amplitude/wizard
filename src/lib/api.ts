@@ -439,7 +439,7 @@ export async function createAmplitudeApp(
 
 /**
  * Error codes returned by the wizard proxy `POST /wizard/v1/dashboards` endpoint.
- * Mirrors the enum defined in the Thunder handoff contract (§3).
+ * Mirrors the enum defined in the App API handoff contract (§3).
  */
 export type WizardDashboardErrorCode =
   | 'INVALID_REQUEST'

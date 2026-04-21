@@ -158,7 +158,7 @@ export async function runAgentWizard(
   }
 
   // Record autocapture default from the framework config so the post-agent
-  // dashboard step can send the right value to Thunder's planner.
+  // dashboard step can send the right value to the App API's planner.
   session.autocaptureEnabled = config.metadata.autocaptureEnabled ?? null;
 
   analytics.wizardCapture('agent started', {
@@ -420,7 +420,7 @@ export async function runAgentWizard(
     await pollForDataIngestion(session, accessToken, cloudRegion);
   }
 
-  // Dashboard creation — one idempotent Thunder REST call per wizard run.
+  // Dashboard creation — one idempotent App API REST call per wizard run.
   // Replaces the previous in-agent MCP `create_chart` + `create_dashboard` loop.
   // Terminal failures are intentionally swallowed here so the rest of the
   // outro still renders; the step emits its own analytics + captureWizardError.

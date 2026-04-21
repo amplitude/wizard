@@ -348,7 +348,7 @@ export interface WizardSession {
   dataIngestionConfirmed: boolean;
 
   /**
-   * Result of the wizard's post-run call to Thunder's
+   * Result of the wizard's post-run call to the App API's
    * `POST /wizard/v1/dashboards` endpoint. Populated by `createDashboardStep`.
    * Fields stay null on short-circuit (no events) or terminal failure — the
    * agent run itself is still considered successful (contract §4).
@@ -370,7 +370,7 @@ export interface WizardSession {
   /**
    * Whether SDK-level autocapture is enabled for this integration.
    * Set from the resolved FrameworkConfig (web frameworks typically true,
-   * backend/mobile false, unknown/generic null). Sent to Thunder in the
+   * backend/mobile false, unknown/generic null). Sent to the App API in the
    * dashboard-creation request so the planner can skip redundant chart
    * types (pageview etc.).
    */

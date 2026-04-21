@@ -155,7 +155,7 @@ export interface WizardUI {
 
   // ── Wizard-created dashboard ───────────────────────────────────
   /**
-   * Called by `createDashboardStep` after the wizard's REST call to Thunder
+   * Called by `createDashboardStep` after the wizard's REST call to the App API
    * returns a dashboard URL. Triggers a re-render so OutroScreen can surface
    * the link as the primary CTA. Agent-mode (NDJSON) implementations emit a
    * structured `dashboard_created` event.
