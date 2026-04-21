@@ -26,7 +26,12 @@ import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
 import { LINTING_TOOLS } from './safe-tools';
-import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
+import {
+  createWizardToolsServer,
+  WIZARD_TOOL_NAMES,
+  type StatusReport,
+  type StatusReporter,
+} from './wizard-tools';
 import { getWizardCommandments } from './commandments';
 import { sanitizeNestedClaudeEnv } from './sanitize-claude-env';
 import type { PackageManagerDetector } from './package-manager-detection';
@@ -109,13 +114,12 @@ function getClaudeCodeExecutablePath(): string {
 type McpServersConfig = Record<string, unknown>;
 
 export const AgentSignals = {
-  /** Signal emitted when the agent reports progress to the user */
-  STATUS: '[STATUS]',
-  /** Signal emitted when the agent cannot access the Amplitude MCP server */
-  ERROR_MCP_MISSING: '[ERROR-MCP-MISSING]',
-  /** Signal emitted when the agent cannot access the setup resource */
-  ERROR_RESOURCE_MISSING: '[ERROR-RESOURCE-MISSING]',
-  /** Signal emitted when the agent provides a remark about its run */
+  /**
+   * Signal emitted when the agent provides a remark about its run.
+   * Kept as a text marker because it bookends a multi-line reflection that
+   * the model writes into its final message; structured tool-call routing
+   * doesn't fit the free-form nature of the reflection payload.
+   */
   WIZARD_REMARK: '[WIZARD-REMARK]',
   /** Signal prefix for benchmark logging */
   BENCHMARK: '[BENCHMARK]',
@@ -149,6 +153,11 @@ export enum AgentErrorType {
 }
 
 const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
+
+// Active StatusReporter slot. runAgent sets this at the start of each attempt
+// and clears it afterwards so the in-process wizard-tools `report_status` tool
+// can route structured events back into the per-run state bag.
+let _activeStatusReporter: StatusReporter | undefined;
 
 /**
  * Check if .claude/settings.json in the project directory contains env
@@ -964,11 +973,13 @@ export async function initializeAgent(
       mcpServers[name] = { type: 'http', url };
     }
 
-    // Add in-process wizard tools (env files, package manager detection)
+    // Add in-process wizard tools (env files, package manager detection).
+    // The status reporter is wired up per-run by runAgent via setStatusReporter.
     const wizardToolsServer = await createWizardToolsServer({
       workingDirectory: config.workingDirectory,
       detectPackageManager: config.detectPackageManager,
       skillsBaseUrl: config.skillsBaseUrl,
+      statusReporter: () => _activeStatusReporter,
     });
     mcpServers['wizard-tools'] = wizardToolsServer;
 
@@ -1436,6 +1447,24 @@ export async function runAgent(
     // recovery attempt (often many minutes) even though the agent is working.
     let postStreamRetryActive = false;
 
+    // Structured status state populated by the `report_status` MCP tool.
+    // Replaces the legacy [STATUS] / [ERROR-*] text-marker regex scanner.
+    let reportedError: StatusReport | null = null;
+    _activeStatusReporter = {
+      onStatus(report) {
+        spinner.message(report.detail);
+        recentStatuses.push(report.detail);
+        if (recentStatuses.length > 3) recentStatuses.shift();
+      },
+      onError(report) {
+        // First error wins — stall/retry loop reads this after the attempt.
+        if (!reportedError) reportedError = report;
+        logToFile(
+          `Structured error reported: ${report.code} — ${report.detail}`,
+        );
+      },
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       if (attempt > 0) {
@@ -1464,6 +1493,7 @@ export async function runAgent(
         collectedText.length = 0;
         recentStatuses.length = 0;
         authErrorDetected = false;
+        reportedError = null;
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received
@@ -1856,20 +1886,28 @@ export async function runAgent(
     if (authErrorDetected) {
       logToFile('Agent error: AUTH_ERROR');
       spinner.stop('Authentication failed');
+      _activeStatusReporter = undefined;
       return { error: AgentErrorType.AUTH_ERROR };
     }
 
-    // Check for error markers in the agent's output
-    if (outputText.includes(AgentSignals.ERROR_MCP_MISSING)) {
-      logToFile('Agent error: MCP_MISSING');
-      spinner.stop('Agent could not access Amplitude MCP');
-      return { error: AgentErrorType.MCP_MISSING };
-    }
-
-    if (outputText.includes(AgentSignals.ERROR_RESOURCE_MISSING)) {
-      logToFile('Agent error: RESOURCE_MISSING');
-      spinner.stop('Agent could not access setup resource');
-      return { error: AgentErrorType.RESOURCE_MISSING };
+    // Structured error signals via `report_status` (replaces text-marker regex).
+    if (reportedError) {
+      const { code, detail } = reportedError;
+      if (code === 'MCP_MISSING') {
+        logToFile('Agent error: MCP_MISSING');
+        spinner.stop(detail || 'Agent could not access Amplitude MCP');
+        _activeStatusReporter = undefined;
+        return { error: AgentErrorType.MCP_MISSING, message: detail };
+      }
+      if (code === 'RESOURCE_MISSING') {
+        logToFile('Agent error: RESOURCE_MISSING');
+        spinner.stop(detail || 'Agent could not access setup resource');
+        _activeStatusReporter = undefined;
+        return { error: AgentErrorType.RESOURCE_MISSING, message: detail };
+      }
+      // Unknown structured error code — log it, let the regex-driven API-error
+      // path below still run (API errors aren't reported via report_status).
+      logToFile(`Unhandled structured error code: ${code}`);
     }
 
     // Check for API errors (rate limits, etc.)
@@ -1974,6 +2012,7 @@ export async function runAgent(
     dashboardWatcher?.close();
     if (dashboardInterval) clearInterval(dashboardInterval);
     clearRetryBanner();
+    _activeStatusReporter = undefined;
   }
 }
 
@@ -1990,7 +2029,7 @@ function handleSDKMessage(
   spinner: SpinnerHandle,
   collectedText: string[],
   receivedSuccessResult = false,
-  recentStatuses?: string[],
+  _recentStatuses?: string[],
 ): void {
   logToFile(`SDK Message: ${message.type}`, JSON.stringify(message, null, 2));
 
@@ -2006,24 +2045,9 @@ function handleSDKMessage(
         for (const block of content) {
           if (block.type === 'text' && typeof block.text === 'string') {
             collectedText.push(block.text);
-
-            // Check for [STATUS] markers
-            const statusRegex = new RegExp(
-              `^.*${AgentSignals.STATUS.replace(
-                /[.*+?^${}()|[\]\\]/g,
-                '\\$&',
-              )}\\s*(.+?)$`,
-              'm',
-            );
-            const statusMatch = block.text.match(statusRegex);
-            if (statusMatch) {
-              const statusText = statusMatch[1].trim();
-              spinner.message(statusText);
-              if (recentStatuses) {
-                recentStatuses.push(statusText);
-                if (recentStatuses.length > 3) recentStatuses.shift();
-              }
-            }
+            // Status updates now flow through the `report_status` MCP tool,
+            // wired to the spinner via StatusReporter in runAgent. No more
+            // [STATUS] text-marker scanning — see wizard-tools.ts.
           }
 
           // Intercept TodoWrite tool_use blocks for task progression
