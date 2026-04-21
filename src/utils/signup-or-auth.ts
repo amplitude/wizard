@@ -84,11 +84,12 @@ async function fetchUserWithProvisioningRetry(
   return { ok: false, retryCount, error: lastError };
 }
 
-type SignupAttemptStatus =
+export type SignupAttemptStatus =
   | 'success'
   | 'requires_redirect'
   | 'signup_error'
-  | 'user_fetch_failed';
+  | 'user_fetch_failed'
+  | 'wrapper_exception';
 
 function emitAttempted(
   status: SignupAttemptStatus,

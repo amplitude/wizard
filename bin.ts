@@ -504,8 +504,10 @@ const runDirectSignupIfRequested = async (
       }
     }
   } catch (err) {
+    const status: import('./src/utils/signup-or-auth.js').SignupAttemptStatus =
+      'wrapper_exception';
     analytics.wizardCapture('agentic signup attempted', {
-      status: 'wrapper_exception',
+      status,
       zone,
     });
     getUI().log.warn(

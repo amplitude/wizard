@@ -780,6 +780,7 @@ describe('--email and --full-name flags', () => {
   afterEach(() => {
     process.argv = originalArgv;
     process.exit = originalExit;
+    vi.resetModules();
   });
 
   test('errors when --email is malformed', async () => {
@@ -889,7 +890,7 @@ describe('--email and --full-name flags', () => {
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       'agentic signup attempted',
-      expect.objectContaining({ status: 'wrapper_exception' }),
+      { status: 'wrapper_exception', zone: 'eu' },
     );
   });
 });
