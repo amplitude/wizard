@@ -12,8 +12,19 @@
  * derail the happy-path outro.
  */
 
+import { z } from 'zod';
 import { logToFile } from '../utils/debug.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
+
+const CreateEventsResponse = z.object({
+  success: z.boolean().optional(),
+  createdEvents: z.array(z.string()).optional(),
+  message: z.string().optional(),
+});
+
+const UpdateEventResponse = z.object({
+  success: z.boolean().optional(),
+});
 
 export interface PlannedEventInput {
   name: string;
@@ -86,11 +97,7 @@ export async function commitPlannedEvents(
       });
       if (!text) return null;
       try {
-        const parsed = JSON.parse(text) as {
-          success?: boolean;
-          createdEvents?: string[];
-          message?: string;
-        };
+        const parsed = CreateEventsResponse.parse(JSON.parse(text));
         return {
           success: parsed.success ?? false,
           createdEvents: parsed.createdEvents ?? [],
@@ -114,11 +121,7 @@ Respond with JSON only — no prose, no markdown fences:
       const match = text.match(/\{[\s\S]*\}/);
       if (!match) return null;
       try {
-        const parsed = JSON.parse(match[0]) as {
-          success?: boolean;
-          createdEvents?: string[];
-          message?: string;
-        };
+        const parsed = CreateEventsResponse.parse(JSON.parse(match[0]));
         return {
           success: parsed.success ?? false,
           createdEvents: parsed.createdEvents ?? [],
@@ -167,7 +170,7 @@ Respond with JSON only — no prose, no markdown fences:
       });
       if (!text) return null;
       try {
-        const parsed = JSON.parse(text) as { success?: boolean };
+        const parsed = UpdateEventResponse.parse(JSON.parse(text));
         return { success: parsed.success ?? false };
       } catch {
         return null;
@@ -180,7 +183,7 @@ Respond with JSON only: {"success":true|false}`,
       const match = text.match(/\{[\s\S]*\}/);
       if (!match) return null;
       try {
-        const parsed = JSON.parse(match[0]) as { success?: boolean };
+        const parsed = UpdateEventResponse.parse(JSON.parse(match[0]));
         return { success: parsed.success ?? false };
       } catch {
         return null;
