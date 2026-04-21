@@ -38,6 +38,8 @@ CRITICAL — confirm_event_plan format:
 
   `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 
+  `Use the report_status tool (wizard-tools MCP) for all progress updates and fatal error signals. Call report_status with kind="status" for in-progress updates (e.g. "installing SDK", "drafting event plan") — these appear in the wizard's spinner. Call report_status with kind="error" for fatal conditions that halt the run (codes: MCP_MISSING, RESOURCE_MISSING). Do NOT emit [STATUS], [ERROR-MCP-MISSING], or [ERROR-RESOURCE-MISSING] text markers in your output — they are no longer scanned.`,
+
   ...(DEMO_MODE
     ? [
         'DEMO MODE: This is a demo run. Limit the instrumentation plan to at most 5 events. Pick the 5 most impactful, representative events for the project. Be concise and fast — skip non-essential analysis.',
