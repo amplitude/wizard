@@ -53,6 +53,7 @@ async function submitFeedbackWithConsent(
       ? await collectDiagnostics({
           session: store.session,
           wizardVersion: store.version,
+          detectedFrameworks: store.session.detectionResults ?? undefined,
         }).catch((err: unknown) => {
           analytics.wizardCapture('feedback diagnostics failed', {
             'error message': err instanceof Error ? err.message : String(err),
