@@ -13,7 +13,7 @@
 import { appendFileSync, statSync, renameSync } from 'fs';
 import type { ExecutionMode } from '../mode-config';
 import { redact, redactString } from './redact';
-import { getRunId, getSessionId } from './correlation';
+import { getAttemptId, getRunId, getSessionId } from './correlation';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -41,6 +41,7 @@ interface LoggerConfig {
 interface LogEntry {
   '@timestamp': string;
   run_id: string;
+  attempt_id: string;
   session_id: string;
   namespace: string;
   level: LogLevel;
@@ -132,6 +133,7 @@ export function initLogger(
     `  node: ${process.version}`,
     `  platform: ${process.platform}`,
     `  run_id: ${getRunId()}`,
+    `  attempt_id: ${getAttemptId()}`,
     `  session_id: ${getSessionId()}`,
     '='.repeat(60),
     '',
@@ -202,9 +204,11 @@ function writeToFile(entry: LogEntry): void {
       redacted.ctx && Object.keys(redacted.ctx).length > 0
         ? ' ' + JSON.stringify(redacted.ctx)
         : '';
-    const line = `[${redacted['@timestamp']}] [${redacted.run_id}] [${
-      redacted.namespace
-    }] ${LEVEL_LABEL[redacted.level]} ${redacted.msg}${ctxStr}\n`;
+    const line = `[${redacted['@timestamp']}] [${redacted.run_id}/${
+      redacted.attempt_id
+    }] [${redacted.namespace}] ${LEVEL_LABEL[redacted.level]} ${
+      redacted.msg
+    }${ctxStr}\n`;
     appendFileSync(logFilePath, line);
 
     // 2. Complete NDJSON to a companion .jsonl file (for programmatic analysis).
@@ -225,6 +229,7 @@ function makeLogger(namespace: string): WizardLogger {
     const entry: LogEntry = {
       '@timestamp': new Date().toISOString(),
       run_id: getRunId(),
+      attempt_id: getAttemptId(),
       session_id: getSessionId(),
       namespace,
       level,

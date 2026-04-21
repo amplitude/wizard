@@ -20,9 +20,14 @@ import {
   ADDITIONAL_FEATURE_PROMPTS,
 } from './wizard-session';
 import { registerCleanup } from '../utils/wizard-abort';
-import { createCustomHeaders } from '../utils/custom-headers';
+import {
+  createCustomHeaders,
+  createTracingHeaders,
+} from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
+import { nextAttemptId } from './observability/correlation';
+import { ToolCallCounters } from './tool-call-counters';
 import { LINTING_TOOLS } from './safe-tools';
 import { createWizardToolsServer, WIZARD_TOOL_NAMES } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
@@ -234,6 +239,7 @@ export type AgentConfig = {
 export function createStopHook(
   featureQueue: readonly AdditionalFeature[],
   isAuthError: () => boolean = () => false,
+  counters?: ToolCallCounters,
 ): HookCallback {
   let featureIndex = 0;
   let remarkRequested = false;
@@ -251,6 +257,7 @@ export function createStopHook(
     // make further API calls to process feature prompts or reflection requests.
     if (isAuthError()) {
       logToFile('Stop hook: allowing stop (auth error detected)');
+      counters?.emit();
       return Promise.resolve({});
     }
 
@@ -272,8 +279,64 @@ export function createStopHook(
       });
     }
 
-    // Phase 3: allow stop
+    // Phase 3: allow stop — emit the aggregated tool-call summary once.
     logToFile('Stop hook: allowing stop');
+    counters?.emit();
+    return Promise.resolve({});
+  };
+}
+
+/**
+ * Factory: PostToolUse hook that increments the successful-tool-call counter.
+ * Does NOT emit analytics per call — totals roll up into the Stop-hook summary.
+ */
+export function createPostToolUseHook(
+  counters: ToolCallCounters,
+): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const toolName =
+      typeof input.tool_name === 'string' ? input.tool_name : 'unknown';
+    counters.recordToolCall(toolName, true);
+    return Promise.resolve({});
+  };
+}
+
+/** Factory: PostToolUseFailure hook — counts the call as a failure. */
+export function createPostToolUseFailureHook(
+  counters: ToolCallCounters,
+): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const toolName =
+      typeof input.tool_name === 'string' ? input.tool_name : 'unknown';
+    counters.recordToolCall(toolName, false);
+    return Promise.resolve({});
+  };
+}
+
+/** Factory: PermissionRequest hook — counts one permission prompt. */
+export function createPermissionRequestHook(
+  counters: ToolCallCounters,
+): HookCallback {
+  return (): Promise<Record<string, unknown>> => {
+    counters.recordPermissionRequest();
+    return Promise.resolve({});
+  };
+}
+
+/** Factory: SubagentStart hook — counts one subagent spawn. */
+export function createSubagentStartHook(
+  counters: ToolCallCounters,
+): HookCallback {
+  return (): Promise<Record<string, unknown>> => {
+    counters.recordSubagentStart();
+    return Promise.resolve({});
+  };
+}
+
+/** Factory: PreCompact hook — counts one compaction. */
+export function createPreCompactHook(counters: ToolCallCounters): HookCallback {
+  return (): Promise<Record<string, unknown>> => {
+    counters.recordCompaction();
     return Promise.resolve({});
   };
 }
@@ -304,7 +367,11 @@ async function checkGatewayLiveness(gatewayUrl: string): Promise<boolean> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), GATEWAY_LIVENESS_TIMEOUT_MS);
   try {
-    await fetch(gatewayUrl, { method: 'HEAD', signal: controller.signal });
+    await fetch(gatewayUrl, {
+      method: 'HEAD',
+      signal: controller.signal,
+      headers: createTracingHeaders(),
+    });
     return true;
   } catch {
     return false;
@@ -345,6 +412,11 @@ function buildAgentEnv(
   for (const [flagKey, variant] of Object.entries(wizardFlags)) {
     if (!flagKey.toLowerCase().startsWith('wizard')) continue;
     headers.addFlag(flagKey, variant);
+  }
+  // Propagate tracing headers so every request the agent subprocess makes
+  // can be correlated to this wizard run + attempt.
+  for (const [key, value] of Object.entries(createTracingHeaders())) {
+    headers.add(key, value);
   }
   const encoded = headers.encode();
   logToFile('ANTHROPIC_CUSTOM_HEADERS', encoded);
@@ -930,6 +1002,7 @@ export async function runAgent(
   middleware?: {
     onMessage(message: SDKMessage): void;
     finalize(resultMessage: SDKMessage, totalDurationMs: number): unknown;
+    get?<T>(key: string): T | undefined;
   },
 ): Promise<{ error?: AgentErrorType; message?: string }> {
   const {
@@ -999,16 +1072,29 @@ export async function runAgent(
     );
     const remarkMatch = outputText.match(remarkRegex);
     if (remarkMatch && remarkMatch[1]) {
-      const remark = remarkMatch[1].trim();
-      if (remark) {
-        analytics.wizardCapture('wizard remark', { remark });
+      const fullRemark = remarkMatch[1].trim();
+      if (fullRemark) {
+        // Cap event-level payload at 4KB to keep property cardinality in check.
+        // The full reflection is preserved in the session-trace JSONL (PR 3).
+        const MAX_REMARK_BYTES = 4096;
+        const truncated =
+          Buffer.byteLength(fullRemark, 'utf8') > MAX_REMARK_BYTES;
+        const remark = truncated
+          ? Buffer.from(fullRemark, 'utf8')
+              .subarray(0, MAX_REMARK_BYTES)
+              .toString('utf8')
+              .replace(/\uFFFD+$/, '')
+          : fullRemark;
+        analytics.wizardCapture('wizard remark', {
+          remark,
+          'remark length': fullRemark.length,
+          'remark truncated': truncated,
+        });
       }
     }
 
-    analytics.wizardCapture('agent completed', {
-      'duration ms': durationMs,
-      'duration seconds': durationSeconds,
-    });
+    // Finalize middleware BEFORE emitting analytics so the token/cost/cache
+    // trackers have flushed their totals into the shared store.
     try {
       if (lastResultMessage) {
         middleware?.finalize(lastResultMessage, durationMs);
@@ -1016,6 +1102,43 @@ export async function runAgent(
     } catch (e) {
       logToFile(`${AgentSignals.BENCHMARK} Middleware finalize error:`, e);
     }
+
+    const mwGet = <T>(key: string): T | undefined =>
+      middleware?.get ? middleware.get<T>(key) : undefined;
+    const tokens = mwGet<{ totalInput: number; totalOutput: number }>('tokens');
+    const cache = mwGet<{
+      totalRead: number;
+      totalCreation5m: number;
+      totalCreation1h: number;
+      totalCreation: number;
+    }>('cache');
+    const cost = mwGet<{ totalCost: number }>('cost');
+    const turns = mwGet<{ totalTurns: number }>('turns');
+
+    const inputTokens = tokens?.totalInput ?? 0;
+    const outputTokens = tokens?.totalOutput ?? 0;
+    const cacheRead = cache?.totalRead ?? 0;
+    const cacheCreation =
+      cache?.totalCreation ??
+      (cache?.totalCreation5m ?? 0) + (cache?.totalCreation1h ?? 0);
+    // Cache hit rate: read / (read + creation). Undefined when there's no cache usage at all.
+    const cacheTotal = cacheRead + cacheCreation;
+    const cacheHitRate = cacheTotal > 0 ? cacheRead / cacheTotal : null;
+
+    analytics.wizardCapture('agent completed', {
+      'duration ms': durationMs,
+      'duration seconds': durationSeconds,
+      'input tokens': inputTokens,
+      'output tokens': outputTokens,
+      'cache read input tokens': cacheRead,
+      'cache creation 5m tokens': cache?.totalCreation5m ?? 0,
+      'cache creation 1h tokens': cache?.totalCreation1h ?? 0,
+      'total cost usd': cost?.totalCost ?? 0,
+      'cache hit rate': cacheHitRate,
+      turns: turns?.totalTurns ?? 0,
+      model: agentConfig.model ?? null,
+      'fallback used': Boolean(agentConfig.useLocalClaude),
+    });
     spinner.stop(successMessage);
     return {};
   };
@@ -1165,8 +1288,15 @@ export async function runAgent(
     // Passed to createStopHook so it can skip reflection when auth is broken.
     let authErrorDetected = false;
 
+    // Tool-call + subagent + permission counters. Per-call hooks increment
+    // these; Stop-hook emits the aggregated `tool summary` event once.
+    const toolCounters = new ToolCallCounters();
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
+        // Rotate attempt_id so per-retry logs stay distinct while run_id
+        // remains frozen for the whole wizard process.
+        nextAttemptId();
         // Exponential backoff: 2s, 4s, 8s
         const backoffMs = Math.min(2_000 * Math.pow(2, attempt - 1), 8_000);
         logToFile(
@@ -1295,7 +1425,13 @@ export async function runAgent(
               Stop: createStopHook(
                 config?.additionalFeatureQueue ?? [],
                 () => authErrorDetected,
+                toolCounters,
               ),
+              PostToolUse: createPostToolUseHook(toolCounters),
+              PostToolUseFailure: createPostToolUseFailureHook(toolCounters),
+              PermissionRequest: createPermissionRequestHook(toolCounters),
+              SubagentStart: createSubagentStartHook(toolCounters),
+              PreCompact: createPreCompactHook(toolCounters),
             }),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
