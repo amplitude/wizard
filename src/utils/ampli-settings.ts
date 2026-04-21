@@ -181,6 +181,16 @@ export function updateStoredUser(user: StoredUser, configPath?: string): void {
       User: user,
     };
     writeConfig(config, configPath);
+    return;
+  }
+
+  if (config[realKey] !== undefined) {
+    const entry = config[realKey] as Record<string, unknown>;
+    config[realKey] = {
+      ...entry,
+      User: user,
+    };
+    writeConfig(config, configPath);
   }
 }
 

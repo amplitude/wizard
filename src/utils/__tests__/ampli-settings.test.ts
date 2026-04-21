@@ -347,6 +347,36 @@ describe('updateStoredUser', () => {
     setupConfig({});
   });
 
+  it('updates only the User field when a real-id entry already exists', () => {
+    const PRESERVED = new Date(Date.now() + 3 * 60 * 60 * 1000).toISOString();
+    setupConfig({
+      'User-42': {
+        User: {
+          id: '42',
+          firstName: 'OldFirst',
+          lastName: 'OldLast',
+          email: 'grace@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'existing-access',
+        OAuthIdToken: 'existing-id',
+        OAuthRefreshToken: 'existing-refresh',
+        OAuthExpiresAt: PRESERVED,
+      },
+    });
+
+    updateStoredUser({ ...realUser, firstName: 'NewFirst' });
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-42']).toEqual({
+      User: { ...realUser, firstName: 'NewFirst' },
+      OAuthAccessToken: 'existing-access',
+      OAuthIdToken: 'existing-id',
+      OAuthRefreshToken: 'existing-refresh',
+      OAuthExpiresAt: PRESERVED,
+    });
+  });
+
   it('migrates a pending entry to the real-id key, preserving OAuth fields', () => {
     const PRESERVED = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
     setupConfig({
