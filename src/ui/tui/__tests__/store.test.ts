@@ -243,6 +243,25 @@ describe('WizardStore', () => {
       expect(store.session.serviceStatus).toBeNull();
     });
 
+    it('setRetryState sets and clears retry banner state', () => {
+      const store = createStore();
+      expect(store.session.retryState).toBeNull();
+
+      const state = {
+        attempt: 3,
+        maxRetries: 10,
+        nextRetryAtMs: Date.now() + 2000,
+        errorStatus: 504,
+        reason: 'Amplitude gateway returned 504',
+        startedAt: Date.now(),
+      };
+      store.setRetryState(state);
+      expect(store.session.retryState).toEqual(state);
+
+      store.setRetryState(null);
+      expect(store.session.retryState).toBeNull();
+    });
+
     it('setMcpComplete marks MCP step done with outcome', () => {
       const store = createStore();
       expect(store.session.mcpComplete).toBe(false);

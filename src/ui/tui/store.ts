@@ -16,6 +16,7 @@ import {
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
+  type RetryState,
   buildSession,
 } from '../../lib/wizard-session.js';
 import {
@@ -44,7 +45,7 @@ export {
   McpOutcome,
   SlackOutcome,
 };
-export type { ScreenName, OutroData, WizardSession };
+export type { ScreenName, OutroData, WizardSession, RetryState };
 
 export interface TaskItem {
   label: string;
@@ -654,6 +655,11 @@ export class WizardStore {
     status: { description: string; statusPageUrl: string } | null,
   ): void {
     this.$session.setKey('serviceStatus', status);
+    this.emitChange();
+  }
+
+  setRetryState(state: RetryState | null): void {
+    this.$session.setKey('retryState', state);
     this.emitChange();
   }
 
