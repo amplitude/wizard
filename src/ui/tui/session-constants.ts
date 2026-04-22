@@ -20,12 +20,14 @@ export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 
 export const AdditionalFeature = {
   LLM: 'llm',
+  SessionReplay: 'session_replay',
 } as const;
 export type AdditionalFeature =
   (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
 
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: 'LLM analytics',
+  [AdditionalFeature.SessionReplay]: 'Session Replay',
 };
 
 export const McpOutcome = {

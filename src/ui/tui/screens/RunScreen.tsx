@@ -120,6 +120,28 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
     );
   }
 
+  if (discoveredFeatures.includes(DiscoveredFeature.SessionReplay)) {
+    const enabled = store.session.sessionReplayOptIn;
+    tips.push(
+      <Text key="session-replay" color={Colors.secondary}>
+        <Text color={Colors.accent}>{Icons.diamond}</Text>{' '}
+        {enabled ? (
+          <Text color={Colors.success}>
+            {Icons.checkmark} Session Replay setup queued
+          </Text>
+        ) : (
+          <Text>
+            Session Replay available {Icons.dash} press{' '}
+            <Text bold color={Colors.accent}>
+              R
+            </Text>{' '}
+            to enable
+          </Text>
+        )}
+      </Text>,
+    );
+  }
+
   if (tips.length === 0) return null;
 
   return (
@@ -152,7 +174,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
   const spinnerFrame = tick % SPINNER_FRAMES.length;
 
-  // Handle LLM toggle key
+  // Handle feature toggle keys
   useScreenInput((input) => {
     if (
       input.toLowerCase() === 'l' &&
@@ -160,6 +182,15 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
       !store.session.llmOptIn
     ) {
       store.enableFeature(AdditionalFeature.LLM);
+    }
+    if (
+      input.toLowerCase() === 'r' &&
+      store.session.discoveredFeatures.includes(
+        DiscoveredFeature.SessionReplay,
+      ) &&
+      !store.session.sessionReplayOptIn
+    ) {
+      store.enableFeature(AdditionalFeature.SessionReplay);
     }
   });
 

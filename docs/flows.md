@@ -114,6 +114,7 @@ flowchart TD
         INSTRUMENT --> FEATURES{Features discovered?}
         FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
         FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
+        FEATURES -->|Session Replay| SR_TIP["Show Session Replay tip"] --> OUTCOME
         FEATURES -->|none| OUTCOME
         AGENT --> OUTCOME{Outcome?}
         OUTCOME -->|success| POST["Upload env vars to hosting"]

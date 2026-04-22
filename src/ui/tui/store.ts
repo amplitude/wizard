@@ -736,6 +736,9 @@ export class WizardStore {
     if (feature === AdditionalFeature.LLM) {
       this.$session.setKey('llmOptIn', true);
     }
+    if (feature === AdditionalFeature.SessionReplay) {
+      this.$session.setKey('sessionReplayOptIn', true);
+    }
     analytics.wizardCapture('feature enabled', { feature });
     this.emitChange();
   }

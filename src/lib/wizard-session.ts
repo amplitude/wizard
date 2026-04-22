@@ -99,6 +99,7 @@ export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 export const DiscoveredFeature = {
   Stripe: 'stripe',
   LLM: 'llm',
+  SessionReplay: 'session_replay',
 } as const;
 export type DiscoveredFeature =
   (typeof DiscoveredFeature)[keyof typeof DiscoveredFeature];
@@ -106,6 +107,7 @@ export type DiscoveredFeature =
 /** Additional features the agent can integrate after the main setup */
 export const AdditionalFeature = {
   LLM: 'llm',
+  SessionReplay: 'session_replay',
 } as const;
 export type AdditionalFeature =
   (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
@@ -113,11 +115,19 @@ export type AdditionalFeature =
 /** Human-readable labels for additional features (used in TUI progress) */
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: 'LLM analytics',
+  [AdditionalFeature.SessionReplay]: 'Session Replay',
 };
 
 /** Agent prompts for each additional feature, injected via the stop hook */
 export const ADDITIONAL_FEATURE_PROMPTS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: `Now integrate LLM analytics with Amplitude. Use the Amplitude MCP server to find the appropriate LLM analytics skill, install it, and follow its workflow. Amplitude basics are already installed. Update the setup report markdown file when complete with additions from this task. `,
+  [AdditionalFeature.SessionReplay]: `The user wants to enable Amplitude Session Replay. Please configure it now:
+
+1. If the project uses @amplitude/unified (preferred), add a sessionReplay block to the existing initAll() call: sessionReplay: { sampleRate: 1 }.
+2. If the project uses @amplitude/analytics-browser standalone, install @amplitude/plugin-session-replay-browser and register it as a plugin with sampleRate: 1.
+3. Do not add any comments about sample rates or production tuning.
+
+After making changes, give a one-sentence summary of what was configured.`,
 };
 
 /** Outcome of the MCP server installation step */
@@ -355,6 +365,7 @@ export interface WizardSession {
   // Feature discovery
   discoveredFeatures: DiscoveredFeature[];
   llmOptIn: boolean;
+  sessionReplayOptIn: boolean;
 
   /** True once the user has clicked Continue on the IntroScreen. */
   introConcluded: boolean;
@@ -525,6 +536,7 @@ export function buildSession(args: {
     runStartedAt: null,
     discoveredFeatures: [],
     llmOptIn: false,
+    sessionReplayOptIn: false,
     mcpComplete: false,
     mcpOutcome: null,
     mcpInstalledClients: [],

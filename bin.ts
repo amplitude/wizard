@@ -1559,6 +1559,24 @@ void yargs(hideBin(process.argv))
                 // No package.json or parse error — skip feature discovery
               }
 
+              // Session Replay — offered for all browser-based frameworks,
+              // independent of package.json contents.
+              const { DiscoveredFeature: SrDF } = await import(
+                './src/lib/wizard-session.js'
+              );
+              const BROWSER_REPLAY_INTEGRATIONS = new Set([
+                'nextjs',
+                'vue',
+                'react-router',
+                'javascript_web',
+              ]);
+              if (
+                tui.store.session.integration &&
+                BROWSER_REPLAY_INTEGRATIONS.has(tui.store.session.integration)
+              ) {
+                tui.store.addDiscoveredFeature(SrDF.SessionReplay);
+              }
+
               // Signal detection is done — IntroScreen shows picker or results
               tui.store.setDetectionComplete();
             })();
