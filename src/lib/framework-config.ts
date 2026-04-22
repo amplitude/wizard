@@ -47,6 +47,16 @@ export interface FrameworkMetadata<
   /** Display name (e.g., "Next.js", "React") */
   name: string;
 
+  /**
+   * Single-character glyph rendered next to the name in pickers and
+   * detection results. Keep to ASCII-width-1 unicode (▲ ● ◆ ◼ …) to
+   * preserve picker alignment. Optional — omit for plain-text display.
+   */
+  glyph?: string;
+
+  /** Hex color for `glyph`. Ignored when `glyph` is absent. */
+  glyphColor?: string;
+
   /** Integration type from constants */
   integration: Integration;
 

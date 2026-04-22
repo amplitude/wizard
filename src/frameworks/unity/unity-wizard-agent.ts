@@ -3,6 +3,7 @@ import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { unityPackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
+import { BrandColors } from '../../lib/brand-colors';
 import { detectUnityProject, isAmplitudePluginPresent } from './utils';
 
 type UnityContext = {
@@ -12,6 +13,8 @@ type UnityContext = {
 export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
   metadata: {
     name: 'Unity',
+    glyph: '◼',
+    glyphColor: BrandColors.gray10,
     integration: Integration.unity,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unity/unity-sdk',

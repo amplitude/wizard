@@ -22,6 +22,8 @@ type PythonContext = {
 export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
   metadata: {
     name: 'Python Language',
+    glyph: '»',
+    glyphColor: '#FFD43B',
     integration: Integration.python,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
