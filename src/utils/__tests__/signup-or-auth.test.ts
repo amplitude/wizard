@@ -42,7 +42,7 @@ const provisionedOrgs = [
 describe('performSignupOrAuth', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns null when flag is off', async () => {
+  it('returns skipped when flag is off', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     const { analytics } = await import('../analytics');
 
@@ -53,14 +53,14 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'skipped' });
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
       'agentic signup attempted',
       expect.anything(),
     );
   });
 
-  it('returns null when flag is on but email is missing', async () => {
+  it('returns skipped when flag is on but email is missing', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
@@ -73,14 +73,14 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'skipped' });
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
       'agentic signup attempted',
       expect.anything(),
     );
   });
 
-  it('returns null when flag is on but fullName is missing', async () => {
+  it('returns skipped when flag is on but fullName is missing', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
@@ -93,14 +93,14 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'skipped' });
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
       'agentic signup attempted',
       expect.anything(),
     );
   });
 
-  it('returns null when direct signup returns requires_redirect', async () => {
+  it('returns skipped when direct signup returns requires_redirect', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
@@ -115,7 +115,7 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).toHaveBeenCalledOnce();
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'skipped' });
   });
 
   it('emits agentic signup attempted with status=requires_redirect on redirect path', async () => {
@@ -139,7 +139,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns null when direct signup returns error', async () => {
+  it('returns skipped when direct signup returns error', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
@@ -154,7 +154,7 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ status: 'skipped' });
   });
 
   it('emits agentic signup attempted with status=signup_error on error kind', async () => {
@@ -198,7 +198,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns tokens (including expiresAt) and userInfo on success', async () => {
+  it('returns complete with tokens, user, and userInfo on success', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
@@ -229,17 +229,24 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(result).not.toBeNull();
+    expect(result.status).toBe('complete');
     expect(result).toMatchObject({
-      accessToken: 'direct-access',
-      idToken: 'direct-id',
-      refreshToken: 'direct-refresh',
-      expiresAt,
+      status: 'complete',
+      tokens: {
+        accessToken: 'direct-access',
+        idToken: 'direct-id',
+        refreshToken: 'direct-refresh',
+        expiresAt,
+      },
       zone: 'us',
+      user: expect.objectContaining({ id: 'user-123', zone: 'us' }),
       userInfo: expect.objectContaining({ id: 'user-123' }),
     });
-    // Persistence is the caller's responsibility now.
-    expect(storeToken).not.toHaveBeenCalled();
+    // Persistence is the function's responsibility — it wrote to disk.
+    expect(storeToken).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'user-123' }),
+      expect.objectContaining({ accessToken: 'direct-access', expiresAt }),
+    );
   });
 
   it('emits agentic signup attempted with status=success on the success path', async () => {
@@ -312,7 +319,9 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(result?.userInfo).toEqual(
+    expect(result.status).toBe('complete');
+    if (result.status !== 'complete') throw new Error('unreachable');
+    expect(result.userInfo).toEqual(
       expect.objectContaining({
         id: 'user-123',
         firstName: 'Ada',
@@ -322,7 +331,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('preserves tokens under a pending sentinel when fetchAmplitudeUser fails after direct-signup success', async () => {
+  it('returns pending-recovery and preserves tokens under a pending sentinel when fetchAmplitudeUser fails after direct-signup success', async () => {
     vi.useFakeTimers();
     try {
       const { isFlagEnabled } = await import('../../lib/feature-flags.js');
@@ -350,10 +359,10 @@ describe('performSignupOrAuth', () => {
       await vi.runAllTimersAsync();
       const result = await pending;
 
-      // Tokens still returned for the caller.
       expect(result).toMatchObject({
-        accessToken: 'direct-access',
-        userInfo: null,
+        status: 'pending-recovery',
+        tokens: expect.objectContaining({ accessToken: 'direct-access' }),
+        zone: 'us',
       });
       // On failure, tokens are preserved under a pending sentinel so the
       // next run can recover without forcing the user back to browser OAuth.

@@ -490,38 +490,19 @@ const runDirectSignupIfRequested = async (
     session.region = zone;
   }
   try {
-    const tokens = await performSignupOrAuth({
+    const outcome = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
     });
-    if (tokens === null) {
+    if (outcome.status === 'skipped') {
       getUI().log.info(
         `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
       );
     } else {
-      // Persist when we have a complete record (real user + real tokens).
-      // If tokens.userInfo is null, performSignupOrAuth already wrote a
-      // pending-sentinel crash-recovery entry in its failure branch, so
-      // downstream credential resolution has something to find either way.
-      if (tokens.userInfo) {
-        const { storeToken } = await import('./src/utils/ampli-settings.js');
-        storeToken(
-          {
-            id: tokens.userInfo.id,
-            firstName: tokens.userInfo.firstName,
-            lastName: tokens.userInfo.lastName,
-            email: tokens.userInfo.email,
-            zone: tokens.zone,
-          },
-          {
-            accessToken: tokens.accessToken,
-            idToken: tokens.idToken,
-            refreshToken: tokens.refreshToken,
-            expiresAt: tokens.expiresAt,
-          },
-        );
-      }
+      // Persistence already happened inside performSignupOrAuth (complete
+      // record on userInfo-ok, pending-sentinel on userInfo-fail for
+      // crash-recovery). Caller just acknowledges success and hands off.
       getUI().log.info('Direct signup succeeded; using newly created account.');
       if (onSuccess) {
         await onSuccess();
@@ -1175,12 +1156,8 @@ void yargs(hideBin(process.argv))
                 const { performAmplitudeAuth } = await import(
                   './src/utils/oauth.js'
                 );
-                const { fetchAmplitudeUser } = await import('./src/lib/api.js');
                 const { DEFAULT_AMPLITUDE_ZONE } = await import(
                   './src/lib/constants.js'
-                );
-                const { storeToken } = await import(
-                  './src/utils/ampli-settings.js'
                 );
 
                 const forceFresh = !ampliConfigExists(installDir);
@@ -1211,36 +1188,25 @@ void yargs(hideBin(process.argv))
                     ? 'eu'
                     : DEFAULT_AMPLITUDE_ZONE;
 
-                // Try direct signup first when --signup + email + fullName are provided
-                // and the feature flag is enabled. performSignupOrAuth returns null when
-                // any of those gates are missing, or when the server returns a non-success
-                // response — in which case we fall through to the existing OAuth flow
-                // (TUI has a browser; this fallback is valid).
-                //
-                // On signup success, the wrapper already fetched the real user
-                // profile (with provisioning retry) — we carry its userInfo
-                // through and skip the redundant fetch in the else-branch.
-                // Persistence still happens below via storeToken.
-                let auth: Awaited<
+                // Try direct signup first when --signup + email + fullName
+                // are provided and the feature flag is enabled. Both auth
+                // functions own persistence — we just read the outcome.
+                type AuthOutcome = Awaited<
                   ReturnType<typeof performAmplitudeAuth>
-                > | null = null;
-                let signupUserInfo: Awaited<
-                  ReturnType<typeof fetchAmplitudeUser>
-                > | null = null;
+                >;
+                let outcome: AuthOutcome | { status: 'skipped' } = {
+                  status: 'skipped',
+                };
                 const s = tui.store.session;
                 if (s.signup && s.signupEmail && s.signupFullName) {
                   const { performSignupOrAuth, trackSignupAttempt } =
                     await import('./src/utils/signup-or-auth.js');
                   try {
-                    const signupResult = await performSignupOrAuth({
+                    outcome = await performSignupOrAuth({
                       email: s.signupEmail,
                       fullName: s.signupFullName,
                       zone,
                     });
-                    if (signupResult !== null) {
-                      auth = signupResult;
-                      signupUserInfo = signupResult.userInfo;
-                    }
                   } catch (err) {
                     trackSignupAttempt({ status: 'wrapper_exception', zone });
                     getUI().log.warn(
@@ -1248,73 +1214,46 @@ void yargs(hideBin(process.argv))
                         err instanceof Error ? err.message : String(err)
                       }. Falling back to OAuth.`,
                     );
-                    auth = null;
                   }
                 }
 
-                if (auth === null) {
-                  auth = await performAmplitudeAuth({ zone, forceFresh });
+                if (outcome.status !== 'complete') {
+                  outcome = await performAmplitudeAuth({ zone, forceFresh });
                 }
 
-                // Update login URL (clears the "copy this URL" hint)
+                // If we still don't have a complete outcome (e.g. cached
+                // tokens couldn't fetch userInfo), retry with a fresh
+                // browser OAuth once — this handles the expired-idToken
+                // case without dragging in an extra fetchAmplitudeUser
+                // attempt at this layer.
+                if (outcome.status === 'pending-recovery') {
+                  tui.store.setLoginUrl(null);
+                  outcome = await performAmplitudeAuth({
+                    zone,
+                    forceFresh: true,
+                  });
+                }
+
                 tui.store.setLoginUrl(null);
 
-                // Zone was already selected by the user before OAuth started.
-                const cloudRegion = zone;
-
-                let userInfo;
-                if (signupUserInfo) {
-                  // Wrapper already fetched userInfo — no redundant network
-                  // call, no browser fallback needed. Persistence happens below.
-                  userInfo = signupUserInfo;
-                } else {
-                  try {
-                    userInfo = await fetchAmplitudeUser(
-                      auth.idToken,
-                      cloudRegion,
-                    );
-                  } catch {
-                    // Token may be expired — re-open the browser for a fresh login
-                    tui.store.setLoginUrl(null);
-                    auth = await performAmplitudeAuth({
-                      zone,
-                      forceFresh: true,
-                    });
-                    userInfo = await fetchAmplitudeUser(
-                      auth.idToken,
-                      cloudRegion,
-                    );
-                  }
+                if (outcome.status !== 'complete') {
+                  // Gave up — let agent-runner retry or surface the error.
+                  throw new Error('Authentication did not complete');
                 }
 
-                // Persist once we have both a real user and real tokens
-                // (including expiresAt from the OAuth token response).
-                storeToken(
-                  {
-                    id: userInfo.id,
-                    firstName: userInfo.firstName,
-                    lastName: userInfo.lastName,
-                    email: userInfo.email,
-                    zone: auth.zone,
-                  },
-                  {
-                    accessToken: auth.accessToken,
-                    idToken: auth.idToken,
-                    refreshToken: auth.refreshToken,
-                    expiresAt: auth.expiresAt,
-                  },
-                );
+                // outcome.status === 'complete' — tokens + user persisted.
+                const { user, userInfo, tokens } = outcome;
 
                 // Populate user email for /whoami display
-                session.userEmail = userInfo.email;
-                analytics.setDistinctId(userInfo.email);
-                analytics.identifyUser({ email: userInfo.email });
+                session.userEmail = user.email;
+                analytics.setDistinctId(user.email);
+                analytics.identifyUser({ email: user.email });
 
                 // Signal AuthScreen — triggers org/workspace/API key pickers
                 tui.store.setOAuthComplete({
-                  accessToken: auth.accessToken,
-                  idToken: auth.idToken,
-                  cloudRegion,
+                  accessToken: tokens.accessToken,
+                  idToken: tokens.idToken,
+                  cloudRegion: user.zone,
                   orgs: userInfo.orgs,
                 });
               } catch (err) {
@@ -1588,8 +1527,6 @@ void yargs(hideBin(process.argv))
       void (async () => {
         setUI(new LoggingUI());
         const { performAmplitudeAuth } = await import('./src/utils/oauth.js');
-        const { fetchAmplitudeUser } = await import('./src/lib/api.js');
-        const { storeToken } = await import('./src/utils/ampli-settings.js');
         const zone = argv.zone as 'us' | 'eu';
 
         try {
@@ -1612,31 +1549,23 @@ void yargs(hideBin(process.argv))
             process.exit(0);
           }
 
-          const auth = await performAmplitudeAuth({ zone });
-          const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
-          storeToken(
-            {
-              id: user.id,
-              firstName: user.firstName,
-              lastName: user.lastName,
-              email: user.email,
-              zone: auth.zone,
-            },
-            {
-              accessToken: auth.accessToken,
-              idToken: auth.idToken,
-              refreshToken: auth.refreshToken,
-              expiresAt: auth.expiresAt,
-            },
-          );
+          const outcome = await performAmplitudeAuth({ zone });
+          if (outcome.status !== 'complete') {
+            throw new Error(
+              'Login did not complete — userInfo could not be fetched.',
+            );
+          }
+          const { user, userInfo } = outcome;
           console.log(
             chalk.green(
               `✔ Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
             ),
           );
-          if (user.orgs.length > 0) {
+          if (userInfo.orgs.length > 0) {
             console.log(
-              chalk.dim(`  Org: ${user.orgs.map((o) => o.name).join(', ')}`),
+              chalk.dim(
+                `  Org: ${userInfo.orgs.map((o) => o.name).join(', ')}`,
+              ),
             );
           }
           process.exit(0);

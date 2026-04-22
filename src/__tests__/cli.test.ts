@@ -183,17 +183,28 @@ async function waitFor(fn: () => boolean, timeout = 2000): Promise<void> {
 function defaultAuthMocks() {
   mockAmpliConfigExists.mockReturnValue(true);
   mockPerformAmplitudeAuth.mockResolvedValue({
-    accessToken: 'access-abc',
-    idToken: 'id-abc',
-    refreshToken: 'refresh-abc',
+    status: 'complete',
+    user: {
+      id: 'user-1',
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'test@example.com',
+      zone: 'us',
+    },
+    userInfo: {
+      id: 'user-1',
+      firstName: 'Test',
+      lastName: 'User',
+      email: 'test@example.com',
+      orgs: [],
+    },
+    tokens: {
+      accessToken: 'access-abc',
+      idToken: 'id-abc',
+      refreshToken: 'refresh-abc',
+      expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+    },
     zone: 'us',
-  });
-  mockFetchAmplitudeUser.mockResolvedValue({
-    id: 'user-1',
-    firstName: 'Test',
-    lastName: 'User',
-    email: 'test@example.com',
-    orgs: [],
   });
 }
 
@@ -371,13 +382,14 @@ describe('TUI auth task: region determines OAuth zone', () => {
     );
   });
 
-  test('stores token and signals AuthScreen after OAuth completes', async () => {
+  test('signals AuthScreen after OAuth completes', async () => {
     simulateRegionSelect('us');
 
     await runCLI([]);
     await waitFor(() => mockStore.setOAuthComplete.mock.calls.length > 0);
 
-    expect(mockStoreToken).toHaveBeenCalled();
+    // Persistence is handled inside performAmplitudeAuth now; the TUI just
+    // reads the outcome and forwards to the store.
     expect(mockStore.setOAuthComplete).toHaveBeenCalledWith(
       expect.objectContaining({
         accessToken: 'access-abc',
@@ -501,17 +513,28 @@ describe('login command', () => {
     consoleSpy.mockClear();
     process.exit = vi.fn() as unknown as typeof process.exit;
     mockPerformAmplitudeAuth.mockResolvedValue({
-      accessToken: 'a',
-      idToken: 'id',
-      refreshToken: 'r',
+      status: 'complete',
+      user: {
+        id: '1',
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@example.com',
+        zone: 'us',
+      },
+      userInfo: {
+        id: '1',
+        firstName: 'Jane',
+        lastName: 'Doe',
+        email: 'jane@example.com',
+        orgs: [{ name: 'Acme' }],
+      },
+      tokens: {
+        accessToken: 'a',
+        idToken: 'id',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3600_000).toISOString(),
+      },
       zone: 'us',
-    });
-    mockFetchAmplitudeUser.mockResolvedValue({
-      id: '1',
-      firstName: 'Jane',
-      lastName: 'Doe',
-      email: 'jane@example.com',
-      orgs: [{ name: 'Acme' }],
     });
   });
 

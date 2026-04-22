@@ -22,9 +22,7 @@ import {
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
-import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
-import { storeToken } from './ampli-settings';
-import { detectRegionFromToken } from './urls';
+import { type AmplitudeOrg } from '../lib/api';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
 
@@ -490,93 +488,71 @@ async function askForWizardLogin(
     installDir?: string;
   } = {},
 ): Promise<ProjectData> {
-  // ── 1. Authenticate via Amplitude OAuth (reuses ampli CLI session) ──
-  const auth = await performAmplitudeAuth({
+  // ── 1. Authenticate — performAmplitudeAuth handles OAuth, zone detection,
+  //       userInfo fetch, and disk persistence. We just read the outcome. ──
+  const outcome = await performAmplitudeAuth({
     zone: DEFAULT_AMPLITUDE_ZONE,
     forceFresh: opts.forceFresh,
   });
 
-  // ── 2. Detect actual cloud region (EU users auth via US endpoint but
-  //       their data lives on EU servers — detectRegionFromToken probes both) ──
-  let cloudRegion: CloudRegion = 'us';
-  try {
-    cloudRegion = await detectRegionFromToken(auth.accessToken);
-  } catch {
-    // Fall back to 'us' if region detection fails
-  }
-
-  // ── 3. Fetch user info from Amplitude Data API ────────────────────
-  let userInfo: Awaited<ReturnType<typeof fetchAmplitudeUser>> | undefined;
-  try {
-    userInfo = await fetchAmplitudeUser(
-      auth.idToken,
-      cloudRegion as typeof auth.zone,
-    );
-  } catch {
-    // Could not fetch user info — warn and continue without it
+  // If userInfo couldn't be resolved, degrade gracefully: tokens are
+  // persisted under a pending sentinel for next-run recovery, and we
+  // fall through to a manual API-key prompt here.
+  if (outcome.status !== 'complete') {
     getUI().log.warn(
       chalk.yellow(
         'Could not fetch user info from Amplitude. Continuing without it.',
       ),
     );
+    const projectApiKey = await askForAmplitudeApiKey(opts.installDir);
+    return {
+      accessToken: outcome.tokens.accessToken,
+      projectApiKey,
+      host: DEFAULT_HOST_URL,
+      distinctId: 'unknown',
+      appId: 0,
+      cloudRegion: outcome.zone as CloudRegion,
+    };
   }
 
+  const { userInfo, tokens, zone: cloudRegionZone } = outcome;
+  const cloudRegion = cloudRegionZone as CloudRegion;
+
+  // ── 2. Org resolution ─────────────────────────────────────────────
   let selectedOrg: AmplitudeOrg | undefined;
-
-  if (userInfo) {
-    // Persist now that we have both user and real tokens (with real expiresAt).
-    storeToken(
-      {
-        id: userInfo.id,
-        firstName: userInfo.firstName,
-        lastName: userInfo.lastName,
-        email: userInfo.email,
-        zone: auth.zone,
-      },
-      {
-        accessToken: auth.accessToken,
-        idToken: auth.idToken,
-        refreshToken: auth.refreshToken,
-        expiresAt: auth.expiresAt,
-      },
+  if (userInfo.orgs.length === 0) {
+    // New user who hasn't created an org yet — direct them to the browser
+    getUI().log.error(
+      `${chalk.red('No Amplitude organization found.')}\n\n` +
+        chalk.dim(
+          'Your account has no organizations. Please complete signup at ' +
+            chalk.cyan('https://app.amplitude.com') +
+            ' and create an organization, then re-run the wizard.',
+        ),
     );
-
-    // ── 4. Org resolution (flowchart: sign-in → determine destination org) ──
-    if (userInfo.orgs.length === 0) {
-      // New user who hasn't created an org yet — direct them to the browser
-      getUI().log.error(
-        `${chalk.red('No Amplitude organization found.')}\n\n` +
-          chalk.dim(
-            'Your account has no organizations. Please complete signup at ' +
-              chalk.cyan('https://app.amplitude.com') +
-              ' and create an organization, then re-run the wizard.',
-          ),
-      );
-      await abort();
-    } else if (userInfo.orgs.length === 1) {
-      selectedOrg = userInfo.orgs[0];
-    } else {
-      // Multiple orgs — prompt the user to pick one
-      const { select } = await import('@inquirer/prompts');
-      selectedOrg = await select<AmplitudeOrg>({
-        message: 'Select an Amplitude organization:',
-        choices: userInfo.orgs.map((org) => ({ name: org.name, value: org })),
-      });
-    }
-
-    getUI().log.success(
-      `Logged in as ${chalk.bold(userInfo.email)}${
-        selectedOrg ? ` (${selectedOrg.name})` : ''
-      }`,
-    );
-    analytics.setDistinctId(userInfo.email);
-    analytics.identifyUser({
-      email: userInfo.email,
-      org_id: selectedOrg?.id,
-      org_name: selectedOrg?.name,
+    await abort();
+  } else if (userInfo.orgs.length === 1) {
+    selectedOrg = userInfo.orgs[0];
+  } else {
+    const { select } = await import('@inquirer/prompts');
+    selectedOrg = await select<AmplitudeOrg>({
+      message: 'Select an Amplitude organization:',
+      choices: userInfo.orgs.map((org) => ({ name: org.name, value: org })),
     });
-    analytics.wizardCapture('wizard link opened');
   }
+
+  getUI().log.success(
+    `Logged in as ${chalk.bold(userInfo.email)}${
+      selectedOrg ? ` (${selectedOrg.name})` : ''
+    }`,
+  );
+  analytics.setDistinctId(userInfo.email);
+  analytics.identifyUser({
+    email: userInfo.email,
+    org_id: selectedOrg?.id,
+    org_name: selectedOrg?.name,
+  });
+  analytics.wizardCapture('wizard link opened');
 
   // ── 4b. Workspace selection ───────────────────────────────────────
   type Workspace = AmplitudeOrg['workspaces'][number];
@@ -668,10 +644,10 @@ async function askForWizardLogin(
   }
 
   return {
-    accessToken: auth.accessToken,
+    accessToken: tokens.accessToken,
     projectApiKey,
     host: DEFAULT_HOST_URL,
-    distinctId: userInfo?.id ?? 'unknown',
+    distinctId: userInfo.id,
     appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
     cloudRegion,
   };
