@@ -10,7 +10,7 @@
  *     same bucket as the original run
  *
  * Usage:
- *   const variant = useExperiment(EXP_AGENT_ANALYTICS);
+ *   const variant = useExperiment(EXP_LLM_ANALYTICS);
  *   if (variant === 'on') { ... }
  */
 
@@ -33,18 +33,6 @@ export interface ExperimentDef<V extends string> {
 }
 
 // ── Seeded experiment defs ───────────────────────────────────────────
-
-export const EXP_AGENT_ANALYTICS: ExperimentDef<'on' | 'off'> = {
-  key: 'wizard-agent-analytics',
-  description:
-    'Enables wizard agent-level analytics. Default on; off disables SDK track()s.',
-  defaultVariant: 'on',
-  variants: {
-    on: { description: 'Analytics enabled (default).' },
-    off: { description: 'Analytics disabled.' },
-  },
-  scope: 'per-user',
-};
 
 export const EXP_LLM_ANALYTICS: ExperimentDef<'on' | 'off'> = {
   key: 'wizard-llm-analytics',
