@@ -499,7 +499,32 @@ const runDirectSignupIfRequested = async (
       getUI().log.info(
         `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
       );
+    } else if (tokens.userInfo === null) {
+      // Without userInfo we can't persist a complete record (id/email/zone),
+      // so treat this as a soft failure and let the caller's fallback path
+      // handle credential resolution.
+      getUI().log.info(
+        `Direct signup succeeded but user profile fetch failed; continuing to ${fallbackLabel}.`,
+      );
     } else {
+      // Persist tokens to ~/.ampli.json so downstream credential resolution
+      // (resolveCredentials / resolveNonInteractiveCredentials) finds them.
+      const { storeToken } = await import('./src/utils/ampli-settings.js');
+      storeToken(
+        {
+          id: tokens.userInfo.id,
+          firstName: tokens.userInfo.firstName,
+          lastName: tokens.userInfo.lastName,
+          email: tokens.userInfo.email,
+          zone: tokens.zone,
+        },
+        {
+          accessToken: tokens.accessToken,
+          idToken: tokens.idToken,
+          refreshToken: tokens.refreshToken,
+          expiresAt: tokens.expiresAt,
+        },
+      );
       getUI().log.info('Direct signup succeeded; using newly created account.');
       if (onSuccess) {
         await onSuccess();
