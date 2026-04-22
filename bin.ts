@@ -246,10 +246,9 @@ const resolveNonInteractiveCredentials = async (
       process.exit(ExitCode.AUTH_REQUIRED);
     }
 
-    const zone =
-      (session.region ?? session.pendingAuthCloudRegion ?? 'us') === 'eu'
-        ? 'eu'
-        : 'us';
+    const { resolveZone } = await import('./src/lib/zone-resolution.js');
+    const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
     if (mode === 'agent' && agentUI) {
       agentUI.emitProjectCreateStart({ orgId: org.id, name: projectName });
     } else {

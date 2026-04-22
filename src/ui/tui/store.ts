@@ -629,13 +629,8 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', appId);
 
     // Write ampli.json to the project directory.
-    // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)
-    // so that /region changes are respected.
     void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-      const zone =
-        this.$session.get().region ??
-        this.$session.get().pendingAuthCloudRegion ??
-        'us';
+      const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE);
       writeAmpliConfig(installDir, {
         OrgId: org.id,
         WorkspaceId: workspace.id,
