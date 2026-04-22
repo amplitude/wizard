@@ -241,14 +241,23 @@ function withTimeout<T>(
   fallback: T,
   onTimeout: () => void,
 ): Promise<T> {
+  let timerId: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<T>((resolve) => {
+    timerId = setTimeout(() => {
+      timerId = undefined;
+      onTimeout();
+      resolve(fallback);
+    }, ms);
+  });
+
   return Promise.race([
-    promise,
-    new Promise<T>((resolve) => {
-      setTimeout(() => {
-        onTimeout();
-        resolve(fallback);
-      }, ms);
+    promise.then((result) => {
+      if (timerId !== undefined) {
+        clearTimeout(timerId);
+      }
+      return result;
     }),
+    timeoutPromise,
   ]);
 }
 
