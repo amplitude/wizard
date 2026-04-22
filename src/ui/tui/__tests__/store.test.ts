@@ -154,6 +154,35 @@ describe('WizardStore', () => {
       expect(store.session.runPhase).toBe(RunPhase.Running);
     });
 
+    it('setRunPhase(Running) stamps runStartedAt on first entry', () => {
+      const store = createStore();
+      expect(store.session.runStartedAt).toBeNull();
+      const before = Date.now();
+      store.setRunPhase(RunPhase.Running);
+      const after = Date.now();
+      expect(store.session.runStartedAt).not.toBeNull();
+      expect(store.session.runStartedAt!).toBeGreaterThanOrEqual(before);
+      expect(store.session.runStartedAt!).toBeLessThanOrEqual(after);
+    });
+
+    it('setRunPhase(Running) does not overwrite runStartedAt on re-entry', async () => {
+      const store = createStore();
+      store.setRunPhase(RunPhase.Running);
+      const stamped = store.session.runStartedAt;
+      // Advance wall clock enough that a reset would differ.
+      await new Promise((r) => setTimeout(r, 5));
+      store.setRunPhase(RunPhase.Running);
+      expect(store.session.runStartedAt).toBe(stamped);
+    });
+
+    it('setRunPhase to Completed preserves runStartedAt', () => {
+      const store = createStore();
+      store.setRunPhase(RunPhase.Running);
+      const stamped = store.session.runStartedAt;
+      store.setRunPhase(RunPhase.Completed);
+      expect(store.session.runStartedAt).toBe(stamped);
+    });
+
     it('setCredentials updates session.credentials', () => {
       const store = createStore();
       const creds = {

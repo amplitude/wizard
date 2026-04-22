@@ -203,7 +203,14 @@ export class WizardStore {
   }
 
   setRunPhase(phase: RunPhase): void {
+    const prevPhase = this.session.runPhase;
     this.$session.setKey('runPhase', phase);
+    // Stamp the start time on the transition into Running so the elapsed
+    // timer on the Run screen survives tab re-mounts (TabContainer fully
+    // unmounts inactive tabs).
+    if (phase === RunPhase.Running && prevPhase !== RunPhase.Running) {
+      this.$session.setKey('runStartedAt', Date.now());
+    }
     this.emitChange();
   }
 
