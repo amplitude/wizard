@@ -267,7 +267,7 @@ describe('WizardStore', () => {
       const store = createStore();
       store.completeSetup();
       expect(wizardCaptureMock).toHaveBeenCalledWith(
-        'setup confirmed',
+        'Setup Confirmed',
         expect.any(Object),
       );
     });
@@ -280,7 +280,7 @@ describe('WizardStore', () => {
         host: 'h',
         appId: 42,
       });
-      expect(wizardCaptureMock).toHaveBeenCalledWith('auth complete', {
+      expect(wizardCaptureMock).toHaveBeenCalledWith('Auth Complete', {
         'app id': 42,
         region: null,
       });
@@ -334,7 +334,7 @@ describe('WizardStore', () => {
     it('enableFeature fires feature enabled event', () => {
       const store = createStore();
       store.enableFeature(AdditionalFeature.LLM);
-      expect(wizardCaptureMock).toHaveBeenCalledWith('feature enabled', {
+      expect(wizardCaptureMock).toHaveBeenCalledWith('Feature Enabled', {
         feature: AdditionalFeature.LLM,
       });
     });
@@ -343,7 +343,7 @@ describe('WizardStore', () => {
       const store = createStore();
       store.setMcpComplete(McpOutcome.Installed, ['Cursor', 'VS Code']);
       expect(wizardCaptureMock).toHaveBeenCalledWith(
-        'mcp complete',
+        'MCP Complete',
         expect.objectContaining({
           'mcp outcome': McpOutcome.Installed,
           'mcp installed clients': ['Cursor', 'VS Code'],

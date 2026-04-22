@@ -195,7 +195,7 @@ export class WizardStore {
   completeSetup(): void {
     this.$session.setKey('setupConfirmed', true);
     analytics.wizardCapture(
-      'setup confirmed',
+      'Setup Confirmed',
       sessionPropertiesCompact(this.session),
     );
     this._resolveSetup();
@@ -227,7 +227,7 @@ export class WizardStore {
         integration: session.integration,
       });
     }
-    analytics.wizardCapture('auth complete', {
+    analytics.wizardCapture('Auth Complete', {
       'app id': credentials?.appId,
       region: session.region,
     });
@@ -274,7 +274,7 @@ export class WizardStore {
   setRegion(region: string): void {
     this.$session.setKey('region', region as WizardSession['region']);
     this.$session.setKey('regionForced', false);
-    analytics.wizardCapture('region selected', { region });
+    analytics.wizardCapture('Region Selected', { region });
 
     // Persist region to project-level ampli.json so next run uses the right zone.
     // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
@@ -346,7 +346,7 @@ export class WizardStore {
   resolvePrompt(answer: boolean | string): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind === 'event-plan') return;
-    analytics.wizardCapture('prompt response', {
+    analytics.wizardCapture('Prompt Response', {
       'prompt kind': prompt.kind,
       response: String(answer),
     });
@@ -371,7 +371,7 @@ export class WizardStore {
   resolveEventPlan(decision: EventPlanDecision): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind !== 'event-plan') return;
-    analytics.wizardCapture('prompt response', {
+    analytics.wizardCapture('Prompt Response', {
       'prompt kind': 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
@@ -507,7 +507,7 @@ export class WizardStore {
   setDataIngestionConfirmed(): void {
     this.$session.setKey('dataIngestionConfirmed', true);
     analytics.wizardCapture(
-      'data ingestion confirmed',
+      'Data Ingestion Confirmed',
       sessionPropertiesCompact(this.session),
     );
     this.emitChange();
@@ -715,7 +715,7 @@ export class WizardStore {
     if (feature === AdditionalFeature.LLM) {
       this.$session.setKey('llmOptIn', true);
     }
-    analytics.wizardCapture('feature enabled', { feature });
+    analytics.wizardCapture('Feature Enabled', { feature });
     this.emitChange();
   }
 
@@ -766,7 +766,7 @@ export class WizardStore {
     this.$session.setKey('mcpComplete', true);
     this.$session.setKey('mcpOutcome', outcome);
     this.$session.setKey('mcpInstalledClients', installedClients);
-    analytics.wizardCapture('mcp complete', {
+    analytics.wizardCapture('MCP Complete', {
       'mcp outcome': outcome,
       'mcp installed clients': installedClients,
       ...sessionPropertiesCompact(this.session),
@@ -777,7 +777,7 @@ export class WizardStore {
   setSlackComplete(outcome: SlackOutcome = SlackOutcome.Skipped): void {
     this.$session.setKey('slackComplete', true);
     this.$session.setKey('slackOutcome', outcome);
-    analytics.wizardCapture('slack complete', {
+    analytics.wizardCapture('Slack Complete', {
       'slack outcome': outcome,
       ...sessionPropertiesCompact(this.session),
     });
@@ -786,7 +786,7 @@ export class WizardStore {
 
   setOutroData(data: OutroData): void {
     this.$session.setKey('outroData', data);
-    analytics.wizardCapture('outro reached', { 'outro kind': data.kind });
+    analytics.wizardCapture('Outro Reached', { 'outro kind': data.kind });
     this.emitChange();
   }
 
@@ -871,7 +871,7 @@ export class WizardStore {
       if (hooks) {
         for (const fn of hooks) fn();
       }
-      analytics.wizardCapture('wizard screen entered', {
+      analytics.wizardCapture('Wizard Screen Entered', {
         'screen name': next,
         'previous screen': prev,
         ...sessionPropertiesCompact(this.session),

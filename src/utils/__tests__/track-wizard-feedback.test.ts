@@ -25,7 +25,7 @@ describe('trackWizardFeedback', () => {
   it('captures feedback via the analytics singleton and flushes', async () => {
     await trackWizardFeedback('  hello  ');
 
-    expect(mockWizardCapture).toHaveBeenCalledWith('feedback submitted', {
+    expect(mockWizardCapture).toHaveBeenCalledWith('Feedback Submitted', {
       message: 'hello',
     });
     // Uses flush() not shutdown() — avoids spurious "Session Ended" mid-session

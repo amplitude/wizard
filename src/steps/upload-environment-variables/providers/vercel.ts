@@ -23,7 +23,7 @@ export class VercelEnvironmentProvider extends EnvironmentProvider {
     const vercelDetected = cliInstalled && projectLinked && authenticated;
 
     // Report detection status as event properties (not session-global tags)
-    analytics.wizardCapture('vercel detection', {
+    analytics.wizardCapture('Vercel Detection', {
       'vercel detected': vercelDetected,
       'vercel cli installed': cliInstalled,
       'vercel project linked': projectLinked,

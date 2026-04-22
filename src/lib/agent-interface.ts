@@ -158,7 +158,7 @@ export function backupAndFixClaudeSettings(workingDirectory: string): boolean {
   for (const name of ['settings.json', 'settings']) {
     const filePath = path.join(workingDirectory, '.claude', name);
     const backupPath = `${filePath}.wizard-backup`;
-    analytics.wizardCapture('claude settings backed up');
+    analytics.wizardCapture('Claude Settings Backed Up');
     try {
       fs.copyFileSync(filePath, backupPath);
       fs.unlinkSync(filePath);
@@ -192,7 +192,7 @@ export function restoreClaudeSettings(workingDirectory: string): void {
     );
     try {
       fs.copyFileSync(backup, path.join(workingDirectory, '.claude', name));
-      analytics.wizardCapture('claude settings restored');
+      analytics.wizardCapture('Claude Settings Restored');
       return;
     } catch (error) {
       analytics.captureException(
@@ -1001,11 +1001,11 @@ export async function runAgent(
     if (remarkMatch && remarkMatch[1]) {
       const remark = remarkMatch[1].trim();
       if (remark) {
-        analytics.wizardCapture('wizard remark', { remark });
+        analytics.wizardCapture('Wizard Remark', { remark });
       }
     }
 
-    analytics.wizardCapture('agent completed', {
+    analytics.wizardCapture('Agent Completed', {
       'duration ms': durationMs,
       'duration seconds': durationSeconds,
     });
@@ -1174,7 +1174,7 @@ export async function runAgent(
             MAX_RETRIES + 1
           }, backing off ${backoffMs}ms`,
         );
-        analytics.wizardCapture('agent stall retry', {
+        analytics.wizardCapture('Agent Stall Retry', {
           attempt,
           'backoff ms': backoffMs,
         });
@@ -1226,7 +1226,7 @@ export async function runAgent(
               receivedFirstMessage ? 'active' : 'cold-start'
             })`,
           );
-          analytics.wizardCapture('agent stall detected', {
+          analytics.wizardCapture('Agent Stall Detected', {
             attempt: attempt + 1,
             'stall timeout ms': timeoutMs,
             'last message type': lastMessageType,
@@ -1411,7 +1411,7 @@ export async function runAgent(
               attempt + 2
             } of ${MAX_RETRIES + 1})`,
           );
-          analytics.wizardCapture('agent api error retry', {
+          analytics.wizardCapture('Agent API Error Retry', {
             attempt,
             error: matchedTransientError.label,
           });
@@ -1459,7 +1459,7 @@ export async function runAgent(
               attempt + 2
             } of ${MAX_RETRIES + 1}): ${errMsg.slice(0, 200)}`,
           );
-          analytics.wizardCapture('agent sdk error retry', {
+          analytics.wizardCapture('Agent SDK Error Retry', {
             attempt,
             error: errMsg.slice(0, 200),
           });

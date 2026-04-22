@@ -12,6 +12,6 @@ export async function trackWizardFeedback(message: string): Promise<void> {
   if (!trimmed) {
     throw new Error('Feedback message cannot be empty');
   }
-  analytics.wizardCapture('feedback submitted', { message: trimmed });
+  analytics.wizardCapture('Feedback Submitted', { message: trimmed });
   await analytics.flush();
 }

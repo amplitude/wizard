@@ -233,7 +233,7 @@ export const ConsoleView = ({
 
   const handleSubmit = (value: string) => {
     const isSlashCommand = value.startsWith('/');
-    analytics.wizardCapture('agent message sent', {
+    analytics.wizardCapture('Agent Message Sent', {
       'message length': value.length,
       'is slash command': isSlashCommand,
     });

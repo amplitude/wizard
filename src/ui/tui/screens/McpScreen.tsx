@@ -222,7 +222,7 @@ export const McpScreen = ({
       try {
         const detected = await installer.detectClients();
         if (detected.length === 0) {
-          analytics.wizardCapture('mcp no clients detected', { mode });
+          analytics.wizardCapture('MCP No Clients Detected', { mode });
           setPhase(Phase.None);
           timerRef.current = setTimeout(
             () =>
@@ -230,7 +230,7 @@ export const McpScreen = ({
             1500,
           );
         } else {
-          analytics.wizardCapture('mcp clients detected', {
+          analytics.wizardCapture('MCP Clients Detected', {
             mode,
             clients: detected.map((c) => c.name),
             count: detected.length,
@@ -282,19 +282,19 @@ export const McpScreen = ({
 
   const handleConfirm = () => {
     if (isRemove) {
-      analytics.wizardCapture('mcp remove confirmed');
+      analytics.wizardCapture('MCP Remove Confirmed');
       void doRemove();
       return;
     }
     // Single-tool confirm path only — multi-tool detection routes straight
     // to the Pick phase (see the detection useEffect).
     const names = clients.map((c) => c.name);
-    analytics.wizardCapture('mcp install confirmed', { clients: names });
+    analytics.wizardCapture('MCP Install Confirmed', { clients: names });
     proceedWithNames(names);
   };
 
   const handleSkip = () => {
-    analytics.wizardCapture('mcp skipped', { mode });
+    analytics.wizardCapture('MCP Skipped', { mode });
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
@@ -328,7 +328,7 @@ export const McpScreen = ({
           if (launchAppForClient(name)) launched += 1;
         }
         if (launched > 0) setAppsLaunched(true);
-        analytics.wizardCapture('mcp post-install launch', {
+        analytics.wizardCapture('MCP Post-Install Launch', {
           launched,
           clients: resultClients,
         });
@@ -383,7 +383,7 @@ export const McpScreen = ({
     }
     setResultClients(installed);
     setFailures(installFailures);
-    analytics.wizardCapture('mcp install complete', {
+    analytics.wizardCapture('MCP Install Complete', {
       installed,
       failed: installFailures.map((f) => f.name),
       attempted: names,
@@ -414,7 +414,7 @@ export const McpScreen = ({
     } catch {
       setResultClients([]);
     }
-    analytics.wizardCapture('mcp remove complete', { removed: result });
+    analytics.wizardCapture('MCP Remove Complete', { removed: result });
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
@@ -462,7 +462,7 @@ export const McpScreen = ({
               ]}
               onSelect={(value) => {
                 const runWizard = value === 'wizard';
-                analytics.wizardCapture('amplitude pre-detected choice', {
+                analytics.wizardCapture('Amplitude Pre-Detected Choice', {
                   'run wizard anyway': runWizard,
                 });
                 store.resolvePreDetectedChoice(runWizard);
@@ -548,7 +548,7 @@ export const McpScreen = ({
                   onSelect={(selected) => {
                     const raw = Array.isArray(selected) ? selected : [selected];
                     const { names, ccMode } = resolveSelection(raw);
-                    analytics.wizardCapture('mcp clients selected', {
+                    analytics.wizardCapture('MCP Clients Selected', {
                       'selected clients': names,
                       'available clients': clients.map((c) => c.name),
                       'claude code mode': ccMode,

@@ -191,7 +191,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const local = readApiKeyWithSource(s.installDir);
       if (local) {
         setSavedKeySource(local.source);
-        analytics.wizardCapture('api key submitted', {
+        analytics.wizardCapture('API Key Submitted', {
           'key source': local.source,
         });
         // Resolve env name + appId from the key when we can — the header
@@ -229,7 +229,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         if (cancelled || store.session.credentials !== null) return;
 
         persistApiKey(apiKey, s.installDir);
-        analytics.wizardCapture('api key submitted', {
+        analytics.wizardCapture('API Key Submitted', {
           'key source': 'environment_picker',
         });
         store.setCredentials({
@@ -266,7 +266,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
       if (projectApiKey) {
         persistApiKey(projectApiKey, s.installDir);
-        analytics.wizardCapture('api key submitted', {
+        analytics.wizardCapture('API Key Submitted', {
           'key source': 'backend_fetch',
         });
         // Resolve env name + appId from the returned key when possible.
@@ -344,7 +344,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         session.installDir,
       );
     }
-    analytics.wizardCapture('create project link opened', {
+    analytics.wizardCapture('Create Project Link Opened', {
       'from screen': fromScreen,
     });
     setPickerNotice(null);
@@ -352,7 +352,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   };
 
   const handleStartOver = (fromScreen: 'workspace' | 'project') => {
-    analytics.wizardCapture('picker start over', { 'from screen': fromScreen });
+    analytics.wizardCapture('Picker Start Over', { 'from screen': fromScreen });
     setSelectedOrg(null);
     setSelectedWorkspace(null);
     setSelectedEnv(null);
@@ -389,7 +389,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       return;
     }
     setApiKeyError('');
-    analytics.wizardCapture('api key submitted', {
+    analytics.wizardCapture('API Key Submitted', {
       'key source': 'manual_entry',
     });
     store.setApiKeyNotice(null);

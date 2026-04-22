@@ -68,7 +68,7 @@ export async function runPrettierStep({
 
     prettierSpinner.stop('Prettier has formatted your files.');
 
-    analytics.wizardCapture('prettier ran', {
+    analytics.wizardCapture('Prettier Ran', {
       integration,
       'prettier installed': true,
     });
