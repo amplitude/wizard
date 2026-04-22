@@ -1218,6 +1218,9 @@ void yargs(hideBin(process.argv))
                     if (signupResult !== null) {
                       auth = signupResult;
                       signupUserInfo = signupResult.userInfo;
+                      getUI().log.info(
+                        'Direct signup succeeded; using newly created account.',
+                      );
                     }
                   } catch (err) {
                     trackSignupAttempt({ status: 'wrapper_exception', zone });
