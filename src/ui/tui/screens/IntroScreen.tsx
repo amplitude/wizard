@@ -330,6 +330,7 @@ const FrameworkPicker = ({
 
   return (
     <PickerMenu<Integration>
+      centered
       message="Select your framework"
       options={options}
       onSelect={(value) => {
