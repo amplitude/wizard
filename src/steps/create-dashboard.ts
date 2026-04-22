@@ -108,45 +108,60 @@ export async function createDashboardStep(
   spinner.start('Creating charts and dashboard in Amplitude…');
 
   const startedAt = Date.now();
-  const result = await runCreateDashboard({
-    accessToken,
-    events,
-    session,
-  });
-  const durationMs = Date.now() - startedAt;
+  try {
+    const result = await runCreateDashboard({
+      accessToken,
+      events,
+      session,
+    });
+    const durationMs = Date.now() - startedAt;
 
-  if (!result) {
-    spinner.stop('Dashboard step timed out — skipping');
-    ui.log.warn(
-      'Amplitude is configured, but the wizard could not create a starter dashboard within 90 seconds. Open app.amplitude.com to create one manually.',
-    );
-    analytics.wizardCapture('dashboard failed', {
+    if (!result) {
+      spinner.stop('Dashboard step timed out — skipping');
+      ui.log.warn(
+        'Amplitude is configured, but the wizard could not create a starter dashboard within 90 seconds. Open app.amplitude.com to create one manually.',
+      );
+      analytics.wizardCapture('dashboard failed', {
+        integration,
+        reason: 'timeout or mcp error',
+        'duration ms': durationMs,
+      });
+      return;
+    }
+
+    // 2. Persist the wizard-visible artifact so OutroScreen can link to it.
+    try {
+      fs.writeFileSync(dashboardPath, JSON.stringify(result, null, 2), 'utf8');
+    } catch (err) {
+      logToFile(
+        `[createDashboard] failed to write ${DASHBOARD_FILE}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+
+    session.checklistDashboardUrl = result.dashboardUrl;
+    ui.setDashboardUrl(result.dashboardUrl);
+    spinner.stop('Dashboard ready');
+    analytics.wizardCapture('dashboard created', {
       integration,
-      reason: 'timeout or mcp error',
+      'chart count': result.charts?.length ?? 0,
       'duration ms': durationMs,
     });
-    return;
-  }
-
-  // 2. Persist the wizard-visible artifact so OutroScreen can link to it.
-  try {
-    fs.writeFileSync(dashboardPath, JSON.stringify(result, null, 2), 'utf8');
   } catch (err) {
+    const durationMs = Date.now() - startedAt;
+    spinner.stop('Dashboard creation failed — skipping');
     logToFile(
-      `[createDashboard] failed to write ${DASHBOARD_FILE}: ${
+      `[createDashboard] unexpected error: ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
+    analytics.wizardCapture('dashboard failed', {
+      integration,
+      reason: 'unexpected error',
+      'duration ms': durationMs,
+    });
   }
-
-  session.checklistDashboardUrl = result.dashboardUrl;
-  ui.setDashboardUrl(result.dashboardUrl);
-  spinner.stop('Dashboard ready');
-  analytics.wizardCapture('dashboard created', {
-    integration,
-    'chart count': result.charts?.length ?? 0,
-    'duration ms': durationMs,
-  });
 }
 
 // ── Helpers (exported for testing) ─────────────────────────────────────────
