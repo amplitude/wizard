@@ -7,6 +7,10 @@
  * accessPropertiesByDotNotation:true, which nests keys by dot segments:
  *   "User-{userId}.OAuthAccessToken" → { "User-{userId}": { "OAuthAccessToken": "..." } }
  */
+/**
+ * Note: user-entry migration helpers were rewritten from a more implicit
+ * version into explicit key-selection flow for clearer semantics.
+ */
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -85,6 +89,34 @@ const StoredEntrySchema = z
     OAuthExpiresAt: z.string().optional(),
   })
   .passthrough();
+
+interface StoredUserUpdatePlan {
+  existingEntryKey: string;
+  shouldDropPending: boolean;
+}
+
+function resolveStoredUserUpdatePlan(
+  config: Record<string, unknown>,
+  pendingKey: string,
+  realKey: string,
+): StoredUserUpdatePlan | undefined {
+  const shouldDropPending =
+    pendingKey !== realKey && config[pendingKey] !== undefined;
+
+  if (config[pendingKey] !== undefined) {
+    return {
+      existingEntryKey: pendingKey,
+      shouldDropPending,
+    };
+  }
+  if (config[realKey] !== undefined) {
+    return {
+      existingEntryKey: realKey,
+      shouldDropPending,
+    };
+  }
+  return undefined;
+}
 
 /** Returns the first real (non-pending) stored user, or undefined if none. */
 export function getStoredUser(configPath?: string): StoredUser | undefined {
@@ -180,19 +212,27 @@ export function updateStoredUser(user: StoredUser, configPath?: string): void {
   const config = readConfig(configPath);
   const pendingKey = userKey('pending', user.zone);
   const realKey = userKey(user.id, user.zone);
+  const updatePlan = resolveStoredUserUpdatePlan(config, pendingKey, realKey);
+  if (!updatePlan) return;
 
-  const parsed = StoredEntrySchema.safeParse(
-    config[pendingKey] ?? config[realKey],
-  );
-  if (!parsed.success) return;
+  const { existingEntryKey, shouldDropPending } = updatePlan;
 
-  const withoutPending = Object.fromEntries(
-    Object.entries(config).filter(([k]) => k !== pendingKey),
-  );
-  writeConfig(
-    { ...withoutPending, [realKey]: { ...parsed.data, User: user } },
-    configPath,
-  );
+  // Guard against malformed disk state before spreading fields into a new object.
+  const parsedEntry = StoredEntrySchema.safeParse(config[existingEntryKey]);
+  if (!parsedEntry.success) return;
+
+  // If we are migrating from pending -> real key, drop the pending record.
+  if (shouldDropPending) {
+    delete config[pendingKey];
+  }
+
+  // Preserve OAuth* fields from the existing entry while replacing the User payload.
+  config[realKey] = {
+    ...parsedEntry.data,
+    User: user,
+  };
+
+  writeConfig(config, configPath);
 }
 
 /** Clears all stored credentials by writing an empty config. */
