@@ -1,21 +1,21 @@
 /**
  * Property-based test for zone resolution.
  *
- * Two properties:
- *   1. resolveZone returns the highest-priority present signal per the
- *      documented tier ordering, or the caller-supplied fallback if no
- *      signal is present.
- *   2. All three production call sites produce the same effective zone
- *      given the same session. This is enforced by calling resolveZone
- *      the way each site does (same signature, same fallback) and asserting
- *      all three outputs agree.
+ * Property: resolveZone returns the highest-priority present signal per
+ * the documented tier ordering, or the caller-supplied fallback if no
+ * signal is present.
+ *
+ * A separate call-site-drift guard lives in zone-resolution.invariants.test.ts
+ * (grep-based forbidden-patterns check) — trying to assert the same thing
+ * here by calling resolveZone multiple times and comparing outputs was
+ * tautological, since the helper is total and the callers share it.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import fc from 'fast-check';
 import { resolveZone } from '../zone-resolution.js';
 import { buildSession } from '../wizard-session.js';
-import { DEFAULT_AMPLITUDE_ZONE, type AmplitudeZone } from '../constants.js';
+import type { AmplitudeZone } from '../constants.js';
 
 vi.mock('../ampli-config.js', () => ({
   readAmpliConfig: vi.fn(() => ({ ok: false, error: 'not_found' })),
@@ -96,37 +96,6 @@ describe('resolveZone — property tests', () => {
 
           const result = resolveZone(session, scenario.fallback);
           expect(result).toBe(expectedZone(scenario));
-        },
-      ),
-      { numRuns: 200 },
-    );
-  });
-
-  it('all three production call sites agree on the effective zone', async () => {
-    // Each call site reduces to `resolveZone(session, DEFAULT_AMPLITUDE_ZONE)`
-    // after the refactor. Invariant: given identical session + stored state,
-    // all three produce the same output. Today that's trivially true because
-    // they share a helper — this test guards against future drift if anyone
-    // reintroduces a bespoke chain.
-    await fc.assert(
-      fc.asyncProperty(
-        fc.record({
-          intent: optionalZoneArb,
-          projectZone: optionalZoneArb,
-          storedUser: storedUserArb,
-        }),
-        async (scenario) => {
-          await applyScenario(scenario);
-          const session = buildSession({});
-          session.region = scenario.intent;
-
-          // Three call sites, three identical invocations.
-          const signupZone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
-          const credsZone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
-          const tuiZone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
-
-          expect(signupZone).toBe(credsZone);
-          expect(credsZone).toBe(tuiZone);
         },
       ),
       { numRuns: 200 },
