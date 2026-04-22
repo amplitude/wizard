@@ -12,6 +12,8 @@ type UnrealContext = {
 export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
   metadata: {
     name: 'Unreal Engine',
+    glyph: '◆',
+    glyphColor: '#9FA5AD',
     integration: Integration.unreal,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unreal/unreal-sdk',

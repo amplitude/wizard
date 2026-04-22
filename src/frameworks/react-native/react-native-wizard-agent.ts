@@ -12,6 +12,8 @@ type ReactNativeContext = {
 export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
   metadata: {
     name: 'React Native',
+    glyph: '◈',
+    glyphColor: '#61DAFB',
     integration: Integration.reactNative,
     beta: true,
     docsUrl:

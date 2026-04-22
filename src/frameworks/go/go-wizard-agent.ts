@@ -9,6 +9,8 @@ type GoContext = Record<string, unknown>;
 export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
   metadata: {
     name: 'Go',
+    glyph: '●',
+    glyphColor: '#00ADD8',
     integration: Integration.go,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/go/go-sdk',

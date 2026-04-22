@@ -12,6 +12,8 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
   {
     metadata: {
       name: 'Node.js',
+      glyph: '●',
+      glyphColor: '#5FA04E',
       integration: Integration.javascriptNode,
       beta: true,
       docsUrl:

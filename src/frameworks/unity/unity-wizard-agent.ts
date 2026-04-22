@@ -12,6 +12,8 @@ type UnityContext = {
 export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
   metadata: {
     name: 'Unity',
+    glyph: '◼',
+    glyphColor: '#F2F4F8',
     integration: Integration.unity,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unity/unity-sdk',

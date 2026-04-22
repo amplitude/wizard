@@ -6,6 +6,8 @@ import { detectNodePackageManagers } from '../../lib/package-manager-detection';
 export const GENERIC_AGENT_CONFIG: FrameworkConfig = {
   metadata: {
     name: 'Generic',
+    glyph: '◇',
+    glyphColor: '#697077',
     integration: Integration.generic,
     docsUrl: 'https://amplitude.com/docs/get-started/amplitude-quickstart',
   },

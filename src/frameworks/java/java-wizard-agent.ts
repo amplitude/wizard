@@ -12,6 +12,8 @@ type JavaContext = {
 export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
   metadata: {
     name: 'Java',
+    glyph: '●',
+    glyphColor: '#ED8B00',
     integration: Integration.java,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/java/jre-java-sdk',

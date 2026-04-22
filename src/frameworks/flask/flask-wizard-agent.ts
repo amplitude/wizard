@@ -24,6 +24,8 @@ type FlaskContext = {
 export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   metadata: {
     name: 'Flask',
+    glyph: '◊',
+    glyphColor: '#F2F4F8',
     integration: Integration.flask,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',

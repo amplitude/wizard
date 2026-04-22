@@ -476,7 +476,7 @@ export const McpScreen = ({
           <Text bold color={Colors.accent}>
             {isRemove
               ? 'Remove Amplitude from your AI tools'
-              : 'Chat with your Amplitude data'}
+              : '💬 Chat with your Amplitude data'}
           </Text>
           {!isRemove && (
             <Text color={Colors.muted}>
