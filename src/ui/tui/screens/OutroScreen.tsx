@@ -78,7 +78,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // Exception: on error, 'u' or 'U' uploads the diagnostic bundle instead of exiting.
   useScreenInput((input, key) => {
     if (!isSuccess) {
-      if (isError && (input === 'u' || input === 'U')) {
+      if (
+        isError &&
+        (input === 'u' || input === 'U') &&
+        uploadState.kind === 'idle'
+      ) {
         runUpload();
         return;
       }
