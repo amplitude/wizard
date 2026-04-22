@@ -331,7 +331,7 @@ export async function runAgentWizard(
       spinnerMessage: SPINNER_MESSAGE,
       successMessage: config.ui.successMessage,
       errorMessage: 'Integration failed',
-      additionalFeatureQueue: session.additionalFeatureQueue,
+      additionalFeatureQueue: () => session.additionalFeatureQueue,
     },
     middleware,
   );

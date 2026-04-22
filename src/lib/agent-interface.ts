@@ -233,7 +233,7 @@ export type AgentConfig = {
  * allowed immediately — the agent cannot respond when auth has failed.
  */
 export function createStopHook(
-  featureQueue: readonly AdditionalFeature[],
+  getFeatureQueue: () => readonly AdditionalFeature[],
   isAuthError: () => boolean = () => false,
 ): HookCallback {
   let featureIndex = 0;
@@ -241,6 +241,7 @@ export function createStopHook(
 
   return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const stop_hook_active = input.stop_hook_active as boolean;
+    const featureQueue = getFeatureQueue();
     logToFile('Stop hook triggered', {
       stop_hook_active,
       featureIndex,
@@ -1011,7 +1012,7 @@ export async function runAgent(
     spinnerMessage?: string;
     successMessage?: string;
     errorMessage?: string;
-    additionalFeatureQueue?: readonly AdditionalFeature[];
+    additionalFeatureQueue?: () => readonly AdditionalFeature[];
   },
   middleware?: {
     onMessage(message: SDKMessage): void;
@@ -1379,7 +1380,7 @@ export async function runAgent(
             },
             hooks: buildHooksConfig({
               Stop: createStopHook(
-                config?.additionalFeatureQueue ?? [],
+                config?.additionalFeatureQueue ?? (() => []),
                 () => authErrorDetected,
               ),
             }),

@@ -686,7 +686,7 @@ describe('createStopHook', () => {
   const hookInput = { stop_hook_active: false };
 
   it('empty queue: first call blocks for remark, second allows stop', async () => {
-    const hook = createStopHook([]);
+    const hook = createStopHook(() => []);
 
     // First call → remark prompt
     const first = await hook(hookInput, undefined, {
@@ -703,7 +703,7 @@ describe('createStopHook', () => {
   });
 
   it('single feature: feature prompt, then remark, then allow stop', async () => {
-    const hook = createStopHook([AdditionalFeature.LLM]);
+    const hook = createStopHook(() => [AdditionalFeature.LLM]);
 
     // First call → LLM feature prompt
     const first = await hook(hookInput, undefined, {
@@ -730,7 +730,10 @@ describe('createStopHook', () => {
 
   it('multiple queue entries: drains all, then remark, then allow stop', async () => {
     // Queue the same feature twice to exercise multi-item draining
-    const hook = createStopHook([AdditionalFeature.LLM, AdditionalFeature.LLM]);
+    const hook = createStopHook(() => [
+      AdditionalFeature.LLM,
+      AdditionalFeature.LLM,
+    ]);
     const signal = new AbortController().signal;
 
     // First call → LLM prompt
@@ -758,7 +761,7 @@ describe('createStopHook', () => {
   });
 
   it('allow stop is idempotent after all phases complete', async () => {
-    const hook = createStopHook([]);
+    const hook = createStopHook(() => []);
     const signal = new AbortController().signal;
 
     await hook(hookInput, undefined, { signal }); // remark
@@ -769,7 +772,10 @@ describe('createStopHook', () => {
 
   it('auth error: allows stop immediately, skipping queue and remark', async () => {
     let authError = false;
-    const hook = createStopHook([AdditionalFeature.LLM], () => authError);
+    const hook = createStopHook(
+      () => [AdditionalFeature.LLM],
+      () => authError,
+    );
     const signal = new AbortController().signal;
 
     authError = true;
@@ -779,7 +785,10 @@ describe('createStopHook', () => {
 
   it('auth error detected mid-run: skips remaining phases on next call', async () => {
     let authError = false;
-    const hook = createStopHook([AdditionalFeature.LLM], () => authError);
+    const hook = createStopHook(
+      () => [AdditionalFeature.LLM],
+      () => authError,
+    );
     const signal = new AbortController().signal;
 
     // First call drains queue normally
@@ -790,6 +799,23 @@ describe('createStopHook', () => {
     authError = true;
     const second = await hook(hookInput, undefined, { signal });
     expect(second).toEqual({});
+  });
+
+  it('late opt-in: feature added after hook created is still picked up', async () => {
+    // Simulates user pressing R after the agent has started running
+    let queue: AdditionalFeature[] = [];
+    const hook = createStopHook(() => queue);
+    const signal = new AbortController().signal;
+
+    // User opts in mid-run — queue grows after hook was created
+    queue = [AdditionalFeature.SessionReplay];
+
+    // First call → SR feature prompt (not remark, because queue is now non-empty)
+    const first = await hook(hookInput, undefined, { signal });
+    expect(first).toHaveProperty('decision', 'block');
+    expect((first as { reason: string }).reason).toBe(
+      ADDITIONAL_FEATURE_PROMPTS[AdditionalFeature.SessionReplay],
+    );
   });
 });
 
