@@ -8,7 +8,6 @@
  */
 
 import type { WizardSession } from './wizard-session';
-import type { AmplitudeZone } from './constants';
 import { DEFAULT_AMPLITUDE_ZONE } from './constants';
 import { resolveZone } from './zone-resolution';
 import { extractAppId } from './api';
@@ -516,7 +515,7 @@ export async function resolveEnvironmentSelection(
     return false;
   }
 
-  const zone = (session.region ?? 'us') as AmplitudeZone;
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
   const apiKey = env.app.apiKey;
 
   session.selectedOrgId = org.id;

@@ -956,17 +956,29 @@ void yargs(hideBin(process.argv))
               // Resolve org/workspace display names so /whoami shows them.
               // Also extracts the numeric analytics project ID for MCP event detection.
               // Fire-and-forget so it doesn't block startup.
-              if (session.region && session.selectedOrgId) {
+              // Hydrate org/workspace display names after credential
+              // resolution succeeds. Gate on credentials (not region) because
+              // resolveCredentials no longer cache-writes session.region;
+              // gating on region would silently skip hydration for returning
+              // agent-mode users whose zone comes from storedUser, not an
+              // explicit flag.
+              if (session.credentials && session.selectedOrgId) {
                 const { getStoredUser, getStoredToken } = await import(
                   './src/utils/ampli-settings.js'
                 );
                 const { fetchAmplitudeUser, extractAppId } = await import(
                   './src/lib/api.js'
                 );
+                const { resolveZone } = await import(
+                  './src/lib/zone-resolution.js'
+                );
+                const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                  './src/lib/constants.js'
+                );
                 const storedUser = getStoredUser();
                 const realUser =
                   storedUser && storedUser.id !== 'pending' ? storedUser : null;
-                const zone = session.region;
+                const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
