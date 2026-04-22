@@ -5,8 +5,12 @@ import { type Mock, type MockedFunction } from 'vitest';
  * - New user (0 orgs) → abort with guidance
  * - Single org → auto-select, no prompt
  * - Multiple orgs → select prompt shown, chosen org used
- * - Zone detection → cloudRegion from detectRegionFromToken, not hardcoded 'us'
- * - Zone detection failure → falls back to 'us'
+ * - performAmplitudeAuth returns pending-recovery → warn + fall through to API-key prompt
+ *
+ * Under the bundled-auth contract, `performAmplitudeAuth` is responsible for
+ * fetching userInfo, detecting region, and persisting to disk — so these tests
+ * only mock the auth function's outcome and verify setup-utils' own logic
+ * (org selection, CI-mode shortcut, graceful degradation).
  */
 
 import { getOrAskForProjectData } from '../setup-utils';
@@ -33,18 +37,6 @@ vi.mock('../oauth', () => ({
   performAmplitudeAuth: vi.fn(),
 }));
 
-vi.mock('../../lib/api', () => ({
-  fetchAmplitudeUser: vi.fn(),
-}));
-
-vi.mock('../ampli-settings', () => ({
-  storeToken: vi.fn(),
-}));
-
-vi.mock('../urls', () => ({
-  detectRegionFromToken: vi.fn(),
-}));
-
 vi.mock('../../telemetry', () => ({
   traceStep: vi.fn((_step: string, fn: () => unknown) => fn()),
 }));
@@ -62,41 +54,49 @@ vi.mock('@inquirer/prompts', () => ({
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 import { performAmplitudeAuth } from '../oauth';
-import { fetchAmplitudeUser } from '../../lib/api';
-import { detectRegionFromToken } from '../urls';
-import { storeToken } from '../ampli-settings';
 import { getUI } from '../../ui';
 import type { AmplitudeUserInfo } from '../../lib/api';
+import type { StoredUser, StoredOAuthToken } from '../ampli-settings';
 import * as inquirer from '@inquirer/prompts';
 
 const mockPerformAmplitudeAuth = performAmplitudeAuth as MockedFunction<
   typeof performAmplitudeAuth
 >;
-const mockFetchAmplitudeUser = fetchAmplitudeUser as MockedFunction<
-  typeof fetchAmplitudeUser
->;
-const mockDetectRegion = detectRegionFromToken as MockedFunction<
-  typeof detectRegionFromToken
->;
-const mockStoreToken = storeToken as MockedFunction<typeof storeToken>;
 const mockSelect = inquirer.select as MockedFunction<typeof inquirer.select>;
 const mockInput = inquirer.input as MockedFunction<typeof inquirer.input>;
 
-const AUTH_RESULT = {
+const TOKENS: StoredOAuthToken = {
   idToken: 'id-token',
   accessToken: 'access-token',
   refreshToken: 'refresh-token',
   expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-  zone: 'us' as const,
 };
 
-function makeUser(orgs: AmplitudeUserInfo['orgs']): AmplitudeUserInfo {
+const STORED_USER: StoredUser = {
+  id: 'user-1',
+  firstName: 'Ada',
+  lastName: 'Lovelace',
+  email: 'ada@example.com',
+  zone: 'us',
+};
+
+function makeCompleteOutcome(
+  orgs: AmplitudeUserInfo['orgs'],
+): ReturnType<typeof performAmplitudeAuth> extends Promise<infer T>
+  ? T
+  : never {
   return {
-    id: 'user-1',
-    firstName: 'Ada',
-    lastName: 'Lovelace',
-    email: 'ada@example.com',
-    orgs,
+    status: 'complete',
+    user: STORED_USER,
+    userInfo: {
+      id: STORED_USER.id,
+      firstName: STORED_USER.firstName,
+      lastName: STORED_USER.lastName,
+      email: STORED_USER.email,
+      orgs,
+    },
+    tokens: TOKENS,
+    zone: 'us',
   };
 }
 
@@ -111,15 +111,12 @@ beforeEach(() => {
 
 describe('login flow — org resolution', () => {
   beforeEach(() => {
-    mockPerformAmplitudeAuth.mockResolvedValue(AUTH_RESULT);
-    mockDetectRegion.mockResolvedValue('us');
-    // Default: API key prompt returns a key
     mockInput.mockResolvedValue('amp-api-key-123');
   });
 
   describe('new user — no orgs', () => {
     it('logs an error and aborts when the user has no organizations', async () => {
-      mockFetchAmplitudeUser.mockResolvedValue(makeUser([]));
+      mockPerformAmplitudeAuth.mockResolvedValue(makeCompleteOutcome([]));
 
       await expect(
         getOrAskForProjectData({ signup: false, ci: false }),
@@ -132,7 +129,7 @@ describe('login flow — org resolution', () => {
     });
 
     it('includes signup guidance in the error message', async () => {
-      mockFetchAmplitudeUser.mockResolvedValue(makeUser([]));
+      mockPerformAmplitudeAuth.mockResolvedValue(makeCompleteOutcome([]));
 
       await expect(
         getOrAskForProjectData({ signup: false, ci: false }),
@@ -146,7 +143,7 @@ describe('login flow — org resolution', () => {
 
   describe('single org', () => {
     it('auto-selects the org without prompting', async () => {
-      mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
+      mockPerformAmplitudeAuth.mockResolvedValue(makeCompleteOutcome([ORG_A]));
 
       await getOrAskForProjectData({ signup: false, ci: false });
 
@@ -154,7 +151,7 @@ describe('login flow — org resolution', () => {
     });
 
     it('shows the org name in the success message', async () => {
-      mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
+      mockPerformAmplitudeAuth.mockResolvedValue(makeCompleteOutcome([ORG_A]));
 
       await getOrAskForProjectData({ signup: false, ci: false });
 
@@ -167,7 +164,9 @@ describe('login flow — org resolution', () => {
 
   describe('multiple orgs', () => {
     it('prompts the user to select an org', async () => {
-      mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A, ORG_B]));
+      mockPerformAmplitudeAuth.mockResolvedValue(
+        makeCompleteOutcome([ORG_A, ORG_B]),
+      );
       mockSelect.mockResolvedValue(ORG_B);
 
       await getOrAskForProjectData({ signup: false, ci: false });
@@ -184,7 +183,9 @@ describe('login flow — org resolution', () => {
     });
 
     it('uses the selected org name in the success message', async () => {
-      mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A, ORG_B]));
+      mockPerformAmplitudeAuth.mockResolvedValue(
+        makeCompleteOutcome([ORG_A, ORG_B]),
+      );
       mockSelect.mockResolvedValue(ORG_B);
 
       await getOrAskForProjectData({ signup: false, ci: false });
@@ -195,97 +196,37 @@ describe('login flow — org resolution', () => {
       );
     });
   });
+});
 
-  describe('token persistence', () => {
-    it('calls storeToken with user details after successful auth', async () => {
-      mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
+describe('login flow — pending-recovery fallback', () => {
+  beforeEach(() => {
+    mockInput.mockResolvedValue('amp-api-key-123');
+  });
 
-      await getOrAskForProjectData({ signup: false, ci: false });
-
-      expect(mockStoreToken).toHaveBeenCalledWith(
-        expect.objectContaining({
-          id: 'user-1',
-          email: 'ada@example.com',
-          firstName: 'Ada',
-          lastName: 'Lovelace',
-        }),
-        expect.objectContaining({
-          accessToken: AUTH_RESULT.accessToken,
-          idToken: AUTH_RESULT.idToken,
-          refreshToken: AUTH_RESULT.refreshToken,
-        }),
-      );
+  it('warns and falls through to manual API-key prompt when userInfo unresolvable', async () => {
+    mockPerformAmplitudeAuth.mockResolvedValue({
+      status: 'pending-recovery',
+      tokens: TOKENS,
+      zone: 'us',
     });
-  });
-});
-
-describe('login flow — zone / region detection', () => {
-  beforeEach(() => {
-    mockPerformAmplitudeAuth.mockResolvedValue(AUTH_RESULT);
-    mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
-    mockInput.mockResolvedValue('amp-api-key-123');
-  });
-
-  it('returns the detected cloud region in the result', async () => {
-    mockDetectRegion.mockResolvedValue('eu');
-
-    const result = await getOrAskForProjectData({ signup: false, ci: false });
-
-    expect(result.cloudRegion).toBe('eu');
-  });
-
-  it('passes the detected region to fetchAmplitudeUser', async () => {
-    mockDetectRegion.mockResolvedValue('eu');
-
-    await getOrAskForProjectData({ signup: false, ci: false });
-
-    expect(mockFetchAmplitudeUser).toHaveBeenCalledWith(
-      AUTH_RESULT.idToken,
-      'eu',
-    );
-  });
-
-  it('falls back to "us" when region detection throws', async () => {
-    mockDetectRegion.mockRejectedValue(new Error('network error'));
-
-    const result = await getOrAskForProjectData({ signup: false, ci: false });
-
-    expect(result.cloudRegion).toBe('us');
-  });
-
-  it('uses "us" region by default when detection succeeds with us', async () => {
-    mockDetectRegion.mockResolvedValue('us');
-
-    const result = await getOrAskForProjectData({ signup: false, ci: false });
-
-    expect(result.cloudRegion).toBe('us');
-  });
-});
-
-describe('login flow — fetchAmplitudeUser failure', () => {
-  beforeEach(() => {
-    mockPerformAmplitudeAuth.mockResolvedValue(AUTH_RESULT);
-    mockDetectRegion.mockResolvedValue('us');
-    mockInput.mockResolvedValue('amp-api-key-123');
-  });
-
-  it('logs a warning and continues when user info fetch fails', async () => {
-    mockFetchAmplitudeUser.mockRejectedValue(new Error('API unavailable'));
 
     const result = await getOrAskForProjectData({ signup: false, ci: false });
 
     const ui = getUI();
     expect(ui.log.warn).toHaveBeenCalled();
-    // Still returns a result with the api key
     expect(result.projectApiKey).toBe('amp-api-key-123');
   });
 
-  it('does not call storeToken when user info fetch fails', async () => {
-    mockFetchAmplitudeUser.mockRejectedValue(new Error('API unavailable'));
+  it('surfaces the tokens.accessToken from pending-recovery', async () => {
+    mockPerformAmplitudeAuth.mockResolvedValue({
+      status: 'pending-recovery',
+      tokens: TOKENS,
+      zone: 'us',
+    });
 
-    await getOrAskForProjectData({ signup: false, ci: false });
+    const result = await getOrAskForProjectData({ signup: false, ci: false });
 
-    expect(mockStoreToken).not.toHaveBeenCalled();
+    expect(result.accessToken).toBe(TOKENS.accessToken);
   });
 });
 
@@ -298,7 +239,6 @@ describe('login flow — CI mode', () => {
     });
 
     expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
-    expect(mockFetchAmplitudeUser).not.toHaveBeenCalled();
     expect(result.projectApiKey).toBe('phx_test_key');
   });
 

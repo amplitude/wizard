@@ -1,7 +1,11 @@
-import type { AmplitudeAuthResult } from './oauth.js';
+import type { SignupOutcome } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
 import { FLAG_DIRECT_SIGNUP, isFlagEnabled } from '../lib/feature-flags.js';
-import { storeToken, type StoredUser } from './ampli-settings.js';
+import {
+  storeToken,
+  type StoredOAuthToken,
+  type StoredUser,
+} from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
@@ -113,63 +117,36 @@ export interface SignupOrAuthInput {
 }
 
 /**
- * Result of {@link performSignupOrAuth}. Extends {@link AmplitudeAuthResult}
- * with the user profile fetched inside the function, so callers can skip a
- * redundant `fetchAmplitudeUser` call.
- *
- * `userInfo` is:
- * - populated on the direct-signup success path when the internal fetch
- *   (with provisioning retry) succeeded
- * - `null` when the fetch failed — the caller is responsible for either
- *   fetching userInfo itself or treating it as a failure
- */
-export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
-  userInfo: AmplitudeUserInfo | null;
-};
-
-/**
  * Attempt direct signup via the headless provisioning endpoint.
  *
- * Returns the new account's tokens (and userInfo, when the internal fetch
- * succeeded) on success; returns `null` when:
- * - the `wizard-direct-signup` feature flag is off
- * - email or fullName is missing
- * - the endpoint returns `requires_redirect` / `needs_information` / `error`
- * - the direct-signup network call itself errors
+ * Always returns a {@link SignupOutcome}, so persistence is guaranteed and
+ * the caller never has to remember to call `storeToken`. The outcome is:
  *
- * On success (userInfo fetch OK), returns tokens + userInfo; persistence
- * is the caller's responsibility. The caller writes `storeToken(user, tokens)`
- * once it has the userInfo. The internal fetch retries briefly on the "no
- * env with API key yet" case to absorb post-signup provisioning lag.
- *
- * On user-fetch failure, writes tokens under a `{id:'pending'}` sentinel
- * before returning so the tokens are preserved for next-run recovery. This
- * matters because `--signup` is the whole point of avoiding a browser
- * redirect — losing tokens here would force the user back to a browser OAuth
- * (TUI) or dead-end the run (CI, where account-already-exists blocks re-signup).
- *
- * This function does NOT fall back to `performAmplitudeAuth()`. Callers
- * that want OAuth fallback (e.g. the TUI path) must call it explicitly
- * when this returns null. Agent/CI modes typically skip OAuth and let
- * `resolveNonInteractiveCredentials` handle cached-token resolution.
+ * - `complete` — signup succeeded, userInfo fetched, record persisted.
+ * - `pending-recovery` — signup succeeded but userInfo fetch failed after
+ *   retries. Tokens are persisted under a `{id:'pending'}` sentinel so the
+ *   next run recovers via cached-session lookup without forcing the user
+ *   back through a browser redirect (the whole point of `--signup`).
+ * - `skipped` — feature flag off, email/fullName missing, or the signup
+ *   endpoint returned `requires_redirect` / `error`. Callers can choose
+ *   to fall back to `performAmplitudeAuth` or abort.
  */
 export async function performSignupOrAuth(
   input: SignupOrAuthInput,
-): Promise<PerformSignupOrAuthResult | null> {
+): Promise<SignupOutcome> {
   if (!isFlagEnabled(FLAG_DIRECT_SIGNUP)) {
     log.debug('flag off; skipping direct signup');
-    return null;
+    return { status: 'skipped' };
   }
   if (input.email === null || input.fullName === null) {
     log.debug('missing email or fullName; skipping direct signup');
-    return null;
+    return { status: 'skipped' };
   }
 
   log.debug('attempting direct signup');
   // performDirectSignup is contracted to catch its own network/parse errors
   // and return { kind: 'error' }. The try/catch here is belt-and-suspenders
-  // enforcement of the wrapper's documented null-on-any-error behavior —
-  // callers rely on the null return to decide fallback strategy.
+  // enforcement of the wrapper's documented skipped-on-any-error behavior.
   let result: Awaited<ReturnType<typeof performDirectSignup>>;
   try {
     result = await performDirectSignup({
@@ -182,76 +159,83 @@ export async function performSignupOrAuth(
       message: err instanceof Error ? err.message : String(err),
     });
     trackSignupAttempt({ status: 'signup_error', zone: input.zone });
-    return null;
+    return { status: 'skipped' };
   }
 
   if (result.kind === 'requires_redirect') {
     log.debug('direct signup did not succeed', { kind: result.kind });
     trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
-    return null;
+    return { status: 'skipped' };
   }
   if (result.kind === 'error') {
     log.debug('direct signup did not succeed', { kind: result.kind });
     trackSignupAttempt({ status: 'signup_error', zone: input.zone });
-    return null;
+    return { status: 'skipped' };
   }
 
-  const tokens = {
+  const tokens: StoredOAuthToken = {
     accessToken: result.tokens.accessToken,
     idToken: result.tokens.idToken,
     refreshToken: result.tokens.refreshToken,
     expiresAt: result.tokens.expiresAt,
   };
 
-  // Fetch the real user profile so the caller can persist a complete record.
-  // The fetch retries briefly on the "no env with API key yet" case to absorb
-  // post-signup provisioning lag.
-  let userInfo: AmplitudeUserInfo | null = null;
+  // Fetch the real user profile. Retries briefly on the "no env with API key
+  // yet" case to absorb post-signup provisioning lag.
   const fetchResult = await fetchUserWithProvisioningRetry(
     tokens.idToken,
     input.zone,
   );
+
   if (fetchResult.ok) {
-    userInfo = fetchResult.userInfo;
+    const userInfo = fetchResult.userInfo;
+    const user: StoredUser = {
+      id: userInfo.id,
+      firstName: userInfo.firstName,
+      lastName: userInfo.lastName,
+      email: userInfo.email,
+      zone: input.zone,
+    };
+    storeToken(user, tokens);
     trackSignupAttempt({
       status: 'success',
       zone: input.zone,
       'has env with api key': fetchResult.hasEnvWithApiKey,
       'user fetch retry count': fetchResult.retryCount,
     });
-    // Success: caller persists. We don't write here, which keeps the bundled
-    // "caller owns the write" shape in the happy path.
-  } else {
-    // Failure: preserve tokens for next-run recovery under a pending sentinel.
-    // Without this, `--signup` users who hit a userInfo race would be pushed
-    // back to a browser redirect (TUI) or dead-end (CI, where re-signup fails
-    // because the account already exists) — which defeats the whole point of
-    // the --signup flow.
-    log.warn('fetchAmplitudeUser failed after direct signup', {
-      zone: input.zone,
-    });
-    const parts = input.fullName.trim().split(/\s+/);
-    const pendingUser: StoredUser = {
-      id: 'pending',
-      firstName: parts[0] ?? '',
-      lastName: parts.slice(1).join(' '),
-      email: input.email,
-      zone: input.zone,
+    return {
+      status: 'complete',
+      user,
+      userInfo,
+      tokens,
+      zone: result.tokens.zone,
     };
-    storeToken(pendingUser, tokens);
-    trackSignupAttempt({
-      status: 'user_fetch_failed',
-      zone: input.zone,
-      'user fetch retry count': fetchResult.retryCount,
-    });
   }
 
+  // Failure: preserve tokens for next-run recovery under a pending sentinel.
+  // Without this, `--signup` users who hit a userInfo race would be pushed
+  // back to a browser redirect (TUI) or dead-end (CI, where re-signup fails
+  // because the account already exists) — defeating the whole point of --signup.
+  log.warn('fetchAmplitudeUser failed after direct signup', {
+    zone: input.zone,
+  });
+  const parts = input.fullName.trim().split(/\s+/);
+  const pendingUser: StoredUser = {
+    id: 'pending',
+    firstName: parts[0] ?? '',
+    lastName: parts.slice(1).join(' '),
+    email: input.email,
+    zone: input.zone,
+  };
+  storeToken(pendingUser, tokens);
+  trackSignupAttempt({
+    status: 'user_fetch_failed',
+    zone: input.zone,
+    'user fetch retry count': fetchResult.retryCount,
+  });
   return {
-    idToken: tokens.idToken,
-    accessToken: tokens.accessToken,
-    refreshToken: tokens.refreshToken,
-    expiresAt: tokens.expiresAt,
+    status: 'pending-recovery',
+    tokens,
     zone: result.tokens.zone,
-    userInfo,
   };
 }
