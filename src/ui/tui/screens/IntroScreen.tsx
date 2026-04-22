@@ -202,10 +202,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
       {/* Framework picker (when auto-detection fails or user requests change) */}
       {(pickingFramework || (session.menu && needsFrameworkPick)) && (
-        <FrameworkPicker
-          store={store}
-          onComplete={() => setPickingFramework(false)}
-        />
+        <Box alignSelf="flex-start" marginLeft={4}>
+          <FrameworkPicker
+            store={store}
+            onComplete={() => setPickingFramework(false)}
+          />
+        </Box>
       )}
 
       {/* Detection results + continue menu */}
