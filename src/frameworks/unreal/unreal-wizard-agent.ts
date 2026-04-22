@@ -3,6 +3,7 @@ import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { unrealPackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
+import { BrandColors } from '../../lib/brand-colors';
 import { detectUnrealProject, isAmplitudePluginPresent } from './utils';
 
 type UnrealContext = {
@@ -13,7 +14,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
   metadata: {
     name: 'Unreal Engine',
     glyph: '◆',
-    glyphColor: '#9FA5AD',
+    glyphColor: BrandColors.gray40,
     integration: Integration.unreal,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/unreal/unreal-sdk',

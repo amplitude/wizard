@@ -4,6 +4,7 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { PYTHON_PACKAGE_INSTALLATION } from '../../lib/framework-config';
 import { detectPythonPackageManagers } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
+import { BrandColors } from '../../lib/brand-colors';
 import fg from 'fast-glob';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -25,7 +26,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   metadata: {
     name: 'Flask',
     glyph: '◊',
-    glyphColor: '#F2F4F8',
+    glyphColor: BrandColors.gray10,
     integration: Integration.flask,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',

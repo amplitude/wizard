@@ -3,6 +3,7 @@ import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { detectNodePackageManagers } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
+import { BrandColors } from '../../lib/brand-colors';
 import {
   getPackageVersion,
   hasPackageInstalled,
@@ -25,7 +26,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
   metadata: {
     name: 'Next.js',
     glyph: '▲',
-    glyphColor: '#F2F4F8',
+    glyphColor: BrandColors.gray10,
     integration: Integration.nextjs,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     unsupportedVersionDocsUrl:
