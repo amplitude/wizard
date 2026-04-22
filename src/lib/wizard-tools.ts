@@ -11,6 +11,7 @@ import path from 'path';
 import fs from 'fs';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
+import { atomicWriteJSON } from '../utils/atomic-write';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
@@ -347,6 +348,37 @@ export function mergeEnvValues(
 }
 
 // ---------------------------------------------------------------------------
+// Event plan persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Write the canonical event plan to `<workingDirectory>/.amplitude-events.json`
+ * using the shape the wizard UI expects: `[{name, description}]`.
+ *
+ * The agent is instructed (via commandments + integration skills) not to
+ * write this file itself — the wizard tool is the single writer so the
+ * shape can't drift. Exported for testing.
+ *
+ * Returns true on success, false on any filesystem error (the caller logs
+ * but doesn't fail the tool call over persistence issues).
+ */
+export function persistEventPlan(
+  workingDirectory: string,
+  events: Array<{ name: string; description: string }>,
+): boolean {
+  try {
+    const planPath = path.join(workingDirectory, '.amplitude-events.json');
+    atomicWriteJSON(planPath, events);
+    return true;
+  } catch (err) {
+    logToFile(
+      `persistEventPlan: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Server factory
 // ---------------------------------------------------------------------------
 
@@ -653,8 +685,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     async (args: { events: Array<{ name: string; description: string }> }) => {
       const { DEMO_MODE } = await import('./constants.js');
       // Light normalization — truncate overly long names but don't try to
-      // extract names from descriptions. The UI reads proper event names
-      // from store.eventPlan (populated from the JSON file the agent writes).
+      // extract names from descriptions.
       const normalizedEvents = args.events.map((e) => ({
         name:
           e.name.trim().length > 50
@@ -677,6 +708,16 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         text = `feedback: ${decision.feedback}`;
       } else {
         text = decision.decision; // 'approved' or 'skipped'
+      }
+      // Persist the canonical event plan to .amplitude-events.json so the
+      // watcher and return-run loader see the same {name, description} shape
+      // regardless of what the agent would otherwise emit. Only write on
+      // approved to avoid overwriting a prior good plan with a rejected one.
+      if (decision.decision === 'approved') {
+        const persisted = persistEventPlan(workingDirectory, events);
+        logToFile(
+          `confirm_event_plan: persist=${persisted} events=${events.length}`,
+        );
       }
       logToFile(`confirm_event_plan result: ${text}`);
       return { content: [{ type: 'text' as const, text }] };

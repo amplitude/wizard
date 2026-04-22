@@ -7,6 +7,7 @@ import {
   ensureGitignoreCoverage,
   parseEnvKeys,
   mergeEnvValues,
+  persistEventPlan,
 } from '../wizard-tools';
 
 function makeTmpDir(): string {
@@ -206,5 +207,70 @@ describe('ensureGitignoreCoverage', () => {
     const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
     // Should not duplicate — the trim check should match
     expect(content).toBe('  .env.local  \n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// persistEventPlan
+// ---------------------------------------------------------------------------
+
+describe('persistEventPlan', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('writes the canonical {name, description} shape to .amplitude-events.json', () => {
+    const events = [
+      { name: 'user signed up', description: 'Fires when signup completes' },
+      { name: 'product viewed', description: 'Fires on PDP mount' },
+    ];
+    expect(persistEventPlan(tmpDir, events)).toBe(true);
+
+    const raw = fs.readFileSync(
+      path.join(tmpDir, '.amplitude-events.json'),
+      'utf8',
+    );
+    expect(JSON.parse(raw)).toEqual(events);
+  });
+
+  it('overwrites a pre-existing non-canonical file (e.g. snake_case event_name)', () => {
+    const planPath = path.join(tmpDir, '.amplitude-events.json');
+    // Simulate what the agent wrote directly, in the wrong shape.
+    fs.writeFileSync(
+      planPath,
+      JSON.stringify([
+        {
+          event_name: 'External Resource Opened',
+          description: 'Non-canonical',
+          file_path: 'src/app/page.tsx',
+        },
+      ]),
+    );
+
+    persistEventPlan(tmpDir, [{ name: 'canonical', description: 'fixed' }]);
+
+    const parsed = JSON.parse(fs.readFileSync(planPath, 'utf8'));
+    expect(parsed).toEqual([{ name: 'canonical', description: 'fixed' }]);
+    // Structural check: canonical shape only, no legacy fields.
+    expect(parsed[0].event_name).toBeUndefined();
+    expect(parsed[0].file_path).toBeUndefined();
+  });
+
+  it('returns false when the working directory does not exist', () => {
+    const nonexistent = path.join(tmpDir, 'does', 'not', 'exist');
+    expect(
+      persistEventPlan(nonexistent, [{ name: 'x', description: 'y' }]),
+    ).toBe(false);
+  });
+
+  it('writes an empty array when given no events (idempotent clear)', () => {
+    expect(persistEventPlan(tmpDir, [])).toBe(true);
+    const raw = fs.readFileSync(
+      path.join(tmpDir, '.amplitude-events.json'),
+      'utf8',
+    );
+    expect(JSON.parse(raw)).toEqual([]);
   });
 });
