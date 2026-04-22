@@ -317,10 +317,15 @@ const FrameworkPicker = ({
       setOptions(
         PICKER_ORDER.map((integration) => {
           const { glyph, name } = FRAMEWORK_REGISTRY[integration].metadata;
-          return {
-            label: glyph ? `${glyph}  ${name}` : name,
-            value: integration,
-          };
+          let label: string;
+          if (glyph) {
+            const cp = glyph.codePointAt(0) ?? 0;
+            const isWide = cp >= 0x2600 || cp > 0xffff;
+            label = isWide ? `${glyph}  ${name}` : `${glyph}   ${name}`;
+          } else {
+            label = name;
+          }
+          return { label, value: integration };
         }),
       );
     });

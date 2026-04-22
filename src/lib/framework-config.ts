@@ -49,8 +49,9 @@ export interface FrameworkMetadata<
 
   /**
    * Single-character glyph rendered next to the name in pickers and
-   * detection results. Keep to ASCII-width-1 unicode (▲ ● ◆ ◼ …) to
-   * preserve picker alignment. Optional — omit for plain-text display.
+   * detection results. Prefer width-2 emoji (🟢 🧭 📱 …); width-1 glyphs
+   * are padded automatically by the picker. Optional — omit for plain-text
+   * display.
    */
   glyph?: string;
 
