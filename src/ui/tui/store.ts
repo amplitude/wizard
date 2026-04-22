@@ -18,6 +18,8 @@ import {
   type DiscoveredFeature,
   buildSession,
 } from '../../lib/wizard-session.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
+import { resolveZone } from '../../lib/zone-resolution.js';
 import {
   AdditionalFeature,
   McpOutcome,
@@ -210,6 +212,7 @@ export class WizardStore {
   setCredentials(credentials: WizardSession['credentials']): void {
     this.$session.setKey('credentials', credentials);
     const session = this.$session.get();
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
     if (session.userEmail) {
       analytics.setDistinctId(session.userEmail);
       analytics.identifyUser({
@@ -223,13 +226,13 @@ export class WizardStore {
         // (Org → Workspace → Environment → App).
         app_id: session.selectedAppId ?? credentials?.appId,
         env_name: session.selectedEnvName,
-        region: session.region,
+        region: zone,
         integration: session.integration,
       });
     }
     analytics.wizardCapture('auth complete', {
       'app id': credentials?.appId,
-      region: session.region,
+      region: zone,
     });
     this.emitChange();
   }
