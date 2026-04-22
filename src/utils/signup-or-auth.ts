@@ -1,6 +1,7 @@
 import type { AmplitudeAuthResult } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
 import { FLAG_DIRECT_SIGNUP, isFlagEnabled } from '../lib/feature-flags.js';
+import { storeToken, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
@@ -136,10 +137,16 @@ export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
  * - the endpoint returns `requires_redirect` / `needs_information` / `error`
  * - the direct-signup network call itself errors
  *
- * Returns tokens (including `expiresAt`) in memory; persistence is the
- * caller's responsibility. The caller writes `storeToken(user, tokens)`
- * once userInfo is known. The internal fetch retries briefly on the "no
+ * On success (userInfo fetch OK), returns tokens + userInfo; persistence
+ * is the caller's responsibility. The caller writes `storeToken(user, tokens)`
+ * once it has the userInfo. The internal fetch retries briefly on the "no
  * env with API key yet" case to absorb post-signup provisioning lag.
+ *
+ * On user-fetch failure, writes tokens under a `{id:'pending'}` sentinel
+ * before returning so the tokens are preserved for next-run recovery. This
+ * matters because `--signup` is the whole point of avoiding a browser
+ * redirect — losing tokens here would force the user back to a browser OAuth
+ * (TUI) or dead-end the run (CI, where account-already-exists blocks re-signup).
  *
  * This function does NOT fall back to `performAmplitudeAuth()`. Callers
  * that want OAuth fallback (e.g. the TUI path) must call it explicitly
@@ -196,10 +203,9 @@ export async function performSignupOrAuth(
     expiresAt: result.tokens.expiresAt,
   };
 
-  // Fetch the real user profile so the caller can persist a complete record
-  // with a valid zone. The fetch retries briefly on the "no env with API key
-  // yet" case to absorb post-signup provisioning lag. On failure, userInfo is
-  // null and the caller decides how to handle it (retry, re-auth, abort).
+  // Fetch the real user profile so the caller can persist a complete record.
+  // The fetch retries briefly on the "no env with API key yet" case to absorb
+  // post-signup provisioning lag.
   let userInfo: AmplitudeUserInfo | null = null;
   const fetchResult = await fetchUserWithProvisioningRetry(
     tokens.idToken,
@@ -213,10 +219,26 @@ export async function performSignupOrAuth(
       'has env with api key': fetchResult.hasEnvWithApiKey,
       'user fetch retry count': fetchResult.retryCount,
     });
+    // Success: caller persists. We don't write here, which keeps the bundled
+    // "caller owns the write" shape in the happy path.
   } else {
+    // Failure: preserve tokens for next-run recovery under a pending sentinel.
+    // Without this, `--signup` users who hit a userInfo race would be pushed
+    // back to a browser redirect (TUI) or dead-end (CI, where re-signup fails
+    // because the account already exists) — which defeats the whole point of
+    // the --signup flow.
     log.warn('fetchAmplitudeUser failed after direct signup', {
       zone: input.zone,
     });
+    const parts = input.fullName.trim().split(/\s+/);
+    const pendingUser: StoredUser = {
+      id: 'pending',
+      firstName: parts[0] ?? '',
+      lastName: parts.slice(1).join(' '),
+      email: input.email,
+      zone: input.zone,
+    };
+    storeToken(pendingUser, tokens);
     trackSignupAttempt({
       status: 'user_fetch_failed',
       zone: input.zone,

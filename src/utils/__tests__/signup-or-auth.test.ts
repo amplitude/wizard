@@ -322,7 +322,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns userInfo: null when fetchAmplitudeUser fails after direct-signup success', async () => {
+  it('preserves tokens under a pending sentinel when fetchAmplitudeUser fails after direct-signup success', async () => {
     vi.useFakeTimers();
     try {
       const { isFlagEnabled } = await import('../../lib/feature-flags.js');
@@ -350,13 +350,68 @@ describe('performSignupOrAuth', () => {
       await vi.runAllTimersAsync();
       const result = await pending;
 
-      // Tokens still returned so caller can decide what to do; no internal
-      // persistence — caller handles it.
+      // Tokens still returned for the caller.
       expect(result).toMatchObject({
         accessToken: 'direct-access',
         userInfo: null,
       });
-      expect(storeToken).not.toHaveBeenCalled();
+      // On failure, tokens are preserved under a pending sentinel so the
+      // next run can recover without forcing the user back to browser OAuth.
+      expect(storeToken).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'pending',
+          email: 'ada@example.com',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          zone: 'us',
+        }),
+        expect.objectContaining({
+          accessToken: 'direct-access',
+          idToken: 'direct-id',
+          refreshToken: 'direct-refresh',
+        }),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('normalizes extra whitespace in fullName for the pending sentinel on failure', async () => {
+    vi.useFakeTimers();
+    try {
+      const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+      vi.mocked(isFlagEnabled).mockReturnValue(true);
+      const { performDirectSignup } = await import('../direct-signup.js');
+      vi.mocked(performDirectSignup).mockResolvedValue({
+        kind: 'success',
+        tokens: {
+          accessToken: 'a',
+          idToken: 'i',
+          refreshToken: 'r',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          zone: 'us',
+        },
+      });
+      const { fetchAmplitudeUser } = await import('../../lib/api.js');
+      vi.mocked(fetchAmplitudeUser).mockRejectedValue(new Error('network'));
+      const { storeToken } = await import('../ampli-settings.js');
+
+      const pending = performSignupOrAuth({
+        email: 'ada@example.com',
+        fullName: '  Ada   Lovelace  ',
+        zone: 'us',
+      });
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(storeToken).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'pending',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+        }),
+        expect.anything(),
+      );
     } finally {
       vi.useRealTimers();
     }
