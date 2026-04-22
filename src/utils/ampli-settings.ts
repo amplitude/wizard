@@ -76,6 +76,16 @@ const UserEntrySchema = z
   })
   .passthrough();
 
+const StoredEntrySchema = z
+  .object({
+    User: StoredUserSchema.optional(),
+    OAuthAccessToken: z.string().optional(),
+    OAuthIdToken: z.string().optional(),
+    OAuthRefreshToken: z.string().optional(),
+    OAuthExpiresAt: z.string().optional(),
+  })
+  .passthrough();
+
 /** Returns the first real (non-pending) stored user, or undefined if none. */
 export function getStoredUser(configPath?: string): StoredUser | undefined {
   const config = readConfig(configPath);
@@ -171,27 +181,18 @@ export function updateStoredUser(user: StoredUser, configPath?: string): void {
   const pendingKey = userKey('pending', user.zone);
   const realKey = userKey(user.id, user.zone);
 
-  if (config[pendingKey] !== undefined) {
-    const entry = config[pendingKey] as Record<string, unknown>;
-    if (pendingKey !== realKey) {
-      delete config[pendingKey];
-    }
-    config[realKey] = {
-      ...entry,
-      User: user,
-    };
-    writeConfig(config, configPath);
-    return;
-  }
+  const parsed = StoredEntrySchema.safeParse(
+    config[pendingKey] ?? config[realKey],
+  );
+  if (!parsed.success) return;
 
-  if (config[realKey] !== undefined) {
-    const entry = config[realKey] as Record<string, unknown>;
-    config[realKey] = {
-      ...entry,
-      User: user,
-    };
-    writeConfig(config, configPath);
-  }
+  const withoutPending = Object.fromEntries(
+    Object.entries(config).filter(([k]) => k !== pendingKey),
+  );
+  writeConfig(
+    { ...withoutPending, [realKey]: { ...parsed.data, User: user } },
+    configPath,
+  );
 }
 
 /** Clears all stored credentials by writing an empty config. */
@@ -213,18 +214,23 @@ export function updateStoredUserZone(
   const config = readConfig(configPath);
   const oldKey = userKey(user.id, user.zone);
   const newKey = userKey(user.id, newZone);
-  const entry = config[oldKey];
 
-  if (entry !== undefined) {
-    if (oldKey !== newKey) {
-      delete config[oldKey];
-    }
-    config[newKey] = {
-      ...(entry as object),
-      User: { ...user, zone: newZone },
-    };
+  const parsed = StoredEntrySchema.safeParse(config[oldKey]);
+  if (!parsed.success) {
+    // Nothing valid to migrate — preserve prior contract of returning the
+    // updated user (the write was a no-op in this case anyway).
+    return { ...user, zone: newZone };
   }
 
-  writeConfig(config, configPath);
+  const withoutOld = Object.fromEntries(
+    Object.entries(config).filter(([k]) => k !== oldKey),
+  );
+  writeConfig(
+    {
+      ...withoutOld,
+      [newKey]: { ...parsed.data, User: { ...user, zone: newZone } },
+    },
+    configPath,
+  );
   return { ...user, zone: newZone };
 }
