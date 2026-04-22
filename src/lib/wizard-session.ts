@@ -215,12 +215,19 @@ export interface WizardSession {
    * 'us' = US region (api.amplitude.com)
    * 'eu' = EU region (api.eu.amplitude.com)
    *
-   * INVARIANT: this field is written ONLY by intent-bearing sources —
+   * WRITE INVARIANT: this field is written ONLY by intent-bearing sources —
    * the --region CLI flag / env var, /region slash command, RegionSelect
    * screen pick, the "Switch data-center region" flow, and checkpoint
-   * restore. Any other code path that needs the effective zone MUST call
-   * `resolveZone(session, fallback)` (src/lib/zone-resolution.ts) and MUST
-   * NOT read session.region directly or assign to it as a cache.
+   * restore. Non-intent code MUST NOT assign to this field as a cache.
+   *
+   * READ GUIDANCE: code outside the TUI render tree (bin.ts entry points,
+   * credential-resolution, agent/CI paths) MUST call
+   * `resolveZone(session, fallback)` (src/lib/zone-resolution.ts) to get
+   * the effective zone, not read this field directly. TUI screens are
+   * currently allowed to read `session.region` directly because the
+   * RegionSelect screen runs first in the TUI flow and guarantees intent
+   * is set before any subsequent screen renders — a follow-up will migrate
+   * them for full invariant conformance.
    */
   region: CloudRegion | null;
 

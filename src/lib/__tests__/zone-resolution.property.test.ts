@@ -46,7 +46,7 @@ interface Scenario {
   fallback: AmplitudeZone;
 }
 
-async function applyScenario(s: Scenario) {
+async function applyScenario(s: Pick<Scenario, 'projectZone' | 'storedUser'>) {
   const { readAmpliConfig } = await import('../ampli-config.js');
   const { getStoredUser } = await import('../../utils/ampli-settings.js');
   vi.mocked(readAmpliConfig).mockReturnValue(
@@ -114,7 +114,6 @@ describe('resolveZone — property tests', () => {
           intent: optionalZoneArb,
           projectZone: optionalZoneArb,
           storedUser: storedUserArb,
-          fallback: zoneArb,
         }),
         async (scenario) => {
           await applyScenario(scenario);

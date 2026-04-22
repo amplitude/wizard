@@ -100,7 +100,9 @@ export async function resolveCredentials(
   // resolved effective zone.
   const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
 
-  // Try to resolve credentials from a stored OAuth token
+  // Try to resolve credentials from a stored OAuth token.
+  // `zone` is always truthy (resolveZone is total); the guard is retained
+  // to avoid reindenting ~340 lines of body, not as a meaningful check.
   if (zone) {
     const storedToken = realUser
       ? getStoredToken(realUser.id, realUser.zone)
