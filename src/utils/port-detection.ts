@@ -10,6 +10,7 @@
  * send them to a URL that has nothing to do with the wizard run.
  */
 import { exec } from 'child_process';
+import * as fs from 'fs';
 import * as path from 'path';
 
 const LSOF_TIMEOUT_MS = 500;
@@ -68,13 +69,27 @@ export function getProcessCwd(pid: number): Promise<string | null> {
   });
 }
 
-/** True if `child` equals `parent` or sits beneath it on disk. */
+/**
+ * True if `child` equals `parent` or sits beneath it on disk. Both sides are
+ * canonicalized via `fs.realpathSync` before comparison so symlinked install
+ * dirs (common with macOS Conductor worktrees, iCloud Drive, Volumes) match
+ * the canonical cwd that lsof reports for the listener.
+ */
 export function isSameOrDescendant(child: string, parent: string): boolean {
-  const c = path.resolve(child);
-  const p = path.resolve(parent);
+  const c = canonical(child);
+  const p = canonical(parent);
   if (c === p) return true;
   const withSep = p.endsWith(path.sep) ? p : p + path.sep;
   return c.startsWith(withSep);
+}
+
+/** Resolve symlinks if the path exists; otherwise fall back to path.resolve. */
+function canonical(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
 }
 
 function runLsof(command: string): Promise<string | null> {

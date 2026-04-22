@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import * as path from 'path';
 
 vi.mock('child_process', () => ({
   exec: vi.fn(),
@@ -101,6 +102,25 @@ describe('isSameOrDescendant', () => {
 
   it('rejects an ancestor', () => {
     expect(isSameOrDescendant('/a', '/a/b')).toBe(false);
+  });
+
+  it('matches through symlinks by canonicalizing both sides', async () => {
+    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import('fs');
+    const os = await import('os');
+    const real = mkdtempSync(path.join(os.tmpdir(), 'port-real-'));
+    const sub = path.join(real, 'app');
+    mkdirSync(sub);
+    const link = path.join(os.tmpdir(), `port-link-${Date.now()}`);
+    try {
+      symlinkSync(real, link);
+      // child via symlink, parent via real path → should still match
+      expect(isSameOrDescendant(path.join(link, 'app'), real)).toBe(true);
+      // both via symlink
+      expect(isSameOrDescendant(path.join(link, 'app'), link)).toBe(true);
+    } finally {
+      rmSync(link, { force: true });
+      rmSync(real, { recursive: true, force: true });
+    }
   });
 });
 
