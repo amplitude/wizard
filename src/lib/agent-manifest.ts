@@ -297,11 +297,6 @@ export function getAgentManifest(): AgentManifest {
         describe: 'Print this machine-readable CLI manifest',
         outputs: 'json',
       },
-      {
-        command: 'completion',
-        describe: 'Print shell completion script for bash/zsh',
-        outputs: 'human',
-      },
     ],
     ndjsonSchemaVersion: 1,
   };

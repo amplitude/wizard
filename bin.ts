@@ -78,10 +78,10 @@ if (!satisfies(process.version, NODE_VERSION_RANGE)) {
 import { isNonInteractiveEnvironment } from './src/utils/environment';
 import { getUI, setUI } from './src/ui';
 import { LoggingUI } from './src/ui/logging-ui';
-import {
-  ZSH_COMPLETION_SCRIPT,
-  BASH_COMPLETION_SCRIPT,
-} from './src/utils/shell-completions';
+import { cleanupShellCompletionLine } from './src/utils/cleanup-shell-rc';
+// Remove the broken `eval "$(amplitude-wizard completion)"` line that earlier
+// versions silently appended to the user's shell rc.
+cleanupShellCompletionLine();
 import { analytics } from './src/utils/analytics';
 import { ExitCode } from './src/lib/exit-codes';
 import { detectNestedAgent } from './src/lib/detect-nested-agent';
@@ -787,12 +787,6 @@ void yargs(hideBin(process.argv))
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
-          // Silently install shell completions on first run.
-          const { installCompletions } = await import(
-            './src/utils/shell-completions.js'
-          );
-          installCompletions();
-
           try {
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
             const tui = startTUI(WIZARD_VERSION);
@@ -2040,18 +2034,6 @@ void yargs(hideBin(process.argv))
       .demandCommand(1, 'You must specify a subcommand (add, remove, or serve)')
       .help();
   })
-  .command(
-    'completion',
-    'Print shell completion script for bash/zsh',
-    () => {},
-    () => {
-      const script = (process.env.SHELL ?? '').endsWith('zsh')
-        ? ZSH_COMPLETION_SCRIPT
-        : BASH_COMPLETION_SCRIPT;
-      process.stdout.write(script + '\n');
-      process.exit(0);
-    },
-  )
   .command(
     'manifest',
     'Print a machine-readable description of the CLI (for AI agents)',
