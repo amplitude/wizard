@@ -86,6 +86,7 @@ const AUTH_RESULT = {
   idToken: 'id-token',
   accessToken: 'access-token',
   refreshToken: 'refresh-token',
+  expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
   zone: 'us' as const,
 };
 

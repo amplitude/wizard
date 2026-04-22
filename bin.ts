@@ -500,6 +500,28 @@ const runDirectSignupIfRequested = async (
         `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
       );
     } else {
+      // Persist when we have a complete record (real user + real tokens).
+      // If tokens.userInfo is null, performSignupOrAuth already wrote a
+      // pending-sentinel crash-recovery entry in its failure branch, so
+      // downstream credential resolution has something to find either way.
+      if (tokens.userInfo) {
+        const { storeToken } = await import('./src/utils/ampli-settings.js');
+        storeToken(
+          {
+            id: tokens.userInfo.id,
+            firstName: tokens.userInfo.firstName,
+            lastName: tokens.userInfo.lastName,
+            email: tokens.userInfo.email,
+            zone: tokens.zone,
+          },
+          {
+            accessToken: tokens.accessToken,
+            idToken: tokens.idToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: tokens.expiresAt,
+          },
+        );
+      }
       getUI().log.info('Direct signup succeeded; using newly created account.');
       if (onSuccess) {
         await onSuccess();
@@ -1196,9 +1218,9 @@ void yargs(hideBin(process.argv))
                 // (TUI has a browser; this fallback is valid).
                 //
                 // On signup success, the wrapper already fetched the real user
-                // profile (with provisioning retry) and persisted tokens to
-                // ~/.ampli.json — so we carry its userInfo through and skip the
-                // redundant fetch + storeToken below.
+                // profile (with provisioning retry) — we carry its userInfo
+                // through and skip the redundant fetch in the else-branch.
+                // Persistence still happens below via storeToken.
                 let auth: Awaited<
                   ReturnType<typeof performAmplitudeAuth>
                 > | null = null;
@@ -1245,8 +1267,8 @@ void yargs(hideBin(process.argv))
 
                 let userInfo;
                 if (signupUserInfo) {
-                  // Wrapper already fetched userInfo and stored tokens — no
-                  // redundant network call, no browser fallback needed.
+                  // Wrapper already fetched userInfo — no redundant network
+                  // call, no browser fallback needed. Persistence happens below.
                   userInfo = signupUserInfo;
                 } else {
                   try {
@@ -1266,25 +1288,25 @@ void yargs(hideBin(process.argv))
                       cloudRegion,
                     );
                   }
-                  // Persist to ~/.ampli.json (signup path already did this)
-                  storeToken(
-                    {
-                      id: userInfo.id,
-                      firstName: userInfo.firstName,
-                      lastName: userInfo.lastName,
-                      email: userInfo.email,
-                      zone: auth.zone,
-                    },
-                    {
-                      accessToken: auth.accessToken,
-                      idToken: auth.idToken,
-                      refreshToken: auth.refreshToken,
-                      expiresAt: new Date(
-                        Date.now() + 3600 * 1000,
-                      ).toISOString(),
-                    },
-                  );
                 }
+
+                // Persist once we have both a real user and real tokens
+                // (including expiresAt from the OAuth token response).
+                storeToken(
+                  {
+                    id: userInfo.id,
+                    firstName: userInfo.firstName,
+                    lastName: userInfo.lastName,
+                    email: userInfo.email,
+                    zone: auth.zone,
+                  },
+                  {
+                    accessToken: auth.accessToken,
+                    idToken: auth.idToken,
+                    refreshToken: auth.refreshToken,
+                    expiresAt: auth.expiresAt,
+                  },
+                );
 
                 // Populate user email for /whoami display
                 session.userEmail = userInfo.email;
@@ -1607,7 +1629,7 @@ void yargs(hideBin(process.argv))
               accessToken: auth.accessToken,
               idToken: auth.idToken,
               refreshToken: auth.refreshToken,
-              expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+              expiresAt: auth.expiresAt,
             },
           );
           console.log(

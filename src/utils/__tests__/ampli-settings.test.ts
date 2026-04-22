@@ -293,6 +293,157 @@ describe('storeToken', () => {
     storeToken(user, token, '/custom/path.json');
     expect(mockWriteFileSync.mock.calls[0][0]).toBe('/custom/path.json');
   });
+
+  it('deletes a sibling pending entry when writing a real user for the same zone', () => {
+    setupConfig({
+      'User-pending': {
+        User: {
+          id: 'pending',
+          firstName: '',
+          lastName: '',
+          email: 'grace@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'pending-acc',
+        OAuthIdToken: 'pending-idt',
+        OAuthRefreshToken: 'pending-ref',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+
+    storeToken(user, token);
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-pending']).toBeUndefined();
+    expect(written['User-42']).toBeDefined();
+  });
+
+  it('only cleans up pending entries for the same zone', () => {
+    setupConfig({
+      'User-pending': {
+        User: {
+          id: 'pending',
+          firstName: '',
+          lastName: '',
+          email: 'us-user@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'us-pending',
+        OAuthIdToken: 'i',
+        OAuthRefreshToken: 'r',
+        OAuthExpiresAt: FUTURE,
+      },
+      'User[eu]-pending': {
+        User: {
+          id: 'pending',
+          firstName: '',
+          lastName: '',
+          email: 'eu-user@example.com',
+          zone: 'eu',
+        },
+        OAuthAccessToken: 'eu-pending',
+        OAuthIdToken: 'i',
+        OAuthRefreshToken: 'r',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+
+    // Writing a real US user should only drop the US pending.
+    storeToken(user, token);
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-pending']).toBeUndefined();
+    expect(written['User[eu]-pending']).toBeDefined();
+    expect(written['User[eu]-pending'].OAuthAccessToken).toBe('eu-pending');
+  });
+
+  it('does not clean up pending when writing a pending user', () => {
+    setupConfig({
+      'User-pending': {
+        User: {
+          id: 'pending',
+          firstName: '',
+          lastName: '',
+          email: 'old@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'old-acc',
+        OAuthIdToken: 'i',
+        OAuthRefreshToken: 'r',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+
+    const pendingUser: StoredUser = {
+      id: 'pending',
+      firstName: 'New',
+      lastName: 'User',
+      email: 'new@example.com',
+      zone: 'us',
+    };
+    storeToken(pendingUser, { ...token, accessToken: 'new-acc' });
+
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-pending']).toBeDefined();
+    expect(written['User-pending'].OAuthAccessToken).toBe('new-acc');
+  });
+});
+
+// ── getStoredToken — malformed expiresAt fallback ─────────────────────────
+
+describe('getStoredToken — malformed OAuthExpiresAt', () => {
+  const userId = '42';
+
+  beforeEach(() => {
+    setupConfig({});
+  });
+
+  it('falls back to a 1h-from-now default when OAuthExpiresAt is not ISO-8601', () => {
+    setupConfig({
+      'User-42': {
+        User: {
+          id: userId,
+          firstName: 'Grace',
+          lastName: 'Hopper',
+          email: 'grace@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'acc',
+        OAuthIdToken: 'idt',
+        OAuthRefreshToken: 'ref',
+        OAuthExpiresAt: 'not-a-valid-date',
+      },
+    });
+
+    const now = Date.now();
+    const retrieved = getStoredToken(userId);
+    expect(retrieved).toBeDefined();
+    const parsed = new Date(retrieved!.expiresAt).getTime();
+    // Fallback is approximately now + 3600s; allow generous slack for test timing.
+    expect(parsed).toBeGreaterThan(now);
+    expect(parsed).toBeLessThan(now + 7200 * 1000);
+  });
+
+  it('preserves a valid ISO-8601 OAuthExpiresAt unchanged', () => {
+    setupConfig({
+      'User-42': {
+        User: {
+          id: userId,
+          firstName: 'Grace',
+          lastName: 'Hopper',
+          email: 'grace@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'acc',
+        OAuthIdToken: 'idt',
+        OAuthRefreshToken: 'ref',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+
+    const retrieved = getStoredToken(userId);
+    expect(retrieved?.expiresAt).toBe(FUTURE);
+  });
 });
 
 describe('store then get token', () => {

@@ -120,8 +120,8 @@ export interface SignupOrAuthInput {
  * `userInfo` is:
  * - populated on the direct-signup success path when the internal fetch
  *   (with provisioning retry) succeeded
- * - `null` on the pending-sentinel path (internal fetch failed) — the
- *   caller is responsible for fetching userInfo itself in that case
+ * - `null` when the fetch failed — the caller is responsible for either
+ *   fetching userInfo itself or treating it as a failure
  */
 export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
   userInfo: AmplitudeUserInfo | null;
@@ -137,12 +137,16 @@ export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
  * - the endpoint returns `requires_redirect` / `needs_information` / `error`
  * - the direct-signup network call itself errors
  *
- * On success, also fetches the real user profile and persists the
- * `StoredUser` + tokens to `~/.ampli.json` so downstream
- * `resolveCredentials()` can populate `session.credentials` via the
- * standard path. Falls back to the `id:'pending'` sentinel if the
- * user fetch fails. The user fetch retries briefly on the "no env with
- * API key yet" case to absorb post-signup provisioning lag.
+ * On success (userInfo fetch OK), returns tokens + userInfo; persistence
+ * is the caller's responsibility. The caller writes `storeToken(user, tokens)`
+ * once it has the userInfo. The internal fetch retries briefly on the "no
+ * env with API key yet" case to absorb post-signup provisioning lag.
+ *
+ * On user-fetch failure, writes tokens under a `{id:'pending'}` sentinel
+ * before returning so the tokens are preserved for next-run recovery. This
+ * matters because `--signup` is the whole point of avoiding a browser
+ * redirect — losing tokens here would force the user back to a browser OAuth
+ * (TUI) or dead-end the run (CI, where account-already-exists blocks re-signup).
  *
  * This function does NOT fall back to `performAmplitudeAuth()`. Callers
  * that want OAuth fallback (e.g. the TUI path) must call it explicitly
@@ -199,59 +203,54 @@ export async function performSignupOrAuth(
     expiresAt: result.tokens.expiresAt,
   };
 
-  // Fetch the real user profile so resolveCredentials() downstream can find
-  // a non-pending stored user with a valid zone. Fall back to the pending
-  // sentinel on fetch failure — the next wizard run will patch the entry.
-  // The fetch retries briefly on the "no env with API key yet" case to
-  // absorb post-signup provisioning lag.
+  // Fetch the real user profile so the caller can persist a complete record.
+  // The fetch retries briefly on the "no env with API key yet" case to absorb
+  // post-signup provisioning lag.
   let userInfo: AmplitudeUserInfo | null = null;
-  let user: StoredUser;
   const fetchResult = await fetchUserWithProvisioningRetry(
     tokens.idToken,
     input.zone,
   );
   if (fetchResult.ok) {
     userInfo = fetchResult.userInfo;
-    user = {
-      id: userInfo.id,
-      firstName: userInfo.firstName,
-      lastName: userInfo.lastName,
-      email: userInfo.email,
-      zone: input.zone,
-    };
     trackSignupAttempt({
       status: 'success',
       zone: input.zone,
       'has env with api key': fetchResult.hasEnvWithApiKey,
       'user fetch retry count': fetchResult.retryCount,
     });
+    // Success: caller persists. We don't write here, which keeps the bundled
+    // "caller owns the write" shape in the happy path.
   } else {
-    log.warn(
-      'fetchAmplitudeUser failed after direct signup; falling back to pending sentinel',
-      {
-        zone: input.zone,
-      },
-    );
+    // Failure: preserve tokens for next-run recovery under a pending sentinel.
+    // Without this, `--signup` users who hit a userInfo race would be pushed
+    // back to a browser redirect (TUI) or dead-end (CI, where re-signup fails
+    // because the account already exists) — which defeats the whole point of
+    // the --signup flow.
+    log.warn('fetchAmplitudeUser failed after direct signup', {
+      zone: input.zone,
+    });
     const parts = input.fullName.trim().split(/\s+/);
-    user = {
+    const pendingUser: StoredUser = {
       id: 'pending',
       firstName: parts[0] ?? '',
       lastName: parts.slice(1).join(' '),
       email: input.email,
       zone: input.zone,
     };
+    storeToken(pendingUser, tokens);
     trackSignupAttempt({
       status: 'user_fetch_failed',
       zone: input.zone,
       'user fetch retry count': fetchResult.retryCount,
     });
   }
-  storeToken(user, tokens);
 
   return {
     idToken: tokens.idToken,
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,
+    expiresAt: tokens.expiresAt,
     zone: result.tokens.zone,
     userInfo,
   };
