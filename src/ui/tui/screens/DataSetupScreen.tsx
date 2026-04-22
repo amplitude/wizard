@@ -18,7 +18,6 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
 import { detectAmplitudeInProject } from '../../../lib/detect-amplitude.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
 import { logToFile } from '../../../utils/debug.js';
 
 interface DataSetupScreenProps {
@@ -44,7 +43,7 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       return;
     }
 
-    const zone = (region ?? 'us') as AmplitudeZone;
+    const zone = region ?? 'us';
     logToFile(
       `[DataSetup] checking activation for appId=${appId} zone=${zone}`,
     );

@@ -12,7 +12,6 @@ import { useState, useEffect } from 'react';
 import type { WizardStore } from '../store.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
 
 interface LoginScreenProps {
   store: WizardStore;
@@ -42,7 +41,7 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         ]);
 
         const user = getStoredUser();
-        const zone = (store.session.region ?? 'us') as AmplitudeZone;
+        const zone = store.session.region ?? 'us';
         const stored = getStoredToken(user?.id, zone);
 
         if (!stored) {

@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 
-import type { Integration } from './constants';
+import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 
 /**
@@ -229,7 +229,7 @@ export interface WizardSession {
    * is set before any subsequent screen renders — a follow-up will migrate
    * them for full invariant conformance.
    */
-  region: CloudRegion | null;
+  region: AmplitudeZone | null;
 
   /**
    * True when the /region slash command forces RegionSelect to re-appear.

@@ -18,7 +18,7 @@ export function resolveZone(
 ): AmplitudeZone {
   // Tier 1: explicit user intent for this run.
   if (session.region != null) {
-    return session.region as AmplitudeZone;
+    return session.region;
   }
 
   // Tier 2: project config (ampli.json Zone).
@@ -33,9 +33,7 @@ export function resolveZone(
     return storedUser.zone;
   }
 
-  // Tier 4: pending-user zone (#165 recovery path — a prior signup left a
-  // pending sentinel because fetchAmplitudeUser failed, but the zone it was
-  // going to is still usable).
+  // Tier 4: pending stored user's zone.
   if (storedUser && storedUser.id === 'pending' && storedUser.zone != null) {
     return storedUser.zone;
   }
