@@ -17,7 +17,11 @@ import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
-import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
+import {
+  ConfirmationInput,
+  PickerMenu,
+  TerminalLink,
+} from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import type {
@@ -29,7 +33,6 @@ import { launchAppForClient } from '../services/post-install-helpers.js';
 import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
-import { makeLink } from '../utils/terminal-rendering.js';
 
 type ClientStatus = 'pending' | 'working' | 'done' | 'failed';
 
@@ -668,19 +671,17 @@ export const McpScreen = ({
                               </Text>
                               <Text color={Colors.muted}>
                                 Plugin docs:{' '}
-                                {makeLink(
-                                  OUTBOUND_URLS.claudePluginDocs,
-                                  OUTBOUND_URLS.claudePluginDocs,
-                                )}
+                                <TerminalLink url={OUTBOUND_URLS.claudePluginDocs}>
+                                  {OUTBOUND_URLS.claudePluginDocs}
+                                </TerminalLink>
                               </Text>
                             </>
                           )}
                         <Text color={Colors.muted}>
                           MCP docs:{' '}
-                          {makeLink(
-                            OUTBOUND_URLS.mcpDocs,
-                            OUTBOUND_URLS.mcpDocs,
-                          )}
+                          <TerminalLink url={OUTBOUND_URLS.mcpDocs}>
+                            {OUTBOUND_URLS.mcpDocs}
+                          </TerminalLink>
                         </Text>
                         {resultClients.some(
                           (n) => n !== CLAUDE_CODE_CLIENT_NAME,
