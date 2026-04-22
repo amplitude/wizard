@@ -1231,7 +1231,6 @@ Default blocking config:
 | `package-manager.ts` | `detectAllPackageManagers()` |
 | `semver.ts` | `fulfillsVersionRange()` |
 | `string.ts` | Case conversion, formatting |
-| `shell-completions.ts` | zsh/bash completion generation and silent installation |
 | `anthropic-status.ts` | `checkAnthropicStatus()` |
 | `custom-headers.ts` | `createCustomHeaders()` for telemetry |
 | `track-wizard-feedback.ts` | Product feedback submission |
