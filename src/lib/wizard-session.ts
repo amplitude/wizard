@@ -10,6 +10,7 @@
  * Business logic reads from the session. Never calls a prompt.
  */
 
+import * as path from 'path';
 import { z } from 'zod';
 
 import type { Integration } from './constants';
@@ -29,7 +30,10 @@ export const CliArgsSchema = z.object({
       const n = Number(v);
       return Number.isInteger(n) && n > 0 ? n : undefined;
     }),
-  installDir: z.string().default(process.cwd()),
+  installDir: z
+    .string()
+    .default(() => process.cwd())
+    .transform((p) => path.resolve(p)),
   debug: z.boolean().default(false),
   verbose: z.boolean().default(false),
   ci: z.boolean().default(false),
@@ -432,7 +436,7 @@ export function buildSession(args: {
     debug: validated.debug ?? false,
     verbose: validated.verbose ?? false,
     forceInstall: validated.forceInstall ?? false,
-    installDir: validated.installDir ?? process.cwd(),
+    installDir: path.resolve(validated.installDir ?? process.cwd()),
     ci: validated.ci ?? false,
     agent: false,
     signup: validated.signup ?? false,
