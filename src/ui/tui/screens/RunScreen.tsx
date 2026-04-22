@@ -139,13 +139,16 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // Single interval drives the spinner, logo animation, and elapsed timer.
   // All three re-render in the same batch — no extra render cycles.
   const [tick, setTick] = useState(0);
-  const startRef = useRef(Date.now());
   useEffect(() => {
     const id = setInterval(() => setTick((t) => t + 1), SPINNER_INTERVAL);
     return () => clearInterval(id);
   }, []);
 
-  const elapsed = Math.floor((Date.now() - startRef.current) / 1000);
+  // Start time lives in the session so the elapsed counter keeps climbing
+  // when the user tabs away and back (TabContainer unmounts inactive tabs).
+  // The ?? fallback is defensive — setRunPhase(Running) always stamps this.
+  const startedAt = store.session.runStartedAt ?? Date.now();
+  const elapsed = Math.floor((Date.now() - startedAt) / 1000);
   const spinnerFrame = tick % SPINNER_FRAMES.length;
 
   // Handle LLM toggle key

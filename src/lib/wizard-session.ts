@@ -297,6 +297,12 @@ export interface WizardSession {
 
   // Lifecycle
   runPhase: RunPhase;
+  /**
+   * Wall-clock timestamp (ms) when runPhase first transitioned to Running.
+   * Null while Idle / before the run starts. Used by the Run screen to
+   * compute elapsed time that persists across tab re-mounts.
+   */
+  runStartedAt: number | null;
   loginUrl: string | null;
 
   // Feature discovery
@@ -451,6 +457,7 @@ export function buildSession(args: {
     regionForced: false,
 
     runPhase: RunPhase.Idle,
+    runStartedAt: null,
     discoveredFeatures: [],
     llmOptIn: false,
     mcpComplete: false,
