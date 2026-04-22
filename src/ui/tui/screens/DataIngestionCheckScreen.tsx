@@ -11,7 +11,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
@@ -28,24 +28,86 @@ import type { AmplitudeZone } from '../../../lib/constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
+import { detectBoundPort } from '../../../utils/port-detection.js';
+import { osc8Link } from '../utils/osc8.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
 const CELEBRATION_DELAY_MS = 3_000;
 
-/** Framework-specific hints for what the user should do to generate events. */
-const FRAMEWORK_HINTS: Partial<Record<Integration, string>> = {
-  [Integration.nextjs]: 'Visit localhost:3000 and click around',
-  [Integration.vue]: 'Visit localhost:5173 and interact with your app',
-  [Integration.reactRouter]: 'Visit localhost:3000 and navigate between pages',
-  [Integration.django]: 'Visit localhost:8000 and browse a few pages',
-  [Integration.flask]: 'Visit localhost:5000 and trigger some requests',
-  [Integration.fastapi]: 'Visit localhost:8000/docs and try some endpoints',
-  [Integration.reactNative]:
-    'Open your app on a device or emulator and tap around',
-  [Integration.swift]: 'Build and run your app, then interact with it',
-  [Integration.android]: 'Build and run your app, then interact with it',
-  [Integration.flutter]: 'Run your app and navigate through a few screens',
+/**
+ * Framework-specific hints. For web frameworks we probe `ports` in order with
+ * `lsof` and build the message around the one that's actually bound — so the
+ * user sees the URL of their running dev server, not a default we guessed.
+ * Native frameworks have no port; `idle` is used verbatim.
+ */
+interface WebFrameworkHint {
+  kind: 'web';
+  ports: readonly number[];
+  pathSuffix?: string;
+  running: (url: string) => ReactNode;
+  idle: string;
+}
+interface NativeFrameworkHint {
+  kind: 'native';
+  idle: string;
+}
+type FrameworkHint = WebFrameworkHint | NativeFrameworkHint;
+
+const FRAMEWORK_HINTS: Partial<Record<Integration, FrameworkHint>> = {
+  [Integration.nextjs]: {
+    kind: 'web',
+    ports: [3000, 3001, 3002, 8080],
+    running: (url) => <>Visit {url} and click around</>,
+    idle: 'Start your dev server, then visit it and click around',
+  },
+  [Integration.vue]: {
+    kind: 'web',
+    ports: [5173, 5174, 4173, 3000, 8080],
+    running: (url) => <>Visit {url} and interact with your app</>,
+    idle: 'Start your dev server, then visit it and interact with your app',
+  },
+  [Integration.reactRouter]: {
+    kind: 'web',
+    ports: [3000, 3001, 5173, 8080],
+    running: (url) => <>Visit {url} and navigate between pages</>,
+    idle: 'Start your dev server, then visit it and navigate between pages',
+  },
+  [Integration.django]: {
+    kind: 'web',
+    ports: [8000, 8080, 5000],
+    running: (url) => <>Visit {url} and browse a few pages</>,
+    idle: 'Start your dev server, then visit it and browse a few pages',
+  },
+  [Integration.flask]: {
+    kind: 'web',
+    ports: [5000, 5001, 8000, 8080],
+    running: (url) => <>Visit {url} and trigger some requests</>,
+    idle: 'Start your dev server, then visit it and trigger some requests',
+  },
+  [Integration.fastapi]: {
+    kind: 'web',
+    ports: [8000, 8080, 5000],
+    pathSuffix: '/docs',
+    running: (url) => <>Visit {url} and try some endpoints</>,
+    idle: 'Start your dev server, then visit /docs and try some endpoints',
+  },
+  [Integration.reactNative]: {
+    kind: 'native',
+    idle: 'Open your app on a device or emulator and tap around',
+  },
+  [Integration.swift]: {
+    kind: 'native',
+    idle: 'Build and run your app, then interact with it',
+  },
+  [Integration.android]: {
+    kind: 'native',
+    idle: 'Build and run your app, then interact with it',
+  },
+  [Integration.flutter]: {
+    kind: 'native',
+    idle: 'Run your app and navigate through a few screens',
+  },
 };
 
 interface DataIngestionCheckScreenProps {
@@ -74,6 +136,7 @@ export const DataIngestionCheckScreen = ({
   const [secondsSince, setSecondsSince] = useState(0);
   const [pollingStartTime] = useState(() => Date.now());
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [detectedPort, setDetectedPort] = useState<number | null>(null);
 
   /** Confirm ingestion with a celebration, then wait for user to press Enter. */
   function confirmWithCelebration(events?: string[]) {
@@ -358,6 +421,26 @@ export const DataIngestionCheckScreen = ({
     return () => clearInterval(id);
   }, [lastChecked, pollingStartTime]);
 
+  // Detect a bound dev-server port for web frameworks, then poll every 10s
+  // so the hint switches to the live URL as soon as the user starts their app.
+  useEffect(() => {
+    const hint = session.integration
+      ? FRAMEWORK_HINTS[session.integration]
+      : undefined;
+    if (!hint || hint.kind !== 'web') return;
+    let cancelled = false;
+    const probe = async () => {
+      const port = await detectBoundPort(hint.ports);
+      if (!cancelled) setDetectedPort(port);
+    };
+    void probe();
+    const id = setInterval(() => void probe(), 10_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [session.integration]);
+
   useScreenInput((_char, key) => {
     // During celebration, wait for Enter to advance
     if (celebrating) {
@@ -382,10 +465,20 @@ export const DataIngestionCheckScreen = ({
     }
   });
 
-  // Derive framework-specific hint
-  const frameworkHint = session.integration
+  // Derive framework-specific hint. For web frameworks, if `lsof` found a
+  // bound port we render a clickable URL; otherwise show the idle message.
+  const hintConfig = session.integration
     ? FRAMEWORK_HINTS[session.integration]
     : undefined;
+  const frameworkHint: ReactNode = (() => {
+    if (!hintConfig) return null;
+    if (hintConfig.kind === 'native') return hintConfig.idle;
+    if (detectedPort === null) return hintConfig.idle;
+    const url = `http://localhost:${detectedPort}${
+      hintConfig.pathSuffix ?? ''
+    }`;
+    return hintConfig.running(osc8Link(url));
+  })();
 
   const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
   const overflow = (eventTypes?.length ?? 0) - MAX_EVENTS_SHOWN;
