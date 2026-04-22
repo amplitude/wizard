@@ -32,7 +32,10 @@ CRITICAL — confirm_event_plan format:
   description: Put ALL details here — when it fires, properties, file paths.
   WRONG name: "Fires on the product detail page after product data loads"
   RIGHT name: "product viewed"
-  Names longer than 50 characters will be automatically truncated.`,
+  Names longer than 50 characters will be automatically truncated.
+
+CRITICAL — do NOT manually write .amplitude-events.json.
+  The confirm_event_plan tool persists the approved plan to that file for you, in the canonical [{name, description}] shape the wizard UI expects. Writing the file yourself with a different shape (event_name, eventName, file_path, etc.) will cause the Event Plan viewer to render blank bullets.`,
 
   `Autocapture — the Amplitude feature that automatically tracks element clicks, form interactions, page/screen views, sessions, app lifecycle events, and file downloads — is commonly enabled by the wizard for web SDKs (@amplitude/unified, @amplitude/analytics-browser) but is NOT available or not on by default for every SDK (e.g. Swift requires an opt-in plugin, backend SDKs don't track element interactions at all, and an existing project may have it disabled). Before proposing events in confirm_event_plan, check the SDK init code you just wrote (or that already exists) to see whether autocapture is on and what it covers for this platform. If it IS on, do NOT propose custom events that merely duplicate its coverage — names like "[X] Clicked", "[X] Tapped", "[X] Pressed", "Form Submitted", "Form Started", "Input Changed", "Page Viewed", or "Screen Viewed" are redundant and must be excluded. Either way, prefer events for business outcomes, state changes, async success/failure, and multi-step flow milestones over raw interaction events (see skills/instrumentation/discover-event-surfaces/references/best-practices.md section R4). If autocapture is on and the project is a landing page or starter template whose only interactions are plain clicks and links, lean toward a minimal plan and let autocapture do the work — confirm_event_plan still requires at least one event, so pick the single most meaningful state change.`,
 
