@@ -465,6 +465,44 @@ const SAFE_SCRIPTS = [
  */
 const DANGEROUS_OPERATORS = /[;`$()]/;
 
+// The agent doesn't always use the same field casing in .amplitude-events.json
+// — observed in the wild: name, event, eventName, event_name. Accept every
+// common variant so the event plan renders instead of falling back to an
+// empty name.
+const eventPlanSchema = z.array(
+  z.looseObject({
+    name: z.string().optional(),
+    event: z.string().optional(),
+    eventName: z.string().optional(),
+    event_name: z.string().optional(),
+    description: z.string().optional(),
+    eventDescriptionAndReasoning: z.string().optional(),
+  }),
+);
+
+/**
+ * Parse the agent-written `.amplitude-events.json` into the shape the
+ * EventPlanViewer expects. Returns null if the input isn't valid JSON or
+ * doesn't match the schema, so callers can distinguish "not ready yet" from
+ * a structural problem. Exported for testing.
+ */
+export function parseEventPlanContent(
+  content: string,
+): Array<{ name: string; description: string }> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    return null;
+  }
+  const result = eventPlanSchema.safeParse(parsed);
+  if (!result.success) return null;
+  return result.data.map((e) => ({
+    name: e.name ?? e.event ?? e.eventName ?? e.event_name ?? '',
+    description: e.description ?? e.eventDescriptionAndReasoning ?? '',
+  }));
+}
+
 /**
  * Check if command is a Amplitude skill installation from MCP.
  * We control the MCP server, so we only need to verify:
@@ -1061,30 +1099,13 @@ export async function runAgent(
       agentConfig.workingDirectory,
       '.amplitude-events.json',
     );
-    const eventPlanSchema = z.array(
-      z.looseObject({
-        name: z.string().optional(),
-        event: z.string().optional(),
-        eventName: z.string().optional(),
-        description: z.string().optional(),
-        eventDescriptionAndReasoning: z.string().optional(),
-      }),
-    );
     const readEventPlan = () => {
       try {
         const content = fs.readFileSync(eventPlanPath, 'utf-8');
-        const result = eventPlanSchema.safeParse(JSON.parse(content));
-        if (result.success) {
-          getUI().setEventPlan(
-            result.data.map((e) => ({
-              name: e.name ?? e.event ?? e.eventName ?? '',
-              description:
-                e.description ?? e.eventDescriptionAndReasoning ?? '',
-            })),
-          );
-        }
+        const events = parseEventPlanContent(content);
+        if (events) getUI().setEventPlan(events);
       } catch {
-        // File doesn't exist or isn't valid JSON yet
+        // File doesn't exist yet
       }
     };
 
