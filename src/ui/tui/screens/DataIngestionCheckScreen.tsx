@@ -455,6 +455,19 @@ export const DataIngestionCheckScreen = ({
         start flowing into Amplitude.
       </Text>
 
+      {/* 0s restart reminder — suppressed in agent/NDJSON mode where there's
+          no human dev server to restart. Phrased conservatively: we don't
+          know the user's exact command, so we don't name one. */}
+      {!session.agent && (
+        <Box marginTop={1} marginLeft={2}>
+          <Text color={Colors.secondary}>
+            {Icons.arrowRight} If your dev server or build was already running
+            when the wizard wrote env vars, restart it (using whatever command
+            you started it with) so the new values load.
+          </Text>
+        </Box>
+      )}
+
       {/* Spinner / polling indicator */}
       {!apiUnavailable && (
         <Box marginTop={1} gap={1} alignItems="center">
@@ -468,21 +481,31 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* Progressive coaching tips after extended wait */}
+      {/* Progressive coaching tips after extended wait.
+          Wording rules: hedged ("look for", "check for", "usually") rather
+          than definitive claims. We don't know the cause; we suggest where
+          to look. */}
       {!apiUnavailable && !celebrating && elapsedSeconds >= 60 && (
         <Box flexDirection="column" marginTop={1} marginLeft={2}>
           <Text color={Colors.secondary}>
-            {Icons.arrowRight} Make sure your dev server is running
+            {Icons.arrowRight} Make sure your dev server is running and
+            you&apos;ve clicked around the app
           </Text>
-          {elapsedSeconds >= 90 && (
-            <Text color={Colors.secondary}>
-              {Icons.arrowRight} Try visiting your app and clicking around
-            </Text>
-          )}
           {elapsedSeconds >= 120 && (
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Check your terminal for errors — the SDK may
-              not have initialized
+              {Icons.arrowRight} In browser devtools, check the Network tab for
+              requests to{' '}
+              {session.region === 'eu'
+                ? 'api.eu.amplitude.com'
+                : 'api2.amplitude.com'}{' '}
+              — a 4xx response or a blocked request usually means the SDK
+              isn&apos;t sending
+            </Text>
+          )}
+          {elapsedSeconds >= 180 && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Look in the browser console for errors from{' '}
+              @amplitude/* — a silent init failure blocks all events
             </Text>
           )}
         </Box>

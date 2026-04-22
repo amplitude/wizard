@@ -408,6 +408,18 @@ export async function runAgentWizard(
     });
   }
 
+  // Post-install restart reminder — the single most common failure mode is
+  // a user whose dev server was already running when we wrote env vars and
+  // who doesn't know to restart it for the new values to load. Emit this
+  // once for human-operator modes (interactive TUI + CI-with-oversight).
+  // Suppressed for --agent/NDJSON mode: agent orchestrators run against
+  // fresh processes or test apps, not a human-managed dev server.
+  if (!session.agent) {
+    getUI().pushStatus(
+      `Your Amplitude env var is set. If your dev server or build was already running, restart it (with whatever command you started it with) so the new value loads — then click around your app and we'll wait for events.`,
+    );
+  }
+
   // MCP installation is handled by McpScreen — no prompt here
 
   // Data ingestion check — agent mode only (not CI).
