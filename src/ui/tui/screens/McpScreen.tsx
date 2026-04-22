@@ -29,6 +29,7 @@ import { launchAppForClient } from '../services/post-install-helpers.js';
 import type { ClaudeCodeInstallMode } from '../../../steps/add-mcp-server-to-clients/index.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
+import { makeLink } from '../utils/terminal-rendering.js';
 
 type ClientStatus = 'pending' | 'working' | 'done' | 'failed';
 
@@ -666,12 +667,20 @@ export const McpScreen = ({
                                 first to pick up the new slash commands.
                               </Text>
                               <Text color={Colors.muted}>
-                                Plugin docs: {OUTBOUND_URLS.claudePluginDocs}
+                                Plugin docs:{' '}
+                                {makeLink(
+                                  OUTBOUND_URLS.claudePluginDocs,
+                                  OUTBOUND_URLS.claudePluginDocs,
+                                )}
                               </Text>
                             </>
                           )}
                         <Text color={Colors.muted}>
-                          MCP docs: {OUTBOUND_URLS.mcpDocs}
+                          MCP docs:{' '}
+                          {makeLink(
+                            OUTBOUND_URLS.mcpDocs,
+                            OUTBOUND_URLS.mcpDocs,
+                          )}
                         </Text>
                         {resultClients.some(
                           (n) => n !== CLAUDE_CODE_CLIENT_NAME,
