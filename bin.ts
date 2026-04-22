@@ -1007,7 +1007,7 @@ void yargs(hideBin(process.argv))
                             session.selectedWorkspaceName ?? undefined,
                           app_id: session.selectedAppId,
                           env_name: session.selectedEnvName,
-                          region: session.region,
+                          region: zone,
                           integration: session.integration,
                         });
                       }
