@@ -16,6 +16,7 @@ import {
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
+  type CloudRegion,
   buildSession,
 } from '../../lib/wizard-session.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
@@ -534,14 +535,15 @@ export class WizardStore {
   setOAuthComplete(data: {
     accessToken: string;
     idToken: string;
-    cloudRegion: WizardSession['pendingAuthCloudRegion'];
+    cloudRegion: CloudRegion | null;
     orgs: WizardSession['pendingOrgs'];
   }): void {
     this.$session.setKey('pendingAuthAccessToken', data.accessToken);
     this.$session.setKey('pendingAuthIdToken', data.idToken);
-    this.$session.setKey('pendingAuthCloudRegion', data.cloudRegion);
     this.$session.setKey('pendingOrgs', data.orgs);
     // Auto-set region — skips RegionSelect for users whose zone is detected.
+    // OAuth-derived zone is intent-equivalent per the write invariant on the
+    // region field (see src/lib/wizard-session.ts).
     if (data.cloudRegion) {
       this.$session.setKey('region', data.cloudRegion);
     }

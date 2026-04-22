@@ -264,9 +264,6 @@ export interface WizardSession {
   /** OAuth access_token held during SUSI — used for Hydra-validated proxy auth. */
   pendingAuthAccessToken: string | null;
 
-  /** Cloud region detected from the OAuth token. Drives RegionSelect auto-skip. */
-  pendingAuthCloudRegion: CloudRegion | null;
-
   /** Org selected during SUSI (written to ampli.json). */
   selectedOrgId: string | null;
   selectedOrgName: string | null;
@@ -488,7 +485,6 @@ export function buildSession(args: {
     pendingOrgs: null,
     pendingAuthIdToken: null,
     pendingAuthAccessToken: null,
-    pendingAuthCloudRegion: null,
     selectedOrgId: null,
     selectedOrgName: null,
     selectedWorkspaceId: null,
