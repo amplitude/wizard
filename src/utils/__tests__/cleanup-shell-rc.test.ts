@@ -82,6 +82,26 @@ describe('cleanupShellCompletionLine', () => {
     );
   });
 
+  it('cleans remaining files when an earlier file is read-only', () => {
+    const block =
+      '\n# Amplitude Wizard shell completions\neval "$(amplitude-wizard completion)"\n';
+    fs.writeFileSync(zshrc, `# zsh${block}`, 'utf-8');
+    fs.writeFileSync(bashrc, `# bash${block}alias ok=1\n`, 'utf-8');
+    fs.chmodSync(zshrc, 0o444);
+
+    try {
+      cleanupShellCompletionLine();
+
+      // .bashrc should still be cleaned even though .zshrc write failed.
+      expect(fs.readFileSync(bashrc, 'utf-8')).not.toContain(
+        'amplitude-wizard completion',
+      );
+      expect(fs.readFileSync(bashrc, 'utf-8')).toContain('alias ok=1');
+    } finally {
+      fs.chmodSync(zshrc, 0o644);
+    }
+  });
+
   it('does not touch unrelated lines that mention amplitude-wizard', () => {
     const contents = [
       '# Amplitude Wizard shell completions',
