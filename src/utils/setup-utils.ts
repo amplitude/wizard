@@ -524,7 +524,7 @@ async function askForWizardLogin(
   let selectedOrg: AmplitudeOrg | undefined;
 
   if (userInfo) {
-    // Persist user details back to ~/.ampli.json (replaces the "pending" entry)
+    // Persist now that we have both user and real tokens (with real expiresAt).
     storeToken(
       {
         id: userInfo.id,
@@ -537,7 +537,7 @@ async function askForWizardLogin(
         accessToken: auth.accessToken,
         idToken: auth.idToken,
         refreshToken: auth.refreshToken,
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        expiresAt: auth.expiresAt,
       },
     );
 

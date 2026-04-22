@@ -198,17 +198,18 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns tokens on success without calling OAuth', async () => {
+  it('returns tokens (including expiresAt) and userInfo on success', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
+    const expiresAt = new Date(Date.now() + 3_600_000).toISOString();
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'success',
       tokens: {
         accessToken: 'direct-access',
         idToken: 'direct-id',
         refreshToken: 'direct-refresh',
-        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        expiresAt,
         zone: 'us',
       },
     });
@@ -229,8 +230,16 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result).toMatchObject({ accessToken: 'direct-access' });
-    expect(storeToken).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({
+      accessToken: 'direct-access',
+      idToken: 'direct-id',
+      refreshToken: 'direct-refresh',
+      expiresAt,
+      zone: 'us',
+      userInfo: expect.objectContaining({ id: 'user-123' }),
+    });
+    // Persistence is the caller's responsibility now.
+    expect(storeToken).not.toHaveBeenCalled();
   });
 
   it('emits agentic signup attempted with status=success on the success path', async () => {
@@ -274,7 +283,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('persists StoredUser with real user id from fetchAmplitudeUser', async () => {
+  it('returns userInfo.id from fetchAmplitudeUser on success', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
@@ -296,67 +305,24 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       orgs: provisionedOrgs,
     });
-    const { storeToken } = await import('../ampli-settings.js');
 
-    await performSignupOrAuth({
+    const result = await performSignupOrAuth({
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
     });
 
-    expect(storeToken).toHaveBeenCalledWith(
+    expect(result?.userInfo).toEqual(
       expect.objectContaining({
         id: 'user-123',
         firstName: 'Ada',
         lastName: 'Lovelace',
         email: 'ada@example.com',
-        zone: 'us',
       }),
-      expect.anything(),
     );
   });
 
-  it('normalizes extra whitespace in fullName before splitting', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
-    const { performDirectSignup } = await import('../direct-signup.js');
-    vi.mocked(performDirectSignup).mockResolvedValue({
-      kind: 'success',
-      tokens: {
-        accessToken: 'a',
-        idToken: 'i',
-        refreshToken: 'r',
-        expiresAt: new Date().toISOString(),
-        zone: 'us',
-      },
-    });
-    const { fetchAmplitudeUser } = await import('../../lib/api.js');
-    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
-      id: 'user-123',
-      firstName: 'Ada',
-      lastName: 'Lovelace',
-      email: 'ada@example.com',
-      orgs: provisionedOrgs,
-    });
-    const { storeToken } = await import('../ampli-settings.js');
-
-    await performSignupOrAuth({
-      email: 'ada@example.com',
-      fullName: '  Ada   Lovelace  ',
-      zone: 'us',
-    });
-
-    expect(storeToken).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: 'user-123',
-        firstName: 'Ada',
-        lastName: 'Lovelace',
-      }),
-      expect.anything(),
-    );
-  });
-
-  it('falls back to pending sentinel when fetchAmplitudeUser fails after direct-signup success', async () => {
+  it('returns userInfo: null when fetchAmplitudeUser fails after direct-signup success', async () => {
     vi.useFakeTimers();
     try {
       const { isFlagEnabled } = await import('../../lib/feature-flags.js');
@@ -384,11 +350,13 @@ describe('performSignupOrAuth', () => {
       await vi.runAllTimersAsync();
       const result = await pending;
 
-      expect(storeToken).toHaveBeenCalledWith(
-        expect.objectContaining({ id: 'pending' }),
-        expect.anything(),
-      );
-      expect(result).toMatchObject({ accessToken: 'direct-access' });
+      // Tokens still returned so caller can decide what to do; no internal
+      // persistence — caller handles it.
+      expect(result).toMatchObject({
+        accessToken: 'direct-access',
+        userInfo: null,
+      });
+      expect(storeToken).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
