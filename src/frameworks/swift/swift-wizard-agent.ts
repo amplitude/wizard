@@ -15,7 +15,7 @@ const SWIFT_PACKAGE_INSTALLATION =
 export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
   metadata: {
     name: 'Swift',
-    glyph: '◆',
+    glyph: '🍎',
     glyphColor: '#F05138',
     integration: Integration.swift,
     beta: true,

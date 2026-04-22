@@ -13,7 +13,7 @@ type UnityContext = {
 export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
   metadata: {
     name: 'Unity',
-    glyph: '◼',
+    glyph: '🎮',
     glyphColor: BrandColors.gray10,
     integration: Integration.unity,
     beta: true,

@@ -22,7 +22,7 @@ type PythonContext = {
 export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
   metadata: {
     name: 'Python Language',
-    glyph: '»',
+    glyph: '🐍',
     glyphColor: '#FFD43B',
     integration: Integration.python,
     beta: true,
