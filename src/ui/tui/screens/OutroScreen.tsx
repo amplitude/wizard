@@ -17,7 +17,11 @@ import { OutroKind } from '../session-constants.js';
 import { Colors, Icons } from '../styles.js';
 import { PickerMenu, ReportViewer, TerminalLink } from '../primitives/index.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
-import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import {
+  DEFAULT_AMPLITUDE_ZONE,
+  OUTBOUND_URLS,
+} from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
@@ -225,7 +229,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               if (choice === 'report') {
                 setShowReport(true);
               } else if (choice === 'dashboard') {
-                const zone = store.session.region ?? 'us';
+                const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
                 const url =
                   store.session.checklistDashboardUrl ??
                   OUTBOUND_URLS.overview[zone];

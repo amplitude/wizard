@@ -20,7 +20,11 @@ import {
   fetchSlackInstallUrl,
   fetchSlackConnectionStatus,
 } from '../../../lib/api.js';
-import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import {
+  DEFAULT_AMPLITUDE_ZONE,
+  OUTBOUND_URLS,
+} from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import { logToFile } from '../../../utils/debug.js';
 import opn from 'opn';
 
@@ -72,7 +76,7 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const region = store.session.region ?? 'us';
+  const region = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
   const isEu = region === 'eu';
   const appName = isEu ? 'Amplitude - EU' : 'Amplitude';
 
@@ -118,7 +122,7 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const zone = region ?? 'us';
+  const zone = region;
 
   const settingsUrl = OUTBOUND_URLS.slackSettings(
     zone,
