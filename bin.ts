@@ -468,7 +468,9 @@ const runDirectSignupIfRequested = async (
   await initFeatureFlags().catch(() => {
     // Non-fatal — all flags default to off.
   });
-  const { performSignupOrAuth } = await import('./src/utils/signup-or-auth.js');
+  const { performSignupOrAuth, trackSignupAttempt } = await import(
+    './src/utils/signup-or-auth.js'
+  );
   const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
 
   // Resolve zone from stored state so EU users aren't silently placed in US.
@@ -504,9 +506,6 @@ const runDirectSignupIfRequested = async (
       }
     }
   } catch (err) {
-    const { trackSignupAttempt } = await import(
-      './src/utils/signup-or-auth.js'
-    );
     trackSignupAttempt({ status: 'wrapper_exception', zone });
     getUI().log.warn(
       `Direct signup errored: ${
@@ -1208,10 +1207,9 @@ void yargs(hideBin(process.argv))
                 > | null = null;
                 const s = tui.store.session;
                 if (s.signup && s.signupEmail && s.signupFullName) {
+                  const { performSignupOrAuth, trackSignupAttempt } =
+                    await import('./src/utils/signup-or-auth.js');
                   try {
-                    const { performSignupOrAuth } = await import(
-                      './src/utils/signup-or-auth.js'
-                    );
                     const signupResult = await performSignupOrAuth({
                       email: s.signupEmail,
                       fullName: s.signupFullName,
@@ -1222,9 +1220,6 @@ void yargs(hideBin(process.argv))
                       signupUserInfo = signupResult.userInfo;
                     }
                   } catch (err) {
-                    const { trackSignupAttempt } = await import(
-                      './src/utils/signup-or-auth.js'
-                    );
                     trackSignupAttempt({ status: 'wrapper_exception', zone });
                     getUI().log.warn(
                       `Direct signup errored: ${
