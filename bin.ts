@@ -942,31 +942,21 @@ void yargs(hideBin(process.argv))
 
             // Load event plan from a previous run (if it exists) so the
             // Events tab is available immediately on returning runs.
+            // Dynamic-import keeps the Claude Agent SDK out of bin.ts load.
             try {
               const fs = await import('fs');
+              const { parseEventPlanContent } = await import(
+                './src/lib/agent-interface.js'
+              );
               const evtPath = resolve(
                 session.installDir,
                 '.amplitude-events.json',
               );
-              const evtContent = fs.readFileSync(evtPath, 'utf-8');
-              const evtSchema = z.array(
-                z.object({
-                  name: z.string().optional(),
-                  event: z.string().optional(),
-                  eventName: z.string().optional(),
-                  description: z.string().optional(),
-                  eventDescriptionAndReasoning: z.string().optional(),
-                }),
+              const events = parseEventPlanContent(
+                fs.readFileSync(evtPath, 'utf-8'),
               );
-              const evtResult = evtSchema.safeParse(JSON.parse(evtContent));
-              if (evtResult.success && evtResult.data.length > 0) {
-                tui.store.setEventPlan(
-                  evtResult.data.map((e) => ({
-                    name: e.name ?? e.event ?? e.eventName ?? '',
-                    description:
-                      e.description ?? e.eventDescriptionAndReasoning ?? '',
-                  })),
-                );
+              if (events && events.length > 0) {
+                tui.store.setEventPlan(events);
               }
             } catch {
               // No event plan file yet — that's fine
