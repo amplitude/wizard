@@ -27,17 +27,15 @@ export function resolveZone(
     return projectConfig.config.Zone;
   }
 
-  // Tier 3: real stored user's home zone.
+  // Tier 3: stored user's home zone. `getStoredUser` returns at most one
+  // record (real or pending); the home-zone semantics are identical for
+  // both — a pending user during SUSI has the same regional intent as a
+  // real user restored from ~/.ampli.json.
   const storedUser = getStoredUser();
-  if (storedUser && storedUser.id !== 'pending' && storedUser.zone != null) {
+  if (storedUser?.zone != null) {
     return storedUser.zone;
   }
 
-  // Tier 4: pending stored user's zone.
-  if (storedUser && storedUser.id === 'pending' && storedUser.zone != null) {
-    return storedUser.zone;
-  }
-
-  // Tier 5: caller-supplied fallback.
+  // Tier 4: caller-supplied fallback.
   return fallback;
 }
