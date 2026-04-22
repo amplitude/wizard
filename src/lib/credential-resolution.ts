@@ -9,6 +9,8 @@
 
 import type { WizardSession } from './wizard-session';
 import type { AmplitudeZone } from './constants';
+import { DEFAULT_AMPLITUDE_ZONE } from './constants';
+import { resolveZone } from './zone-resolution';
 import { extractAppId } from './api';
 import { analytics } from '../utils/analytics';
 
@@ -84,34 +86,20 @@ export async function resolveCredentials(
   const storedUser = getStoredUser();
   const realUser =
     storedUser && storedUser.id !== 'pending' ? storedUser : null;
-  // Pending users are used only as a last-resort zone fallback. They're
-  // written during signup flows when fetchAmplitudeUser fails after a
-  // successful token grant — the tokens are valid, but the real user ID
-  // hasn't been populated yet. Without this fallback, zone resolution
-  // fails and the tokens can't be used on subsequent runs until the
-  // pending entry is patched.
-  const pendingUser =
-    storedUser && storedUser.id === 'pending' ? storedUser : null;
-
   if (realUser?.email) {
     session.userEmail = realUser.email;
   }
 
+  // projectConfig is read here (not inside resolveZone) because later code in
+  // this function uses projectConfig.config.OrgId and projectConfig.config.WorkspaceId
+  // for org/workspace pre-population. resolveZone reads ampli.json separately;
+  // the duplicate read is cheap and keeps the helper pure.
   const projectConfig = readAmpliConfig(installDir);
-  const projectZone = projectConfig.ok ? projectConfig.config.Zone : undefined;
 
-  // Checkpoint region wins (user explicitly changed via /region),
-  // then project config, then global user zone, then pending user zone.
-  const zone =
-    (session._restoredFromCheckpoint ? session.region : null) ??
-    projectZone ??
-    realUser?.zone ??
-    pendingUser?.zone ??
-    null;
-
-  if (zone) {
-    session.region = zone;
-  }
+  // Single source of truth for zone resolution — see src/lib/zone-resolution.ts.
+  // No longer mutates session.region: that field represents user intent, not
+  // resolved effective zone.
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
 
   // Try to resolve credentials from a stored OAuth token
   if (zone) {
@@ -136,7 +124,7 @@ export async function resolveCredentials(
           refreshToken: storedToken.refreshToken,
           expiresAt: expiresAtMs,
         },
-        zone as AmplitudeZone,
+        zone,
       );
       if (refreshResult) {
         const { storeToken } = await import('../utils/ampli-settings.js');
@@ -170,7 +158,7 @@ export async function resolveCredentials(
           accessToken: storedToken.accessToken,
           idToken: storedToken.idToken,
           projectApiKey: localKey.key,
-          host: getHostFromRegion(zone as AmplitudeZone),
+          host: getHostFromRegion(zone),
           appId: 0,
         };
         session.activationLevel = 'none';
@@ -194,7 +182,7 @@ export async function resolveCredentials(
             const { fetchAmplitudeUser } = await import('./api.js');
             const userInfo = await fetchAmplitudeUser(
               storedToken.idToken,
-              zone as AmplitudeZone,
+              zone,
             );
             if (!session.userEmail && userInfo.email) {
               session.userEmail = userInfo.email;
@@ -249,10 +237,7 @@ export async function resolveCredentials(
         // Fetch user data to check how many environments are available.
         const { fetchAmplitudeUser } = await import('./api.js');
         try {
-          const userInfo = await fetchAmplitudeUser(
-            storedToken.idToken,
-            zone as AmplitudeZone,
-          );
+          const userInfo = await fetchAmplitudeUser(storedToken.idToken, zone);
           analytics.setDistinctId(userInfo.email);
           analytics.identifyUser({ email: userInfo.email });
           const workspaceId = session.selectedWorkspaceId ?? undefined;
@@ -338,7 +323,7 @@ export async function resolveCredentials(
                     accessToken: storedToken.accessToken,
                     idToken: storedToken.idToken,
                     projectApiKey: apiKey,
-                    host: getHostFromRegion(zone as AmplitudeZone),
+                    host: getHostFromRegion(zone),
                     appId: Number(matchedEnv.app.id) || 0,
                   };
                   session.activationLevel = 'none';
@@ -398,7 +383,7 @@ export async function resolveCredentials(
               accessToken: storedToken.accessToken,
               idToken: storedToken.idToken,
               projectApiKey: apiKey,
-              host: getHostFromRegion(zone as AmplitudeZone),
+              host: getHostFromRegion(zone),
               appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
             };
             session.activationLevel = 'none';
@@ -430,7 +415,7 @@ export async function resolveCredentials(
           const projectApiKey = await getAPIKey({
             installDir,
             idToken: storedToken.idToken,
-            zone: zone as AmplitudeZone,
+            zone: zone,
             workspaceId: session.selectedWorkspaceId ?? undefined,
           });
           if (projectApiKey) {
@@ -439,7 +424,7 @@ export async function resolveCredentials(
               accessToken: storedToken.accessToken,
               idToken: storedToken.idToken,
               projectApiKey,
-              host: getHostFromRegion(zone as AmplitudeZone),
+              host: getHostFromRegion(zone),
               appId: session.selectedAppId
                 ? Number(session.selectedAppId) || 0
                 : 0,

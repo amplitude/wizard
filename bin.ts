@@ -472,23 +472,12 @@ const runDirectSignupIfRequested = async (
     './src/utils/signup-or-auth.js'
   );
   const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+  const { resolveZone } = await import('./src/lib/zone-resolution.js');
 
-  // Resolve zone from stored state so EU users aren't silently placed in US.
-  // In non-TUI modes session.region is null at this point because credential
-  // resolution hasn't run yet. Mirror the priority used by resolveCredentials:
-  // project config > stored user zone > default.
-  let zone = session.region;
-  if (!zone) {
-    const { getStoredUser } = await import('./src/utils/ampli-settings.js');
-    const { readAmpliConfig } = await import('./src/lib/ampli-config.js');
-    const projectConfig = readAmpliConfig(session.installDir);
-    const projectZone = projectConfig.ok
-      ? projectConfig.config.Zone
-      : undefined;
-    const storedUser = getStoredUser();
-    zone = projectZone ?? storedUser?.zone ?? DEFAULT_AMPLITUDE_ZONE;
-    session.region = zone;
-  }
+  // Single source of truth — see src/lib/zone-resolution.ts. Does not mutate
+  // session.region; `resolveCredentials` derives the same zone independently
+  // when it runs later.
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
   try {
     const tokens = await performSignupOrAuth({
       email: session.signupEmail,
@@ -1184,10 +1173,13 @@ void yargs(hideBin(process.argv))
                     }
                   });
                 });
-                const zone =
-                  tui.store.session.region === 'eu'
-                    ? 'eu'
-                    : DEFAULT_AMPLITUDE_ZONE;
+                const { resolveZone } = await import(
+                  './src/lib/zone-resolution.js'
+                );
+                const zone = resolveZone(
+                  tui.store.session,
+                  DEFAULT_AMPLITUDE_ZONE,
+                );
 
                 // Try direct signup first when --signup + email + fullName are provided
                 // and the feature flag is enabled. performSignupOrAuth returns null when

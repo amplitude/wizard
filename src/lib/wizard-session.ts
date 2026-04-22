@@ -214,6 +214,13 @@ export interface WizardSession {
    * null = not yet selected (shown as RegionSelect screen)
    * 'us' = US region (api.amplitude.com)
    * 'eu' = EU region (api.eu.amplitude.com)
+   *
+   * INVARIANT: this field is written ONLY by intent-bearing sources —
+   * the --region CLI flag / env var, /region slash command, RegionSelect
+   * screen pick, the "Switch data-center region" flow, and checkpoint
+   * restore. Any other code path that needs the effective zone MUST call
+   * `resolveZone(session, fallback)` (src/lib/zone-resolution.ts) and MUST
+   * NOT read session.region directly or assign to it as a cache.
    */
   region: CloudRegion | null;
 
