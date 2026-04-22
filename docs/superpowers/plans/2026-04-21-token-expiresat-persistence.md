@@ -17,8 +17,7 @@
 Before starting Task 1, set up a dedicated worktree and feature branch. The follow-up PR stacks on top of `feat/direct-signup-v2` (the #165 branch), **not** on `main`.
 
 ```bash
-# From the main checkout at /Users/michael.bird/repos/wizard
-cd /Users/michael.bird/repos/wizard
+# From the main checkout of this repo
 git worktree add .claude/worktrees/wizard-expiresat-fix -b followup/token-expiresAt-persistence feat/direct-signup-v2
 cd .claude/worktrees/wizard-expiresat-fix
 pnpm install
