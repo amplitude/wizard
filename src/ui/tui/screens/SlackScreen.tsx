@@ -122,10 +122,8 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const zone = region;
-
   const settingsUrl = OUTBOUND_URLS.slackSettings(
-    zone,
+    region,
     store.session.selectedOrgId,
   );
 
@@ -152,7 +150,7 @@ export const SlackScreen = ({
     };
 
     if (accessToken && orgId) {
-      void fetchSlackInstallUrl(accessToken, zone, orgId, settingsUrl).then(
+      void fetchSlackInstallUrl(accessToken, region, orgId, settingsUrl).then(
         (directUrl) => open(directUrl ?? settingsUrl),
       );
     } else {
