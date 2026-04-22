@@ -204,7 +204,7 @@ describe('collectDiagnostics', () => {
       wizardVersion: '1.0.0',
       // Force an error path by passing a very tight timeout — also exercises
       // the timeout branch of the collector.
-      timeoutMs: 5000,
+      timeoutMs: 5,
     });
 
     // The JSON parse failures are swallowed by readProjectJson (returns null),
