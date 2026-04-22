@@ -504,12 +504,10 @@ const runDirectSignupIfRequested = async (
       }
     }
   } catch (err) {
-    const status: import('./src/utils/signup-or-auth.js').SignupAttemptStatus =
-      'wrapper_exception';
-    analytics.wizardCapture('agentic signup attempted', {
-      status,
-      zone,
-    });
+    const { trackSignupAttempt } = await import(
+      './src/utils/signup-or-auth.js'
+    );
+    trackSignupAttempt('wrapper_exception', zone);
     getUI().log.warn(
       `Direct signup errored: ${
         err instanceof Error ? err.message : String(err)
@@ -1224,12 +1222,10 @@ void yargs(hideBin(process.argv))
                       signupUserInfo = signupResult.userInfo;
                     }
                   } catch (err) {
-                    const status: import('./src/utils/signup-or-auth.js').SignupAttemptStatus =
-                      'wrapper_exception';
-                    analytics.wizardCapture('agentic signup attempted', {
-                      status,
-                      zone,
-                    });
+                    const { trackSignupAttempt } = await import(
+                      './src/utils/signup-or-auth.js'
+                    );
+                    trackSignupAttempt('wrapper_exception', zone);
                     getUI().log.warn(
                       `Direct signup errored: ${
                         err instanceof Error ? err.message : String(err)

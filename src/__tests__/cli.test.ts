@@ -148,9 +148,15 @@ vi.mock('../utils/analytics', () => ({
 vi.mock('../lib/detect-amplitude', () => ({
   detectAmplitudeInProject: vi.fn().mockReturnValue({ confidence: 'none' }),
 }));
-vi.mock('../utils/signup-or-auth', () => ({
-  performSignupOrAuth: vi.fn(),
-}));
+vi.mock('../utils/signup-or-auth', async () => {
+  const actual = await vi.importActual<
+    typeof import('../utils/signup-or-auth')
+  >('../utils/signup-or-auth');
+  return {
+    ...actual,
+    performSignupOrAuth: vi.fn(),
+  };
+});
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');
   return { ...actual, homedir: mockHomedir };

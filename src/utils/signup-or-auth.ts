@@ -91,20 +91,24 @@ export type SignupAttemptStatus =
   | 'user_fetch_failed'
   | 'wrapper_exception';
 
-function emitAttempted(
+export const AGENTIC_SIGNUP_ATTEMPTED_EVENT = 'agentic signup attempted';
+
+export const trackSignupAttempt = (
   status: SignupAttemptStatus,
   zone: AmplitudeZone,
   extras: { hasEnvWithApiKey?: boolean; userFetchRetryCount?: number } = {},
-): void {
-  const props: Record<string, unknown> = { status, zone };
-  if (extras.hasEnvWithApiKey !== undefined) {
-    props['has env with api key'] = extras.hasEnvWithApiKey;
-  }
-  if (extras.userFetchRetryCount !== undefined) {
-    props['user fetch retry count'] = extras.userFetchRetryCount;
-  }
-  analytics.wizardCapture('agentic signup attempted', props);
-}
+): void => {
+  analytics.wizardCapture(AGENTIC_SIGNUP_ATTEMPTED_EVENT, {
+    status,
+    zone,
+    ...(extras.hasEnvWithApiKey !== undefined && {
+      'has env with api key': extras.hasEnvWithApiKey,
+    }),
+    ...(extras.userFetchRetryCount !== undefined && {
+      'user fetch retry count': extras.userFetchRetryCount,
+    }),
+  });
+};
 
 export interface SignupOrAuthInput {
   email: string | null;
@@ -177,18 +181,18 @@ export async function performSignupOrAuth(
     log.warn('direct signup threw unexpectedly', {
       message: err instanceof Error ? err.message : String(err),
     });
-    emitAttempted('signup_error', input.zone);
+    trackSignupAttempt('signup_error', input.zone);
     return null;
   }
 
   if (result.kind === 'requires_redirect') {
     log.debug('direct signup did not succeed', { kind: result.kind });
-    emitAttempted('requires_redirect', input.zone);
+    trackSignupAttempt('requires_redirect', input.zone);
     return null;
   }
   if (result.kind === 'error') {
     log.debug('direct signup did not succeed', { kind: result.kind });
-    emitAttempted('signup_error', input.zone);
+    trackSignupAttempt('signup_error', input.zone);
     return null;
   }
 
@@ -219,7 +223,7 @@ export async function performSignupOrAuth(
       email: userInfo.email,
       zone: input.zone,
     };
-    emitAttempted('success', input.zone, {
+    trackSignupAttempt('success', input.zone, {
       hasEnvWithApiKey: fetchResult.hasEnvWithApiKey,
       userFetchRetryCount: fetchResult.retryCount,
     });
@@ -238,7 +242,7 @@ export async function performSignupOrAuth(
       email: input.email,
       zone: input.zone,
     };
-    emitAttempted('user_fetch_failed', input.zone, {
+    trackSignupAttempt('user_fetch_failed', input.zone, {
       userFetchRetryCount: fetchResult.retryCount,
     });
   }
