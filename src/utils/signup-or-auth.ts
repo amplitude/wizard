@@ -74,11 +74,18 @@ async function fetchUserWithProvisioningRetry(
     }
   }
   if (userInfo) {
+    const hasEnv = hasEnvWithApiKey(userInfo);
+    if (!hasEnv) {
+      log.warn('signup user has no env with apiKey after retries', {
+        zone,
+        orgs: userInfo.orgs.length,
+      });
+    }
     return {
       ok: true,
       userInfo,
       retryCount,
-      hasEnvWithApiKey: hasEnvWithApiKey(userInfo),
+      hasEnvWithApiKey: hasEnv,
     };
   }
   return { ok: false, retryCount, error: lastError };
