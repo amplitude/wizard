@@ -500,6 +500,28 @@ const runDirectSignupIfRequested = async (
         `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
       );
     } else {
+      // Persist when we have a complete record (real user + real tokens).
+      // If tokens.userInfo is null, performSignupOrAuth already wrote a
+      // pending-sentinel crash-recovery entry in its failure branch, so
+      // downstream credential resolution has something to find either way.
+      if (tokens.userInfo) {
+        const { storeToken } = await import('./src/utils/ampli-settings.js');
+        storeToken(
+          {
+            id: tokens.userInfo.id,
+            firstName: tokens.userInfo.firstName,
+            lastName: tokens.userInfo.lastName,
+            email: tokens.userInfo.email,
+            zone: tokens.zone,
+          },
+          {
+            accessToken: tokens.accessToken,
+            idToken: tokens.idToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: tokens.expiresAt,
+          },
+        );
+      }
       getUI().log.info('Direct signup succeeded; using newly created account.');
       if (onSuccess) {
         await onSuccess();
