@@ -28,7 +28,7 @@ import * as path from 'node:path';
 export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   metadata: {
     name: 'FastAPI',
-    glyph: '💨',
+    glyph: '⚡',
     glyphColor: '#009688',
     integration: Integration.fastapi,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
