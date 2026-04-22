@@ -103,12 +103,21 @@ export function getStoredToken(
 ): StoredOAuthToken | undefined {
   const config = readConfig(configPath);
 
+  // Validates `OAuthExpiresAt` as an ISO-8601 datetime. If the stored value
+  // is malformed (hand-edited ampli.json, older broken writer, etc.), fall
+  // back to a 1-hour-from-now ISO date — the same default value callers
+  // used to fabricate before `expiresAt` was threaded through the auth
+  // result. This keeps token-refresh math from seeing NaN and makes the
+  // downstream behavior no worse than the pre-PR baseline.
   const OAuthEntrySchema = z
     .object({
       OAuthAccessToken: z.string(),
       OAuthIdToken: z.string(),
       OAuthRefreshToken: z.string(),
-      OAuthExpiresAt: z.string(),
+      OAuthExpiresAt: z
+        .string()
+        .datetime()
+        .catch(() => new Date(Date.now() + 3600 * 1000).toISOString()),
     })
     .passthrough();
 
@@ -142,7 +151,16 @@ export function getStoredToken(
   return undefined;
 }
 
-/** Persists an OAuth token to ~/.ampli.json in the same format as the ampli CLI. */
+/**
+ * Persists an OAuth token to ~/.ampli.json in the same format as the ampli CLI.
+ *
+ * When writing a non-pending user, any sibling `{id:'pending'}` entry for the
+ * same zone is cleaned up. That entry is only ever written as a transient
+ * crash-recovery sentinel (see `performSignupOrAuth`'s failure branch); once
+ * the caller has a real user, the sentinel is obsolete and would otherwise
+ * linger as orphan state and risk returning stale tokens from a no-userId
+ * `getStoredToken()` lookup.
+ */
 export function storeToken(
   user: StoredUser,
   token: StoredOAuthToken,
@@ -150,6 +168,9 @@ export function storeToken(
 ): void {
   const config = readConfig(configPath);
   const key = userKey(user.id, user.zone);
+  if (user.id !== 'pending') {
+    delete config[userKey('pending', user.zone)];
+  }
   config[key] = {
     ...((config[key] as object | undefined) ?? {}),
     User: user,

@@ -322,13 +322,10 @@ export async function performAmplitudeAuth(options: {
       Date.now() + tokenResponse.expires_in * 1000,
     ).toISOString();
 
-    logToFile(
-      '[oauth] returning auth result; caller is responsible for persistence',
-      {
-        zone,
-        expiresAt,
-      },
-    );
+    logToFile('[oauth] token exchange complete, returning auth result', {
+      zone,
+      expiresAt,
+    });
 
     return {
       idToken: tokenResponse.id_token,
