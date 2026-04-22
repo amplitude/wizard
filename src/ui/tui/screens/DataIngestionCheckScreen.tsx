@@ -276,22 +276,9 @@ export const DataIngestionCheckScreen = ({
         return;
       }
 
-      // Activation API only checks autocapture events. Fall back to the
-      // event catalog which includes all event types.
-      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
-        const catalogEvents = await fetchWorkspaceEventTypes(
-          dataApiToken,
-          zone,
-          currentSession.selectedOrgId,
-          currentSession.selectedWorkspaceId,
-        );
-        logToFile(
-          `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
-        );
-        if (catalogEvents.length > 0) {
-          confirmWithCelebration(catalogEvents);
-        }
-      }
+      // Do NOT treat the event catalog as a success signal — it reflects
+      // schema registrations, not real ingestion. A project with a taxonomy
+      // but zero live events will falsely celebrate. Keep polling instead.
     } catch (err) {
       logToFile(
         `[DataIngestionCheck] poll error: ${
@@ -476,13 +463,20 @@ export const DataIngestionCheckScreen = ({
           </Text>
           {elapsedSeconds >= 90 && (
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Try visiting your app and clicking around
+              {Icons.arrowRight} If you changed env vars, restart the dev server
+              so the new values load
             </Text>
           )}
           {elapsedSeconds >= 120 && (
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Check your terminal for errors — the SDK may
-              not have initialized
+              {Icons.arrowRight} Open devtools Network tab — look for requests
+              to api2.amplitude.com (a CORS or 4xx means the SDK isn't sending)
+            </Text>
+          )}
+          {elapsedSeconds >= 180 && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Check the browser console for errors from
+              @amplitude/* — a silent init failure blocks all events
             </Text>
           )}
         </Box>
