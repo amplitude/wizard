@@ -500,6 +500,30 @@ const runDirectSignupIfRequested = async (
         `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
       );
     } else {
+      // Persist tokens so downstream credential resolution finds them.
+      // performSignupOrAuth only writes on the user-fetch failure path
+      // (pending sentinel); success-path persistence is the caller's
+      // responsibility. Without this, agent/CI/classic modes read
+      // ~/.ampli.json, find nothing, and either fail with AUTH_REQUIRED
+      // or fall back to browser OAuth — silently discarding the signup.
+      if (tokens.userInfo) {
+        const { storeToken } = await import('./src/utils/ampli-settings.js');
+        storeToken(
+          {
+            id: tokens.userInfo.id,
+            firstName: tokens.userInfo.firstName,
+            lastName: tokens.userInfo.lastName,
+            email: tokens.userInfo.email,
+            zone: tokens.zone,
+          },
+          {
+            accessToken: tokens.accessToken,
+            idToken: tokens.idToken,
+            refreshToken: tokens.refreshToken,
+            expiresAt: tokens.expiresAt,
+          },
+        );
+      }
       getUI().log.info('Direct signup succeeded; using newly created account.');
       if (onSuccess) {
         await onSuccess();
