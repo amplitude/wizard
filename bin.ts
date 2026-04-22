@@ -507,7 +507,7 @@ const runDirectSignupIfRequested = async (
     const { trackSignupAttempt } = await import(
       './src/utils/signup-or-auth.js'
     );
-    trackSignupAttempt('wrapper_exception', zone);
+    trackSignupAttempt({ status: 'wrapper_exception', zone });
     getUI().log.warn(
       `Direct signup errored: ${
         err instanceof Error ? err.message : String(err)
@@ -1225,7 +1225,7 @@ void yargs(hideBin(process.argv))
                     const { trackSignupAttempt } = await import(
                       './src/utils/signup-or-auth.js'
                     );
-                    trackSignupAttempt('wrapper_exception', zone);
+                    trackSignupAttempt({ status: 'wrapper_exception', zone });
                     getUI().log.warn(
                       `Direct signup errored: ${
                         err instanceof Error ? err.message : String(err)
