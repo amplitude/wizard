@@ -17,7 +17,7 @@ type VueContext = Record<string, unknown>;
 export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
   metadata: {
     name: 'Vue',
-    glyph: '▲',
+    glyph: '🟢',
     glyphColor: '#42B883',
     integration: Integration.vue,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',

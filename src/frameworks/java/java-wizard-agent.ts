@@ -12,7 +12,7 @@ type JavaContext = {
 export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
   metadata: {
     name: 'Java',
-    glyph: '●',
+    glyph: '☕',
     glyphColor: '#ED8B00',
     integration: Integration.java,
     beta: true,

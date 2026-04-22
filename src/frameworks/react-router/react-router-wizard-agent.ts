@@ -69,7 +69,7 @@ function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
 export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   metadata: {
     name: 'React Router',
-    glyph: '◆',
+    glyph: '🧭',
     glyphColor: '#CA4245',
     integration: Integration.reactRouter,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',

@@ -14,7 +14,7 @@ const ANDROID_PACKAGE_INSTALLATION =
 export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
   metadata: {
     name: 'Android',
-    glyph: '●',
+    glyph: '🤖',
     glyphColor: '#3DDC84',
     integration: Integration.android,
     beta: true,

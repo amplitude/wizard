@@ -9,7 +9,7 @@ type FlutterContext = Record<string, unknown>;
 export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
   metadata: {
     name: 'Flutter',
-    glyph: '◆',
+    glyph: '🐦',
     glyphColor: '#54C5F8',
     integration: Integration.flutter,
     beta: true,

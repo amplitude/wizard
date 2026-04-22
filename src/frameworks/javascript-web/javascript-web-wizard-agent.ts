@@ -18,7 +18,7 @@ import { detectNodePackageManagers } from '../../lib/package-manager-detection';
 export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   metadata: {
     name: 'JavaScript (Web)',
-    glyph: '●',
+    glyph: '🌐',
     glyphColor: '#F7DF1E',
     integration: Integration.javascript_web,
     beta: true,

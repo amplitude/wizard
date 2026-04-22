@@ -7,7 +7,7 @@ import { BrandColors } from '../../lib/brand-colors';
 export const GENERIC_AGENT_CONFIG: FrameworkConfig = {
   metadata: {
     name: 'Generic',
-    glyph: '◇',
+    glyph: '🧰',
     glyphColor: BrandColors.gray60,
     integration: Integration.generic,
     docsUrl: 'https://amplitude.com/docs/get-started/amplitude-quickstart',

@@ -25,7 +25,7 @@ type FlaskContext = {
 export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   metadata: {
     name: 'Flask',
-    glyph: '◊',
+    glyph: '🧪',
     glyphColor: BrandColors.gray10,
     integration: Integration.flask,
     beta: true,

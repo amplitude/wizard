@@ -13,7 +13,7 @@ type UnrealContext = {
 export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
   metadata: {
     name: 'Unreal Engine',
-    glyph: '◆',
+    glyph: '🎮',
     glyphColor: BrandColors.gray40,
     integration: Integration.unreal,
     beta: true,
