@@ -161,6 +161,13 @@ export function storeToken(
   writeConfig(config, configPath);
 }
 
+// ── Wizard-scoped settings (device id, first-run, run counter) ─────────
+//
+// Stored under a top-level `"wizard"` key so they survive logout (unlike the
+// `User-*` entries which get wiped by clearStoredCredentials).
+
+const WIZARD_SETTINGS_KEY = 'wizard';
+
 /** Clears all stored credentials. Preserves the wizard settings namespace so
  * anonymousId and first-run state survive logout. */
 export function clearStoredCredentials(configPath?: string): void {
@@ -171,13 +178,6 @@ export function clearStoredCredentials(configPath?: string): void {
   }
   writeConfig(preserved, configPath);
 }
-
-// ── Wizard-scoped settings (device id, first-run, run counter) ─────────
-//
-// Stored under a top-level `"wizard"` key so they survive logout (unlike the
-// `User-*` entries which get wiped by clearStoredCredentials).
-
-const WIZARD_SETTINGS_KEY = 'wizard';
 
 const WizardSettingsSchema = z.object({
   deviceId: z.string().optional(),

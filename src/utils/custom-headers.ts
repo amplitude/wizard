@@ -13,6 +13,8 @@ import { getExecutionMode } from '../lib/mode-config';
  */
 export function createCustomHeaders(): {
   add(key: string, value: string): void;
+  /** Add a header without auto-prefixing (e.g. W3C `traceparent`). */
+  addRaw(key: string, value: string): void;
   /** Add a feature flag for Amplitude ($feature/<flagKey>: variant). */
   addFlag(flagKey: string, variant: string): void;
   encode(): string;
@@ -24,6 +26,10 @@ export function createCustomHeaders(): {
       const name =
         key.startsWith('x-') || key.startsWith('X-') ? key : `X-${key}`;
       entries.push({ key: name, value });
+    },
+
+    addRaw(key: string, value: string): void {
+      entries.push({ key, value });
     },
 
     addFlag(flagKey: string, variant: string): void {

@@ -416,7 +416,7 @@ function buildAgentEnv(
   // Propagate tracing headers so every request the agent subprocess makes
   // can be correlated to this wizard run + attempt.
   for (const [key, value] of Object.entries(createTracingHeaders())) {
-    headers.add(key, value);
+    headers.addRaw(key, value);
   }
   const encoded = headers.encode();
   logToFile('ANTHROPIC_CUSTOM_HEADERS', encoded);
