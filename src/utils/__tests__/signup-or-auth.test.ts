@@ -14,6 +14,11 @@ vi.mock('../ampli-settings.js', () => ({
 vi.mock('../../lib/api.js', () => ({
   fetchAmplitudeUser: vi.fn(),
 }));
+vi.mock('../analytics', () => ({
+  analytics: {
+    wizardCapture: vi.fn(),
+  },
+}));
 
 // Minimal provisioned-account shape: one org / workspace / env with an
 // apiKey. Having this is the signal that backend provisioning finished,
@@ -39,6 +44,7 @@ describe('performSignupOrAuth', () => {
 
   it('returns null when flag is off', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
+    const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
       email: 'ada@example.com',
@@ -48,12 +54,17 @@ describe('performSignupOrAuth', () => {
 
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      'agentic signup attempted',
+      expect.anything(),
+    );
   });
 
   it('returns null when flag is on but email is missing', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
+    const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
       email: null,
@@ -63,12 +74,17 @@ describe('performSignupOrAuth', () => {
 
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      'agentic signup attempted',
+      expect.anything(),
+    );
   });
 
   it('returns null when flag is on but fullName is missing', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
+    const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
       email: 'ada@example.com',
@@ -78,6 +94,10 @@ describe('performSignupOrAuth', () => {
 
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      'agentic signup attempted',
+      expect.anything(),
+    );
   });
 
   it('returns null when direct signup returns requires_redirect', async () => {
@@ -98,6 +118,27 @@ describe('performSignupOrAuth', () => {
     expect(result).toBeNull();
   });
 
+  it('emits agentic signup attempted with status=requires_redirect on redirect path', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'requires_redirect',
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      { status: 'requires_redirect', zone: 'us' },
+    );
+  });
+
   it('returns null when direct signup returns error', async () => {
     const { isFlagEnabled } = await import('../../lib/feature-flags.js');
     vi.mocked(isFlagEnabled).mockReturnValue(true);
@@ -114,6 +155,47 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(result).toBeNull();
+  });
+
+  it('emits agentic signup attempted with status=signup_error on error kind', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'error',
+      message: 'boom',
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      { status: 'signup_error', zone: 'us' },
+    );
+  });
+
+  it('emits agentic signup attempted with status=signup_error when performDirectSignup throws', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockRejectedValue(new Error('network'));
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      { status: 'signup_error', zone: 'us' },
+    );
   });
 
   it('returns tokens on success without calling OAuth', async () => {
@@ -149,6 +231,47 @@ describe('performSignupOrAuth', () => {
     expect(result).not.toBeNull();
     expect(result).toMatchObject({ accessToken: 'direct-access' });
     expect(storeToken).toHaveBeenCalledOnce();
+  });
+
+  it('emits agentic signup attempted with status=success on the success path', async () => {
+    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+    vi.mocked(isFlagEnabled).mockReturnValue(true);
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      {
+        status: 'success',
+        zone: 'us',
+        'has env with api key': true,
+        'user fetch retry count': 0,
+      },
+    );
   });
 
   it('persists StoredUser with real user id from fetchAmplitudeUser', async () => {
@@ -266,6 +389,47 @@ describe('performSignupOrAuth', () => {
         expect.anything(),
       );
       expect(result).toMatchObject({ accessToken: 'direct-access' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('emits agentic signup attempted with status=user_fetch_failed when fetch retries exhaust', async () => {
+    vi.useFakeTimers();
+    try {
+      const { isFlagEnabled } = await import('../../lib/feature-flags.js');
+      vi.mocked(isFlagEnabled).mockReturnValue(true);
+      const { performDirectSignup } = await import('../direct-signup.js');
+      vi.mocked(performDirectSignup).mockResolvedValue({
+        kind: 'success',
+        tokens: {
+          accessToken: 'a',
+          idToken: 'i',
+          refreshToken: 'r',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          zone: 'us',
+        },
+      });
+      const { fetchAmplitudeUser } = await import('../../lib/api.js');
+      vi.mocked(fetchAmplitudeUser).mockRejectedValue(new Error('network'));
+      const { analytics } = await import('../analytics');
+
+      const pending = performSignupOrAuth({
+        email: 'ada@example.com',
+        fullName: 'Ada Lovelace',
+        zone: 'us',
+      });
+      await vi.runAllTimersAsync();
+      await pending;
+
+      expect(analytics.wizardCapture).toHaveBeenCalledWith(
+        'agentic signup attempted',
+        {
+          status: 'user_fetch_failed',
+          zone: 'us',
+          'user fetch retry count': 3,
+        },
+      );
     } finally {
       vi.useRealTimers();
     }

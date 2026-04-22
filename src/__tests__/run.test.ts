@@ -107,4 +107,37 @@ describe('runWizard error handling', () => {
     expect(mockAnalytics.captureException).not.toHaveBeenCalled();
     expect(mockAnalytics.shutdown).not.toHaveBeenCalled();
   });
+
+  it('passes signup=true to session started when session.signup is set', async () => {
+    mockAnalytics.wizardCapture = vi.fn();
+    const testArgs = {
+      integration: Integration.nextjs,
+      signup: true,
+    };
+
+    mockRunAgentWizard.mockResolvedValue(undefined);
+
+    await runWizard(testArgs);
+
+    expect(mockAnalytics.wizardCapture).toHaveBeenCalledWith(
+      'session started',
+      expect.objectContaining({ signup: true }),
+    );
+  });
+
+  it('passes signup=false to session started when session.signup is unset', async () => {
+    mockAnalytics.wizardCapture = vi.fn();
+    const testArgs = {
+      integration: Integration.nextjs,
+    };
+
+    mockRunAgentWizard.mockResolvedValue(undefined);
+
+    await runWizard(testArgs);
+
+    expect(mockAnalytics.wizardCapture).toHaveBeenCalledWith(
+      'session started',
+      expect.objectContaining({ signup: false }),
+    );
+  });
 });

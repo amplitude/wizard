@@ -148,6 +148,15 @@ vi.mock('../utils/analytics', () => ({
 vi.mock('../lib/detect-amplitude', () => ({
   detectAmplitudeInProject: vi.fn().mockReturnValue({ confidence: 'none' }),
 }));
+vi.mock('../utils/signup-or-auth', async () => {
+  const actual = await vi.importActual<
+    typeof import('../utils/signup-or-auth')
+  >('../utils/signup-or-auth');
+  return {
+    ...actual,
+    performSignupOrAuth: vi.fn(),
+  };
+});
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');
   return { ...actual, homedir: mockHomedir };
@@ -858,6 +867,37 @@ describe('--email and --full-name flags', () => {
       expect.objectContaining({
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
+      }),
+    );
+  });
+
+  test('emits agentic signup attempted with status=wrapper_exception when wrapper throws', async () => {
+    const { performSignupOrAuth } = await import('../utils/signup-or-auth');
+    const { analytics } = await import('../utils/analytics');
+    vi.mocked(performSignupOrAuth).mockRejectedValueOnce(new Error('boom'));
+
+    await runCLI([
+      '--signup',
+      '--ci',
+      '--email',
+      'ada@example.com',
+      '--full-name',
+      'Ada Lovelace',
+      '--install-dir',
+      '/tmp/test',
+    ]);
+
+    await waitFor(() =>
+      (analytics.wizardCapture as ReturnType<typeof vi.fn>).mock.calls.some(
+        (c) => c[0] === 'agentic signup attempted',
+      ),
+    );
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      'agentic signup attempted',
+      expect.objectContaining({
+        status: 'wrapper_exception',
+        zone: expect.any(String),
       }),
     );
   });
