@@ -5,7 +5,12 @@ vi.mock('child_process', () => ({
 }));
 
 import { exec } from 'child_process';
-import { detectBoundPort, isPortBound } from '../port-detection';
+import {
+  detectBoundPort,
+  getListeningPid,
+  getProcessCwd,
+  isSameOrDescendant,
+} from '../port-detection';
 
 type ExecCallback = (
   error: Error | null,
@@ -13,6 +18,10 @@ type ExecCallback = (
   stderr: string,
 ) => void;
 
+/**
+ * Register a fake `exec` implementation. The handler receives the command
+ * string and a callback; it should invoke the callback with (error, stdout).
+ */
 function mockExec(
   handler: (command: string, callback: ExecCallback) => void,
 ): void {
@@ -30,79 +39,143 @@ function mockExec(
   }) as unknown as typeof exec);
 }
 
-describe('isPortBound', () => {
-  beforeEach(() => {
-    vi.mocked(exec).mockReset();
+beforeEach(() => {
+  vi.mocked(exec).mockReset();
+});
+
+describe('getListeningPid', () => {
+  it('parses the PID from lsof -Fp output', async () => {
+    mockExec((_cmd, cb) => cb(null, 'p1234\n', ''));
+    await expect(getListeningPid(3000)).resolves.toBe(1234);
   });
 
-  it('returns true when lsof prints a LISTEN line', async () => {
-    mockExec((_cmd, cb) => cb(null, 'node 123 kelson 21u IPv6 TCP LISTEN', ''));
-    await expect(isPortBound(3000)).resolves.toBe(true);
+  it('returns null when lsof exits non-zero (no match)', async () => {
+    mockExec((_cmd, cb) => cb(new Error('exit 1'), '', ''));
+    await expect(getListeningPid(9999)).resolves.toBeNull();
   });
 
-  it('returns false when lsof exits non-zero (no match)', async () => {
-    mockExec((_cmd, cb) => {
-      const err = new Error('exit 1') as Error & { code?: number };
-      err.code = 1;
-      cb(err, '', '');
-    });
-    await expect(isPortBound(9999)).resolves.toBe(false);
-  });
-
-  it('returns false when stdout is empty even without error', async () => {
+  it('returns null when stdout has no p-line', async () => {
     mockExec((_cmd, cb) => cb(null, '', ''));
-    await expect(isPortBound(3000)).resolves.toBe(false);
+    await expect(getListeningPid(3000)).resolves.toBeNull();
   });
 
   it('rejects invalid ports without shelling out', async () => {
-    await expect(isPortBound(0)).resolves.toBe(false);
-    await expect(isPortBound(70000)).resolves.toBe(false);
-    await expect(isPortBound(-1)).resolves.toBe(false);
-    await expect(isPortBound(1.5)).resolves.toBe(false);
+    await expect(getListeningPid(0)).resolves.toBeNull();
+    await expect(getListeningPid(70000)).resolves.toBeNull();
+    await expect(getListeningPid(-1)).resolves.toBeNull();
     expect(exec).not.toHaveBeenCalled();
   });
+});
 
-  it('includes the port in the lsof command', async () => {
-    mockExec((_cmd, cb) => cb(null, '', ''));
-    await isPortBound(5173);
-    expect(vi.mocked(exec).mock.calls[0]?.[0]).toContain(':5173');
+describe('getProcessCwd', () => {
+  it('parses the cwd path from lsof -Fn output', async () => {
+    mockExec((_cmd, cb) => cb(null, 'p1234\nn/Users/kelson/project\n', ''));
+    await expect(getProcessCwd(1234)).resolves.toBe('/Users/kelson/project');
+  });
+
+  it('returns null when lsof fails', async () => {
+    mockExec((_cmd, cb) => cb(new Error('boom'), '', ''));
+    await expect(getProcessCwd(1234)).resolves.toBeNull();
+  });
+
+  it('rejects invalid PIDs', async () => {
+    await expect(getProcessCwd(0)).resolves.toBeNull();
+    await expect(getProcessCwd(-1)).resolves.toBeNull();
+    expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe('isSameOrDescendant', () => {
+  it('matches the same path', () => {
+    expect(isSameOrDescendant('/a/b', '/a/b')).toBe(true);
+  });
+
+  it('matches a descendant', () => {
+    expect(isSameOrDescendant('/a/b/c', '/a/b')).toBe(true);
+    expect(isSameOrDescendant('/a/b/c/d', '/a/b')).toBe(true);
+  });
+
+  it('rejects a sibling with a shared prefix', () => {
+    expect(isSameOrDescendant('/a/bc', '/a/b')).toBe(false);
+  });
+
+  it('rejects an ancestor', () => {
+    expect(isSameOrDescendant('/a', '/a/b')).toBe(false);
   });
 });
 
 describe('detectBoundPort', () => {
-  beforeEach(() => {
-    vi.mocked(exec).mockReset();
-  });
-
-  it('returns the first bound port from candidates', async () => {
+  it('returns the first bound port when no cwd filter is applied', async () => {
     mockExec((cmd, cb) => {
-      if (cmd.includes(':3001')) {
-        cb(null, 'LISTEN line', '');
-      } else {
-        const err = new Error('exit 1');
-        cb(err, '', '');
-      }
+      if (cmd.includes(':3001')) cb(null, 'p1234\n', '');
+      else cb(new Error('exit 1'), '', '');
     });
     await expect(detectBoundPort([3000, 3001, 3002])).resolves.toBe(3001);
   });
 
-  it('returns null when no candidate is bound', async () => {
-    mockExec((_cmd, cb) => cb(new Error('exit 1'), '', ''));
-    await expect(detectBoundPort([3000, 3001])).resolves.toBeNull();
+  it('accepts a port whose listener cwd matches the install dir', async () => {
+    mockExec((cmd, cb) => {
+      if (cmd.startsWith('lsof -iTCP:3000')) cb(null, 'p1234\n', '');
+      else if (cmd.startsWith('lsof -p 1234'))
+        cb(null, 'p1234\nn/Users/kelson/project\n', '');
+      else cb(new Error('exit 1'), '', '');
+    });
+    await expect(
+      detectBoundPort([3000], { cwd: '/Users/kelson/project' }),
+    ).resolves.toBe(3000);
+  });
+
+  it('accepts a listener running from a subdirectory of the install dir', async () => {
+    mockExec((cmd, cb) => {
+      if (cmd.startsWith('lsof -iTCP:3000')) cb(null, 'p1234\n', '');
+      else if (cmd.startsWith('lsof -p 1234'))
+        cb(null, 'p1234\nn/Users/kelson/project/web\n', '');
+      else cb(new Error('exit 1'), '', '');
+    });
+    await expect(
+      detectBoundPort([3000], { cwd: '/Users/kelson/project' }),
+    ).resolves.toBe(3000);
+  });
+
+  it('rejects a listener whose cwd is unrelated to the install dir', async () => {
+    mockExec((cmd, cb) => {
+      if (cmd.startsWith('lsof -iTCP:3000')) cb(null, 'p1234\n', '');
+      else if (cmd.startsWith('lsof -p 1234'))
+        cb(null, 'p1234\nn/Users/kelson/other-app\n', '');
+      else cb(new Error('exit 1'), '', '');
+    });
+    await expect(
+      detectBoundPort([3000], { cwd: '/Users/kelson/project' }),
+    ).resolves.toBeNull();
+  });
+
+  it('falls through to the next candidate when the current one fails the cwd check', async () => {
+    mockExec((cmd, cb) => {
+      if (cmd.startsWith('lsof -iTCP:3000')) cb(null, 'p1111\n', '');
+      else if (cmd.startsWith('lsof -p 1111'))
+        cb(null, 'p1111\nn/somewhere/else\n', '');
+      else if (cmd.startsWith('lsof -iTCP:3001')) cb(null, 'p2222\n', '');
+      else if (cmd.startsWith('lsof -p 2222'))
+        cb(null, 'p2222\nn/Users/kelson/project\n', '');
+      else cb(new Error('exit 1'), '', '');
+    });
+    await expect(
+      detectBoundPort([3000, 3001], { cwd: '/Users/kelson/project' }),
+    ).resolves.toBe(3001);
+  });
+
+  it('rejects a port whose PID has no resolvable cwd', async () => {
+    mockExec((cmd, cb) => {
+      if (cmd.startsWith('lsof -iTCP:3000')) cb(null, 'p1234\n', '');
+      else cb(new Error('lsof -p failed'), '', '');
+    });
+    await expect(
+      detectBoundPort([3000], { cwd: '/Users/kelson/project' }),
+    ).resolves.toBeNull();
   });
 
   it('returns null for an empty candidate list', async () => {
     await expect(detectBoundPort([])).resolves.toBeNull();
     expect(exec).not.toHaveBeenCalled();
-  });
-
-  it('stops probing after the first match', async () => {
-    let callCount = 0;
-    mockExec((_cmd, cb) => {
-      callCount++;
-      cb(null, 'LISTEN line', '');
-    });
-    await detectBoundPort([3000, 3001, 3002]);
-    expect(callCount).toBe(1);
   });
 });

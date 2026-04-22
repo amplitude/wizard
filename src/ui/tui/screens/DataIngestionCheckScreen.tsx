@@ -29,7 +29,7 @@ import { Integration } from '../../../lib/constants.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import { detectBoundPort } from '../../../utils/port-detection.js';
-import { osc8Link } from '../utils/osc8.js';
+import { makeLink } from '../utils/terminal-rendering.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
@@ -423,14 +423,17 @@ export const DataIngestionCheckScreen = ({
 
   // Detect a bound dev-server port for web frameworks, then poll every 10s
   // so the hint switches to the live URL as soon as the user starts their app.
+  // Only match ports whose listener is running out of the install dir — a
+  // raw :3000 scan would also catch unrelated Docker/other-project services.
   useEffect(() => {
     const hint = session.integration
       ? FRAMEWORK_HINTS[session.integration]
       : undefined;
     if (!hint || hint.kind !== 'web') return;
+    const installDir = session.installDir;
     let cancelled = false;
     const probe = async () => {
-      const port = await detectBoundPort(hint.ports);
+      const port = await detectBoundPort(hint.ports, { cwd: installDir });
       if (!cancelled) setDetectedPort(port);
     };
     void probe();
@@ -439,7 +442,7 @@ export const DataIngestionCheckScreen = ({
       cancelled = true;
       clearInterval(id);
     };
-  }, [session.integration]);
+  }, [session.integration, session.installDir]);
 
   useScreenInput((_char, key) => {
     // During celebration, wait for Enter to advance
@@ -477,7 +480,7 @@ export const DataIngestionCheckScreen = ({
     const url = `http://localhost:${detectedPort}${
       hintConfig.pathSuffix ?? ''
     }`;
-    return hintConfig.running(osc8Link(url));
+    return hintConfig.running(makeLink(url, url));
   })();
 
   const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
