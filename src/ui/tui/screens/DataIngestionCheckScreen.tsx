@@ -27,6 +27,7 @@ import {
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { FRAMEWORK_REGISTRY } from '../../../lib/registry.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 
@@ -50,19 +51,16 @@ const FRAMEWORK_HINTS: Partial<Record<Integration, string>> = {
 };
 
 /**
- * Frameworks whose runtime is a browser. The 120s + 180s coaching tips
- * reference browser devtools (Network tab / console), which don't apply
- * to native mobile (Swift, Android, Flutter, React Native, Expo) or
- * server-side runtimes (Django, Flask, FastAPI, Python, JS Node, Ruby,
- * Laravel, Go, Java, Unreal, Unity). Gating those tips on this set is
- * what keeps the "no wrong suggestions" contract.
+ * Frameworks whose runtime is a browser, derived from each framework
+ * config's `metadata.targetsBrowser` flag. Used to gate browser-specific
+ * coaching tips (Network tab, console) that don't apply to native mobile,
+ * server-side, or game-engine runtimes.
  */
-const BROWSER_FRAMEWORKS = new Set<Integration>([
-  Integration.nextjs,
-  Integration.vue,
-  Integration.reactRouter,
-  Integration.javascript_web,
-]);
+const BROWSER_FRAMEWORKS = new Set<Integration>(
+  Object.values(FRAMEWORK_REGISTRY)
+    .filter((config) => config.metadata.targetsBrowser)
+    .map((config) => config.metadata.integration),
+);
 
 interface DataIngestionCheckScreenProps {
   store: WizardStore;

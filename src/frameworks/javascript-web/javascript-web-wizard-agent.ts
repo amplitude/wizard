@@ -21,6 +21,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
     glyph: '●',
     glyphColor: '#F7DF1E',
     integration: Integration.javascript_web,
+    targetsBrowser: true,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     gatherContext: (options: WizardOptions) => {
