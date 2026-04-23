@@ -16,8 +16,14 @@ import type {
   SDKMessage,
 } from './types';
 import { createLogger } from '../observability/logger';
-import { addBreadcrumb, setSentryTag } from '../observability/sentry';
+import {
+  addBreadcrumb,
+  setSentryTag,
+  startWizardSpan,
+  type WizardSpan,
+} from '../observability/sentry';
 import { rotateRunId } from '../observability/correlation';
+import { analytics } from '../../utils/analytics';
 
 const log = createLogger('agent');
 
@@ -27,10 +33,12 @@ interface PhaseTiming {
   startedAt: number;
   messageCount: number;
   toolCalls: number;
+  span: WizardSpan;
 }
 
 export function createObservabilityMiddleware(): Middleware {
   let currentPhaseTiming: PhaseTiming | null = null;
+  let runSpan: WizardSpan | null = null;
   let totalToolCalls = 0;
   let totalMessages = 0;
 
@@ -44,6 +52,7 @@ export function createObservabilityMiddleware(): Middleware {
       rotateRunId();
       log.info('Agent run started');
       addBreadcrumb('agent', 'Agent run started');
+      runSpan = startWizardSpan('agent.run', 'agent.run');
     },
 
     onMessage(
@@ -66,6 +75,10 @@ export function createObservabilityMiddleware(): Middleware {
             });
             addBreadcrumb('tool', `Tool: ${toolName}`, {
               phase: ctx.currentPhase,
+            });
+            analytics.wizardCapture('tool call executed', {
+              'tool name': toolName,
+              'agent phase': ctx.currentPhase,
             });
           }
         }
@@ -97,7 +110,7 @@ export function createObservabilityMiddleware(): Middleware {
       _ctx: MiddlewareContext,
       _store: MiddlewareStore,
     ) {
-      // Log the completed phase with timing
+      // Close out the completed phase with timing
       if (currentPhaseTiming) {
         const elapsed = Date.now() - currentPhaseTiming.startedAt;
         log.info(
@@ -115,6 +128,23 @@ export function createObservabilityMiddleware(): Middleware {
         addBreadcrumb('phase', `${fromPhase} → ${toPhase}`, {
           duration_ms: elapsed,
         });
+        analytics.wizardCapture('agent phase completed', {
+          'from phase': fromPhase,
+          'to phase': toPhase,
+          'duration ms': elapsed,
+          'message count': currentPhaseTiming.messageCount,
+          'tool call count': currentPhaseTiming.toolCalls,
+        });
+        currentPhaseTiming.span.setAttribute('duration_ms', elapsed);
+        currentPhaseTiming.span.setAttribute(
+          'message_count',
+          currentPhaseTiming.messageCount,
+        );
+        currentPhaseTiming.span.setAttribute(
+          'tool_call_count',
+          currentPhaseTiming.toolCalls,
+        );
+        currentPhaseTiming.span.end();
       }
 
       // Start timing the new phase
@@ -123,6 +153,9 @@ export function createObservabilityMiddleware(): Middleware {
         startedAt: Date.now(),
         messageCount: 0,
         toolCalls: 0,
+        span: startWizardSpan(`agent.phase.${toPhase}`, 'agent.phase', {
+          phase: toPhase,
+        }),
       };
 
       setSentryTag('agent_phase', toPhase);
@@ -152,6 +185,27 @@ export function createObservabilityMiddleware(): Middleware {
         duration_ms: totalDurationMs,
         total_tool_calls: totalToolCalls,
       });
+
+      analytics.wizardCapture('agent run completed', {
+        'duration ms': totalDurationMs,
+        'total messages': totalMessages,
+        'total tool calls': totalToolCalls,
+        'is error': isError,
+        'num turns': resultMessage.num_turns,
+      });
+
+      // Close the final phase span (if any) + the run span.
+      if (currentPhaseTiming) {
+        currentPhaseTiming.span.end();
+        currentPhaseTiming = null;
+      }
+      if (runSpan) {
+        runSpan.setAttribute('duration_ms', totalDurationMs);
+        runSpan.setAttribute('total_tool_calls', totalToolCalls);
+        runSpan.setAttribute('is_error', isError);
+        runSpan.end();
+        runSpan = null;
+      }
 
       // Return summary for potential consumption
       return {
