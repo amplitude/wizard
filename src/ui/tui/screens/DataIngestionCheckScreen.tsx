@@ -495,7 +495,7 @@ export const DataIngestionCheckScreen = ({
             <Text color={Colors.secondary}>
               {Icons.arrowRight} In browser devtools, check the Network tab for
               requests to{' '}
-              {session.region === 'eu'
+              {(session.region ?? session.pendingAuthCloudRegion) === 'eu'
                 ? 'api.eu.amplitude.com'
                 : 'api2.amplitude.com'}{' '}
               — a 4xx response or a blocked request usually means the SDK
