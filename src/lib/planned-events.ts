@@ -100,7 +100,7 @@ export async function commitPlannedEvents(
         const parsed = CreateEventsResponse.parse(JSON.parse(text));
         return {
           success: parsed.success ?? false,
-          createdEvents: parsed.createdEvents ?? [],
+          createdEvents: parsed.createdEvents,
           message: parsed.message,
         };
       } catch (err) {
@@ -124,7 +124,7 @@ Respond with JSON only — no prose, no markdown fences:
         const parsed = CreateEventsResponse.parse(JSON.parse(match[0]));
         return {
           success: parsed.success ?? false,
-          createdEvents: parsed.createdEvents ?? [],
+          createdEvents: parsed.createdEvents,
           message: parsed.message,
         };
       } catch {
