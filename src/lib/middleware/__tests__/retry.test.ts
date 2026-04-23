@@ -25,7 +25,7 @@ describe('createRetryMiddleware', () => {
     expect(state.attempt).toBe(3);
     expect(state.maxRetries).toBe(10);
     expect(state.errorStatus).toBe(504);
-    expect(state.reason).toContain('504');
+    expect(state.reason).toBe('Amplitude gateway error');
     expect(state.nextRetryAtMs).toBeGreaterThanOrEqual(state.startedAt);
   });
 

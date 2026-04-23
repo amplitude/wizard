@@ -1488,10 +1488,9 @@ export async function runAgent(
             attempt: attempt + 2,
             maxRetries: MAX_RETRIES + 1,
             errorStatus: extractHttpStatus(matchedTransientError.pattern),
-            reason: `Upstream ${matchedTransientError.pattern.replace(
-              'API Error: ',
-              'returned ',
-            )}`,
+            reason: matchedTransientError.pattern.includes('API Error')
+              ? 'Upstream error'
+              : `Upstream ${matchedTransientError.label}`,
           });
           collectedText.length = 0;
           recentStatuses.length = 0;

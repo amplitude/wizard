@@ -252,7 +252,7 @@ describe('WizardStore', () => {
         maxRetries: 10,
         nextRetryAtMs: Date.now() + 2000,
         errorStatus: 504,
-        reason: 'Amplitude gateway returned 504',
+        reason: 'Amplitude gateway error',
         startedAt: Date.now(),
       };
       store.setRetryState(state);

@@ -16,10 +16,10 @@ const FALLBACK_MAX_RETRIES = 10;
 
 function reasonForStatus(status: number | null): string {
   if (status === null) return 'Reconnecting';
-  if (status >= 500) return `Amplitude gateway returned ${status}`;
+  if (status >= 500) return 'Amplitude gateway error';
   if (status === 429) return 'Rate limited — backing off';
-  if (status >= 400) return `Upstream returned ${status}`;
-  return `Upstream returned ${status}`;
+  if (status >= 400) return 'Upstream error';
+  return 'Unexpected response';
 }
 
 function parseRetryMessage(message: SDKMessage): RetryState | null {
