@@ -1491,7 +1491,7 @@ export async function runAgent(
             reason: `Upstream ${matchedTransientError.pattern.replace(
               'API Error: ',
               'returned ',
-            )} — retrying`,
+            )}`,
           });
           collectedText.length = 0;
           recentStatuses.length = 0;
@@ -1517,7 +1517,7 @@ export async function runAgent(
             attempt: attempt + 2,
             maxRetries: MAX_RETRIES + 1,
             errorStatus: null,
-            reason: 'Stalled — reconnecting',
+            reason: 'Agent stalled',
           });
           continue;
         }
@@ -1552,7 +1552,7 @@ export async function runAgent(
             attempt: attempt + 2,
             maxRetries: MAX_RETRIES + 1,
             errorStatus: extractHttpStatusFromMessage(errMsg),
-            reason: 'Transient error — retrying',
+            reason: 'Transient error',
           });
           collectedText.length = 0;
           recentStatuses.length = 0;

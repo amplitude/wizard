@@ -25,15 +25,14 @@ export const RetryBanner = ({ retryState, now }: RetryBannerProps) => {
   const statusText = retryState.errorStatus
     ? ` (HTTP ${retryState.errorStatus})`
     : '';
+  // Build the banner as one string — JSX line breaks between `{expr}` tokens
+  // collapse to a single space, which would turn "attempt 3/10" into
+  // "attempt 3/ 10" when the content wraps across lines.
+  const bannerText = `${Icons.warning} ${retryState.reason}${statusText} ${Icons.dash} retrying (attempt ${retryState.attempt}/${retryState.maxRetries}${etaText})`;
 
   return (
     <Box marginTop={1}>
-      <Text color={Colors.warning}>
-        {Icons.warning} {retryState.reason}
-        {statusText} {Icons.dash} retrying (attempt {retryState.attempt}/
-        {retryState.maxRetries}
-        {etaText})
-      </Text>
+      <Text color={Colors.warning}>{bannerText}</Text>
     </Box>
   );
 };
