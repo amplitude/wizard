@@ -34,12 +34,8 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { TerminalLink } from '../primitives/index.js';
-import {
-  DEFAULT_AMPLITUDE_ZONE,
-  OUTBOUND_URLS,
-  type AmplitudeZone,
-} from '../../../lib/constants.js';
-import { resolveZone } from '../../../lib/zone-resolution.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { analytics } from '../../../utils/analytics.js';
 import {
   createAmplitudeApp,
@@ -71,7 +67,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
   useWizardStore(store);
 
   const { session } = store;
-  const zone: AmplitudeZone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
+  const zone = useResolvedZone(session);
   const orgId = session.selectedOrgId;
   const orgName = session.selectedOrgName;
   // /create-project can fire mid-SUSI (pending* tokens set, credentials
