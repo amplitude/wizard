@@ -275,28 +275,48 @@ export function resolveEnvPath(
 }
 
 /**
- * Ensure the given env file basename is covered by .gitignore in the working directory.
+ * Ensure the given entry is covered by .gitignore in the working directory.
+ *
  * Creates .gitignore if it doesn't exist; appends the entry if missing.
+ * Normalizes trailing slashes so `.claude/skills/` and `.claude/skills`
+ * are treated as equivalent. `coveredBy` lets the caller skip the append
+ * when a broader pattern (e.g. `.claude/`) is already listed.
+ */
+export function ensureGitignoreEntry(
+  workingDirectory: string,
+  entry: string,
+  options?: { coveredBy?: string[] },
+): void {
+  const gitignorePath = path.join(workingDirectory, '.gitignore');
+  const coveredBy = options?.coveredBy ?? [];
+
+  const normalize = (line: string): string => line.trim().replace(/\/+$/, '');
+  const target = normalize(entry);
+  const broader = coveredBy.map(normalize);
+
+  if (fs.existsSync(gitignorePath)) {
+    const content = fs.readFileSync(gitignorePath, 'utf8');
+    const existing = content.split('\n').map(normalize);
+    if (existing.includes(target)) return;
+    if (broader.some((b) => existing.includes(b))) return;
+    const newContent = content.endsWith('\n')
+      ? `${content}${entry}\n`
+      : `${content}\n${entry}\n`;
+    fs.writeFileSync(gitignorePath, newContent, 'utf8');
+  } else {
+    fs.writeFileSync(gitignorePath, `${entry}\n`, 'utf8');
+  }
+}
+
+/**
+ * Ensure the given env file basename is covered by .gitignore in the working directory.
+ * Thin back-compat wrapper around ensureGitignoreEntry.
  */
 export function ensureGitignoreCoverage(
   workingDirectory: string,
   envFileName: string,
 ): void {
-  const gitignorePath = path.join(workingDirectory, '.gitignore');
-
-  if (fs.existsSync(gitignorePath)) {
-    const content = fs.readFileSync(gitignorePath, 'utf8');
-    // Check if the file (or a glob covering it) is already listed
-    if (content.split('\n').some((line) => line.trim() === envFileName)) {
-      return;
-    }
-    const newContent = content.endsWith('\n')
-      ? `${content}${envFileName}\n`
-      : `${content}\n${envFileName}\n`;
-    fs.writeFileSync(gitignorePath, newContent, 'utf8');
-  } else {
-    fs.writeFileSync(gitignorePath, `${envFileName}\n`, 'utf8');
-  }
+  ensureGitignoreEntry(workingDirectory, envFileName);
 }
 
 /**
@@ -592,6 +612,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         ? downloadSkill(skill, workingDirectory)
         : installBundledSkill(args.skillId, workingDirectory);
       if (result.success) {
+        ensureGitignoreEntry(workingDirectory, '.claude/skills/', {
+          coveredBy: ['.claude/', '.claude'],
+        });
         return {
           content: [
             {

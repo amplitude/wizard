@@ -5,6 +5,7 @@ import * as os from 'os';
 import {
   resolveEnvPath,
   ensureGitignoreCoverage,
+  ensureGitignoreEntry,
   parseEnvKeys,
   mergeEnvValues,
   persistEventPlan,
@@ -207,6 +208,64 @@ describe('ensureGitignoreCoverage', () => {
     const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
     // Should not duplicate — the trim check should match
     expect(content).toBe('  .env.local  \n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureGitignoreEntry (directory patterns + coveredBy)
+// ---------------------------------------------------------------------------
+
+describe('ensureGitignoreEntry', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('creates .gitignore with directory entry when file does not exist', () => {
+    ensureGitignoreEntry(tmpDir, '.claude/skills/');
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('.claude/skills/\n');
+  });
+
+  it('appends directory entry to existing .gitignore', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules\n');
+    ensureGitignoreEntry(tmpDir, '.claude/skills/');
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('node_modules\n.claude/skills/\n');
+  });
+
+  it('treats trailing-slash and no-trailing-slash as equivalent', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), '.claude/skills\n');
+    ensureGitignoreEntry(tmpDir, '.claude/skills/');
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('.claude/skills\n');
+  });
+
+  it('skips append when a broader pattern in coveredBy is present', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), '.claude/\n');
+    ensureGitignoreEntry(tmpDir, '.claude/skills/', {
+      coveredBy: ['.claude/', '.claude'],
+    });
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('.claude/\n');
+  });
+
+  it('appends when coveredBy patterns are absent', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'dist\n');
+    ensureGitignoreEntry(tmpDir, '.claude/skills/', {
+      coveredBy: ['.claude/', '.claude'],
+    });
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('dist\n.claude/skills/\n');
+  });
+
+  it('appends with newline if .gitignore lacks trailing newline', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'dist');
+    ensureGitignoreEntry(tmpDir, '.claude/skills/');
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('dist\n.claude/skills/\n');
   });
 });
 
