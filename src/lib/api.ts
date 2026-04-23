@@ -230,6 +230,60 @@ export interface CreateProjectResult {
   name: string;
 }
 
+function fallbackCreateProjectErrorForStatus(
+  status: number,
+  url: string,
+): ApiError {
+  // If the backend error body is unavailable or malformed, preserve the
+  // HTTP-specific meaning so callers don't receive a vague generic error.
+  if (status === 400) {
+    return new ApiError(
+      'Invalid request while creating project',
+      status,
+      url,
+      'INVALID_REQUEST',
+    );
+  }
+  if (status === 402) {
+    return new ApiError(
+      "Your org has reached its project quota. Create one in Amplitude settings and try again.",
+      status,
+      url,
+      'QUOTA_REACHED',
+    );
+  }
+  if (status === 403) {
+    return new ApiError(
+      "You don't have permission to create projects in this org.",
+      status,
+      url,
+      'FORBIDDEN',
+    );
+  }
+  if (status === 409) {
+    return new ApiError(
+      'A project with this name already exists.',
+      status,
+      url,
+      'NAME_TAKEN',
+    );
+  }
+  if (status === 429) {
+    return new ApiError(
+      'Rate limited while creating project. Please wait a moment and retry.',
+      status,
+      url,
+      'INTERNAL',
+    );
+  }
+  return new ApiError(
+    `Failed to create project (HTTP ${status})`,
+    status,
+    url,
+    'INTERNAL',
+  );
+}
+
 /** Max project-name length accepted by the backend (inclusive). */
 export const PROJECT_NAME_MAX_LENGTH = 255;
 
@@ -336,41 +390,20 @@ export async function createAmplitudeApp(
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
-        // Treat 4xx/5xx as normal responses so we can surface the backend's
-        // structured error payload without axios re-wrapping it.
-        validateStatus: () => true,
         timeout: 20_000,
       },
     );
 
-    if (response.status >= 200 && response.status < 300) {
-      const parsed = CreateProjectSuccessSchema.parse(response.data);
-      // Best-effort analytics — `apiKey` intentionally omitted so it never
-      // leaves this function in plaintext.
-      analytics.wizardCapture('Project Created', {
-        source: 'wizard_cli',
-        app_id: parsed.appId,
-        zone,
-        org_id: input.orgId,
-      });
-      return parsed;
-    }
-
-    // Attempt to parse the structured error body. If it doesn't match the
-    // schema, fall through to a generic INTERNAL error so callers still get a
-    // usable code.
-    const errBody = CreateProjectErrorSchema.safeParse(response.data);
-    if (errBody.success) {
-      const { code, message } = errBody.data.error;
-      throw new ApiError(message, response.status, url, code);
-    }
-
-    throw new ApiError(
-      `Failed to create project (HTTP ${response.status})`,
-      response.status,
-      url,
-      'INTERNAL',
-    );
+    const parsed = CreateProjectSuccessSchema.parse(response.data);
+    // Best-effort analytics — `apiKey` intentionally omitted so it never
+    // leaves this function in plaintext.
+    analytics.wizardCapture('Project Created', {
+      source: 'wizard_cli',
+      app_id: parsed.appId,
+      zone,
+      org_id: input.orgId,
+    });
+    return parsed;
   } catch (error) {
     // Re-throw our own ApiError instances untouched.
     if (error instanceof ApiError) {
@@ -378,11 +411,32 @@ export async function createAmplitudeApp(
       throw error;
     }
 
-    // Axios errors from network failures (DNS, timeout, etc.) — map to INTERNAL.
+    // Axios errors include non-2xx responses and network failures.
     if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      if (status) {
+        // Preferred path: parse the backend's structured error payload.
+        const errBody = CreateProjectErrorSchema.safeParse(error.response?.data);
+        if (errBody.success) {
+          const { code, message } = errBody.data.error;
+          const apiError = new ApiError(message, status, url, code);
+          analytics.captureException(apiError, { endpoint: url, code });
+          throw apiError;
+        }
+
+        // If the payload shape is unexpected, preserve HTTP semantics (e.g. 429).
+        const apiError = fallbackCreateProjectErrorForStatus(status, url);
+        analytics.captureException(apiError, {
+          endpoint: url,
+          code: apiError.code,
+        });
+        throw apiError;
+      }
+
+      // Network failures (DNS, timeout, reset, etc.) have no HTTP response.
       const apiError = new ApiError(
         error.message || 'Network error creating project',
-        error.response?.status,
+        undefined,
         url,
         'INTERNAL',
       );

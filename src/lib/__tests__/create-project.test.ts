@@ -39,6 +39,19 @@ const mockedAxios = axios as unknown as {
   post: ReturnType<typeof vi.fn>;
 };
 
+function makeAxiosError(
+  status: number,
+  data: unknown,
+  message = `Request failed with status code ${status}`,
+) {
+  return Object.assign(new Error(message), {
+    isAxiosError: true,
+    response: { status, data },
+    config: { url: 'https://example.test/wizard/projects' },
+    toJSON: () => ({}),
+  });
+}
+
 describe('validateProjectName', () => {
   it('accepts ordinary names', () => {
     expect(validateProjectName('My Project')).toBeNull();
@@ -145,10 +158,9 @@ describe('createAmplitudeApp', () => {
     ['INVALID_REQUEST', 400],
     ['INTERNAL', 500],
   ] as const)('maps %s error code from backend', async (code, status) => {
-    mockedAxios.post.mockResolvedValueOnce({
-      status,
-      data: { error: { code, message: `something about ${code}` } },
-    });
+    mockedAxios.post.mockRejectedValueOnce(
+      makeAxiosError(status, { error: { code, message: `something about ${code}` } }),
+    );
 
     await expect(
       createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
@@ -160,13 +172,23 @@ describe('createAmplitudeApp', () => {
   });
 
   it('falls back to INTERNAL when the error body is malformed', async () => {
-    mockedAxios.post.mockResolvedValueOnce({
-      status: 500,
-      data: { something: 'unexpected' },
-    });
+    mockedAxios.post.mockRejectedValueOnce(
+      makeAxiosError(500, { something: 'unexpected' }),
+    );
     await expect(
       createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
     ).rejects.toMatchObject({ code: 'INTERNAL', statusCode: 500 });
+  });
+
+  it('preserves 429 meaning when error body is malformed', async () => {
+    mockedAxios.post.mockRejectedValueOnce(makeAxiosError(429, {}));
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL',
+      statusCode: 429,
+      message: expect.stringContaining('Rate limited'),
+    });
   });
 
   it('validates name locally before hitting the network', async () => {
