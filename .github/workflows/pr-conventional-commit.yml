@@ -6,7 +6,7 @@ on:
 
 jobs:
   validate-pr-title:
-    name: Check PR for semantic title
+    name: validate-pr-title
     runs-on: ubuntu-latest
     permissions:
       contents: read
