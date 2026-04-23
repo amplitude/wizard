@@ -34,7 +34,11 @@ type Args = {
   region?: 'us' | 'eu';
 };
 
-export async function runWizard(argv: Args, session?: WizardSession) {
+export async function runWizard(
+  argv: Args,
+  session?: WizardSession,
+  getAdditionalFeatureQueue?: () => readonly import('./lib/wizard-session').AdditionalFeature[],
+) {
   const finalArgs = {
     ...argv,
     ...readEnvironment(),
@@ -123,7 +127,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
   let retry = true;
   while (retry) {
     try {
-      await runAgentWizard(config, session);
+      await runAgentWizard(config, session, getAdditionalFeatureQueue);
       retry = false;
     } catch (error) {
       const errorMessage =

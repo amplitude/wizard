@@ -237,6 +237,7 @@ describe('CI mode validation', () => {
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
       expect.anything(),
+      expect.any(Function),
     );
   });
 
@@ -260,6 +261,7 @@ describe('CI mode validation', () => {
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ apiKey: 'phx_test_key' }),
       expect.objectContaining({ apiKey: 'phx_test_key' }),
+      expect.any(Function),
     );
   });
 
@@ -273,6 +275,7 @@ describe('CI mode validation', () => {
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ ci: false }),
       expect.anything(),
+      expect.any(Function),
     );
   });
 });

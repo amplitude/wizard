@@ -951,6 +951,7 @@ void yargs(hideBin(process.argv))
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
             session,
+            () => session.additionalFeatureQueue,
           );
         })();
       } else if (options.ci || options.yes) {
@@ -971,6 +972,7 @@ void yargs(hideBin(process.argv))
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
             session,
+            () => session.additionalFeatureQueue,
           );
         })();
       } else if (
@@ -1665,6 +1667,7 @@ void yargs(hideBin(process.argv))
                 await lazyRunWizard(
                   options as Parameters<typeof lazyRunWizard>[0],
                   tui.store.session,
+                  () => tui.store.session.additionalFeatureQueue,
                 );
               } else {
                 tui.store.setOutroData({ kind: OutroKind.Success });
@@ -1673,6 +1676,7 @@ void yargs(hideBin(process.argv))
               await lazyRunWizard(
                 options as Parameters<typeof lazyRunWizard>[0],
                 tui.store.session,
+                () => tui.store.session.additionalFeatureQueue,
               );
             }
 

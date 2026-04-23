@@ -3,7 +3,11 @@ import {
   SPINNER_MESSAGE,
   type FrameworkConfig,
 } from './framework-config';
-import { type WizardSession, OutroKind } from './wizard-session';
+import {
+  type WizardSession,
+  OutroKind,
+  type AdditionalFeature,
+} from './wizard-session';
 import {
   tryGetPackageJson,
   isUsingTypeScript,
@@ -65,6 +69,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
 export async function runAgentWizard(
   config: FrameworkConfig,
   session: WizardSession,
+  getAdditionalFeatureQueue?: () => readonly AdditionalFeature[],
 ): Promise<void> {
   if (session.debug) {
     enableDebugLogs();
@@ -331,7 +336,8 @@ export async function runAgentWizard(
       spinnerMessage: SPINNER_MESSAGE,
       successMessage: config.ui.successMessage,
       errorMessage: 'Integration failed',
-      additionalFeatureQueue: () => session.additionalFeatureQueue,
+      additionalFeatureQueue:
+        getAdditionalFeatureQueue ?? (() => session.additionalFeatureQueue),
     },
     middleware,
   );
