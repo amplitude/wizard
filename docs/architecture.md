@@ -490,9 +490,10 @@ WizardSession
 │   dataIngestionConfirmed
 │
 ├─ Feature discovery
-│   discoveredFeatures: DiscoveredFeature[] ('stripe' | 'llm')
+│   discoveredFeatures: DiscoveredFeature[] ('stripe' | 'llm' | 'session_replay')
 │   llmOptIn: boolean
-│   additionalFeatureQueue: AdditionalFeature[] ('llm')
+│   sessionReplayOptIn: boolean
+│   additionalFeatureQueue: AdditionalFeature[] ('llm' | 'session_replay')
 │
 ├─ Post-agent state
 │   mcpComplete, mcpOutcome, mcpInstalledClients[]

@@ -1508,6 +1508,9 @@ void yargs(hideBin(process.argv))
               }
 
               // Feature discovery — deterministic scan of package.json deps
+              const { DiscoveredFeature } = await import(
+                './src/lib/wizard-session.js'
+              );
               try {
                 const { readFileSync } = await import('fs');
                 const pkgPath = join(installDir, 'package.json');
@@ -1520,9 +1523,6 @@ void yargs(hideBin(process.argv))
                   ...pkg.devDependencies,
                 };
                 const depNames = Object.keys(allDeps);
-
-                const { DiscoveredFeature } =
-                  await import('./src/lib/wizard-session.js');
 
                 if (
                   depNames.some((d) =>
@@ -1563,9 +1563,6 @@ void yargs(hideBin(process.argv))
 
               // Session Replay — offered for all browser-based frameworks,
               // independent of package.json contents.
-              const { DiscoveredFeature: SrDF } = await import(
-                './src/lib/wizard-session.js'
-              );
               const BROWSER_REPLAY_INTEGRATIONS = new Set([
                 'nextjs',
                 'vue',
@@ -1576,7 +1573,7 @@ void yargs(hideBin(process.argv))
                 tui.store.session.integration &&
                 BROWSER_REPLAY_INTEGRATIONS.has(tui.store.session.integration)
               ) {
-                tui.store.addDiscoveredFeature(SrDF.SessionReplay);
+                tui.store.addDiscoveredFeature(DiscoveredFeature.SessionReplay);
               }
 
               // Signal detection is done — IntroScreen shows picker or results
