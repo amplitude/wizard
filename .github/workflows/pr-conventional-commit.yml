@@ -12,30 +12,20 @@ jobs:
       contents: read
       pull-requests: read
     steps:
-      - name: PR title is valid
-        if: >
-          startsWith(github.event.pull_request.title, 'feat:') || startsWith(github.event.pull_request.title, 'feat(') ||
-          startsWith(github.event.pull_request.title, 'fix:') || startsWith(github.event.pull_request.title, 'fix(') ||
-          startsWith(github.event.pull_request.title, 'docs:') || startsWith(github.event.pull_request.title, 'docs(') ||
-          startsWith(github.event.pull_request.title, 'test:') || startsWith(github.event.pull_request.title, 'test(') ||
-          startsWith(github.event.pull_request.title, 'ci:') || startsWith(github.event.pull_request.title, 'ci(') ||
-          startsWith(github.event.pull_request.title, 'refactor:') || startsWith(github.event.pull_request.title, 'refactor(') ||
-          startsWith(github.event.pull_request.title, 'perf:') || startsWith(github.event.pull_request.title, 'perf(') ||
-          startsWith(github.event.pull_request.title, 'chore:') || startsWith(github.event.pull_request.title, 'chore(') ||
-          startsWith(github.event.pull_request.title, 'revert:') || startsWith(github.event.pull_request.title, 'revert(')
-        run: |
-          echo 'Title checks passed'
-      - name: PR title is invalid
-        if: >
-          !startsWith(github.event.pull_request.title, 'feat:') && !startsWith(github.event.pull_request.title, 'feat(') &&
-          !startsWith(github.event.pull_request.title, 'fix:') && !startsWith(github.event.pull_request.title, 'fix(') &&
-          !startsWith(github.event.pull_request.title, 'docs:') && !startsWith(github.event.pull_request.title, 'docs(') &&
-          !startsWith(github.event.pull_request.title, 'test:') && !startsWith(github.event.pull_request.title, 'test(') &&
-          !startsWith(github.event.pull_request.title, 'ci:') && !startsWith(github.event.pull_request.title, 'ci(') &&
-          !startsWith(github.event.pull_request.title, 'refactor:') && !startsWith(github.event.pull_request.title, 'refactor(') &&
-          !startsWith(github.event.pull_request.title, 'perf:') && !startsWith(github.event.pull_request.title, 'perf(') &&
-          !startsWith(github.event.pull_request.title, 'chore:') && !startsWith(github.event.pull_request.title, 'chore(') &&
-          !startsWith(github.event.pull_request.title, 'revert:') && !startsWith(github.event.pull_request.title, 'revert(')
-        run: |
-          echo 'Pull request title is not a valid conventional commit. Allowed types: feat, fix, docs, test, ci, refactor, perf, chore, revert.'
-          exit 1
+      - name: Validate PR title
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          script: |
+            const title = context.payload.pull_request.title;
+            const types = ['feat', 'fix', 'docs', 'test', 'ci', 'refactor', 'perf', 'chore', 'revert'];
+            const conventionalCommitRegex = /^(feat|fix|docs|test|ci|refactor|perf|chore|revert)(\([^)]+\))?!?:\s*.+/;
+
+            if (!conventionalCommitRegex.test(title)) {
+              core.setFailed(
+                `Pull request title is not a valid conventional commit. Allowed types: ${types.join(', ')}.\n` +
+                `Title must be lowercase and match pattern: type(scope)?: description or type(scope)!: description`
+              );
+              return;
+            }
+
+            core.info('PR title is a valid conventional commit');
