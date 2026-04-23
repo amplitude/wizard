@@ -83,7 +83,7 @@ describe('performDirectSignup', () => {
     }
   });
 
-  it('returns error with "Unexpected" message on unrecognized response shape', async () => {
+  it('returns error with "Unexpected" message on unrecognized 2xx response shape', async () => {
     server.use(http.post(PROVISIONING_URL, () => HttpResponse.json({})));
 
     const result = await performDirectSignup(INPUT);
@@ -91,6 +91,41 @@ describe('performDirectSignup', () => {
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
       expect(result.message).toContain('Unexpected');
+    }
+  });
+
+  it('surfaces 429 rate-limit with its HTTP meaning on unrecognized body', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json(
+          { message: 'rate limited upstream' },
+          { status: 429 },
+        ),
+      ),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('429');
+      expect(result.message.toLowerCase()).toContain('rate limited');
+    }
+  });
+
+  it('surfaces non-429 4xx as HTTP client error rather than "Unexpected response"', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({ unknown: 'shape' }, { status: 403 }),
+      ),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toContain('403');
+      expect(result.message).not.toContain('Unexpected');
     }
   });
 

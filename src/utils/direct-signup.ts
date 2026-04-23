@@ -124,6 +124,19 @@ export async function performDirectSignup(
 
   const parsedCode = OAuthCodeSchema.safeParse(response.data);
   if (!parsedCode.success) {
+    if (response.status === 429) {
+      log.warn('[direct-signup] provisioning rate limited');
+      return { kind: 'error', message: 'Provisioning rate limited (HTTP 429)' };
+    }
+    if (response.status >= 400) {
+      log.warn('[direct-signup] provisioning client error', {
+        status: response.status,
+      });
+      return {
+        kind: 'error',
+        message: `Provisioning failed with HTTP ${response.status}`,
+      };
+    }
     log.error('[direct-signup] unexpected response shape', {
       status: response.status,
     });
