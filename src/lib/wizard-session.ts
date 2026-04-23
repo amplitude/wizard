@@ -433,7 +433,7 @@ export function buildSession(args: {
    * When provided, pre-populates `region` so RegionSelect is skipped in
    * the TUI flow too.
    */
-  zone?: 'us' | 'eu';
+  zone?: AmplitudeZone;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -479,12 +479,8 @@ export function buildSession(args: {
     activationLevel: null,
     activationOptionsComplete: false,
     snippetConfigured: false,
-    // --zone CLI flag pre-populates region so non-TUI signup picks the
-    // right data center (the backend does not route across regions —
-    // hitting the US endpoint with an EU-intending email would silently
-    // provision the account in US). When omitted, region stays null and
-    // the canonical zone-resolution chain runs.
-    region: parsed.success ? validated.zone ?? null : args.zone ?? null,
+    // --zone pre-populates region so non-TUI signup targets the right DC.
+    region: validated.zone ?? null,
     regionForced: false,
 
     runPhase: RunPhase.Idle,

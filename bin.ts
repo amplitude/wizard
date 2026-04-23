@@ -76,6 +76,7 @@ if (!satisfies(process.version, NODE_VERSION_RANGE)) {
 }
 
 import { isNonInteractiveEnvironment } from './src/utils/environment';
+import type { AmplitudeZone } from './src/lib/constants';
 import { getUI, setUI } from './src/ui';
 import { LoggingUI } from './src/ui/logging-ui';
 import {
@@ -140,7 +141,7 @@ const buildSessionFromOptions = async (
     menu: options.menu as boolean | undefined,
     signupEmail: options.email as string | undefined,
     signupFullName: options['full-name'] as string | undefined,
-    zone: options.zone as 'us' | 'eu' | undefined,
+    zone: options.zone as AmplitudeZone | undefined,
     integration: options.integration as Parameters<
       typeof buildSession
     >[0]['integration'],
