@@ -883,6 +883,14 @@ describe('--email and --full-name flags', () => {
       'ada@example.com',
       '--full-name',
       'Ada Lovelace',
+      // `--region` is required in non-TUI modes now — without it,
+      // `tryResolveZone` returns null and `process.exit` fires before
+      // `performSignupOrAuth` is ever called. In test, `process.exit`
+      // is a no-op so the assertion would pass for the wrong reason
+      // (execution falling through with `zone: null`). Pass a real
+      // region so the production control flow is exercised.
+      '--region',
+      'us',
       '--install-dir',
       '/tmp/test',
     ]);
