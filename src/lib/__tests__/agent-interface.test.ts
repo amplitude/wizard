@@ -14,6 +14,7 @@ import {
   buildWizardMetadata,
   isSkillInstallCommand,
   matchesAllowedPrefix,
+  parseEventPlanContent,
   AgentErrorType,
   AgentSignals,
 } from '../agent-interface';
@@ -981,5 +982,86 @@ describe('buildWizardMetadata', () => {
   it('ignores unrelated flags', () => {
     const result = buildWizardMetadata({ 'other-flag': 'value' });
     expect(result).toEqual({ VARIANT: 'base' });
+  });
+});
+
+describe('parseEventPlanContent', () => {
+  it('parses the canonical {name, description} shape', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([{ name: 'user signed up', description: 'Fires when…' }]),
+    );
+    expect(out).toEqual([
+      { name: 'user signed up', description: 'Fires when…' },
+    ]);
+  });
+
+  it('accepts snake_case event_name (observed from the agent in the wild)', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        {
+          event_name: 'External Resource Opened',
+          description: 'Fires when a user opens an external link',
+          file_path: 'src/app/page.tsx',
+        },
+      ]),
+    );
+    expect(out).toEqual([
+      {
+        name: 'External Resource Opened',
+        description: 'Fires when a user opens an external link',
+      },
+    ]);
+  });
+
+  it('accepts camelCase eventName', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([{ eventName: 'a', description: 'b' }]),
+    );
+    expect(out).toEqual([{ name: 'a', description: 'b' }]);
+  });
+
+  it('accepts plain "event" key', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([{ event: 'a', description: 'b' }]),
+    );
+    expect(out).toEqual([{ name: 'a', description: 'b' }]);
+  });
+
+  it('prefers name when multiple name fields coexist', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        { name: 'preferred', eventName: 'ignored', event_name: 'ignored' },
+      ]),
+    );
+    expect(out?.[0]?.name).toBe('preferred');
+  });
+
+  it('falls back to eventDescriptionAndReasoning when description is missing', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        { name: 'a', eventDescriptionAndReasoning: 'long form reasoning' },
+      ]),
+    );
+    expect(out?.[0]?.description).toBe('long form reasoning');
+  });
+
+  it('returns an empty-string name when no name field is present', () => {
+    const out = parseEventPlanContent(JSON.stringify([{ description: 'x' }]));
+    expect(out).toEqual([{ name: '', description: 'x' }]);
+  });
+
+  it('returns null for invalid JSON', () => {
+    expect(parseEventPlanContent('{not json')).toBeNull();
+  });
+
+  it('returns null when the payload is not an array', () => {
+    expect(parseEventPlanContent('{"name":"x"}')).toBeNull();
+  });
+
+  it('tolerates extra unknown fields (looseObject)', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([{ name: 'a', description: 'b', file_path: 'x.ts' }]),
+    );
+    expect(out).toEqual([{ name: 'a', description: 'b' }]);
   });
 });

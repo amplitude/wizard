@@ -24,6 +24,8 @@ type DjangoContext = {
 export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
   metadata: {
     name: 'Django',
+    glyph: '🎸',
+    glyphColor: '#44B78B',
     integration: Integration.django,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',

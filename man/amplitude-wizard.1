@@ -39,14 +39,6 @@ Install the Amplitude MCP server into supported AI clients (Claude, Cursor, etc.
 .TP
 \fBmcp remove\fR
 Remove the Amplitude MCP server from supported AI clients.
-.TP
-\fBcompletion\fR
-Print a shell completion script for bash or zsh. Source it in your shell rc:
-.RS
-.nf
-eval "$(amplitude\-wizard completion)"
-.fi
-.RE
 .SH OPTIONS
 .SS Global options
 .TP
@@ -154,12 +146,6 @@ amplitude\-wizard \-\-ci \-\-api\-key <key> \-\-install\-dir .
 Force Next.js integration without auto\-detection:
 .nf
 amplitude\-wizard \-\-integration nextjs
-.fi
-.TP
-Set up shell completions (bash/zsh):
-.nf
-echo 'eval "$(amplitude\-wizard completion)"' >> ~/.zshrc
-source ~/.zshrc
 .fi
 .TP
 Log in to the EU data center:

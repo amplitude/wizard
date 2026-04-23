@@ -17,7 +17,11 @@ import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
-import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
+import {
+  ConfirmationInput,
+  PickerMenu,
+  TerminalLink,
+} from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import type {
@@ -476,7 +480,7 @@ export const McpScreen = ({
           <Text bold color={Colors.accent}>
             {isRemove
               ? 'Remove Amplitude from your AI tools'
-              : 'Chat with your Amplitude data'}
+              : '💬 Chat with your Amplitude data'}
           </Text>
           {!isRemove && (
             <Text color={Colors.muted}>
@@ -666,12 +670,18 @@ export const McpScreen = ({
                                 first to pick up the new slash commands.
                               </Text>
                               <Text color={Colors.muted}>
-                                Plugin docs: {OUTBOUND_URLS.claudePluginDocs}
+                                Plugin docs:{' '}
+                                <TerminalLink url={OUTBOUND_URLS.claudePluginDocs}>
+                                  {OUTBOUND_URLS.claudePluginDocs}
+                                </TerminalLink>
                               </Text>
                             </>
                           )}
                         <Text color={Colors.muted}>
-                          MCP docs: {OUTBOUND_URLS.mcpDocs}
+                          MCP docs:{' '}
+                          <TerminalLink url={OUTBOUND_URLS.mcpDocs}>
+                            {OUTBOUND_URLS.mcpDocs}
+                          </TerminalLink>
                         </Text>
                         {resultClients.some(
                           (n) => n !== CLAUDE_CODE_CLIENT_NAME,

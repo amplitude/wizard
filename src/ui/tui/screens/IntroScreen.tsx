@@ -222,6 +222,11 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           {frameworkLabel && (
             <Text>
               <Text color={Colors.body}>Framework </Text>
+              {config?.metadata.glyph && (
+                <Text color={config.metadata.glyphColor}>
+                  {config.metadata.glyph}{' '}
+                </Text>
+              )}
               <Text color={Colors.secondary}>
                 {frameworkLabel}
                 {!manuallySelected && ' (detected)'}
@@ -310,10 +315,13 @@ const FrameworkPicker = ({
   useEffect(() => {
     void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
       setOptions(
-        PICKER_ORDER.map((integration) => ({
-          label: FRAMEWORK_REGISTRY[integration].metadata.name,
-          value: integration,
-        })),
+        PICKER_ORDER.map((integration) => {
+          const { glyph, name } = FRAMEWORK_REGISTRY[integration].metadata;
+          return {
+            label: glyph ? `${glyph}  ${name}` : name,
+            value: integration,
+          };
+        }),
       );
     });
   }, []);

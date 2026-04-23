@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.3](https://github.com/amplitude/wizard/compare/wizard-v1.4.2...wizard-v1.4.3) (2026-04-21)
+
+
+### Miscellaneous Chores
+
+* force release 1.4.3 to validate OIDC publish ([#190](https://github.com/amplitude/wizard/issues/190)) ([10ba241](https://github.com/amplitude/wizard/commit/10ba241fa6083dc79cc3dca836a57f3c899074ae))
+
+## [1.4.2](https://github.com/amplitude/wizard/compare/wizard-v1.4.1...wizard-v1.4.2) (2026-04-21)
+
+
+### Bug Fixes
+
+* detect npx invocation when it resolves to a local install ([#183](https://github.com/amplitude/wizard/issues/183)) ([dae9bc9](https://github.com/amplitude/wizard/commit/dae9bc962bc5a928ec5a737d0868758382923ad2))
+
+## [1.4.1](https://github.com/amplitude/wizard/compare/wizard-v1.4.0...wizard-v1.4.1) (2026-04-21)
+
+
+### Bug Fixes
+
+* detect npx invocation when it resolves to a local install ([#183](https://github.com/amplitude/wizard/issues/183)) ([dae9bc9](https://github.com/amplitude/wizard/commit/dae9bc962bc5a928ec5a737d0868758382923ad2))
+
 ## [1.4.0](https://github.com/amplitude/wizard/compare/wizard-v1.3.0...wizard-v1.4.0) (2026-04-18)
 
 

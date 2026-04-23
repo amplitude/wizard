@@ -85,7 +85,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
           <Text color={Colors.success} bold>
-            {Icons.checkmark} Amplitude is live!
+            🎉 Amplitude is live!
           </Text>
           {store.eventPlan.length > 0 && (
             <Text color={Colors.body}>
@@ -128,7 +128,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           {store.session.checklistDashboardUrl && (
             <Box marginTop={1} flexDirection="column">
               <Text color={Colors.success} bold>
-                {Icons.checkmark} Dashboard ready:
+                📊 Dashboard ready:
               </Text>
               <Text color={Colors.muted}>
                 {store.session.checklistDashboardUrl}

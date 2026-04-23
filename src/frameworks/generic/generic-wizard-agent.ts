@@ -2,10 +2,13 @@
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
 import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { BrandColors } from '../../lib/brand-colors';
 
 export const GENERIC_AGENT_CONFIG: FrameworkConfig = {
   metadata: {
     name: 'Generic',
+    glyph: '🧰',
+    glyphColor: BrandColors.gray60,
     integration: Integration.generic,
     docsUrl: 'https://amplitude.com/docs/get-started/amplitude-quickstart',
   },

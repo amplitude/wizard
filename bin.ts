@@ -79,10 +79,10 @@ import { isNonInteractiveEnvironment } from './src/utils/environment';
 import type { AmplitudeZone } from './src/lib/constants';
 import { getUI, setUI } from './src/ui';
 import { LoggingUI } from './src/ui/logging-ui';
-import {
-  ZSH_COMPLETION_SCRIPT,
-  BASH_COMPLETION_SCRIPT,
-} from './src/utils/shell-completions';
+import { cleanupShellCompletionLine } from './src/utils/cleanup-shell-rc';
+// Remove the broken `eval "$(amplitude-wizard completion)"` line that earlier
+// versions silently appended to the user's shell rc.
+cleanupShellCompletionLine();
 import { analytics } from './src/utils/analytics';
 import { ExitCode } from './src/lib/exit-codes';
 import { detectNestedAgent } from './src/lib/detect-nested-agent';
@@ -116,6 +116,14 @@ const lazyRunWizard = async (
 const CLI_INVOCATION: string = (() => {
   const scriptPath = process.argv[1] ?? '';
   if (scriptPath.includes('/_npx/') || scriptPath.includes('\\_npx\\')) {
+    return 'npx @amplitude/wizard';
+  }
+  // npm >= 7 implements `npx` as `npm exec`, which always sets
+  // npm_command=exec — even when npx resolves to an already-installed copy
+  // (e.g. running `npx @amplitude/wizard` from inside this repo, or from
+  // a project that depends on it). argv[1] doesn't contain /_npx/ in that
+  // case, so this catches it.
+  if (process.env.npm_command === 'exec') {
     return 'npx @amplitude/wizard';
   }
   return 'amplitude-wizard';
@@ -639,6 +647,7 @@ if (process.env.NODE_ENV === 'test') {
 }
 
 void yargs(hideBin(process.argv))
+  .scriptName(CLI_INVOCATION)
   .env('AMPLITUDE_WIZARD')
   // global options
   .options({
@@ -941,12 +950,6 @@ void yargs(hideBin(process.argv))
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
-          // Silently install shell completions on first run.
-          const { installCompletions } = await import(
-            './src/utils/shell-completions.js'
-          );
-          installCompletions();
-
           try {
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
             const tui = startTUI(WIZARD_VERSION);
@@ -1108,31 +1111,21 @@ void yargs(hideBin(process.argv))
 
             // Load event plan from a previous run (if it exists) so the
             // Events tab is available immediately on returning runs.
+            // Dynamic-import keeps the Claude Agent SDK out of bin.ts load.
             try {
               const fs = await import('fs');
+              const { parseEventPlanContent } = await import(
+                './src/lib/agent-interface.js'
+              );
               const evtPath = resolve(
                 session.installDir,
                 '.amplitude-events.json',
               );
-              const evtContent = fs.readFileSync(evtPath, 'utf-8');
-              const evtSchema = z.array(
-                z.object({
-                  name: z.string().optional(),
-                  event: z.string().optional(),
-                  eventName: z.string().optional(),
-                  description: z.string().optional(),
-                  eventDescriptionAndReasoning: z.string().optional(),
-                }),
+              const events = parseEventPlanContent(
+                fs.readFileSync(evtPath, 'utf-8'),
               );
-              const evtResult = evtSchema.safeParse(JSON.parse(evtContent));
-              if (evtResult.success && evtResult.data.length > 0) {
-                tui.store.setEventPlan(
-                  evtResult.data.map((e) => ({
-                    name: e.name ?? e.event ?? e.eventName ?? '',
-                    description:
-                      e.description ?? e.eventDescriptionAndReasoning ?? '',
-                  })),
-                );
+              if (events && events.length > 0) {
+                tui.store.setEventPlan(events);
               }
             } catch {
               // No event plan file yet — that's fine
@@ -2294,18 +2287,6 @@ void yargs(hideBin(process.argv))
       .demandCommand(1, 'You must specify a subcommand (add, remove, or serve)')
       .help();
   })
-  .command(
-    'completion',
-    'Print shell completion script for bash/zsh',
-    () => {},
-    () => {
-      const script = (process.env.SHELL ?? '').endsWith('zsh')
-        ? ZSH_COMPLETION_SCRIPT
-        : BASH_COMPLETION_SCRIPT;
-      process.stdout.write(script + '\n');
-      process.exit(0);
-    },
-  )
   .command(
     'manifest',
     'Print a machine-readable description of the CLI (for AI agents)',
