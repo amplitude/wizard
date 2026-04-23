@@ -140,6 +140,7 @@ const buildSessionFromOptions = async (
     menu: options.menu as boolean | undefined,
     signupEmail: options.email as string | undefined,
     signupFullName: options['full-name'] as string | undefined,
+    zone: options.zone as 'us' | 'eu' | undefined,
     integration: options.integration as Parameters<
       typeof buildSession
     >[0]['integration'],
@@ -461,13 +462,22 @@ const runDirectSignupIfRequested = async (
   const { performSignupOrAuth, trackSignupAttempt } = await import(
     './src/utils/signup-or-auth.js'
   );
-  const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
-  const { resolveZone } = await import('./src/lib/zone-resolution.js');
+  const { tryResolveZone } = await import('./src/lib/zone-resolution.js');
 
-  // Single source of truth — see src/lib/zone-resolution.ts. Does not mutate
-  // session.region; `resolveCredentials` derives the same zone independently
-  // when it runs later.
-  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
+  // Non-TUI modes have no RegionSelect screen to disambiguate — and the
+  // backend does not route cross-region, so POSTing an EU-intending email
+  // to the US provisioning endpoint would silently create the account in
+  // the US data center. Require an explicit signal (--zone flag, project
+  // config, or stored user) before sending the signup request. Exit with
+  // AUTH_REQUIRED so orchestrators see a structured failure rather than a
+  // misrouted account.
+  const zone = tryResolveZone(session);
+  if (zone == null) {
+    getUI().log.error(
+      'Cannot determine data center region for --signup. Pass --zone us or --zone eu.',
+    );
+    process.exit(ExitCode.AUTH_REQUIRED);
+  }
   try {
     const tokens = await performSignupOrAuth({
       email: session.signupEmail,
@@ -718,6 +728,18 @@ void yargs(hideBin(process.argv))
         }
         return value;
       },
+    },
+    zone: {
+      // Required for --signup in non-TUI modes: the backend does not
+      // route across regions, so the client must POST to the correct
+      // provisioning endpoint (us or eu). In the TUI this is covered
+      // by the RegionSelect screen; agent/CI/classic have no prompt,
+      // so this flag is the only way to signal regional intent on a
+      // first-time signup. When provided in TUI mode, pre-populates
+      // the zone and skips RegionSelect.
+      describe: 'data center region for --signup in non-interactive modes',
+      choices: ['us', 'eu'] as const,
+      type: 'string',
     },
   })
   .command(

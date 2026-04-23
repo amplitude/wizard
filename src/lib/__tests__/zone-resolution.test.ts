@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { resolveZone } from '../zone-resolution.js';
+import { resolveZone, tryResolveZone } from '../zone-resolution.js';
 import { buildSession } from '../wizard-session.js';
 
 vi.mock('../ampli-config.js', () => ({
@@ -108,5 +108,60 @@ describe('resolveZone', () => {
 
     const session = buildSession({});
     expect(resolveZone(session, 'eu')).toBe('eu');
+  });
+});
+
+describe('tryResolveZone', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('returns null when no zone signal is present', async () => {
+    const { readAmpliConfig } = await import('../ampli-config.js');
+    const { getStoredUser } = await import('../../utils/ampli-settings.js');
+    vi.mocked(readAmpliConfig).mockReturnValue({
+      ok: false,
+      error: 'not_found',
+    });
+    vi.mocked(getStoredUser).mockReturnValue(undefined);
+
+    const session = buildSession({});
+    expect(tryResolveZone(session)).toBeNull();
+  });
+
+  it('returns session.region when --zone pre-populates it', async () => {
+    const { readAmpliConfig } = await import('../ampli-config.js');
+    const { getStoredUser } = await import('../../utils/ampli-settings.js');
+    vi.mocked(readAmpliConfig).mockReturnValue({
+      ok: false,
+      error: 'not_found',
+    });
+    vi.mocked(getStoredUser).mockReturnValue(undefined);
+
+    const session = buildSession({ zone: 'eu' });
+    expect(tryResolveZone(session)).toBe('eu');
+  });
+
+  it('returns ampli.json Zone when set and no explicit flag', async () => {
+    const { readAmpliConfig } = await import('../ampli-config.js');
+    vi.mocked(readAmpliConfig).mockReturnValue({
+      ok: true,
+      config: { Zone: 'eu' },
+    });
+
+    const session = buildSession({});
+    expect(tryResolveZone(session)).toBe('eu');
+  });
+});
+
+describe('buildSession with --zone flag', () => {
+  it('pre-populates session.region from the zone arg', () => {
+    const session = buildSession({ zone: 'eu' });
+    expect(session.region).toBe('eu');
+  });
+
+  it('leaves session.region null when zone is omitted', () => {
+    const session = buildSession({});
+    expect(session.region).toBeNull();
   });
 });

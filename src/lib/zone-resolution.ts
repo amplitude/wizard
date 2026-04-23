@@ -12,10 +12,14 @@ import type { AmplitudeZone } from './constants.js';
 import { readAmpliConfig } from './ampli-config.js';
 import { getStoredUser } from '../utils/ampli-settings.js';
 
-export function resolveZone(
-  session: WizardSession,
-  fallback: AmplitudeZone,
-): AmplitudeZone {
+/**
+ * Attempt to resolve the zone from explicit signals only (no fallback).
+ * Returns null when no signal is available — callers that require a
+ * definite regional intent (e.g. direct signup, which POSTs to
+ * region-specific provisioning endpoints) should treat `null` as "user
+ * must be asked" rather than silently defaulting to US.
+ */
+export function tryResolveZone(session: WizardSession): AmplitudeZone | null {
   // Tier 1: explicit user intent for this run.
   if (session.region != null) {
     return session.region;
@@ -36,6 +40,12 @@ export function resolveZone(
     return storedUser.zone;
   }
 
-  // Tier 4: caller-supplied fallback.
-  return fallback;
+  return null;
+}
+
+export function resolveZone(
+  session: WizardSession,
+  fallback: AmplitudeZone,
+): AmplitudeZone {
+  return tryResolveZone(session) ?? fallback;
 }
