@@ -109,6 +109,10 @@ export class Analytics {
   setDistinctId(distinctId: string) {
     this.distinctId = distinctId;
     setSentryUser(distinctId);
+    // Re-evaluate flags now that we know the user_id. Fire-and-forget —
+    // a no-op if the Experiment client hasn't been initialized yet, and
+    // flag-refresh failures are non-fatal.
+    void this.refreshFlags().catch(() => {});
   }
 
   /**
