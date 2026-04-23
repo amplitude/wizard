@@ -30,6 +30,7 @@ vi.mock('../../../utils/analytics.js', () => ({
     identifyUser: vi.fn(),
     shutdown: vi.fn().mockResolvedValue(undefined),
     isFeatureFlagEnabled: vi.fn().mockReturnValue(true),
+    captureException: vi.fn(),
   },
   sessionProperties: vi.fn(() => ({})),
   sessionPropertiesCompact: vi.fn(() => ({})),

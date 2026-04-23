@@ -1033,11 +1033,14 @@ void yargs(hideBin(process.argv))
               const { storeToken } = await import(
                 './src/utils/ampli-settings.js'
               );
+              const { resolveZone } = await import(
+                './src/lib/zone-resolution.js'
+              );
 
-              const zone =
-                tui.store.session.region === 'eu'
-                  ? 'eu'
-                  : DEFAULT_AMPLITUDE_ZONE;
+              const zone = resolveZone(
+                tui.store.session,
+                DEFAULT_AMPLITUDE_ZONE,
+              );
 
               let auth = await performAmplitudeAuth({ zone, forceFresh });
 
