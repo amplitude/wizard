@@ -243,16 +243,9 @@ export async function performSignupOrAuth(
       zone: input.zone,
     };
   }
-  // Persist tokens BEFORE emitting telemetry. If persistence throws (disk
-  // full, permission error), the exception propagates to the caller's
-  // outer catch which emits `wrapper_exception` — making that the sole
-  // event for the attempt. Tracking success or user_fetch_failed first
-  // would double-count the attempt in telemetry.
-  //
-  // `replaceStoredUser` (not `storeToken`) so any prior stored account is
-  // wiped: signup expresses "this account replaces any prior one," and
-  // `getStoredUser()` returns only the first real user in the file, so a
-  // non-destructive write would strand the new account behind the old one.
+  // Persist BEFORE telemetry: a disk/permission failure must propagate to
+  // the outer catch so `wrapper_exception` is the sole event — emitting
+  // success or user_fetch_failed first would double-count the attempt.
   replaceStoredUser(user, tokens);
   if (fetchResult.ok) {
     trackSignupAttempt({

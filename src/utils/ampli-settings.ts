@@ -62,6 +62,10 @@ function userKey(userId: string, zone: AmplitudeZone): string {
     : `User-${safeId}`;
 }
 
+function isUserKey(key: string): boolean {
+  return key.startsWith('User-') || key.startsWith('User[');
+}
+
 const StoredUserSchema = z.object({
   id: z.string(),
   firstName: z.string(),
@@ -81,7 +85,7 @@ export function getStoredUser(configPath?: string): StoredUser | undefined {
   const config = readConfig(configPath);
   let fallback: StoredUser | undefined;
   for (const [key, value] of Object.entries(config)) {
-    if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
+    if (!isUserKey(key)) continue;
     const entry = UserEntrySchema.safeParse(value);
     if (!entry.success || !entry.data.User) continue;
     const user = entry.data.User as StoredUser;
@@ -135,7 +139,7 @@ export function getStoredToken(
 
   // Try all stored users
   for (const key of Object.keys(config)) {
-    if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
+    if (!isUserKey(key)) continue;
     const token = findToken(key);
     if (token) return token;
   }
@@ -161,14 +165,7 @@ export function storeToken(
   writeConfig(config, configPath);
 }
 
-/**
- * Persists a user + token as the sole stored account: removes every other
- * `User-*` / `User[*]-*` entry before writing, preserving non-user config
- * keys. Use on the signup success path — signup expresses the intent "this
- * account replaces any prior one," and `getStoredUser()` returns only the
- * first real user it finds, so non-destructive writes here leave earlier
- * entries stranded in the file.
- */
+/** Persists a user + token as the sole stored account, wiping any prior User entries. */
 export function replaceStoredUser(
   user: StoredUser,
   token: StoredOAuthToken,
@@ -176,9 +173,7 @@ export function replaceStoredUser(
 ): void {
   const config = readConfig(configPath);
   for (const k of Object.keys(config)) {
-    if (k.startsWith('User-') || k.startsWith('User[')) {
-      delete config[k];
-    }
+    if (isUserKey(k)) delete config[k];
   }
   const key = userKey(user.id, user.zone);
   config[key] = {

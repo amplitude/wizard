@@ -496,11 +496,7 @@ export function buildSession(args: {
     activationOptionsComplete: false,
     snippetConfigured: false,
     // --region (alias: --zone) pre-populates region so non-TUI signup
-    // targets the right DC. Same `parsed.success` guard as signupEmail /
-    // signupFullName: on zod parse failure, reject raw args so an
-    // unvalidated value (e.g. programmatic caller passing 'fr') cannot
-    // bypass zod's `z.enum(['us', 'eu'])` via the raw-args fallback.
-    // yargs' `choices` constraint covers the CLI path.
+    // targets the right DC. Same parse-failure guard as signupEmail above.
     region: parsed.success ? validated.region ?? null : null,
     regionForced: false,
 

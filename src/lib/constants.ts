@@ -58,16 +58,9 @@ export const CLAUDE_PLUGIN_MARKETPLACE_REPO = 'amplitude/mcp-marketplace';
 export const CLAUDE_PLUGIN_ID = 'amplitude';
 
 /**
- * Email format accepted by `--email`. Single source of truth for CLI-level
- * email validation — imported by `bin.ts`'s yargs `coerce` AND used in
- * `CliArgsSchema` (wizard-session.ts). Keeping both layers on the same
- * regex prevents the mismatch where yargs accepts a value that zod then
- * rejects, which would silently null out `signupEmail` / `signupFullName`
- * via `parsed.success`.
- *
- * Deliberately permissive — matches "\S+@\S+.\S+". Format shape only; the
- * authoritative "is this address reachable" check is the provisioning
- * endpoint itself.
+ * Shared between yargs `coerce` and `CliArgsSchema` — a mismatch would let
+ * yargs accept a value zod rejects, silently nulling `signupEmail` via the
+ * `parsed.success` fallback. Format-only; provisioning is authoritative.
  */
 export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
