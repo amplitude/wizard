@@ -196,6 +196,23 @@ export function createObservabilityMiddleware(): Middleware {
 
       // Close the final phase span (if any) + the run span.
       if (currentPhaseTiming) {
+        const elapsed = Date.now() - currentPhaseTiming.startedAt;
+        currentPhaseTiming.span.setAttribute('duration_ms', elapsed);
+        currentPhaseTiming.span.setAttribute(
+          'message_count',
+          currentPhaseTiming.messageCount,
+        );
+        currentPhaseTiming.span.setAttribute(
+          'tool_call_count',
+          currentPhaseTiming.toolCalls,
+        );
+        analytics.wizardCapture('agent phase completed', {
+          'from phase': currentPhaseTiming.phase,
+          'to phase': 'finalize',
+          'duration ms': elapsed,
+          'message count': currentPhaseTiming.messageCount,
+          'tool call count': currentPhaseTiming.toolCalls,
+        });
         currentPhaseTiming.span.end();
         currentPhaseTiming = null;
       }
