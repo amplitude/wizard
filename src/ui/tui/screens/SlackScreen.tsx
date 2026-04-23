@@ -10,7 +10,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import type { WizardStore } from '../store.js';
 import { SlackOutcome } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -76,7 +76,16 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const region = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
+  // Memoize: `resolveZone` performs synchronous disk reads
+  // (`readAmpliConfig` + `getStoredUser`). This component re-renders on
+  // `phase` / `openedUrl` state changes and on session updates; without
+  // the memo those re-renders would redundantly re-read the same files.
+  // The deps (session.region, installDir) capture every input that can
+  // actually change within this screen's lifetime.
+  const region = useMemo(
+    () => resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE),
+    [store.session.region, store.session.installDir],
+  );
   const isEu = region === 'eu';
   const appName = isEu ? 'Amplitude - EU' : 'Amplitude';
 

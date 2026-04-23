@@ -50,6 +50,12 @@ const ALLOWED_DIRECT_READS = new Set<string>([
   // may replace this with a computed zone dep; for now it's benign because
   // resolveZone's other inputs are stable within a process lifetime.
   'src/ui/tui/screens/AuthScreen.tsx',
+  // SlackScreen: useMemo dep array only (body uses the memoized result
+  // of resolveZone). Same rationale as AuthScreen — a direct session.region
+  // read here is safe because resolveZone's other inputs (installDir,
+  // ampli.json Zone, stored user zone) are stable for this screen's
+  // lifetime after RegionSelect / auth have run.
+  'src/ui/tui/screens/SlackScreen.tsx',
   // Prose comments reference `session.region`; no actual reads.
   'src/lib/credential-resolution.ts',
   // bin.ts: pre-OAuth RegionSelect gate checks + a verbose-log display.
