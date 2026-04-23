@@ -13,6 +13,7 @@
 import * as path from 'path';
 import { z } from 'zod';
 
+import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 
@@ -46,7 +47,12 @@ export const CliArgsSchema = z.object({
   apiKey: z.string().optional(),
   integration: z.string().optional(),
   appName: z.string().optional(),
-  signupEmail: z.string().email().nullable().optional().default(null),
+  signupEmail: z
+    .string()
+    .regex(EMAIL_REGEX, 'Invalid email')
+    .nullable()
+    .optional()
+    .default(null),
   signupFullName: z.string().nullable().optional().default(null),
   region: z.enum(['us', 'eu']).nullable().optional().default(null),
 });

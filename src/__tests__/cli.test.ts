@@ -86,6 +86,7 @@ vi.mock('../lib/constants', () => ({
   IS_DEV: true,
   DEFAULT_AMPLITUDE_ZONE: 'us',
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
+  EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,

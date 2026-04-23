@@ -76,6 +76,7 @@ if (!satisfies(process.version, NODE_VERSION_RANGE)) {
 }
 
 import { isNonInteractiveEnvironment } from './src/utils/environment';
+import { EMAIL_REGEX } from './src/lib/constants';
 import type { AmplitudeZone } from './src/lib/constants';
 import { getUI, setUI } from './src/ui';
 import { LoggingUI } from './src/ui/logging-ui';
@@ -743,7 +744,7 @@ void yargs(hideBin(process.argv))
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+        if (!EMAIL_REGEX.test(value)) {
           throw new Error(`Invalid email: "${value}"`);
         }
         return value;
