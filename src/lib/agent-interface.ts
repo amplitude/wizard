@@ -1031,13 +1031,30 @@ export async function runAgent(
   spinner.start(spinnerMessage);
 
   if (agentConfig.useLocalClaude) {
-    return runAgentLocally(
+    const result = await runAgentLocally(
       prompt,
       agentConfig.workingDirectory,
       spinner,
       successMessage,
       errorMessage,
     );
+    // Read .amplitude-events.json if the local agent wrote one
+    let plannedEvents: Array<{ name: string; description: string }> | undefined;
+    try {
+      const eventPlanPath = path.join(
+        agentConfig.workingDirectory,
+        '.amplitude-events.json',
+      );
+      const content = fs.readFileSync(eventPlanPath, 'utf-8');
+      const events = parseEventPlanContent(content);
+      if (events) {
+        plannedEvents = events;
+        getUI().setEventPlan(events);
+      }
+    } catch {
+      // File doesn't exist — no planned events
+    }
+    return { ...result, plannedEvents };
   }
 
   const { query } = await getSDKModule();
