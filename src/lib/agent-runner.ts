@@ -192,6 +192,7 @@ export async function runAgentWizard(
 
   const {
     accessToken: rawAccessToken,
+    idToken: rawIdToken,
     projectApiKey,
     host,
     appId,
@@ -200,6 +201,7 @@ export async function runAgentWizard(
   // OAuth access token (the field names were swapped historically).
   // Always prefer the real OAuth access token from ~/.ampli.json for Hydra auth.
   let accessToken = rawAccessToken;
+  let idToken = rawIdToken ?? '';
   try {
     const { getStoredToken, getStoredUser, storeToken } = await import(
       '../utils/ampli-settings.js'
@@ -209,6 +211,7 @@ export async function runAgentWizard(
     const stored = getStoredToken(user?.id, user?.zone);
     if (stored?.accessToken) {
       accessToken = stored.accessToken;
+      if (stored.idToken) idToken = stored.idToken;
       // Silently refresh if the access token has expired but the refresh window is still valid
       if (user && new Date() > new Date(stored.expiresAt)) {
         try {
@@ -220,6 +223,7 @@ export async function runAgentWizard(
             expiresAt: refreshed.expiresAt,
           });
           accessToken = refreshed.accessToken;
+          idToken = refreshed.idToken;
         } catch {
           // Refresh failed — proceed with the existing token; auth error will surface during the run
         }
@@ -414,6 +418,7 @@ export async function runAgentWizard(
   const plannedEventsSummary = await commitPlannedEventsStep(
     agentResult.plannedEvents ?? [],
     accessToken,
+    idToken,
     appId,
     session,
     cloudRegion,
@@ -685,6 +690,7 @@ Important: Use the detect_package_manager tool (from the wizard-tools MCP server
 async function commitPlannedEventsStep(
   plannedEvents: Array<{ name: string; description: string }>,
   accessToken: string,
+  idToken: string,
   credentialsAppId: number | null | undefined,
   session: WizardSession,
   cloudRegion: string,
@@ -700,7 +706,7 @@ async function commitPlannedEventsStep(
     try {
       const { fetchAmplitudeUser } = await import('./api.js');
       const userInfo = await fetchAmplitudeUser(
-        accessToken,
+        idToken,
         cloudRegion as 'us' | 'eu',
       );
       const org = session.selectedOrgId
