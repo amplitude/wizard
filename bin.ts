@@ -458,15 +458,6 @@ const runDirectSignupIfRequested = async (
   if (!session.signup || !session.signupEmail || !session.signupFullName) {
     return;
   }
-  // Non-interactive modes (agent, CI, classic) don't otherwise init the
-  // Experiment client — without this, `isFlagEnabled(FLAG_DIRECT_SIGNUP)`
-  // inside performSignupOrAuth always returns false and signup no-ops.
-  // The TUI path initializes flags separately before launching the Ink
-  // app; initFeatureFlags() is idempotent.
-  const { initFeatureFlags } = await import('./src/lib/feature-flags.js');
-  await initFeatureFlags().catch(() => {
-    // Non-fatal — all flags default to off.
-  });
   const { performSignupOrAuth, trackSignupAttempt } = await import(
     './src/utils/signup-or-auth.js'
   );

@@ -4,10 +4,6 @@ import { performSignupOrAuth } from '../signup-or-auth';
 vi.mock('../direct-signup.js', () => ({
   performDirectSignup: vi.fn(),
 }));
-vi.mock('../../lib/feature-flags.js', () => ({
-  FLAG_DIRECT_SIGNUP: 'wizard-direct-signup',
-  isFlagEnabled: vi.fn(() => false),
-}));
 vi.mock('../ampli-settings.js', () => ({
   storeToken: vi.fn(),
 }));
@@ -42,27 +38,7 @@ const provisionedOrgs = [
 describe('performSignupOrAuth', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns null when flag is off', async () => {
-    const { performDirectSignup } = await import('../direct-signup.js');
-    const { analytics } = await import('../analytics');
-
-    const result = await performSignupOrAuth({
-      email: 'ada@example.com',
-      fullName: 'Ada Lovelace',
-      zone: 'us',
-    });
-
-    expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
-    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
-      'agentic signup attempted',
-      expect.anything(),
-    );
-  });
-
-  it('returns null when flag is on but email is missing', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
+  it('returns null when email is missing', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     const { analytics } = await import('../analytics');
 
@@ -80,9 +56,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns null when flag is on but fullName is missing', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
+  it('returns null when fullName is missing', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     const { analytics } = await import('../analytics');
 
@@ -101,8 +75,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('returns null when direct signup returns requires_redirect', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'requires_redirect',
@@ -119,8 +91,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('emits agentic signup attempted with status=requires_redirect on redirect path', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'requires_redirect',
@@ -140,8 +110,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('returns null when direct signup returns error', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'error',
@@ -158,8 +126,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('emits agentic signup attempted with status=signup_error on error kind', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'error',
@@ -180,8 +146,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('emits agentic signup attempted with status=signup_error when performDirectSignup throws', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockRejectedValue(new Error('network'));
     const { analytics } = await import('../analytics');
@@ -199,8 +163,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('returns tokens on success without calling OAuth', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'success',
@@ -234,8 +196,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('emits agentic signup attempted with status=success on the success path', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'success',
@@ -275,8 +235,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('persists StoredUser with real user id from fetchAmplitudeUser', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'success',
@@ -317,8 +275,6 @@ describe('performSignupOrAuth', () => {
   });
 
   it('normalizes extra whitespace in fullName before splitting', async () => {
-    const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-    vi.mocked(isFlagEnabled).mockReturnValue(true);
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'success',
@@ -359,8 +315,6 @@ describe('performSignupOrAuth', () => {
   it('falls back to pending sentinel when fetchAmplitudeUser fails after direct-signup success', async () => {
     vi.useFakeTimers();
     try {
-      const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-      vi.mocked(isFlagEnabled).mockReturnValue(true);
       const { performDirectSignup } = await import('../direct-signup.js');
       vi.mocked(performDirectSignup).mockResolvedValue({
         kind: 'success',
@@ -397,8 +351,6 @@ describe('performSignupOrAuth', () => {
   it('emits agentic signup attempted with status=user_fetch_failed when fetch retries exhaust', async () => {
     vi.useFakeTimers();
     try {
-      const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-      vi.mocked(isFlagEnabled).mockReturnValue(true);
       const { performDirectSignup } = await import('../direct-signup.js');
       vi.mocked(performDirectSignup).mockResolvedValue({
         kind: 'success',
@@ -438,8 +390,6 @@ describe('performSignupOrAuth', () => {
   it('retries fetchAmplitudeUser when the new account has no env with an API key yet', async () => {
     vi.useFakeTimers();
     try {
-      const { isFlagEnabled } = await import('../../lib/feature-flags.js');
-      vi.mocked(isFlagEnabled).mockReturnValue(true);
       const { performDirectSignup } = await import('../direct-signup.js');
       vi.mocked(performDirectSignup).mockResolvedValue({
         kind: 'success',

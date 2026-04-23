@@ -1,6 +1,5 @@
 import type { AmplitudeAuthResult } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
-import { FLAG_DIRECT_SIGNUP, isFlagEnabled } from '../lib/feature-flags.js';
 import { storeToken, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
@@ -139,7 +138,6 @@ export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
  *
  * Returns the new account's tokens (and userInfo, when the internal fetch
  * succeeded) on success; returns `null` when:
- * - the `wizard-direct-signup` feature flag is off
  * - email or fullName is missing
  * - the endpoint returns `requires_redirect` / `needs_information` / `error`
  * - the direct-signup network call itself errors
@@ -159,10 +157,6 @@ export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
 export async function performSignupOrAuth(
   input: SignupOrAuthInput,
 ): Promise<PerformSignupOrAuthResult | null> {
-  if (!isFlagEnabled(FLAG_DIRECT_SIGNUP)) {
-    log.debug('flag off; skipping direct signup');
-    return null;
-  }
   if (input.email === null || input.fullName === null) {
     log.debug('missing email or fullName; skipping direct signup');
     return null;
