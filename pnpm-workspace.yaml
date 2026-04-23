@@ -1,8 +1,31 @@
-onlyBuiltDependencies:
-  - esbuild
-  - msw
-minimumReleaseAge: 10080
+# Supply-chain security controls per Amplitude's NPM Supply Chain Security standard.
+# https://amplitude.atlassian.net/wiki/spaces/SAO/pages/3665690706
 
+# Delay installation of brand-new versions by 7 days so the ecosystem has time
+# to flag compromised releases (shai-hulud, debug+chalk, etc. were detected
+# within days of publish).
+minimumReleaseAge: 10080 # minutes = 7 days
+
+# Fail installs if a dependency's trust evidence has weakened since a prior
+# release (e.g. a package that was previously published via provenance now
+# lacks it). Catches the axios@1.14.1 style attack where a package is
+# published outside the project's normal CI pipeline.
+trustPolicy: no-downgrade
+
+# Reject transitive dependencies resolved from git repos or tarball URLs;
+# every indirect dep must come from the npm registry.
+blockExoticSubdeps: true
+
+# Default-deny lifecycle scripts: any dep that needs to run build scripts
+# must be explicitly allowlisted in allowBuilds below, otherwise install fails.
+strictDepBuilds: true
+
+# Allowlist of dependencies permitted to run build scripts. Audit before
+# adding new entries. Replaces the deprecated `onlyBuiltDependencies` API
+# (renamed in pnpm 10.26).
+allowBuilds:
+  esbuild: true
+  msw: true
 
 packages:
   - '!e2e-tests/**'

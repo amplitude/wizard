@@ -113,7 +113,7 @@
     "node": ">=20",
     "npm": ">=3.10.7"
   },
-  "packageManager": "pnpm@10.23.0+sha512.21c4e5698002ade97e4efe8b8b4a89a8de3c85a37919f957e7a0f30f38fbc5bbdd05980ffe29179b2fb6e6e691242e098d945d1601772cad0fef5fb6411e2a4b",
+  "packageManager": "pnpm@10.33.1+sha512.05ba3c1d5d1c18f68df06470d74055e62d41fc110a0c660db1b2dfb2785327f04cf0f68345d4609bc52089e7fa0343c31593b2f9594e2c5d5da426230acc9820",
   "scripts": {
     "prepublishOnly": "pnpm build",
     "clean": "rm -rf ./dist",
@@ -151,6 +151,6 @@
   "license": "MIT",
   "volta": {
     "node": "20.18.2",
-    "pnpm": "10.23.0"
+    "pnpm": "10.33.1"
   }
 }
