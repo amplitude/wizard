@@ -227,12 +227,6 @@ export async function performSignupOrAuth(
       email: userInfo.email,
       zone: input.zone,
     };
-    trackSignupAttempt({
-      status: 'success',
-      zone: input.zone,
-      'has env with api key': fetchResult.hasEnvWithApiKey,
-      'user fetch retry count': fetchResult.retryCount,
-    });
   } else {
     log.warn(
       'fetchAmplitudeUser failed after direct signup; falling back to pending sentinel',
@@ -248,13 +242,27 @@ export async function performSignupOrAuth(
       email: input.email,
       zone: input.zone,
     };
+  }
+  // Persist tokens BEFORE emitting telemetry. If `storeToken` throws (disk
+  // full, permission error), the exception propagates to the caller's
+  // outer catch which emits `wrapper_exception` — making that the sole
+  // event for the attempt. Tracking success or user_fetch_failed first
+  // would double-count the attempt in telemetry.
+  storeToken(user, tokens);
+  if (fetchResult.ok) {
+    trackSignupAttempt({
+      status: 'success',
+      zone: input.zone,
+      'has env with api key': fetchResult.hasEnvWithApiKey,
+      'user fetch retry count': fetchResult.retryCount,
+    });
+  } else {
     trackSignupAttempt({
       status: 'user_fetch_failed',
       zone: input.zone,
       'user fetch retry count': fetchResult.retryCount,
     });
   }
-  storeToken(user, tokens);
 
   return {
     idToken: tokens.idToken,
