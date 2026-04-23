@@ -8,6 +8,7 @@ import {
   parseEnvKeys,
   mergeEnvValues,
   persistEventPlan,
+  cleanupIntegrationSkills,
 } from '../wizard-tools';
 
 function makeTmpDir(): string {
@@ -207,6 +208,64 @@ describe('ensureGitignoreCoverage', () => {
     const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
     // Should not duplicate — the trim check should match
     expect(content).toBe('  .env.local  \n');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cleanupIntegrationSkills
+// ---------------------------------------------------------------------------
+
+describe('cleanupIntegrationSkills', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  function makeSkill(name: string): void {
+    const dir = path.join(tmpDir, '.claude', 'skills', name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'SKILL.md'), '# test skill\n');
+  }
+
+  function skillExists(name: string): boolean {
+    return fs.existsSync(path.join(tmpDir, '.claude', 'skills', name));
+  }
+
+  it('removes integration- directories and keeps others', () => {
+    makeSkill('integration-nextjs-app-router');
+    makeSkill('integration-django');
+    makeSkill('instrumentation-events');
+    makeSkill('taxonomy-quickstart');
+    makeSkill('user-custom-skill');
+
+    cleanupIntegrationSkills(tmpDir);
+
+    expect(skillExists('integration-nextjs-app-router')).toBe(false);
+    expect(skillExists('integration-django')).toBe(false);
+    expect(skillExists('instrumentation-events')).toBe(true);
+    expect(skillExists('taxonomy-quickstart')).toBe(true);
+    expect(skillExists('user-custom-skill')).toBe(true);
+  });
+
+  it('is a no-op when .claude/skills/ does not exist', () => {
+    expect(() => cleanupIntegrationSkills(tmpDir)).not.toThrow();
+  });
+
+  it('is a no-op when skills directory is empty', () => {
+    fs.mkdirSync(path.join(tmpDir, '.claude', 'skills'), { recursive: true });
+    expect(() => cleanupIntegrationSkills(tmpDir)).not.toThrow();
+  });
+
+  it('leaves taxonomy and instrumentation dirs untouched when no integrations present', () => {
+    makeSkill('instrumentation-events');
+    makeSkill('taxonomy-quickstart');
+
+    cleanupIntegrationSkills(tmpDir);
+
+    expect(skillExists('instrumentation-events')).toBe(true);
+    expect(skillExists('taxonomy-quickstart')).toBe(true);
   });
 });
 

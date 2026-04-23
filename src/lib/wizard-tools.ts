@@ -208,6 +208,43 @@ export function installBundledSkill(
   return { success: false, error: `Bundled skill "${skillId}" not found` };
 }
 
+/**
+ * Remove wizard-installed integration skills from `<installDir>/.claude/skills/`.
+ *
+ * Integration skills are a single-use SDK-setup workflow — they're dead
+ * weight once the run completes. Instrumentation and taxonomy skills stay
+ * on disk because users can invoke them later for event discovery, chart
+ * building, and dashboard planning.
+ *
+ * Only directories whose name starts with `integration-` are removed; other
+ * content under `.claude/skills/` (user-owned skills, instrumentation-*,
+ * taxonomy-*) is left alone. Silent on I/O errors so a cleanup failure
+ * never blocks the success path.
+ */
+export function cleanupIntegrationSkills(installDir: string): void {
+  const skillsDir = path.join(installDir, '.claude', 'skills');
+  if (!fs.existsSync(skillsDir)) return;
+
+  try {
+    for (const name of fs.readdirSync(skillsDir)) {
+      if (!name.startsWith('integration-')) continue;
+      const target = path.join(skillsDir, name);
+      try {
+        fs.rmSync(target, { recursive: true, force: true });
+        logToFile(`cleanupIntegrationSkills: removed ${target}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logToFile(
+          `cleanupIntegrationSkills: failed to remove ${target}: ${msg}`,
+        );
+      }
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`cleanupIntegrationSkills: error scanning ${skillsDir}: ${msg}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // SDK dynamic import (ESM module loaded once, cached)
 // ---------------------------------------------------------------------------
