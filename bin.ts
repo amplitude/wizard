@@ -481,29 +481,49 @@ const runDirectSignupIfRequested = async (
     );
     process.exit(ExitCode.AUTH_REQUIRED);
   }
+  let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
-    const tokens = await performSignupOrAuth({
+    tokens = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
     });
-    if (tokens === null) {
-      getUI().log.info(
-        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
-      );
-    } else {
-      getUI().log.info('Direct signup succeeded; using newly created account.');
-      if (onSuccess) {
-        await onSuccess();
-      }
-    }
   } catch (err) {
+    // Only the wrapper itself threw — emit wrapper_exception and bail.
+    // Scope this catch narrowly so an `onSuccess` throw below cannot
+    // re-emit telemetry after the wrapper has already recorded a
+    // `success` / `user_fetch_failed` event internally.
     trackSignupAttempt({ status: 'wrapper_exception', zone });
     getUI().log.warn(
       `Direct signup errored: ${
         err instanceof Error ? err.message : String(err)
       }. Continuing to ${fallbackLabel}.`,
     );
+    return;
+  }
+  if (tokens === null) {
+    getUI().log.info(
+      `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+    );
+    return;
+  }
+  getUI().log.info('Direct signup succeeded; using newly created account.');
+  if (onSuccess) {
+    try {
+      await onSuccess();
+    } catch (err) {
+      // Signup itself succeeded — the wrapper already emitted the
+      // `success` / `user_fetch_failed` event and persisted tokens.
+      // If the classic-mode `resolveCredentials` (or any future
+      // onSuccess caller) throws during post-signup plumbing, log it
+      // but DO NOT re-emit wrapper_exception. The caller's normal
+      // flow will see no credentials and recover via its own path.
+      getUI().log.warn(
+        `Direct signup succeeded but post-signup handling failed: ${
+          err instanceof Error ? err.message : String(err)
+        }. Continuing to ${fallbackLabel}.`,
+      );
+    }
   }
 };
 
