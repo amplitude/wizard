@@ -159,7 +159,9 @@ describe('createAmplitudeApp', () => {
     ['INTERNAL', 500],
   ] as const)('maps %s error code from backend', async (code, status) => {
     mockedAxios.post.mockRejectedValueOnce(
-      makeAxiosError(status, { error: { code, message: `something about ${code}` } }),
+      makeAxiosError(status, {
+        error: { code, message: `something about ${code}` },
+      }),
     );
 
     await expect(

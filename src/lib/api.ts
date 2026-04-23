@@ -258,7 +258,7 @@ function fallbackCreateProjectErrorForStatus(
   }
   if (status === 402) {
     return new ApiError(
-      "Your org has reached its project quota. Create one in Amplitude settings and try again.",
+      'Your org has reached its project quota. Create one in Amplitude settings and try again.',
       status,
       url,
       'QUOTA_REACHED',
@@ -428,7 +428,9 @@ export async function createAmplitudeApp(
       const status = error.response?.status;
       if (status) {
         // Preferred path: parse the backend's structured error payload.
-        const errBody = CreateProjectErrorSchema.safeParse(error.response?.data);
+        const errBody = CreateProjectErrorSchema.safeParse(
+          error.response?.data,
+        );
         if (errBody.success) {
           const { code, message } = errBody.data.error;
           const apiError = new ApiError(message, status, url, code);
