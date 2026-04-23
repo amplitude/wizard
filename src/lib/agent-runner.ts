@@ -414,7 +414,7 @@ export async function runAgentWizard(
   // once for human-operator modes (interactive TUI + CI-with-oversight).
   // Suppressed for --agent/NDJSON mode: agent orchestrators run against
   // fresh processes or test apps, not a human-managed dev server.
-  if (!session.agent) {
+  if (!session.agent && Object.keys(envVars).length > 0) {
     getUI().pushStatus(
       `Your Amplitude env var is set. If your dev server or build was already running, restart it (with whatever command you started it with) so the new value loads — then click around your app and we'll wait for events.`,
     );
