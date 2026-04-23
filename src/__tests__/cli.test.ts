@@ -873,7 +873,8 @@ describe('--email and --full-name flags', () => {
   });
 
   test('emits agentic signup attempted with status=wrapper_exception when wrapper throws', async () => {
-    const { performSignupOrAuth } = await import('../utils/signup-or-auth');
+    const { performSignupOrAuth, AGENTIC_SIGNUP_ATTEMPTED_EVENT } =
+      await import('../utils/signup-or-auth');
     const { analytics } = await import('../utils/analytics');
     vi.mocked(performSignupOrAuth).mockRejectedValueOnce(new Error('boom'));
 
@@ -898,12 +899,12 @@ describe('--email and --full-name flags', () => {
 
     await waitFor(() =>
       (analytics.wizardCapture as ReturnType<typeof vi.fn>).mock.calls.some(
-        (c) => c[0] === 'agentic signup attempted',
+        (c) => c[0] === AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       ),
     );
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
-      'agentic signup attempted',
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       expect.objectContaining({
         status: 'wrapper_exception',
         zone: expect.any(String),

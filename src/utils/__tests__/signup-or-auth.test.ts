@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { performSignupOrAuth } from '../signup-or-auth';
+import {
+  performSignupOrAuth,
+  AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+} from '../signup-or-auth';
 
 vi.mock('../direct-signup.js', () => ({
   performDirectSignup: vi.fn(),
@@ -51,7 +54,7 @@ describe('performSignupOrAuth', () => {
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
-      'agentic signup attempted',
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       expect.anything(),
     );
   });
@@ -69,7 +72,7 @@ describe('performSignupOrAuth', () => {
     expect(performDirectSignup).not.toHaveBeenCalled();
     expect(result).toBeNull();
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
-      'agentic signup attempted',
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       expect.anything(),
     );
   });
@@ -104,7 +107,7 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
-      'agentic signup attempted',
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       { status: 'requires_redirect', zone: 'us' },
     );
   });
@@ -140,7 +143,7 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
-      'agentic signup attempted',
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       { status: 'signup_error', zone: 'us' },
     );
   });
@@ -157,7 +160,7 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
-      'agentic signup attempted',
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       { status: 'signup_error', zone: 'us' },
     );
   });
@@ -224,7 +227,7 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
-      'agentic signup attempted',
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       {
         status: 'success',
         zone: 'us',
@@ -375,7 +378,7 @@ describe('performSignupOrAuth', () => {
       await pending;
 
       expect(analytics.wizardCapture).toHaveBeenCalledWith(
-        'agentic signup attempted',
+        AGENTIC_SIGNUP_ATTEMPTED_EVENT,
         {
           status: 'user_fetch_failed',
           zone: 'us',
