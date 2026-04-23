@@ -170,7 +170,7 @@ describe('resolveCredentials — zone resolution', () => {
     expect(session.credentials?.host).toBe('https://eu.amplitude.com');
   });
 
-  it('returns early without touching region when no user is stored', async () => {
+  it('returns no credentials when no user is stored', async () => {
     const { getStoredUser } = await import('../../utils/ampli-settings.js');
 
     vi.mocked(getStoredUser).mockReturnValue(undefined);
