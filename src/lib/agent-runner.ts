@@ -32,6 +32,7 @@ import { enableDebugLogs, logToFile } from '../utils/debug';
 import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
+import { createRetryMiddleware } from './middleware/retry';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
@@ -302,10 +303,19 @@ export async function runAgentWizard(
   );
 
   // Always run observability middleware for structured logging + Sentry breadcrumbs.
+  // Retry middleware surfaces transient gateway retries to the UI.
   // Benchmark middleware (token/cost tracking) is opt-in via --benchmark.
+  const retryMiddleware = createRetryMiddleware((state) =>
+    getUI().setRetryState(state),
+  );
   const middleware = session.benchmark
-    ? createBenchmarkPipeline(spinner, sessionToOptions(session))
-    : new MiddlewarePipeline([createObservabilityMiddleware()]);
+    ? createBenchmarkPipeline(spinner, sessionToOptions(session), undefined, {
+        extraMiddlewares: [retryMiddleware],
+      })
+    : new MiddlewarePipeline([
+        createObservabilityMiddleware(),
+        retryMiddleware,
+      ]);
 
   const agentResult = await runAgent(
     agent,
@@ -407,6 +417,20 @@ export async function runAgentWizard(
       integration: config.metadata.integration,
       session,
     });
+  }
+
+  // Post-install restart reminder — the single most common failure mode is
+  // a user whose dev server was already running when we wrote env vars and
+  // who doesn't know to restart it for the new values to load. Emit this
+  // once for human-operator modes (interactive TUI + CI-with-oversight),
+  // and only when env vars were actually written (some frameworks set
+  // getEnvVars to {} and manage config differently).
+  // Suppressed for --agent/NDJSON mode: agent orchestrators run against
+  // fresh processes or test apps, not a human-managed dev server.
+  if (!session.agent && Object.keys(envVars).length > 0) {
+    getUI().pushStatus(
+      `Your Amplitude env vars are set. If your dev server or build was already running, restart it (with whatever command you started it with) so the new values load — then click around your app and we'll wait for events.`,
+    );
   }
 
   // MCP installation is handled by McpScreen — no prompt here

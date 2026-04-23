@@ -182,6 +182,9 @@ export function initSentry(config: SentryConfig): void {
       tracesSampleRate: 1.0, // Low volume CLI — every run matters
       sendDefaultPii: false, // Never send PII by default
 
+      // Structured logs — feeds Sentry.logger.* calls and the logger sink
+      enableLogs: true,
+
       // Error filtering and redaction
       beforeSend,
 
@@ -206,8 +209,13 @@ export function initSentry(config: SentryConfig): void {
 }
 
 /**
- * Register the logger sink so log.error() → Sentry.captureException
- * and log.warn()/info() → Sentry.addBreadcrumb automatically.
+ * Register the logger sink so:
+ *   - log.error() → Sentry.captureException (issue-grouped, fingerprinted)
+ *   - log.warn() / log.info() → Sentry.logger.* (searchable structured logs)
+ *                             + Sentry.addBreadcrumb (attached to any later error)
+ *
+ * Breadcrumbs stay because they give pre-error context on the issue view;
+ * Sentry.logger gives full-text log search decoupled from error events.
  */
 function registerSentrySink(): void {
   setSentrySink(
@@ -220,9 +228,21 @@ function registerSentrySink(): void {
       if (!initialized) return;
       if (level === 'error') {
         captureError(new Error(msg), { namespace, ...ctx });
-      } else {
-        addBreadcrumb(namespace, msg, ctx);
+        return;
       }
+      const attrs: Record<string, unknown> = {
+        namespace,
+        ...(ctx ? (redact(ctx) as Record<string, unknown>) : {}),
+      };
+      try {
+        const redactedMsg = redactString(msg);
+        if (level === 'warn') Sentry.logger.warn(redactedMsg, attrs);
+        else if (level === 'info') Sentry.logger.info(redactedMsg, attrs);
+        else Sentry.logger.debug(redactedMsg, attrs);
+      } catch {
+        // Non-fatal
+      }
+      addBreadcrumb(namespace, msg, ctx);
     },
   );
 }
@@ -288,6 +308,83 @@ export function setSentryTag(key: string, value: string): void {
     Sentry.setTag(key, value);
   } catch {
     // Non-fatal
+  }
+}
+
+/**
+ * Start a Sentry performance span that you manually `.end()`.
+ *
+ * Returns an object with `end()` and `setAttribute()` methods. When Sentry
+ * is not initialized (telemetry disabled, init failed, etc.), returns a
+ * no-op that's safe to call.
+ *
+ * Use this for cross-callback lifecycles (e.g., agent run from onInit to
+ * onFinalize) where `Sentry.startSpan(cb)` doesn't fit.
+ */
+export interface WizardSpan {
+  end(): void;
+  setAttribute(key: string, value: unknown): void;
+}
+
+type SpanAttrValue = string | number | boolean;
+
+function coerceAttr(value: unknown): SpanAttrValue {
+  if (
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  if (value === null || value === undefined) return '';
+  return JSON.stringify(value);
+}
+
+function toSpanAttributes(
+  input: Record<string, unknown>,
+): Record<string, SpanAttrValue> {
+  const out: Record<string, SpanAttrValue> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (v === undefined) continue;
+    out[k] = coerceAttr(v);
+  }
+  return out;
+}
+
+export function startWizardSpan(
+  name: string,
+  op: string,
+  attributes?: Record<string, unknown>,
+): WizardSpan {
+  if (!initialized) {
+    return { end: () => {}, setAttribute: () => {} };
+  }
+  try {
+    const span = Sentry.startInactiveSpan({
+      name,
+      op,
+      attributes: attributes
+        ? toSpanAttributes(redact(attributes) as Record<string, unknown>)
+        : undefined,
+    });
+    return {
+      end: () => {
+        try {
+          span.end();
+        } catch {
+          /* non-fatal */
+        }
+      },
+      setAttribute: (key, value) => {
+        try {
+          span.setAttribute(key, coerceAttr(value));
+        } catch {
+          /* non-fatal */
+        }
+      },
+    };
+  } catch {
+    return { end: () => {}, setAttribute: () => {} };
   }
 }
 

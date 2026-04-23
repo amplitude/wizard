@@ -9,6 +9,7 @@ import {
   type SpinnerHandle,
   type EventPlanDecision,
 } from './wizard-ui';
+import type { RetryState } from '../lib/wizard-session';
 
 export class LoggingUI implements WizardUI {
   intro(message: string): void {
@@ -119,6 +120,20 @@ export class LoggingUI implements WizardUI {
     console.log(`│  Status page: ${data.statusPageUrl}`);
     console.log(
       `│  The wizard may not work reliably while services are affected.`,
+    );
+  }
+
+  setRetryState(state: RetryState | null): void {
+    if (!state) return;
+    const status = state.errorStatus ? ` (HTTP ${state.errorStatus})` : '';
+    const eta = Math.max(
+      0,
+      Math.round((state.nextRetryAtMs - Date.now()) / 1000),
+    );
+    console.log(
+      `▲  ${state.reason}${status} — retrying attempt ${state.attempt}/${
+        state.maxRetries
+      }${eta > 0 ? ` in ${eta}s` : ''}`,
     );
   }
 

@@ -18,6 +18,7 @@ import {
 import {
   type AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
+  type RetryState,
 } from './wizard-session';
 import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
@@ -947,6 +948,53 @@ export async function runAgentLocally(
   });
 }
 
+/** Pull a 3-digit status out of an `API Error: NNN ...` pattern. */
+function extractHttpStatus(pattern: string): number | null {
+  const m = pattern.match(/API Error: (\d{3})/);
+  return m ? Number(m[1]) : null;
+}
+
+/** Extract the first HTTP status seen in an error message, if any. */
+function extractHttpStatusFromMessage(msg: string): number | null {
+  const m = msg.match(/\b([4-5]\d{2})\b/);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * Publish a retry banner to the UI. Used from the post-stream and catch-path
+ * retry sites — the middleware-based path handles live `api_retry` messages.
+ * Swallows UI errors so a failed update never aborts the retry loop.
+ */
+function publishRetryBanner(input: {
+  attempt: number;
+  maxRetries: number;
+  errorStatus: number | null;
+  reason: string;
+}): void {
+  const now = Date.now();
+  const state: RetryState = {
+    attempt: input.attempt,
+    maxRetries: input.maxRetries,
+    nextRetryAtMs: now,
+    errorStatus: input.errorStatus,
+    reason: input.reason,
+    startedAt: now,
+  };
+  try {
+    getUI().setRetryState(state);
+  } catch {
+    // UI may not be initialised during some test paths.
+  }
+}
+
+function clearRetryBanner(): void {
+  try {
+    getUI().setRetryState(null);
+  } catch {
+    // UI may not be initialised during some test paths.
+  }
+}
+
 /**
  * Execute an agent with the provided prompt and options
  * Handles the full lifecycle: spinner, execution, error handling
@@ -1103,7 +1151,9 @@ export async function runAgent(
       try {
         const content = fs.readFileSync(eventPlanPath, 'utf-8');
         const events = parseEventPlanContent(content);
-        if (events) getUI().setEventPlan(events);
+        if (events) {
+          getUI().setEventPlan(events.filter((e) => e.name.trim().length > 0));
+        }
       } catch {
         // File doesn't exist yet
       }
@@ -1436,6 +1486,14 @@ export async function runAgent(
             attempt,
             error: matchedTransientError.label,
           });
+          publishRetryBanner({
+            attempt: attempt + 2,
+            maxRetries: MAX_RETRIES + 1,
+            errorStatus: extractHttpStatus(matchedTransientError.pattern),
+            reason: matchedTransientError.pattern.includes('API Error')
+              ? 'Upstream error'
+              : `Upstream ${matchedTransientError.label}`,
+          });
           collectedText.length = 0;
           recentStatuses.length = 0;
           signalDone();
@@ -1443,6 +1501,7 @@ export async function runAgent(
         }
 
         // Clean completion — exit the retry loop
+        clearRetryBanner();
         break;
       } catch (innerError) {
         clearTimeout(staleTimer);
@@ -1455,6 +1514,12 @@ export async function runAgent(
               MAX_RETRIES + 1
             })`,
           );
+          publishRetryBanner({
+            attempt: attempt + 2,
+            maxRetries: MAX_RETRIES + 1,
+            errorStatus: null,
+            reason: 'Agent stalled',
+          });
           continue;
         }
 
@@ -1483,6 +1548,12 @@ export async function runAgent(
           analytics.wizardCapture('agent sdk error retry', {
             attempt,
             error: errMsg.slice(0, 200),
+          });
+          publishRetryBanner({
+            attempt: attempt + 2,
+            maxRetries: MAX_RETRIES + 1,
+            errorStatus: extractHttpStatusFromMessage(errMsg),
+            reason: 'Transient error',
           });
           collectedText.length = 0;
           recentStatuses.length = 0;
@@ -1586,6 +1657,7 @@ export async function runAgent(
     if (eventPlanInterval) clearInterval(eventPlanInterval);
     dashboardWatcher?.close();
     if (dashboardInterval) clearInterval(dashboardInterval);
+    clearRetryBanner();
   }
 }
 

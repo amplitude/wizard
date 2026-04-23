@@ -8,6 +8,8 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
+import type { RetryState } from '../lib/wizard-session';
+
 /** Result returned by the confirm_event_plan tool to the agent. */
 export type EventPlanDecision =
   | { decision: 'approved' | 'skipped' }
@@ -90,6 +92,14 @@ export interface WizardUI {
 
   /** Show service degradation (pushes outage overlay in TUI). */
   showServiceStatus(data: { description: string; statusPageUrl: string }): void;
+
+  /**
+   * Surface a transient retry banner while the agent reconnects after a 504 /
+   * transient API error / stall. Pass `null` to clear. TUI renders an amber
+   * banner below the task list; LoggingUI logs transitions; AgentUI emits an
+   * NDJSON event.
+   */
+  setRetryState(state: RetryState | null): void;
 
   /** Warn that .claude/settings.json overrides blocking env vars (pushes blocking overlay in TUI). */
   showSettingsOverride(

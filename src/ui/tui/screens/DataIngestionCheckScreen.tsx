@@ -26,6 +26,7 @@ import {
 } from '../../../lib/api.js';
 import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { FRAMEWORK_REGISTRY } from '../../../lib/registry.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import { detectBoundPort } from '../../../utils/port-detection.js';
@@ -109,6 +110,18 @@ const FRAMEWORK_HINTS: Partial<Record<Integration, FrameworkHint>> = {
     idle: 'Run your app and navigate through a few screens',
   },
 };
+
+/**
+ * Frameworks whose runtime is a browser, derived from each framework
+ * config's `metadata.targetsBrowser` flag. Used to gate browser-specific
+ * coaching tips (Network tab, console) that don't apply to native mobile,
+ * server-side, or game-engine runtimes.
+ */
+const BROWSER_FRAMEWORKS = new Set<Integration>(
+  Object.values(FRAMEWORK_REGISTRY)
+    .filter((config) => config.metadata.targetsBrowser)
+    .map((config) => config.metadata.integration),
+);
 
 interface DataIngestionCheckScreenProps {
   store: WizardStore;
@@ -482,6 +495,13 @@ export const DataIngestionCheckScreen = ({
     return hintConfig.running(makeLink(url, url));
   })();
 
+  // Gate browser-specific coaching tips — suppressed for mobile / server /
+  // engine frameworks whose runtime has no browser devtools. A Swift /
+  // Django / Go user can't "check the Network tab."
+  const isBrowserFramework = session.integration
+    ? BROWSER_FRAMEWORKS.has(session.integration)
+    : false;
+
   const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
   const overflow = (eventTypes?.length ?? 0) - MAX_EVENTS_SHOWN;
 
@@ -550,6 +570,20 @@ export const DataIngestionCheckScreen = ({
         start flowing into Amplitude.
       </Text>
 
+      {/* 0s restart reminder — suppressed in agent/NDJSON mode where there's
+          no human dev server to restart. Phrased conservatively: we don't
+          know the user's exact command, so we don't name one. The longer
+          explanation is on the status line emitted by agent-runner; this
+          on-screen copy is deliberately terse. */}
+      {!session.agent && (
+        <Box marginTop={1} marginLeft={2}>
+          <Text color={Colors.secondary}>
+            {Icons.arrowRight} If your dev server or build was already running,
+            restart it so the new env values load.
+          </Text>
+        </Box>
+      )}
+
       {/* Spinner / polling indicator */}
       {!apiUnavailable && (
         <Box marginTop={1} gap={1} alignItems="center">
@@ -563,21 +597,41 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* Progressive coaching tips after extended wait */}
+      {/* Progressive coaching tips after extended wait.
+          Wording rules: hedged ("look for", "check for", "usually") rather
+          than definitive claims. We don't know the cause; we suggest where
+          to look. */}
       {!apiUnavailable && !celebrating && elapsedSeconds >= 60 && (
         <Box flexDirection="column" marginTop={1} marginLeft={2}>
           <Text color={Colors.secondary}>
-            {Icons.arrowRight} Make sure your dev server is running
+            {Icons.arrowRight} Make sure your dev server is running and
+            you&apos;ve clicked around the app
           </Text>
-          {elapsedSeconds >= 90 && (
+          {elapsedSeconds >= 120 && isBrowserFramework && (
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Try visiting your app and clicking around
+              {Icons.arrowRight} In browser devtools, check the Network tab for
+              requests to{' '}
+              {resolveZone(session, 'us') === 'eu'
+                ? 'api.eu.amplitude.com'
+                : 'api2.amplitude.com'}{' '}
+              — a 4xx response or a blocked request usually means the SDK
+              isn&apos;t sending
             </Text>
           )}
-          {elapsedSeconds >= 120 && (
+          {elapsedSeconds >= 180 && isBrowserFramework && (
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Check your terminal for errors — the SDK may
-              not have initialized
+              {Icons.arrowRight} Look in the browser console for errors from{' '}
+              @amplitude/* — a silent init failure blocks all events
+            </Text>
+          )}
+          {elapsedSeconds >= 120 && !isBrowserFramework && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Check your app&apos;s logs for SDK init errors
+              or failed network calls to{' '}
+              {resolveZone(session, 'us') === 'eu'
+                ? 'api.eu.amplitude.com'
+                : 'api2.amplitude.com'}{' '}
+              — a silent failure there blocks events
             </Text>
           )}
         </Box>

@@ -46,6 +46,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   });
 
   const outroData = store.session.outroData;
+  const visibleEvents = store.eventPlan.filter((e) => e.name.trim().length > 0);
 
   if (!outroData) {
     return (
@@ -87,10 +88,10 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           <Text color={Colors.success} bold>
             🎉 Amplitude is live!
           </Text>
-          {store.eventPlan.length > 0 && (
+          {visibleEvents.length > 0 && (
             <Text color={Colors.body}>
-              {store.eventPlan.length} event
-              {store.eventPlan.length !== 1 ? 's' : ''} instrumented
+              {visibleEvents.length} event
+              {visibleEvents.length !== 1 ? 's' : ''} instrumented
               {store.session.selectedEnvName
                 ? ` in ${store.session.selectedEnvName}`
                 : ''}
@@ -110,12 +111,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           )}
 
           {/* Events added */}
-          {store.eventPlan.length > 0 && (
+          {visibleEvents.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               <Text color={Colors.secondary} bold>
                 Events
               </Text>
-              {store.eventPlan.map((event) => (
+              {visibleEvents.map((event) => (
                 <Text key={event.name} color={Colors.body}>
                   {Icons.diamond} <Text bold>{event.name}</Text>
                   <Text color={Colors.muted}> {event.description}</Text>

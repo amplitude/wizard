@@ -15,6 +15,7 @@ import { PhaseDetector } from './phase-detector';
 import { loadBenchmarkConfig } from './config';
 import { createPluginsFromConfig } from './benchmarks';
 import type { BenchmarkConfig } from './config';
+import type { Middleware } from './types';
 import type { WizardOptions } from '../../utils/types';
 import { AgentSignals } from '../agent-interface';
 import { createObservabilityMiddleware } from './observability';
@@ -70,6 +71,7 @@ export function createBenchmarkPipeline(
   spinner: SpinnerHandle,
   options: WizardOptions,
   configOverride?: BenchmarkConfig,
+  extras?: { extraMiddlewares?: Middleware[] },
 ): MiddlewarePipeline {
   const config = configOverride ?? loadBenchmarkConfig(options.installDir);
 
@@ -100,8 +102,15 @@ export function createBenchmarkPipeline(
   );
 
   // Prepend observability middleware so it runs on benchmark pipelines too.
-  return new MiddlewarePipeline([createObservabilityMiddleware(), ...plugins], {
-    phaseDetector: new PhaseDetector(),
-    autoDetectPhases: true,
-  });
+  return new MiddlewarePipeline(
+    [
+      createObservabilityMiddleware(),
+      ...plugins,
+      ...(extras?.extraMiddlewares ?? []),
+    ],
+    {
+      phaseDetector: new PhaseDetector(),
+      autoDetectPhases: true,
+    },
+  );
 }

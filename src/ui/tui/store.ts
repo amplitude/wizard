@@ -17,6 +17,7 @@ import {
   type OutroData,
   type DiscoveredFeature,
   type CloudRegion,
+  type RetryState,
   buildSession,
 } from '../../lib/wizard-session.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
@@ -47,7 +48,7 @@ export {
   McpOutcome,
   SlackOutcome,
 };
-export type { ScreenName, OutroData, WizardSession };
+export type { ScreenName, OutroData, WizardSession, RetryState };
 
 export interface TaskItem {
   label: string;
@@ -654,6 +655,11 @@ export class WizardStore {
     status: { description: string; statusPageUrl: string } | null,
   ): void {
     this.$session.setKey('serviceStatus', status);
+    this.emitChange();
+  }
+
+  setRetryState(state: RetryState | null): void {
+    this.$session.setKey('retryState', state);
     this.emitChange();
   }
 

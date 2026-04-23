@@ -60,6 +60,13 @@ export interface FrameworkMetadata<
   /** Integration type from constants */
   integration: Integration;
 
+  /**
+   * Whether this framework runs in a browser environment.
+   * Used to gate browser-specific coaching tips (e.g., "check the Network tab")
+   * that are irrelevant for native mobile, server-side, or game-engine runtimes.
+   */
+  targetsBrowser?: boolean;
+
   /** URL to framework-specific Amplitude docs */
   docsUrl: string;
 
