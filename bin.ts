@@ -1199,10 +1199,20 @@ void yargs(hideBin(process.argv))
                 let signupUserInfo: Awaited<
                   ReturnType<typeof fetchAmplitudeUser>
                 > | null = null;
+                // True iff direct signup produced fresh tokens in this run.
+                // Used by the downstream fetchAmplitudeUser catch to
+                // distinguish a provisioning-lag recovery (signup succeeded,
+                // but user data not yet available) from the normal
+                // expired-token case.
+                let signupTokensObtained = false;
+                const { trackSignupAttempt } = await import(
+                  './src/utils/signup-or-auth.js'
+                );
                 const s = tui.store.session;
                 if (s.signup && s.signupEmail && s.signupFullName) {
-                  const { performSignupOrAuth, trackSignupAttempt } =
-                    await import('./src/utils/signup-or-auth.js');
+                  const { performSignupOrAuth } = await import(
+                    './src/utils/signup-or-auth.js'
+                  );
                   try {
                     const signupResult = await performSignupOrAuth({
                       email: s.signupEmail,
@@ -1212,6 +1222,7 @@ void yargs(hideBin(process.argv))
                     if (signupResult !== null) {
                       auth = signupResult;
                       signupUserInfo = signupResult.userInfo;
+                      signupTokensObtained = true;
                       getUI().log.info(
                         'Direct signup succeeded; using newly created account.',
                       );
@@ -1249,6 +1260,23 @@ void yargs(hideBin(process.argv))
                       cloudRegion,
                     );
                   } catch {
+                    if (signupTokensObtained) {
+                      // Signup succeeded moments ago so the tokens can't be
+                      // expired — the fetch failure is almost certainly
+                      // backend provisioning lag for a brand-new account.
+                      // Surface the transition so the user isn't confused
+                      // when a browser opens after "signup succeeded", and
+                      // emit telemetry so we can measure how often the rare
+                      // edge case actually hits production.
+                      getUI().log.info(
+                        'Account created, but user data is still being provisioned. ' +
+                          'Opening browser to complete sign-in…',
+                      );
+                      trackSignupAttempt({
+                        status: 'browser_fallback_after_signup',
+                        zone,
+                      });
+                    }
                     // Token may be expired — re-open the browser for a fresh login
                     tui.store.setLoginUrl(null);
                     auth = await performAmplitudeAuth({

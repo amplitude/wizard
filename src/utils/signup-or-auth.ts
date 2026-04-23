@@ -95,7 +95,14 @@ export type SignupAttemptStatus =
   | 'requires_redirect'
   | 'signup_error'
   | 'user_fetch_failed'
-  | 'wrapper_exception';
+  | 'wrapper_exception'
+  /**
+   * Direct signup produced fresh tokens, but the caller's downstream
+   * `fetchAmplitudeUser` still failed and it opened a browser OAuth flow
+   * to recover. Distinguishes this rare edge case from a primary-path
+   * browser OAuth (which never fires this event).
+   */
+  | 'browser_fallback_after_signup';
 
 export const AGENTIC_SIGNUP_ATTEMPTED_EVENT = 'agentic signup attempted';
 
