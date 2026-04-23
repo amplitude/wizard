@@ -50,6 +50,10 @@ vi.mock('../../lib/feature-flags', () => ({
   FLAG_LLM_ANALYTICS: 'wizard-llm-analytics',
 }));
 
+vi.mock('../install-id', () => ({
+  getOrCreateInstallId: vi.fn(() => 'test-uuid'),
+}));
+
 import { v4 as uuidv4 } from 'uuid';
 
 import { Analytics, resolveTelemetryApiKey } from '../analytics.js';
