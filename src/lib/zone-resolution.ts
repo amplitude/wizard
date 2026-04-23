@@ -46,6 +46,24 @@ export function tryResolveZone(session: WizardSession): AmplitudeZone | null {
 export function resolveZone(
   session: WizardSession,
   fallback: AmplitudeZone,
+  options?: {
+    /**
+     * When `false`, only Tier 1 (`session.region`) is consulted; Tiers 2
+     * and 3 (project config, stored user) are skipped and the fallback
+     * is returned if Tier 1 is null. Pass `false` from hot paths — React
+     * render bodies, high-frequency loops — where the synchronous disk
+     * reads in `readAmpliConfig` and `getStoredUser` matter and the
+     * caller can assert `session.region` is already populated (typically
+     * because the caller runs after RegionSelect / auth).
+     *
+     * Defaults to `true` so `resolveZone(session, fallback)` preserves
+     * its original full-chain semantics at all existing call sites.
+     */
+    readDisk?: boolean;
+  },
 ): AmplitudeZone {
+  if (options?.readDisk === false) {
+    return session.region ?? fallback;
+  }
   return tryResolveZone(session) ?? fallback;
 }

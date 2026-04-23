@@ -109,6 +109,64 @@ describe('resolveZone', () => {
     const session = buildSession({});
     expect(resolveZone(session, 'eu')).toBe('eu');
   });
+
+  describe('readDisk: false (hot-path mode)', () => {
+    it('returns session.region when set, without touching disk', async () => {
+      const { readAmpliConfig } = await import('../ampli-config.js');
+      const { getStoredUser } = await import('../../utils/ampli-settings.js');
+      const readAmpliConfigMock = vi.mocked(readAmpliConfig);
+      const getStoredUserMock = vi.mocked(getStoredUser);
+      readAmpliConfigMock.mockClear();
+      getStoredUserMock.mockClear();
+
+      const session = buildSession({ region: 'eu' });
+      expect(resolveZone(session, 'us', { readDisk: false })).toBe('eu');
+      expect(readAmpliConfigMock).not.toHaveBeenCalled();
+      expect(getStoredUserMock).not.toHaveBeenCalled();
+    });
+
+    it('returns fallback when session.region is null — skips Tier 2/3 even if set', async () => {
+      const { readAmpliConfig } = await import('../ampli-config.js');
+      const { getStoredUser } = await import('../../utils/ampli-settings.js');
+      // These would normally produce 'eu' via Tier 2. With readDisk:false
+      // they must be ignored entirely — the mocks should not even be
+      // called, and the caller's fallback wins.
+      vi.mocked(readAmpliConfig).mockReturnValue({
+        ok: true,
+        config: { Zone: 'eu' },
+      });
+      vi.mocked(getStoredUser).mockReturnValue({
+        id: 'u',
+        firstName: '',
+        lastName: '',
+        email: 'x@x',
+        zone: 'eu',
+      });
+      const readAmpliConfigMock = vi.mocked(readAmpliConfig);
+      const getStoredUserMock = vi.mocked(getStoredUser);
+      readAmpliConfigMock.mockClear();
+      getStoredUserMock.mockClear();
+
+      const session = buildSession({});
+      expect(resolveZone(session, 'us', { readDisk: false })).toBe('us');
+      expect(readAmpliConfigMock).not.toHaveBeenCalled();
+      expect(getStoredUserMock).not.toHaveBeenCalled();
+    });
+
+    it('default (no options) preserves full-chain semantics', async () => {
+      const { readAmpliConfig } = await import('../ampli-config.js');
+      const { getStoredUser } = await import('../../utils/ampli-settings.js');
+      vi.mocked(readAmpliConfig).mockReturnValue({
+        ok: true,
+        config: { Zone: 'eu' },
+      });
+      vi.mocked(getStoredUser).mockReturnValue(undefined);
+
+      const session = buildSession({});
+      // readDisk defaults to true → Tier 2 fires → returns 'eu'.
+      expect(resolveZone(session, 'us')).toBe('eu');
+    });
+  });
 });
 
 describe('tryResolveZone', () => {

@@ -1,24 +1,24 @@
 /**
- * Memoized zone resolution for React components.
+ * Zone resolution for React components, without disk I/O.
  *
- * `resolveZone` does synchronous disk I/O on every call (`readAmpliConfig`
- * on `ampli.json`, `getStoredUser` on `~/.ampli.json`). Calling it at the
- * top level of a component body re-runs those reads on every render —
- * cheap individually, but wasteful on screens that re-render from local
- * state / timers / store subscriptions.
+ * `resolveZone` walks three tiers to find the effective zone:
+ * (1) `session.region`, (2) `ampli.json` Zone, (3) stored user zone.
+ * Tiers 2 and 3 require synchronous disk reads via `readAmpliConfig` /
+ * `getStoredUser`. Calling the full chain in a component render body
+ * re-runs those reads on every render — wasteful on screens that
+ * re-render from local state, timers, or store subscriptions.
  *
- * This hook wraps `resolveZone` in a `useMemo` keyed on the inputs that
- * can legitimately change within a screen's lifetime (`session.region`,
- * `session.installDir`). The remaining inputs (`ampli.json` Zone and
- * stored user zone) are treated as stable for the memo's lifetime —
- * nothing inside a mounted screen rewrites those files, and every screen
- * that calls this hook runs after RegionSelect / auth have completed,
- * at which point both files are settled.
+ * This hook passes `{ readDisk: false }` so only Tier 1 is consulted.
+ * That skips the disk reads entirely — no staleness (no disk cache to
+ * go stale), no per-render I/O. Safe because every consumer of this
+ * hook runs after RegionSelect / auth has populated `session.region`,
+ * making Tier 1 the authoritative answer.
  *
- * If a future screen mounts before those writes happen, or something
- * begins mutating `ampli.json` mid-screen, prefer to hoist zone
- * resolution up to a parent and thread it as a prop rather than
- * extending this hook's dep array — file mtimes aren't reactive.
+ * If you find yourself wanting this hook for a screen that might
+ * render before `session.region` is set (e.g. a new early-flow
+ * screen), do NOT add Tier 2/3 back here — prefer hoisting zone
+ * resolution up to a parent and threading it as a prop. File-backed
+ * values aren't reactive and don't belong in render-path reads.
  */
 import { useMemo } from 'react';
 import type { WizardSession } from '../../../lib/wizard-session.js';
@@ -30,7 +30,7 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 
 export function useResolvedZone(session: WizardSession): AmplitudeZone {
   return useMemo(
-    () => resolveZone(session, DEFAULT_AMPLITUDE_ZONE),
-    [session.region, session.installDir],
+    () => resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: false }),
+    [session.region],
   );
 }
