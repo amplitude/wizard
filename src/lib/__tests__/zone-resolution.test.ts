@@ -25,7 +25,7 @@ describe('resolveZone', () => {
     vi.mocked(getStoredUser).mockReturnValue(undefined);
 
     const session = buildSession({});
-    expect(resolveZone(session, 'us')).toBe('us');
+    expect(resolveZone(session, 'us', { readDisk: true })).toBe('us');
   });
 
   it('returns session.region when set — beats every lower tier', async () => {
@@ -45,7 +45,7 @@ describe('resolveZone', () => {
 
     const session = buildSession({});
     session.region = 'eu';
-    expect(resolveZone(session, 'us')).toBe('eu');
+    expect(resolveZone(session, 'us', { readDisk: true })).toBe('eu');
   });
 
   it('returns ampli.json Zone when session.region is null', async () => {
@@ -56,7 +56,7 @@ describe('resolveZone', () => {
     });
 
     const session = buildSession({});
-    expect(resolveZone(session, 'us')).toBe('eu');
+    expect(resolveZone(session, 'us', { readDisk: true })).toBe('eu');
   });
 
   it('returns real storedUser zone when no intent and no ampli.json Zone', async () => {
@@ -75,7 +75,7 @@ describe('resolveZone', () => {
     });
 
     const session = buildSession({});
-    expect(resolveZone(session, 'us')).toBe('eu');
+    expect(resolveZone(session, 'us', { readDisk: true })).toBe('eu');
   });
 
   it('returns pending storedUser zone as recovery fallback (#165)', async () => {
@@ -94,7 +94,7 @@ describe('resolveZone', () => {
     });
 
     const session = buildSession({});
-    expect(resolveZone(session, 'us')).toBe('eu');
+    expect(resolveZone(session, 'us', { readDisk: true })).toBe('eu');
   });
 
   it('honors the caller-supplied fallback (not hardcoded to us)', async () => {
@@ -107,7 +107,7 @@ describe('resolveZone', () => {
     vi.mocked(getStoredUser).mockReturnValue(undefined);
 
     const session = buildSession({});
-    expect(resolveZone(session, 'eu')).toBe('eu');
+    expect(resolveZone(session, 'eu', { readDisk: true })).toBe('eu');
   });
 
   describe('readDisk: false (hot-path mode)', () => {
@@ -153,7 +153,7 @@ describe('resolveZone', () => {
       expect(getStoredUserMock).not.toHaveBeenCalled();
     });
 
-    it('default (no options) preserves full-chain semantics', async () => {
+    it('readDisk: true runs the full Tier 1→2→3 chain', async () => {
       const { readAmpliConfig } = await import('../ampli-config.js');
       const { getStoredUser } = await import('../../utils/ampli-settings.js');
       vi.mocked(readAmpliConfig).mockReturnValue({
@@ -163,8 +163,8 @@ describe('resolveZone', () => {
       vi.mocked(getStoredUser).mockReturnValue(undefined);
 
       const session = buildSession({});
-      // readDisk defaults to true → Tier 2 fires → returns 'eu'.
-      expect(resolveZone(session, 'us')).toBe('eu');
+      // readDisk: true → Tier 2 fires → returns 'eu'.
+      expect(resolveZone(session, 'us', { readDisk: true })).toBe('eu');
     });
   });
 });

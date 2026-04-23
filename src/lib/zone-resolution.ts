@@ -46,23 +46,29 @@ export function tryResolveZone(session: WizardSession): AmplitudeZone | null {
 export function resolveZone(
   session: WizardSession,
   fallback: AmplitudeZone,
-  options?: {
+  options: {
     /**
-     * When `false`, only Tier 1 (`session.region`) is consulted; Tiers 2
-     * and 3 (project config, stored user) are skipped and the fallback
-     * is returned if Tier 1 is null. Pass `false` from hot paths — React
-     * render bodies, high-frequency loops — where the synchronous disk
-     * reads in `readAmpliConfig` and `getStoredUser` matter and the
-     * caller can assert `session.region` is already populated (typically
-     * because the caller runs after RegionSelect / auth).
+     * Required. Controls whether Tiers 2 and 3 (project `ampli.json`
+     * and stored user) are consulted after Tier 1 (`session.region`).
      *
-     * Defaults to `true` so `resolveZone(session, fallback)` preserves
-     * its original full-chain semantics at all existing call sites.
+     * Pass `true` when the caller cannot assume Tier 1 is populated —
+     * typically early-flow paths (CLI arg parsing, auth, credential
+     * resolution) that run before the RegionSelect gate. Each `true`
+     * call performs synchronous `readAmpliConfig` + `getStoredUser`
+     * disk reads.
+     *
+     * Pass `false` when the caller runs after RegionSelect / auth and
+     * can assert Tier 1 is authoritative — React render bodies, poll
+     * loops, and other hot paths where the per-call disk I/O matters.
+     * The shared `useResolvedZone` hook wraps this pattern for screens.
+     *
+     * Required rather than defaulted so every call site makes an
+     * explicit, reviewable choice about the Tier 2/3 disk I/O cost.
      */
-    readDisk?: boolean;
+    readDisk: boolean;
   },
 ): AmplitudeZone {
-  if (options?.readDisk === false) {
+  if (!options.readDisk) {
     return session.region ?? fallback;
   }
   return tryResolveZone(session) ?? fallback;

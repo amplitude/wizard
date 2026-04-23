@@ -94,7 +94,9 @@ describe('resolveZone — property tests', () => {
           const session = buildSession({});
           session.region = scenario.intent;
 
-          const result = resolveZone(session, scenario.fallback);
+          const result = resolveZone(session, scenario.fallback, {
+            readDisk: true,
+          });
           expect(result).toBe(expectedZone(scenario));
         },
       ),

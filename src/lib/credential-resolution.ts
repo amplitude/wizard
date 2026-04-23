@@ -98,7 +98,10 @@ export async function resolveCredentials(
   // Single source of truth for zone resolution — see src/lib/zone-resolution.ts.
   // No longer mutates session.region: that field represents user intent, not
   // resolved effective zone.
-  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
+  // readDisk: true — credential resolution runs before the RegionSelect gate;
+  // session.region may not be set yet and disk tiers are the authoritative
+  // source.
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
 
   // Try to resolve credentials from a stored OAuth token.
   // `zone` is always truthy (resolveZone is total); the guard is retained
@@ -517,7 +520,9 @@ export async function resolveEnvironmentSelection(
     return false;
   }
 
-  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
+  // readDisk: true — credential resolution runs before the RegionSelect gate;
+  // session.region may not be set yet.
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
   const apiKey = env.app.apiKey;
 
   session.selectedOrgId = org.id;

@@ -53,7 +53,11 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       // Show current data immediately, then refresh from API
       store.setCommandFeedback(getWhoamiText(store.session), 30_000);
       if (store.session.credentials?.idToken) {
-        const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
+        // readDisk: true — /whoami may fire at any point in the session,
+        // including before RegionSelect is reached.
+        const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+          readDisk: true,
+        });
         void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) => {
           fetchAmplitudeUser(store.session.credentials!.idToken!, zone)
             .then((userInfo) => {

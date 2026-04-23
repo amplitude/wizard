@@ -230,7 +230,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               if (choice === 'report') {
                 setShowReport(true);
               } else if (choice === 'dashboard') {
-                const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
+                // readDisk: false — outro runs at the end of the wizard, far
+                // past the RegionSelect gate. Tier 1 is authoritative.
+                const zone = resolveZone(
+                  store.session,
+                  DEFAULT_AMPLITUDE_ZONE,
+                  {
+                    readDisk: false,
+                  },
+                );
                 const url =
                   store.session.checklistDashboardUrl ??
                   OUTBOUND_URLS.overview[zone];

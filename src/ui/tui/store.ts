@@ -221,7 +221,11 @@ export class WizardStore {
   setCredentials(credentials: WizardSession['credentials']): void {
     this.$session.setKey('credentials', credentials);
     const session = this.$session.get();
-    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
+    // readDisk: true — setCredentials may be called from paths (agent mode,
+    // classic UI, token refresh) that run before / around RegionSelect.
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: true,
+    });
     if (session.userEmail) {
       analytics.setDistinctId(session.userEmail);
       analytics.identifyUser({
@@ -640,7 +644,11 @@ export class WizardStore {
 
     // Write ampli.json to the project directory.
     void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-      const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE);
+      // readDisk: true — invoked from store mutation paths where the
+      // RegionSelect invariant isn't guaranteed (e.g. checkpoint restore).
+      const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE, {
+        readDisk: true,
+      });
       writeAmpliConfig(installDir, {
         OrgId: org.id,
         WorkspaceId: workspace.id,

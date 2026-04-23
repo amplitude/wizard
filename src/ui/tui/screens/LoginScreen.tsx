@@ -43,7 +43,11 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         ]);
 
         const user = getStoredUser();
-        const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
+        // readDisk: true — login runs before the RegionSelect gate; disk
+        // tiers are the authoritative source for intent here.
+        const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+          readDisk: true,
+        });
         const stored = getStoredToken(user?.id, zone);
 
         if (!stored) {

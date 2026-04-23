@@ -261,7 +261,10 @@ const resolveNonInteractiveCredentials = async (
 
     const { resolveZone } = await import('./src/lib/zone-resolution.js');
     const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
-    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
+    // Pre-OAuth CLI path: session.region may be unset, fall back to disk tiers.
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: true,
+    });
     if (mode === 'agent' && agentUI) {
       agentUI.emitProjectCreateStart({ orgId: org.id, name: projectName });
     } else {
@@ -1020,7 +1023,11 @@ void yargs(hideBin(process.argv))
                 const storedUser = getStoredUser();
                 const realUser =
                   storedUser && storedUser.id !== 'pending' ? storedUser : null;
-                const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
+                // Fire-and-forget user refresh during CLI startup: session may
+                // not yet have region set, so fall back to disk tiers.
+                const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+                  readDisk: true,
+                });
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
@@ -1222,9 +1229,12 @@ void yargs(hideBin(process.argv))
                 const { resolveZone } = await import(
                   './src/lib/zone-resolution.js'
                 );
+                // Pre-auth: session.region may be unset at this point, so
+                // fall back to the disk tiers to find an intent.
                 const zone = resolveZone(
                   tui.store.session,
                   DEFAULT_AMPLITUDE_ZONE,
+                  { readDisk: true },
                 );
 
                 // Try direct signup first when --signup + email + fullName are provided

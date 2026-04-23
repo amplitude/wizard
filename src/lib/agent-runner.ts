@@ -231,9 +231,12 @@ export async function runAgentWizard(
     // Fall back to whatever the TUI provided
   }
   // Derive cloudRegion from session via the centralized resolver.
+  // readDisk: true — the agent runner may be entered via paths (classic UI,
+  // resumed sessions) where the RegionSelect invariant isn't guaranteed.
   const cloudRegion: import('../utils/types.js').CloudRegion = resolveZone(
     session,
     DEFAULT_AMPLITUDE_ZONE,
+    { readDisk: true },
   );
 
   // Framework context was already gathered by SetupScreen + detection
