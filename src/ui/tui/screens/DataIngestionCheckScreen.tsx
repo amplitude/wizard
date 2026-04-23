@@ -48,6 +48,21 @@ const FRAMEWORK_HINTS: Partial<Record<Integration, string>> = {
   [Integration.flutter]: 'Run your app and navigate through a few screens',
 };
 
+/**
+ * Frameworks whose runtime is a browser. The 120s + 180s coaching tips
+ * reference browser devtools (Network tab / console), which don't apply
+ * to native mobile (Swift, Android, Flutter, React Native, Expo) or
+ * server-side runtimes (Django, Flask, FastAPI, Python, JS Node, Ruby,
+ * Laravel, Go, Java, Unreal, Unity). Gating those tips on this set is
+ * what keeps the "no wrong suggestions" contract.
+ */
+const BROWSER_FRAMEWORKS = new Set<Integration>([
+  Integration.nextjs,
+  Integration.vue,
+  Integration.reactRouter,
+  Integration.javascript_web,
+]);
+
 interface DataIngestionCheckScreenProps {
   store: WizardStore;
 }
@@ -387,6 +402,13 @@ export const DataIngestionCheckScreen = ({
     ? FRAMEWORK_HINTS[session.integration]
     : undefined;
 
+  // Gate browser-specific coaching tips — suppressed for mobile / server /
+  // engine frameworks whose runtime has no browser devtools. A Swift /
+  // Django / Go user can't "check the Network tab."
+  const isBrowserFramework = session.integration
+    ? BROWSER_FRAMEWORKS.has(session.integration)
+    : false;
+
   const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
   const overflow = (eventTypes?.length ?? 0) - MAX_EVENTS_SHOWN;
 
@@ -457,13 +479,14 @@ export const DataIngestionCheckScreen = ({
 
       {/* 0s restart reminder — suppressed in agent/NDJSON mode where there's
           no human dev server to restart. Phrased conservatively: we don't
-          know the user's exact command, so we don't name one. */}
+          know the user's exact command, so we don't name one. The longer
+          explanation is on the status line emitted by agent-runner; this
+          on-screen copy is deliberately terse. */}
       {!session.agent && (
         <Box marginTop={1} marginLeft={2}>
           <Text color={Colors.secondary}>
-            {Icons.arrowRight} If your dev server or build was already running
-            when the wizard wrote env vars, restart it (using whatever command
-            you started it with) so the new values load.
+            {Icons.arrowRight} If your dev server or build was already running,
+            restart it so the new env values load.
           </Text>
         </Box>
       )}
@@ -491,7 +514,7 @@ export const DataIngestionCheckScreen = ({
             {Icons.arrowRight} Make sure your dev server is running and
             you&apos;ve clicked around the app
           </Text>
-          {elapsedSeconds >= 120 && (
+          {elapsedSeconds >= 120 && isBrowserFramework && (
             <Text color={Colors.secondary}>
               {Icons.arrowRight} In browser devtools, check the Network tab for
               requests to{' '}
@@ -502,10 +525,20 @@ export const DataIngestionCheckScreen = ({
               isn&apos;t sending
             </Text>
           )}
-          {elapsedSeconds >= 180 && (
+          {elapsedSeconds >= 180 && isBrowserFramework && (
             <Text color={Colors.secondary}>
               {Icons.arrowRight} Look in the browser console for errors from{' '}
               @amplitude/* — a silent init failure blocks all events
+            </Text>
+          )}
+          {elapsedSeconds >= 120 && !isBrowserFramework && (
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Check your app&apos;s logs for SDK init errors
+              or failed network calls to{' '}
+              {(session.region ?? session.pendingAuthCloudRegion) === 'eu'
+                ? 'api.eu.amplitude.com'
+                : 'api2.amplitude.com'}{' '}
+              — a silent failure there blocks events
             </Text>
           )}
         </Box>
