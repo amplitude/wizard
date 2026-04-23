@@ -44,7 +44,7 @@ export const CliArgsSchema = z.object({
   appName: z.string().optional(),
   signupEmail: z.string().email().nullable().optional().default(null),
   signupFullName: z.string().nullable().optional().default(null),
-  zone: z.enum(['us', 'eu']).nullable().optional().default(null),
+  region: z.enum(['us', 'eu']).nullable().optional().default(null),
 });
 
 /**
@@ -428,12 +428,12 @@ export function buildSession(args: {
   signupEmail?: string;
   signupFullName?: string;
   /**
-   * From --zone CLI flag. Lets non-TUI modes (agent/CI/classic) pick the
-   * data center for direct signup, since they have no RegionSelect screen.
-   * When provided, pre-populates `region` so RegionSelect is skipped in
-   * the TUI flow too.
+   * From --region CLI flag (--zone is accepted as an alias). Lets non-TUI
+   * modes (agent/CI/classic) pick the data center for direct signup, since
+   * they have no RegionSelect screen. When provided, pre-populates the
+   * session's region so RegionSelect is skipped in the TUI flow too.
    */
-  zone?: AmplitudeZone;
+  region?: AmplitudeZone;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -479,8 +479,9 @@ export function buildSession(args: {
     activationLevel: null,
     activationOptionsComplete: false,
     snippetConfigured: false,
-    // --zone pre-populates region so non-TUI signup targets the right DC.
-    region: validated.zone ?? null,
+    // --region (alias: --zone) pre-populates region so non-TUI signup
+    // targets the right DC.
+    region: validated.region ?? null,
     regionForced: false,
 
     runPhase: RunPhase.Idle,

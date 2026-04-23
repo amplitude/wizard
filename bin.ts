@@ -141,7 +141,9 @@ const buildSessionFromOptions = async (
     menu: options.menu as boolean | undefined,
     signupEmail: options.email as string | undefined,
     signupFullName: options['full-name'] as string | undefined,
-    zone: options.zone as AmplitudeZone | undefined,
+    // --region is canonical; --zone is a yargs alias, so `options.region`
+    // is populated by either flag.
+    region: options.region as AmplitudeZone | undefined,
     integration: options.integration as Parameters<
       typeof buildSession
     >[0]['integration'],
@@ -468,14 +470,14 @@ const runDirectSignupIfRequested = async (
   // Non-TUI modes have no RegionSelect screen to disambiguate — and the
   // backend does not route cross-region, so POSTing an EU-intending email
   // to the US provisioning endpoint would silently create the account in
-  // the US data center. Require an explicit signal (--zone flag, project
+  // the US data center. Require an explicit signal (--region flag, project
   // config, or stored user) before sending the signup request. Exit with
   // AUTH_REQUIRED so orchestrators see a structured failure rather than a
   // misrouted account.
   const zone = tryResolveZone(session);
   if (zone == null) {
     getUI().log.error(
-      'Cannot determine data center region for --signup. Pass --zone us or --zone eu.',
+      'Cannot determine data center region for --signup. Pass --region us or --region eu.',
     );
     process.exit(ExitCode.AUTH_REQUIRED);
   }
@@ -730,24 +732,27 @@ void yargs(hideBin(process.argv))
         return value;
       },
     },
-    zone: {
-      // Required for --signup in non-TUI modes: the backend does not
-      // route across regions, so the client must POST to the correct
-      // provisioning endpoint (us or eu). In the TUI this is covered
-      // by the RegionSelect screen; agent/CI/classic have no prompt,
-      // so this flag is the only way to signal regional intent on a
-      // first-time signup. When provided in TUI mode, pre-populates
-      // the zone and skips RegionSelect.
-      describe: 'data center region for --signup in non-interactive modes',
-      choices: ['us', 'eu'] as const,
-      type: 'string',
-    },
   })
   .command(
     ['$0'],
     'Run the Amplitude setup wizard',
     (yargs) => {
       return yargs.options({
+        region: {
+          // Required for --signup in non-TUI modes: the backend does
+          // not route across regions, so the client must POST to the
+          // correct provisioning endpoint (us or eu). In the TUI this
+          // is covered by the RegionSelect screen; agent/CI/classic
+          // have no prompt, so this flag is the only way to signal
+          // regional intent on a first-time signup. When provided in
+          // TUI mode, pre-populates the region and skips RegionSelect.
+          // `--zone` is accepted as an alias for consistency with the
+          // `wizard login` subcommand.
+          describe: 'data center region for --signup in non-interactive modes',
+          choices: ['us', 'eu'] as const,
+          type: 'string',
+          alias: 'zone',
+        },
         'force-install': {
           default: false,
           describe: 'install packages even if dependency checks fail',
@@ -1602,11 +1607,14 @@ void yargs(hideBin(process.argv))
     'Log in to your Amplitude account',
     (yargs) => {
       return yargs.options({
-        zone: {
+        region: {
           describe: 'data center region (us or eu)',
           choices: ['us', 'eu'] as const,
           default: 'us' as const,
           type: 'string',
+          // `--zone` is the pre-existing name; kept as an alias so any
+          // scripts using `wizard login --zone` continue to work.
+          alias: 'zone',
         },
       });
     },
@@ -1616,7 +1624,8 @@ void yargs(hideBin(process.argv))
         const { performAmplitudeAuth } = await import('./src/utils/oauth.js');
         const { fetchAmplitudeUser } = await import('./src/lib/api.js');
         const { storeToken } = await import('./src/utils/ampli-settings.js');
-        const zone = argv.zone as 'us' | 'eu';
+        // `--region` is canonical; `argv.zone` is the yargs alias mirror.
+        const zone = argv.region as 'us' | 'eu';
 
         try {
           const { getStoredUser, getStoredToken } = await import(
@@ -1939,7 +1948,7 @@ void yargs(hideBin(process.argv))
         } catch {
           setUI(new LoggingUI());
           getUI().log.error(
-            `Could not start region picker. Use --zone with \`${CLI_INVOCATION} login\` to set your region.`,
+            `Could not start region picker. Use --region with \`${CLI_INVOCATION} login\` to set your region.`,
           );
           process.exit(1);
         }

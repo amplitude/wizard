@@ -84,7 +84,9 @@ _amplitude_wizard() {
           esac
           ;;
         login)
-          _arguments '--zone[Amplitude data center zone]:zone:(us eu)'
+          _arguments \
+            '--region[Amplitude data center region]:region:(us eu)' \
+            '--zone[Amplitude data center region (alias for --region)]:zone:(us eu)'
           ;;
         feedback)
           _arguments '--message[Feedback message]:message:' '-m[Feedback message]:message:'
@@ -126,10 +128,10 @@ _amplitude_wizard_completions() {
       fi
       ;;
     login)
-      if [[ "$prev" == "--zone" ]]; then
+      if [[ "$prev" == "--region" || "$prev" == "--zone" ]]; then
         COMPREPLY=($(compgen -W "us eu" -- "$cur"))
       else
-        COMPREPLY=($(compgen -W "--zone" -- "$cur"))
+        COMPREPLY=($(compgen -W "--region --zone" -- "$cur"))
       fi
       ;;
     feedback)

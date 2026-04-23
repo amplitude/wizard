@@ -129,7 +129,7 @@ describe('tryResolveZone', () => {
     expect(tryResolveZone(session)).toBeNull();
   });
 
-  it('returns session.region when --zone pre-populates it', async () => {
+  it('returns session.region when --region pre-populates it', async () => {
     const { readAmpliConfig } = await import('../ampli-config.js');
     const { getStoredUser } = await import('../../utils/ampli-settings.js');
     vi.mocked(readAmpliConfig).mockReturnValue({
@@ -138,7 +138,7 @@ describe('tryResolveZone', () => {
     });
     vi.mocked(getStoredUser).mockReturnValue(undefined);
 
-    const session = buildSession({ zone: 'eu' });
+    const session = buildSession({ region: 'eu' });
     expect(tryResolveZone(session)).toBe('eu');
   });
 
@@ -154,13 +154,13 @@ describe('tryResolveZone', () => {
   });
 });
 
-describe('buildSession with --zone flag', () => {
-  it('pre-populates session.region from the zone arg', () => {
-    const session = buildSession({ zone: 'eu' });
+describe('buildSession with --region flag', () => {
+  it('pre-populates session.region from the region arg', () => {
+    const session = buildSession({ region: 'eu' });
     expect(session.region).toBe('eu');
   });
 
-  it('leaves session.region null when zone is omitted', () => {
+  it('leaves session.region null when region is omitted', () => {
     const session = buildSession({});
     expect(session.region).toBeNull();
   });
