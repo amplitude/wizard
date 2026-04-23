@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 
-import type { Integration } from './constants';
+import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 
 /**
@@ -214,8 +214,23 @@ export interface WizardSession {
    * null = not yet selected (shown as RegionSelect screen)
    * 'us' = US region (api.amplitude.com)
    * 'eu' = EU region (api.eu.amplitude.com)
+   *
+   * WRITE INVARIANT: this field is written ONLY by intent-bearing sources —
+   * the --region CLI flag / env var, /region slash command, RegionSelect
+   * screen pick, the "Switch data-center region" flow, checkpoint restore,
+   * and OAuth-derived zone after successful authentication (signing into an
+   * EU account is regional intent, even though it's not a manual pick).
+   * Non-intent code MUST NOT assign to this field as a cache.
+   *
+   * READ GUIDANCE: code outside the TUI render tree (bin.ts entry points,
+   * credential-resolution, agent/CI paths) MUST call
+   * `resolveZone(session, fallback)` (src/lib/zone-resolution.ts) to get
+   * the effective zone, not read this field directly. The only legitimate
+   * direct reads are: display/debug output, checkpoint persistence (we
+   * persist intent, not resolved zone), and the RegionSelect gate checks
+   * in bin.ts that drive pre-auth flow ordering.
    */
-  region: CloudRegion | null;
+  region: AmplitudeZone | null;
 
   /**
    * True when the /region slash command forces RegionSelect to re-appear.
@@ -248,9 +263,6 @@ export interface WizardSession {
 
   /** OAuth access_token held during SUSI — used for Hydra-validated proxy auth. */
   pendingAuthAccessToken: string | null;
-
-  /** Cloud region detected from the OAuth token. Drives RegionSelect auto-skip. */
-  pendingAuthCloudRegion: CloudRegion | null;
 
   /** Org selected during SUSI (written to ampli.json). */
   selectedOrgId: string | null;
@@ -473,7 +485,6 @@ export function buildSession(args: {
     pendingOrgs: null,
     pendingAuthIdToken: null,
     pendingAuthAccessToken: null,
-    pendingAuthCloudRegion: null,
     selectedOrgId: null,
     selectedOrgName: null,
     selectedWorkspaceId: null,

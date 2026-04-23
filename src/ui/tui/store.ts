@@ -16,8 +16,11 @@ import {
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
+  type CloudRegion,
   buildSession,
 } from '../../lib/wizard-session.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
+import { resolveZone } from '../../lib/zone-resolution.js';
 import {
   AdditionalFeature,
   McpOutcome,
@@ -210,6 +213,7 @@ export class WizardStore {
   setCredentials(credentials: WizardSession['credentials']): void {
     this.$session.setKey('credentials', credentials);
     const session = this.$session.get();
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
     if (session.userEmail) {
       analytics.setDistinctId(session.userEmail);
       analytics.identifyUser({
@@ -223,13 +227,13 @@ export class WizardStore {
         // (Org → Workspace → Environment → App).
         app_id: session.selectedAppId ?? credentials?.appId,
         env_name: session.selectedEnvName,
-        region: session.region,
+        region: zone,
         integration: session.integration,
       });
     }
     analytics.wizardCapture('auth complete', {
       'app id': credentials?.appId,
-      region: session.region,
+      region: zone,
     });
     this.emitChange();
   }
@@ -531,14 +535,15 @@ export class WizardStore {
   setOAuthComplete(data: {
     accessToken: string;
     idToken: string;
-    cloudRegion: WizardSession['pendingAuthCloudRegion'];
+    cloudRegion: CloudRegion | null;
     orgs: WizardSession['pendingOrgs'];
   }): void {
     this.$session.setKey('pendingAuthAccessToken', data.accessToken);
     this.$session.setKey('pendingAuthIdToken', data.idToken);
-    this.$session.setKey('pendingAuthCloudRegion', data.cloudRegion);
     this.$session.setKey('pendingOrgs', data.orgs);
     // Auto-set region — skips RegionSelect for users whose zone is detected.
+    // OAuth-derived zone is intent-equivalent per the write invariant on the
+    // region field (see src/lib/wizard-session.ts).
     if (data.cloudRegion) {
       this.$session.setKey('region', data.cloudRegion);
     }
@@ -626,13 +631,8 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', appId);
 
     // Write ampli.json to the project directory.
-    // Use session.region (user-confirmed) over pendingAuthCloudRegion (auto-detected)
-    // so that /region changes are respected.
     void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-      const zone =
-        this.$session.get().region ??
-        this.$session.get().pendingAuthCloudRegion ??
-        'us';
+      const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE);
       writeAmpliConfig(installDir, {
         OrgId: org.id,
         WorkspaceId: workspace.id,

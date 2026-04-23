@@ -124,7 +124,10 @@ describe('resolveCredentials — zone resolution', () => {
     const session = buildSession({});
     await resolveCredentials(session, { requireOrgId: false });
 
-    expect(session.region).toBe('us');
+    // session.region is no longer mutated by resolveCredentials (see
+    // zone-resolution invariant). Observe that the pending-user zone was
+    // honored via the credentials host instead.
+    expect(session.credentials?.host).toBe('https://us.amplitude.com');
   });
 
   it('real user zone wins over pending user zone', async () => {
@@ -163,10 +166,11 @@ describe('resolveCredentials — zone resolution', () => {
     const session = buildSession({});
     await resolveCredentials(session, { requireOrgId: false });
 
-    expect(session.region).toBe('eu');
+    // See note above — assert the zone via credentials host.
+    expect(session.credentials?.host).toBe('https://eu.amplitude.com');
   });
 
-  it('returns early without touching region when no user is stored', async () => {
+  it('returns no credentials when no user is stored', async () => {
     const { getStoredUser } = await import('../../utils/ampli-settings.js');
 
     vi.mocked(getStoredUser).mockReturnValue(undefined);

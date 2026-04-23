@@ -20,7 +20,11 @@ import {
   fetchSlackInstallUrl,
   fetchSlackConnectionStatus,
 } from '../../../lib/api.js';
-import { OUTBOUND_URLS, type AmplitudeZone } from '../../../lib/constants.js';
+import {
+  DEFAULT_AMPLITUDE_ZONE,
+  OUTBOUND_URLS,
+} from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import { logToFile } from '../../../utils/debug.js';
 import opn from 'opn';
 
@@ -72,7 +76,7 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const region = store.session.region ?? 'us';
+  const region = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
   const isEu = region === 'eu';
   const appName = isEu ? 'Amplitude - EU' : 'Amplitude';
 
@@ -92,22 +96,25 @@ export const SlackScreen = ({
     // The App API uses access_token, not id_token.
     const accessToken = credentials?.accessToken;
     if (accessToken && orgId) {
-      void fetchSlackConnectionStatus(
-        accessToken,
-        region as AmplitudeZone,
-        orgId,
-      ).then((isConnected) => {
-        if (cancelled) return;
-        logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
-        if (isConnected) {
-          setPhase(Phase.Done);
-          timerRef.current = setTimeout(() => {
-            if (!cancelled) {
-              markDone(store, SlackOutcome.Configured, standalone, onComplete);
-            }
-          }, 1500);
-        }
-      });
+      void fetchSlackConnectionStatus(accessToken, region, orgId).then(
+        (isConnected) => {
+          if (cancelled) return;
+          logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
+          if (isConnected) {
+            setPhase(Phase.Done);
+            timerRef.current = setTimeout(() => {
+              if (!cancelled) {
+                markDone(
+                  store,
+                  SlackOutcome.Configured,
+                  standalone,
+                  onComplete,
+                );
+              }
+            }, 1500);
+          }
+        },
+      );
     }
 
     return () => {
@@ -115,10 +122,8 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const zone = (region ?? 'us') as AmplitudeZone;
-
   const settingsUrl = OUTBOUND_URLS.slackSettings(
-    zone,
+    region,
     store.session.selectedOrgId,
   );
 
@@ -145,7 +150,7 @@ export const SlackScreen = ({
     };
 
     if (accessToken && orgId) {
-      void fetchSlackInstallUrl(accessToken, zone, orgId, settingsUrl).then(
+      void fetchSlackInstallUrl(accessToken, region, orgId, settingsUrl).then(
         (directUrl) => open(directUrl ?? settingsUrl),
       );
     } else {

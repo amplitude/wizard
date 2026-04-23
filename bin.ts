@@ -246,10 +246,9 @@ const resolveNonInteractiveCredentials = async (
       process.exit(ExitCode.AUTH_REQUIRED);
     }
 
-    const zone =
-      (session.region ?? session.pendingAuthCloudRegion ?? 'us') === 'eu'
-        ? 'eu'
-        : 'us';
+    const { resolveZone } = await import('./src/lib/zone-resolution.js');
+    const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
     if (mode === 'agent' && agentUI) {
       agentUI.emitProjectCreateStart({ orgId: org.id, name: projectName });
     } else {
@@ -472,23 +471,12 @@ const runDirectSignupIfRequested = async (
     './src/utils/signup-or-auth.js'
   );
   const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+  const { resolveZone } = await import('./src/lib/zone-resolution.js');
 
-  // Resolve zone from stored state so EU users aren't silently placed in US.
-  // In non-TUI modes session.region is null at this point because credential
-  // resolution hasn't run yet. Mirror the priority used by resolveCredentials:
-  // project config > stored user zone > default.
-  let zone = session.region;
-  if (!zone) {
-    const { getStoredUser } = await import('./src/utils/ampli-settings.js');
-    const { readAmpliConfig } = await import('./src/lib/ampli-config.js');
-    const projectConfig = readAmpliConfig(session.installDir);
-    const projectZone = projectConfig.ok
-      ? projectConfig.config.Zone
-      : undefined;
-    const storedUser = getStoredUser();
-    zone = projectZone ?? storedUser?.zone ?? DEFAULT_AMPLITUDE_ZONE;
-    session.region = zone;
-  }
+  // Single source of truth — see src/lib/zone-resolution.ts. Does not mutate
+  // session.region; `resolveCredentials` derives the same zone independently
+  // when it runs later.
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
   try {
     const tokens = await performSignupOrAuth({
       email: session.signupEmail,
@@ -967,17 +955,29 @@ void yargs(hideBin(process.argv))
               // Resolve org/workspace display names so /whoami shows them.
               // Also extracts the numeric analytics project ID for MCP event detection.
               // Fire-and-forget so it doesn't block startup.
-              if (session.region && session.selectedOrgId) {
+              // Hydrate org/workspace display names after credential
+              // resolution succeeds. Gate on credentials (not region) because
+              // resolveCredentials no longer cache-writes session.region;
+              // gating on region would silently skip hydration for returning
+              // agent-mode users whose zone comes from storedUser, not an
+              // explicit flag.
+              if (session.credentials && session.selectedOrgId) {
                 const { getStoredUser, getStoredToken } = await import(
                   './src/utils/ampli-settings.js'
                 );
                 const { fetchAmplitudeUser, extractAppId } = await import(
                   './src/lib/api.js'
                 );
+                const { resolveZone } = await import(
+                  './src/lib/zone-resolution.js'
+                );
+                const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                  './src/lib/constants.js'
+                );
                 const storedUser = getStoredUser();
                 const realUser =
                   storedUser && storedUser.id !== 'pending' ? storedUser : null;
-                const zone = session.region;
+                const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
@@ -1006,7 +1006,7 @@ void yargs(hideBin(process.argv))
                             session.selectedWorkspaceName ?? undefined,
                           app_id: session.selectedAppId,
                           env_name: session.selectedEnvName,
-                          region: session.region,
+                          region: zone,
                           integration: session.integration,
                         });
                       }
@@ -1184,10 +1184,13 @@ void yargs(hideBin(process.argv))
                     }
                   });
                 });
-                const zone =
-                  tui.store.session.region === 'eu'
-                    ? 'eu'
-                    : DEFAULT_AMPLITUDE_ZONE;
+                const { resolveZone } = await import(
+                  './src/lib/zone-resolution.js'
+                );
+                const zone = resolveZone(
+                  tui.store.session,
+                  DEFAULT_AMPLITUDE_ZONE,
+                );
 
                 // Try direct signup first when --signup + email + fullName are provided
                 // and the feature flag is enabled. performSignupOrAuth returns null when

@@ -24,7 +24,8 @@ import {
   restoreClaudeSettings,
 } from './agent-interface';
 import { getLlmGatewayUrlFromHost } from '../utils/urls';
-import { OUTBOUND_URLS } from './constants.js';
+import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
+import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { enableDebugLogs, logToFile } from '../utils/debug';
@@ -228,11 +229,11 @@ export async function runAgentWizard(
   } catch {
     // Fall back to whatever the TUI provided
   }
-  // Derive cloudRegion from session (set during auth or defaulting to 'us')
-  const cloudRegion: import('../utils/types.js').CloudRegion =
-    (session.pendingAuthCloudRegion as
-      | import('../utils/types.js').CloudRegion
-      | null) ?? 'us';
+  // Derive cloudRegion from session via the centralized resolver.
+  const cloudRegion: import('../utils/types.js').CloudRegion = resolveZone(
+    session,
+    DEFAULT_AMPLITUDE_ZONE,
+  );
 
   // Framework context was already gathered by SetupScreen + detection
   const frameworkContext = session.frameworkContext;

@@ -34,7 +34,12 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { TerminalLink } from '../primitives/index.js';
-import { OUTBOUND_URLS, type AmplitudeZone } from '../../../lib/constants.js';
+import {
+  DEFAULT_AMPLITUDE_ZONE,
+  OUTBOUND_URLS,
+  type AmplitudeZone,
+} from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import { analytics } from '../../../utils/analytics.js';
 import {
   createAmplitudeApp,
@@ -66,11 +71,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
   useWizardStore(store);
 
   const { session } = store;
-  // Normalize to a known zone — matches bin.ts's create-project path so an
-  // unexpected value defaults safely to 'us' instead of flowing into the
-  // proxy URL lookup as a cast string.
-  const zone: AmplitudeZone =
-    (session.region ?? session.pendingAuthCloudRegion) === 'eu' ? 'eu' : 'us';
+  const zone: AmplitudeZone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE);
   const orgId = session.selectedOrgId;
   const orgName = session.selectedOrgName;
   // /create-project can fire mid-SUSI (pending* tokens set, credentials

@@ -24,8 +24,8 @@ import {
   fetchProjectActivationStatus,
   fetchWorkspaceEventTypes,
 } from '../../../lib/api.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
-import { Integration } from '../../../lib/constants.js';
+import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 
@@ -128,7 +128,6 @@ export const DataIngestionCheckScreen = ({
     // Read from store.session at call time to avoid stale closures
     const currentSession = store.session;
     const currentCredentials = currentSession.credentials;
-    const currentRegion = currentSession.region;
 
     if (!currentCredentials) {
       setApiUnavailable(true);
@@ -140,7 +139,7 @@ export const DataIngestionCheckScreen = ({
       setApiUnavailable(true);
       return;
     }
-    const zone = (currentRegion ?? 'us') as AmplitudeZone;
+    const zone = resolveZone(currentSession, DEFAULT_AMPLITUDE_ZONE);
     const dataApiToken =
       currentCredentials.idToken ?? currentCredentials.accessToken;
 
