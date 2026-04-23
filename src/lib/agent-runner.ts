@@ -438,6 +438,11 @@ export async function runAgentWizard(
     continueUrl,
   };
 
+  // Remove single-use integration skills from the user's project.
+  // Instrumentation and taxonomy skills stay — users invoke them later.
+  const { cleanupIntegrationSkills } = await import('./wizard-tools.js');
+  cleanupIntegrationSkills(session.installDir);
+
   getUI().outro(`Successfully installed Amplitude!`);
 
   await analytics.shutdown('success');
