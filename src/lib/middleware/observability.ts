@@ -18,6 +18,11 @@ import type {
 import { createLogger } from '../observability/logger';
 import { addBreadcrumb, setSentryTag } from '../observability/sentry';
 import { rotateRunId } from '../observability/correlation';
+import {
+  datadogEvent,
+  datadogLog,
+  setDatadogTag,
+} from '../observability/datadog';
 
 const log = createLogger('agent');
 
@@ -40,10 +45,10 @@ export function createObservabilityMiddleware(): Middleware {
     onInit() {
       totalToolCalls = 0;
       totalMessages = 0;
-      // Rotate the run ID so retries get distinct correlation
       rotateRunId();
       log.info('Agent run started');
       addBreadcrumb('agent', 'Agent run started');
+      datadogEvent('agent.run.started');
     },
 
     onMessage(
@@ -65,6 +70,10 @@ export function createObservabilityMiddleware(): Middleware {
               phase: ctx.currentPhase,
             });
             addBreadcrumb('tool', `Tool: ${toolName}`, {
+              phase: ctx.currentPhase,
+            });
+            datadogLog('debug', 'agent.tool', `Tool: ${toolName}`, {
+              tool: toolName,
               phase: ctx.currentPhase,
             });
           }
@@ -97,7 +106,6 @@ export function createObservabilityMiddleware(): Middleware {
       _ctx: MiddlewareContext,
       _store: MiddlewareStore,
     ) {
-      // Log the completed phase with timing
       if (currentPhaseTiming) {
         const elapsed = Date.now() - currentPhaseTiming.startedAt;
         log.info(
@@ -115,6 +123,13 @@ export function createObservabilityMiddleware(): Middleware {
         addBreadcrumb('phase', `${fromPhase} → ${toPhase}`, {
           duration_ms: elapsed,
         });
+        datadogEvent('agent.phase.completed', {
+          from: fromPhase,
+          to: toPhase,
+          duration_ms: elapsed,
+          messages: currentPhaseTiming.messageCount,
+          tool_calls: currentPhaseTiming.toolCalls,
+        });
       }
 
       // Start timing the new phase
@@ -126,6 +141,7 @@ export function createObservabilityMiddleware(): Middleware {
       };
 
       setSentryTag('agent_phase', toPhase);
+      setDatadogTag('agent_phase', toPhase);
     },
 
     onFinalize(
@@ -153,7 +169,14 @@ export function createObservabilityMiddleware(): Middleware {
         total_tool_calls: totalToolCalls,
       });
 
-      // Return summary for potential consumption
+      datadogEvent(`agent.run.${isError ? 'failed' : 'completed'}`, {
+        duration_ms: totalDurationMs,
+        total_messages: totalMessages,
+        total_tool_calls: totalToolCalls,
+        is_error: isError,
+        num_turns: resultMessage.num_turns,
+      });
+
       return {
         duration_ms: totalDurationMs,
         total_messages: totalMessages,

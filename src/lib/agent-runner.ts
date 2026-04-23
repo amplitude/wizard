@@ -33,6 +33,7 @@ import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
+import { flushDatadog, datadogEvent } from './observability/datadog';
 
 /**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
@@ -445,7 +446,11 @@ export async function runAgentWizard(
 
   getUI().outro(`Successfully installed Amplitude!`);
 
-  await analytics.shutdown('success');
+  datadogEvent('wizard.session.ended', { status: 'success' });
+  await Promise.all([
+    analytics.shutdown('success'),
+    flushDatadog().catch(() => {}),
+  ]);
 }
 
 /**

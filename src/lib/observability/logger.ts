@@ -72,6 +72,16 @@ let sentrySink:
     ) => void)
   | null = null;
 
+/** Callback registered for Datadog log shipping. */
+let datadogSink:
+  | ((
+      level: LogLevel,
+      namespace: string,
+      msg: string,
+      ctx?: Record<string, unknown>,
+    ) => void)
+  | null = null;
+
 // ── Level ordering ──────────────────────────────────────────────────
 
 const LEVEL_ORDER: Record<LogLevel, number> = {
@@ -169,6 +179,20 @@ export function setSentrySink(
   sentrySink = sink;
 }
 
+/**
+ * Register a Datadog sink. Called by the Datadog module during init.
+ */
+export function setDatadogSink(
+  sink: (
+    level: LogLevel,
+    namespace: string,
+    msg: string,
+    ctx?: Record<string, unknown>,
+  ) => void,
+): void {
+  datadogSink = sink;
+}
+
 /** Get the current log file path. */
 export function getLogFilePath(): string {
   return logFilePath;
@@ -243,6 +267,11 @@ function makeLogger(namespace: string): WizardLogger {
     // 3. Sentry sink (Phase 2 — no-op until registered)
     if (sentrySink && LEVEL_ORDER[level] >= LEVEL_ORDER.info) {
       sentrySink(level, namespace, msg, ctx);
+    }
+
+    // 4. Datadog sink — ships all levels for full visibility
+    if (datadogSink) {
+      datadogSink(level, namespace, msg, ctx);
     }
   };
 

@@ -10,7 +10,9 @@ import { analytics } from './analytics';
 import { getUI } from '../ui';
 import {
   flushSentry,
+  flushDatadog,
   captureError as sentryCaptureError,
+  datadogError as ddCaptureError,
 } from '../lib/observability';
 
 export class WizardError extends Error {
@@ -57,7 +59,7 @@ export async function wizardAbort(
     }
   }
 
-  // 2. Capture error in analytics + Sentry (if provided)
+  // 2. Capture error in analytics + Sentry + Datadog (if provided)
   if (error) {
     analytics.captureException(error, {
       ...((error instanceof WizardError && error.context) || {}),
@@ -66,13 +68,20 @@ export async function wizardAbort(
       exitCode,
       ...((error instanceof WizardError && error.context) || {}),
     });
+    ddCaptureError(error, {
+      exitCode,
+      ...((error instanceof WizardError && error.context) || {}),
+    });
   }
 
-  // 3. Shutdown analytics and flush Sentry
+  // 3. Shutdown analytics, flush Sentry + Datadog
   await Promise.all([
     analytics.shutdown(error ? 'error' : 'cancelled'),
     flushSentry().catch(() => {
       /* Sentry flush failure is non-fatal */
+    }),
+    flushDatadog().catch(() => {
+      /* Datadog flush failure is non-fatal */
     }),
   ]);
 

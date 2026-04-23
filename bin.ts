@@ -90,6 +90,7 @@ import {
   initLogger,
   initCorrelation,
   initSentry,
+  initDatadog,
   setTerminalSink,
   getLogFilePath,
 } from './src/lib/observability';
@@ -487,6 +488,14 @@ const resolveNonInteractiveCredentials = async (
     version: WIZARD_VERSION,
     mode,
     debug: isDebug,
+  });
+
+  // Initialize Datadog log shipping (requires DD_API_KEY env var).
+  // Respects the same DO_NOT_TRACK/AMPLITUDE_WIZARD_NO_TELEMETRY opt-out.
+  initDatadog({
+    sessionId: analytics.getAnonymousId(),
+    version: WIZARD_VERSION,
+    mode,
   });
 
   // Set session-scoped properties so every event includes mode/version/platform.

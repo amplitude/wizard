@@ -13,6 +13,7 @@ import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
 import { getVersionCheckInfo } from './lib/version-check';
+import { datadogEvent, setDatadogTag } from './lib/observability/datadog';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -78,7 +79,12 @@ export async function runWizard(argv: Args, session?: WizardSession) {
 
   session.integration = integration;
   analytics.setSessionProperty('integration', integration);
+  setDatadogTag('integration', integration);
   analytics.wizardCapture('session started', {
+    integration,
+    ci: session.ci ?? false,
+  });
+  datadogEvent('wizard.session.started', {
     integration,
     ci: session.ci ?? false,
   });

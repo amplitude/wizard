@@ -40,3 +40,14 @@ export {
   flushSentry,
 } from './sentry';
 export type { SentryConfig } from './sentry';
+
+// Datadog
+export {
+  initDatadog,
+  datadogLog,
+  datadogEvent,
+  datadogError,
+  setDatadogTag,
+  flushDatadog,
+  isDatadogInitialized,
+} from './datadog';
