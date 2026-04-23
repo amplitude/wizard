@@ -145,6 +145,26 @@ export interface OutroData {
   canRestart?: boolean;
 }
 
+/**
+ * Transient state shown while the agent is retrying after a transient LLM /
+ * proxy failure. Populated from `api_retry` SDK messages and the manual retry
+ * sites in agent-interface.ts. Cleared when the next normal message arrives.
+ */
+export interface RetryState {
+  /** 1-indexed attempt number that is about to begin. */
+  attempt: number;
+  /** Max retries the SDK / retry loop was configured with. */
+  maxRetries: number;
+  /** Absolute timestamp (ms) when the next retry will begin. */
+  nextRetryAtMs: number;
+  /** HTTP status code, when known (504, 400, …). `null` for stalls / SDK errors. */
+  errorStatus: number | null;
+  /** Short human-readable reason shown in the banner. */
+  reason: string;
+  /** Timestamp when this retry state was first set. */
+  startedAt: number;
+}
+
 export interface WizardSession {
   // From CLI args
   debug: boolean;
@@ -325,6 +345,7 @@ export interface WizardSession {
 
   // Runtime
   serviceStatus: { description: string; statusPageUrl: string } | null;
+  retryState: RetryState | null;
   settingsOverrideKeys: string[] | null;
   outroData: OutroData | null;
 
@@ -483,6 +504,7 @@ export function buildSession(args: {
     credentials: null,
     apiKeyNotice: null,
     serviceStatus: null,
+    retryState: null,
     settingsOverrideKeys: null,
     outroData: null,
     introConcluded: false,

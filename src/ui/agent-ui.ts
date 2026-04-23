@@ -5,6 +5,7 @@
  */
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
+import type { RetryState } from '../lib/wizard-session';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 
@@ -518,6 +519,23 @@ export class AgentUI implements WizardUI {
     emit('diagnostic', data.description, {
       data: { statusPageUrl: data.statusPageUrl },
     });
+  }
+
+  setRetryState(state: RetryState | null): void {
+    if (state) {
+      emit('diagnostic', `retry attempt ${state.attempt}/${state.maxRetries}`, {
+        data: {
+          kind: 'retry',
+          attempt: state.attempt,
+          maxRetries: state.maxRetries,
+          errorStatus: state.errorStatus,
+          reason: state.reason,
+          nextRetryAtMs: state.nextRetryAtMs,
+        },
+      });
+    } else {
+      emit('diagnostic', 'retry cleared', { data: { kind: 'retry_cleared' } });
+    }
   }
 
   showSettingsOverride(

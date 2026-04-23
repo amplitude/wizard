@@ -12,6 +12,7 @@ import type {
   EventPlanDecision,
 } from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
+import type { RetryState } from '../../lib/wizard-session.js';
 import { Overlay } from './router.js';
 import { RunPhase, OutroKind } from './session-constants.js';
 
@@ -96,6 +97,10 @@ export class InkUI implements WizardUI {
   }): void {
     this.store.setServiceStatus(data);
     this.store.pushOverlay(Overlay.Outage);
+  }
+
+  setRetryState(state: RetryState | null): void {
+    this.store.setRetryState(state);
   }
 
   showSettingsOverride(
