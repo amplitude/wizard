@@ -950,7 +950,9 @@ void yargs(hideBin(process.argv))
                 fs.readFileSync(evtPath, 'utf-8'),
               );
               if (events && events.length > 0) {
-                tui.store.setEventPlan(events);
+                tui.store.setEventPlan(
+                  events.filter((e) => e.name.trim().length > 0),
+                );
               }
             } catch {
               // No event plan file yet — that's fine

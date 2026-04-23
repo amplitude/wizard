@@ -712,7 +712,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
             description: z
               .string()
               .describe(
-                'When this event fires, what properties it includes, and where it will be placed (file path + function/component).',
+                'One short sentence (≤20 words) stating when this event fires. Do NOT include file paths, property lists, autocapture rationale, or implementation notes — those belong in internal planning, not in the user-facing plan.',
               ),
           }),
         )

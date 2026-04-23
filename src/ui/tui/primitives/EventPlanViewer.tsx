@@ -13,7 +13,8 @@ interface EventPlanViewerProps {
 }
 
 export const EventPlanViewer = ({ events }: EventPlanViewerProps) => {
-  if (events.length === 0) {
+  const visible = events.filter((e) => e.name.trim().length > 0);
+  if (visible.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
         <Text bold>Event plan</Text>
@@ -29,7 +30,7 @@ export const EventPlanViewer = ({ events }: EventPlanViewerProps) => {
     <Box flexDirection="column" paddingX={1}>
       <Text bold>Event plan</Text>
       <Box height={1} />
-      {events.map((event) => (
+      {visible.map((event) => (
         <Text key={event.name} color={Colors.muted}>
           {Icons.bullet}{' '}
           <Text color={Colors.accent} bold>

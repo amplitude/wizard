@@ -1151,7 +1151,9 @@ export async function runAgent(
       try {
         const content = fs.readFileSync(eventPlanPath, 'utf-8');
         const events = parseEventPlanContent(content);
-        if (events) getUI().setEventPlan(events);
+        if (events) {
+          getUI().setEventPlan(events.filter((e) => e.name.trim().length > 0));
+        }
       } catch {
         // File doesn't exist yet
       }
