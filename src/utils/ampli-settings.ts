@@ -16,7 +16,10 @@ import {
   type AmplitudeZone,
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
+import { createLogger } from '../lib/observability/logger.js';
 import { atomicWriteJSON } from './atomic-write.js';
+
+const log = createLogger('ampli-settings');
 
 export const AMPLI_CONFIG_PATH = path.join(os.homedir(), '.ampli.json');
 
@@ -172,10 +175,22 @@ export function replaceStoredUser(
   configPath?: string,
 ): void {
   const config = readConfig(configPath);
+  const wiped: string[] = [];
   for (const k of Object.keys(config)) {
-    if (isUserKey(k)) delete config[k];
+    if (isUserKey(k)) {
+      delete config[k];
+      wiped.push(k);
+    }
+  }
+  if (wiped.length > 0) {
+    log.debug('replaceStoredUser: wiped prior user entries', {
+      count: wiped.length,
+      keys: wiped,
+    });
   }
   const key = userKey(user.id, user.zone);
+  // No spread needed: the loop above deleted every User-* key, so there is
+  // nothing to preserve at `config[key]`.
   config[key] = {
     User: user,
     OAuthAccessToken: token.accessToken,
