@@ -13,7 +13,7 @@ interface EventPlanViewerProps {
 }
 
 export const EventPlanViewer = ({ events }: EventPlanViewerProps) => {
-  const visible = events.filter((e) => e.name.length > 0);
+  const visible = events.filter((e) => e.name.trim().length > 0);
   if (visible.length === 0) {
     return (
       <Box flexDirection="column" paddingX={1}>
