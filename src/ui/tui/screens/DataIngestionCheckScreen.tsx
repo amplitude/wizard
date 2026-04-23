@@ -26,6 +26,7 @@ import {
 } from '../../../lib/api.js';
 import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { FRAMEWORK_REGISTRY } from '../../../lib/registry.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
@@ -134,6 +135,7 @@ export const DataIngestionCheckScreen = ({
 
   const { session } = store;
   const { activationLevel } = session;
+  const zone = useResolvedZone(session);
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -215,7 +217,13 @@ export const DataIngestionCheckScreen = ({
       setApiUnavailable(true);
       return;
     }
-    const zone = resolveZone(currentSession, DEFAULT_AMPLITUDE_ZONE);
+    // readDisk: false — region is populated on the session by the time this
+    // screen renders (flow is gated on region !== null). Skipping Tier 2/3
+    // avoids synchronous readAmpliConfig + getStoredUser disk reads every
+    // 30s poll.
+    const zone = resolveZone(currentSession, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: false,
+    });
     const dataApiToken =
       currentCredentials.idToken ?? currentCredentials.accessToken;
 
@@ -611,10 +619,8 @@ export const DataIngestionCheckScreen = ({
             <Text color={Colors.secondary}>
               {Icons.arrowRight} In browser devtools, check the Network tab for
               requests to{' '}
-              {resolveZone(session, 'us') === 'eu'
-                ? 'api.eu.amplitude.com'
-                : 'api2.amplitude.com'}{' '}
-              — a 4xx response or a blocked request usually means the SDK
+              {zone === 'eu' ? 'api.eu.amplitude.com' : 'api2.amplitude.com'} —
+              a 4xx response or a blocked request usually means the SDK
               isn&apos;t sending
             </Text>
           )}
@@ -628,10 +634,8 @@ export const DataIngestionCheckScreen = ({
             <Text color={Colors.secondary}>
               {Icons.arrowRight} Check your app&apos;s logs for SDK init errors
               or failed network calls to{' '}
-              {resolveZone(session, 'us') === 'eu'
-                ? 'api.eu.amplitude.com'
-                : 'api2.amplitude.com'}{' '}
-              — a silent failure there blocks events
+              {zone === 'eu' ? 'api.eu.amplitude.com' : 'api2.amplitude.com'} —
+              a silent failure there blocks events
             </Text>
           )}
         </Box>

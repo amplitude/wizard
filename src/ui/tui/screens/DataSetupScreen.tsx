@@ -44,7 +44,12 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       return;
     }
 
-    const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE);
+    // readDisk: false — region is populated on the session by the time this
+    // screen renders (flow is gated on region !== null). Skipping Tier 2/3
+    // avoids synchronous readAmpliConfig + getStoredUser disk reads on mount.
+    const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: false,
+    });
     logToFile(
       `[DataSetup] checking activation for appId=${appId} zone=${zone}`,
     );
