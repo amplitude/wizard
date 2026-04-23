@@ -10,6 +10,7 @@
 
 import type { RetryState } from '../wizard-session';
 import type { Middleware, SDKMessage } from './types';
+import { analytics } from '../../utils/analytics';
 
 /** Default cap when the SDK doesn't include `max_retries`. */
 const FALLBACK_MAX_RETRIES = 10;
@@ -65,6 +66,13 @@ export function createRetryMiddleware(
       if (next) {
         active = true;
         onState(next);
+        analytics.wizardCapture('llm retry', {
+          attempt: next.attempt,
+          'max retries': next.maxRetries,
+          'error status': next.errorStatus,
+          reason: next.reason,
+          'retry delay ms': Math.max(0, next.nextRetryAtMs - next.startedAt),
+        });
         return;
       }
       if (active) {
