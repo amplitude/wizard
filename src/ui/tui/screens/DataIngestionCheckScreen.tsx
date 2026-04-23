@@ -26,6 +26,7 @@ import {
 } from '../../../lib/api.js';
 import type { AmplitudeZone } from '../../../lib/constants.js';
 import { Integration } from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 
@@ -518,7 +519,7 @@ export const DataIngestionCheckScreen = ({
             <Text color={Colors.secondary}>
               {Icons.arrowRight} In browser devtools, check the Network tab for
               requests to{' '}
-              {(session.region ?? session.pendingAuthCloudRegion) === 'eu'
+              {resolveZone(session, 'us') === 'eu'
                 ? 'api.eu.amplitude.com'
                 : 'api2.amplitude.com'}{' '}
               — a 4xx response or a blocked request usually means the SDK
@@ -535,7 +536,7 @@ export const DataIngestionCheckScreen = ({
             <Text color={Colors.secondary}>
               {Icons.arrowRight} Check your app&apos;s logs for SDK init errors
               or failed network calls to{' '}
-              {(session.region ?? session.pendingAuthCloudRegion) === 'eu'
+              {resolveZone(session, 'us') === 'eu'
                 ? 'api.eu.amplitude.com'
                 : 'api2.amplitude.com'}{' '}
               — a silent failure there blocks events
