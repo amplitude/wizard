@@ -8,7 +8,7 @@ vi.mock('../direct-signup.js', () => ({
   performDirectSignup: vi.fn(),
 }));
 vi.mock('../ampli-settings.js', () => ({
-  storeToken: vi.fn(),
+  replaceStoredUser: vi.fn(),
 }));
 vi.mock('../../lib/api.js', () => ({
   fetchAmplitudeUser: vi.fn(),
@@ -185,7 +185,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       orgs: provisionedOrgs,
     });
-    const { storeToken } = await import('../ampli-settings.js');
+    const { replaceStoredUser } = await import('../ampli-settings.js');
 
     const result = await performSignupOrAuth({
       email: 'ada@example.com',
@@ -195,7 +195,7 @@ describe('performSignupOrAuth', () => {
 
     expect(result).not.toBeNull();
     expect(result).toMatchObject({ accessToken: 'direct-access' });
-    expect(storeToken).toHaveBeenCalledOnce();
+    expect(replaceStoredUser).toHaveBeenCalledOnce();
   });
 
   it('emits agentic signup attempted with status=success on the success path', async () => {
@@ -257,7 +257,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       orgs: provisionedOrgs,
     });
-    const { storeToken } = await import('../ampli-settings.js');
+    const { replaceStoredUser } = await import('../ampli-settings.js');
 
     await performSignupOrAuth({
       email: 'ada@example.com',
@@ -265,7 +265,7 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(storeToken).toHaveBeenCalledWith(
+    expect(replaceStoredUser).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'user-123',
         firstName: 'Ada',
@@ -297,7 +297,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       orgs: provisionedOrgs,
     });
-    const { storeToken } = await import('../ampli-settings.js');
+    const { replaceStoredUser } = await import('../ampli-settings.js');
 
     await performSignupOrAuth({
       email: 'ada@example.com',
@@ -305,7 +305,7 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(storeToken).toHaveBeenCalledWith(
+    expect(replaceStoredUser).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'user-123',
         firstName: 'Ada',
@@ -331,7 +331,7 @@ describe('performSignupOrAuth', () => {
       });
       const { fetchAmplitudeUser } = await import('../../lib/api.js');
       vi.mocked(fetchAmplitudeUser).mockRejectedValue(new Error('network'));
-      const { storeToken } = await import('../ampli-settings.js');
+      const { replaceStoredUser } = await import('../ampli-settings.js');
 
       const pending = performSignupOrAuth({
         email: 'ada@example.com',
@@ -341,7 +341,7 @@ describe('performSignupOrAuth', () => {
       await vi.runAllTimersAsync();
       const result = await pending;
 
-      expect(storeToken).toHaveBeenCalledWith(
+      expect(replaceStoredUser).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'pending' }),
         expect.anything(),
       );

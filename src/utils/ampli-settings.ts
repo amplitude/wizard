@@ -161,6 +161,36 @@ export function storeToken(
   writeConfig(config, configPath);
 }
 
+/**
+ * Persists a user + token as the sole stored account: removes every other
+ * `User-*` / `User[*]-*` entry before writing, preserving non-user config
+ * keys. Use on the signup success path — signup expresses the intent "this
+ * account replaces any prior one," and `getStoredUser()` returns only the
+ * first real user it finds, so non-destructive writes here leave earlier
+ * entries stranded in the file.
+ */
+export function replaceStoredUser(
+  user: StoredUser,
+  token: StoredOAuthToken,
+  configPath?: string,
+): void {
+  const config = readConfig(configPath);
+  for (const k of Object.keys(config)) {
+    if (k.startsWith('User-') || k.startsWith('User[')) {
+      delete config[k];
+    }
+  }
+  const key = userKey(user.id, user.zone);
+  config[key] = {
+    User: user,
+    OAuthAccessToken: token.accessToken,
+    OAuthIdToken: token.idToken,
+    OAuthRefreshToken: token.refreshToken,
+    OAuthExpiresAt: token.expiresAt,
+  };
+  writeConfig(config, configPath);
+}
+
 /** Clears all stored credentials by writing an empty config. */
 export function clearStoredCredentials(configPath?: string): void {
   writeConfig({}, configPath);

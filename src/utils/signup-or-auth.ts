@@ -1,6 +1,6 @@
 import type { AmplitudeAuthResult } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
-import { storeToken, type StoredUser } from './ampli-settings.js';
+import { replaceStoredUser, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
@@ -243,12 +243,17 @@ export async function performSignupOrAuth(
       zone: input.zone,
     };
   }
-  // Persist tokens BEFORE emitting telemetry. If `storeToken` throws (disk
+  // Persist tokens BEFORE emitting telemetry. If persistence throws (disk
   // full, permission error), the exception propagates to the caller's
   // outer catch which emits `wrapper_exception` — making that the sole
   // event for the attempt. Tracking success or user_fetch_failed first
   // would double-count the attempt in telemetry.
-  storeToken(user, tokens);
+  //
+  // `replaceStoredUser` (not `storeToken`) so any prior stored account is
+  // wiped: signup expresses "this account replaces any prior one," and
+  // `getStoredUser()` returns only the first real user in the file, so a
+  // non-destructive write would strand the new account behind the old one.
+  replaceStoredUser(user, tokens);
   if (fetchResult.ok) {
     trackSignupAttempt({
       status: 'success',
