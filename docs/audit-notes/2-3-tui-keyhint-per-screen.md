@@ -2,24 +2,32 @@
 
 **Category:** TUI
 **Effort:** M
-**Status:** Scaffolded (design note only).
+**Status:** Implemented.
 
-## Scope
+## What changed
 
-Plumb per-screen hints. See `docs/audit-branches.md` for the full list of audit
-findings; this branch holds the per-finding design note so the fix has a
-single home when implementation lands.
+Added `src/ui/tui/hooks/useScreenHints.ts` — a module-scoped nanostore atom
+plus a `useScreenHints(hints)` register hook and `useScreenHintsValue()`
+subscription hook. Since only one screen is active at a time, a single
+atom is sufficient and avoids threading props through the router + App
+shell.
 
-## Implementation plan
+`ConsoleView` now prefers the registered hints over the legacy
+`screenHints` prop (still accepted for backward compatibility). When a
+screen unmounts the hook clears its registration, preventing stale hints
+from bleeding into the next screen.
 
-1. Reproduce the finding against the current main HEAD.
-2. Write a failing unit/integration test capturing the observed behavior.
-3. Ship the fix in a single focused commit on this branch, update this
-   file's Status to `Implemented`, and replace the plan with a short
-   "what changed" summary.
+Wired up three high-traffic screens:
 
-## Why scaffolded
+- `IntroScreen` — ↑↓ Navigate / Enter Select
+- `RegionSelectScreen` — ↑↓ Navigate / Enter Select
+- `RunScreen` — ←→ Tabs / Ctrl+C Cancel
 
-Scope exceeds what the audit-branch sweep could safely land in one pass.
-Effort rating: **M**. Implementation belongs with a dedicated
-review cycle and associated tests.
+Remaining screens continue to render just the default `/` (Commands) and
+`Tab` (Ask a question) hints. Screens without explicit hints produce the
+same output as before this change — no regressions.
+
+## Follow-ups
+
+- Wire the remaining 13 screens. Most map to ↑↓/Enter patterns via
+  `PickerMenu`; `SlackScreen` / `McpScreen` have their own key handlers.

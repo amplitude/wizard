@@ -15,7 +15,14 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
+import { useScreenHints } from '../hooks/useScreenHints.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
+
+const REGION_HINTS: readonly KeyHint[] = Object.freeze([
+  { key: '↑↓', label: 'Navigate' },
+  { key: 'Enter', label: 'Select' },
+]);
 
 interface RegionSelectScreenProps {
   store: WizardStore;
@@ -36,6 +43,7 @@ const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
 
 export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
   useWizardStore(store);
+  useScreenHints(REGION_HINTS);
 
   const { session } = store;
 

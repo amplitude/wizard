@@ -15,7 +15,14 @@ import { Box, Text } from 'ink';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenHints } from '../hooks/useScreenHints.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
 import type { WizardStore } from '../store.js';
+
+const RUN_HINTS: readonly KeyHint[] = Object.freeze([
+  { key: '←→', label: 'Tabs' },
+  { key: 'Ctrl+C', label: 'Cancel' },
+]);
 import {
   TabContainer,
   ProgressList,
@@ -242,6 +249,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 
 export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
+  useScreenHints(RUN_HINTS);
 
   const lastStatus =
     store.statusMessages.length > 0
