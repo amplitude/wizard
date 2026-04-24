@@ -1218,22 +1218,34 @@ void yargs(hideBin(process.argv))
 
                 const forceFresh = !ampliConfigExists(installDir);
 
-                // Wait for the user to dismiss the welcome screen AND pick a
-                // region before opening the OAuth URL. This ensures the logo
-                // and intro are visible before the browser opens.
+                // Wait for:
+                //   (a) the user to dismiss the welcome screen AND pick a region
+                //       (always required — gates the OAuth browser open)
+                //   (b) if --signup was passed, the SigningUpScreen ceremony to
+                //       terminate — either tokens obtained (signupAuth !== null)
+                //       or the screen abandoned after redirect/error/unknown
+                //       field (signupAbandoned === true). Without this, bin.ts
+                //       races SigningUpScreen's POST and opens the browser
+                //       before the signup flow can write its result to the
+                //       session.
+                const signupCeremonySettled = (s: typeof tui.store.session) =>
+                  !s.signup || s.signupAuth !== null || s.signupAbandoned;
+
                 await new Promise<void>((resolve) => {
-                  if (
-                    tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
-                  ) {
+                  const ready = () => {
+                    const s = tui.store.session;
+                    return (
+                      s.introConcluded &&
+                      s.region !== null &&
+                      signupCeremonySettled(s)
+                    );
+                  };
+                  if (ready()) {
                     resolve();
                     return;
                   }
                   const unsub = tui.store.subscribe(() => {
-                    if (
-                      tui.store.session.introConcluded &&
-                      tui.store.session.region !== null
-                    ) {
+                    if (ready()) {
                       unsub();
                       resolve();
                     }
