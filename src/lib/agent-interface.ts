@@ -1332,6 +1332,14 @@ export async function runAgent(
               // Append wizard-wide commandments (from YAML) rather than replacing
               // the preset so we keep default Claude Code behaviors.
               append: getWizardCommandments(),
+              // Move per-session dynamic context (cwd, date, user, etc.) out of
+              // the cached system prompt and into the first user message. This
+              // lets the static preset + our commandments be cached across runs
+              // and machines, dramatically improving cache_read hit rate on the
+              // ~3KB commandments block every turn. The Agent SDK caches the
+              // system prompt implicitly; we just need to stop invalidating it.
+              // See cache_read_input_tokens in benchmarks/cache-tracker.ts.
+              excludeDynamicSections: true,
             },
             env: {
               ...process.env,
