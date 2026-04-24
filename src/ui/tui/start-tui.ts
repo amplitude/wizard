@@ -51,10 +51,22 @@ export function startTUI(
   const inkUI = new InkUI(store);
   setUI(inkUI);
 
-  // Render the App — exitOnCtrlC lets Ink translate Ctrl+C into process.exit()
+  // Render the App — exitOnCtrlC is false so Ctrl+C emits a real SIGINT
+  // signal instead of Ink calling process.exit() directly. This lets the
+  // SIGINT handler in bin.ts run (checkpoint save, analytics flush, banner).
   const { unmount: inkUnmount } = render(createElement(App, { store }), {
-    exitOnCtrlC: true,
+    exitOnCtrlC: false,
   });
+
+  // In raw mode the terminal won't generate SIGINT for Ctrl+C; Ink just
+  // delivers the \x03 byte on stdin. Re-raise it as a real signal so the
+  // process-level handler fires.
+  const onStdinData = (data: Buffer) => {
+    if (data[0] === 0x03) {
+      process.kill(process.pid, 'SIGINT');
+    }
+  };
+  process.stdin.on('data', onStdinData);
 
   // Reset terminal colors on exit
   const cleanup = () => {
@@ -66,6 +78,7 @@ export function startTUI(
 
   return {
     unmount: () => {
+      process.stdin.off('data', onStdinData);
       inkUnmount();
       cleanup();
     },
