@@ -718,9 +718,7 @@ describe('feedback command', () => {
     // Spy inside beforeEach so earlier tests that call mockRestore()
     // on console.error (e.g. login > OAuth failure) don't leave us
     // without a spy on stderr when log.error() routes there.
-    consoleSpy = vi
-      .spyOn(console, 'log')
-      .mockImplementation(() => undefined);
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
     consoleErrSpy = vi
       .spyOn(console, 'error')
       .mockImplementation(() => undefined);
