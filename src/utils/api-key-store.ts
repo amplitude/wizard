@@ -10,7 +10,7 @@
  * can have different API keys on the same machine.
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   readFileSync,
@@ -32,8 +32,9 @@ function projectHandle(installDir: string): string {
 
 function keychainRead(account: string): string | null {
   try {
-    return execSync(
-      `security find-generic-password -a "${account}" -s "${KEYCHAIN_SERVICE}" -w 2>/dev/null`,
+    return execFileSync(
+      'security',
+      ['find-generic-password', '-a', account, '-s', KEYCHAIN_SERVICE, '-w'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     ).trim();
   } catch {
@@ -43,8 +44,24 @@ function keychainRead(account: string): string | null {
 
 function keychainWrite(account: string, key: string): boolean {
   try {
-    execSync(
-      `security add-generic-password -U -a "${account}" -s "${KEYCHAIN_SERVICE}" -w "${key}"`,
+    // NOTE: The key is passed as a command-line argument to `-w`. This means it
+    // is briefly visible in `ps` output. macOS `security` does not support
+    // reading the password from stdin, so there is no way to avoid this with
+    // the current CLI interface. Using `execFileSync` (not a shell) prevents
+    // shell-history and metacharacter issues but does not hide the argument
+    // from the process table.
+    execFileSync(
+      'security',
+      [
+        'add-generic-password',
+        '-U',
+        '-a',
+        account,
+        '-s',
+        KEYCHAIN_SERVICE,
+        '-w',
+        key,
+      ],
       { stdio: 'ignore' },
     );
     return true;
@@ -57,8 +74,9 @@ function keychainWrite(account: string, key: string): boolean {
 
 function secretToolRead(account: string): string | null {
   try {
-    return execSync(
-      `secret-tool lookup service "${KEYCHAIN_SERVICE}" account "${account}" 2>/dev/null`,
+    return execFileSync(
+      'secret-tool',
+      ['lookup', 'service', KEYCHAIN_SERVICE, 'account', account],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     ).trim();
   } catch {
@@ -68,10 +86,20 @@ function secretToolRead(account: string): string | null {
 
 function secretToolWrite(account: string, key: string): boolean {
   try {
-    // secret-tool requires stdin for the password
-    execSync(
-      `printf '%s' "${key}" | secret-tool store --label="Amplitude API Key" service "${KEYCHAIN_SERVICE}" account "${account}"`,
-      { stdio: ['pipe', 'ignore', 'ignore'] },
+    // secret-tool reads the password from stdin. Pipe the key via `input`
+    // rather than building a shell pipeline — that way we can't hit shell
+    // metacharacter issues if the key contains quotes, backticks, etc.
+    execFileSync(
+      'secret-tool',
+      [
+        'store',
+        '--label=Amplitude API Key',
+        'service',
+        KEYCHAIN_SERVICE,
+        'account',
+        account,
+      ],
+      { input: key, stdio: ['pipe', 'ignore', 'ignore'] },
     );
     return true;
   } catch {
@@ -160,8 +188,9 @@ export function clearApiKey(installDir: string): void {
 
   if (process.platform === 'darwin') {
     try {
-      execSync(
-        `security delete-generic-password -a "${account}" -s "${KEYCHAIN_SERVICE}" 2>/dev/null`,
+      execFileSync(
+        'security',
+        ['delete-generic-password', '-a', account, '-s', KEYCHAIN_SERVICE],
         { stdio: 'ignore' },
       );
     } catch {
@@ -171,8 +200,9 @@ export function clearApiKey(installDir: string): void {
 
   if (process.platform === 'linux') {
     try {
-      execSync(
-        `secret-tool clear service "${KEYCHAIN_SERVICE}" account "${account}" 2>/dev/null`,
+      execFileSync(
+        'secret-tool',
+        ['clear', 'service', KEYCHAIN_SERVICE, 'account', account],
         { stdio: 'ignore' },
       );
     } catch {
