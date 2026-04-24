@@ -31,6 +31,7 @@ import {
   readAmpliConfig,
   writeAmpliConfig,
 } from '../../../lib/ampli-config.js';
+import type { SignupSuccessResult } from '../../../utils/signup-or-auth.js';
 
 vi.mock('../../../utils/analytics.js', () => ({
   analytics: {
@@ -2267,4 +2268,48 @@ describe('WizardStore', () => {
       expect(store.fileWrites[1].status).toBe('applied');
     });
   });
+
+  // ── Signup setters ───────────────────────────────────────────────
+
+  describe('signup setters', () => {
+    it('setSignupEmail writes the email', () => {
+      const store = createStore();
+      store.setSignupEmail('jane@example.com');
+      expect(store.session.signupEmail).toBe('jane@example.com');
+    });
+
+    it('setSignupFullName trims and writes the name', () => {
+      const store = createStore();
+      store.setSignupFullName('  Jane Doe  ');
+      expect(store.session.signupFullName).toBe('Jane Doe');
+    });
+
+    it('setSignupAuth writes the success result', () => {
+      const store = createStore();
+      const result: SignupSuccessResult = {
+        kind: 'success',
+        idToken: 'id',
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      };
+      store.setSignupAuth(result);
+      expect(store.session.signupAuth).toEqual(result);
+    });
+
+    it('setSignupRequiredFields writes the array', () => {
+      const store = createStore();
+      store.setSignupRequiredFields(['full_name']);
+      expect(store.session.signupRequiredFields).toEqual(['full_name']);
+    });
+
+    it('setSignupAbandoned writes the boolean', () => {
+      const store = createStore();
+      store.setSignupAbandoned(true);
+      expect(store.session.signupAbandoned).toBe(true);
+    });
+  });
 });
+

@@ -22,6 +22,7 @@ import {
   buildSession,
   toCredentialAppId,
 } from '../../lib/wizard-session.js';
+import type { SignupSuccessResult } from '../../utils/signup-or-auth.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
 import { resolveZone } from '../../lib/zone-resolution.js';
 import {
@@ -572,6 +573,31 @@ export class WizardStore {
 
   setLoginUrl(url: string | null): void {
     this.$session.setKey('loginUrl', url);
+    this.emitChange();
+  }
+
+  setSignupEmail(email: string): void {
+    this.$session.setKey('signupEmail', email);
+    this.emitChange();
+  }
+
+  setSignupFullName(name: string): void {
+    this.$session.setKey('signupFullName', name.trim());
+    this.emitChange();
+  }
+
+  setSignupAuth(auth: SignupSuccessResult): void {
+    this.$session.setKey('signupAuth', auth);
+    this.emitChange();
+  }
+
+  setSignupRequiredFields(fields: string[]): void {
+    this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setSignupAbandoned(value: boolean): void {
+    this.$session.setKey('signupAbandoned', value);
     this.emitChange();
   }
 
