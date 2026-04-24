@@ -226,7 +226,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       {(pickingFramework || (session.menu && needsFrameworkPick)) && (
         <FrameworkPicker
           store={store}
-          onComplete={() => setPickingFramework(false)}
+          onComplete={() => {
+            setPickingFramework(false);
+            setAutoFallback(false);
+          }}
         />
       )}
 
