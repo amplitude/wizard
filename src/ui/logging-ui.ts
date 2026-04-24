@@ -21,9 +21,10 @@ export class LoggingUI implements WizardUI {
   }
 
   cancel(message: string, options?: { docsUrl?: string }): void {
-    console.log(`■  ${message}`);
+    // Cancel implies failure/abort — direct to stderr so callers can detect it
+    console.error(`■  ${message}`);
     if (options?.docsUrl) {
-      console.log(`│  Manual setup guide: ${options.docsUrl}`);
+      console.error(`│  Manual setup guide: ${options.docsUrl}`);
     }
   }
 
@@ -32,10 +33,13 @@ export class LoggingUI implements WizardUI {
       console.log(`│  ${message}`);
     },
     warn(message: string): void {
-      console.log(`▲  ${message}`);
+      // Route warnings to stderr so pipe consumers can separate signal from errors
+      console.error(`▲  ${message}`);
     },
     error(message: string): void {
-      console.log(`✖  ${message}`);
+      // Route errors to stderr — stdout should remain clean for structured
+      // output (e.g. --json / agent mode) and for shell piping.
+      console.error(`✖  ${message}`);
     },
     success(message: string): void {
       console.log(`✔  ${message}`);
@@ -115,10 +119,11 @@ export class LoggingUI implements WizardUI {
     description: string;
     statusPageUrl: string;
   }): void {
-    console.log(`▲  The setup agent is temporarily unavailable.`);
-    console.log(`│  Status: ${data.description}`);
-    console.log(`│  Status page: ${data.statusPageUrl}`);
-    console.log(
+    // Service status is a warning — goes to stderr
+    console.error(`▲  The setup agent is temporarily unavailable.`);
+    console.error(`│  Status: ${data.description}`);
+    console.error(`│  Status page: ${data.statusPageUrl}`);
+    console.error(
       `│  The wizard may not work reliably while services are affected.`,
     );
   }
@@ -130,7 +135,8 @@ export class LoggingUI implements WizardUI {
       0,
       Math.round((state.nextRetryAtMs - Date.now()) / 1000),
     );
-    console.log(
+    // Retry notices are warning-level — stderr
+    console.error(
       `▲  ${state.reason}${status} — retrying attempt ${state.attempt}/${
         state.maxRetries
       }${eta > 0 ? ` in ${eta}s` : ''}`,
@@ -141,13 +147,14 @@ export class LoggingUI implements WizardUI {
     keys: string[],
     _backupAndFix: () => boolean,
   ): Promise<void> {
-    console.log(
+    // Security warning — stderr
+    console.error(
       `▲  Security warning: .claude/settings.json overrides detected`,
     );
     for (const key of keys) {
-      console.log(`│    • ${key}`);
+      console.error(`│    • ${key}`);
     }
-    console.log(
+    console.error(
       `│  These overrides prevent the Wizard from accessing the Amplitude LLM Gateway.`,
     );
     return Promise.resolve();
