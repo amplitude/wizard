@@ -1236,6 +1236,13 @@ export async function runAgent(
     // Passed to createStopHook so it can skip reflection when auth is broken.
     let authErrorDetected = false;
 
+    // Tracks whether a post-stream retry banner is currently shown to the user.
+    // Mirrors the pattern in src/lib/middleware/retry.ts: set true when we
+    // publish the banner, clear as soon as the next attempt produces its first
+    // message. Without this the banner lingers for the entire duration of the
+    // recovery attempt (often many minutes) even though the agent is working.
+    let postStreamRetryActive = false;
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       if (attempt > 0) {
         // Exponential backoff: 2s, 4s, 8s
@@ -1392,6 +1399,16 @@ export async function runAgent(
             (rawMessage as Record<string, unknown>)?.type?.toString() ??
             'unknown';
           resetStaleTimer();
+
+          // A post-stream retry banner is active from a previous attempt's
+          // failure. The fact that a message arrived at all means the new
+          // attempt reached the upstream and is making progress, so drop
+          // the banner now instead of waiting for the whole stream to
+          // complete (which can take many minutes).
+          if (postStreamRetryActive) {
+            postStreamRetryActive = false;
+            clearRetryBanner();
+          }
           const parsed = safeParseSDKMessage(rawMessage);
           if (!parsed.ok) {
             logToFile(
@@ -1502,6 +1519,7 @@ export async function runAgent(
               ? 'Upstream error'
               : `Upstream ${matchedTransientError.label}`,
           });
+          postStreamRetryActive = true;
           collectedText.length = 0;
           recentStatuses.length = 0;
           signalDone();
@@ -1509,6 +1527,7 @@ export async function runAgent(
         }
 
         // Clean completion — exit the retry loop
+        postStreamRetryActive = false;
         clearRetryBanner();
         break;
       } catch (innerError) {
@@ -1528,6 +1547,7 @@ export async function runAgent(
             errorStatus: null,
             reason: 'Agent stalled',
           });
+          postStreamRetryActive = true;
           continue;
         }
 
@@ -1563,6 +1583,7 @@ export async function runAgent(
             errorStatus: extractHttpStatusFromMessage(errMsg),
             reason: 'Transient error',
           });
+          postStreamRetryActive = true;
           collectedText.length = 0;
           recentStatuses.length = 0;
           continue;
