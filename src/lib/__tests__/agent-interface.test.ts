@@ -65,6 +65,7 @@ const mockUIInstance = {
   multiselect: vi.fn(),
   heartbeat: vi.fn(),
   setEventPlan: vi.fn(),
+  setRetryState: vi.fn(),
 };
 vi.mock('../../ui', () => ({
   getUI: () => mockUIInstance,
@@ -526,6 +527,87 @@ describe('runAgent', () => {
       ).rejects.toThrow('Network failure');
 
       expect(queryCallCount).toBe(1); // No retry — not a stall
+    });
+
+    it('clears the retry banner on the first message of the recovery attempt', async () => {
+      // Regression: before, the banner was only cleared when the recovery
+      // attempt's stream reached a clean completion. A recovery run can take
+      // many minutes, so users saw the amber "retrying" banner stick around
+      // even though the wizard was working. The fix clears on the first
+      // message of the new attempt (mirroring middleware/retry.ts).
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+      let attempt2FirstMessageSeen = false;
+      let setRetryStateCallsAtFirstMessage: Array<unknown> | null = null;
+
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+
+        if (queryCallCount === 1) {
+          // Attempt 1: yield an error result with API Error 400. The outer
+          // retry loop detects this in collectedText and publishes a banner.
+          return (async function* () {
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: true,
+              result: 'API Error: 400 terminated',
+            };
+          })();
+        }
+
+        // Attempt 2: yield an assistant message first (simulating forward
+        // progress), then success. The banner must clear on the assistant
+        // message, not wait for the success result.
+        return (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              role: 'assistant',
+              content: [{ type: 'text', text: 'Resuming work' }],
+            },
+          };
+          // Snapshot setRetryState calls at the moment of first progress.
+          attempt2FirstMessageSeen = true;
+          setRetryStateCallsAtFirstMessage =
+            mockUIInstance.setRetryState.mock.calls.map((call) => call[0]);
+          yield {
+            type: 'result',
+            subtype: 'success',
+            is_error: false,
+            result: '',
+          };
+        })();
+      });
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      // Let attempt 1 emit, then advance past the 2s backoff so attempt 2 starts.
+      await vi.advanceTimersByTimeAsync(3_000);
+      const result = await runPromise;
+
+      expect(result).toEqual({});
+      expect(queryCallCount).toBe(2);
+      expect(attempt2FirstMessageSeen).toBe(true);
+
+      // The snapshot at the moment of first progress must already contain a
+      // non-null publish AND a null clear — i.e. the banner was cleared before
+      // the stream reached its success result.
+      expect(setRetryStateCallsAtFirstMessage).not.toBeNull();
+      const calls = setRetryStateCallsAtFirstMessage!;
+      const firstPublishIndex = calls.findIndex((arg) => arg !== null);
+      const firstClearIndex = calls.findIndex(
+        (arg, idx) => idx > firstPublishIndex && arg === null,
+      );
+      expect(firstPublishIndex).toBeGreaterThanOrEqual(0);
+      expect(firstClearIndex).toBeGreaterThan(firstPublishIndex);
     });
   });
 
