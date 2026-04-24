@@ -329,18 +329,23 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 /**
  * Popularity-ordered list for the manual framework picker.
  * Excludes `generic` — the wizard auto-selects it when detection fails.
+ *
+ * Ordering rationale: put JavaScript (Web) at the top as the safest default
+ * for users who aren't sure (it covers most React/Vanilla/SPA projects).
+ * Then group web → mobile → backend → games so the list scans cleanly.
+ * Number-key shortcuts [1]-[9],[0] map to the first ten entries.
  */
 const PICKER_ORDER: Integration[] = [
+  Integration.javascript_web,
   Integration.nextjs,
   Integration.reactRouter,
   Integration.vue,
   Integration.reactNative,
+  Integration.javascriptNode,
   Integration.python,
   Integration.django,
   Integration.flask,
   Integration.fastapi,
-  Integration.javascript_web,
-  Integration.javascriptNode,
   Integration.swift,
   Integration.android,
   Integration.flutter,
