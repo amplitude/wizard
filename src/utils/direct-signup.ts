@@ -79,6 +79,15 @@ export interface DirectSignupInput {
   zone: AmplitudeZone;
 }
 
+export interface DirectSignupOptions {
+  /**
+   * Cancel the in-flight HTTP requests. Forwarded to axios as the
+   * `signal` config. Used by the TUI to drop the request when
+   * SigningUpScreen unmounts (e.g. the user quits mid-POST).
+   */
+  signal?: AbortSignal;
+}
+
 export type DirectSignupResult =
   | {
       kind: 'success';
@@ -103,6 +112,7 @@ export type DirectSignupResult =
  */
 export async function performDirectSignup(
   input: DirectSignupInput,
+  options: DirectSignupOptions = {},
 ): Promise<DirectSignupResult> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[input.zone];
   const url = provisioningUrl(input.zone);
@@ -128,6 +138,7 @@ export async function performDirectSignup(
         headers: { 'Content-Type': 'application/json' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: options.signal,
       },
     );
   } catch (e) {
@@ -196,6 +207,7 @@ export async function performDirectSignup(
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: options.signal,
       },
     );
   } catch (e) {

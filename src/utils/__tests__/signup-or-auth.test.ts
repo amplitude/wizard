@@ -516,10 +516,13 @@ describe('performSignupOrAuth — missing fullName no longer short-circuits', ()
       zone: 'us',
     });
 
-    expect(performDirectSignup).toHaveBeenCalledWith({
-      email: 'new@acme.com',
-      fullName: null,
-      zone: 'us',
-    });
+    expect(performDirectSignup).toHaveBeenCalledWith(
+      {
+        email: 'new@acme.com',
+        fullName: null,
+        zone: 'us',
+      },
+      expect.anything(),
+    );
   });
 });

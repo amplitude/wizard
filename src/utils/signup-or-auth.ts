@@ -126,6 +126,15 @@ export interface SignupOrAuthInput {
   zone: AmplitudeZone;
 }
 
+export interface SignupOrAuthOptions {
+  /**
+   * Cancel the in-flight signup POST. Forwarded to `performDirectSignup`
+   * which passes it to axios. Used by SigningUpScreen to abort the
+   * request on unmount.
+   */
+  signal?: AbortSignal;
+}
+
 /**
  * Result of {@link performSignupOrAuth}. Discriminated union that surfaces
  * each non-success outcome as its own arm so callers can branch without
@@ -187,6 +196,7 @@ export type SignupSuccessResult = Extract<
  */
 export async function performSignupOrAuth(
   input: SignupOrAuthInput,
+  options: SignupOrAuthOptions = {},
 ): Promise<PerformSignupOrAuthResult> {
   if (input.email === null) {
     log.debug('missing email; skipping direct signup');
@@ -200,11 +210,14 @@ export async function performSignupOrAuth(
   // callers rely on the error arm to decide fallback strategy.
   let result: Awaited<ReturnType<typeof performDirectSignup>>;
   try {
-    result = await performDirectSignup({
-      email: input.email,
-      fullName: input.fullName,
-      zone: input.zone,
-    });
+    result = await performDirectSignup(
+      {
+        email: input.email,
+        fullName: input.fullName,
+        zone: input.zone,
+      },
+      { signal: options.signal },
+    );
   } catch (err) {
     log.warn('direct signup threw unexpectedly', {
       message: err instanceof Error ? err.message : String(err),
