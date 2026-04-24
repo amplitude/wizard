@@ -8,15 +8,15 @@
  *
  * Silent failure — we never block the wizard or break if the network is
  * unreachable. Opts out automatically when:
- *   - stdout is not a TTY (piped / agent / ci modes)
- *   - NO_UPDATE_NOTIFIER=1 or CI=1
+ *   - stderr is not a TTY (piped / agent / ci modes)
+ *   - NO_UPDATE_NOTIFIER=1, CI=1, or DO_NOT_TRACK=1
  *   - AMPLITUDE_WIZARD_NO_UPDATE_CHECK=1
  */
 
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { satisfies, gt } from 'semver';
+import semver from 'semver';
 
 const CHECK_INTERVAL_MS = 1000 * 60 * 60 * 24; // once per 24h
 const CACHE_FILENAME = 'amplitude-wizard-update-check.json';
@@ -99,8 +99,9 @@ async function fetchLatestVersion(
 export function shouldCheckForUpdates(): boolean {
   if (process.env.AMPLITUDE_WIZARD_NO_UPDATE_CHECK === '1') return false;
   if (process.env.NO_UPDATE_NOTIFIER === '1') return false;
+  if (process.env.DO_NOT_TRACK === '1') return false;
   if (process.env.CI === '1' || process.env.CI === 'true') return false;
-  if (!process.stdout.isTTY) return false;
+  if (!process.stderr.isTTY) return false;
   return true;
 }
 
@@ -145,14 +146,14 @@ export async function checkForUpdate(
 
   // Defensive: ignore invalid versions
   try {
-    if (!satisfies(currentVersion, '*') || !satisfies(latest, '*')) {
+    if (!semver.valid(currentVersion) || !semver.valid(latest)) {
       return null;
     }
   } catch {
     return null;
   }
 
-  const available = gt(latest, currentVersion);
+  const available = semver.gt(latest, currentVersion);
   return { current: currentVersion, latest, available };
 }
 
