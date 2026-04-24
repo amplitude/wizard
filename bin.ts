@@ -797,11 +797,13 @@ void yargs(hideBin(process.argv))
             // owns that flow instead — Ink puts stdin in raw mode, so Ctrl+C
             // is delivered as a keypress, not SIGINT.
             //
-            // First signal: show "Saving session..." banner (via
-            //   setCommandFeedback — renders globally in ConsoleView), fire
-            //   and forget save-checkpoint + analytics flush, then exit
-            //   after a fixed 2s grace window so the banner is visible.
-            // Second signal within that window: exit immediately (code 130).
+            // Import the shared helper eagerly so it's available when SIGINT
+            // fires — placing this after startTUI but before registering the
+            // handler avoids the TDZ issue that would occur if we referenced
+            // a `const` binding from a later dynamic import.
+            const { performGracefulExit } = await import(
+              './src/lib/graceful-exit.js'
+            );
             let sigintReceived = false;
             process.on('SIGINT', () => {
               if (sigintReceived) {
@@ -809,28 +811,11 @@ void yargs(hideBin(process.argv))
               }
               sigintReceived = true;
 
-              try {
-                tui.store.setCommandFeedback(
-                  'Saving session… press Ctrl+C again to force quit.',
-                  10_000,
-                );
-              } catch {
-                // store may be mid-teardown; non-fatal
-              }
-
-              try {
-                saveCheckpoint(tui.store.session);
-              } catch {
-                // best-effort
-              }
-              void analytics.flush().catch(() => {
-                // best-effort
+              performGracefulExit({
+                session: tui.store.session,
+                setCommandFeedback: (msg, ms) =>
+                  tui.store.setCommandFeedback(msg, ms),
               });
-
-              // Fixed 2s grace window so the banner is readable. Do NOT
-              // chain exit onto flush.finally — flush resolves instantly
-              // in the common case which would flash the banner invisibly.
-              setTimeout(() => process.exit(130), 2_000);
             });
 
             // Build session from CLI args and attach to store

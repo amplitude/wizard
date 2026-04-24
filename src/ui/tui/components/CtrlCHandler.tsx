@@ -1,7 +1,7 @@
 /**
  * CtrlCHandler — Intercepts Ctrl+C via Ink's native `useInput` hook and
- * drives the graceful-exit flow directly (banner → save checkpoint →
- * flush analytics → exit after a 2-second grace window).
+ * delegates to the shared `performGracefulExit` helper (banner → save
+ * checkpoint → flush analytics → exit after a 2-second grace window).
  *
  * Why this component (rather than a process SIGINT handler in bin.ts)?
  *
@@ -20,19 +20,14 @@
  *   This gives the user a real, visible window to read the banner.
  * - Second Ctrl+C within that window: exit immediately (code 130).
  *
- * IMPORTANT: we deliberately do NOT chain `process.exit` onto
- * `analytics.flush().finally(...)` — flush resolves almost instantly in
- * the common case, which was causing the banner to flash and the
- * process to exit before the user could see it.
+ * The actual exit sequence lives in `src/lib/graceful-exit.ts` and is
+ * shared with the process SIGINT handler in bin.ts.
  */
 
 import { useRef } from 'react';
 import { useInput } from 'ink';
 import type { WizardStore } from '../store.js';
-import { saveCheckpoint } from '../../../lib/session-checkpoint.js';
-import { analytics } from '../../../utils/analytics.js';
-
-const EXIT_DELAY_MS = 2_000;
+import { performGracefulExit } from '../../../lib/graceful-exit.js';
 
 interface CtrlCHandlerProps {
   store: WizardStore;
@@ -45,35 +40,14 @@ export const CtrlCHandler = ({ store }: CtrlCHandlerProps) => {
     if (!(key.ctrl && input === 'c')) return;
 
     if (pendingExit.current) {
-      // Second Ctrl+C — force-exit without waiting
       process.exit(130);
     }
     pendingExit.current = true;
 
-    try {
-      store.setCommandFeedback(
-        'Saving session… press Ctrl+C again to force quit.',
-        10_000, // longer than EXIT_DELAY_MS so it never clears early
-      );
-    } catch {
-      // store may be mid-teardown; non-fatal
-    }
-
-    // Fire-and-forget cleanup. We do NOT await analytics.flush before
-    // exiting — if it resolves instantly the banner flashes invisibly.
-    try {
-      saveCheckpoint(store.session);
-    } catch {
-      // best-effort
-    }
-    void analytics.flush().catch(() => {
-      // best-effort
+    performGracefulExit({
+      session: store.session,
+      setCommandFeedback: (msg, ms) => store.setCommandFeedback(msg, ms),
     });
-
-    // Single exit path for the first press: fixed grace window so the
-    // banner is visible long enough to read. Do NOT unref — we want
-    // this timer to keep the event loop alive until it fires.
-    setTimeout(() => process.exit(130), EXIT_DELAY_MS);
   });
 
   return null;
