@@ -33,6 +33,8 @@ interface IntroScreenProps {
 
 const LOGO_MIN_COLS = 75;
 const LOGO_MIN_ROWS = 20;
+const COMPACT_COLS = 85;
+const COMPACT_ROWS = 22;
 
 /**
  * Suffix shown after the framework name. Exported for unit tests.
@@ -76,6 +78,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     pickingFramework || (session.menu && needsFrameworkPick);
   const showLogo =
     cols >= LOGO_MIN_COLS && rows >= LOGO_MIN_ROWS && !pickerVisible;
+  const compact = rows < COMPACT_ROWS || cols < COMPACT_COLS;
+  const narrow = cols < COMPACT_COLS;
 
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
@@ -189,20 +193,30 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       flexGrow={1}
       alignItems="center"
       justifyContent="flex-start"
-      paddingTop={2}
+      paddingTop={compact ? 0 : 2}
     >
       {/* Logo (responsive — hidden when terminal is too small) */}
       {showLogo && <AmplitudeTextLogo />}
 
-      {/* Heading */}
-      <Box flexDirection="column" alignItems="center" marginBottom={1}>
+      {/* Heading — collapses to a single line when the viewport is tight */}
+      <Box
+        flexDirection="column"
+        alignItems="center"
+        marginBottom={compact ? 0 : 1}
+      >
         <Text bold color={Colors.heading}>
           Amplitude Wizard
         </Text>
-        <Text color={Colors.muted}>AI-powered analytics setup in minutes</Text>
-        <Text color={Colors.secondary}>
-          Installs the SDK, adds events, and verifies data is flowing.
-        </Text>
+        {!compact && (
+          <>
+            <Text color={Colors.muted}>
+              AI-powered analytics setup in minutes
+            </Text>
+            <Text color={Colors.secondary}>
+              Installs the SDK, adds events, and verifies data is flowing.
+            </Text>
+          </>
+        )}
       </Box>
 
       {/* Detection spinner */}
@@ -271,16 +285,20 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           )}
 
           {showContinue && (
-            <Box marginTop={1}>
+            <Box marginTop={compact ? 0 : 1}>
               <PickerMenu
                 options={[
                   { label: 'Continue', value: 'continue' },
                   {
                     label: 'Change framework',
                     value: 'framework',
-                    hint: 'pick manually',
+                    ...(narrow ? {} : { hint: 'pick manually' }),
                   },
-                  { label: 'Cancel', value: 'cancel', hint: 'exit wizard' },
+                  {
+                    label: 'Cancel',
+                    value: 'cancel',
+                    ...(narrow ? {} : { hint: 'exit wizard' }),
+                  },
                 ]}
                 onSelect={(value) => {
                   const choice = Array.isArray(value) ? value[0] : value;
