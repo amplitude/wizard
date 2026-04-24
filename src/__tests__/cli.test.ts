@@ -710,13 +710,20 @@ describe('whoami command', () => {
 describe('feedback command', () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
-  const consoleSpy = vi
-    .spyOn(console, 'log')
-    .mockImplementation(() => undefined);
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    consoleSpy.mockClear();
+    // Spy inside beforeEach so earlier tests that call mockRestore()
+    // on console.error (e.g. login > OAuth failure) don't leave us
+    // without a spy on stderr when log.error() routes there.
+    consoleSpy = vi
+      .spyOn(console, 'log')
+      .mockImplementation(() => undefined);
+    consoleErrSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     mockTrackWizardFeedback.mockClear();
     process.exit = vi.fn() as unknown as typeof process.exit;
   });
@@ -724,6 +731,8 @@ describe('feedback command', () => {
   afterEach(() => {
     process.argv = originalArgv;
     process.exit = originalExit;
+    consoleSpy.mockRestore();
+    consoleErrSpy.mockRestore();
     vi.resetModules();
   });
 
@@ -734,7 +743,11 @@ describe('feedback command', () => {
     );
 
     expect(process.exit).toHaveBeenCalledWith(1);
-    const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    // Error message is routed through log.error → console.error (per C1 fix)
+    const allOutput = [
+      ...consoleSpy.mock.calls.map((c) => c[0]),
+      ...consoleErrSpy.mock.calls.map((c) => c[0]),
+    ].join('\n');
     expect(allOutput).toMatch(/Usage:/);
     expect(mockTrackWizardFeedback).not.toHaveBeenCalled();
   });
