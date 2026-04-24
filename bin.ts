@@ -479,6 +479,7 @@ const resolveNonInteractiveCredentials = async (
   const rawArgv = process.argv.slice(2);
   const isAgent =
     rawArgv.includes('--agent') || process.env.AMPLITUDE_WIZARD_AGENT === '1';
+  if (isAgent) process.env.AMPLITUDE_WIZARD_AGENT = '1';
   const isCi =
     rawArgv.includes('--ci') ||
     rawArgv.includes('--yes') ||
@@ -517,10 +518,11 @@ const resolveNonInteractiveCredentials = async (
   // Non-blocking background update check — prints a one-line notice on
   // stderr when a newer version is available. Auto-skips in CI / piped /
   // agent modes via shouldCheckForUpdates().
-  void import('./src/utils/update-notifier.js').then(
-    ({ scheduleUpdateCheck }) =>
+  void import('./src/utils/update-notifier.js')
+    .then(({ scheduleUpdateCheck }) =>
       scheduleUpdateCheck('@amplitude/wizard', WIZARD_VERSION),
-  );
+    )
+    .catch(() => {});
 
   // Route logger terminal output through the UI singleton.
   setTerminalSink((level: LogLevel, namespace: string, msg: string) => {

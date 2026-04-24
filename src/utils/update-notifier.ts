@@ -8,7 +8,8 @@
  *
  * Silent failure — we never block the wizard or break if the network is
  * unreachable. Opts out automatically when:
- *   - stderr is not a TTY (piped / agent / ci modes)
+ *   - stderr is not a TTY (piped / ci modes)
+ *   - AMPLITUDE_WIZARD_AGENT=1 (agent mode)
  *   - NO_UPDATE_NOTIFIER=1, CI=1, or DO_NOT_TRACK=1
  *   - AMPLITUDE_WIZARD_NO_UPDATE_CHECK=1
  */
@@ -101,6 +102,7 @@ export function shouldCheckForUpdates(): boolean {
   if (process.env.NO_UPDATE_NOTIFIER === '1') return false;
   if (process.env.DO_NOT_TRACK === '1') return false;
   if (process.env.CI === '1' || process.env.CI === 'true') return false;
+  if (process.env.AMPLITUDE_WIZARD_AGENT === '1') return false;
   if (!process.stderr.isTTY) return false;
   return true;
 }
