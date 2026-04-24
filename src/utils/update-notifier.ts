@@ -55,6 +55,19 @@ async function writeCache(cache: Cache): Promise<void> {
   }
 }
 
+/**
+ * Build the npm registry URL for a package name. Scoped packages require the
+ * literal `@` in the URL path; only the `/` must be escaped.
+ * `encodeURIComponent('@amplitude/wizard')` would produce
+ * `%40amplitude%2Fwizard`, which the registry 404s.
+ * See: https://github.com/npm/registry/blob/main/docs/REGISTRY-API.md
+ *
+ * Exported for unit tests — don't call directly from non-test code.
+ */
+export function buildRegistryUrl(pkgName: string): string {
+  return `https://registry.npmjs.org/${pkgName.replace('/', '%2f')}`;
+}
+
 async function fetchLatestVersion(
   pkgName: string,
   timeoutMs: number,
@@ -65,13 +78,10 @@ async function fetchLatestVersion(
     try {
       // `application/vnd.npm.install-v1+json` returns a slim response that
       // excludes per-version metadata — just enough to get `dist-tags.latest`.
-      const res = await fetch(
-        `https://registry.npmjs.org/${encodeURIComponent(pkgName)}`,
-        {
-          headers: { accept: 'application/vnd.npm.install-v1+json' },
-          signal: controller.signal,
-        },
-      );
+      const res = await fetch(buildRegistryUrl(pkgName), {
+        headers: { accept: 'application/vnd.npm.install-v1+json' },
+        signal: controller.signal,
+      });
       if (!res.ok) return null;
       const body = (await res.json()) as {
         'dist-tags'?: { latest?: string };
