@@ -33,6 +33,7 @@ import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
 import { wizardAbort, WizardError } from '../utils/wizard-abort';
+import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
 /**
@@ -353,6 +354,7 @@ export async function runAgentWizard(
         integration: config.metadata.integration,
         'error type': AgentErrorType.AUTH_ERROR,
       }),
+      exitCode: ExitCode.AUTH_REQUIRED,
     });
   }
 
@@ -364,6 +366,7 @@ export async function runAgentWizard(
         'error type': AgentErrorType.MCP_MISSING,
         signal: AgentSignals.ERROR_MCP_MISSING,
       }),
+      exitCode: ExitCode.AGENT_FAILED,
     });
   }
 
@@ -375,6 +378,7 @@ export async function runAgentWizard(
         'error type': AgentErrorType.RESOURCE_MISSING,
         signal: AgentSignals.ERROR_RESOURCE_MISSING,
       }),
+      exitCode: ExitCode.AGENT_FAILED,
     });
   }
 
@@ -400,6 +404,7 @@ export async function runAgentWizard(
         integration: config.metadata.integration,
         'error type': agentResult.error,
       }),
+      exitCode: ExitCode.NETWORK_ERROR,
     });
   }
 
