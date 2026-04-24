@@ -1229,12 +1229,10 @@ void yargs(hideBin(process.argv))
                 const { resolveZone } = await import(
                   './src/lib/zone-resolution.js'
                 );
-                // Pre-auth: session.region may be unset at this point, so
-                // fall back to the disk tiers to find an intent.
                 const zone = resolveZone(
                   tui.store.session,
                   DEFAULT_AMPLITUDE_ZONE,
-                  { readDisk: true },
+                  { readDisk: false },
                 );
 
                 // Try direct signup first when --signup + email + fullName are provided
