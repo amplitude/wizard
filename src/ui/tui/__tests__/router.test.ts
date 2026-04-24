@@ -957,4 +957,135 @@ describe('WizardRouter', () => {
       expect(router.lastNavDirection).toBe('pop');
     });
   });
+
+  // ── 8. Signup flow states ─────────────────────────────────────────
+
+  describe('signup flow states', () => {
+    it('signup=true, no email → SignupEmail', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        emailCaptureComplete: true,
+        tosAccepted: true,
+        signupEmail: null,
+        signupFullName: null,
+        signupRequiredFields: [],
+        signupAuth: null,
+        signupAbandoned: false,
+      });
+      expect(router.resolve(session)).toBe(Screen.SignupEmail);
+    });
+
+    it('signup=true, email set, nothing required → SigningUp', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        emailCaptureComplete: true,
+        tosAccepted: true,
+        signupEmail: 'x@y.com',
+        signupFullName: null,
+        signupRequiredFields: [],
+        signupAuth: null,
+        signupAbandoned: false,
+      });
+      expect(router.resolve(session)).toBe(Screen.SigningUp);
+    });
+
+    it('signup=true, requiredFields=[full_name], no name → SignupFullName', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        emailCaptureComplete: true,
+        tosAccepted: true,
+        signupEmail: 'x@y.com',
+        signupFullName: null,
+        signupRequiredFields: ['full_name'],
+        signupAuth: null,
+        signupAbandoned: false,
+      });
+      expect(router.resolve(session)).toBe(Screen.SignupFullName);
+    });
+
+    it('signup=true, requirements satisfied after name → SigningUp (retry)', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        emailCaptureComplete: true,
+        tosAccepted: true,
+        signupEmail: 'x@y.com',
+        signupFullName: 'Jane',
+        signupRequiredFields: ['full_name'],
+        signupAuth: null,
+        signupAbandoned: false,
+      });
+      expect(router.resolve(session)).toBe(Screen.SigningUp);
+    });
+
+    it('signup=true, signupAuth set → Auth (bin.ts consumes tokens)', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        emailCaptureComplete: true,
+        tosAccepted: true,
+        signupEmail: 'x@y.com',
+        signupFullName: 'Jane',
+        signupRequiredFields: [],
+        signupAuth: {
+          kind: 'success',
+          idToken: 'id',
+          accessToken: 'acc',
+          refreshToken: 'ref',
+          zone: 'us',
+          userInfo: null,
+          dashboardUrl: null,
+        },
+        signupAbandoned: false,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('signup=true, abandoned → Auth (fallback)', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        emailCaptureComplete: true,
+        tosAccepted: true,
+        signupEmail: 'x@y.com',
+        signupFullName: null,
+        signupRequiredFields: [],
+        signupAuth: null,
+        signupAbandoned: true,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('signup=true, unknown required field → Auth (unknown-field guard)', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        emailCaptureComplete: true,
+        tosAccepted: true,
+        signupEmail: 'x@y.com',
+        signupFullName: null,
+        signupRequiredFields: ['department'],
+        signupAuth: null,
+        signupAbandoned: false,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+  });
 });
