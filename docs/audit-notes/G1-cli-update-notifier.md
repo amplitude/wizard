@@ -1,25 +1,34 @@
-# Audit G1 — Add update-notifier
+# Audit G1 — Update notifier
 
 **Category:** CLI
 **Effort:** M
-**Status:** Scaffolded (design note only).
+**Status:** Implemented.
 
-## Scope
+## What changed
 
-Add update-notifier. See `docs/audit-branches.md` for the full list of audit
-findings; this branch holds the per-finding design note so the fix has a
-single home when implementation lands.
+Added `src/utils/update-notifier.ts`:
 
-## Implementation plan
+- Fire-and-forget background check to `registry.npmjs.org` with a
+  1.5s timeout and a 24h on-disk cache (`$TMPDIR/amplitude-wizard-update-check.json`).
+- Uses the npm install-v1 slim response format to avoid downloading the
+  full packument.
+- Writes a one-line notice to `stderr` when a newer version is
+  available.
 
-1. Reproduce the finding against the current main HEAD.
-2. Write a failing unit/integration test capturing the observed behavior.
-3. Ship the fix in a single focused commit on this branch, update this
-   file's Status to `Implemented`, and replace the plan with a short
-   "what changed" summary.
+Respects the following opt-outs:
 
-## Why scaffolded
+- `AMPLITUDE_WIZARD_NO_UPDATE_CHECK=1`
+- `NO_UPDATE_NOTIFIER=1` (matches the widely-used `update-notifier`
+  convention)
+- `CI=1` / `CI=true`
+- `!process.stdout.isTTY` (piped, `--agent` mode, `--ci`)
 
-Scope exceeds what the audit-branch sweep could safely land in one pass.
-Effort rating: **M**. Implementation belongs with a dedicated
-review cycle and associated tests.
+`bin.ts` kicks off the check after analytics session properties are
+configured — this guarantees we never block startup and the fetch runs
+in parallel with the wizard's heavy dynamic imports.
+
+Not implemented (intentionally):
+
+- No prompt to auto-update. We surface the command and let the user
+  decide; auto-update would be surprising for a tool often run via
+  `npx`.

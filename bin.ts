@@ -514,6 +514,14 @@ const resolveNonInteractiveCredentials = async (
   analytics.setSessionProperty('platform', process.platform);
   analytics.setSessionProperty('node_version', process.version);
 
+  // Non-blocking background update check — prints a one-line notice on
+  // stderr when a newer version is available. Auto-skips in CI / piped /
+  // agent modes via shouldCheckForUpdates().
+  void import('./src/utils/update-notifier.js').then(
+    ({ scheduleUpdateCheck }) =>
+      scheduleUpdateCheck('@amplitude/wizard', WIZARD_VERSION),
+  );
+
   // Route logger terminal output through the UI singleton.
   setTerminalSink((level: LogLevel, namespace: string, msg: string) => {
     const prefix = `[${namespace}]`;
