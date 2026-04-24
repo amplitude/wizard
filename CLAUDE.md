@@ -16,7 +16,7 @@ The flows cover:
 - **Activation Check flow** — evaluates whether a returning user's project is ingesting events, and routes them accordingly
 - **SUSI flow** — sign up / sign in, org and project selection for new users
 - **Data Setup flow** — taxonomy agent, first chart, first dashboard after events are ingested
-- **Org / Project Selection flow** — picker UI for switching org or project, also used by `/org` and `/project` slash commands
+- **Org / Project Selection flow** — picker UI for switching org or project (reached via the framework-detection flow or the `/region` slash command's follow-up pickers)
 - **Framework Detection flow** — auto-detect or manual selection, plus setup question disambiguation
 - **Outro flow** — success, error, and cancel states after the agent run
 
@@ -141,7 +141,7 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 - **Session is the single source of truth.** All state lives in `WizardSession`. Screens and steps read from and write to the session; they do not communicate directly.
 - **Flows are declarative.** Each flow is a pipeline of `{ screen, show, isComplete }` entries. Navigation advances automatically when `isComplete` returns true.
 - **Overlays interrupt without breaking flow.** `OutageScreen` and `SettingsOverrideScreen` are pushed onto an overlay stack and popped when resolved, resuming the flow where it left off. Overlay enum: `Outage`, `SettingsOverride`, `Snake`, `Mcp`, `Slack`, `Logout`, `Login`.
-- **Slash commands are always available.** `/org`, `/project`, `/region`, `/login`, `/logout`, `/whoami`, `/chart`, `/dashboard`, `/taxonomy`, `/slack`, `/feedback`, `/help`, `/debug` must be interceptable at any point in the session.
+- **Slash commands are always available.** `/region`, `/login`, `/logout`, `/whoami`, `/create-project`, `/mcp`, `/slack`, `/feedback`, `/help`, `/debug`, `/snake`, `/exit` must be interceptable at any point in the session. The canonical list lives in `src/ui/tui/console-commands.ts` — update both together.
 - **Framework configs are data-driven.** No switch statements or per-framework routing. Everything goes through `FrameworkConfig` + `FRAMEWORK_REGISTRY`. The universal runner handles all shared behavior.
 - **Agent commandments** (`src/lib/commandments.ts`) are always injected as system prompt. Key rules: never hardcode secrets, always use `wizard-tools` MCP for env vars and package manager detection, must call `confirm_event_plan` before writing `track()` calls.
 - **Detection order matters.** The `Integration` enum order in `constants.ts` controls both auto-detection priority (first match wins) and display order in the CLI select menu.
