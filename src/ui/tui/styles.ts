@@ -35,21 +35,31 @@ export const Brand = {
 // ── Semantic color aliases ───────────────────────────────────────────
 
 export const Colors = {
-  // Text hierarchy (4 levels).
+  // Text hierarchy.
   //
   // WCAG AA on the Gray 100 (#13171A) terminal background requires a
   // contrast ratio of at least 4.5:1 for normal-sized text. Brand Gray 60
   // (#697077) measures ~4.1:1 — below the threshold — so instructional
   // copy tagged `Colors.muted` was often hard to read, especially on
-  // low-gamut LCDs and sunlit laptops. Bump `muted` to Gray 50 (#868D95,
-  // ~6.2:1) to clear AA, and split off a separate `subtle` token (old
-  // Gray 60 value) for cosmetic chrome that doesn't need to be read —
-  // borders, background separators, etc.
+  // low-gamut LCDs and sunlit laptops.
+  //
+  // We bump `muted` to Gray 50 (#868D95, ~6.2:1) to clear AA. Because
+  // there isn't a brand gray between Gray 50 and Gray 60 that also
+  // passes AA, `muted` and `secondary` now share the same value — they
+  // remain as distinct tokens to preserve semantic intent at callsites
+  // (instructional copy vs. supporting text), but visually they're one
+  // tier. Expect no rendered difference today, and a slight future
+  // differentiation if/when we add a mid-gray brand token.
+  //
+  // `subtle` (old Gray 60 value) is reserved for decorative chrome —
+  // separators, ornament glyphs, inactive bullets — that the reader
+  // doesn't need to parse. It intentionally does NOT meet AA because it
+  // isn't text.
   heading: Brand.gray10,
   body: Brand.gray30,
   secondary: Brand.gray50,
-  muted: Brand.gray50,
-  subtle: Brand.gray60,
+  muted: Brand.gray50, // alias of `secondary` — see comment above
+  subtle: Brand.gray60, // decorative chrome only — below AA by design
   disabled: Brand.gray70,
 
   // Interactive
