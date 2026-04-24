@@ -76,6 +76,7 @@ async function fetchLatestVersion(
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
+    timer.unref();
     try {
       // `application/vnd.npm.install-v1+json` returns a slim response that
       // excludes per-version metadata — just enough to get `dist-tags.latest`.
