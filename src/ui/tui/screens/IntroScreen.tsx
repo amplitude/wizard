@@ -32,9 +32,9 @@ interface IntroScreenProps {
 }
 
 const LOGO_MIN_COLS = 75;
-const LOGO_MIN_ROWS = 20;
+const LOGO_MIN_ROWS = 26;
 const COMPACT_COLS = 85;
-const COMPACT_ROWS = 22;
+const COMPACT_ROWS = 24;
 
 /**
  * Suffix shown after the framework name. Exported for unit tests.
@@ -193,7 +193,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       flexGrow={1}
       alignItems="center"
       justifyContent="flex-start"
-      paddingTop={compact ? 0 : 2}
+      paddingTop={compact ? 0 : 1}
     >
       {/* Logo (responsive — hidden when terminal is too small) */}
       {showLogo && <AmplitudeTextLogo />}
@@ -208,14 +208,9 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           Amplitude Wizard
         </Text>
         {!compact && (
-          <>
-            <Text color={Colors.muted}>
-              AI-powered analytics setup in minutes
-            </Text>
-            <Text color={Colors.secondary}>
-              Installs the SDK, adds events, and verifies data is flowing.
-            </Text>
-          </>
+          <Text color={Colors.muted}>
+            AI-powered analytics setup in minutes
+          </Text>
         )}
       </Box>
 
