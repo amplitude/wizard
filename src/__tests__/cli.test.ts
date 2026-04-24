@@ -634,19 +634,26 @@ describe('logout command', () => {
 describe('whoami command', () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
-  const consoleSpy = vi
-    .spyOn(console, 'log')
-    .mockImplementation(() => undefined);
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    consoleSpy.mockClear();
+    // Spy inside beforeEach so earlier tests that call mockRestore()
+    // on console.error (e.g. login > OAuth failure) don't leave us
+    // without a stderr spy when log.error routes there (per C1 / C5).
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    consoleErrSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     process.exit = vi.fn() as unknown as typeof process.exit;
   });
 
   afterEach(() => {
     process.argv = originalArgv;
     process.exit = originalExit;
+    consoleSpy.mockRestore();
+    consoleErrSpy.mockRestore();
     vi.resetModules();
   });
 
@@ -680,7 +687,12 @@ describe('whoami command', () => {
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
 
-    const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    // C5 routes the "Not logged in" message through getUI().log.error,
+    // which per C1 writes to stderr rather than stdout.
+    const allOutput = [
+      ...consoleSpy.mock.calls.map((c) => c[0]),
+      ...consoleErrSpy.mock.calls.map((c) => c[0]),
+    ].join('\n');
     expect(allOutput).toMatch(/Not logged in/);
     expect(process.exit).toHaveBeenCalledWith(0);
   });
