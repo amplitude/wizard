@@ -72,6 +72,59 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
+    // ── Signup screens ─────────────────────────────────────────────────
+    // Case A: signup=true, no name yet → must stop at SignupFullName
+    it('routes to SignupFullName when signup=true and signupFullName is null', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        signupFullName: null,
+        signupEmail: null,
+      });
+      expect(router.resolve(session)).toBe(Screen.SignupFullName);
+    });
+
+    // Case B: signup=true, name supplied but email missing → must stop at SignupEmail
+    it('routes to SignupEmail when signup=true and signupFullName is set but signupEmail is null', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        signupFullName: 'Jane Doe',
+        signupEmail: null,
+      });
+      expect(router.resolve(session)).toBe(Screen.SignupEmail);
+    });
+
+    // Case C: signup=true, both fields supplied → both signup screens complete, advances to Auth
+    it('advances past signup screens to Auth when signup=true and both fields are set', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: true,
+        signupFullName: 'Jane Doe',
+        signupEmail: 'jane@example.com',
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
+    // Case D: signup=false → both signup screens skipped entirely, lands on Auth
+    it('skips signup screens entirely when signup=false', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+        signup: false,
+        signupFullName: null,
+        signupEmail: null,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
     it('advances from Auth to DataSetup when credentials + org + workspace are set', () => {
       const router = new WizardRouter();
       const session = sessionWith({

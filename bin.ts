@@ -460,20 +460,34 @@ const resolveNonInteractiveCredentials = async (
 /**
  * Run the direct-signup wrapper for agent / CI / classic modes.
  *
- * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
- * set. On a non-null result, optionally runs `onSuccess` (classic uses this
- * to populate `session.credentials` via `resolveCredentials`). On null or
- * thrown errors, logs a human message that points at the mode's fallback
- * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
+ * No-op when `session.signup` is not set. When `opts.canPrompt` is true
+ * (classic mode), calls `promptForMissingSignupFields` to fill in any missing
+ * region/name/email interactively before the network call; agent and CI pass
+ * false and fail fast if those fields are absent. On a non-null result,
+ * optionally runs `onSuccess` (classic uses this to populate
+ * `session.credentials` via `resolveCredentials`). On null or thrown errors,
+ * logs a human message that points at the mode's fallback path
+ * (`fallbackLabel`) and returns — the caller's own auth path runs next.
  */
 const runDirectSignupIfRequested = async (
   session: import('./src/lib/wizard-session').WizardSession,
   fallbackLabel: string,
+  opts: { canPrompt: boolean },
   onSuccess?: () => Promise<void>,
 ): Promise<void> => {
-  if (!session.signup || !session.signupEmail || !session.signupFullName) {
+  if (!session.signup) return;
+
+  if (opts.canPrompt) {
+    const { promptForMissingSignupFields } = await import(
+      './src/utils/signup-prompt.js'
+    );
+    await promptForMissingSignupFields(session);
+  }
+
+  if (!session.signupEmail || !session.signupFullName) {
     return;
   }
+
   const { performSignupOrAuth, trackSignupAttempt } = await import(
     './src/utils/signup-or-auth.js'
   );
@@ -888,7 +902,9 @@ void yargs(hideBin(process.argv))
           // resolution. Agent mode has no browser, so a null result continues
           // to resolveNonInteractiveCredentials, which handles cached tokens
           // or exits cleanly with AUTH_REQUIRED.
-          await runDirectSignupIfRequested(session, 'cached-token resolution');
+          await runDirectSignupIfRequested(session, 'cached-token resolution', {
+            canPrompt: false,
+          });
 
           await resolveNonInteractiveCredentials(
             session,
@@ -913,7 +929,9 @@ void yargs(hideBin(process.argv))
           // resolution. CI mode has no browser, so a null result continues to
           // resolveNonInteractiveCredentials, which handles cached tokens or
           // exits cleanly with AUTH_REQUIRED.
-          await runDirectSignupIfRequested(session, 'cached-token resolution');
+          await runDirectSignupIfRequested(session, 'cached-token resolution', {
+            canPrompt: false,
+          });
 
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
@@ -939,12 +957,17 @@ void yargs(hideBin(process.argv))
           // the TUI-only safety check that clears credentials when no org is
           // selected. Without this, a successful signup would get silently
           // cleared and the browser would open anyway, defeating the point.
-          await runDirectSignupIfRequested(session, 'OAuth', async () => {
-            const { resolveCredentials } = await import(
-              './src/lib/credential-resolution.js'
-            );
-            await resolveCredentials(session, { requireOrgId: false });
-          });
+          await runDirectSignupIfRequested(
+            session,
+            'OAuth',
+            { canPrompt: true },
+            async () => {
+              const { resolveCredentials } = await import(
+                './src/lib/credential-resolution.js'
+              );
+              await resolveCredentials(session, { requireOrgId: false });
+            },
+          );
 
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],

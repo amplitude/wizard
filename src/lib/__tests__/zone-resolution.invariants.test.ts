@@ -58,6 +58,9 @@ const ALLOWED_DIRECT_READS = new Set<string>([
   'src/lib/credential-resolution.ts',
   // bin.ts: pre-OAuth RegionSelect gate checks + a verbose-log display.
   'bin.ts',
+  // Classic-mode signup prompt helper: gates on session.region === null before
+  // prompting, then writes back the user's selection (same pattern as bin.ts).
+  'src/utils/signup-prompt.ts',
 ]);
 
 /** Zone-fallback against session.region — e.g. `session.region ?? 'us'`. */
