@@ -1313,59 +1313,28 @@ void yargs(hideBin(process.argv))
                   { readDisk: false },
                 );
 
-                // Try direct signup first when --signup + email + fullName are provided
-                // and the feature flag is enabled. performSignupOrAuth returns null when
-                // any of those gates are missing, or when the server returns a non-success
-                // response — in which case we fall through to the existing OAuth flow
-                // (TUI has a browser; this fallback is valid).
-                //
-                // On signup success, the wrapper already fetched the real user
-                // profile (with provisioning retry) and persisted tokens to
-                // ~/.ampli.json — so we carry its userInfo through and skip the
-                // redundant fetch + storeToken below.
+                // Direct signup has already been attempted by the SigningUpScreen
+                // — results are written to session.signupAuth on success,
+                // or session.signupAbandoned on redirect/error/unsupported.
                 let auth: Awaited<
                   ReturnType<typeof performAmplitudeAuth>
                 > | null = null;
                 let signupUserInfo: Awaited<
                   ReturnType<typeof fetchAmplitudeUser>
                 > | null = null;
-                // True iff direct signup produced fresh tokens in this run.
-                // Used by the downstream fetchAmplitudeUser catch to
-                // distinguish a provisioning-lag recovery (signup succeeded,
-                // but user data not yet available) from the normal
-                // expired-token case.
                 let signupTokensObtained = false;
+
                 const { trackSignupAttempt } = await import(
                   './src/utils/signup-or-auth.js'
                 );
                 const s = tui.store.session;
-                if (s.signup && s.signupEmail && s.signupFullName) {
-                  const { performSignupOrAuth } = await import(
-                    './src/utils/signup-or-auth.js'
+                if (s.signupAuth !== null) {
+                  auth = s.signupAuth;
+                  signupUserInfo = s.signupAuth.userInfo;
+                  signupTokensObtained = true;
+                  getUI().log.info(
+                    'Direct signup succeeded; using newly created account.',
                   );
-                  try {
-                    const signupResult = await performSignupOrAuth({
-                      email: s.signupEmail,
-                      fullName: s.signupFullName,
-                      zone,
-                    });
-                    if (signupResult !== null) {
-                      auth = signupResult;
-                      signupUserInfo = signupResult.userInfo;
-                      signupTokensObtained = true;
-                      getUI().log.info(
-                        'Direct signup succeeded; using newly created account.',
-                      );
-                    }
-                  } catch (err) {
-                    trackSignupAttempt({ status: 'wrapper_exception', zone });
-                    getUI().log.warn(
-                      `Direct signup errored: ${
-                        err instanceof Error ? err.message : String(err)
-                      }. Falling back to OAuth.`,
-                    );
-                    auth = null;
-                  }
                 }
 
                 if (auth === null) {
