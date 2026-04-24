@@ -115,9 +115,9 @@ When('the first signup POST returns a success payload', function () {
 });
 
 When('the first signup POST returns requires_redirect', function () {
-  // Mirrors SigningUpScreen's abandonAfterHold path: the terminal-hold
-  // timer fires setSignupAbandoned(true). For router purposes, the hold
-  // is a presentational delay — the flow-level effect is the abandon bit.
+  // Mirrors SigningUpScreen's response handler on the requires_redirect
+  // arm: setSignupAbandoned(true) so the router falls through to
+  // AuthScreen.
   session.signupAbandoned = true;
 });
 
