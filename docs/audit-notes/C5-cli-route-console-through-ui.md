@@ -2,24 +2,25 @@
 
 **Category:** CLI
 **Effort:** M
-**Status:** Scaffolded (design note only).
+**Status:** Implemented.
 
-## Scope
+## What changed
 
-Replace console.log with getUI. See `docs/audit-branches.md` for the full list of audit
-findings; this branch holds the per-finding design note so the fix has a
-single home when implementation lands.
+All remaining `console.log` / `console.error` call sites in `bin.ts`
+(outside of the agent-runner boundary) now route through `getUI()`:
 
-## Implementation plan
+- Login / logout / whoami / feedback / region / detect / status /
+  auth status / auth token paths
+- TUI init fallback debug output
+- OAuth setup debug output
 
-1. Reproduce the finding against the current main HEAD.
-2. Write a failing unit/integration test capturing the observed behavior.
-3. Ship the fix in a single focused commit on this branch, update this
-   file's Status to `Implemented`, and replace the plan with a short
-   "what changed" summary.
+This keeps user-facing output consistent across interactive (`LoggingUI`),
+TUI (`InkUI`), and NDJSON (`AgentUI`) modes — especially so that
+`--agent` consumers see structured events for command output instead of
+raw stdout bytes.
 
-## Why scaffolded
-
-Scope exceeds what the audit-branch sweep could safely land in one pass.
-Effort rating: **M**. Implementation belongs with a dedicated
-review cycle and associated tests.
+Non-UI writes kept:
+- `process.stdout.write(JSON.stringify(...))` — explicit JSON output for
+  machine consumers (`--json` / `detect`, `status`, `auth`).
+- `process.stdout.write(result.token + '\n')` — raw token output for
+  shell substitution (`$(amplitude-wizard auth token)`).

@@ -1153,7 +1153,11 @@ void yargs(hideBin(process.argv))
               } catch (err) {
                 // Auth failure is non-fatal here — agent-runner will retry/handle it
                 if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-                  console.error('OAuth setup error:', err);
+                  getUI().log.error(
+                    `OAuth setup error: ${
+                      err instanceof Error ? err.message : String(err)
+                    }`,
+                  );
                 }
               }
             })();
@@ -1374,7 +1378,11 @@ void yargs(hideBin(process.argv))
           } catch (err) {
             // TUI unavailable (e.g., in test environment) — continue with default UI
             if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-              console.error('TUI init failed:', err);
+              getUI().log.error(
+                `TUI init failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
             }
             await lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
           }
@@ -1412,13 +1420,11 @@ void yargs(hideBin(process.argv))
           const cachedToken = getStoredToken(undefined, zone);
           const cachedUser = cachedToken ? getStoredUser() : undefined;
           if (cachedUser && cachedUser.id !== 'pending') {
-            console.log(
-              chalk.green(
-                `✔ Already logged in as ${cachedUser.firstName} ${cachedUser.lastName} <${cachedUser.email}>`,
-              ),
+            getUI().log.success(
+              `Already logged in as ${cachedUser.firstName} ${cachedUser.lastName} <${cachedUser.email}>`,
             );
             if (cachedUser.zone !== 'us') {
-              console.log(chalk.dim(`  Zone: ${cachedUser.zone}`));
+              getUI().note(`Zone: ${cachedUser.zone}`);
             }
             process.exit(0);
           }
@@ -1440,22 +1446,16 @@ void yargs(hideBin(process.argv))
               expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
             },
           );
-          console.log(
-            chalk.green(
-              `✔ Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
-            ),
+          getUI().log.success(
+            `Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
           );
           if (user.orgs.length > 0) {
-            console.log(
-              chalk.dim(`  Org: ${user.orgs.map((o) => o.name).join(', ')}`),
-            );
+            getUI().note(`Org: ${user.orgs.map((o) => o.name).join(', ')}`);
           }
           process.exit(0);
         } catch (e) {
-          console.error(
-            chalk.red(
-              `Login failed: ${e instanceof Error ? e.message : String(e)}`,
-            ),
+          getUI().log.error(
+            `Login failed: ${e instanceof Error ? e.message : String(e)}`,
           );
           process.exit(1);
         }
@@ -1484,12 +1484,12 @@ void yargs(hideBin(process.argv))
           clearApiKey(installDir);
           clearCheckpoint(installDir);
           if (user) {
-            console.log(chalk.green(`✔ Logged out ${user.email}`));
+            getUI().log.success(`Logged out ${user.email}`);
           } else {
-            console.log(chalk.dim('No active session found.'));
+            getUI().note('No active session found.');
           }
         } catch {
-          console.log(chalk.dim('No active session found.'));
+          getUI().note('No active session found.');
         }
         process.exit(0);
       })();
@@ -1508,17 +1508,15 @@ void yargs(hideBin(process.argv))
         const user = getStoredUser();
         const token = getStoredToken();
         if (user && token && user.id !== 'pending') {
-          console.log(
+          getUI().log.info(
             `Logged in as ${chalk.bold(
               user.firstName + ' ' + user.lastName,
             )} <${user.email}>`,
           );
-          if (user.zone !== 'us') console.log(chalk.dim(`Zone: ${user.zone}`));
+          if (user.zone !== 'us') getUI().note(`Zone: ${user.zone}`);
         } else {
-          console.log(
-            chalk.yellow(
-              `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-            ),
+          getUI().log.warn(
+            `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
           );
         }
         process.exit(0);
@@ -1556,13 +1554,11 @@ void yargs(hideBin(process.argv))
             './src/utils/track-wizard-feedback.js'
           );
           await trackWizardFeedback(message);
-          console.log(chalk.green('✔ Thanks — your feedback was sent.'));
+          getUI().log.success('Thanks — your feedback was sent.');
           process.exit(0);
         } catch (e) {
-          console.error(
-            chalk.red(
-              `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
-            ),
+          getUI().log.error(
+            `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
           );
           process.exit(1);
         }
@@ -1708,16 +1704,12 @@ void yargs(hideBin(process.argv))
 
           const updated = updateStoredUserZone(pickedRegion as 'us' | 'eu');
           if (updated) {
-            console.log(
-              chalk.green(
-                `\n✔ Region updated to ${pickedRegion.toUpperCase()}`,
-              ),
+            getUI().log.success(
+              `Region updated to ${pickedRegion.toUpperCase()}`,
             );
           } else {
-            console.log(
-              chalk.dim(
-                `\nRegion set to ${pickedRegion.toUpperCase()}. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-              ),
+            getUI().note(
+              `Region set to ${pickedRegion.toUpperCase()}. Run \`${CLI_INVOCATION} login\` to authenticate.`,
             );
           }
           process.exit(0);
@@ -1758,16 +1750,14 @@ void yargs(hideBin(process.argv))
           if (jsonOutput) {
             process.stdout.write(JSON.stringify(result) + '\n');
           } else if (result.integration) {
-            console.log(
-              `${chalk.green('✔')} Detected ${chalk.bold(
+            getUI().log.success(
+              `Detected ${chalk.bold(
                 result.frameworkName ?? result.integration,
               )} (${result.integration})`,
             );
           } else {
-            console.log(
-              chalk.dim(
-                `No framework detected. Run \`${CLI_INVOCATION} --menu\` to pick one manually.`,
-              ),
+            getUI().note(
+              `No framework detected. Run \`${CLI_INVOCATION} --menu\` to pick one manually.`,
             );
           }
           process.exit(result.integration ? 0 : 1);
@@ -1776,7 +1766,7 @@ void yargs(hideBin(process.argv))
           if (jsonOutput) {
             process.stdout.write(JSON.stringify({ error: message }) + '\n');
           } else {
-            console.error(chalk.red(`Detection failed: ${message}`));
+            getUI().log.error(`Detection failed: ${message}`);
           }
           process.exit(ExitCode.GENERAL_ERROR);
         }
@@ -1812,26 +1802,27 @@ void yargs(hideBin(process.argv))
           } else {
             const check = (v: boolean) =>
               v ? chalk.green('✔') : chalk.dim('·');
-            console.log(
+            const ui = getUI();
+            ui.log.info(
               `${check(result.framework.integration !== null)} Framework: ${
                 result.framework.name ?? chalk.dim('none detected')
               }`,
             );
-            console.log(
+            ui.log.info(
               `${check(
                 result.amplitudeInstalled.confidence !== 'none',
               )} Amplitude SDK: ${
                 result.amplitudeInstalled.reason ?? chalk.dim('not installed')
               }`,
             );
-            console.log(
+            ui.log.info(
               `${check(result.apiKey.configured)} API key: ${
                 result.apiKey.configured
                   ? `stored in ${result.apiKey.source}`
                   : chalk.dim('not set')
               }`,
             );
-            console.log(
+            ui.log.info(
               `${check(result.auth.loggedIn)} Logged in: ${
                 result.auth.loggedIn
                   ? `${result.auth.email} (${result.auth.zone})`
@@ -1845,7 +1836,7 @@ void yargs(hideBin(process.argv))
           if (jsonOutput) {
             process.stdout.write(JSON.stringify({ error: message }) + '\n');
           } else {
-            console.error(chalk.red(`Status failed: ${message}`));
+            getUI().log.error(`Status failed: ${message}`);
           }
           process.exit(ExitCode.GENERAL_ERROR);
         }
@@ -1872,22 +1863,18 @@ void yargs(hideBin(process.argv))
             if (jsonOutput) {
               process.stdout.write(JSON.stringify(result) + '\n');
             } else if (result.loggedIn && result.user) {
-              console.log(
-                `${chalk.green('✔')} Logged in as ${chalk.bold(
+              getUI().log.success(
+                `Logged in as ${chalk.bold(
                   `${result.user.firstName} ${result.user.lastName}`,
                 )} <${result.user.email}>`,
               );
-              console.log(chalk.dim(`  Zone: ${result.user.zone}`));
+              getUI().note(`Zone: ${result.user.zone}`);
               if (result.tokenExpiresAt) {
-                console.log(
-                  chalk.dim(`  Token expires: ${result.tokenExpiresAt}`),
-                );
+                getUI().note(`Token expires: ${result.tokenExpiresAt}`);
               }
             } else {
-              console.log(
-                chalk.yellow(
-                  `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-                ),
+              getUI().log.warn(
+                `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
               );
             }
             process.exit(result.loggedIn ? 0 : ExitCode.AUTH_REQUIRED);
@@ -1918,10 +1905,8 @@ void yargs(hideBin(process.argv))
                   }) + '\n',
                 );
               } else {
-                console.error(
-                  chalk.red(
-                    `Not logged in. Run \`${CLI_INVOCATION} login\` first.`,
-                  ),
+                getUI().log.error(
+                  `Not logged in. Run \`${CLI_INVOCATION} login\` first.`,
                 );
               }
               process.exit(ExitCode.AUTH_REQUIRED);
