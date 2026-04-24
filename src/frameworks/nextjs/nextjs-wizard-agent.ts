@@ -68,7 +68,6 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
     getVersion: (packageJson: unknown) =>
       getPackageVersion('next', packageJson as PackageDotJson),
     getVersionBucket: getNextJsVersionBucket,
-    minimumVersion: '15.3.0',
     getInstalledVersion: async (options: WizardOptions) => {
       const packageJson = await tryGetPackageJson(options);
       return packageJson ? getPackageVersion('next', packageJson) : undefined;
