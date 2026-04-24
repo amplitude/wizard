@@ -895,6 +895,7 @@ describe('--email and --full-name flags', () => {
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
       }),
+      expect.any(Function),
     );
   });
 
