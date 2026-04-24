@@ -6,7 +6,7 @@
  * KeyHintBar integrated above the input line.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { Spinner } from '@inkjs/ui';
@@ -221,8 +221,10 @@ export const ConsoleView = ({
   const [inputActive, setInputActive] = useState(false);
   const [initialValue, setInitialValue] = useState('');
   const [inputKey, setInputKey] = useState(0);
-  const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Conversation Q&A turns. Rendered via Ink <Static> so completed turns are
+  // written once above the live region and survive TUI exit / terminal
+  // scrollback. This mirrors how Claude Code persists agent output.
   const [history, setHistory] = useState<ConversationTurn[]>([]);
 
   // Event plan prompt local state
@@ -248,11 +250,9 @@ export const ConsoleView = ({
 
   const feedback = store.commandFeedback;
   const screenError = store.screenError;
-  const showResponse = loading || !!response;
-  const showFeedback = !showResponse && !!feedback;
+  const showFeedback = !loading && !!feedback;
   const innerWidth = width;
   const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
-  const responseIsLong = !!response && response.split('\n').length > 3;
   const pendingPrompt = store.pendingPrompt;
 
   // Watch for activation keys while the input is dormant
@@ -261,10 +261,6 @@ export const ConsoleView = ({
       if (key.escape || char === 'q' || char === 'Q') {
         if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
-          return;
-        }
-        if (responseIsLong) {
-          setResponse(null);
           return;
         }
       }
@@ -292,7 +288,6 @@ export const ConsoleView = ({
       'is slash command': isSlashCommand,
     });
     if (isSlashCommand) {
-      setResponse(null);
       const query = executeCommand(value, store);
       if (query) {
         handleSubmit(query);
@@ -300,23 +295,29 @@ export const ConsoleView = ({
       return;
     }
 
-    setResponse(null);
     setLoading(true);
     const creds = resolveConsoleCredentials(store.session);
     const context = buildSessionContext(store.session);
 
-    queryConsole(value, context, creds, history)
+    // Pass at most the last 8 turns to the model for context (token budget).
+    // The <Static> history itself keeps the full scrollback.
+    const modelHistory = history.slice(-8);
+
+    queryConsole(value, context, creds, modelHistory)
       .then((text) => {
-        setResponse(text);
         setHistory((h) => [
-          ...h.slice(-8),
+          ...h,
           { role: 'user', content: value },
           { role: 'assistant', content: text },
         ]);
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        setResponse(`Error: ${msg}`);
+        setHistory((h) => [
+          ...h,
+          { role: 'user', content: value },
+          { role: 'assistant', content: `Error: ${msg}` },
+        ]);
       })
       .finally(() => setLoading(false));
   };
@@ -393,6 +394,33 @@ export const ConsoleView = ({
 
   return (
     <Box width={width} height={height} flexDirection="column">
+      {/* Permanent Q&A scrollback — each turn is written once above the live
+        region and survives TUI exit. Mirrors the append-only pattern Claude
+        Code uses for completed agent output. */}
+      {history.length > 0 && (
+        <Static items={history.map((turn, idx) => ({ ...turn, idx }))}>
+          {(turn) =>
+            turn.role === 'user' ? (
+              <Box key={`turn-${turn.idx}`} paddingX={Layout.paddingX}>
+                <Text color={Colors.muted}>{Icons.prompt} </Text>
+                <Text color={Colors.secondary}>{turn.content}</Text>
+              </Box>
+            ) : (
+              <Box
+                key={`turn-${turn.idx}`}
+                paddingX={Layout.paddingX}
+                paddingY={1}
+                flexDirection="column"
+              >
+                <Text color={Colors.accent}>
+                  {renderMarkdown(turn.content).trimEnd()}
+                </Text>
+              </Box>
+            )
+          }
+        </Static>
+      )}
+
       {/* Content area */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {pendingPrompt ? (
@@ -456,21 +484,6 @@ export const ConsoleView = ({
               <Text color={Colors.muted}> [Q / Esc] skip</Text>
             )}
           </Box>
-        ) : responseIsLong ? (
-          <Box
-            flexDirection="column"
-            flexGrow={1}
-            paddingX={Layout.paddingX}
-            paddingY={1}
-            overflow="hidden"
-          >
-            <Text color={Colors.accent}>
-              {response ? renderMarkdown(response).trimEnd() : ''}
-            </Text>
-            <Box marginTop={1}>
-              <Text color={Colors.muted}>[Q / Esc] close</Text>
-            </Box>
-          </Box>
         ) : (
           children
         )}
@@ -514,24 +527,9 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Response line */}
-      {showResponse && !responseIsLong && (
-        <Box
-          paddingX={Layout.paddingX}
-          paddingY={1}
-          gap={1}
-          flexDirection="column"
-        >
-          {loading ? (
-            <Spinner />
-          ) : (
-            <Text color={Colors.accent}>
-              {response ? renderMarkdown(response).trimEnd() : ''}
-            </Text>
-          )}
-        </Box>
-      )}
-      {loading && responseIsLong && (
+      {/* Loading spinner — completed turns append to the Static scrollback
+        above; only the in-flight state lives in the live region. */}
+      {loading && (
         <Box paddingX={Layout.paddingX}>
           <Spinner />
         </Box>
