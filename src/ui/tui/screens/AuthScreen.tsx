@@ -500,6 +500,13 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               Waiting for authentication{Icons.ellipsis}
             </Text>
           </Box>
+          {session.signup && (
+            <Box marginTop={1}>
+              <Text color={Colors.body}>
+                Please sign up or log in from the browser to continue.
+              </Text>
+            </Box>
+          )}
           {session.loginUrl && (
             <Box marginTop={1} flexDirection="column">
               <Text color={Colors.muted}>
