@@ -12,6 +12,37 @@
 import type { WizardSession } from '../../lib/wizard-session.js';
 import { OPT_IN_DISCOVERED_FEATURES, RunPhase } from './session-constants.js';
 
+// ── Signup required-field helpers ────────────────────────────────────
+
+/**
+ * The set of `needs_information` field names the wizard knows how to
+ * collect locally. Fields outside this set cause the signup flow to
+ * abandon to browser OAuth — we can't prompt for something we don't
+ * have a screen for.
+ */
+export const KNOWN_REQUIRED_FIELDS: ReadonlySet<string> = new Set([
+  'full_name',
+]);
+
+/**
+ * Returns true when the session already carries a value for `field`.
+ * Used by SigningUpScreen to detect the "server asked for a field we
+ * already sent" case — indicates the server rejected our value, so we
+ * bail to browser OAuth instead of re-prompting in a loop.
+ */
+export function fieldPresentOnSession(
+  s: { signupFullName: string | null },
+  field: string,
+): boolean {
+  if (!KNOWN_REQUIRED_FIELDS.has(field)) return false;
+  switch (field) {
+    case 'full_name':
+      return s.signupFullName !== null;
+    default:
+      return false;
+  }
+}
+
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
 /** Screens that participate in linear flows */
