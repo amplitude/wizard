@@ -35,7 +35,7 @@ function sessionAtRun(): WizardSession {
     region: 'us',
     credentials: CREDS,
     selectedOrgName: 'Acme',
-    selectedWorkspaceName: 'Amplitude',
+    selectedProjectName: 'Amplitude',
     selectedEnvName: 'Production',
     projectHasData: false,
   });
@@ -72,20 +72,20 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('advances from Auth to DataSetup when credentials + org + workspace are set', () => {
+    it('advances from Auth to DataSetup when credentials + org + project are set', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
         credentials: CREDS,
         selectedOrgName: 'Acme',
-        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Amplitude',
         selectedEnvName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
 
-    it('stays on Auth when credentials set but workspace name AND id are missing', () => {
+    it('stays on Auth when credentials set but project name AND id are missing', () => {
       const router = new WizardRouter();
       // With neither name nor ID resolved, the identity isn't known at all —
       // user must complete selection.
@@ -95,8 +95,8 @@ describe('WizardRouter', () => {
         credentials: CREDS,
         selectedOrgName: 'Acme',
         selectedOrgId: 'org-1',
-        selectedWorkspaceName: null,
-        selectedWorkspaceId: null,
+        selectedProjectName: null,
+        selectedProjectId: null,
         selectedEnvName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.Auth);
@@ -113,8 +113,8 @@ describe('WizardRouter', () => {
         credentials: CREDS,
         selectedOrgName: null,
         selectedOrgId: 'org-1',
-        selectedWorkspaceName: null,
-        selectedWorkspaceId: 'ws-1',
+        selectedProjectName: null,
+        selectedProjectId: 'ws-1',
         selectedEnvName: null,
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
@@ -123,13 +123,13 @@ describe('WizardRouter', () => {
     it('advances from Auth to DataSetup when env name is missing (env is optional)', () => {
       const router = new WizardRouter();
       // Manual API key entry can't resolve the env. As long as org and
-      // workspace are known, Auth is considered complete.
+      // project are known, Auth is considered complete.
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
         credentials: CREDS,
         selectedOrgName: 'Acme',
-        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Amplitude',
         selectedEnvName: null,
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
@@ -221,7 +221,7 @@ describe('WizardRouter', () => {
         region: 'us',
         createProject: {
           pending: true,
-          source: 'workspace',
+          source: 'project',
           suggestedName: null,
         },
       });
@@ -249,7 +249,7 @@ describe('WizardRouter', () => {
         region: 'us',
         credentials: CREDS,
         selectedOrgName: 'Acme',
-        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Amplitude',
         selectedEnvName: 'Production',
         createProject: {
           pending: false,

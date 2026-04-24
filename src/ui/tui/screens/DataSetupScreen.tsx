@@ -32,10 +32,10 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
   useEffect(() => {
     if (store.session.projectHasData !== null) return;
 
-    const { credentials, selectedOrgId, selectedWorkspaceId } = store.session;
-    // credentials.appId is 0 for OAuth users; fall back to the workspace UUID
-    const appId =
-      store.session.credentials?.appId || selectedWorkspaceId || null;
+    const { credentials, region, selectedOrgId, selectedProjectId } =
+      store.session;
+    // credentials.appId is 0 for OAuth users; fall back to the project UUID
+    const appId = store.session.credentials?.appId || selectedProjectId || null;
 
     // No credentials or project ID — can't check, fall through to Framework Detection
     if (!credentials || !appId || !selectedOrgId) {

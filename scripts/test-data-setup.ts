@@ -50,9 +50,11 @@ if (!existsSync(appAmpliJson)) {
   console.error(`ampli.json not found in ${appDir}`);
   process.exit(1);
 }
-const { OrgId, WorkspaceId, Zone } = JSON.parse(
-  readFileSync(appAmpliJson, 'utf8'),
-);
+// ampli.json migrated WorkspaceId → ProjectId; still read the legacy field as fallback
+const ampliConfig = JSON.parse(readFileSync(appAmpliJson, 'utf8'));
+const { OrgId, Zone } = ampliConfig;
+const ProjectId: string | undefined =
+  ampliConfig.ProjectId ?? ampliConfig.WorkspaceId;
 const zone: 'us' | 'eu' = Zone === 'eu' ? 'eu' : 'us';
 
 // ── Refresh token if expired (persists new tokens to ~/.ampli.json) ───────────
@@ -113,9 +115,12 @@ async function getValidToken(): Promise<{
 }
 
 // ── Orgs query (verify auth + get numeric app IDs) ────────────────────────────
+// NOTE: The GraphQL API still names this field `workspaces`; we alias it to
+// `projects` to match the new Amplitude-website terminology throughout this
+// script. The backend hasn't renamed the field yet.
 
 const ORGS_QUERY = `
-query { orgs { id name workspaces { id name environments { name app { id apiKey } } } } }`;
+query { orgs { id name projects: workspaces { id name environments { name app { id apiKey } } } } }`;
 
 // ── Activation status query (internal Amplitude field — may not be available) ─
 
@@ -169,7 +174,7 @@ async function main() {
   console.log('═══════════════════════════════════════');
   console.log(`App dir:     ${appDir}`);
   console.log(`OrgId:       ${OrgId}`);
-  console.log(`WorkspaceId: ${WorkspaceId}`);
+  console.log(`ProjectId:   ${ProjectId}`);
   console.log(`Zone:        ${zone}`);
   console.log('');
 
@@ -207,7 +212,8 @@ async function main() {
     type OrgShape = {
       id: string;
       name: string;
-      workspaces?: Array<{
+      // GraphQL field is `workspaces`; aliased to `projects` in the query
+      projects?: Array<{
         id: string;
         name: string;
         environments?: Array<{
@@ -220,29 +226,27 @@ async function main() {
       (o) => String(o.id) === String(OrgId),
     );
     if (targetOrg) {
-      const targetWs = targetOrg.workspaces?.find(
-        (w) => String(w.id) === String(WorkspaceId),
+      const targetProject = targetOrg.projects?.find(
+        (p) => String(p.id) === String(ProjectId),
       );
-      if (targetWs) {
-        console.log(`  ✓ Workspace found: ${targetWs.name}`);
-        (targetWs.environments ?? []).forEach((env) => {
+      if (targetProject) {
+        console.log(`  ✓ Project found: ${targetProject.name}`);
+        (targetProject.environments ?? []).forEach((env) => {
           console.log(
             `    Environment: ${env.name}  AppId=${env.app?.id ?? 'n/a'}`,
           );
           if (env.app?.id) envAppId = env.app.id;
         });
       } else {
-        console.log(`  ✗ Workspace ${WorkspaceId} not found in org ${OrgId}`);
+        console.log(`  ✗ Project ${ProjectId} not found in org ${OrgId}`);
       }
     } else {
-      console.log(
-        `  ✗ Org ${OrgId} not found. Accessible orgs and workspaces:`,
-      );
+      console.log(`  ✗ Org ${OrgId} not found. Accessible orgs and projects:`);
       for (const org of orgs as OrgShape[]) {
         console.log(`    Org ${org.id} (${org.name})`);
-        for (const ws of org.workspaces ?? []) {
-          console.log(`      Workspace ${ws.id} (${ws.name})`);
-          for (const env of ws.environments ?? []) {
+        for (const project of org.projects ?? []) {
+          console.log(`      Project ${project.id} (${project.name})`);
+          for (const env of project.environments ?? []) {
             console.log(
               `        env=${env.name}  appId=${env.app?.id ?? 'n/a'}`,
             );
@@ -267,7 +271,7 @@ async function main() {
 
   // Test data-api (public) and Thunder (internal, requires browser session)
   const appIdCandidates: [string, string][] = [
-    ['WorkspaceId', String(WorkspaceId)],
+    ['ProjectId', String(ProjectId)],
     ...(envAppId ? [['EnvAppId', envAppId] as [string, string]] : []),
   ];
   for (const [endpointLabel, url] of [

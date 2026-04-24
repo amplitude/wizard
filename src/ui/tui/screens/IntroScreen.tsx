@@ -114,7 +114,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // ── Resume-from-checkpoint prompt ─────────────────────────────────
   if (showResume) {
     const orgLabel =
-      session.selectedOrgName ?? session.selectedWorkspaceName ?? null;
+      session.selectedOrgName ?? session.selectedProjectName ?? null;
 
     return (
       <Box
@@ -180,8 +180,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     region: null,
                     selectedOrgId: null,
                     selectedOrgName: null,
-                    selectedWorkspaceId: null,
-                    selectedWorkspaceName: null,
+                    selectedProjectId: null,
+                    selectedProjectName: null,
                     selectedEnvName: null,
                   };
                   setShowResume(false);

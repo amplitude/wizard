@@ -1,4 +1,11 @@
-import { Given, When, Then, Before, After, DataTable } from '@cucumber/cucumber';
+import {
+  Given,
+  When,
+  Then,
+  Before,
+  After,
+  DataTable,
+} from '@cucumber/cucumber';
 import assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -37,10 +44,13 @@ Given('I am working in a project directory', function () {
   // projectDir is created in Before — nothing else needed
 });
 
-Given('there is no {string} in the project directory', function (filename: string) {
-  const filePath = path.join(projectDir, filename);
-  if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-});
+Given(
+  'there is no {string} in the project directory',
+  function (filename: string) {
+    const filePath = path.join(projectDir, filename);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+  },
+);
 
 Given(
   '{string} exists in the project directory with content:',
@@ -60,26 +70,20 @@ When('the wizard reads ampli.json', function () {
   if (lastResult.ok) currentConfig = lastResult.config;
 });
 
-When(
-  'the wizard writes ampli.json with:',
-  function (dataTable: DataTable) {
-    const config: AmpliConfig = dataTable.rowsHash() as AmpliConfig;
-    writeAmpliConfig(projectDir, config);
-    currentConfig = config;
-  },
-);
+When('the wizard writes ampli.json with:', function (dataTable: DataTable) {
+  const config: AmpliConfig = dataTable.rowsHash() as AmpliConfig;
+  writeAmpliConfig(projectDir, config);
+  currentConfig = config;
+});
 
-When(
-  'the wizard merges ampli.json with:',
-  function (dataTable: DataTable) {
-    const existingResult = readAmpliConfig(projectDir);
-    const existing = existingResult.ok ? existingResult.config : {};
-    const updates = dataTable.rowsHash() as Partial<AmpliConfig>;
-    const merged = mergeAmpliConfig(existing, updates);
-    writeAmpliConfig(projectDir, merged);
-    currentConfig = merged;
-  },
-);
+When('the wizard merges ampli.json with:', function (dataTable: DataTable) {
+  const existingResult = readAmpliConfig(projectDir);
+  const existing = existingResult.ok ? existingResult.config : {};
+  const updates = dataTable.rowsHash() as Partial<AmpliConfig>;
+  const merged = mergeAmpliConfig(existing, updates);
+  writeAmpliConfig(projectDir, merged);
+  currentConfig = merged;
+});
 
 // ── Then ──────────────────────────────────────────────────────────────────────
 
@@ -122,16 +126,24 @@ Then('the config should have SourceId {string}', function (expected: string) {
   assert.strictEqual(currentConfig.SourceId, expected);
 });
 
-Then('{string} should exist in the project directory', function (filename: string) {
-  assert.ok(
-    fs.existsSync(path.join(projectDir, filename)),
-    `Expected ${filename} to exist in ${projectDir}`,
-  );
-});
+Then(
+  '{string} should exist in the project directory',
+  function (filename: string) {
+    assert.ok(
+      fs.existsSync(path.join(projectDir, filename)),
+      `Expected ${filename} to exist in ${projectDir}`,
+    );
+  },
+);
 
 Then('it should contain OrgId {string}', function (expected: string) {
   const result = readAmpliConfig(projectDir);
-  assert.ok(result.ok, `Expected valid ampli.json but got error: ${!result.ok ? result.error : ''}`);
+  assert.ok(
+    result.ok,
+    `Expected valid ampli.json but got error: ${
+      !result.ok ? result.error : ''
+    }`,
+  );
   assert.strictEqual(result.config.OrgId, expected);
 });
 
@@ -141,33 +153,93 @@ Then('it should contain SourceId {string}', function (expected: string) {
   assert.strictEqual(result.config.SourceId, expected);
 });
 
-Then('{string} should contain OrgId {string}', function (_filename: string, expected: string) {
-  const result = readAmpliConfig(projectDir);
-  assert.ok(result.ok);
-  assert.strictEqual(result.config.OrgId, expected);
-});
+Then(
+  '{string} should contain OrgId {string}',
+  function (_filename: string, expected: string) {
+    const result = readAmpliConfig(projectDir);
+    assert.ok(result.ok);
+    assert.strictEqual(result.config.OrgId, expected);
+  },
+);
 
-Then('{string} should contain SourceId {string}', function (_filename: string, expected: string) {
-  const result = readAmpliConfig(projectDir);
-  assert.ok(result.ok);
-  assert.strictEqual(result.config.SourceId, expected);
-});
+Then(
+  '{string} should contain SourceId {string}',
+  function (_filename: string, expected: string) {
+    const result = readAmpliConfig(projectDir);
+    assert.ok(result.ok);
+    assert.strictEqual(result.config.SourceId, expected);
+  },
+);
 
-Then('{string} should contain Version {string}', function (_filename: string, expected: string) {
-  const result = readAmpliConfig(projectDir);
-  assert.ok(result.ok);
-  assert.strictEqual(result.config.Version, expected);
-});
+Then(
+  '{string} should contain Version {string}',
+  function (_filename: string, expected: string) {
+    const result = readAmpliConfig(projectDir);
+    assert.ok(result.ok);
+    assert.strictEqual(result.config.Version, expected);
+  },
+);
 
-Then('{string} should contain Path {string}', function (_filename: string, expected: string) {
-  const result = readAmpliConfig(projectDir);
-  assert.ok(result.ok);
-  assert.strictEqual(result.config.Path, expected);
-});
+Then(
+  '{string} should contain Path {string}',
+  function (_filename: string, expected: string) {
+    const result = readAmpliConfig(projectDir);
+    assert.ok(result.ok);
+    assert.strictEqual(result.config.Path, expected);
+  },
+);
 
 Then('the user should be warned about merge conflicts', function () {
   // In a real wizard this would display a warning in the TUI — here we
   // verify that the parse result carries the correct error code so the
   // calling layer can surface the warning.
-  assert.ok(lastResult && !lastResult.ok && lastResult.error === 'merge_conflicts');
+  assert.ok(
+    lastResult && !lastResult.ok && lastResult.error === 'merge_conflicts',
+  );
 });
+
+// ── ProjectId migration steps ─────────────────────────────────────────────
+
+Then('the config should have ProjectId {string}', function (expected: string) {
+  assert.ok(currentConfig, 'No config loaded');
+  assert.strictEqual(currentConfig.ProjectId, expected);
+});
+
+Then('the config should not have a WorkspaceId field', function () {
+  assert.ok(currentConfig, 'No config loaded');
+  assert.ok(
+    !('WorkspaceId' in currentConfig),
+    `Expected WorkspaceId to be absent after migration, got: ${JSON.stringify(
+      currentConfig,
+    )}`,
+  );
+});
+
+Then(
+  '{string} should contain ProjectId {string}',
+  function (_filename: string, expected: string) {
+    const result = readAmpliConfig(projectDir);
+    assert.ok(result.ok);
+    assert.strictEqual(result.config.ProjectId, expected);
+  },
+);
+
+Then('it should contain ProjectId {string}', function (expected: string) {
+  const result = readAmpliConfig(projectDir);
+  assert.ok(result.ok);
+  assert.strictEqual(result.config.ProjectId, expected);
+});
+
+Then(
+  '{string} should not contain a WorkspaceId field',
+  function (_filename: string) {
+    const raw = fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    assert.ok(
+      !('WorkspaceId' in parsed),
+      `Expected WorkspaceId to be absent from written ampli.json, got keys: ${Object.keys(
+        parsed,
+      ).join(', ')}`,
+    );
+  },
+);

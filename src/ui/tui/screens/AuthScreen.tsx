@@ -4,8 +4,8 @@
  * Steps:
  *   1. OAuth waiting — spinner + login URL while browser auth happens
  *   2. Org selection — picker if the user belongs to multiple orgs
- *   3. Workspace selection — picker if the org has multiple workspaces
- *   4. Project selection — picker if the workspace has multiple environments
+ *   3. Project selection — picker if the org has multiple projects
+ *   4. Environment selection — picker if the project has multiple environments
  *   5. API key entry — text input (only if no project key could be resolved)
  *
  * The screen drives itself from session.pendingOrgs + session.credentials.
@@ -48,7 +48,7 @@ type EnvironmentEntry = {
 type OrgEntry = {
   id: string;
   name: string;
-  workspaces: Array<{
+  projects: Array<{
     id: string;
     name: string;
     environments?: EnvironmentEntry[] | null;
@@ -56,13 +56,13 @@ type OrgEntry = {
 };
 
 /**
- * Returns the environments with usable API keys from a workspace, sorted by rank.
+ * Returns the environments with usable API keys from a project, sorted by rank.
  */
 function getSelectableEnvironments(
-  workspace: OrgEntry['workspaces'][number] | null | undefined,
+  project: OrgEntry['projects'][number] | null | undefined,
 ): EnvironmentEntry[] {
-  if (!workspace?.environments) return [];
-  return workspace.environments
+  if (!project?.environments) return [];
+  return project.environments
     .filter((env) => env.app?.apiKey)
     .sort((a, b) => a.rank - b.rank);
 }
@@ -74,9 +74,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   // Local step state — which org the user has selected in this render session
   const [selectedOrg, setSelectedOrg] = useState<OrgEntry | null>(null);
-  // Track the selected workspace locally so we can access its environments
-  const [selectedWorkspace, setSelectedWorkspace] = useState<
-    OrgEntry['workspaces'][number] | null
+  // Track the selected project locally so we can access its environments
+  const [selectedProject, setSelectedProject] = useState<
+    OrgEntry['projects'][number] | null
   >(null);
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentEntry | null>(null);
   const [apiKeyError, setApiKeyError] = useState('');
@@ -87,7 +87,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   const pendingOrgs = session.pendingOrgs;
 
-  // Validate pre-populated org/workspace IDs against live data.
+  // Validate pre-populated org/project IDs against live data.
   // If the user's access changed (removed from org, switched accounts),
   // stale IDs from ./ampli.json could silently select the wrong project.
   useEffect(() => {
@@ -97,7 +97,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       !pendingOrgs.some((o) => o.id === session.selectedOrgId)
     ) {
       // Stale org — clear pre-populated values so the picker shows
-      store.setOrgAndWorkspace(
+      store.setOrgAndProject(
         { id: '', name: '' },
         { id: '', name: '' },
         session.installDir,
@@ -115,58 +115,58 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     (pendingOrgs?.length === 1 ? pendingOrgs[0] : null) ??
     prePopulatedOrg;
 
-  // Resolve workspace: user-picked > single-workspace auto-select > pre-populated from session
-  const singleWorkspace =
-    effectiveOrg?.workspaces.length === 1 ? effectiveOrg.workspaces[0] : null;
-  const prePopulatedWorkspace =
-    session.selectedWorkspaceId && effectiveOrg
-      ? effectiveOrg.workspaces.find(
-          (ws) => ws.id === session.selectedWorkspaceId,
+  // Resolve project: user-picked > single-project auto-select > pre-populated from session
+  const singleProject =
+    effectiveOrg?.projects.length === 1 ? effectiveOrg.projects[0] : null;
+  const prePopulatedProject =
+    session.selectedProjectId && effectiveOrg
+      ? effectiveOrg.projects.find(
+          (project) => project.id === session.selectedProjectId,
         ) ?? null
       : null;
-  const effectiveWorkspace =
-    selectedWorkspace ?? singleWorkspace ?? prePopulatedWorkspace ?? null;
+  const effectiveProject =
+    selectedProject ?? singleProject ?? prePopulatedProject ?? null;
 
   useEffect(() => {
     if (
       effectiveOrg &&
-      effectiveWorkspace &&
-      (!session.selectedWorkspaceId ||
+      effectiveProject &&
+      (!session.selectedProjectId ||
         !session.selectedOrgName ||
-        !session.selectedWorkspaceName)
+        !session.selectedProjectName)
     ) {
-      store.setOrgAndWorkspace(
+      store.setOrgAndProject(
         effectiveOrg,
-        effectiveWorkspace,
+        effectiveProject,
         session.installDir,
       );
     }
   }, [
     effectiveOrg?.id,
-    effectiveWorkspace?.id,
-    session.selectedWorkspaceId,
+    effectiveProject?.id,
+    session.selectedProjectId,
     session.selectedOrgName,
-    session.selectedWorkspaceName,
+    session.selectedProjectName,
   ]);
 
-  // workspaceChosen requires the local workspace object (effectiveWorkspace)
-  // rather than just session.selectedWorkspaceId, because we need the
-  // environments list to drive the project picker. When selectedWorkspaceId is
-  // pre-populated from ampli.json but no workspace object exists yet,
+  // projectChosen requires the local project object (effectiveProject)
+  // rather than just session.selectedProjectId, because we need the
+  // environments list to drive the environment picker. When selectedProjectId is
+  // pre-populated from ampli.json but no project object exists yet,
   // selectableEnvs would be empty and the picker would be bypassed.
-  const workspaceChosen = effectiveWorkspace !== null;
+  const projectChosen = effectiveProject !== null;
 
-  // Environments available in the selected workspace
-  const selectableEnvs = getSelectableEnvironments(effectiveWorkspace);
+  // Environments available in the selected project
+  const selectableEnvs = getSelectableEnvironments(effectiveProject);
   const hasMultipleEnvs = selectableEnvs.length > 1;
 
   // Auto-select the environment when there's only one with an API key
   useEffect(() => {
-    if (workspaceChosen && !selectedEnv && selectableEnvs.length === 1) {
+    if (projectChosen && !selectedEnv && selectableEnvs.length === 1) {
       setSelectedEnv(selectableEnvs[0]);
       store.setSelectedEnvName(selectableEnvs[0].name);
     }
-  }, [workspaceChosen, selectedEnv, selectableEnvs.length]);
+  }, [projectChosen, selectedEnv, selectableEnvs.length]);
 
   // True once the user has picked an environment (or it was auto-selected),
   // or there are no environments to pick from (falls through to manual key entry).
@@ -174,8 +174,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   // Resolve API key from local storage, selected environment, or backend fetch.
   useEffect(() => {
-    if (!workspaceChosen || !envResolved || session.credentials !== null)
-      return;
+    if (!projectChosen || !envResolved || session.credentials !== null) return;
 
     let cancelled = false;
 
@@ -198,8 +197,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         // Resolve env name + appId from the key when we can — the header
         // slot is informational, not required for Auth to complete.
         let matchedAppId: string | null = null;
-        if (effectiveWorkspace) {
-          const match = (effectiveWorkspace.environments ?? []).find(
+        if (effectiveProject) {
+          const match = (effectiveProject.environments ?? []).find(
             (e) => e.app?.apiKey === local.key,
           );
           if (match) {
@@ -258,7 +257,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         installDir: s.installDir,
         idToken,
         zone,
-        workspaceId: s.selectedWorkspaceId ?? undefined,
+        projectId: s.selectedProjectId ?? undefined,
       });
 
       if (cancelled || store.session.credentials !== null) return;
@@ -271,8 +270,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         // Resolve env name + appId from the returned key when possible.
         // Not required for Auth to complete.
         let fetchedAppId: string | null = null;
-        if (effectiveWorkspace) {
-          const match = (effectiveWorkspace.environments ?? []).find(
+        if (effectiveProject) {
+          const match = (effectiveProject.environments ?? []).find(
             (e) => e.app?.apiKey === projectApiKey,
           );
           if (match) {
@@ -304,11 +303,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       cancelled = true;
     };
   }, [
-    workspaceChosen,
+    projectChosen,
     envResolved,
     selectedEnv,
     session.credentials,
-    session.selectedWorkspaceId,
+    session.selectedProjectId,
     session.pendingAuthIdToken,
     session.region,
     session.installDir,
@@ -316,29 +315,29 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   const needsOrgPick =
     pendingOrgs !== null && pendingOrgs.length > 1 && effectiveOrg === null;
-  const needsWorkspacePick =
-    effectiveOrg !== null &&
-    effectiveOrg.workspaces.length > 1 &&
-    !selectedWorkspace;
   const needsProjectPick =
-    workspaceChosen && hasMultipleEnvs && !selectedEnv && !needsWorkspacePick;
+    effectiveOrg !== null &&
+    effectiveOrg.projects.length > 1 &&
+    !selectedProject;
+  const needsEnvPick =
+    projectChosen && hasMultipleEnvs && !selectedEnv && !needsProjectPick;
   const needsApiKey =
     effectiveOrg !== null &&
-    workspaceChosen &&
+    projectChosen &&
     envResolved &&
     session.credentials === null &&
     // Only show manual input if there's no selected env with a key
     // (either no envs available, or the env had no key)
     !selectedEnv?.app?.apiKey;
 
-  const handleCreateProject = (fromScreen: 'workspace' | 'project') => {
-    // Pre-resolve the org: during the workspace picker, session.selectedOrgId
+  const handleCreateProject = (fromScreen: 'project' | 'environment') => {
+    // Pre-resolve the org: during the project picker, session.selectedOrgId
     // may still be null even though effectiveOrg is known. Commit it now so
     // CreateProjectScreen has the orgId it needs to POST /projects.
     if (effectiveOrg && !session.selectedOrgId) {
-      store.setOrgAndWorkspace(
+      store.setOrgAndProject(
         effectiveOrg,
-        effectiveWorkspace ?? { id: '', name: '' },
+        effectiveProject ?? { id: '', name: '' },
         session.installDir,
       );
     }
@@ -349,18 +348,18 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     store.startCreateProject(fromScreen);
   };
 
-  const handleStartOver = (fromScreen: 'workspace' | 'project') => {
+  const handleStartOver = (fromScreen: 'project' | 'environment') => {
     analytics.wizardCapture('picker start over', { 'from screen': fromScreen });
     setSelectedOrg(null);
-    setSelectedWorkspace(null);
+    setSelectedProject(null);
     setSelectedEnv(null);
     setPickerNotice(null);
-    store.setOrgAndWorkspace(
+    store.setOrgAndProject(
       { id: '', name: '' },
       { id: '', name: '' },
       session.installDir,
     );
-    // Clear stale project name — setOrgAndWorkspace doesn't touch it.
+    // Clear stale env name — setOrgAndProject doesn't touch it.
     store.setSelectedEnvName(null);
 
     // Re-fetch the org list so newly-created projects show up in the picker.
@@ -394,7 +393,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     store.setApiKeyNotice(null);
     // Env name stays null for manually-entered keys — we can't determine
     // which environment the key belongs to without an extra backend call.
-    // The header will render org / workspace only, which is acceptable.
+    // The header will render org / project only, which is acceptable.
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       idToken: session.pendingAuthIdToken ?? undefined,
@@ -421,11 +420,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   if (effectiveOrg && !needsOrgPick) {
     completedSteps.push({ label: `Organization: ${effectiveOrg.name}` });
   }
-  if (effectiveWorkspace && !needsWorkspacePick) {
-    completedSteps.push({ label: `Workspace: ${effectiveWorkspace.name}` });
+  if (effectiveProject && !needsProjectPick) {
+    completedSteps.push({ label: `Project: ${effectiveProject.name}` });
   }
-  if (selectedEnv && !needsProjectPick) {
-    completedSteps.push({ label: `Project: ${selectedEnv.name}` });
+  if (selectedEnv && !needsEnvPick) {
+    completedSteps.push({ label: `Environment: ${selectedEnv.name}` });
   }
 
   return (
@@ -485,11 +484,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         </Box>
       )}
 
-      {/* Step 3: workspace picker (multiple workspaces only) */}
-      {needsWorkspacePick && effectiveOrg && (
+      {/* Step 3: project picker (multiple projects only) */}
+      {needsProjectPick && effectiveOrg && (
         <Box flexDirection="column">
           <Text bold color={Colors.heading}>
-            Select a workspace
+            Select a project
           </Text>
           <Text color={Colors.secondary}>
             in <Text color={Colors.body}>{effectiveOrg.name}</Text>
@@ -500,11 +499,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             </Box>
           )}
           <Box marginTop={1}>
-            <PickerMenu<OrgEntry['workspaces'][number] | PickerAction>
+            <PickerMenu<OrgEntry['projects'][number] | PickerAction>
               options={[
-                ...effectiveOrg.workspaces.map((ws) => ({
-                  label: ws.name,
-                  value: ws as OrgEntry['workspaces'][number] | PickerAction,
+                ...effectiveOrg.projects.map((project) => ({
+                  label: project.name,
+                  value: project as OrgEntry['projects'][number] | PickerAction,
                 })),
                 {
                   label: 'Create new project\u2026',
@@ -522,17 +521,17 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               onSelect={(value) => {
                 const picked = Array.isArray(value) ? value[0] : value;
                 if (picked === CREATE_ACTION) {
-                  handleCreateProject('workspace');
+                  handleCreateProject('project');
                   return;
                 }
                 if (picked === RESTART_ACTION) {
-                  handleStartOver('workspace');
+                  handleStartOver('project');
                   return;
                 }
                 if (isPickerAction(picked)) return;
                 setPickerNotice(null);
-                setSelectedWorkspace(picked);
-                store.setOrgAndWorkspace(
+                setSelectedProject(picked);
+                store.setOrgAndProject(
                   effectiveOrg,
                   picked,
                   session.installDir,
@@ -543,11 +542,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         </Box>
       )}
 
-      {/* Step 4: project/environment picker (multiple environments only) */}
-      {needsProjectPick && (
+      {/* Step 4: environment picker (multiple environments only) */}
+      {needsEnvPick && (
         <Box flexDirection="column">
           <Text bold color={Colors.heading}>
-            Select a project
+            Select an environment
           </Text>
           {pickerNotice && (
             <Box marginTop={1}>
@@ -573,11 +572,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               onSelect={(value) => {
                 const picked = Array.isArray(value) ? value[0] : value;
                 if (picked === CREATE_ACTION) {
-                  handleCreateProject('project');
+                  handleCreateProject('environment');
                   return;
                 }
                 if (picked === RESTART_ACTION) {
-                  handleStartOver('project');
+                  handleStartOver('environment');
                   return;
                 }
                 if (isPickerAction(picked)) return;

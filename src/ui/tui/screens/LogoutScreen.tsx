@@ -46,7 +46,8 @@ export const LogoutScreen = ({
     clearApiKey(installDir);
     clearCheckpoint(installDir);
     // Strip OrgId/WorkspaceId/Zone from ampli.json so the next login shows
-    // the org + workspace pickers instead of silently reusing stale IDs.
+    // the org + project pickers instead of silently reusing stale IDs.
+    // (Back-compat: ampli.json still stores the field as `WorkspaceId`.)
     clearAuthFieldsInAmpliConfig(installDir);
     onLoggedOut?.();
     setPhase(Phase.Done);
