@@ -29,7 +29,7 @@ function advancePastAuth(s: WizardSession): void {
   s.region = 'us';
   s.selectedOrgId = 'org-1';
   s.selectedOrgName = 'Test Org';
-  s.selectedWorkspaceName = 'Default';
+  s.selectedProjectName = 'Default';
   s.selectedEnvName = 'Default';
 }
 

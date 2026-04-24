@@ -64,9 +64,8 @@ function executeCommand(raw: string, store: WizardStore): string | void {
                   email: userInfo.email,
                   org_id: store.session.selectedOrgId ?? undefined,
                   org_name: store.session.selectedOrgName ?? undefined,
-                  workspace_id: store.session.selectedWorkspaceId ?? undefined,
-                  workspace_name:
-                    store.session.selectedWorkspaceName ?? undefined,
+                  project_id: store.session.selectedProjectId ?? undefined,
+                  project_name: store.session.selectedProjectName ?? undefined,
                   app_id: store.session.selectedAppId,
                   env_name: store.session.selectedEnvName,
                   region: store.session.region,

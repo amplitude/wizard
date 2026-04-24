@@ -20,7 +20,7 @@ the store, router, flows, and console commands. Organized by priority.
 
 ## P0 — Bugs and broken states
 
-### 1. Store race condition in `setOrgAndWorkspace()`
+### 1. Store race condition in `setOrgAndProject()`
 
 **File:** `src/ui/tui/store.ts` (around line 496)
 
@@ -103,7 +103,7 @@ Many screens catch API errors and fall back silently:
 | DataSetupScreen | API activation check fails → falls back to local detection with no message |
 | McpScreen | `installer.install()` throws → shows "skipped" without explaining why |
 | SlackScreen | `opn()` fails → user sees "Opening browser..." but nothing opens |
-| AuthScreen | Org/workspace API calls fail → no retry, no message |
+| AuthScreen | Org/project API calls fail → no retry, no message |
 | ChecklistScreen | `opn()` fails → marks item complete anyway |
 
 **Recommendation:** Every API or external call should have a visible fallback
@@ -111,7 +111,7 @@ message: "Couldn't reach [service]. [What we did instead / what you can do]."
 
 ### 8. Auto-selection without confirmation
 
-AuthScreen auto-selects when there's a single org, single workspace, or single
+AuthScreen auto-selects when there's a single org, single project, or single
 environment. The user is never told which was selected — they just advance.
 
 **Problem:** If the user is in the wrong org (e.g., personal vs company), they
@@ -200,17 +200,22 @@ Show this in the `?` help overlay.
 
 ### 14. Inconsistent terminology
 
-The codebase uses "projects," "environments," "workspaces," and "apps"
-inconsistently:
+**Resolved:** The wizard now uses the Amplitude website hierarchy
+**Org → Project → Environment → App** everywhere in user-facing UI, session
+fields, ampli.json keys, and analytics. The Data API GraphQL schema still
+exposes the legacy field `workspaces`, so adapter code maps it to `projects`
+at the TS boundary — backend contracts are unchanged.
 
-- AuthScreen calls them "projects" in the picker
-- Amplitude Data API returns Org → Workspace → Environment → App (with apiKey)
-- `project-id` CLI flag is really an environment-scoped `app.id`
-- User-facing `/whoami` surfaces "project" for workspace and "env" for environment
+Historical notes:
 
-**Partially resolved:** Session field `selectedProjectName` renamed to `selectedEnvName`
-to match the Data API's actual shape. `--env` CLI flag deprecated — it's redundant
-with `--project-id` since each `app.id` identifies exactly one environment.
+- Session field `selectedProjectName` (env name) was renamed to
+  `selectedEnvName` earlier to match the Data API's actual env shape, freeing
+  up `selectedProjectName` for the newly renamed project layer.
+- `selectedWorkspaceId/Name` → `selectedProjectId/Name`.
+- `AmplitudeOrg.workspaces` → `AmplitudeOrg.projects` (TS-only rename).
+- ampli.json `WorkspaceId` → `ProjectId` (legacy files auto-migrate on read).
+- `--env` CLI flag remains deprecated — redundant with `--project-id` since
+  each `app.id` identifies exactly one environment.
 
 ### 15. Number key shortcuts in PickerMenu not discoverable
 
@@ -354,7 +359,7 @@ or is clipped without warning.
 - "(detected)" label is a nice touch for returning users.
 
 ### AuthScreen
-- Auto-selection of single org/workspace is efficient but invisible. (See #8.)
+- Auto-selection of single org/project is efficient but invisible. (See #8.)
 - API key manual entry: error message "API key cannot be empty" should also
   suggest the expected format.
 - "Only organization admins can access project API keys" is shown reactively on

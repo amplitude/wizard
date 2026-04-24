@@ -169,7 +169,8 @@ const buildSessionFromOptions = async (
       typeof buildSession
     >[0]['integration'],
     benchmark: options.benchmark as boolean | undefined,
-    // yargs normalizes --app-id (primary) / --project-id (alias) to `appId`.
+    // --app-id is the canonical flag; --project-id is now a separate flag that
+    // refers to the Amplitude project (formerly workspace), not the app.
     appId: options.appId as string | undefined,
     appName: options.appName as string | undefined,
   });
@@ -220,11 +221,15 @@ const resolveNonInteractiveCredentials = async (
   const { resolveCredentials, resolveEnvironmentSelection } = await import(
     './src/lib/credential-resolution.js'
   );
+  // Prefer --project-id (canonical); fall back to --workspace-id (hidden legacy alias).
+  const projectIdFlag =
+    (options.projectId as string | undefined) ??
+    (options.workspaceId as string | undefined);
   await resolveCredentials(session, {
     requireOrgId: false,
     org: options.org as string | undefined,
     env: options.env as string | undefined,
-    workspaceId: options.workspaceId as string | undefined,
+    projectId: projectIdFlag,
     appId: options.appId as string | undefined,
     accessTokenOverride: envAccessToken,
   });
@@ -357,18 +362,18 @@ const resolveNonInteractiveCredentials = async (
     if (mode === 'ci') {
       // CI mode: auto-select first environment with an API key
       for (const org of session.pendingOrgs) {
-        for (const ws of org.workspaces) {
-          const env = (ws.environments ?? [])
+        for (const project of org.projects) {
+          const env = (project.environments ?? [])
             .filter((e) => e.app?.apiKey)
             .sort((a, b) => a.rank - b.rank)[0];
           if (env) {
             await resolveEnvironmentSelection(session, {
               orgId: org.id,
-              workspaceId: ws.id,
+              projectId: project.id,
               env: env.name,
             });
             getUI().log.info(
-              `Resolved Amplitude API key non-interactively (CI mode): ${org.name} / ${ws.name} / ${env.name}`,
+              `Resolved Amplitude API key non-interactively (CI mode): ${org.name} / ${project.name} / ${env.name}`,
             );
             break;
           }
@@ -396,7 +401,7 @@ const resolveNonInteractiveCredentials = async (
       }
     } else if (agentUI) {
       // Agent mode: emit a structured prompt event with the full
-      // org/workspace/app/env hierarchy. The orchestrator can either
+      // org/project/app/env hierarchy. The orchestrator can either
       // reply on stdin with { appId } or re-invoke with --app-id (globally
       // unique, identifies the env directly).
       //
@@ -458,7 +463,7 @@ const resolveNonInteractiveCredentials = async (
   if (mode === 'agent' && session.credentials) {
     const parts = [
       session.selectedOrgName,
-      session.selectedWorkspaceName,
+      session.selectedProjectName,
       session.selectedEnvName,
     ].filter(Boolean);
     if (parts.length > 0) {
@@ -632,7 +637,6 @@ void yargs(hideBin(process.argv))
       describe:
         'Amplitude app ID (numeric, e.g. 769610) — the only scope flag needed in agent mode',
       type: 'string',
-      alias: 'project-id',
     },
     'app-name': {
       // `--project-name` kept as alias for existing callers; internally we
@@ -642,11 +646,20 @@ void yargs(hideBin(process.argv))
       type: 'string',
       alias: 'project-name',
     },
+    // Canonical name for the Amplitude hierarchy level between Org and
+    // Environment. The Amplitude website uses "Project"; the GraphQL backend
+    // still uses "workspace" internally. Agents should prefer --app-id, which
+    // is globally unique and unambiguous — --project-id remains available for
+    // interactive/legacy callers that only know their project UUID.
+    'project-id': {
+      describe: 'Amplitude project ID (UUID; previously --workspace-id)',
+      type: 'string',
+    },
     // --workspace-id / --org / --env remain parseable (yargs env fallbacks,
-    // interactive legacy, CI scripts). Hidden from public help — agents should
-    // use --app-id, which is globally unique and unambiguous.
+    // interactive legacy, CI scripts). Hidden from public help — superseded
+    // by --project-id (same semantics, new name).
     'workspace-id': {
-      describe: 'Amplitude workspace ID (UUID) — legacy; prefer --app-id',
+      describe: false as unknown as string, // hidden legacy alias of --project-id
       type: 'string',
       hidden: true,
     },
@@ -850,7 +863,7 @@ void yargs(hideBin(process.argv))
               );
               await resolveCredentials(session);
 
-              // Resolve org/workspace display names so /whoami shows them.
+              // Resolve org/project display names so /whoami shows them.
               // Also extracts the numeric analytics project ID for MCP event detection.
               // Fire-and-forget so it doesn't block startup.
               if (session.region && session.selectedOrgId) {
@@ -886,10 +899,9 @@ void yargs(hideBin(process.argv))
                           email: userInfo.email,
                           org_id: session.selectedOrgId ?? undefined,
                           org_name: session.selectedOrgName ?? undefined,
-                          workspace_id:
-                            session.selectedWorkspaceId ?? undefined,
-                          workspace_name:
-                            session.selectedWorkspaceName ?? undefined,
+                          project_id: session.selectedProjectId ?? undefined,
+                          project_name:
+                            session.selectedProjectName ?? undefined,
                           app_id: session.selectedAppId,
                           env_name: session.selectedEnvName,
                           region: session.region,
@@ -913,25 +925,25 @@ void yargs(hideBin(process.argv))
                         if (org) {
                           session.selectedOrgName = org.name;
                           changed = true;
-                          // Fall back to the first workspace if the stored ID is stale.
-                          const ws = session.selectedWorkspaceId
-                            ? org.workspaces.find(
-                                (w) => w.id === session.selectedWorkspaceId,
-                              ) ?? org.workspaces[0]
-                            : org.workspaces[0];
-                          if (ws) {
-                            session.selectedWorkspaceName = ws.name;
+                          // Fall back to the first project if the stored ID is stale.
+                          const project = session.selectedProjectId
+                            ? org.projects.find(
+                                (p) => p.id === session.selectedProjectId,
+                              ) ?? org.projects[0]
+                            : org.projects[0];
+                          if (project) {
+                            session.selectedProjectName = project.name;
                             // Extract the Amplitude app ID from the lowest-rank environment.
-                            const appId = extractAppId(ws);
+                            const appId = extractAppId(project);
                             logToFile(
                               `[bin] app ID resolution: environments=${
-                                ws.environments?.length ?? 'null'
+                                project.environments?.length ?? 'null'
                               }, appId=${appId}`,
                             );
                             if (appId) session.selectedAppId = appId;
                           } else {
                             logToFile(
-                              `[bin] app ID resolution: no workspaces in org ${org.id}`,
+                              `[bin] app ID resolution: no projects in org ${org.id}`,
                             );
                           }
                         }
@@ -1016,7 +1028,7 @@ void yargs(hideBin(process.argv))
             // ── OAuth + account setup ──────────────────────────────
             // Runs concurrently with framework detection while AuthScreen shows.
             // When OAuth completes, store.setOAuthComplete() triggers the
-            // AuthScreen SUSI pickers (org → workspace → API key).
+            // AuthScreen SUSI pickers (org → project → API key).
             // AuthScreen calls store.setCredentials() when done, advancing the
             // router past Auth → RegionSelect → DataSetup → to IntroScreen.
             const authTask = (async () => {
@@ -1116,7 +1128,7 @@ void yargs(hideBin(process.argv))
                 analytics.setDistinctId(userInfo.email);
                 analytics.identifyUser({ email: userInfo.email });
 
-                // Signal AuthScreen — triggers org/workspace/API key pickers
+                // Signal AuthScreen — triggers org/project/API key pickers
                 tui.store.setOAuthComplete({
                   accessToken: auth.accessToken,
                   idToken: auth.idToken,

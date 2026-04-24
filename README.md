@@ -130,14 +130,13 @@ auto-approve side effects of `--agent` (so you can script but still get
 prompted for confirmation when needed).
 
 **Selecting an Amplitude project.** Amplitude's hierarchy is
-Org → Workspace → Project → Environment. When multiple match, pick one
-with a flag — `--project-id` is unambiguous; the others narrow when
-needed:
+Org → Project → Environment → App. When multiple match, pick one with a
+flag — `--project-id` is unambiguous; the others narrow when needed:
 
 | Flag | When to use |
 |------|-------------|
-| `--project-id <id>` | Numeric project ID (e.g. `769610`). Most unambiguous selector. |
-| `--workspace-id <uuid>` | Narrow to one workspace when env names collide. |
+| `--project-id <id>` | Numeric app/environment ID (e.g. `769610`). Most unambiguous selector. |
+| `--workspace-id <uuid>` | Narrow to one project when env names collide. (Flag name kept for backward compat with the ampli CLI; scopes to an Amplitude Project.) |
 | `--org <name>` | Case-insensitive partial match on org name. |
 | `--env <name>` | Amplitude environment (e.g. `Production`). NOT a POSIX env var. |
 

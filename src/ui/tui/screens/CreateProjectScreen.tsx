@@ -2,8 +2,7 @@
  * CreateProjectScreen — Inline "Create new project…" flow.
  *
  * Reached from AuthScreen when the user picks "Create new project…" from
- * either the workspace picker or the project picker, and via the
- * `/create-project` slash command.
+ * the project picker, and via the `/create-project` slash command.
  *
  * Flow:
  *   1. Prompt for a project name (TextInput)
@@ -181,11 +180,11 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       }
 
       store.setSelectedEnvName(result.name);
-      // Dash creates a same-named taxonomy workspace alongside the new app.
-      // Setting the workspace name satisfies Auth.isComplete so the router
-      // can advance past Auth; the real workspace id will appear on the
+      // Dash creates a same-named taxonomy project alongside the new app.
+      // Setting the project name satisfies Auth.isComplete so the router
+      // can advance past Auth; the real project id will appear on the
       // next fetchAmplitudeUser refresh.
-      store.restoreSessionIds({ workspaceName: result.name });
+      store.restoreSessionIds({ projectName: result.name });
       store.setCredentials({
         accessToken:
           session.pendingAuthAccessToken ??

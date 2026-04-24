@@ -212,9 +212,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -240,21 +240,21 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       choices: Array<{
         orgId: string;
         orgName: string;
-        workspaceId: string;
-        workspaceName: string;
+        projectId: string;
+        projectName: string;
         appId: string | null;
         envName: string;
         label: string;
       }>;
     };
     expect(data.promptType).toBe('environment_selection');
-    expect(data.hierarchy).toEqual(['org', 'workspace', 'app', 'environment']);
+    expect(data.hierarchy).toEqual(['org', 'project', 'app', 'environment']);
     expect(data.choices).toHaveLength(2);
     expect(data.choices[0]).toMatchObject({
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100001',
       envName: 'Production',
       label: 'DevX / Sandbox / Production',
@@ -267,9 +267,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -292,9 +292,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -312,8 +312,8 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       resumeFlags: Array<{ label: string; flags: string[] }>;
     };
     expect(data.resumeFlags).toHaveLength(1);
-    // --project-id alone is sufficient — it's globally unique and resolves
-    // to one (org, workspace, env) tuple server-side. No --env / --org noise.
+    // --app-id alone is sufficient — it's globally unique and resolves
+    // to one (org, project, env) tuple server-side. No --env / --org noise.
     expect(data.resumeFlags[0].flags).toEqual(['--app-id', '100002']);
   });
 });
@@ -337,14 +337,6 @@ describe('parseEnvSelectionStdinLine', () => {
     expect(parsed).toEqual({ appId: '100002' });
   });
 
-  it('parses legacy { projectId } shape via zod', () => {
-    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine(
-      '{"projectId":"100001"}',
-    );
-    expect(rejectionMessage).toBeNull();
-    expect(parsed).toEqual({ projectId: '100001' });
-  });
-
   it('rejects non-string appId (wrong type) and returns a descriptive reason', () => {
     const { parsed, rejectionMessage } =
       parseEnvSelectionStdinLine('{"appId":12345}');
@@ -365,8 +357,8 @@ describe('resolveEnvSelectionFromStdin', () => {
     {
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100001',
       envName: 'Production',
       rank: 1,
@@ -375,8 +367,8 @@ describe('resolveEnvSelectionFromStdin', () => {
     {
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100002',
       envName: 'Development',
       rank: 2,
@@ -403,24 +395,11 @@ describe('resolveEnvSelectionFromStdin', () => {
       kind: 'selected',
       selection: {
         orgId: 'org-1',
-        workspaceId: 'ws-a',
+        projectId: 'proj-a',
         env: 'Development',
       },
       warnings: [],
     });
-  });
-
-  it('resolves legacy { projectId } alias AND surfaces a deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { projectId: '100001' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    if (outcome.kind === 'selected') {
-      expect(outcome.selection.env).toBe('Production');
-    }
-    expect(outcome.warnings.join('\n')).toMatch(/\{ projectId \}/);
-    expect(outcome.warnings.join('\n')).toMatch(/deprecated/);
   });
 
   it('returns kind=mismatch when a provided appId does not match any choice', () => {
@@ -430,27 +409,5 @@ describe('resolveEnvSelectionFromStdin', () => {
       expect(outcome.reason).toMatch(/999999/);
       expect(outcome.reason).toMatch(/did not match/);
     }
-  });
-
-  it('returns kind=mismatch when a legacy triple does not match any choice', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'ghost', workspaceId: 'none', env: 'Staging' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('mismatch');
-    if (outcome.kind === 'mismatch') {
-      expect(outcome.reason).toMatch(/ghost/);
-    }
-  });
-
-  it('accepts a matching legacy triple and emits the deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'org-1', workspaceId: 'ws-a', env: 'Production' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    expect(outcome.warnings.join('\n')).toMatch(
-      /\{ orgId, workspaceId, env \}/,
-    );
   });
 });
