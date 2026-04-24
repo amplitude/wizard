@@ -425,7 +425,7 @@ export const ConsoleView = ({
       {/* Status ticker — shown when an overlay is active */}
       {lastStatus && (
         <Box paddingX={Layout.paddingX} overflow="hidden">
-          <Text color={Colors.muted}>{Icons.diamondOpen} </Text>
+          <Text color={Colors.subtle}>{Icons.diamondOpen} </Text>
           <Text color={Colors.muted} wrap="truncate-end">
             {linkify(lastStatus)}
           </Text>
