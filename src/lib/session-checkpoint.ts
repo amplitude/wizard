@@ -15,7 +15,6 @@ import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
 import { Integration } from './constants.js';
-import { FRAMEWORK_REGISTRY } from './registry.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -105,9 +104,9 @@ export function saveCheckpoint(session: WizardSession): void {
  * - the checkpoint belongs to a different project directory
  * - the file is malformed or fails validation
  */
-export function loadCheckpoint(
+export async function loadCheckpoint(
   installDir: string,
-): Partial<WizardSession> | null {
+): Promise<Partial<WizardSession> | null> {
   const filePath = checkpointPath(installDir);
   if (!existsSync(filePath)) return null;
 
@@ -136,7 +135,7 @@ export function loadCheckpoint(
   // integration when detection auto-fell-back; re-deriving keeps the UI
   // consistent with the actual framework config.
   const integration = checkpoint.integration as WizardSession['integration'];
-  const derivedLabel = deriveFrameworkLabel(
+  const derivedLabel = await deriveFrameworkLabel(
     integration,
     checkpoint.detectedFrameworkLabel,
   );
@@ -165,14 +164,23 @@ export function loadCheckpoint(
  * matches a known framework, trust the registry's name over the persisted
  * label (handles corrupted checkpoints from older builds). Falls back to
  * the persisted label only when the integration isn't recognized.
+ *
+ * Generic is intentionally excluded: when the wizard falls back to Generic,
+ * `detectedFrameworkLabel` is left `null` on purpose and must stay `null`
+ * across checkpoint save/restore.
+ *
+ * The registry is loaded dynamically to avoid eagerly pulling in all 18
+ * framework modules on the critical startup path.
  */
-function deriveFrameworkLabel(
+async function deriveFrameworkLabel(
   integration: WizardSession['integration'],
   persistedLabel: string | null,
-): string | null {
+): Promise<string | null> {
   if (!integration) return persistedLabel;
+  if (integration === Integration.generic) return persistedLabel;
   const known = Object.values(Integration).includes(integration);
   if (!known) return persistedLabel;
+  const { FRAMEWORK_REGISTRY } = await import('./registry.js');
   return FRAMEWORK_REGISTRY[integration].metadata.name;
 }
 
