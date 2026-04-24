@@ -5,8 +5,10 @@ import { SigningUpScreen } from '../SigningUpScreen.js';
 import { makeScreenTestStore } from '../../__tests__/screen-test-utils.js';
 
 const mockPerformSignupOrAuth = vi.fn();
+const mockTrackSignupAttempt = vi.fn();
 vi.mock('../../../../utils/signup-or-auth.js', () => ({
   performSignupOrAuth: (...args: unknown[]) => mockPerformSignupOrAuth(...args),
+  trackSignupAttempt: (...args: unknown[]) => mockTrackSignupAttempt(...args),
 }));
 
 function makeStore(fullName: string | null = null) {
@@ -20,6 +22,7 @@ function makeStore(fullName: string | null = null) {
 
 beforeEach(() => {
   mockPerformSignupOrAuth.mockReset();
+  mockTrackSignupAttempt.mockReset();
   vi.useFakeTimers();
 });
 
@@ -141,6 +144,21 @@ describe('SigningUpScreen — render states', () => {
     expect(frame).toMatch(/Enter your full name/);
     expect(frame).toMatch(/Jane Doe/);
     expect(frame).toMatch(/Signing up/);
+  });
+});
+
+describe('SigningUpScreen — performSignupOrAuth throws (deadlock guard)', () => {
+  it('sets signupAbandoned and emits wrapper_exception when the wrapper throws', async () => {
+    mockPerformSignupOrAuth.mockRejectedValueOnce(new Error('disk full'));
+    const store = makeStore(null);
+    render(<SigningUpScreen store={store} />);
+    await vi.advanceTimersByTimeAsync(0);
+    // Without the catch, the bin.ts signupCeremonySettled wait would
+    // never satisfy and the wizard would hang.
+    expect(store.session.signupAbandoned).toBe(true);
+    expect(mockTrackSignupAttempt).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'wrapper_exception', zone: 'us' }),
+    );
   });
 });
 
