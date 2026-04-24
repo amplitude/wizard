@@ -33,6 +33,21 @@ const ErrorSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 });
 
+const NeedsInformationSchema = z
+  .object({
+    type: z.literal('needs_information'),
+    needs_information: z
+      .object({
+        schema: z
+          .object({
+            required: z.array(z.string()).min(1),
+          })
+          .passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
 const TokenSchema = z.object({
   access_token: z.string(),
   id_token: z.string(),
@@ -55,7 +70,7 @@ function provisioningUrl(zone: AmplitudeZone): string {
 
 export interface DirectSignupInput {
   email: string;
-  fullName: string;
+  fullName: string | null;
   zone: AmplitudeZone;
 }
 
@@ -71,6 +86,7 @@ export type DirectSignupResult =
       };
     }
   | { kind: 'requires_redirect' }
+  | { kind: 'needs_information'; requiredFields: string[] }
   | { kind: 'error'; message: string };
 
 /**
@@ -99,7 +115,7 @@ export async function performDirectSignup(
         state,
         client_id: oAuthClientId,
         redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-        full_name: input.fullName,
+        ...(input.fullName !== null ? { full_name: input.fullName } : {}),
       },
       {
         headers: { 'Content-Type': 'application/json' },
@@ -116,6 +132,14 @@ export async function performDirectSignup(
 
   const parsedRedirect = RedirectSchema.safeParse(response.data);
   if (parsedRedirect.success) return { kind: 'requires_redirect' };
+
+  const parsedNeedsInfo = NeedsInformationSchema.safeParse(response.data);
+  if (parsedNeedsInfo.success) {
+    return {
+      kind: 'needs_information',
+      requiredFields: parsedNeedsInfo.data.needs_information.schema.required,
+    };
+  }
 
   const parsedError = ErrorSchema.safeParse(response.data);
   if (parsedError.success) {
