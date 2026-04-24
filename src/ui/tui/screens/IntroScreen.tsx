@@ -25,6 +25,7 @@ import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { analytics } from '../../../utils/analytics.js';
+import { logToFile } from '../../../utils/debug.js';
 
 interface IntroScreenProps {
   store: WizardStore;
@@ -33,6 +34,23 @@ interface IntroScreenProps {
 const LOGO_MIN_COLS = 75;
 const LOGO_MIN_ROWS = 20;
 
+/**
+ * Suffix shown after the framework name. Exported for unit tests.
+ * - '' when the user manually picked the framework, or when we fell back
+ *   (the main label already reads "none detected" in that case)
+ * - ' (detected)' when auto-detection found a real framework
+ */
+export function getFrameworkLabelSuffix({
+  manuallySelected,
+  autoFallback,
+}: {
+  manuallySelected: boolean;
+  autoFallback: boolean;
+}): string {
+  if (manuallySelected || autoFallback) return '';
+  return ' (detected)';
+}
+
 export const IntroScreen = ({ store }: IntroScreenProps) => {
   useWizardStore(store);
 
@@ -40,6 +58,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
+  const [autoFallback, setAutoFallback] = useState(false);
   const [showResume, setShowResume] = useState(
     () => store.session._restoredFromCheckpoint,
   );
@@ -60,12 +79,15 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
+  // NOTE: we deliberately do NOT call setDetectedFramework here — Generic is a
+  // fallback, not a detection. The render derives its label from the config.
   useEffect(() => {
     if (needsFrameworkPick && !session.menu && !showResume) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.setFrameworkConfig(Integration.generic, genericConfig);
-        store.setDetectedFramework(genericConfig.metadata.name);
+        setAutoFallback(true);
+        logToFile('[intro] no framework matched — falling back to Generic');
       });
     }
   }, [needsFrameworkPick, session.menu, showResume]);
@@ -222,17 +244,19 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           {frameworkLabel && (
             <Text>
               <Text color={Colors.body}>Framework </Text>
-              {config?.metadata.glyph && (
+              {!autoFallback && config?.metadata.glyph && (
                 <Text color={config.metadata.glyphColor}>
                   {config.metadata.glyph}{' '}
                 </Text>
               )}
               <Text color={Colors.secondary}>
-                {frameworkLabel}
-                {!manuallySelected && ' (detected)'}
-                {config?.metadata.beta && ' [BETA]'}
+                {autoFallback ? 'none detected' : frameworkLabel}
+                {getFrameworkLabelSuffix({ manuallySelected, autoFallback })}
+                {!autoFallback && config?.metadata.beta && ' [BETA]'}
               </Text>
-              <Text color={Colors.success}> {Icons.checkmark}</Text>
+              {!autoFallback && (
+                <Text color={Colors.success}> {Icons.checkmark}</Text>
+              )}
             </Text>
           )}
 
