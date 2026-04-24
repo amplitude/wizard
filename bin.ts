@@ -833,7 +833,7 @@ void yargs(hideBin(process.argv))
               const { loadCheckpoint } = await import(
                 './src/lib/session-checkpoint.js'
               );
-              const checkpoint = loadCheckpoint(session.installDir);
+              const checkpoint = await loadCheckpoint(session.installDir);
               if (checkpoint) {
                 Object.assign(session, checkpoint);
                 session.introConcluded = false;
