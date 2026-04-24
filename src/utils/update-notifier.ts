@@ -160,26 +160,68 @@ export async function checkForUpdate(
   return { current: currentVersion, latest, available };
 }
 
+// Buffered notice that will be flushed on process exit. Kept at module scope
+// so the process.on('exit') hook installed below can close over it without
+// fighting React/Ink teardown timing.
+let pendingNotice: string | null = null;
+let exitHookInstalled = false;
+
+function formatNotice(
+  pkgName: string,
+  current: string,
+  latest: string,
+): string {
+  return `\nA new version of ${pkgName} is available: ${current} → ${latest}\n  Run \`npm i -g ${pkgName}\` or use \`npx ${pkgName}@latest\` to update.\n`;
+}
+
+function installExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  // `exit` fires after Ink has unmounted and released the alt-screen, so a
+  // direct stderr write lands in the user's normal scrollback. Writing
+  // during TUI runtime would have been clobbered by Ink's next frame render.
+  process.on('exit', () => {
+    if (!pendingNotice) return;
+    try {
+      process.stderr.write(pendingNotice);
+    } catch {
+      // broken pipe — non-fatal
+    }
+  });
+}
+
 /**
- * Prints a one-line upgrade notice to stderr when a newer version is
- * available. Non-blocking: awaits the background check but catches all
- * errors so the caller can kick it off without try/catch.
+ * Kicks off the background version check and buffers an upgrade notice for
+ * display on process exit (after Ink's alt-screen has been released).
+ *
+ * Why defer to exit? Writing directly to stderr during a TUI session fights
+ * Ink's full-screen renderer — the notice either gets overwritten by the
+ * next frame or corrupts the layout. Deferring is the simplest reliable way
+ * to surface it without routing through the UI abstraction.
+ *
+ * Non-blocking: awaits the background fetch but catches all errors so the
+ * caller can fire this off without try/catch.
+ *
+ * Exported for tests.
  */
 export function scheduleUpdateCheck(
   pkgName: string,
   currentVersion: string,
 ): Promise<void> {
+  installExitHook();
   return checkForUpdate(pkgName, currentVersion)
     .then((result) => {
       if (!result || !result.available) return;
-      const msg = `\nA new version of ${pkgName} is available: ${result.current} → ${result.latest}\n  Run \`npm i -g ${pkgName}\` or use \`npx ${pkgName}@latest\` to update.\n`;
-      try {
-        process.stderr.write(msg);
-      } catch {
-        // ignore — broken pipe
-      }
+      pendingNotice = formatNotice(pkgName, result.current, result.latest);
     })
     .catch(() => {
       // swallow
     });
+}
+
+/** Test helper — drains the buffered notice without waiting for exit. */
+export function _drainPendingNoticeForTest(): string | null {
+  const n = pendingNotice;
+  pendingNotice = null;
+  return n;
 }
