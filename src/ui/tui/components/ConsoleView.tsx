@@ -141,6 +141,56 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/snake':
       store.showSnakeOverlay();
       break;
+    case '/debug': {
+      // Surface a redacted diagnostic snapshot — credentials / tokens are
+      // stripped. Writes the full snapshot to stderr for copy/paste
+      // sharing; the console only shows a brief summary.
+      void import('../utils/diagnostics.js')
+        .then(({ createDiagnosticSnapshot }) => {
+          // Use the real wizard version (set on the store by startTUI from
+          // package.json). Using a hardcoded placeholder would make every
+          // bug-report snapshot read "wizard_version: dev".
+          const snapshot = createDiagnosticSnapshot(
+            store,
+            store.version || 'unknown',
+          ) as {
+            current_screen?: string | null;
+            active_flow?: string | null;
+            session?: {
+              integration?: string | null;
+              region?: string | null;
+            };
+            tasks_count?: number;
+          };
+          try {
+            process.stderr.write(
+              '\n[/debug] diagnostic snapshot:\n' +
+                JSON.stringify(snapshot, null, 2) +
+                '\n',
+            );
+          } catch {
+            // ignore broken pipe
+          }
+          const summary =
+            `flow: ${snapshot.active_flow ?? 'n/a'} | screen: ${
+              snapshot.current_screen ?? 'n/a'
+            } | ` +
+            `integration: ${snapshot.session?.integration ?? 'n/a'} | ` +
+            `zone: ${snapshot.session?.region ?? 'n/a'} | tasks: ${
+              snapshot.tasks_count ?? 0
+            }`;
+          store.setCommandFeedback(
+            summary + ' (full snapshot written to stderr)',
+            30_000,
+          );
+        })
+        .catch(() => {
+          store.setCommandFeedback(
+            'Diagnostics unavailable. See /tmp/amplitude-wizard.log.',
+          );
+        });
+      break;
+    }
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;

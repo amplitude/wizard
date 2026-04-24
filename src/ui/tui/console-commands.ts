@@ -22,6 +22,7 @@ export const COMMANDS = [
     cmd: '/feedback',
     desc: 'Send product feedback',
   },
+  { cmd: '/debug', desc: 'Print a diagnostic snapshot (safe to share)' },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
