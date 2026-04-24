@@ -99,6 +99,7 @@
     "fast-check": "4.6.0",
     "globals": "17.4.0",
     "husky": "9.1.7",
+    "ink-testing-library": "^4.0.0",
     "lint-staged": "15.5.1",
     "msw": "2.10.4",
     "prettier": "2.8.8",
