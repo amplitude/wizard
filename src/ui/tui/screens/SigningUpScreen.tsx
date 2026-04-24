@@ -30,6 +30,7 @@ import { Box, Text } from 'ink';
 import { useEffect } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { Colors } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { performSignupOrAuth } from '../../../utils/signup-or-auth.js';
@@ -41,6 +42,14 @@ interface SigningUpScreenProps {
 
 export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
   useWizardStore(store);
+  // Resolve the zone via the shared TUI hook rather than reading the
+  // raw session field. Matches the pattern used by sibling screens
+  // (CreateProjectScreen, DataIngestionCheckScreen, SlackScreen) and
+  // ConsoleView. Behaviorally equivalent in the normal flow — the
+  // SigningUp predicate already requires region to be set — but it
+  // removes an unsafe non-null assertion and gives us a sane
+  // DEFAULT_AMPLITUDE_ZONE fallback if the predicate is ever bypassed.
+  const zone = useResolvedZone(store.session);
 
   // Empty deps array: the effect runs exactly once per mount. The
   // request-time fields (signupEmail, region, optionally signupFullName)
@@ -65,7 +74,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         {
           email: s.signupEmail,
           fullName: s.signupFullName,
-          zone: s.region!,
+          zone,
         },
         { signal: controller.signal },
       );
