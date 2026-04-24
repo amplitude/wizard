@@ -68,10 +68,16 @@ describe('VUE_AGENT_CONFIG.detection.detect', () => {
     expect(detected).toBe(true);
   });
 
-  it('falls back to .vue file sniff when package.json lacks vue', async () => {
+  it('trusts package.json when present — skips file fallback if vue is absent', async () => {
+    // When package.json exists and doesn't list vue, we must NOT walk the
+    // filesystem. The manifest is authoritative; the fallback is strictly for
+    // the "no manifest at all" case.
     fs.writeFileSync(
       path.join(tmpDir, 'package.json'),
-      JSON.stringify({ name: 'mystery-app' }),
+      JSON.stringify({
+        name: 'react-app',
+        dependencies: { react: '^19.0.0', 'react-dom': '^19.0.0' },
+      }),
     );
     fs.writeFileSync(
       path.join(tmpDir, 'Component.vue'),
@@ -81,7 +87,7 @@ describe('VUE_AGENT_CONFIG.detection.detect', () => {
     const detected = await VUE_AGENT_CONFIG.detection.detect(
       makeOptions(tmpDir),
     );
-    expect(detected).toBe(true);
+    expect(detected).toBe(false);
   });
 
   it('refuses the file fallback when a nuxt.config is present', async () => {

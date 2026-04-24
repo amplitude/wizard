@@ -71,11 +71,11 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
       if (packageJson) {
         // Nuxt projects have both 'vue' and 'nuxt' — don't claim them
         if (hasPackageInstalled('nuxt', packageJson)) return false;
-        if (hasPackageInstalled('vue', packageJson)) return true;
+        return hasPackageInstalled('vue', packageJson);
       }
-      // Fallback: sniff for .vue source files when package.json is missing
-      // or doesn't list vue. Keeps detection working for partial checkouts
-      // and unusual scaffolds.
+      // Fallback: sniff for .vue source files ONLY when package.json is
+      // missing. If the manifest exists, trust it — avoids walking large
+      // node_modules trees on every non-Vue project.
       return hasVueFileSignals(options.installDir);
     },
     detectPackageManager: detectNodePackageManagers,
