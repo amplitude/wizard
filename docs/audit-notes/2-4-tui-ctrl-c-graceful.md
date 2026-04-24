@@ -1,25 +1,18 @@
 # Audit 2.4 — Graceful Ctrl+C
 
 **Category:** TUI
-**Effort:** M
-**Status:** Scaffolded (design note only).
+**Effort:** S
+**Status:** Implemented.
 
-## Scope
+## What changed
 
-Graceful Ctrl+C. See `docs/audit-branches.md` for the full list of audit
-findings; this branch holds the per-finding design note so the fix has a
-single home when implementation lands.
+Improved the first-Ctrl+C experience in `bin.ts`:
 
-## Implementation plan
-
-1. Reproduce the finding against the current main HEAD.
-2. Write a failing unit/integration test capturing the observed behavior.
-3. Ship the fix in a single focused commit on this branch, update this
-   file's Status to `Implemented`, and replace the plan with a short
-   "what changed" summary.
-
-## Why scaffolded
-
-Scope exceeds what the audit-branch sweep could safely land in one pass.
-Effort rating: **M**. Implementation belongs with a dedicated
-review cycle and associated tests.
+1. Push a visible "Saving session… press Ctrl+C again to force quit."
+   status into the TUI before starting checkpoint + analytics flush, so
+   users aren't staring at a frozen screen.
+2. Bumped the force-kill timer from 1s to 2s to give Sentry +
+   analytics flush a realistic window.
+3. Kept the double-Ctrl+C fast path unchanged — second Ctrl+C
+   immediately `process.exit(130)`.
+4. Exit code remains 130 (SIGINT convention).

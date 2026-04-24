@@ -1255,8 +1255,9 @@ void yargs(hideBin(process.argv))
             });
 
             // Save checkpoint on unexpected termination (Ctrl+C).
-            // First Ctrl+C saves checkpoint and exits promptly.
-            // Second Ctrl+C within the grace window force-kills immediately.
+            // First Ctrl+C: show "Saving session..." banner, save checkpoint,
+            // flush analytics, then exit with code 130 (SIGINT convention).
+            // Second Ctrl+C within the grace window: force-kill immediately.
             let sigintReceived = false;
             process.on('SIGINT', () => {
               if (sigintReceived) {
@@ -1265,8 +1266,21 @@ void yargs(hideBin(process.argv))
               }
               sigintReceived = true;
 
-              // Force-kill after 1 second if checkpoint save hangs
-              const forceTimer = setTimeout(() => process.exit(130), 1_000);
+              // Surface a friendly "we heard you" banner so the TUI doesn't
+              // just freeze while checkpoint+analytics flush. Best-effort —
+              // if the store is already torn down we swallow the error.
+              try {
+                tui.store.pushStatus(
+                  'Saving session… press Ctrl+C again to force quit.',
+                );
+              } catch {
+                // store may be mid-teardown; non-fatal
+              }
+
+              // Force-kill after 2 seconds if checkpoint save / analytics
+              // flush hangs. Slightly longer than the previous 1s window to
+              // give Sentry + analytics a realistic chance to flush.
+              const forceTimer = setTimeout(() => process.exit(130), 2_000);
               // Unref so it doesn't keep the event loop alive
               if (forceTimer.unref) forceTimer.unref();
 
@@ -1276,7 +1290,7 @@ void yargs(hideBin(process.argv))
                 // Best-effort — don't block exit
               }
 
-              // Best-effort flush — the 1s force-kill timer bounds the wait
+              // Best-effort flush — the force-kill timer bounds the wait
               void analytics.flush().finally(() => process.exit(130));
             });
 
