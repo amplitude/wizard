@@ -461,9 +461,10 @@ const resolveNonInteractiveCredentials = async (
  * Run the direct-signup wrapper for agent / CI / classic modes.
  *
  * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
- * set. On a non-null result, optionally runs `onSuccess` (classic uses this
- * to populate `session.credentials` via `resolveCredentials`). On null or
- * thrown errors, logs a human message that points at the mode's fallback
+ * set. On a `success` result, optionally runs `onSuccess` (classic uses this
+ * to populate `session.credentials` via `resolveCredentials`). On any
+ * non-success arm (`requires_redirect`, `needs_information`, `error`) or a
+ * thrown error, logs a human message that points at the mode's fallback
  * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
  */
 const runDirectSignupIfRequested = async (
@@ -493,9 +494,9 @@ const runDirectSignupIfRequested = async (
     );
     process.exit(ExitCode.AUTH_REQUIRED);
   }
-  let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
+  let result: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
-    tokens = await performSignupOrAuth({
+    result = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
@@ -513,12 +514,24 @@ const runDirectSignupIfRequested = async (
     );
     return;
   }
-  if (tokens === null) {
-    getUI().log.info(
-      `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
-    );
-    return;
+
+  switch (result.kind) {
+    case 'success':
+      // Fall through to the success path below.
+      break;
+    case 'requires_redirect':
+    case 'needs_information':
+    case 'error':
+      // Non-TUI modes (classic/agent/CI) have no interactive re-prompt
+      // for needs_information — bucket all non-success arms into the
+      // same "continue to fallback" path. The wrapper has already
+      // emitted the appropriate telemetry for each arm internally.
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+      return;
   }
+
   getUI().log.info('Direct signup succeeded; using newly created account.');
   if (onSuccess) {
     try {
