@@ -27,7 +27,7 @@ const {
   mockTrackWizardFeedback,
 } = vi.hoisted(() => {
   const mockStore = {
-    session: {} as Record<string, unknown>,
+    session: { signupAuth: null } as Record<string, unknown>,
     subscribe: vi.fn(() => vi.fn()),
     setLoginUrl: vi.fn(),
     setOAuthComplete: vi.fn(),
@@ -115,6 +115,7 @@ vi.mock('../lib/wizard-session', () => ({
     frameworkContext: {},
     frameworkContextAnswerOrder: [],
     apiKeyNotice: null,
+    signupAuth: null,
     ...args,
     tosAccepted: args.acceptTos === true ? true : null,
   }),
