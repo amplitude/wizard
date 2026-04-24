@@ -43,6 +43,21 @@ export function fieldPresentOnSession(
   }
 }
 
+/**
+ * Returns true when the session carries a value for every field the
+ * server has (so far) asked for via `needs_information`. Gates the
+ * SigningUpScreen POST — we only retry once all outstanding fields
+ * have been collected.
+ */
+export function allRequiredFieldsCollected(s: {
+  signupRequiredFields: string[];
+  signupFullName: string | null;
+}): boolean {
+  return s.signupRequiredFields.every((field) =>
+    fieldPresentOnSession(s, field),
+  );
+}
+
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
 /** Screens that participate in linear flows */
@@ -52,6 +67,9 @@ export enum Screen {
   Auth = 'auth',
   CreateProject = 'create-project',
   RegionSelect = 'region-select',
+  SignupEmail = 'signup-email',
+  SigningUp = 'signing-up',
+  SignupFullName = 'signup-full-name',
   DataSetup = 'data-setup',
   Options = 'options',
   ActivationOptions = 'activation-options',
@@ -113,6 +131,43 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.RegionSelect,
       show: (s) => s.region === null || s.regionForced,
       isComplete: (s) => s.region !== null && !s.regionForced,
+    },
+    // 2b. Email collection for direct signup. Shown only when --signup is set
+    //     and --email was not passed.
+    {
+      screen: Screen.SignupEmail,
+      show: (s) => s.signup && s.signupEmail === null,
+      isComplete: (s) => !s.signup || s.signupEmail !== null,
+    },
+    // 2c. Signup POST firing point. Mounts whenever we have an email, no
+    //     tokens yet, haven't abandoned, and every field the server has
+    //     asked for so far is present on the session.
+    {
+      screen: Screen.SigningUp,
+      show: (s) =>
+        s.signup &&
+        s.signupEmail !== null &&
+        s.signupAuth === null &&
+        !s.signupAbandoned &&
+        allRequiredFieldsCollected(s),
+      isComplete: (s) =>
+        !s.signup ||
+        s.signupAuth !== null ||
+        s.signupAbandoned ||
+        !allRequiredFieldsCollected(s),
+    },
+    // 2d. Full-name collection. Shown only when the server's last response
+    //     listed 'full_name' as required AND we don't already have it.
+    {
+      screen: Screen.SignupFullName,
+      show: (s) =>
+        s.signup &&
+        s.signupRequiredFields.includes('full_name') &&
+        s.signupFullName === null,
+      isComplete: (s) =>
+        !s.signup ||
+        !s.signupRequiredFields.includes('full_name') ||
+        s.signupFullName !== null,
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
