@@ -10,7 +10,7 @@
  * unreachable. Opts out automatically when:
  *   - stderr is not a TTY (piped / ci modes)
  *   - AMPLITUDE_WIZARD_AGENT=1 (agent mode)
- *   - NO_UPDATE_NOTIFIER=1, CI=1, or DO_NOT_TRACK=1
+ *   - NO_UPDATE_NOTIFIER is set (any non-empty value), CI=1, or DO_NOT_TRACK=1
  *   - AMPLITUDE_WIZARD_NO_UPDATE_CHECK=1
  */
 
@@ -100,7 +100,7 @@ async function fetchLatestVersion(
 
 export function shouldCheckForUpdates(): boolean {
   if (process.env.AMPLITUDE_WIZARD_NO_UPDATE_CHECK === '1') return false;
-  if (process.env.NO_UPDATE_NOTIFIER === '1') return false;
+  if (process.env.NO_UPDATE_NOTIFIER) return false;
   if (process.env.DO_NOT_TRACK === '1') return false;
   if (process.env.CI === '1' || process.env.CI === 'true') return false;
   if (process.env.AMPLITUDE_WIZARD_AGENT === '1') return false;
@@ -140,9 +140,10 @@ export async function checkForUpdate(
     latest = cache.latestVersion;
   } else {
     latest = await fetchLatestVersion(pkgName, options.timeoutMs ?? 1500);
-    if (latest !== null) {
-      await writeCache({ lastCheckedAt: now, latestVersion: latest });
-    }
+    await writeCache({
+      lastCheckedAt: now,
+      latestVersion: latest ?? cache?.latestVersion ?? null,
+    });
   }
 
   if (!latest) return null;
