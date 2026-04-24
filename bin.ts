@@ -32,6 +32,25 @@ import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import chalk from 'chalk';
 
+// Honor the NO_COLOR / FORCE_COLOR standards (https://no-color.org,
+// https://force-color.org) globally. Doing this at module scope ensures every
+// downstream `chalk.*` call — from yargs help to LoggingUI — respects the
+// user's choice. We also drop color when stdout is not a TTY, which matters
+// for pipes and CI systems that capture the wizard's output.
+(() => {
+  if (process.env.NO_COLOR !== undefined) {
+    chalk.level = 0;
+    return;
+  }
+  if (process.env.FORCE_COLOR !== undefined) {
+    // Let chalk's own FORCE_COLOR parsing win; no override needed.
+    return;
+  }
+  if (!process.stdout.isTTY) {
+    chalk.level = 0;
+  }
+})();
+
 /**
  * Dev mode toggle — when set (e.g. via `pnpm try` / `pnpm dev`), internal
  * flags like --local-mcp show up in --help. End users never see them.
