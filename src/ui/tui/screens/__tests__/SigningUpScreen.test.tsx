@@ -68,7 +68,7 @@ describe('SigningUpScreen — needs_information arm (happy path)', () => {
 });
 
 describe('SigningUpScreen — needs_information arm (all fields already sent)', () => {
-  it('sets signupAbandoned after ~1s when no unmet fields', async () => {
+  it('sets signupAbandoned when no unmet fields', async () => {
     mockPerformSignupOrAuth.mockResolvedValueOnce({
       kind: 'needs_information',
       requiredFields: ['full_name'],
@@ -76,14 +76,12 @@ describe('SigningUpScreen — needs_information arm (all fields already sent)', 
     const store = makeStore('Jane Doe'); // full_name already on session
     render(<SigningUpScreen store={store} />);
     await vi.advanceTimersByTimeAsync(0);
-    expect(store.session.signupAbandoned).toBe(false); // not yet — holding
-    await vi.advanceTimersByTimeAsync(1000);
     expect(store.session.signupAbandoned).toBe(true);
   });
 });
 
 describe('SigningUpScreen — needs_information with unknown field', () => {
-  it('sets signupAbandoned after ~1s on unknown field', async () => {
+  it('sets signupAbandoned on unknown field (requiredFields never written)', async () => {
     mockPerformSignupOrAuth.mockResolvedValueOnce({
       kind: 'needs_information',
       requiredFields: ['full_name', 'department'],
@@ -91,51 +89,58 @@ describe('SigningUpScreen — needs_information with unknown field', () => {
     const store = makeStore(null);
     render(<SigningUpScreen store={store} />);
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(1000);
     expect(store.session.signupAbandoned).toBe(true);
-    expect(store.session.signupRequiredFields).toEqual([]); // never written
+    expect(store.session.signupRequiredFields).toEqual([]);
   });
 });
 
 describe('SigningUpScreen — requires_redirect / error arms', () => {
-  it('sets signupAbandoned after ~1s on requires_redirect', async () => {
+  it('sets signupAbandoned on requires_redirect', async () => {
     mockPerformSignupOrAuth.mockResolvedValueOnce({
       kind: 'requires_redirect',
     });
     const store = makeStore(null);
     render(<SigningUpScreen store={store} />);
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(1000);
     expect(store.session.signupAbandoned).toBe(true);
   });
 
-  it('sets signupAbandoned after ~1s on error', async () => {
+  it('sets signupAbandoned on error', async () => {
     mockPerformSignupOrAuth.mockResolvedValueOnce({ kind: 'error' });
     const store = makeStore(null);
     render(<SigningUpScreen store={store} />);
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(1000);
     expect(store.session.signupAbandoned).toBe(true);
   });
 });
 
 describe('SigningUpScreen — render states', () => {
-  it('shows "Loading…" while the POST is in flight', () => {
+  it('renders email-screen layout with submitted email + spinner by default', () => {
     mockPerformSignupOrAuth.mockReturnValueOnce(new Promise(() => {})); // never resolves
     const store = makeStore(null);
     const { lastFrame } = render(<SigningUpScreen store={store} />);
-    expect(lastFrame()).toMatch(/Loading/);
+    const frame = lastFrame();
+    expect(frame).toMatch(/Enter the email for your new account/);
+    expect(frame).toMatch(/jane@example\.com/);
+    expect(frame).toMatch(/Signing up/);
   });
 
-  it('shows the browser transition message after a terminal non-success', async () => {
-    mockPerformSignupOrAuth.mockResolvedValueOnce({
-      kind: 'requires_redirect',
+  it('renders name-screen layout when coming from the name screen', () => {
+    mockPerformSignupOrAuth.mockReturnValueOnce(new Promise(() => {})); // never resolves
+    // Post-name-screen state: signupRequiredFields still contains 'full_name',
+    // signupFullName is now set.
+    const store = makeScreenTestStore({
+      signup: true,
+      signupEmail: 'jane@example.com',
+      signupFullName: 'Jane Doe',
+      signupRequiredFields: ['full_name'],
+      region: 'us',
     });
-    const store = makeStore(null);
     const { lastFrame } = render(<SigningUpScreen store={store} />);
-    // Flush microtasks (await inside effect) and React's commit tick.
-    await vi.advanceTimersByTimeAsync(0);
-    expect(lastFrame()).toMatch(/Please sign up or log in in your browser/);
+    const frame = lastFrame();
+    expect(frame).toMatch(/Enter your full name/);
+    expect(frame).toMatch(/Jane Doe/);
+    expect(frame).toMatch(/Signing up/);
   });
 });
 
@@ -165,24 +170,5 @@ describe('SigningUpScreen — cleanup on unmount', () => {
     expect(store.session.signupAuth).toBeNull();
     expect(store.session.signupAbandoned).toBe(false);
     expect(store.session.signupRequiredFields).toEqual([]);
-  });
-
-  it('unmount during terminal hold does not abandon', async () => {
-    mockPerformSignupOrAuth.mockResolvedValueOnce({
-      kind: 'requires_redirect',
-    });
-    const store = makeStore(null);
-    const { unmount } = render(<SigningUpScreen store={store} />);
-
-    // Let the POST resolve; screen switches to terminal phase and schedules the 1s timeout.
-    await vi.advanceTimersByTimeAsync(0);
-
-    // Unmount before the 1s hold elapses.
-    unmount();
-
-    // Advance past the timeout — the cleared timeout should NOT fire setSignupAbandoned.
-    await vi.advanceTimersByTimeAsync(2000);
-
-    expect(store.session.signupAbandoned).toBe(false);
   });
 });
