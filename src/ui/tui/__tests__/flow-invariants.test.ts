@@ -562,6 +562,70 @@ describe('WizardRouter overlay behavior', () => {
   });
 });
 
+// ── Signup field-collection invariants ──────────────────────────────
+
+describe('WizardRouter signup field-collection invariants', () => {
+  /**
+   * Invariant 1 (property): signup=true with signupEmail=null never resolves
+   * to Auth, regardless of signupFullName value.
+   *
+   * The SignupEmail screen must gate Auth: no email collected = Auth not reached.
+   */
+  it('signup=true, signupEmail=null never resolves to Auth (any signupFullName)', () => {
+    fc.assert(
+      fc.property(
+        fc.option(fc.string({ minLength: 1 }), { nil: null }),
+        (signupFullName) => {
+          const session = buildSession({});
+          const router = new WizardRouter(Flow.Wizard);
+
+          // Baseline: past Intro + RegionSelect so those gates don't block
+          session.introConcluded = true;
+          session.region = 'us';
+          session.regionForced = false;
+
+          // Signup mode with email still missing
+          session.signup = true;
+          session.signupEmail = null;
+          session.signupFullName = signupFullName;
+
+          const resolved = router.resolve(session);
+
+          expect(
+            resolved,
+            `Expected router NOT to resolve to Auth when signupEmail=null (signupFullName=${JSON.stringify(
+              signupFullName,
+            )}), got ${resolved}`,
+          ).not.toBe(Screen.Auth);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  /**
+   * Invariant 2 (point check): signup=true with all three signup fields
+   * populated (region, signupFullName, signupEmail) must not resolve to
+   * SignupFullName or SignupEmail — those collection screens are complete.
+   */
+  it('signup=true with all signup fields collected never resolves to SignupFullName or SignupEmail', () => {
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    session.regionForced = false;
+    session.signup = true;
+    session.signupFullName = 'Jane Smith';
+    session.signupEmail = 'jane@example.com';
+
+    const resolved = router.resolve(session);
+
+    expect(resolved).not.toBe(Screen.SignupFullName);
+    expect(resolved).not.toBe(Screen.SignupEmail);
+  });
+});
+
 // ── Error phase invariants ───────────────────────────────────────────
 
 describe('WizardRouter error phase routing', () => {
