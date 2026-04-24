@@ -233,11 +233,8 @@ export class WizardStore {
         email: session.userEmail,
         org_id: session.selectedOrgId ?? undefined,
         org_name: session.selectedOrgName ?? undefined,
-        workspace_id: session.selectedWorkspaceId ?? undefined,
-        workspace_name: session.selectedWorkspaceName ?? undefined,
-        // Canonical telemetry keys: `app_id` matches Python `app_id` and
-        // TS `appId`; `env_name` matches the Amplitude data-model shape
-        // (Org → Workspace → Environment → App).
+        project_id: session.selectedProjectId ?? undefined,
+        project_name: session.selectedProjectName ?? undefined,
         app_id: session.selectedAppId ?? credentials?.appId,
         env_name: session.selectedEnvName,
         region: zone,
@@ -294,14 +291,14 @@ export class WizardStore {
     analytics.wizardCapture('region selected', { region });
 
     // Persist region to project-level ampli.json so next run uses the right zone.
-    // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
+    // Only writes if OrgId/ProjectId already exist (otherwise writeAmpliConfig
     // would create a partial config).
     const session = this.$session.get();
-    if (session.selectedOrgId && session.selectedWorkspaceId) {
+    if (session.selectedOrgId && session.selectedProjectId) {
       void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
         writeAmpliConfig(session.installDir, {
           OrgId: session.selectedOrgId!,
-          WorkspaceId: session.selectedWorkspaceId!,
+          ProjectId: session.selectedProjectId!,
           Zone: region as 'us' | 'eu',
         });
       });
@@ -460,25 +457,25 @@ export class WizardStore {
   }
 
   /**
-   * Restore org/workspace/app session IDs that weren't populated at startup
+   * Restore org/project/app session IDs that weren't populated at startup
    * (e.g. because the fire-and-forget fetchAmplitudeUser failed due to expired token).
    * Only updates fields that are provided.
    */
   restoreSessionIds(fields: {
     orgId?: string;
     orgName?: string;
-    workspaceId?: string;
-    workspaceName?: string;
+    projectId?: string;
+    projectName?: string;
     appId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
       this.$session.setKey('selectedOrgId', fields.orgId);
     if (fields.orgName !== undefined)
       this.$session.setKey('selectedOrgName', fields.orgName);
-    if (fields.workspaceId !== undefined)
-      this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
-    if (fields.workspaceName !== undefined)
-      this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
+    if (fields.projectId !== undefined)
+      this.$session.setKey('selectedProjectId', fields.projectId);
+    if (fields.projectName !== undefined)
+      this.$session.setKey('selectedProjectName', fields.projectName);
     if (fields.appId !== undefined)
       this.$session.setKey('selectedAppId', fields.appId);
     this.emitChange();
@@ -577,7 +574,7 @@ export class WizardStore {
    * @param suggestedName optional pre-filled name (e.g. from /create-project <name> or --project-name)
    */
   startCreateProject(
-    source: 'workspace' | 'project' | 'slash' | 'cli-flag',
+    source: 'project' | 'environment' | 'slash' | 'cli-flag',
     suggestedName?: string | null,
   ): void {
     this.$session.setKey('createProject', {
@@ -615,8 +612,8 @@ export class WizardStore {
   }
 
   /**
-   * Called from AuthScreen when org + workspace selection changes.
-   * Records org/workspace on the session, and (when `persist` is true)
+   * Called from AuthScreen when org + project selection changes.
+   * Records org/project on the session, and (when `persist` is true)
    * writes the IDs to the project's ampli.json.
    *
    * Pass `persist: false` from synthesisers that only mirror existing state
@@ -626,9 +623,9 @@ export class WizardStore {
    * "create project") leave `persist` at its default of `true` so the
    * config file stays in sync with what the user picked.
    */
-  setOrgAndWorkspace(
+  setOrgAndProject(
     org: { id: string; name: string },
-    workspace: {
+    project: {
       id: string;
       name: string;
       environments?: Array<{
@@ -643,12 +640,12 @@ export class WizardStore {
 
     this.$session.setKey('selectedOrgId', org.id);
     this.$session.setKey('selectedOrgName', org.name);
-    this.$session.setKey('selectedWorkspaceId', workspace.id);
-    this.$session.setKey('selectedWorkspaceName', workspace.name);
+    this.$session.setKey('selectedProjectId', project.id);
+    this.$session.setKey('selectedProjectName', project.name);
 
     // Extract the Amplitude app ID from the lowest-rank environment.
     const appId =
-      workspace.environments
+      project.environments
         ?.slice()
         .sort((a, b) => a.rank - b.rank)
         .find((e) => e.app?.id)?.app?.id ?? null;
@@ -664,7 +661,7 @@ export class WizardStore {
         });
         writeAmpliConfig(installDir, {
           OrgId: org.id,
-          WorkspaceId: workspace.id,
+          ProjectId: project.id,
           Zone: zone,
         });
       });

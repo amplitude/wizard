@@ -116,8 +116,8 @@ The wizard persists state across four layers, each with different scope and life
 | Layer | File / Location | Scope | Lifetime | Contents |
 |-------|----------------|-------|----------|----------|
 | **OAuth tokens** | `~/.ampli.json` | Per user | Until expiry (silent refresh via `token-refresh.ts`) | Access token, refresh token, expiry timestamp. Written with `atomicWriteJSON()`. |
-| **API key store** | `~/.ampli.json` + project `.env.local` | Per project | Persistent | API key, org/workspace/project selection, region |
-| **Session checkpoint** | `$TMPDIR/amplitude-wizard-checkpoint.json` | Per install directory | 24 hours | Intro state, region, org/workspace selection, framework detection. Zod-validated on load. No credentials. |
+| **API key store** | `~/.ampli.json` + project `.env.local` | Per project | Persistent | API key, org/project/environment selection, region. New files are written with `ProjectId`; legacy files containing `WorkspaceId` are still readable and auto-migrated to `ProjectId` at parse time. |
+| **Session checkpoint** | `$TMPDIR/amplitude-wizard-checkpoint.json` | Per install directory | 24 hours | Intro state, region, org/project selection, framework detection. Zod-validated on load. No credentials. |
 | **In-memory store** | `WizardStore` (nanostores) | Per run | Process lifetime | Full session state, tasks, prompts, overlays, UI state |
 
 **Security invariants:**
@@ -133,7 +133,7 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 
 ## Analytics conventions
 
-- **Property-key naming.** Event properties, user properties, and group-identify keys are all lowercase-with-spaces: `'org id'`, `'duration ms'`, `'error message'`, `'detected framework'`. When adding a new `wizardCapture` / `captureWizardError` call, spell multi-word keys as quoted strings — don't use TypeScript property shorthand (`{ durationMs }`) for multi-word names. Single-word keys (`integration`, `status`, `attempt`, `region`, `mode`) and Amplitude-reserved keys starting with `$` (`$app_name`, `$error`) pass through untouched.
+- **Property-key naming.** Event properties, user properties, and group-identify keys are all lowercase-with-spaces: `'org id'`, `'project id'`, `'project name'`, `'duration ms'`, `'error message'`, `'detected framework'`. When adding a new `wizardCapture` / `captureWizardError` call, spell multi-word keys as quoted strings — don't use TypeScript property shorthand (`{ durationMs }`) for multi-word names. Single-word keys (`integration`, `status`, `attempt`, `region`, `mode`) and Amplitude-reserved keys starting with `$` (`$app_name`, `$error`) pass through untouched. Note: these replaced the older `workspace_id` / `workspace_name` keys as part of the workspace → project rename.
 - **Group analytics.** Every event is automatically associated with the `'org id'` group via `setGroup()` inside `identifyUser()` (`src/utils/analytics.ts`). Do **not** re-pass `orgId` per event.
 - **Dev vs prod telemetry.** Local dev runs (`NODE_ENV=development`, set by `pnpm try` / `pnpm dev`) route telemetry to the dev Amplitude project. Prod builds use the production key. Both keys mirror the App API's ampli config and point at the main `amplitude/Amplitude` project — same one the rest of the Amplitude app writes to.
 

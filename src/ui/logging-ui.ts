@@ -176,8 +176,8 @@ export class LoggingUI implements WizardUI {
     appId: number;
     orgId?: string | null;
     orgName?: string | null;
-    workspaceId?: string | null;
-    workspaceName?: string | null;
+    projectId?: string | null;
+    projectName?: string | null;
     envName?: string | null;
   }): void {
     // No-op in CI mode — credentials are handled directly
