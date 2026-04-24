@@ -34,14 +34,7 @@ function keychainRead(account: string): string | null {
   try {
     return execFileSync(
       'security',
-      [
-        'find-generic-password',
-        '-a',
-        account,
-        '-s',
-        KEYCHAIN_SERVICE,
-        '-w',
-      ],
+      ['find-generic-password', '-a', account, '-s', KEYCHAIN_SERVICE, '-w'],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
     ).trim();
   } catch {
@@ -194,13 +187,7 @@ export function clearApiKey(installDir: string): void {
     try {
       execFileSync(
         'security',
-        [
-          'delete-generic-password',
-          '-a',
-          account,
-          '-s',
-          KEYCHAIN_SERVICE,
-        ],
+        ['delete-generic-password', '-a', account, '-s', KEYCHAIN_SERVICE],
         { stdio: 'ignore' },
       );
     } catch {

@@ -5,16 +5,19 @@ import * as path from 'node:path';
 
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   persistApiKey,
   readApiKey,
   readApiKeyWithSource,
 } from '../api-key-store.js';
 
-const mockExecSync = vi.mocked(execSync);
+// Implementation uses execFileSync (see F2 shell-injection fix); tests
+// mock that rather than execSync.
+const mockExecSync = vi.mocked(execFileSync);
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -47,7 +50,7 @@ describe('persistApiKey', () => {
 
   it('returns "keychain" when macOS keychain write succeeds', () => {
     setPlatform('darwin');
-    mockExecSync.mockReturnValue('' as ReturnType<typeof execSync>);
+    mockExecSync.mockReturnValue('' as ReturnType<typeof execFileSync>);
     expect(persistApiKey('mykey', tmpDir)).toBe('keychain');
   });
 
@@ -66,7 +69,7 @@ describe('persistApiKey', () => {
 
   it('returns "keychain" when Linux secret-tool write succeeds', () => {
     setPlatform('linux');
-    mockExecSync.mockReturnValue('' as ReturnType<typeof execSync>);
+    mockExecSync.mockReturnValue('' as ReturnType<typeof execFileSync>);
     expect(persistApiKey('mykey', tmpDir)).toBe('keychain');
   });
 
@@ -165,7 +168,7 @@ describe('readApiKeyWithSource', () => {
   it('reads from macOS keychain when available', () => {
     setPlatform('darwin');
     mockExecSync.mockReturnValue(
-      'keychainkey\n' as ReturnType<typeof execSync>,
+      'keychainkey\n' as ReturnType<typeof execFileSync>,
     );
     const result = readApiKeyWithSource(tmpDir);
     expect(result).toEqual({ key: 'keychainkey', source: 'keychain' });
@@ -173,7 +176,9 @@ describe('readApiKeyWithSource', () => {
 
   it('reads from Linux secret-tool when available', () => {
     setPlatform('linux');
-    mockExecSync.mockReturnValue('linuxkey\n' as ReturnType<typeof execSync>);
+    mockExecSync.mockReturnValue(
+      'linuxkey\n' as ReturnType<typeof execFileSync>,
+    );
     const result = readApiKeyWithSource(tmpDir);
     expect(result).toEqual({ key: 'linuxkey', source: 'keychain' });
   });
