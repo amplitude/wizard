@@ -791,6 +791,52 @@ void yargs(hideBin(process.argv))
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
             const tui = startTUI(WIZARD_VERSION);
 
+            // Install the SIGINT handler IMMEDIATELY after starting the TUI.
+            // CtrlCHandler (mounted inside App via Ink's useInput) raises
+            // SIGINT as soon as Ctrl+C is pressed — if the handler isn't
+            // registered by then, Node's default behaviour is to terminate
+            // instantly with no banner, no checkpoint, no analytics flush.
+            // The handler was previously installed ~470 lines later (after
+            // auth + detection awaits), creating a race window where early
+            // Ctrl+C killed the process instantly.
+            //
+            // First Ctrl+C: show "Saving session..." banner (via
+            //   setCommandFeedback — renders globally in ConsoleView, not
+            //   pushStatus which is overlay-only), save checkpoint, flush
+            //   analytics, then exit with code 130 (SIGINT convention).
+            // Second Ctrl+C within the grace window: force-kill immediately.
+            let sigintReceived = false;
+            process.on('SIGINT', () => {
+              if (sigintReceived) {
+                // Second Ctrl+C — force-kill without waiting
+                process.exit(130);
+              }
+              sigintReceived = true;
+
+              try {
+                tui.store.setCommandFeedback(
+                  'Saving session… press Ctrl+C again to force quit.',
+                  10_000, // longer than the 2s force-kill so it never clears
+                );
+              } catch {
+                // store may be mid-teardown; non-fatal
+              }
+
+              // Force-kill after 2 seconds if checkpoint save / analytics
+              // flush hangs. Slightly longer than the previous 1s window to
+              // give Sentry + analytics a realistic chance to flush.
+              const forceTimer = setTimeout(() => process.exit(130), 2_000);
+              if (forceTimer.unref) forceTimer.unref();
+
+              try {
+                saveCheckpoint(tui.store.session);
+              } catch {
+                // Best-effort — don't block exit
+              }
+
+              void analytics.flush().finally(() => process.exit(130));
+            });
+
             // Build session from CLI args and attach to store
             const session = await buildSessionFromOptions(options);
 
@@ -1254,52 +1300,9 @@ void yargs(hideBin(process.argv))
               }
             });
 
-            // Save checkpoint on unexpected termination (Ctrl+C).
-            // First Ctrl+C: show "Saving session..." banner, save checkpoint,
-            // flush analytics, then exit with code 130 (SIGINT convention).
-            // Second Ctrl+C within the grace window: force-kill immediately.
-            let sigintReceived = false;
-            process.on('SIGINT', () => {
-              if (sigintReceived) {
-                // Second Ctrl+C — force-kill without waiting
-                process.exit(130);
-              }
-              sigintReceived = true;
-
-              // Surface a friendly "we heard you" banner so the TUI doesn't
-              // just freeze while checkpoint+analytics flush.
-              //
-              // We use setCommandFeedback (not pushStatus): the latter is
-              // only surfaced inside an overlay or RunScreen's TabContainer,
-              // so on Intro/Auth/RegionSelect/DataSetup the banner would be
-              // invisible. setCommandFeedback renders globally through
-              // ConsoleView (on every screen) in the accent-prompt style.
-              // Best-effort — if the store is already torn down we swallow.
-              try {
-                tui.store.setCommandFeedback(
-                  'Saving session… press Ctrl+C again to force quit.',
-                  10_000, // longer than the 2s force-kill so it never clears
-                );
-              } catch {
-                // store may be mid-teardown; non-fatal
-              }
-
-              // Force-kill after 2 seconds if checkpoint save / analytics
-              // flush hangs. Slightly longer than the previous 1s window to
-              // give Sentry + analytics a realistic chance to flush.
-              const forceTimer = setTimeout(() => process.exit(130), 2_000);
-              // Unref so it doesn't keep the event loop alive
-              if (forceTimer.unref) forceTimer.unref();
-
-              try {
-                saveCheckpoint(tui.store.session);
-              } catch {
-                // Best-effort — don't block exit
-              }
-
-              // Best-effort flush — the force-kill timer bounds the wait
-              void analytics.flush().finally(() => process.exit(130));
-            });
+            // (The SIGINT handler is now installed earlier, right after
+            // startTUI(), to close a race window where early Ctrl+C would
+            // bypass the handler and terminate immediately.)
 
             // Wait for auth and framework detection to finish concurrently.
             await Promise.all([authTask, detectionTask]);
