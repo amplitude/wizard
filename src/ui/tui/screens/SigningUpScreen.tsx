@@ -34,6 +34,7 @@ import { Colors } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { performSignupOrAuth } from '../../../utils/signup-or-auth.js';
 import { KNOWN_REQUIRED_FIELDS, fieldPresentOnSession } from '../flows.js';
+import { useResolvedZone } from '../hooks/useResolvedZone.js';
 
 interface SigningUpScreenProps {
   store: WizardStore;
@@ -41,6 +42,7 @@ interface SigningUpScreenProps {
 
 export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
   useWizardStore(store);
+  const zone = useResolvedZone(store.session);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,7 +54,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         {
           email: s.signupEmail,
           fullName: s.signupFullName,
-          zone: s.region!,
+          zone,
         },
         { signal: controller.signal },
       );
