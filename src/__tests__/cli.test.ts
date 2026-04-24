@@ -218,7 +218,11 @@ vi.mock('../utils/signup-or-auth', async () => {
   >('../utils/signup-or-auth');
   return {
     ...actual,
-    performSignupOrAuth: vi.fn(),
+    // Default to the `error` arm so `runDirectSignupIfRequested` falls through
+    // to the mode's fallback auth path. Individual tests override with
+    // `mockResolvedValueOnce`/`mockRejectedValueOnce` when they need to
+    // exercise success, redirect, or throw behavior.
+    performSignupOrAuth: vi.fn().mockResolvedValue({ kind: 'error' }),
   };
 });
 vi.mock('node:os', async () => {
