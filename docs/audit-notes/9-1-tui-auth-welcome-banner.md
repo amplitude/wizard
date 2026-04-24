@@ -2,24 +2,23 @@
 
 **Category:** TUI
 **Effort:** S
-**Status:** Scaffolded (design note only).
+**Status:** Implemented.
 
-## Scope
+## What changed
 
-Post-auth welcome banner. See `docs/audit-branches.md` for the full list of audit
-findings; this branch holds the per-finding design note so the fix has a
-single home when implementation lands.
+Added a small welcome banner above the OAuth-waiting spinner in
+`AuthScreen.tsx`:
 
-## Implementation plan
+```
+• Sign in to Amplitude
+  We use your browser to securely fetch your API key — the wizard never
+  sees or stores your password.
+```
 
-1. Reproduce the finding against the current main HEAD.
-2. Write a failing unit/integration test capturing the observed behavior.
-3. Ship the fix in a single focused commit on this branch, update this
-   file's Status to `Implemented`, and replace the plan with a short
-   "what changed" summary.
+Shown only when we're on step 1 (no completed steps yet) so it doesn't
+repeat after the user advances to org/workspace/project pickers.
 
-## Why scaffolded
-
-Scope exceeds what the audit-branch sweep could safely land in one pass.
-Effort rating: **S**. Implementation belongs with a dedicated
-review cycle and associated tests.
+This sets the user's expectation up front: OAuth steals focus, and the
+old wizard said "Waiting for authentication…" with no context —
+returning users would sometimes think it was hung. The banner makes the
+security story explicit and gives the blank time a reason.

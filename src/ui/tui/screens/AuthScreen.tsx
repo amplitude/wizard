@@ -445,6 +445,19 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {/* Step 1: waiting for OAuth browser redirect */}
       {pendingOrgs === null && (
         <Box flexDirection="column">
+          {/* Welcome banner (audit 9.1) — tells users WHY we need OAuth
+              before the browser window steals focus. */}
+          {completedSteps.length === 0 && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Text bold color={Colors.heading}>
+                {Icons.dot} Sign in to Amplitude
+              </Text>
+              <Text color={Colors.secondary}>
+                We use your browser to securely fetch your API key — the wizard
+                never sees or stores your password.
+              </Text>
+            </Box>
+          )}
           <Box gap={1}>
             <BrailleSpinner color={Colors.accent} />
             <Text color={Colors.body}>
