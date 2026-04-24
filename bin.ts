@@ -1376,9 +1376,12 @@ void yargs(hideBin(process.argv))
 
             // Keep the outro screen visible — let process.exit() handle cleanup
           } catch (err) {
-            // TUI unavailable (e.g., in test environment) — continue with default UI
+            // TUI unavailable (e.g., in test environment) — continue with default UI.
+            // Use console.error directly: startTUI() calls setUI(inkUI) before
+            // render(), so if render() throws, getUI() returns an InkUI whose
+            // renderer never started — messages would vanish into the store.
             if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-              getUI().log.error(
+              console.error(
                 `TUI init failed: ${
                   err instanceof Error ? err.message : String(err)
                 }`,
@@ -1703,13 +1706,20 @@ void yargs(hideBin(process.argv))
           });
 
           const updated = updateStoredUserZone(pickedRegion as 'us' | 'eu');
+          // Write confirmation synchronously: Ink renders asynchronously via
+          // React reconciliation, so store.pushStatus() messages would be lost
+          // when process.exit(0) fires on the next line.
           if (updated) {
-            getUI().log.success(
-              `Region updated to ${pickedRegion.toUpperCase()}`,
+            console.log(
+              chalk.green(
+                `\n✔ Region updated to ${pickedRegion.toUpperCase()}`,
+              ),
             );
           } else {
-            getUI().note(
-              `Region set to ${pickedRegion.toUpperCase()}. Run \`${CLI_INVOCATION} login\` to authenticate.`,
+            console.log(
+              chalk.dim(
+                `\nRegion set to ${pickedRegion.toUpperCase()}. Run \`${CLI_INVOCATION} login\` to authenticate.`,
+              ),
             );
           }
           process.exit(0);
