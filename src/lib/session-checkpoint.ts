@@ -14,6 +14,7 @@ import { join } from 'path';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
+import { Integration } from './constants.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -103,9 +104,9 @@ export function saveCheckpoint(session: WizardSession): void {
  * - the checkpoint belongs to a different project directory
  * - the file is malformed or fails validation
  */
-export function loadCheckpoint(
+export async function loadCheckpoint(
   installDir: string,
-): Partial<WizardSession> | null {
+): Promise<Partial<WizardSession> | null> {
   const filePath = checkpointPath(installDir);
   if (!existsSync(filePath)) return null;
 
@@ -128,6 +129,17 @@ export function loadCheckpoint(
   // Must match the current project directory
   if (checkpoint.installDir !== installDir) return null;
 
+  // Self-heal: if integration is a known framework, derive the display
+  // label from the registry instead of trusting the persisted value.
+  // Older builds could write a stale "Generic" label alongside a valid
+  // integration when detection auto-fell-back; re-deriving keeps the UI
+  // consistent with the actual framework config.
+  const integration = checkpoint.integration as WizardSession['integration'];
+  const derivedLabel = await deriveFrameworkLabel(
+    integration,
+    checkpoint.detectedFrameworkLabel,
+  );
+
   // Return only the fields that are safe to restore.
   // Credentials, runPhase, activation state, and post-run steps are
   // intentionally omitted so they get re-evaluated on resume.
@@ -139,12 +151,37 @@ export function loadCheckpoint(
     selectedWorkspaceId: checkpoint.selectedWorkspaceId,
     selectedWorkspaceName: checkpoint.selectedWorkspaceName,
     selectedEnvName: checkpoint.selectedEnvName,
-    integration: checkpoint.integration as WizardSession['integration'],
-    detectedFrameworkLabel: checkpoint.detectedFrameworkLabel,
+    integration,
+    detectedFrameworkLabel: derivedLabel,
     detectionComplete: checkpoint.detectionComplete,
     frameworkContext: checkpoint.frameworkContext,
     introConcluded: checkpoint.introConcluded,
   };
+}
+
+/**
+ * Derive the display label for a persisted integration. If the integration
+ * matches a known framework, trust the registry's name over the persisted
+ * label (handles corrupted checkpoints from older builds). Falls back to
+ * the persisted label only when the integration isn't recognized.
+ *
+ * Generic is intentionally excluded: when the wizard falls back to Generic,
+ * `detectedFrameworkLabel` is left `null` on purpose and must stay `null`
+ * across checkpoint save/restore.
+ *
+ * The registry is loaded dynamically to avoid eagerly pulling in all 18
+ * framework modules on the critical startup path.
+ */
+async function deriveFrameworkLabel(
+  integration: WizardSession['integration'],
+  persistedLabel: string | null,
+): Promise<string | null> {
+  if (!integration) return persistedLabel;
+  if (integration === Integration.generic) return persistedLabel;
+  const known = Object.values(Integration).includes(integration);
+  if (!known) return persistedLabel;
+  const { FRAMEWORK_REGISTRY } = await import('./registry.js');
+  return FRAMEWORK_REGISTRY[integration].metadata.name;
 }
 
 /**
