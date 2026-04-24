@@ -172,12 +172,24 @@ export async function performDirectSignup(
         message: `Provisioning failed with HTTP ${response.status}`,
       };
     }
+    // Surface the discriminant if the server shipped one — makes future
+    // triage materially easier when a new response arm appears in prod
+    // before the wizard knows how to parse it. `type` is just a tag, no
+    // PII risk.
+    const responseType =
+      response.data && typeof response.data === 'object'
+        ? (response.data as { type?: unknown }).type
+        : undefined;
     log.error('[direct-signup] unexpected response shape', {
       status: response.status,
+      type: typeof responseType === 'string' ? responseType : undefined,
     });
     return {
       kind: 'error',
-      message: `Unexpected response (${response.status})`,
+      message:
+        typeof responseType === 'string'
+          ? `Unexpected response (${response.status}, type=${responseType})`
+          : `Unexpected response (${response.status})`,
     };
   }
 

@@ -1392,6 +1392,15 @@ void yargs(hideBin(process.argv))
                       // when a browser opens after "signup succeeded", and
                       // emit telemetry so we can measure how often the rare
                       // edge case actually hits production.
+                      //
+                      // Telemetry pairing: the wrapper in
+                      // performSignupOrAuth already emitted
+                      // `user_fetch_failed` for the failed first fetch.
+                      // The `browser_fallback_after_signup` event below
+                      // is the second half of the degradation chain
+                      // (we're falling back to OAuth). The two events
+                      // together describe a real two-layer failure —
+                      // not a double-count of one attempt.
                       getUI().log.info(
                         'Account created, but user data is still being provisioned. ' +
                           'Opening browser to complete sign-in…',

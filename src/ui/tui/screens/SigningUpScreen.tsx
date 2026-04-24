@@ -42,11 +42,24 @@ interface SigningUpScreenProps {
 export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
   useWizardStore(store);
 
+  // Empty deps array: the effect runs exactly once per mount. The
+  // request-time fields (signupEmail, region, optionally signupFullName)
+  // are guaranteed to be present by the SigningUp flow predicate in
+  // flows.ts — see the entry that gates `signupEmail !== null` and
+  // `region !== null` before this screen can mount. If a future flow
+  // reorder lets SigningUp mount before those fields are written, the
+  // POST will fire with stale/null inputs and the failure will be
+  // silent. Add a flow-invariants property test to lock this in if more
+  // call sites accumulate.
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
 
     void (async () => {
+      // Snapshot the fields we send IN the request — these are stable
+      // for the lifetime of this screen (predicates above ensure
+      // SignupEmail / SignupFullName aren't mounted simultaneously, so
+      // they can't write while we're posting).
       const s = store.session;
       const result = await performSignupOrAuth(
         {
@@ -70,8 +83,13 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             store.setSignupAbandoned(true);
             return;
           }
+          // Re-read the live session for the unmet-field check —
+          // a slash command (e.g. /region) could in principle have
+          // mutated session during the await, and we want the freshest
+          // view when deciding whether to abandon vs continue.
+          const live = store.session;
           const unmet = result.requiredFields.filter(
-            (f) => !fieldPresentOnSession(s, f),
+            (f) => !fieldPresentOnSession(live, f),
           );
           if (unmet.length === 0) {
             store.setSignupAbandoned(true);
