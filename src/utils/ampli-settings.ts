@@ -16,7 +16,10 @@ import {
   type AmplitudeZone,
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
+import { createLogger } from '../lib/observability/logger.js';
 import { atomicWriteJSON } from './atomic-write.js';
+
+const log = createLogger('ampli-settings');
 
 export const AMPLI_CONFIG_PATH = path.join(os.homedir(), '.ampli.json');
 
@@ -62,6 +65,10 @@ function userKey(userId: string, zone: AmplitudeZone): string {
     : `User-${safeId}`;
 }
 
+function isUserKey(key: string): boolean {
+  return key.startsWith('User-') || key.startsWith('User[');
+}
+
 const StoredUserSchema = z.object({
   id: z.string(),
   firstName: z.string(),
@@ -81,7 +88,7 @@ export function getStoredUser(configPath?: string): StoredUser | undefined {
   const config = readConfig(configPath);
   let fallback: StoredUser | undefined;
   for (const [key, value] of Object.entries(config)) {
-    if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
+    if (!isUserKey(key)) continue;
     const entry = UserEntrySchema.safeParse(value);
     if (!entry.success || !entry.data.User) continue;
     const user = entry.data.User as StoredUser;
@@ -135,7 +142,7 @@ export function getStoredToken(
 
   // Try all stored users
   for (const key of Object.keys(config)) {
-    if (!key.startsWith('User-') && !key.startsWith('User[')) continue;
+    if (!isUserKey(key)) continue;
     const token = findToken(key);
     if (token) return token;
   }
@@ -152,6 +159,39 @@ export function storeToken(
   const key = userKey(user.id, user.zone);
   config[key] = {
     ...((config[key] as object | undefined) ?? {}),
+    User: user,
+    OAuthAccessToken: token.accessToken,
+    OAuthIdToken: token.idToken,
+    OAuthRefreshToken: token.refreshToken,
+    OAuthExpiresAt: token.expiresAt,
+  };
+  writeConfig(config, configPath);
+}
+
+/** Persists a user + token as the sole stored account, wiping any prior User entries. */
+export function replaceStoredUser(
+  user: StoredUser,
+  token: StoredOAuthToken,
+  configPath?: string,
+): void {
+  const config = readConfig(configPath);
+  const wiped: string[] = [];
+  for (const k of Object.keys(config)) {
+    if (isUserKey(k)) {
+      delete config[k];
+      wiped.push(k);
+    }
+  }
+  if (wiped.length > 0) {
+    log.debug('replaceStoredUser: wiped prior user entries', {
+      count: wiped.length,
+      keys: wiped,
+    });
+  }
+  const key = userKey(user.id, user.zone);
+  // No spread needed: the loop above deleted every User-* key, so there is
+  // nothing to preserve at `config[key]`.
+  config[key] = {
     User: user,
     OAuthAccessToken: token.accessToken,
     OAuthIdToken: token.idToken,

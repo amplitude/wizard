@@ -57,6 +57,13 @@ export const CLAUDE_PLUGIN_MARKETPLACE_NAME = 'amplitude';
 export const CLAUDE_PLUGIN_MARKETPLACE_REPO = 'amplitude/mcp-marketplace';
 export const CLAUDE_PLUGIN_ID = 'amplitude';
 
+/**
+ * Shared between yargs `coerce` and `CliArgsSchema` — a mismatch would let
+ * yargs accept a value zod rejects, silently nulling `signupEmail` via the
+ * `parsed.success` fallback. Format-only; provisioning is authoritative.
+ */
+export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // ── URLs ─────────────────────────────────────────────────────────────
 
 export const DEFAULT_URL = IS_DEV
@@ -83,7 +90,9 @@ export const AMPLITUDE_ZONE_SETTINGS = {
     oAuthHost: process.env.OAUTH_HOST ?? 'https://auth.amplitude.com',
     oAuthClientId:
       process.env.OAUTH_CLIENT_ID ?? '0ac84169-c41c-4222-885b-31469c761cb0',
-    dataApiUrl: 'https://data-api.amplitude.com/graphql',
+    dataApiUrl:
+      process.env.AMPLITUDE_WIZARD_DATA_API_URL ??
+      'https://data-api.amplitude.com/graphql',
     /** App API GraphQL endpoint — org-scoped. Append the numeric orgId. */
     appApiUrlBase: 'https://core.amplitude.com/t/graphql/org/',
     webUrl: 'https://data.amplitude.com',
@@ -92,6 +101,9 @@ export const AMPLITUDE_ZONE_SETTINGS = {
     oAuthHost: 'https://auth.eu.amplitude.com',
     oAuthClientId:
       process.env.OAUTH_CLIENT_ID ?? '110d04a1-8e60-4157-9c43-fcbe4e014a85',
+    // AMPLITUDE_WIZARD_DATA_API_URL is US-only by design — matches the
+    // OAUTH_HOST override pattern. EU developers mocking the API locally
+    // should run tests against the `us` zone.
     dataApiUrl: 'https://data-api.eu.amplitude.com/graphql',
     /** App API GraphQL endpoint — org-scoped. Append the numeric orgId. */
     appApiUrlBase: 'https://core.eu.amplitude.com/t/graphql/org/',

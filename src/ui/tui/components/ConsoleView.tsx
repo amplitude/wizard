@@ -24,6 +24,8 @@ import {
   buildSessionContext,
   type ConversationTurn,
 } from '../../../lib/console-query.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import {
   COMMANDS,
   getWhoamiText,
@@ -50,12 +52,14 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/whoami':
       // Show current data immediately, then refresh from API
       store.setCommandFeedback(getWhoamiText(store.session), 30_000);
-      if (store.session.credentials?.idToken && store.session.region) {
+      if (store.session.credentials?.idToken) {
+        // readDisk: true — /whoami may fire at any point in the session,
+        // including before RegionSelect is reached.
+        const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+          readDisk: true,
+        });
         void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) => {
-          fetchAmplitudeUser(
-            store.session.credentials!.idToken!,
-            store.session.region!,
-          )
+          fetchAmplitudeUser(store.session.credentials!.idToken!, zone)
             .then((userInfo) => {
               if (userInfo.email) {
                 store.session.userEmail = userInfo.email;
@@ -69,7 +73,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
                     store.session.selectedWorkspaceName ?? undefined,
                   app_id: store.session.selectedAppId,
                   env_name: store.session.selectedEnvName,
-                  region: store.session.region,
+                  region: zone,
                   integration: store.session.integration,
                 });
               }

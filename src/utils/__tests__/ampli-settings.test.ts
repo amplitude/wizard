@@ -24,6 +24,7 @@ import {
   getStoredUser,
   getStoredToken,
   storeToken,
+  replaceStoredUser,
   clearStoredCredentials,
   type StoredUser,
   type StoredOAuthToken,
@@ -313,6 +314,102 @@ describe('store then get token', () => {
     storeToken(user, token);
     const retrieved = getStoredToken('55');
     expect(retrieved).toEqual(token);
+  });
+});
+
+// ── replaceStoredUser ──────────────────────────────────────────────────────
+
+describe('replaceStoredUser', () => {
+  const user: StoredUser = {
+    id: '42',
+    firstName: 'Grace',
+    lastName: 'Hopper',
+    email: 'grace@example.com',
+    zone: 'us',
+  };
+  const token: StoredOAuthToken = {
+    accessToken: 'acc',
+    idToken: 'idt',
+    refreshToken: 'ref',
+    expiresAt: FUTURE,
+  };
+
+  beforeEach(() => {
+    setupConfig({});
+  });
+
+  it('writes the new user when the file is empty', () => {
+    replaceStoredUser(user, token);
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-42']).toMatchObject({
+      User: user,
+      OAuthAccessToken: 'acc',
+    });
+  });
+
+  it('removes every other User-* entry before writing', () => {
+    setupConfig({
+      ...makeUserEntry('99'),
+      ...makeUserEntry('7'),
+    });
+    replaceStoredUser(user, token);
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(Object.keys(written).filter((k) => k.startsWith('User'))).toEqual([
+      'User-42',
+    ]);
+  });
+
+  it('removes User[zone]-* entries from other zones', () => {
+    setupConfig({
+      'User[eu]-456': {
+        User: {
+          id: '456',
+          firstName: 'X',
+          lastName: 'Y',
+          email: 'x@y.com',
+          zone: 'eu',
+        },
+        OAuthAccessToken: 'eu-acc',
+        OAuthIdToken: 'eu-id',
+        OAuthRefreshToken: 'eu-ref',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+    replaceStoredUser(user, token);
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User[eu]-456']).toBeUndefined();
+    expect(written['User-42']).toBeDefined();
+  });
+
+  it('preserves non-user config keys', () => {
+    setupConfig({
+      ...makeUserEntry('99'),
+      Settings: { theme: 'dark' },
+    });
+    replaceStoredUser(user, token);
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-99']).toBeUndefined();
+    expect(written['Settings']).toEqual({ theme: 'dark' });
+  });
+
+  it('clears pending sentinel entries', () => {
+    setupConfig(makeUserEntry('pending', {}, { id: 'pending' }));
+    replaceStoredUser(user, token);
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User-pending']).toBeUndefined();
+    expect(written['User-42']).toBeDefined();
+  });
+
+  it('uses User[eu]-{id} key for EU zone', () => {
+    replaceStoredUser({ ...user, zone: 'eu' }, token);
+    const written = JSON.parse(mockWriteFileSync.mock.calls[0][1] as string);
+    expect(written['User[eu]-42']).toBeDefined();
+    expect(written['User-42']).toBeUndefined();
+  });
+
+  it('passes configPath through to fs', () => {
+    replaceStoredUser(user, token, '/custom/path.json');
+    expect(mockWriteFileSync.mock.calls[0][0]).toBe('/custom/path.json');
   });
 });
 

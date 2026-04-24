@@ -23,12 +23,15 @@ type Args = {
   installDir?: string;
   default?: boolean;
   signup?: boolean;
+  signupEmail?: string;
+  signupFullName?: string;
   localMcp?: boolean;
   ci?: boolean;
   apiKey?: string;
   appId?: string;
   menu?: boolean;
   benchmark?: boolean;
+  region?: 'us' | 'eu';
 };
 
 export async function runWizard(argv: Args, session?: WizardSession) {
@@ -56,12 +59,15 @@ export async function runWizard(argv: Args, session?: WizardSession) {
       installDir: resolvedInstallDir,
       ci: finalArgs.ci,
       signup: finalArgs.signup,
+      signupEmail: finalArgs.signupEmail,
+      signupFullName: finalArgs.signupFullName,
       localMcp: finalArgs.localMcp,
       apiKey: finalArgs.apiKey,
       menu: finalArgs.menu,
       integration: finalArgs.integration,
       benchmark: finalArgs.benchmark,
       appId: finalArgs.appId,
+      region: finalArgs.region,
     });
   }
 
@@ -81,6 +87,7 @@ export async function runWizard(argv: Args, session?: WizardSession) {
   analytics.wizardCapture('session started', {
     integration,
     ci: session.ci ?? false,
+    signup: session.signup ?? false,
   });
 
   const config = FRAMEWORK_REGISTRY[integration];

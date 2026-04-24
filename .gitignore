@@ -3,6 +3,7 @@
 # Thumbnails
 ._*
 .claude/skills
+.claude/worktrees
 
 
 # Files that might appear on external disk

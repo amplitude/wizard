@@ -17,8 +17,9 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { detectAmplitudeInProject } from '../../../lib/detect-amplitude.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import { logToFile } from '../../../utils/debug.js';
 
 interface DataSetupScreenProps {
@@ -31,8 +32,7 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
   useEffect(() => {
     if (store.session.projectHasData !== null) return;
 
-    const { credentials, region, selectedOrgId, selectedWorkspaceId } =
-      store.session;
+    const { credentials, selectedOrgId, selectedWorkspaceId } = store.session;
     // credentials.appId is 0 for OAuth users; fall back to the workspace UUID
     const appId =
       store.session.credentials?.appId || selectedWorkspaceId || null;
@@ -44,7 +44,12 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       return;
     }
 
-    const zone = (region ?? 'us') as AmplitudeZone;
+    // readDisk: false — region is populated on the session by the time this
+    // screen renders (flow is gated on region !== null). Skipping Tier 2/3
+    // avoids synchronous readAmpliConfig + getStoredUser disk reads on mount.
+    const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: false,
+    });
     logToFile(
       `[DataSetup] checking activation for appId=${appId} zone=${zone}`,
     );
