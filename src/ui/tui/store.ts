@@ -287,6 +287,16 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSignupEmail(email: string): void {
+    this.$session.setKey('signupEmail', email);
+    this.emitChange();
+  }
+
+  setSignupFullName(name: string): void {
+    this.$session.setKey('signupFullName', name.trim());
+    this.emitChange();
+  }
+
   setRegion(region: string): void {
     this.$session.setKey('region', region as WizardSession['region']);
     this.$session.setKey('regionForced', false);

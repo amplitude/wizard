@@ -1033,6 +1033,26 @@ describe('WizardStore', () => {
     });
   });
 
+  // ── Signup field setters ─────────────────────────────────────────
+
+  describe('WizardStore.setSignupEmail', () => {
+    it('writes the email onto session.signupEmail', () => {
+      const store = createStore();
+      expect(store.session.signupEmail).toBeNull();
+      store.setSignupEmail('foo@example.com');
+      expect(store.session.signupEmail).toBe('foo@example.com');
+    });
+  });
+
+  describe('WizardStore.setSignupFullName', () => {
+    it('writes the trimmed name onto session.signupFullName', () => {
+      const store = createStore();
+      expect(store.session.signupFullName).toBeNull();
+      store.setSignupFullName('  Jane Doe  ');
+      expect(store.session.signupFullName).toBe('Jane Doe');
+    });
+  });
+
   // ── setupComplete promise ────────────────────────────────────────
 
   describe('setupComplete', () => {
