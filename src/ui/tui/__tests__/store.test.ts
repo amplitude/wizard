@@ -1036,10 +1036,10 @@ describe('WizardStore', () => {
   // ── Signup field setters ─────────────────────────────────────────
 
   describe('WizardStore.setSignupEmail', () => {
-    it('writes the email onto session.signupEmail', () => {
+    it('writes the trimmed email onto session.signupEmail', () => {
       const store = createStore();
       expect(store.session.signupEmail).toBeNull();
-      store.setSignupEmail('foo@example.com');
+      store.setSignupEmail('  foo@example.com  ');
       expect(store.session.signupEmail).toBe('foo@example.com');
     });
   });

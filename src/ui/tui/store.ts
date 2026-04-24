@@ -288,7 +288,7 @@ export class WizardStore {
   }
 
   setSignupEmail(email: string): void {
-    this.$session.setKey('signupEmail', email);
+    this.$session.setKey('signupEmail', email.trim());
     this.emitChange();
   }
 
