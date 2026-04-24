@@ -44,9 +44,12 @@ function keychainRead(account: string): string | null {
 
 function keychainWrite(account: string, key: string): boolean {
   try {
-    // Pass the secret via stdin (-w without a value reads from stdin) so the
-    // key never appears on the process command line, where it would be visible
-    // to `ps` and the shell history.
+    // NOTE: The key is passed as a command-line argument to `-w`. This means it
+    // is briefly visible in `ps` output. macOS `security` does not support
+    // reading the password from stdin, so there is no way to avoid this with
+    // the current CLI interface. Using `execFileSync` (not a shell) prevents
+    // shell-history and metacharacter issues but does not hide the argument
+    // from the process table.
     execFileSync(
       'security',
       [
