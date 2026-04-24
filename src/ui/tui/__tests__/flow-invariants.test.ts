@@ -325,6 +325,90 @@ describe('WizardRouter flow invariants (property-based)', () => {
       { numRuns: 500 },
     );
   });
+
+  it('SigningUp is never resolved when signupAbandoned=true', () => {
+    fc.assert(
+      fc.property(
+        fc.record({
+          signupEmail: fc.oneof(fc.string({ minLength: 1 }), fc.constant(null)),
+          signupFullName: fc.oneof(
+            fc.string({ minLength: 1 }),
+            fc.constant(null),
+          ),
+          signupRequiredFields: fc.array(
+            fc.constantFrom('full_name', 'department'),
+          ),
+        }),
+        ({ signupEmail, signupFullName, signupRequiredFields }) => {
+          const session: WizardSession = {
+            ...buildSession({}),
+            introConcluded: true,
+            region: 'us',
+            signup: true,
+            signupEmail,
+            signupFullName,
+            signupRequiredFields,
+            signupAuth: null,
+            signupAbandoned: true,
+          };
+          const router = new WizardRouter(Flow.Wizard);
+          return router.resolve(session) !== Screen.SigningUp;
+        },
+      ),
+    );
+  });
+
+  it('SigningUp is never resolved when signupAuth is non-null', () => {
+    const session: WizardSession = {
+      ...buildSession({}),
+      introConcluded: true,
+      region: 'us',
+      signup: true,
+      signupEmail: 'x@y.com',
+      signupFullName: 'Jane',
+      signupRequiredFields: [],
+      signupAuth: {
+        kind: 'success',
+        idToken: 'id',
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        zone: 'us',
+        userInfo: null,
+      },
+      signupAbandoned: false,
+    };
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).not.toBe(Screen.SigningUp);
+  });
+
+  it('SigningUp never fires when any requiredField is unknown', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(
+          'department',
+          'company',
+          'phone',
+          'unknown_field',
+          'role',
+        ),
+        (unknownField) => {
+          const session: WizardSession = {
+            ...buildSession({}),
+            introConcluded: true,
+            region: 'us',
+            signup: true,
+            signupEmail: 'x@y.com',
+            signupFullName: 'Jane',
+            signupRequiredFields: ['full_name', unknownField],
+            signupAuth: null,
+            signupAbandoned: false,
+          };
+          const router = new WizardRouter(Flow.Wizard);
+          return router.resolve(session) !== Screen.SigningUp;
+        },
+      ),
+    );
+  });
 });
 
 // ── Parameterized happy path ─────────────────────────────────────────
