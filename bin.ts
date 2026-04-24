@@ -530,6 +530,17 @@ const runDirectSignupIfRequested = async (
         `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
       );
       return;
+    default: {
+      // Exhaustiveness guard: if a new arm is added to
+      // PerformSignupOrAuthResult, fail closed by routing to the
+      // fallback path rather than silently treating it as success.
+      const _exhaustive: never = result;
+      void _exhaustive;
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+      return;
+    }
   }
 
   getUI().log.info('Direct signup succeeded; using newly created account.');

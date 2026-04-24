@@ -135,6 +135,16 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         case 'error':
           store.setSignupAbandoned(true);
           return;
+        default: {
+          // Exhaustiveness guard: if a new arm is added to
+          // PerformSignupOrAuthResult, fail closed by abandoning so
+          // bin.ts's signupCeremonySettled wait resolves and the
+          // wizard doesn't hang indefinitely on "Signing up…".
+          const _exhaustive: never = result;
+          void _exhaustive;
+          store.setSignupAbandoned(true);
+          return;
+        }
       }
     })();
 
