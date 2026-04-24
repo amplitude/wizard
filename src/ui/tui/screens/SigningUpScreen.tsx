@@ -32,7 +32,10 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import { performSignupOrAuth } from '../../../utils/signup-or-auth.js';
+import {
+  performSignupOrAuth,
+  trackSignupAttempt,
+} from '../../../utils/signup-or-auth.js';
 import { KNOWN_REQUIRED_FIELDS, fieldPresentOnSession } from '../flows.js';
 
 interface SigningUpScreenProps {
@@ -61,14 +64,28 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // SignupEmail / SignupFullName aren't mounted simultaneously, so
       // they can't write while we're posting).
       const s = store.session;
-      const result = await performSignupOrAuth(
-        {
-          email: s.signupEmail,
-          fullName: s.signupFullName,
-          zone: s.region!,
-        },
-        { signal: controller.signal },
-      );
+      let result: Awaited<ReturnType<typeof performSignupOrAuth>>;
+      try {
+        result = await performSignupOrAuth(
+          {
+            email: s.signupEmail,
+            fullName: s.signupFullName,
+            zone: s.region!,
+          },
+          { signal: controller.signal },
+        );
+      } catch {
+        // The wrapper itself threw (e.g. disk/permission failure while
+        // persisting tokens). Mirror the non-TUI path in
+        // `runDirectSignupIfRequested`: emit `wrapper_exception` and
+        // mark the ceremony abandoned so the auth task in bin.ts can
+        // proceed to browser OAuth instead of waiting forever on
+        // `signupCeremonySettled`.
+        if (cancelled) return;
+        trackSignupAttempt({ status: 'wrapper_exception', zone: s.region! });
+        store.setSignupAbandoned(true);
+        return;
+      }
       if (cancelled) return;
 
       switch (result.kind) {
