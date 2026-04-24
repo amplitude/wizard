@@ -16,6 +16,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
@@ -25,13 +26,33 @@ import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { analytics } from '../../../utils/analytics.js';
+import { logToFile } from '../../../utils/debug.js';
 
 interface IntroScreenProps {
   store: WizardStore;
 }
 
 const LOGO_MIN_COLS = 75;
-const LOGO_MIN_ROWS = 20;
+const LOGO_MIN_ROWS = 26;
+const COMPACT_COLS = 85;
+const COMPACT_ROWS = 24;
+
+/**
+ * Suffix shown after the framework name. Exported for unit tests.
+ * - '' when the user manually picked the framework, or when we fell back
+ *   (the main label already reads "none detected" in that case)
+ * - ' (detected)' when auto-detection found a real framework
+ */
+export function getFrameworkLabelSuffix({
+  manuallySelected,
+  autoFallback,
+}: {
+  manuallySelected: boolean;
+  autoFallback: boolean;
+}): string {
+  if (manuallySelected || autoFallback) return '';
+  return ' (detected)';
+}
 
 export const IntroScreen = ({ store }: IntroScreenProps) => {
   useWizardStore(store);
@@ -51,21 +72,30 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const detecting = !session.detectionComplete;
   const needsFrameworkPick =
     session.detectionComplete && !session.frameworkConfig;
+  // Derive fallback state from session so it survives component remount
+  // (e.g. ScreenErrorBoundary retries). Generic is never reachable via
+  // the manual picker — it's excluded from PICKER_ORDER — so integration
+  // === generic uniquely identifies the auto-fallback path.
+  const autoFallback = session.integration === Integration.generic;
 
   // Hide logo when framework picker is open — the long list overlaps in Ink.
   const pickerVisible =
     pickingFramework || (session.menu && needsFrameworkPick);
   const showLogo =
     cols >= LOGO_MIN_COLS && rows >= LOGO_MIN_ROWS && !pickerVisible;
+  const compact = rows < COMPACT_ROWS || cols < COMPACT_COLS;
+  const narrow = cols < COMPACT_COLS;
 
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
+  // NOTE: we deliberately do NOT call setDetectedFramework here — Generic is a
+  // fallback, not a detection. The render derives its label from the config.
   useEffect(() => {
     if (needsFrameworkPick && !session.menu && !showResume) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.setFrameworkConfig(Integration.generic, genericConfig);
-        store.setDetectedFramework(genericConfig.metadata.name);
+        logToFile('[intro] no framework matched — falling back to Generic');
       });
     }
   }, [needsFrameworkPick, session.menu, showResume]);
@@ -167,20 +197,25 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       flexGrow={1}
       alignItems="center"
       justifyContent="flex-start"
-      paddingTop={2}
+      paddingTop={compact ? 0 : 1}
     >
       {/* Logo (responsive — hidden when terminal is too small) */}
       {showLogo && <AmplitudeTextLogo />}
 
-      {/* Heading */}
-      <Box flexDirection="column" alignItems="center" marginBottom={1}>
+      {/* Heading — collapses to a single line when the viewport is tight */}
+      <Box
+        flexDirection="column"
+        alignItems="center"
+        marginBottom={compact ? 0 : 1}
+      >
         <Text bold color={Colors.heading}>
           Amplitude Wizard
         </Text>
-        <Text color={Colors.muted}>AI-powered analytics setup in minutes</Text>
-        <Text color={Colors.secondary}>
-          Installs the SDK, adds events, and verifies data is flowing.
-        </Text>
+        {!compact && (
+          <Text color={Colors.muted}>
+            AI-powered analytics setup in minutes
+          </Text>
+        )}
       </Box>
 
       {/* Detection spinner */}
@@ -204,23 +239,28 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       {(pickingFramework || (session.menu && needsFrameworkPick)) && (
         <FrameworkPicker
           store={store}
-          onComplete={() => setPickingFramework(false)}
+          onComplete={(selected) => {
+            setPickingFramework(false);
+            if (selected) {
+              setManuallySelected(true);
+            }
+          }}
         />
       )}
 
       {/* Detection results + continue menu */}
       {!detecting && !pickingFramework && (
         <Box flexDirection="column" alignItems="flex-start">
-          <Text>
+          <Box>
             <Text color={Colors.body}>Directory </Text>
             <Text color={Colors.secondary}>
               /{path.basename(session.installDir)}
             </Text>
             <Text color={Colors.success}> {Icons.checkmark}</Text>
-          </Text>
+          </Box>
 
-          {frameworkLabel && (
-            <Text>
+          {frameworkLabel && !autoFallback && (
+            <Box>
               <Text color={Colors.body}>Framework </Text>
               {config?.metadata.glyph && (
                 <Text color={config.metadata.glyphColor}>
@@ -229,24 +269,37 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               )}
               <Text color={Colors.secondary}>
                 {frameworkLabel}
-                {!manuallySelected && ' (detected)'}
+                {getFrameworkLabelSuffix({ manuallySelected, autoFallback })}
                 {config?.metadata.beta && ' [BETA]'}
               </Text>
               <Text color={Colors.success}> {Icons.checkmark}</Text>
-            </Text>
+            </Box>
+          )}
+
+          {autoFallback && (
+            <Box marginTop={1}>
+              <Text color={Colors.muted}>
+                No framework detected. Continue with the generic guide or pick
+                one below.
+              </Text>
+            </Box>
           )}
 
           {showContinue && (
-            <Box marginTop={1}>
+            <Box marginTop={compact ? 0 : 1}>
               <PickerMenu
                 options={[
                   { label: 'Continue', value: 'continue' },
                   {
                     label: 'Change framework',
                     value: 'framework',
-                    hint: 'pick manually',
+                    ...(narrow ? {} : { hint: 'pick manually' }),
                   },
-                  { label: 'Cancel', value: 'cancel', hint: 'exit wizard' },
+                  {
+                    label: 'Cancel',
+                    value: 'cancel',
+                    ...(narrow ? {} : { hint: 'exit wizard' }),
+                  },
                 ]}
                 onSelect={(value) => {
                   const choice = Array.isArray(value) ? value[0] : value;
@@ -262,7 +315,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     });
                   } else if (choice === 'framework') {
                     setPickingFramework(true);
-                    setManuallySelected(true);
                   } else {
                     store.concludeIntro();
                   }
@@ -279,18 +331,23 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 /**
  * Popularity-ordered list for the manual framework picker.
  * Excludes `generic` — the wizard auto-selects it when detection fails.
+ *
+ * Ordering rationale: put JavaScript (Web) at the top as the safest default
+ * for users who aren't sure (it covers most React/Vanilla/SPA projects).
+ * Then group web → mobile → backend → games so the list scans cleanly.
+ * Number-key shortcuts [1]-[9],[0] map to the first ten entries.
  */
 const PICKER_ORDER: Integration[] = [
+  Integration.javascript_web,
   Integration.nextjs,
   Integration.reactRouter,
   Integration.vue,
   Integration.reactNative,
+  Integration.javascriptNode,
   Integration.python,
   Integration.django,
   Integration.flask,
   Integration.fastapi,
-  Integration.javascript_web,
-  Integration.javascriptNode,
   Integration.swift,
   Integration.android,
   Integration.flutter,
@@ -306,11 +363,16 @@ const FrameworkPicker = ({
   onComplete,
 }: {
   store: WizardStore;
-  onComplete?: () => void;
+  onComplete?: (selected: boolean) => void;
 }) => {
   const [options, setOptions] = useState<
     { label: string; value: Integration }[]
   >([]);
+
+  // Esc exits the picker without changing the selection.
+  useScreenInput((_input, key) => {
+    if (key.escape) onComplete?.(false);
+  });
 
   useEffect(() => {
     void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
@@ -331,7 +393,7 @@ const FrameworkPicker = ({
   return (
     <PickerMenu<Integration>
       centered
-      message="Select your framework"
+      message="Select your framework (Esc to go back)"
       options={options}
       onSelect={(value) => {
         const integration = Array.isArray(value) ? value[0] : value;
@@ -341,7 +403,7 @@ const FrameworkPicker = ({
             const config = FRAMEWORK_REGISTRY[integration];
             store.setFrameworkConfig(integration, config);
             store.setDetectedFramework(config.metadata.name);
-            onComplete?.();
+            onComplete?.(true);
           },
         );
       }}

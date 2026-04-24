@@ -31,7 +31,6 @@ Before(function () {
   session.region = 'us';
   session.pendingAuthIdToken = 'id-token-abc';
   session.pendingAuthAccessToken = 'access-abc';
-  session.pendingAuthCloudRegion = 'us';
 });
 
 After(function () {

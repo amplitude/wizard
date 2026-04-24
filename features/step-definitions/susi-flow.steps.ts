@@ -54,7 +54,6 @@ Before(function () {
   session.region = 'us';
   // Simulate OAuth completing — pendingAuthIdToken set
   session.pendingAuthIdToken = 'id-token-abc';
-  session.pendingAuthCloudRegion = 'us';
 });
 
 After(function () {

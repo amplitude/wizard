@@ -17,8 +17,11 @@ import { OutroKind } from '../session-constants.js';
 import { Colors, Icons } from '../styles.js';
 import { PickerMenu, ReportViewer, TerminalLink } from '../primitives/index.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
-import { OUTBOUND_URLS } from '../../../lib/constants.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
+import {
+  DEFAULT_AMPLITUDE_ZONE,
+  OUTBOUND_URLS,
+} from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
@@ -227,7 +230,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               if (choice === 'report') {
                 setShowReport(true);
               } else if (choice === 'dashboard') {
-                const zone = (store.session.region ?? 'us') as AmplitudeZone;
+                // readDisk: false — outro runs at the end of the wizard, far
+                // past the RegionSelect gate. Tier 1 is authoritative.
+                const zone = resolveZone(
+                  store.session,
+                  DEFAULT_AMPLITUDE_ZONE,
+                  {
+                    readDisk: false,
+                  },
+                );
                 const url =
                   store.session.checklistDashboardUrl ??
                   OUTBOUND_URLS.overview[zone];

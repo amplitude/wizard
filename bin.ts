@@ -95,6 +95,8 @@ if (!satisfies(process.version, NODE_VERSION_RANGE)) {
 }
 
 import { isNonInteractiveEnvironment } from './src/utils/environment';
+import { EMAIL_REGEX } from './src/lib/constants';
+import type { AmplitudeZone } from './src/lib/constants';
 import { getUI, setUI } from './src/ui';
 import { LoggingUI } from './src/ui/logging-ui';
 import { cleanupShellCompletionLine } from './src/utils/cleanup-shell-rc';
@@ -165,6 +167,11 @@ const buildSessionFromOptions = async (
     localMcp: options.localMcp as boolean | undefined,
     apiKey: options.apiKey as string | undefined,
     menu: options.menu as boolean | undefined,
+    signupEmail: options.email as string | undefined,
+    signupFullName: options['full-name'] as string | undefined,
+    // --region is canonical; --zone is a yargs alias, so `options.region`
+    // is populated by either flag.
+    region: options.region as AmplitudeZone | undefined,
     integration: options.integration as Parameters<
       typeof buildSession
     >[0]['integration'],
@@ -276,10 +283,12 @@ const resolveNonInteractiveCredentials = async (
       process.exit(ExitCode.AUTH_REQUIRED);
     }
 
-    const zone =
-      (session.region ?? session.pendingAuthCloudRegion ?? 'us') === 'eu'
-        ? 'eu'
-        : 'us';
+    const { resolveZone } = await import('./src/lib/zone-resolution.js');
+    const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+    // Pre-OAuth CLI path: session.region may be unset, fall back to disk tiers.
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: true,
+    });
     if (mode === 'agent' && agentUI) {
       agentUI.emitProjectCreateStart({ orgId: org.id, name: projectName });
     } else {
@@ -468,6 +477,88 @@ const resolveNonInteractiveCredentials = async (
     ].filter(Boolean);
     if (parts.length > 0) {
       getUI().log.info(`Using: ${parts.join(' / ')}`);
+    }
+  }
+};
+
+/**
+ * Run the direct-signup wrapper for agent / CI / classic modes.
+ *
+ * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
+ * set. On a non-null result, optionally runs `onSuccess` (classic uses this
+ * to populate `session.credentials` via `resolveCredentials`). On null or
+ * thrown errors, logs a human message that points at the mode's fallback
+ * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
+ */
+const runDirectSignupIfRequested = async (
+  session: import('./src/lib/wizard-session').WizardSession,
+  fallbackLabel: string,
+  onSuccess?: () => Promise<void>,
+): Promise<void> => {
+  if (!session.signup || !session.signupEmail || !session.signupFullName) {
+    return;
+  }
+  const { performSignupOrAuth, trackSignupAttempt } = await import(
+    './src/utils/signup-or-auth.js'
+  );
+  const { tryResolveZone } = await import('./src/lib/zone-resolution.js');
+
+  // Non-TUI modes have no RegionSelect screen to disambiguate — and the
+  // backend does not route cross-region, so POSTing an EU-intending email
+  // to the US provisioning endpoint would silently create the account in
+  // the US data center. Require an explicit signal (--region flag, project
+  // config, or stored user) before sending the signup request. Exit with
+  // AUTH_REQUIRED so orchestrators see a structured failure rather than a
+  // misrouted account.
+  const zone = tryResolveZone(session);
+  if (zone == null) {
+    getUI().log.error(
+      'Cannot determine data center region for --signup. Pass --region us or --region eu.',
+    );
+    process.exit(ExitCode.AUTH_REQUIRED);
+  }
+  let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
+  try {
+    tokens = await performSignupOrAuth({
+      email: session.signupEmail,
+      fullName: session.signupFullName,
+      zone,
+    });
+  } catch (err) {
+    // Only the wrapper itself threw — emit wrapper_exception and bail.
+    // Scope this catch narrowly so an `onSuccess` throw below cannot
+    // re-emit telemetry after the wrapper has already recorded a
+    // `success` / `user_fetch_failed` event internally.
+    trackSignupAttempt({ status: 'wrapper_exception', zone });
+    getUI().log.warn(
+      `Direct signup errored: ${
+        err instanceof Error ? err.message : String(err)
+      }. Continuing to ${fallbackLabel}.`,
+    );
+    return;
+  }
+  if (tokens === null) {
+    getUI().log.info(
+      `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+    );
+    return;
+  }
+  getUI().log.info('Direct signup succeeded; using newly created account.');
+  if (onSuccess) {
+    try {
+      await onSuccess();
+    } catch (err) {
+      // Signup itself succeeded — the wrapper already emitted the
+      // `success` / `user_fetch_failed` event and persisted tokens.
+      // If the classic-mode `resolveCredentials` (or any future
+      // onSuccess caller) throws during post-signup plumbing, log it
+      // but DO NOT re-emit wrapper_exception. The caller's normal
+      // flow will see no credentials and recover via its own path.
+      getUI().log.warn(
+        `Direct signup succeeded but post-signup handling failed: ${
+          err instanceof Error ? err.message : String(err)
+        }. Continuing to ${fallbackLabel}.`,
+      );
     }
   }
 };
@@ -683,12 +774,84 @@ void yargs(hideBin(process.argv))
       describe: 'force human-readable output (overrides --json auto-detect)',
       type: 'boolean',
     },
+    email: {
+      describe: 'email to use when creating a new account (requires --signup)',
+      type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (!EMAIL_REGEX.test(value)) {
+          throw new Error(`Invalid email: "${value}"`);
+        }
+        return value;
+      },
+    },
+    'full-name': {
+      describe:
+        'full name to use when creating a new account (requires --signup)',
+      type: 'string',
+      coerce: (value: string | undefined) => {
+        if (value === undefined) return value;
+        if (value.trim().length === 0) {
+          throw new Error('--full-name cannot be empty');
+        }
+        return value;
+      },
+    },
+    // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
+    // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN / _AGENT / _INSTALL_DIR / _CLASSIC
+    // to these option names; declaring them here lets .strict() accept the
+    // env-var injection on every command (not just $0 where they're visible).
+    dev: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_DEV env-var passthrough',
+      type: 'boolean',
+    },
+    log: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_LOG env-var passthrough',
+      type: 'string',
+    },
+    token: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_TOKEN env-var passthrough',
+      type: 'string',
+    },
+    agent: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_AGENT env-var passthrough',
+      type: 'boolean',
+    },
+    'install-dir': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_INSTALL_DIR env-var passthrough',
+      type: 'string',
+    },
+    classic: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_CLASSIC env-var passthrough',
+      type: 'boolean',
+    },
   })
   .command(
     ['$0'],
     'Run the Amplitude setup wizard',
     (yargs) => {
       return yargs.options({
+        region: {
+          // Required for --signup in non-TUI modes: the backend does
+          // not route across regions, so the client must POST to the
+          // correct provisioning endpoint (us or eu). In the TUI this
+          // is covered by the RegionSelect screen; agent/CI/classic
+          // have no prompt, so this flag is the only way to signal
+          // regional intent on a first-time signup. When provided in
+          // TUI mode, pre-populates the region and skips RegionSelect.
+          // `--zone` is accepted as an alias for consistency with the
+          // `wizard login` subcommand.
+          describe: 'data center region for --signup in non-interactive modes',
+          choices: ['us', 'eu'] as const,
+          type: 'string',
+          alias: 'zone',
+        },
         'force-install': {
           default: false,
           describe: 'install packages even if dependency checks fail',
@@ -786,6 +949,13 @@ void yargs(hideBin(process.argv))
 
           const session = await buildSessionFromOptions(options);
           session.agent = true;
+
+          // Attempt direct signup before falling through to cached-token
+          // resolution. Agent mode has no browser, so a null result continues
+          // to resolveNonInteractiveCredentials, which handles cached tokens
+          // or exits cleanly with AUTH_REQUIRED.
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
+
           await resolveNonInteractiveCredentials(
             session,
             options,
@@ -804,6 +974,13 @@ void yargs(hideBin(process.argv))
 
         void (async () => {
           const session = await buildSessionFromOptions(options, { ci: true });
+
+          // Attempt direct signup before falling through to cached-token
+          // resolution. CI mode has no browser, so a null result continues to
+          // resolveNonInteractiveCredentials, which handles cached tokens or
+          // exits cleanly with AUTH_REQUIRED.
+          await runDirectSignupIfRequested(session, 'cached-token resolution');
+
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],
@@ -815,13 +992,64 @@ void yargs(hideBin(process.argv))
         process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
       ) {
         // Classic mode: interactive prompts without the rich TUI
-        void lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
+        void (async () => {
+          const session = await buildSessionFromOptions(options);
+
+          // Attempt direct signup before falling through to OAuth browser
+          // flow. On success, run resolveCredentials so agent-runner's
+          // !session.credentials guard skips the OAuth call. On null/failure,
+          // classic mode proceeds normally — getOrAskForProjectData calls
+          // performAmplitudeAuth, which opens a browser (valid for classic).
+          //
+          // requireOrgId: false — classic has no AuthScreen to recover from
+          // the TUI-only safety check that clears credentials when no org is
+          // selected. Without this, a successful signup would get silently
+          // cleared and the browser would open anyway, defeating the point.
+          await runDirectSignupIfRequested(session, 'OAuth', async () => {
+            const { resolveCredentials } = await import(
+              './src/lib/credential-resolution.js'
+            );
+            await resolveCredentials(session, { requireOrgId: false });
+          });
+
+          await lazyRunWizard(
+            options as Parameters<typeof lazyRunWizard>[0],
+            session,
+          );
+        })();
       } else {
         // Interactive TTY: launch the Ink TUI
         void (async () => {
           try {
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
             const tui = startTUI(WIZARD_VERSION);
+
+            // Install the SIGINT handler IMMEDIATELY after starting the TUI.
+            // This handler covers external `kill -INT <pid>` signals. When
+            // the user presses Ctrl+C in the TUI, CtrlCHandler (Ink useInput)
+            // owns that flow instead — Ink puts stdin in raw mode, so Ctrl+C
+            // is delivered as a keypress, not SIGINT.
+            //
+            // Import the shared helper eagerly so it's available when SIGINT
+            // fires — placing this after startTUI but before registering the
+            // handler avoids the TDZ issue that would occur if we referenced
+            // a `const` binding from a later dynamic import.
+            const { performGracefulExit } = await import(
+              './src/lib/graceful-exit.js'
+            );
+            let sigintReceived = false;
+            process.on('SIGINT', () => {
+              if (sigintReceived) {
+                process.exit(130);
+              }
+              sigintReceived = true;
+
+              performGracefulExit({
+                session: tui.store.session,
+                setCommandFeedback: (msg, ms) =>
+                  tui.store.setCommandFeedback(msg, ms),
+              });
+            });
 
             // Build session from CLI args and attach to store
             const session = await buildSessionFromOptions(options);
@@ -846,7 +1074,7 @@ void yargs(hideBin(process.argv))
               const { loadCheckpoint } = await import(
                 './src/lib/session-checkpoint.js'
               );
-              const checkpoint = loadCheckpoint(session.installDir);
+              const checkpoint = await loadCheckpoint(session.installDir);
               if (checkpoint) {
                 Object.assign(session, checkpoint);
                 session.introConcluded = false;
@@ -866,17 +1094,33 @@ void yargs(hideBin(process.argv))
               // Resolve org/project display names so /whoami shows them.
               // Also extracts the numeric analytics project ID for MCP event detection.
               // Fire-and-forget so it doesn't block startup.
-              if (session.region && session.selectedOrgId) {
+              // Hydrate org/workspace display names after credential
+              // resolution succeeds. Gate on credentials (not region) because
+              // resolveCredentials no longer cache-writes session.region;
+              // gating on region would silently skip hydration for returning
+              // agent-mode users whose zone comes from storedUser, not an
+              // explicit flag.
+              if (session.credentials && session.selectedOrgId) {
                 const { getStoredUser, getStoredToken } = await import(
                   './src/utils/ampli-settings.js'
                 );
                 const { fetchAmplitudeUser, extractAppId } = await import(
                   './src/lib/api.js'
                 );
+                const { resolveZone } = await import(
+                  './src/lib/zone-resolution.js'
+                );
+                const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                  './src/lib/constants.js'
+                );
                 const storedUser = getStoredUser();
                 const realUser =
                   storedUser && storedUser.id !== 'pending' ? storedUser : null;
-                const zone = session.region;
+                // Fire-and-forget user refresh during CLI startup: session may
+                // not yet have region set, so fall back to disk tiers.
+                const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+                  readDisk: true,
+                });
                 const storedToken = realUser
                   ? getStoredToken(realUser.id, realUser.zone)
                   : getStoredToken(undefined, zone);
@@ -904,7 +1148,7 @@ void yargs(hideBin(process.argv))
                             session.selectedProjectName ?? undefined,
                           app_id: session.selectedAppId,
                           env_name: session.selectedEnvName,
-                          region: session.region,
+                          region: zone,
                           integration: session.integration,
                         });
                       }
@@ -1074,15 +1318,73 @@ void yargs(hideBin(process.argv))
                     }
                   });
                 });
-                const zone =
-                  tui.store.session.region === 'eu'
-                    ? 'eu'
-                    : DEFAULT_AMPLITUDE_ZONE;
+                const { resolveZone } = await import(
+                  './src/lib/zone-resolution.js'
+                );
+                const zone = resolveZone(
+                  tui.store.session,
+                  DEFAULT_AMPLITUDE_ZONE,
+                  { readDisk: false },
+                );
 
-                let auth = await performAmplitudeAuth({
-                  zone,
-                  forceFresh,
-                });
+                // Try direct signup first when --signup + email + fullName are provided
+                // and the feature flag is enabled. performSignupOrAuth returns null when
+                // any of those gates are missing, or when the server returns a non-success
+                // response — in which case we fall through to the existing OAuth flow
+                // (TUI has a browser; this fallback is valid).
+                //
+                // On signup success, the wrapper already fetched the real user
+                // profile (with provisioning retry) and persisted tokens to
+                // ~/.ampli.json — so we carry its userInfo through and skip the
+                // redundant fetch + storeToken below.
+                let auth: Awaited<
+                  ReturnType<typeof performAmplitudeAuth>
+                > | null = null;
+                let signupUserInfo: Awaited<
+                  ReturnType<typeof fetchAmplitudeUser>
+                > | null = null;
+                // True iff direct signup produced fresh tokens in this run.
+                // Used by the downstream fetchAmplitudeUser catch to
+                // distinguish a provisioning-lag recovery (signup succeeded,
+                // but user data not yet available) from the normal
+                // expired-token case.
+                let signupTokensObtained = false;
+                const { trackSignupAttempt } = await import(
+                  './src/utils/signup-or-auth.js'
+                );
+                const s = tui.store.session;
+                if (s.signup && s.signupEmail && s.signupFullName) {
+                  const { performSignupOrAuth } = await import(
+                    './src/utils/signup-or-auth.js'
+                  );
+                  try {
+                    const signupResult = await performSignupOrAuth({
+                      email: s.signupEmail,
+                      fullName: s.signupFullName,
+                      zone,
+                    });
+                    if (signupResult !== null) {
+                      auth = signupResult;
+                      signupUserInfo = signupResult.userInfo;
+                      signupTokensObtained = true;
+                      getUI().log.info(
+                        'Direct signup succeeded; using newly created account.',
+                      );
+                    }
+                  } catch (err) {
+                    trackSignupAttempt({ status: 'wrapper_exception', zone });
+                    getUI().log.warn(
+                      `Direct signup errored: ${
+                        err instanceof Error ? err.message : String(err)
+                      }. Falling back to OAuth.`,
+                    );
+                    auth = null;
+                  }
+                }
+
+                if (auth === null) {
+                  auth = await performAmplitudeAuth({ zone, forceFresh });
+                }
 
                 // Update login URL (clears the "copy this URL" hint)
                 tui.store.setLoginUrl(null);
@@ -1091,37 +1393,64 @@ void yargs(hideBin(process.argv))
                 const cloudRegion = zone;
 
                 let userInfo;
-                try {
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
-                  );
-                } catch {
-                  // Token may be expired — re-open the browser for a fresh login
-                  tui.store.setLoginUrl(null);
-                  auth = await performAmplitudeAuth({ zone, forceFresh: true });
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
+                if (signupUserInfo) {
+                  // Wrapper already fetched userInfo and stored tokens — no
+                  // redundant network call, no browser fallback needed.
+                  userInfo = signupUserInfo;
+                } else {
+                  try {
+                    userInfo = await fetchAmplitudeUser(
+                      auth.idToken,
+                      cloudRegion,
+                    );
+                  } catch {
+                    if (signupTokensObtained) {
+                      // Signup succeeded moments ago so the tokens can't be
+                      // expired — the fetch failure is almost certainly
+                      // backend provisioning lag for a brand-new account.
+                      // Surface the transition so the user isn't confused
+                      // when a browser opens after "signup succeeded", and
+                      // emit telemetry so we can measure how often the rare
+                      // edge case actually hits production.
+                      getUI().log.info(
+                        'Account created, but user data is still being provisioned. ' +
+                          'Opening browser to complete sign-in…',
+                      );
+                      trackSignupAttempt({
+                        status: 'browser_fallback_after_signup',
+                        zone,
+                      });
+                    }
+                    // Token may be expired — re-open the browser for a fresh login
+                    tui.store.setLoginUrl(null);
+                    auth = await performAmplitudeAuth({
+                      zone,
+                      forceFresh: true,
+                    });
+                    userInfo = await fetchAmplitudeUser(
+                      auth.idToken,
+                      cloudRegion,
+                    );
+                  }
+                  // Persist to ~/.ampli.json (signup path already did this)
+                  storeToken(
+                    {
+                      id: userInfo.id,
+                      firstName: userInfo.firstName,
+                      lastName: userInfo.lastName,
+                      email: userInfo.email,
+                      zone: auth.zone,
+                    },
+                    {
+                      accessToken: auth.accessToken,
+                      idToken: auth.idToken,
+                      refreshToken: auth.refreshToken,
+                      expiresAt: new Date(
+                        Date.now() + 3600 * 1000,
+                      ).toISOString(),
+                    },
                   );
                 }
-
-                // Persist to ~/.ampli.json
-                storeToken(
-                  {
-                    id: userInfo.id,
-                    firstName: userInfo.firstName,
-                    lastName: userInfo.lastName,
-                    email: userInfo.email,
-                    zone: auth.zone,
-                  },
-                  {
-                    accessToken: auth.accessToken,
-                    idToken: auth.idToken,
-                    refreshToken: auth.refreshToken,
-                    expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-                  },
-                );
 
                 // Populate user email for /whoami display
                 session.userEmail = userInfo.email;
@@ -1138,7 +1467,11 @@ void yargs(hideBin(process.argv))
               } catch (err) {
                 // Auth failure is non-fatal here — agent-runner will retry/handle it
                 if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-                  console.error('OAuth setup error:', err);
+                  getUI().log.error(
+                    `OAuth setup error: ${
+                      err instanceof Error ? err.message : String(err)
+                    }`,
+                  );
                 }
               }
             })();
@@ -1285,31 +1618,9 @@ void yargs(hideBin(process.argv))
               }
             });
 
-            // Save checkpoint on unexpected termination (Ctrl+C).
-            // First Ctrl+C saves checkpoint and exits promptly.
-            // Second Ctrl+C within the grace window force-kills immediately.
-            let sigintReceived = false;
-            process.on('SIGINT', () => {
-              if (sigintReceived) {
-                // Second Ctrl+C — force-kill without waiting
-                process.exit(130);
-              }
-              sigintReceived = true;
-
-              // Force-kill after 1 second if checkpoint save hangs
-              const forceTimer = setTimeout(() => process.exit(130), 1_000);
-              // Unref so it doesn't keep the event loop alive
-              if (forceTimer.unref) forceTimer.unref();
-
-              try {
-                saveCheckpoint(tui.store.session);
-              } catch {
-                // Best-effort — don't block exit
-              }
-
-              // Best-effort flush — the 1s force-kill timer bounds the wait
-              void analytics.flush().finally(() => process.exit(130));
-            });
+            // (The SIGINT handler is now installed earlier, right after
+            // startTUI(), to close a race window where early Ctrl+C would
+            // bypass the handler and terminate immediately.)
 
             // Wait for auth and framework detection to finish concurrently.
             await Promise.all([authTask, detectionTask]);
@@ -1379,9 +1690,16 @@ void yargs(hideBin(process.argv))
 
             // Keep the outro screen visible — let process.exit() handle cleanup
           } catch (err) {
-            // TUI unavailable (e.g., in test environment) — continue with default UI
+            // TUI unavailable (e.g., in test environment) — continue with default UI.
+            // Use console.error directly: startTUI() calls setUI(inkUI) before
+            // render(), so if render() throws, getUI() returns an InkUI whose
+            // renderer never started — messages would vanish into the store.
             if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-              console.error('TUI init failed:', err);
+              console.error(
+                `TUI init failed: ${
+                  err instanceof Error ? err.message : String(err)
+                }`,
+              );
             }
             await lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
           }
@@ -1394,11 +1712,14 @@ void yargs(hideBin(process.argv))
     'Log in to your Amplitude account',
     (yargs) => {
       return yargs.options({
-        zone: {
+        region: {
           describe: 'data center region (us or eu)',
           choices: ['us', 'eu'] as const,
           default: 'us' as const,
           type: 'string',
+          // `--zone` is the pre-existing name; kept as an alias so any
+          // scripts using `wizard login --zone` continue to work.
+          alias: 'zone',
         },
       });
     },
@@ -1408,7 +1729,8 @@ void yargs(hideBin(process.argv))
         const { performAmplitudeAuth } = await import('./src/utils/oauth.js');
         const { fetchAmplitudeUser } = await import('./src/lib/api.js');
         const { storeToken } = await import('./src/utils/ampli-settings.js');
-        const zone = argv.zone as 'us' | 'eu';
+        // `--region` is canonical; `argv.zone` is the yargs alias mirror.
+        const zone = argv.region as 'us' | 'eu';
 
         try {
           const { getStoredUser, getStoredToken } = await import(
@@ -1419,13 +1741,11 @@ void yargs(hideBin(process.argv))
           const cachedToken = getStoredToken(undefined, zone);
           const cachedUser = cachedToken ? getStoredUser() : undefined;
           if (cachedUser && cachedUser.id !== 'pending') {
-            console.log(
-              chalk.green(
-                `✔ Already logged in as ${cachedUser.firstName} ${cachedUser.lastName} <${cachedUser.email}>`,
-              ),
+            getUI().log.success(
+              `Already logged in as ${cachedUser.firstName} ${cachedUser.lastName} <${cachedUser.email}>`,
             );
             if (cachedUser.zone !== 'us') {
-              console.log(chalk.dim(`  Zone: ${cachedUser.zone}`));
+              getUI().note(`Zone: ${cachedUser.zone}`);
             }
             process.exit(0);
           }
@@ -1447,22 +1767,16 @@ void yargs(hideBin(process.argv))
               expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
             },
           );
-          console.log(
-            chalk.green(
-              `✔ Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
-            ),
+          getUI().log.success(
+            `Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
           );
           if (user.orgs.length > 0) {
-            console.log(
-              chalk.dim(`  Org: ${user.orgs.map((o) => o.name).join(', ')}`),
-            );
+            getUI().note(`Org: ${user.orgs.map((o) => o.name).join(', ')}`);
           }
           process.exit(0);
         } catch (e) {
-          console.error(
-            chalk.red(
-              `Login failed: ${e instanceof Error ? e.message : String(e)}`,
-            ),
+          getUI().log.error(
+            `Login failed: ${e instanceof Error ? e.message : String(e)}`,
           );
           process.exit(1);
         }
@@ -1491,12 +1805,12 @@ void yargs(hideBin(process.argv))
           clearApiKey(installDir);
           clearCheckpoint(installDir);
           if (user) {
-            console.log(chalk.green(`✔ Logged out ${user.email}`));
+            getUI().log.success(`Logged out ${user.email}`);
           } else {
-            console.log(chalk.dim('No active session found.'));
+            getUI().note('No active session found.');
           }
         } catch {
-          console.log(chalk.dim('No active session found.'));
+          getUI().note('No active session found.');
         }
         process.exit(0);
       })();
@@ -1515,17 +1829,15 @@ void yargs(hideBin(process.argv))
         const user = getStoredUser();
         const token = getStoredToken();
         if (user && token && user.id !== 'pending') {
-          console.log(
+          getUI().log.info(
             `Logged in as ${chalk.bold(
               user.firstName + ' ' + user.lastName,
             )} <${user.email}>`,
           );
-          if (user.zone !== 'us') console.log(chalk.dim(`Zone: ${user.zone}`));
+          if (user.zone !== 'us') getUI().note(`Zone: ${user.zone}`);
         } else {
-          console.log(
-            chalk.yellow(
-              `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-            ),
+          getUI().log.warn(
+            `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
           );
         }
         process.exit(0);
@@ -1533,24 +1845,32 @@ void yargs(hideBin(process.argv))
     },
   )
   .command(
-    'feedback',
+    'feedback [words..]',
     'Send product feedback to the Amplitude team',
     (yargs) => {
-      return yargs.options({
-        message: {
-          alias: 'm',
-          describe: 'Feedback message',
+      return yargs
+        .positional('words', {
+          describe: 'Feedback message (positional, space-separated)',
           type: 'string',
-        },
-      });
+          array: true,
+        })
+        .options({
+          message: {
+            alias: 'm',
+            describe: 'Feedback message',
+            type: 'string',
+          },
+        });
     },
     (argv) => {
       void (async () => {
         setUI(new LoggingUI());
         const fromFlag =
           typeof argv.message === 'string' ? argv.message.trim() : '';
-        const argvRest = (argv._ as string[]).slice(1).join(' ').trim();
-        const message = (fromFlag || argvRest).trim();
+        const positional = Array.isArray(argv.words)
+          ? argv.words.join(' ').trim()
+          : '';
+        const message = (fromFlag || positional).trim();
         if (!message) {
           getUI().log.error(
             `Usage: ${CLI_INVOCATION} feedback <message>  or  feedback --message <message>`,
@@ -1563,13 +1883,11 @@ void yargs(hideBin(process.argv))
             './src/utils/track-wizard-feedback.js'
           );
           await trackWizardFeedback(message);
-          console.log(chalk.green('✔ Thanks — your feedback was sent.'));
+          getUI().log.success('Thanks — your feedback was sent.');
           process.exit(0);
         } catch (e) {
-          console.error(
-            chalk.red(
-              `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
-            ),
+          getUI().log.error(
+            `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
           );
           process.exit(1);
         }
@@ -1714,6 +2032,9 @@ void yargs(hideBin(process.argv))
           });
 
           const updated = updateStoredUserZone(pickedRegion as 'us' | 'eu');
+          // Write confirmation synchronously: Ink renders asynchronously via
+          // React reconciliation, so store.pushStatus() messages would be lost
+          // when process.exit(0) fires on the next line.
           if (updated) {
             console.log(
               chalk.green(
@@ -1731,7 +2052,7 @@ void yargs(hideBin(process.argv))
         } catch {
           setUI(new LoggingUI());
           getUI().log.error(
-            `Could not start region picker. Use --zone with \`${CLI_INVOCATION} login\` to set your region.`,
+            `Could not start region picker. Use --region with \`${CLI_INVOCATION} login\` to set your region.`,
           );
           process.exit(1);
         }
@@ -1765,16 +2086,14 @@ void yargs(hideBin(process.argv))
           if (jsonOutput) {
             process.stdout.write(JSON.stringify(result) + '\n');
           } else if (result.integration) {
-            console.log(
-              `${chalk.green('✔')} Detected ${chalk.bold(
+            getUI().log.success(
+              `Detected ${chalk.bold(
                 result.frameworkName ?? result.integration,
               )} (${result.integration})`,
             );
           } else {
-            console.log(
-              chalk.dim(
-                `No framework detected. Run \`${CLI_INVOCATION} --menu\` to pick one manually.`,
-              ),
+            getUI().note(
+              `No framework detected. Run \`${CLI_INVOCATION} --menu\` to pick one manually.`,
             );
           }
           process.exit(result.integration ? 0 : 1);
@@ -1783,7 +2102,7 @@ void yargs(hideBin(process.argv))
           if (jsonOutput) {
             process.stdout.write(JSON.stringify({ error: message }) + '\n');
           } else {
-            console.error(chalk.red(`Detection failed: ${message}`));
+            getUI().log.error(`Detection failed: ${message}`);
           }
           process.exit(ExitCode.GENERAL_ERROR);
         }
@@ -1819,26 +2138,27 @@ void yargs(hideBin(process.argv))
           } else {
             const check = (v: boolean) =>
               v ? chalk.green('✔') : chalk.dim('·');
-            console.log(
+            const ui = getUI();
+            ui.log.info(
               `${check(result.framework.integration !== null)} Framework: ${
                 result.framework.name ?? chalk.dim('none detected')
               }`,
             );
-            console.log(
+            ui.log.info(
               `${check(
                 result.amplitudeInstalled.confidence !== 'none',
               )} Amplitude SDK: ${
                 result.amplitudeInstalled.reason ?? chalk.dim('not installed')
               }`,
             );
-            console.log(
+            ui.log.info(
               `${check(result.apiKey.configured)} API key: ${
                 result.apiKey.configured
                   ? `stored in ${result.apiKey.source}`
                   : chalk.dim('not set')
               }`,
             );
-            console.log(
+            ui.log.info(
               `${check(result.auth.loggedIn)} Logged in: ${
                 result.auth.loggedIn
                   ? `${result.auth.email} (${result.auth.zone})`
@@ -1852,7 +2172,7 @@ void yargs(hideBin(process.argv))
           if (jsonOutput) {
             process.stdout.write(JSON.stringify({ error: message }) + '\n');
           } else {
-            console.error(chalk.red(`Status failed: ${message}`));
+            getUI().log.error(`Status failed: ${message}`);
           }
           process.exit(ExitCode.GENERAL_ERROR);
         }
@@ -1879,22 +2199,18 @@ void yargs(hideBin(process.argv))
             if (jsonOutput) {
               process.stdout.write(JSON.stringify(result) + '\n');
             } else if (result.loggedIn && result.user) {
-              console.log(
-                `${chalk.green('✔')} Logged in as ${chalk.bold(
+              getUI().log.success(
+                `Logged in as ${chalk.bold(
                   `${result.user.firstName} ${result.user.lastName}`,
                 )} <${result.user.email}>`,
               );
-              console.log(chalk.dim(`  Zone: ${result.user.zone}`));
+              getUI().note(`Zone: ${result.user.zone}`);
               if (result.tokenExpiresAt) {
-                console.log(
-                  chalk.dim(`  Token expires: ${result.tokenExpiresAt}`),
-                );
+                getUI().note(`Token expires: ${result.tokenExpiresAt}`);
               }
             } else {
-              console.log(
-                chalk.yellow(
-                  `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-                ),
+              getUI().log.warn(
+                `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
               );
             }
             process.exit(result.loggedIn ? 0 : ExitCode.AUTH_REQUIRED);
@@ -1925,10 +2241,8 @@ void yargs(hideBin(process.argv))
                   }) + '\n',
                 );
               } else {
-                console.error(
-                  chalk.red(
-                    `Not logged in. Run \`${CLI_INVOCATION} login\` first.`,
-                  ),
+                getUI().log.error(
+                  `Not logged in. Run \`${CLI_INVOCATION} login\` first.`,
                 );
               }
               process.exit(ExitCode.AUTH_REQUIRED);
@@ -2097,6 +2411,24 @@ void yargs(hideBin(process.argv))
       `Feedback:  ${CLI_INVOCATION} feedback`,
     ].join('\n'),
   )
+  // Validate --app-id is numeric so a typo like `--app-id=foo` fails fast with
+  // a yargs-native error instead of becoming `0` downstream.
+  .check((argv) => {
+    const raw = argv['app-id'];
+    if (raw === undefined || raw === null || raw === '') return true;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(
+        `--app-id must be a positive integer (received: ${String(raw)})`,
+      );
+    }
+    return true;
+  })
+  // Reject unknown flags and subcommands. Catches typos like `--app-ids` or
+  // `--instal-dir` that would otherwise silently fall through. Middleware for
+  // consolidating credential resolution is paired with the bin.ts command-
+  // module split (see TODOs).
+  .strict()
   .recommendCommands()
   .help()
   .alias('help', 'h')

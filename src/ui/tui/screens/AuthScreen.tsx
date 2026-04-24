@@ -21,9 +21,10 @@ import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import {
+  DEFAULT_AMPLITUDE_ZONE,
   DEFAULT_HOST_URL,
-  type AmplitudeZone,
 } from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import { analytics } from '../../../utils/analytics.js';
 
 const CREATE_ACTION = '__create__' as const;
@@ -221,9 +222,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       if (selectedEnv?.app?.apiKey) {
         const apiKey = selectedEnv.app.apiKey;
         const envAppId = selectedEnv.app.id ?? null;
-        const zone = (s.region ??
-          s.pendingAuthCloudRegion ??
-          'us') as AmplitudeZone;
+        // readDisk: true — auth screen runs before the RegionSelect gate.
+        const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
         const { getHostFromRegion } = await import('../../../utils/urls.js');
         if (cancelled || store.session.credentials !== null) return;
 
@@ -247,9 +247,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const idToken = s.pendingAuthIdToken;
       if (!idToken) return;
 
-      const zone = (s.region ??
-        s.pendingAuthCloudRegion ??
-        'us') as AmplitudeZone;
+      // readDisk: true — auth screen runs before the RegionSelect gate.
+      const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
 
       const { getAPIKey } = await import('../../../utils/get-api-key.js');
       const { getHostFromRegion } = await import('../../../utils/urls.js');
@@ -311,7 +310,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     session.selectedProjectId,
     session.pendingAuthIdToken,
     session.region,
-    session.pendingAuthCloudRegion,
     session.installDir,
   ]);
 
@@ -367,9 +365,10 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     // Re-fetch the org list so newly-created projects show up in the picker.
     // Best-effort: silently ignore failures and fall back to the cached list.
     const idToken = session.pendingAuthIdToken;
-    const zone = (session.region ??
-      session.pendingAuthCloudRegion ??
-      'us') as AmplitudeZone;
+    // readDisk: true — auth screen runs before the RegionSelect gate.
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: true,
+    });
     if (idToken) {
       void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) =>
         fetchAmplitudeUser(idToken, zone)

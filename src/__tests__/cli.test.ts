@@ -86,6 +86,7 @@ vi.mock('../lib/constants', () => ({
   IS_DEV: true,
   DEFAULT_AMPLITUDE_ZONE: 'us',
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
+  EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
@@ -148,6 +149,15 @@ vi.mock('../utils/analytics', () => ({
 vi.mock('../lib/detect-amplitude', () => ({
   detectAmplitudeInProject: vi.fn().mockReturnValue({ confidence: 'none' }),
 }));
+vi.mock('../utils/signup-or-auth', async () => {
+  const actual = await vi.importActual<
+    typeof import('../utils/signup-or-auth')
+  >('../utils/signup-or-auth');
+  return {
+    ...actual,
+    performSignupOrAuth: vi.fn(),
+  };
+});
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os');
   return { ...actual, homedir: mockHomedir };
@@ -634,19 +644,26 @@ describe('logout command', () => {
 describe('whoami command', () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
-  const consoleSpy = vi
-    .spyOn(console, 'log')
-    .mockImplementation(() => undefined);
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let consoleErrSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    consoleSpy.mockClear();
+    // Spy inside beforeEach so earlier tests that call mockRestore()
+    // on console.error (e.g. login > OAuth failure) don't leave us
+    // without a stderr spy when log.error routes there (per C1 / C5).
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    consoleErrSpy = vi
+      .spyOn(console, 'error')
+      .mockImplementation(() => undefined);
     process.exit = vi.fn() as unknown as typeof process.exit;
   });
 
   afterEach(() => {
     process.argv = originalArgv;
     process.exit = originalExit;
+    consoleSpy.mockRestore();
+    consoleErrSpy.mockRestore();
     vi.resetModules();
   });
 
@@ -680,7 +697,12 @@ describe('whoami command', () => {
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
 
-    const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    // C5 routes the "Not logged in" message through getUI().log.error,
+    // which per C1 writes to stderr rather than stdout.
+    const allOutput = [
+      ...consoleSpy.mock.calls.map((c) => c[0]),
+      ...consoleErrSpy.mock.calls.map((c) => c[0]),
+    ].join('\n');
     expect(allOutput).toMatch(/Not logged in/);
     expect(process.exit).toHaveBeenCalledWith(0);
   });
@@ -771,6 +793,146 @@ describe('feedback command', () => {
 
     expect(mockTrackWizardFeedback).toHaveBeenCalledWith('from flag');
     expect(process.exit).toHaveBeenCalledWith(0);
+  });
+});
+
+// ── --email / --full-name flags ───────────────────────────────────────────────
+
+describe('--email and --full-name flags', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+  });
+
+  test('errors when --email is malformed', async () => {
+    // Silence yargs error output for this test
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada',
+        '--full-name',
+        'Ada Lovelace',
+        '--install-dir',
+        '/tmp/test',
+      ]);
+
+      // Give any async handlers time to fire
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    // The key invariant: a malformed email must NOT reach runWizard.
+    // yargs' coerce failure prevents the command handler from running.
+    expect(mockRunWizard).not.toHaveBeenCalled();
+  });
+
+  test('errors when --full-name is empty', async () => {
+    // Silence yargs error output for this test
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada@example.com',
+        '--full-name',
+        '',
+        '--install-dir',
+        '/tmp/test',
+      ]);
+
+      // Give any async handlers time to fire
+      await new Promise((r) => setTimeout(r, 50));
+    } finally {
+      stderrSpy.mockRestore();
+    }
+
+    // The key invariant: an empty full-name must NOT reach runWizard.
+    // yargs' coerce failure prevents the command handler from running.
+    expect(mockRunWizard).not.toHaveBeenCalled();
+  });
+
+  test('accepts --email and --full-name on the default command', async () => {
+    await runCLI([
+      '--signup',
+      '--ci',
+      '--email',
+      'ada@example.com',
+      '--full-name',
+      'Ada Lovelace',
+      '--install-dir',
+      '/tmp/test',
+    ]);
+
+    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+
+    // Second arg is the WizardSession built by buildSession — check it contains
+    // the signup profile fields passed on the command line.
+    expect(mockRunWizard).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        signupEmail: 'ada@example.com',
+        signupFullName: 'Ada Lovelace',
+      }),
+    );
+  });
+
+  test('emits agentic signup attempted with status=wrapper_exception when wrapper throws', async () => {
+    const { performSignupOrAuth, AGENTIC_SIGNUP_ATTEMPTED_EVENT } =
+      await import('../utils/signup-or-auth');
+    const { analytics } = await import('../utils/analytics');
+    vi.mocked(performSignupOrAuth).mockRejectedValueOnce(new Error('boom'));
+
+    await runCLI([
+      '--signup',
+      '--ci',
+      '--email',
+      'ada@example.com',
+      '--full-name',
+      'Ada Lovelace',
+      // `--region` is required in non-TUI modes now — without it,
+      // `tryResolveZone` returns null and `process.exit` fires before
+      // `performSignupOrAuth` is ever called. In test, `process.exit`
+      // is a no-op so the assertion would pass for the wrong reason
+      // (execution falling through with `zone: null`). Pass a real
+      // region so the production control flow is exercised.
+      '--region',
+      'us',
+      '--install-dir',
+      '/tmp/test',
+    ]);
+
+    await waitFor(() =>
+      (analytics.wizardCapture as ReturnType<typeof vi.fn>).mock.calls.some(
+        (c) => c[0] === AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      ),
+    );
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      expect.objectContaining({
+        status: 'wrapper_exception',
+        zone: expect.any(String),
+      }),
+    );
   });
 });
 

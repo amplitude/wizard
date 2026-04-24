@@ -328,9 +328,11 @@ describe('WizardStore', () => {
         host: 'h',
         appId: 42,
       });
+      // region resolves via resolveZone → falls to DEFAULT_AMPLITUDE_ZONE
+      // since the test session has no intent, ampli.json, or stored user.
       expect(wizardCaptureMock).toHaveBeenCalledWith('auth complete', {
         'app id': 42,
-        region: null,
+        region: 'us',
       });
     });
 

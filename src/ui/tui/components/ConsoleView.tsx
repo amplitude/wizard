@@ -6,7 +6,7 @@
  * KeyHintBar integrated above the input line.
  */
 
-import { Box, Text, useInput } from 'ink';
+import { Box, Static, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { Spinner } from '@inkjs/ui';
@@ -24,6 +24,8 @@ import {
   buildSessionContext,
   type ConversationTurn,
 } from '../../../lib/console-query.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 import {
   COMMANDS,
   getWhoamiText,
@@ -50,12 +52,14 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/whoami':
       // Show current data immediately, then refresh from API
       store.setCommandFeedback(getWhoamiText(store.session), 30_000);
-      if (store.session.credentials?.idToken && store.session.region) {
+      if (store.session.credentials?.idToken) {
+        // readDisk: true — /whoami may fire at any point in the session,
+        // including before RegionSelect is reached.
+        const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+          readDisk: true,
+        });
         void import('../../../lib/api.js').then(({ fetchAmplitudeUser }) => {
-          fetchAmplitudeUser(
-            store.session.credentials!.idToken!,
-            store.session.region!,
-          )
+          fetchAmplitudeUser(store.session.credentials!.idToken!, zone)
             .then((userInfo) => {
               if (userInfo.email) {
                 store.session.userEmail = userInfo.email;
@@ -68,7 +72,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
                   project_name: store.session.selectedProjectName ?? undefined,
                   app_id: store.session.selectedAppId,
                   env_name: store.session.selectedEnvName,
-                  region: store.session.region,
+                  region: zone,
                   integration: store.session.integration,
                 });
               }
@@ -136,6 +140,56 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/snake':
       store.showSnakeOverlay();
       break;
+    case '/debug': {
+      // Surface a redacted diagnostic snapshot — credentials / tokens are
+      // stripped. Writes the full snapshot to stderr for copy/paste
+      // sharing; the console only shows a brief summary.
+      void import('../utils/diagnostics.js')
+        .then(({ createDiagnosticSnapshot }) => {
+          // Use the real wizard version (set on the store by startTUI from
+          // package.json). Using a hardcoded placeholder would make every
+          // bug-report snapshot read "wizard_version: dev".
+          const snapshot = createDiagnosticSnapshot(
+            store,
+            store.version || 'unknown',
+          ) as {
+            current_screen?: string | null;
+            active_flow?: string | null;
+            session?: {
+              integration?: string | null;
+              region?: string | null;
+            };
+            tasks_count?: number;
+          };
+          try {
+            process.stderr.write(
+              '\n[/debug] diagnostic snapshot:\n' +
+                JSON.stringify(snapshot, null, 2) +
+                '\n',
+            );
+          } catch {
+            // ignore broken pipe
+          }
+          const summary =
+            `flow: ${snapshot.active_flow ?? 'n/a'} | screen: ${
+              snapshot.current_screen ?? 'n/a'
+            } | ` +
+            `integration: ${snapshot.session?.integration ?? 'n/a'} | ` +
+            `zone: ${snapshot.session?.region ?? 'n/a'} | tasks: ${
+              snapshot.tasks_count ?? 0
+            }`;
+          store.setCommandFeedback(
+            summary + ' (full snapshot written to stderr)',
+            30_000,
+          );
+        })
+        .catch(() => {
+          store.setCommandFeedback(
+            'Diagnostics unavailable. See /tmp/amplitude-wizard.log.',
+          );
+        });
+      break;
+    }
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;
@@ -166,8 +220,10 @@ export const ConsoleView = ({
   const [inputActive, setInputActive] = useState(false);
   const [initialValue, setInitialValue] = useState('');
   const [inputKey, setInputKey] = useState(0);
-  const [response, setResponse] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // Conversation Q&A turns. Rendered via Ink <Static> so completed turns are
+  // written once above the live region and survive TUI exit / terminal
+  // scrollback. This mirrors how Claude Code persists agent output.
   const [history, setHistory] = useState<ConversationTurn[]>([]);
 
   // Event plan prompt local state
@@ -193,11 +249,9 @@ export const ConsoleView = ({
 
   const feedback = store.commandFeedback;
   const screenError = store.screenError;
-  const showResponse = loading || !!response;
-  const showFeedback = !showResponse && !!feedback;
+  const showFeedback = !loading && !!feedback;
   const innerWidth = width;
   const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
-  const responseIsLong = !!response && response.split('\n').length > 3;
   const pendingPrompt = store.pendingPrompt;
 
   // Watch for activation keys while the input is dormant
@@ -206,10 +260,6 @@ export const ConsoleView = ({
       if (key.escape || char === 'q' || char === 'Q') {
         if (pendingPrompt && pendingPrompt.kind !== 'event-plan') {
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
-          return;
-        }
-        if (responseIsLong) {
-          setResponse(null);
           return;
         }
       }
@@ -237,7 +287,6 @@ export const ConsoleView = ({
       'is slash command': isSlashCommand,
     });
     if (isSlashCommand) {
-      setResponse(null);
       const query = executeCommand(value, store);
       if (query) {
         handleSubmit(query);
@@ -245,23 +294,29 @@ export const ConsoleView = ({
       return;
     }
 
-    setResponse(null);
     setLoading(true);
     const creds = resolveConsoleCredentials(store.session);
     const context = buildSessionContext(store.session);
 
-    queryConsole(value, context, creds, history)
+    // Pass at most the last 8 turns to the model for context (token budget).
+    // The <Static> history itself keeps the full scrollback.
+    const modelHistory = history.slice(-8);
+
+    queryConsole(value, context, creds, modelHistory)
       .then((text) => {
-        setResponse(text);
         setHistory((h) => [
-          ...h.slice(-8),
+          ...h,
           { role: 'user', content: value },
           { role: 'assistant', content: text },
         ]);
       })
       .catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        setResponse(`Error: ${msg}`);
+        setHistory((h) => [
+          ...h,
+          { role: 'user', content: value },
+          { role: 'assistant', content: `Error: ${msg}` },
+        ]);
       })
       .finally(() => setLoading(false));
   };
@@ -338,6 +393,33 @@ export const ConsoleView = ({
 
   return (
     <Box width={width} height={height} flexDirection="column">
+      {/* Permanent Q&A scrollback — each turn is written once above the live
+        region and survives TUI exit. Mirrors the append-only pattern Claude
+        Code uses for completed agent output. */}
+      {history.length > 0 && (
+        <Static items={history.map((turn, idx) => ({ ...turn, idx }))}>
+          {(turn) =>
+            turn.role === 'user' ? (
+              <Box key={`turn-${turn.idx}`} paddingX={Layout.paddingX}>
+                <Text color={Colors.muted}>{Icons.prompt} </Text>
+                <Text color={Colors.secondary}>{turn.content}</Text>
+              </Box>
+            ) : (
+              <Box
+                key={`turn-${turn.idx}`}
+                paddingX={Layout.paddingX}
+                paddingY={1}
+                flexDirection="column"
+              >
+                <Text color={Colors.accent}>
+                  {renderMarkdown(turn.content).trimEnd()}
+                </Text>
+              </Box>
+            )
+          }
+        </Static>
+      )}
+
       {/* Content area */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {pendingPrompt ? (
@@ -401,21 +483,6 @@ export const ConsoleView = ({
               <Text color={Colors.muted}> [Q / Esc] skip</Text>
             )}
           </Box>
-        ) : responseIsLong ? (
-          <Box
-            flexDirection="column"
-            flexGrow={1}
-            paddingX={Layout.paddingX}
-            paddingY={1}
-            overflow="hidden"
-          >
-            <Text color={Colors.accent}>
-              {response ? renderMarkdown(response).trimEnd() : ''}
-            </Text>
-            <Box marginTop={1}>
-              <Text color={Colors.muted}>[Q / Esc] close</Text>
-            </Box>
-          </Box>
         ) : (
           children
         )}
@@ -424,7 +491,7 @@ export const ConsoleView = ({
       {/* Status ticker — shown when an overlay is active */}
       {lastStatus && (
         <Box paddingX={Layout.paddingX} overflow="hidden">
-          <Text color={Colors.muted}>{Icons.diamondOpen} </Text>
+          <Text color={Colors.subtle}>{Icons.diamondOpen} </Text>
           <Text color={Colors.muted} wrap="truncate-end">
             {linkify(lastStatus)}
           </Text>
@@ -459,24 +526,9 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Response line */}
-      {showResponse && !responseIsLong && (
-        <Box
-          paddingX={Layout.paddingX}
-          paddingY={1}
-          gap={1}
-          flexDirection="column"
-        >
-          {loading ? (
-            <Spinner />
-          ) : (
-            <Text color={Colors.accent}>
-              {response ? renderMarkdown(response).trimEnd() : ''}
-            </Text>
-          )}
-        </Box>
-      )}
-      {loading && responseIsLong && (
+      {/* Loading spinner — completed turns append to the Static scrollback
+        above; only the in-flight state lives in the live region. */}
+      {loading && (
         <Box paddingX={Layout.paddingX}>
           <Spinner />
         </Box>

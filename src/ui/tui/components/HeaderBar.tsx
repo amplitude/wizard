@@ -36,7 +36,7 @@ export const HeaderBar = ({
       </Box>
       {context && (
         <Box flexGrow={1} justifyContent="flex-end" overflow="hidden">
-          <Text color={Colors.muted}> {Icons.dot} </Text>
+          <Text color={Colors.subtle}> {Icons.dot} </Text>
           <Text color={Colors.secondary} wrap="truncate-end">
             {context}
           </Text>

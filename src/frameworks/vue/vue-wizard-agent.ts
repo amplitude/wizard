@@ -1,4 +1,5 @@
 /* Vue wizard for Amplitude */
+import fg from 'fast-glob';
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { detectNodePackageManagers } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
@@ -9,6 +10,36 @@ import {
 } from '../../utils/package-json';
 import { tryGetPackageJson } from '../../utils/setup-utils';
 import { createVersionBucket } from '../../utils/semver';
+
+const FILE_SCAN_IGNORES = [
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/.git/**',
+  '**/.nuxt/**',
+  '**/.output/**',
+];
+
+/**
+ * Fallback Vue detection: sniff for .vue source files or Vite config when
+ * package.json is missing or doesn't list `vue` (e.g. unusual scaffolds,
+ * partial checkouts). Returns false if the tree looks Nuxt-shaped.
+ */
+async function hasVueFileSignals(installDir: string): Promise<boolean> {
+  const nuxtConfigs = await fg(['nuxt.config.{ts,js,mjs,cjs}'], {
+    cwd: installDir,
+    deep: 2,
+    ignore: FILE_SCAN_IGNORES,
+  });
+  if (nuxtConfigs.length > 0) return false;
+
+  const vueFiles = await fg(['**/*.vue'], {
+    cwd: installDir,
+    deep: 4,
+    ignore: FILE_SCAN_IGNORES,
+  });
+  return vueFiles.length > 0;
+}
 
 const getVueVersionBucket = createVersionBucket();
 
@@ -37,10 +68,15 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     },
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
-      if (!packageJson) return false;
-      // Nuxt projects have both 'vue' and 'nuxt' — don't claim them
-      if (hasPackageInstalled('nuxt', packageJson)) return false;
-      return hasPackageInstalled('vue', packageJson);
+      if (packageJson) {
+        // Nuxt projects have both 'vue' and 'nuxt' — don't claim them
+        if (hasPackageInstalled('nuxt', packageJson)) return false;
+        return hasPackageInstalled('vue', packageJson);
+      }
+      // Fallback: sniff for .vue source files ONLY when package.json is
+      // missing. If the manifest exists, trust it — avoids walking large
+      // node_modules trees on every non-Vue project.
+      return hasVueFileSignals(options.installDir);
     },
     detectPackageManager: detectNodePackageManagers,
   },

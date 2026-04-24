@@ -13,7 +13,8 @@
 import * as path from 'path';
 import { z } from 'zod';
 
-import type { Integration } from './constants';
+import { EMAIL_REGEX } from './constants';
+import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 
 /**
@@ -46,6 +47,14 @@ export const CliArgsSchema = z.object({
   apiKey: z.string().optional(),
   integration: z.string().optional(),
   appName: z.string().optional(),
+  signupEmail: z
+    .string()
+    .regex(EMAIL_REGEX, 'Invalid email')
+    .nullable()
+    .optional()
+    .default(null),
+  signupFullName: z.string().nullable().optional().default(null),
+  region: z.enum(['us', 'eu']).nullable().optional().default(null),
 });
 
 /**
@@ -174,6 +183,8 @@ export interface WizardSession {
   ci: boolean;
   agent: boolean;
   signup: boolean;
+  signupEmail: string | null;
+  signupFullName: string | null;
   localMcp: boolean;
   apiKey?: string;
   menu: boolean;
@@ -246,8 +257,23 @@ export interface WizardSession {
    * null = not yet selected (shown as RegionSelect screen)
    * 'us' = US region (api.amplitude.com)
    * 'eu' = EU region (api.eu.amplitude.com)
+   *
+   * WRITE INVARIANT: this field is written ONLY by intent-bearing sources —
+   * the --region CLI flag / env var, /region slash command, RegionSelect
+   * screen pick, the "Switch data-center region" flow, checkpoint restore,
+   * and OAuth-derived zone after successful authentication (signing into an
+   * EU account is regional intent, even though it's not a manual pick).
+   * Non-intent code MUST NOT assign to this field as a cache.
+   *
+   * READ GUIDANCE: code outside the TUI render tree (bin.ts entry points,
+   * credential-resolution, agent/CI paths) MUST call
+   * `resolveZone(session, fallback)` (src/lib/zone-resolution.ts) to get
+   * the effective zone, not read this field directly. The only legitimate
+   * direct reads are: display/debug output, checkpoint persistence (we
+   * persist intent, not resolved zone), and the RegionSelect gate checks
+   * in bin.ts that drive pre-auth flow ordering.
    */
-  region: CloudRegion | null;
+  region: AmplitudeZone | null;
 
   /**
    * True when the /region slash command forces RegionSelect to re-appear.
@@ -280,9 +306,6 @@ export interface WizardSession {
 
   /** OAuth access_token held during SUSI — used for Hydra-validated proxy auth. */
   pendingAuthAccessToken: string | null;
-
-  /** Cloud region detected from the OAuth token. Drives RegionSelect auto-skip. */
-  pendingAuthCloudRegion: CloudRegion | null;
 
   /** Org selected during SUSI (written to ampli.json). */
   selectedOrgId: string | null;
@@ -445,6 +468,15 @@ export function buildSession(args: {
   appId?: string;
   /** From --app-name / --project-name CLI flag — pre-fills CreateAppScreen. */
   appName?: string;
+  signupEmail?: string;
+  signupFullName?: string;
+  /**
+   * From --region CLI flag (--zone is accepted as an alias). Lets non-TUI
+   * modes (agent/CI/classic) pick the data center for direct signup, since
+   * they have no RegionSelect screen. When provided, pre-populates the
+   * session's region so RegionSelect is skipped in the TUI flow too.
+   */
+  region?: AmplitudeZone;
 }): WizardSession {
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse(args);
@@ -467,6 +499,12 @@ export function buildSession(args: {
     ci: validated.ci ?? false,
     agent: false,
     signup: validated.signup ?? false,
+    // On parse failure we intentionally reject raw args for the signup
+    // fields — otherwise a malformed email would skip zod's .email() check
+    // via the fallback and reach the signup endpoint. Null here means the
+    // signup wrapper short-circuits with "missing email or fullName".
+    signupEmail: parsed.success ? validated.signupEmail ?? null : null,
+    signupFullName: parsed.success ? validated.signupFullName ?? null : null,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
@@ -484,7 +522,9 @@ export function buildSession(args: {
     activationLevel: null,
     activationOptionsComplete: false,
     snippetConfigured: false,
-    region: null,
+    // --region (alias: --zone) pre-populates region so non-TUI signup
+    // targets the right DC. Same parse-failure guard as signupEmail above.
+    region: parsed.success ? validated.region ?? null : null,
     regionForced: false,
 
     runPhase: RunPhase.Idle,
@@ -499,7 +539,6 @@ export function buildSession(args: {
     pendingOrgs: null,
     pendingAuthIdToken: null,
     pendingAuthAccessToken: null,
-    pendingAuthCloudRegion: null,
     selectedOrgId: null,
     selectedOrgName: null,
     selectedProjectId: null,

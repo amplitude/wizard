@@ -51,9 +51,18 @@ export function startTUI(
   const inkUI = new InkUI(store);
   setUI(inkUI);
 
-  // Render the App — exitOnCtrlC lets Ink translate Ctrl+C into process.exit()
+  // Render the App — exitOnCtrlC is false so Ctrl+C does NOT call
+  // process.exit() directly. Instead, CtrlCHandler (mounted in App via
+  // Ink's useInput hook) raises SIGINT so the handler in bin.ts can run
+  // its full graceful-exit flow (banner, save checkpoint, flush
+  // analytics, force-kill timer).
+  //
+  // We used to hook stdin.on('data') here to catch the 0x03 byte, but
+  // that fought Ink's internal raw-mode reader on some terminals and
+  // dropped the keypress entirely. useInput is the supported Ink API
+  // and delivers Ctrl+C reliably as `key.ctrl && input === 'c'`.
   const { unmount: inkUnmount } = render(createElement(App, { store }), {
-    exitOnCtrlC: true,
+    exitOnCtrlC: false,
   });
 
   // Reset terminal colors on exit
