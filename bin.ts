@@ -1267,11 +1267,18 @@ void yargs(hideBin(process.argv))
               sigintReceived = true;
 
               // Surface a friendly "we heard you" banner so the TUI doesn't
-              // just freeze while checkpoint+analytics flush. Best-effort —
-              // if the store is already torn down we swallow the error.
+              // just freeze while checkpoint+analytics flush.
+              //
+              // We use setCommandFeedback (not pushStatus): the latter is
+              // only surfaced inside an overlay or RunScreen's TabContainer,
+              // so on Intro/Auth/RegionSelect/DataSetup the banner would be
+              // invisible. setCommandFeedback renders globally through
+              // ConsoleView (on every screen) in the accent-prompt style.
+              // Best-effort — if the store is already torn down we swallow.
               try {
-                tui.store.pushStatus(
+                tui.store.setCommandFeedback(
                   'Saving session… press Ctrl+C again to force quit.',
+                  10_000, // longer than the 2s force-kill so it never clears
                 );
               } catch {
                 // store may be mid-teardown; non-fatal
