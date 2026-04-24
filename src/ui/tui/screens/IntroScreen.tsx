@@ -236,31 +236,38 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       {/* Detection results + continue menu */}
       {!detecting && !pickingFramework && (
         <Box flexDirection="column" alignItems="flex-start">
-          <Text>
+          <Box>
             <Text color={Colors.body}>Directory </Text>
             <Text color={Colors.secondary}>
               /{path.basename(session.installDir)}
             </Text>
             <Text color={Colors.success}> {Icons.checkmark}</Text>
-          </Text>
+          </Box>
 
-          {frameworkLabel && (
-            <Text>
+          {frameworkLabel && !autoFallback && (
+            <Box>
               <Text color={Colors.body}>Framework </Text>
-              {!autoFallback && config?.metadata.glyph && (
+              {config?.metadata.glyph && (
                 <Text color={config.metadata.glyphColor}>
                   {config.metadata.glyph}{' '}
                 </Text>
               )}
               <Text color={Colors.secondary}>
-                {autoFallback ? 'none detected' : frameworkLabel}
+                {frameworkLabel}
                 {getFrameworkLabelSuffix({ manuallySelected, autoFallback })}
-                {!autoFallback && config?.metadata.beta && ' [BETA]'}
+                {config?.metadata.beta && ' [BETA]'}
               </Text>
-              {!autoFallback && (
-                <Text color={Colors.success}> {Icons.checkmark}</Text>
-              )}
-            </Text>
+              <Text color={Colors.success}> {Icons.checkmark}</Text>
+            </Box>
+          )}
+
+          {autoFallback && (
+            <Box marginTop={1}>
+              <Text color={Colors.muted}>
+                No framework detected. Continue with the generic guide or pick
+                one below.
+              </Text>
+            </Box>
           )}
 
           {showContinue && (
