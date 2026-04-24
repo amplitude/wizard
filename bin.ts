@@ -1094,7 +1094,7 @@ void yargs(hideBin(process.argv))
               // Resolve org/project display names so /whoami shows them.
               // Also extracts the numeric analytics project ID for MCP event detection.
               // Fire-and-forget so it doesn't block startup.
-              // Hydrate org/workspace display names after credential
+              // Hydrate org/project display names after credential
               // resolution succeeds. Gate on credentials (not region) because
               // resolveCredentials no longer cache-writes session.region;
               // gating on region would silently skip hydration for returning
