@@ -138,3 +138,51 @@ describe('SigningUpScreen — render states', () => {
     expect(lastFrame()).toMatch(/Please sign up or log in in your browser/);
   });
 });
+
+describe('SigningUpScreen — cleanup on unmount', () => {
+  it('unmount during POST does not write to session', async () => {
+    let resolvePost: (value: unknown) => void = () => {};
+    const pending = new Promise((resolve) => {
+      resolvePost = resolve;
+    });
+    mockPerformSignupOrAuth.mockReturnValueOnce(pending);
+
+    const store = makeStore(null);
+    const { unmount } = render(<SigningUpScreen store={store} />);
+    unmount();
+
+    // Resolve the POST after unmount with a response that WOULD have written to session.
+    resolvePost({
+      kind: 'success',
+      idToken: 'id',
+      accessToken: 'acc',
+      refreshToken: 'ref',
+      zone: 'us',
+      userInfo: null,
+    });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(store.session.signupAuth).toBeNull();
+    expect(store.session.signupAbandoned).toBe(false);
+    expect(store.session.signupRequiredFields).toEqual([]);
+  });
+
+  it('unmount during terminal hold does not abandon', async () => {
+    mockPerformSignupOrAuth.mockResolvedValueOnce({
+      kind: 'requires_redirect',
+    });
+    const store = makeStore(null);
+    const { unmount } = render(<SigningUpScreen store={store} />);
+
+    // Let the POST resolve; screen switches to terminal phase and schedules the 1s timeout.
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Unmount before the 1s hold elapses.
+    unmount();
+
+    // Advance past the timeout — the cleared timeout should NOT fire setSignupAbandoned.
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(store.session.signupAbandoned).toBe(false);
+  });
+});
