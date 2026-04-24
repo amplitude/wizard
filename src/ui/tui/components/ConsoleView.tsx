@@ -33,6 +33,30 @@ import {
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
 import { KeyHintBar, type KeyHint } from './KeyHintBar.js';
+import { spawn } from 'node:child_process';
+
+/**
+ * Fire-and-forget browser launch for a URL. Never throws — if the platform
+ * has no known opener we simply do nothing and rely on the caller's
+ * fallback messaging.
+ */
+function openUrlInBrowser(url: string): void {
+  try {
+    if (process.platform === 'darwin') {
+      spawn('open', [url], { stdio: 'ignore', detached: true }).unref();
+    } else if (process.platform === 'win32') {
+      spawn('cmd', ['/c', 'start', '', url], {
+        stdio: 'ignore',
+        detached: true,
+      }).unref();
+    } else {
+      // Linux — try xdg-open; swallow failure silently.
+      spawn('xdg-open', [url], { stdio: 'ignore', detached: true }).unref();
+    }
+  } catch {
+    // non-fatal
+  }
+}
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -137,6 +161,87 @@ function executeCommand(raw: string, store: WizardStore): string | void {
     case '/snake':
       store.showSnakeOverlay();
       break;
+    case '/chart': {
+      // Open the "new chart" deep-link in the user's browser.
+      const zone = store.session.region ?? 'us';
+      const orgId = store.session.selectedOrgId ?? null;
+      void import('../../../lib/constants.js').then(({ OUTBOUND_URLS }) => {
+        const url = OUTBOUND_URLS.newChart(zone, orgId);
+        openUrlInBrowser(url);
+        store.setCommandFeedback(`Opening chart editor: ${url}`, 30_000);
+      });
+      break;
+    }
+    case '/dashboard': {
+      const zone = store.session.region ?? 'us';
+      const orgId = store.session.selectedOrgId ?? null;
+      void import('../../../lib/constants.js').then(({ OUTBOUND_URLS }) => {
+        const url = OUTBOUND_URLS.newDashboard(zone, orgId);
+        openUrlInBrowser(url);
+        store.setCommandFeedback(`Opening dashboard editor: ${url}`, 30_000);
+      });
+      break;
+    }
+    case '/taxonomy': {
+      // Taxonomy agent is triggered after event ingestion in the data-setup
+      // flow. When invoked manually we surface the deep-link and a
+      // suggestion to re-run the wizard if no data is ingested yet.
+      const zone = store.session.region ?? 'us';
+      const orgId = store.session.selectedOrgId ?? null;
+      void import('../../../lib/constants.js').then(({ OUTBOUND_URLS }) => {
+        const base = OUTBOUND_URLS.app[zone];
+        const url = orgId
+          ? `${base}/${orgId}/data/taxonomy`
+          : `${base}/data/taxonomy`;
+        openUrlInBrowser(url);
+        store.setCommandFeedback(`Opening taxonomy editor: ${url}`, 30_000);
+      });
+      break;
+    }
+    case '/debug': {
+      // Surface a redacted diagnostic snapshot — credentials / tokens are
+      // stripped. Writes the full snapshot to stderr for copy/paste
+      // sharing; the console only shows a brief summary.
+      void import('../utils/diagnostics.js')
+        .then(({ createDiagnosticSnapshot }) => {
+          const snapshot = createDiagnosticSnapshot(store, 'dev') as {
+            current_screen?: string | null;
+            active_flow?: string | null;
+            session?: {
+              integration?: string | null;
+              region?: string | null;
+            };
+            tasks_count?: number;
+          };
+          try {
+            process.stderr.write(
+              '\n[/debug] diagnostic snapshot:\n' +
+                JSON.stringify(snapshot, null, 2) +
+                '\n',
+            );
+          } catch {
+            // ignore broken pipe
+          }
+          const summary =
+            `flow: ${snapshot.active_flow ?? 'n/a'} | screen: ${
+              snapshot.current_screen ?? 'n/a'
+            } | ` +
+            `integration: ${snapshot.session?.integration ?? 'n/a'} | ` +
+            `zone: ${snapshot.session?.region ?? 'n/a'} | tasks: ${
+              snapshot.tasks_count ?? 0
+            }`;
+          store.setCommandFeedback(
+            summary + ' (full snapshot written to stderr)',
+            30_000,
+          );
+        })
+        .catch(() => {
+          store.setCommandFeedback(
+            'Diagnostics unavailable. See /tmp/amplitude-wizard.log.',
+          );
+        });
+      break;
+    }
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;

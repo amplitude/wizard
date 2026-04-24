@@ -2,24 +2,35 @@
 
 **Category:** TUI
 **Effort:** M
-**Status:** Scaffolded (design note only).
+**Status:** Implemented.
 
-## Scope
+## What changed
 
-Add /debug /taxonomy /chart /dashboard. See `docs/audit-branches.md` for the full list of audit
-findings; this branch holds the per-finding design note so the fix has a
-single home when implementation lands.
+Four new slash commands landed in the TUI ConsoleView:
 
-## Implementation plan
+- `/chart` — opens the "new chart" deep-link for the current org + zone
+  (`OUTBOUND_URLS.newChart`).
+- `/dashboard` — opens the "new dashboard" deep-link
+  (`OUTBOUND_URLS.newDashboard`).
+- `/taxonomy` — opens the Data Taxonomy editor for the current org at
+  `{app}/{orgId}/data/taxonomy`.
+- `/debug` — runs `createDiagnosticSnapshot()` and writes the full
+  redacted snapshot to stderr for copy/paste sharing. A one-line summary
+  lands in the console command feedback.
 
-1. Reproduce the finding against the current main HEAD.
-2. Write a failing unit/integration test capturing the observed behavior.
-3. Ship the fix in a single focused commit on this branch, update this
-   file's Status to `Implemented`, and replace the plan with a short
-   "what changed" summary.
+Added a small `openUrlInBrowser()` helper inside `ConsoleView.tsx` to
+avoid pulling in the `open` npm dependency (it's not in the bundle —
+`post-install-helpers.ts` uses the same `spawn` pattern).
 
-## Why scaffolded
+All four commands degrade gracefully when offline / without an
+authenticated session: the `/chart`, `/dashboard`, `/taxonomy` URLs work
+unauthenticated (user lands on a sign-in page), and `/debug` doesn't
+touch the network.
 
-Scope exceeds what the audit-branch sweep could safely land in one pass.
-Effort rating: **M**. Implementation belongs with a dedicated
-review cycle and associated tests.
+## Follow-ups
+
+- Interactive overlays for `/chart` and `/dashboard` (e.g., inline
+  wizard-style chart creation) remain in the Data Setup flow —
+  `/chart`/`/dashboard` here just surface the creation UI.
+- `/debug` should eventually accept `--copy` to push to clipboard; not
+  implemented to keep the change minimal and dep-free.
