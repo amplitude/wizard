@@ -128,9 +128,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.success} bold>
                 📊 Dashboard ready:
               </Text>
-              <Text color={Colors.muted}>
+              <TerminalLink url={store.session.checklistDashboardUrl}>
                 {store.session.checklistDashboardUrl}
-              </Text>
+              </TerminalLink>
             </Box>
           )}
 

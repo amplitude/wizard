@@ -66,12 +66,17 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
         }}
       />
 
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
         <Text color={Colors.muted}>
           {Icons.dot} Data residency affects API endpoints and compliance. You
           can change this later with{' '}
           <Text color={Colors.secondary}>/region</Text>.
         </Text>
+        {session.regionForced && (
+          <Text color={Colors.warning}>
+            {Icons.dot} You&apos;ll need to sign in again for the new region.
+          </Text>
+        )}
       </Box>
     </Box>
   );
