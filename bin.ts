@@ -784,6 +784,25 @@ void yargs(hideBin(process.argv))
         return value;
       },
     },
+    // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
+    // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN to these option names; declaring
+    // them here lets .strict() accept the env-var invocation. The actual
+    // values are read via process.env elsewhere.
+    dev: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_DEV env-var passthrough',
+      type: 'boolean',
+    },
+    log: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_LOG env-var passthrough',
+      type: 'string',
+    },
+    token: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_TOKEN env-var passthrough',
+      type: 'string',
+    },
   })
   .command(
     ['$0'],
