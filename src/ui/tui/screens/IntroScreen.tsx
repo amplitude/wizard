@@ -357,9 +357,6 @@ const PICKER_ORDER: Integration[] = [
   Integration.unreal,
 ];
 
-const BACK_VALUE = '__back__' as const;
-type FrameworkPickerValue = Integration | typeof BACK_VALUE;
-
 /** Framework picker shown when auto-detection fails. */
 const FrameworkPicker = ({
   store,
@@ -369,7 +366,7 @@ const FrameworkPicker = ({
   onComplete?: (selected: boolean) => void;
 }) => {
   const [options, setOptions] = useState<
-    { label: string; value: FrameworkPickerValue }[]
+    { label: string; value: Integration }[]
   >([]);
 
   // Esc exits the picker without changing the selection.
@@ -379,33 +376,27 @@ const FrameworkPicker = ({
 
   useEffect(() => {
     void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
-      setOptions([
-        { label: '← Back (keep current selection)', value: BACK_VALUE },
-        ...PICKER_ORDER.map((integration) => {
+      setOptions(
+        PICKER_ORDER.map((integration) => {
           const { glyph, name } = FRAMEWORK_REGISTRY[integration].metadata;
           return {
             label: glyph ? `${glyph}  ${name}` : name,
-            value: integration as FrameworkPickerValue,
+            value: integration,
           };
         }),
-      ]);
+      );
     });
   }, []);
 
   if (options.length === 0) return null;
 
   return (
-    <PickerMenu<FrameworkPickerValue>
+    <PickerMenu<Integration>
       centered
       message="Select your framework (Esc to go back)"
       options={options}
       onSelect={(value) => {
-        const selected = Array.isArray(value) ? value[0] : value;
-        if (selected === BACK_VALUE) {
-          onComplete?.(false);
-          return;
-        }
-        const integration = selected;
+        const integration = Array.isArray(value) ? value[0] : value;
         analytics.wizardCapture('framework manually selected', { integration });
         void import('../../../lib/registry.js').then(
           ({ FRAMEWORK_REGISTRY }) => {
