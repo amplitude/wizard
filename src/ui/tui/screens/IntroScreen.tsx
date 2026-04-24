@@ -61,7 +61,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
-  const [autoFallback, setAutoFallback] = useState(false);
   const [showResume, setShowResume] = useState(
     () => store.session._restoredFromCheckpoint,
   );
@@ -73,6 +72,11 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const detecting = !session.detectionComplete;
   const needsFrameworkPick =
     session.detectionComplete && !session.frameworkConfig;
+  // Derive fallback state from session so it survives component remount
+  // (e.g. ScreenErrorBoundary retries). Generic is never reachable via
+  // the manual picker — it's excluded from PICKER_ORDER — so integration
+  // === generic uniquely identifies the auto-fallback path.
+  const autoFallback = session.integration === Integration.generic;
 
   // Hide logo when framework picker is open — the long list overlaps in Ink.
   const pickerVisible =
@@ -91,7 +95,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.setFrameworkConfig(Integration.generic, genericConfig);
-        setAutoFallback(true);
         logToFile('[intro] no framework matched — falling back to Generic');
       });
     }
@@ -239,7 +242,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           onComplete={(selected) => {
             setPickingFramework(false);
             if (selected) {
-              setAutoFallback(false);
               setManuallySelected(true);
             }
           }}
