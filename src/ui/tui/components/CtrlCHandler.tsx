@@ -1,7 +1,7 @@
 /**
  * CtrlCHandler — Intercepts Ctrl+C via Ink's native `useInput` hook and
  * drives the graceful-exit flow directly (banner → save checkpoint →
- * flush analytics → exit).
+ * flush analytics → exit after a 2-second grace window).
  *
  * Why this component (rather than a process SIGINT handler in bin.ts)?
  *
@@ -14,27 +14,25 @@
  * 3. Running the exit logic inside the component guarantees it fires
  *    every time Ink receives Ctrl+C, with no ordering assumptions.
  *
- * On second press within the 2-second window we force-exit immediately.
+ * Exit timing:
+ * - First Ctrl+C: show the banner, kick off save-checkpoint + analytics
+ *   flush in the background, then wait a fixed 2 seconds before exiting.
+ *   This gives the user a real, visible window to read the banner.
+ * - Second Ctrl+C within that window: exit immediately (code 130).
+ *
+ * IMPORTANT: we deliberately do NOT chain `process.exit` onto
+ * `analytics.flush().finally(...)` — flush resolves almost instantly in
+ * the common case, which was causing the banner to flash and the
+ * process to exit before the user could see it.
  */
 
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { useInput } from 'ink';
-import { appendFileSync } from 'node:fs';
 import type { WizardStore } from '../store.js';
 import { saveCheckpoint } from '../../../lib/session-checkpoint.js';
 import { analytics } from '../../../utils/analytics.js';
 
-const DEBUG_LOG = '/tmp/amplitude-wizard-ctrlc.log';
-const debugLog = (msg: string): void => {
-  try {
-    appendFileSync(
-      DEBUG_LOG,
-      `[${new Date().toISOString()}] pid=${process.pid} ${msg}\n`,
-    );
-  } catch {
-    // best-effort
-  }
-};
+const EXIT_DELAY_MS = 2_000;
 
 interface CtrlCHandlerProps {
   store: WizardStore;
@@ -43,23 +41,11 @@ interface CtrlCHandlerProps {
 export const CtrlCHandler = ({ store }: CtrlCHandlerProps) => {
   const pendingExit = useRef(false);
 
-  useEffect(() => {
-    debugLog('mounted — useInput active');
-    return () => debugLog('unmounted');
-  }, []);
-
   useInput((input, key) => {
-    debugLog(
-      `useInput fired: input=${JSON.stringify(input)} ctrl=${key.ctrl} meta=${
-        key.meta
-      }`,
-    );
     if (!(key.ctrl && input === 'c')) return;
 
-    debugLog('Ctrl+C matched — running graceful exit');
-
     if (pendingExit.current) {
-      // Second Ctrl+C — force-kill without waiting
+      // Second Ctrl+C — force-exit without waiting
       process.exit(130);
     }
     pendingExit.current = true;
@@ -67,24 +53,27 @@ export const CtrlCHandler = ({ store }: CtrlCHandlerProps) => {
     try {
       store.setCommandFeedback(
         'Saving session… press Ctrl+C again to force quit.',
-        10_000, // longer than the 2s force-kill so it never clears early
+        10_000, // longer than EXIT_DELAY_MS so it never clears early
       );
     } catch {
       // store may be mid-teardown; non-fatal
     }
 
-    // Force-kill after 2 seconds if checkpoint save / analytics flush hangs.
-    const forceTimer = setTimeout(() => process.exit(130), 2_000);
-    if (forceTimer.unref) forceTimer.unref();
-
+    // Fire-and-forget cleanup. We do NOT await analytics.flush before
+    // exiting — if it resolves instantly the banner flashes invisibly.
     try {
       saveCheckpoint(store.session);
     } catch {
-      // Best-effort — don't block exit
+      // best-effort
     }
+    void analytics.flush().catch(() => {
+      // best-effort
+    });
 
-    // Best-effort flush — the force-kill timer bounds the wait
-    void analytics.flush().finally(() => process.exit(130));
+    // Single exit path for the first press: fixed grace window so the
+    // banner is visible long enough to read. Do NOT unref — we want
+    // this timer to keep the event loop alive until it fires.
+    setTimeout(() => process.exit(130), EXIT_DELAY_MS);
   });
 
   return null;
