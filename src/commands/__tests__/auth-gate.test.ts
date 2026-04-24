@@ -69,7 +69,7 @@ describe('isAuthTaskGateReady', () => {
     ).toBe(false);
   });
 
-  it('releases --signup once ToS is accepted', () => {
+  it('blocks --signup after ToS until SigningUpScreen settles (no auth yet)', () => {
     expect(
       isAuthTaskGateReady(
         s({
@@ -78,6 +78,48 @@ describe('isAuthTaskGateReady', () => {
           signup: true,
           emailCaptureComplete: true,
           tosAccepted: true,
+          signupAuth: null,
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('releases --signup once direct signup wrote signupAuth', () => {
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          signup: true,
+          emailCaptureComplete: true,
+          tosAccepted: true,
+          signupAuth: {
+            kind: 'success',
+            idToken: 'i',
+            accessToken: 'a',
+            refreshToken: 'r',
+            zone: 'us',
+            userInfo: null,
+            dashboardUrl: null,
+          },
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('releases --signup once SigningUpScreen abandoned to OAuth fallback', () => {
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          signup: true,
+          emailCaptureComplete: true,
+          tosAccepted: true,
+          signupAuth: null,
+          signupAbandoned: true,
         }),
       ),
     ).toBe(true);

@@ -630,6 +630,11 @@ export function gateCiSignupAcceptToS(
  *   - With --signup, ToS is accepted (so the browser doesn't open before
  *     EmailCapture / ToS finish — tosAccepted=true implies email capture
  *     is complete since ToS only renders after EmailCapture)
+ *   - With --signup, the SigningUpScreen ceremony has finished: either
+ *     `signupAuth` is populated (direct signup succeeded) or
+ *     `signupAbandoned` is true (redirect / error / unsupported field →
+ *     browser OAuth fallback). Without this, the auth task races the
+ *     screen-driven POST and opens OAuth while signup is still in flight.
  *
  * Pure function, exported for unit testing — the original inline closure
  * silently regressed when its individual conditions drifted and there was
@@ -642,6 +647,11 @@ export function isAuthTaskGateReady(
   if (session.region === null) return false;
   if (session.regionForced) return false;
   if (session.signup && session.tosAccepted !== true) return false;
+  const signupCeremonySettled =
+    !session.signup ||
+    session.signupAuth !== null ||
+    session.signupAbandoned;
+  if (!signupCeremonySettled) return false;
   return true;
 }
 
