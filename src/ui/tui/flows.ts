@@ -189,14 +189,20 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: (s) => s.signup && s.signupEmail === null,
       isComplete: (s) => !s.signup || s.signupEmail !== null,
     },
-    // 2c. Signup POST firing point. Mounts whenever we have an email, no
+    // 2c. Signup POST firing point. Mounts whenever we have an email,
+    //     a region (so we know which provisioning host to hit), no
     //     tokens yet, haven't abandoned, and every field the server has
-    //     asked for so far is present on the session.
+    //     asked for so far is present on the session. The region check
+    //     is redundant in normal flow ordering (RegionSelect's
+    //     isComplete already gates this) but making it local lets
+    //     SigningUpScreen rely on `s.region !== null` without chasing
+    //     the invariant across files.
     {
       screen: Screen.SigningUp,
       show: (s) =>
         s.signup &&
         s.signupEmail !== null &&
+        s.region !== null &&
         s.signupAuth === null &&
         !s.signupAbandoned &&
         allRequiredFieldsCollected(s),

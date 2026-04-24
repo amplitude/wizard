@@ -894,6 +894,10 @@ export const defaultCommand: CommandModule = {
                       'Account created, but user data is still being provisioned. ' +
                         'Opening browser to complete sign-in…',
                     );
+                    // `performSignupOrAuth` already emitted `user_fetch_failed`
+                    // on the signup path; this second event marks the rare
+                    // "signup succeeded then probe fetch failed" layer — not a
+                    // double-count of the same failure.
                     trackSignupAttempt({
                       status: 'browser_fallback_after_signup',
                       zone,
