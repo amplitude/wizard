@@ -33,7 +33,10 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { Colors } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import { performSignupOrAuth } from '../../../utils/signup-or-auth.js';
+import {
+  performSignupOrAuth,
+  trackSignupAttempt,
+} from '../../../utils/signup-or-auth.js';
 import { KNOWN_REQUIRED_FIELDS, fieldPresentOnSession } from '../flows.js';
 
 interface SigningUpScreenProps {
@@ -70,14 +73,35 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // SignupEmail / SignupFullName aren't mounted simultaneously, so
       // they can't write while we're posting).
       const s = store.session;
-      const result = await performSignupOrAuth(
-        {
-          email: s.signupEmail,
-          fullName: s.signupFullName,
-          zone,
-        },
-        { signal: controller.signal },
-      );
+      let result: Awaited<ReturnType<typeof performSignupOrAuth>>;
+      try {
+        result = await performSignupOrAuth(
+          {
+            email: s.signupEmail,
+            fullName: s.signupFullName,
+            zone,
+          },
+          { signal: controller.signal },
+        );
+      } catch {
+        // performSignupOrAuth intentionally propagates errors from
+        // `replaceStoredUser` (disk / permission failures on
+        // ~/.ampli.json). Without this catch, the screen never writes
+        // a terminal session field, the bin.ts signupCeremonySettled
+        // wait never satisfies, and the wizard hangs indefinitely on
+        // "Signing up…".
+        //
+        // Match runDirectSignupIfRequested's behavior: emit the
+        // wrapper_exception telemetry, abandon, let bin.ts proceed to
+        // OAuth fallback. We don't have direct access to the original
+        // err here for logging — the wrapper already logged its
+        // direct-signup throw at signup_error level; this catch is
+        // only reached for the rarer post-tokens persistence failure.
+        if (cancelled) return;
+        trackSignupAttempt({ status: 'wrapper_exception', zone });
+        store.setSignupAbandoned(true);
+        return;
+      }
       if (cancelled) return;
 
       switch (result.kind) {
