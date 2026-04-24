@@ -16,6 +16,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
@@ -235,9 +236,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       {(pickingFramework || (session.menu && needsFrameworkPick)) && (
         <FrameworkPicker
           store={store}
-          onComplete={() => {
+          onComplete={(selected) => {
             setPickingFramework(false);
-            setAutoFallback(false);
+            if (selected) {
+              setAutoFallback(false);
+              setManuallySelected(true);
+            }
           }}
         />
       )}
@@ -309,7 +313,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     });
                   } else if (choice === 'framework') {
                     setPickingFramework(true);
-                    setManuallySelected(true);
                   } else {
                     store.concludeIntro();
                   }
@@ -347,48 +350,62 @@ const PICKER_ORDER: Integration[] = [
   Integration.unreal,
 ];
 
+const BACK_VALUE = '__back__' as const;
+type FrameworkPickerValue = Integration | typeof BACK_VALUE;
+
 /** Framework picker shown when auto-detection fails. */
 const FrameworkPicker = ({
   store,
   onComplete,
 }: {
   store: WizardStore;
-  onComplete?: () => void;
+  onComplete?: (selected: boolean) => void;
 }) => {
   const [options, setOptions] = useState<
-    { label: string; value: Integration }[]
+    { label: string; value: FrameworkPickerValue }[]
   >([]);
+
+  // Esc exits the picker without changing the selection.
+  useScreenInput((_input, key) => {
+    if (key.escape) onComplete?.(false);
+  });
 
   useEffect(() => {
     void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
-      setOptions(
-        PICKER_ORDER.map((integration) => {
+      setOptions([
+        { label: '← Back (keep current selection)', value: BACK_VALUE },
+        ...PICKER_ORDER.map((integration) => {
           const { glyph, name } = FRAMEWORK_REGISTRY[integration].metadata;
           return {
             label: glyph ? `${glyph}  ${name}` : name,
-            value: integration,
+            value: integration as FrameworkPickerValue,
           };
         }),
-      );
+      ]);
     });
   }, []);
 
   if (options.length === 0) return null;
 
   return (
-    <PickerMenu<Integration>
+    <PickerMenu<FrameworkPickerValue>
       centered
-      message="Select your framework"
+      message="Select your framework (Esc to go back)"
       options={options}
       onSelect={(value) => {
-        const integration = Array.isArray(value) ? value[0] : value;
+        const selected = Array.isArray(value) ? value[0] : value;
+        if (selected === BACK_VALUE) {
+          onComplete?.(false);
+          return;
+        }
+        const integration = selected;
         analytics.wizardCapture('framework manually selected', { integration });
         void import('../../../lib/registry.js').then(
           ({ FRAMEWORK_REGISTRY }) => {
             const config = FRAMEWORK_REGISTRY[integration];
             store.setFrameworkConfig(integration, config);
             store.setDetectedFramework(config.metadata.name);
-            onComplete?.();
+            onComplete?.(true);
           },
         );
       }}
