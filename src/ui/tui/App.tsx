@@ -17,6 +17,7 @@ import type { WizardStore } from './store.js';
 import { createScreens, createServices } from './screen-registry.js';
 import { CommandModeContext } from './context/CommandModeContext.js';
 import { ConsoleView } from './components/ConsoleView.js';
+import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
@@ -57,6 +58,9 @@ export const App = ({ store }: AppProps) => {
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>
+      {/* Always-on Ctrl+C interceptor. Uses Ink's useInput so it gets
+          the key event in raw mode; fires the bin.ts SIGINT handler. */}
+      <CtrlCHandler />
       <Box
         flexDirection="column"
         height={rows}
