@@ -810,6 +810,33 @@ void yargs(hideBin(process.argv))
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
             const tui = startTUI(WIZARD_VERSION);
 
+            // Install the SIGINT handler IMMEDIATELY after starting the TUI.
+            // This handler covers external `kill -INT <pid>` signals. When
+            // the user presses Ctrl+C in the TUI, CtrlCHandler (Ink useInput)
+            // owns that flow instead — Ink puts stdin in raw mode, so Ctrl+C
+            // is delivered as a keypress, not SIGINT.
+            //
+            // Import the shared helper eagerly so it's available when SIGINT
+            // fires — placing this after startTUI but before registering the
+            // handler avoids the TDZ issue that would occur if we referenced
+            // a `const` binding from a later dynamic import.
+            const { performGracefulExit } = await import(
+              './src/lib/graceful-exit.js'
+            );
+            let sigintReceived = false;
+            process.on('SIGINT', () => {
+              if (sigintReceived) {
+                process.exit(130);
+              }
+              sigintReceived = true;
+
+              performGracefulExit({
+                session: tui.store.session,
+                setCommandFeedback: (msg, ms) =>
+                  tui.store.setCommandFeedback(msg, ms),
+              });
+            });
+
             // Build session from CLI args and attach to store
             const session = await buildSessionFromOptions(options);
 
@@ -1273,31 +1300,9 @@ void yargs(hideBin(process.argv))
               }
             });
 
-            // Save checkpoint on unexpected termination (Ctrl+C).
-            // First Ctrl+C saves checkpoint and exits promptly.
-            // Second Ctrl+C within the grace window force-kills immediately.
-            let sigintReceived = false;
-            process.on('SIGINT', () => {
-              if (sigintReceived) {
-                // Second Ctrl+C — force-kill without waiting
-                process.exit(130);
-              }
-              sigintReceived = true;
-
-              // Force-kill after 1 second if checkpoint save hangs
-              const forceTimer = setTimeout(() => process.exit(130), 1_000);
-              // Unref so it doesn't keep the event loop alive
-              if (forceTimer.unref) forceTimer.unref();
-
-              try {
-                saveCheckpoint(tui.store.session);
-              } catch {
-                // Best-effort — don't block exit
-              }
-
-              // Best-effort flush — the 1s force-kill timer bounds the wait
-              void analytics.flush().finally(() => process.exit(130));
-            });
+            // (The SIGINT handler is now installed earlier, right after
+            // startTUI(), to close a race window where early Ctrl+C would
+            // bypass the handler and terminate immediately.)
 
             // Wait for auth and framework detection to finish concurrently.
             await Promise.all([authTask, detectionTask]);
