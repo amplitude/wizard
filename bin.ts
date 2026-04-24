@@ -1799,24 +1799,32 @@ void yargs(hideBin(process.argv))
     },
   )
   .command(
-    'feedback',
+    'feedback [words..]',
     'Send product feedback to the Amplitude team',
     (yargs) => {
-      return yargs.options({
-        message: {
-          alias: 'm',
-          describe: 'Feedback message',
+      return yargs
+        .positional('words', {
+          describe: 'Feedback message (positional, space-separated)',
           type: 'string',
-        },
-      });
+          array: true,
+        })
+        .options({
+          message: {
+            alias: 'm',
+            describe: 'Feedback message',
+            type: 'string',
+          },
+        });
     },
     (argv) => {
       void (async () => {
         setUI(new LoggingUI());
         const fromFlag =
           typeof argv.message === 'string' ? argv.message.trim() : '';
-        const argvRest = (argv._ as string[]).slice(1).join(' ').trim();
-        const message = (fromFlag || argvRest).trim();
+        const positional = Array.isArray(argv.words)
+          ? argv.words.join(' ').trim()
+          : '';
+        const message = (fromFlag || positional).trim();
         if (!message) {
           getUI().log.error(
             `Usage: ${CLI_INVOCATION} feedback <message>  or  feedback --message <message>`,
@@ -2357,6 +2365,24 @@ void yargs(hideBin(process.argv))
       `Feedback:  ${CLI_INVOCATION} feedback`,
     ].join('\n'),
   )
+  // Validate --app-id is numeric so a typo like `--app-id=foo` fails fast with
+  // a yargs-native error instead of becoming `0` downstream.
+  .check((argv) => {
+    const raw = argv['app-id'];
+    if (raw === undefined || raw === null || raw === '') return true;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(
+        `--app-id must be a positive integer (received: ${String(raw)})`,
+      );
+    }
+    return true;
+  })
+  // Reject unknown flags and subcommands. Catches typos like `--app-ids` or
+  // `--instal-dir` that would otherwise silently fall through. Middleware for
+  // consolidating credential resolution is paired with the bin.ts command-
+  // module split (see TODOs).
+  .strict()
   .recommendCommands()
   .help()
   .alias('help', 'h')
