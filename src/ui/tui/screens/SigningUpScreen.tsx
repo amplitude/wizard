@@ -7,20 +7,27 @@
  *
  * - `success` → setSignupAuth (flow proceeds with the new account)
  * - `needs_information` with a known, unmet field → setSignupRequiredFields
- *   (flow advances to the corresponding field-collection screen; a
- *   remount fires the retry POST)
+ *   (flow advances to SignupFullNameScreen; the subsequent remount fires
+ *   the retry POST)
  * - `needs_information` with nothing actionable (all fields already sent,
- *   or an unknown field we can't collect) → hold a short transition
- *   message then setSignupAbandoned (flow falls through to AuthScreen →
- *   browser OAuth)
- * - `requires_redirect` / `error` → same transition + abandon
+ *   or an unknown field we can't collect) → setSignupAbandoned (flow
+ *   falls through to AuthScreen → browser OAuth; AuthScreen surfaces the
+ *   signup-specific copy when session.signup is true)
+ * - `requires_redirect` / `error` → setSignupAbandoned
+ *
+ * Rendering: mirrors the layout of whichever input screen the user just
+ * submitted (email or full-name). Combined with the transition-group
+ * mapping in App.tsx (which suppresses the DissolveTransition animation
+ * between SignupEmail ↔ SigningUp ↔ SignupFullName), the user sees a
+ * continuous "same screen, now with a spinner" experience — even though
+ * three distinct screen components are rendered.
  *
  * The in-flight POST is cancelled on unmount via AbortSignal so a user
  * who quits mid-request doesn't leak an HTTP connection.
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors } from '../styles.js';
@@ -32,26 +39,12 @@ interface SigningUpScreenProps {
   store: WizardStore;
 }
 
-const TERMINAL_HOLD_MS = 1000;
-
-type Phase = 'loading' | 'terminal';
-
 export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
   useWizardStore(store);
-  const [phase, setPhase] = useState<Phase>('loading');
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     const controller = new AbortController();
-
-    const abandonAfterHold = () => {
-      setPhase('terminal');
-      timeoutRef.current = setTimeout(() => {
-        if (cancelled) return;
-        store.setSignupAbandoned(true);
-      }, TERMINAL_HOLD_MS);
-    };
 
     void (async () => {
       const s = store.session;
@@ -74,14 +67,14 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             (f) => !KNOWN_REQUIRED_FIELDS.has(f),
           );
           if (hasUnknownField) {
-            abandonAfterHold();
+            store.setSignupAbandoned(true);
             return;
           }
           const unmet = result.requiredFields.filter(
             (f) => !fieldPresentOnSession(s, f),
           );
           if (unmet.length === 0) {
-            abandonAfterHold();
+            store.setSignupAbandoned(true);
             return;
           }
           store.setSignupRequiredFields(result.requiredFields);
@@ -89,7 +82,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         }
         case 'requires_redirect':
         case 'error':
-          abandonAfterHold();
+          store.setSignupAbandoned(true);
           return;
       }
     })();
@@ -97,24 +90,40 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
     return () => {
       cancelled = true;
       controller.abort();
-      if (timeoutRef.current !== null) clearTimeout(timeoutRef.current);
     };
   }, []);
 
-  if (phase === 'loading') {
-    return (
-      <Box flexDirection="row" gap={1}>
-        <BrailleSpinner />
-        <Text color={Colors.muted}>Loading…</Text>
-      </Box>
-    );
-  }
+  const session = store.session;
+
+  // Pick the layout that matches whichever input screen the user most
+  // recently submitted. If the name screen just ran (server asked for
+  // full_name and the user filled it in), mirror that screen. Otherwise
+  // we came from the email screen (or from flags with only email set).
+  const cameFromNameScreen =
+    session.signupRequiredFields.includes('full_name') &&
+    session.signupFullName !== null;
+
+  const heading = cameFromNameScreen
+    ? 'Enter your full name:'
+    : 'Enter the email for your new account:';
+  const submittedValue = cameFromNameScreen
+    ? session.signupFullName
+    : session.signupEmail;
 
   return (
-    <Box flexDirection="column">
-      <Text color={Colors.muted}>
-        Please sign up or log in in your browser. Opening momentarily.
-      </Text>
+    <Box flexDirection="column" flexGrow={1}>
+      <Box flexDirection="column" marginBottom={1}>
+        <Text bold color={Colors.heading}>
+          {heading}
+        </Text>
+      </Box>
+      <Box flexDirection="column" gap={1}>
+        <Text color={Colors.muted}>{submittedValue}</Text>
+        <Box gap={1}>
+          <BrailleSpinner />
+          <Text color={Colors.muted}>Signing up…</Text>
+        </Box>
+      </Box>
     </Box>
   );
 };
