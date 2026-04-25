@@ -210,7 +210,7 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           ui.emitVerificationResult({
             phase,
             success: false,
-            failures: [(e as Error).message],
+            failures: [String((e as Error).message ?? e)],
           });
         }
         throw e;
