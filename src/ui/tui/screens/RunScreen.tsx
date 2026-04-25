@@ -31,7 +31,10 @@ import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryBanner } from '../components/RetryBanner.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
-import { ADDITIONAL_FEATURE_LABELS } from '../session-constants.js';
+import {
+  ADDITIONAL_FEATURE_LABELS,
+  TRAILING_FEATURES,
+} from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 
 const LOG_FILE = '/tmp/amplitude-wizard.log';
@@ -133,15 +136,19 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     status: t.status,
   }));
 
-  // Synthesize task items for additional features: completed (in run order),
-  // then the one currently being processed by the stop hook (in_progress),
-  // then the rest of the queue (pending).
+  // Synthesize task items for trailing additional features: completed (in
+  // run order), then the one currently being processed by the stop hook
+  // (in_progress), then the rest of the queue (pending). Inline features
+  // (e.g. Session Replay) are configured during SDK init and surface via
+  // the agent's own TodoWrite items, not here.
   const { additionalFeatureCompleted, additionalFeatureCurrent } =
     store.session;
   const queueRemainder = store.session.additionalFeatureQueue.filter(
-    (f) => f !== additionalFeatureCurrent,
+    (f) => f !== additionalFeatureCurrent && TRAILING_FEATURES.has(f),
   );
-  for (const feature of additionalFeatureCompleted) {
+  for (const feature of additionalFeatureCompleted.filter((f) =>
+    TRAILING_FEATURES.has(f),
+  )) {
     const label = ADDITIONAL_FEATURE_LABELS[feature];
     progressItems.push({
       label: `Set up ${label}`,
@@ -149,7 +156,10 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
       status: 'completed',
     });
   }
-  if (additionalFeatureCurrent) {
+  if (
+    additionalFeatureCurrent &&
+    TRAILING_FEATURES.has(additionalFeatureCurrent)
+  ) {
     const label = ADDITIONAL_FEATURE_LABELS[additionalFeatureCurrent];
     progressItems.push({
       label: `Set up ${label}`,

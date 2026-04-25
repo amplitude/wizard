@@ -34,4 +34,16 @@ describe('session-constants sync', () => {
       canonical.ADDITIONAL_FEATURE_LABELS,
     );
   });
+
+  it('INLINE_FEATURES values match wizard-session', () => {
+    expect([...tui.INLINE_FEATURES].sort()).toStrictEqual(
+      [...canonical.INLINE_FEATURES].sort(),
+    );
+  });
+
+  it('TRAILING_FEATURES values match wizard-session', () => {
+    expect([...tui.TRAILING_FEATURES].sort()).toStrictEqual(
+      [...canonical.TRAILING_FEATURES].sort(),
+    );
+  });
 });

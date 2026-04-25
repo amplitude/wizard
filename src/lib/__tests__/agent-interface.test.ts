@@ -801,21 +801,62 @@ describe('createStopHook', () => {
     expect(second).toEqual({});
   });
 
-  it('late opt-in: feature added after hook created is still picked up', async () => {
-    // Simulates user pressing R after the agent has started running
+  it('late opt-in: trailing feature added after hook created is still picked up', async () => {
+    // Simulates user opting in mid-run via the picklist
     let queue: AdditionalFeature[] = [];
     const hook = createStopHook(() => queue);
     const signal = new AbortController().signal;
 
     // User opts in mid-run — queue grows after hook was created
-    queue = [AdditionalFeature.SessionReplay];
+    queue = [AdditionalFeature.LLM];
 
-    // First call → SR feature prompt (not remark, because queue is now non-empty)
+    // First call → LLM feature prompt (not remark, because queue is now non-empty)
     const first = await hook(hookInput, undefined, { signal });
     expect(first).toHaveProperty('decision', 'block');
     expect((first as { reason: string }).reason).toBe(
-      ADDITIONAL_FEATURE_PROMPTS[AdditionalFeature.SessionReplay],
+      ADDITIONAL_FEATURE_PROMPTS[AdditionalFeature.LLM],
     );
+  });
+
+  it('inline features (Session Replay) are skipped by the stop hook', async () => {
+    // Inline features are configured during SDK init via the system prompt,
+    // not drained here. The hook should treat a queue with only inline
+    // entries as empty.
+    const hook = createStopHook(() => [AdditionalFeature.SessionReplay]);
+    const signal = new AbortController().signal;
+
+    // First call → remark prompt (no trailing features to drain)
+    const first = await hook(hookInput, undefined, { signal });
+    expect(first).toHaveProperty('decision', 'block');
+    expect((first as { reason: string }).reason).toContain('WIZARD-REMARK');
+
+    // Second call → allow stop
+    const second = await hook(hookInput, undefined, { signal });
+    expect(second).toEqual({});
+  });
+
+  it('mixed queue: drains trailing only, skips inline features', async () => {
+    const hook = createStopHook(() => [
+      AdditionalFeature.SessionReplay,
+      AdditionalFeature.LLM,
+    ]);
+    const signal = new AbortController().signal;
+
+    // First call → LLM feature prompt (SR is filtered out)
+    const first = await hook(hookInput, undefined, { signal });
+    expect(first).toHaveProperty('decision', 'block');
+    expect((first as { reason: string }).reason).toBe(
+      ADDITIONAL_FEATURE_PROMPTS[AdditionalFeature.LLM],
+    );
+
+    // Second call → remark prompt
+    const second = await hook(hookInput, undefined, { signal });
+    expect(second).toHaveProperty('decision', 'block');
+    expect((second as { reason: string }).reason).toContain('WIZARD-REMARK');
+
+    // Third call → allow stop
+    const third = await hook(hookInput, undefined, { signal });
+    expect(third).toEqual({});
   });
 });
 

@@ -30,6 +30,14 @@ export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.SessionReplay]: 'Session Replay',
 };
 
+export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.SessionReplay,
+]);
+
+export const TRAILING_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.LLM,
+]);
+
 export const McpOutcome = {
   NoClients: 'no_clients',
   Skipped: 'skipped',

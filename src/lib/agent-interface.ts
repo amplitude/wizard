@@ -18,6 +18,7 @@ import {
 import {
   type AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
+  TRAILING_FEATURES,
   type RetryState,
 } from './wizard-session';
 import { registerCleanup } from '../utils/wizard-abort';
@@ -250,7 +251,9 @@ export function createStopHook(
 
   return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const stop_hook_active = input.stop_hook_active as boolean;
-    const featureQueue = getFeatureQueue();
+    const featureQueue = getFeatureQueue().filter((f) =>
+      TRAILING_FEATURES.has(f),
+    );
     logToFile('Stop hook triggered', {
       stop_hook_active,
       featureIndex,

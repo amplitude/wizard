@@ -7,6 +7,9 @@ import {
   type WizardSession,
   OutroKind,
   type AdditionalFeature,
+  ADDITIONAL_FEATURE_PROMPTS,
+  ADDITIONAL_FEATURE_LABELS,
+  INLINE_FEATURES,
 } from './wizard-session';
 import {
   tryGetPackageJson,
@@ -263,18 +266,19 @@ export async function runAgentWizard(
   const skipAmplitudeMcp =
     config.prompts.buildPrompt !== undefined || !accessToken;
 
-  const integrationPrompt = buildIntegrationPrompt(
-    config,
-    {
-      frameworkVersion: frameworkVersion || 'latest',
-      typescript: typeScriptDetected,
-      projectApiKey,
-      host,
-      appId,
-    },
-    frameworkContext,
-    skipAmplitudeMcp,
-  );
+  const integrationPrompt =
+    buildIntegrationPrompt(
+      config,
+      {
+        frameworkVersion: frameworkVersion || 'latest',
+        typescript: typeScriptDetected,
+        projectApiKey,
+        host,
+        appId,
+      },
+      frameworkContext,
+      skipAmplitudeMcp,
+    ) + buildInlineFeatureSection(session.additionalFeatureQueue);
 
   // Initialize and run agent
   const spinner = getUI().spinner();
@@ -611,6 +615,33 @@ async function pollForDataIngestion(
     'No events detected within the timeout window. ' +
       'Run your app to send events, then check your Amplitude dashboard.',
   );
+}
+
+/**
+ * Append per-feature instructions for any inline features the user opted into.
+ * Returns an empty string when no inline features are queued.
+ */
+function buildInlineFeatureSection(
+  queue: readonly AdditionalFeature[],
+): string {
+  const inline = queue.filter((f) => INLINE_FEATURES.has(f));
+  if (inline.length === 0) return '';
+
+  const items = inline
+    .map(
+      (f) =>
+        `### ${ADDITIONAL_FEATURE_LABELS[f]}\n${ADDITIONAL_FEATURE_PROMPTS[f]}`,
+    )
+    .join('\n\n');
+
+  return `
+
+ADDITIONAL FEATURES (configure as part of SDK initialization):
+
+The user has opted in to additional Amplitude features. Configure these as part of the SDK initialization step — in the same initAll() call where applicable — rather than as a separate task. Update the relevant TodoWrite task name to reflect what you're doing.
+
+${items}
+`;
 }
 
 /**

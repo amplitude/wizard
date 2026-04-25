@@ -130,6 +130,23 @@ export const ADDITIONAL_FEATURE_PROMPTS: Record<AdditionalFeature, string> = {
 After making changes, give a one-sentence summary of what was configured.`,
 };
 
+/**
+ * Features that the agent configures inline as part of SDK initialization.
+ * Their prompts are appended to the initial integration prompt and they are
+ * NOT drained by the stop hook or rendered as separate task items.
+ */
+export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.SessionReplay,
+]);
+
+/**
+ * Features that run as a separate "Set up X" task after the main agent run,
+ * drained one at a time via the stop hook and rendered as trailing task items.
+ */
+export const TRAILING_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.LLM,
+]);
+
 /** Outcome of the MCP server installation step */
 export const McpOutcome = {
   NoClients: 'no_clients',
