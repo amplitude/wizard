@@ -325,8 +325,11 @@ describe('TUI auth task: region determines OAuth zone', () => {
   test('waits for region before starting OAuth', async () => {
     let storedCallback: (() => void) | null = null;
 
+    // Capture only the FIRST subscribe call (the auth task waiting for
+    // region + introConcluded). bin.ts also subscribes for feature
+    // discovery on integration change — ignore that one in this test.
     (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
-      storedCallback = cb; // capture but do NOT call yet
+      if (!storedCallback) storedCallback = cb;
       return vi.fn();
     });
 

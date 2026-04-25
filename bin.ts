@@ -58,7 +58,7 @@ import chalk from 'chalk';
 const IS_WIZARD_DEV = process.env.AMPLITUDE_WIZARD_DEV === '1';
 
 import { readFileSync } from 'fs';
-import { resolve, dirname, join } from 'path';
+import { resolve, dirname } from 'path';
 import { z } from 'zod';
 
 const WIZARD_VERSION: string = (() => {
@@ -1519,93 +1519,30 @@ void yargs(hideBin(process.argv))
                 }
               }
 
-              // Feature discovery — deterministic scan of package.json deps
-              const { DiscoveredFeature } = await import(
-                './src/lib/wizard-session.js'
+              // Feature discovery — same helper that CI/agent uses, so the
+              // package and integration lists never drift between modes.
+              const { discoverFeatures } = await import(
+                './src/lib/feature-discovery.js'
               );
-              try {
-                const { readFileSync } = await import('fs');
-                const pkgPath = join(installDir, 'package.json');
-                const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
-                  dependencies?: Record<string, string>;
-                  devDependencies?: Record<string, string>;
-                };
-                const allDeps = {
-                  ...pkg.dependencies,
-                  ...pkg.devDependencies,
-                };
-                const depNames = Object.keys(allDeps);
-
-                if (
-                  depNames.some((d) =>
-                    ['stripe', '@stripe/stripe-js'].includes(d),
-                  )
-                ) {
-                  tui.store.addDiscoveredFeature(DiscoveredFeature.Stripe);
+              const runDiscovery = () => {
+                for (const f of discoverFeatures({
+                  installDir,
+                  integration: tui.store.session.integration,
+                })) {
+                  tui.store.addDiscoveredFeature(f);
                 }
+              };
+              runDiscovery();
 
-                // LLM SDK detection — sourced from Amplitude LLM analytics skill
-                // Gated by the wizard-llm-analytics feature flag.
-                const { isFlagEnabled } = await import(
-                  './src/lib/feature-flags.js'
-                );
-                const { FLAG_LLM_ANALYTICS } = await import(
-                  './src/lib/feature-flags.js'
-                );
-                if (isFlagEnabled(FLAG_LLM_ANALYTICS)) {
-                  const LLM_PACKAGES = [
-                    'openai',
-                    '@anthropic-ai/sdk',
-                    'ai',
-                    '@ai-sdk/openai',
-                    'langchain',
-                    '@langchain/openai',
-                    '@langchain/langgraph',
-                    '@google/generative-ai',
-                    '@google/genai',
-                    '@instructor-ai/instructor',
-                    '@mastra/core',
-                    'portkey-ai',
-                  ];
-                  if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
-                    tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
-                  }
-                }
-              } catch {
-                // No package.json or parse error — skip feature discovery
-              }
-
-              // Session Replay — offered for all browser-based frameworks,
-              // independent of package.json contents.
-              const BROWSER_REPLAY_INTEGRATIONS = new Set([
-                'nextjs',
-                'vue',
-                'react-router',
-                'javascript_web',
-              ]);
-
-              // Check Session Replay for auto-detected framework
-              if (
-                tui.store.session.integration &&
-                BROWSER_REPLAY_INTEGRATIONS.has(tui.store.session.integration)
-              ) {
-                tui.store.addDiscoveredFeature(DiscoveredFeature.SessionReplay);
-              }
-
-              // Re-check Session Replay when integration changes (handles manual selection)
+              // Re-run when integration changes (handles manual selection
+              // after auto-detection fails). Track last-seen to avoid the
+              // package.json scan firing on every store emit.
+              let lastIntegration = tui.store.session.integration;
               tui.store.subscribe(() => {
-                const session = tui.store.session;
-                if (
-                  session.integration &&
-                  BROWSER_REPLAY_INTEGRATIONS.has(session.integration) &&
-                  !session.discoveredFeatures.includes(
-                    DiscoveredFeature.SessionReplay,
-                  )
-                ) {
-                  tui.store.addDiscoveredFeature(
-                    DiscoveredFeature.SessionReplay,
-                  );
-                }
+                const integration = tui.store.session.integration;
+                if (integration === lastIntegration) return;
+                lastIntegration = integration;
+                runDiscovery();
               });
 
               // Signal detection is done — IntroScreen shows picker or results
