@@ -28,6 +28,16 @@ import { red } from './src/utils/logging';
 import { config as loadDotenv } from 'dotenv';
 loadDotenv();
 
+// Have to run this above the other imports because they are importing clack that
+// has the problematic imports.
+const NODE_VERSION_RANGE = '>=18.17.0';
+if (!satisfies(process.version, NODE_VERSION_RANGE)) {
+  red(
+    `Amplitude wizard requires Node.js ${NODE_VERSION_RANGE}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
+  );
+  process.exit(1);
+}
+
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import chalk from 'chalk';
@@ -87,17 +97,6 @@ import {
   mcpCommand,
   manifestCommand,
 } from './src/commands';
-
-const NODE_VERSION_RANGE = '>=18.17.0';
-
-// Have to run this above the other imports because they are importing clack that
-// has the problematic imports.
-if (!satisfies(process.version, NODE_VERSION_RANGE)) {
-  red(
-    `Amplitude wizard requires Node.js ${NODE_VERSION_RANGE}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
-  );
-  process.exit(1);
-}
 
 // ── Observability bootstrap ─────────────────────────────────────────
 // Initialize structured logging early so all code paths can use it.

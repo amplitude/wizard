@@ -24,7 +24,7 @@ export const WIZARD_VERSION: string = (() => {
       .parse(
         JSON.parse(
           readFileSync(
-            resolve(dirname(__filename), '..', '..', 'package.json'),
+            resolve(dirname(__filename), '..', '..', '..', 'package.json'),
             'utf-8',
           ),
         ),
