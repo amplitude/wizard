@@ -42,13 +42,12 @@ export class ScreenErrorBoundary extends Component<Props, State> {
         .then(({ createDiagnosticSnapshot }) => {
           const snapshot = createDiagnosticSnapshot(
             store,
-            (store as { version?: string }).version ?? 'dev',
+            store.version || 'dev',
           );
           const payload = {
             error: {
               name: error.name,
               message: error.message,
-              stack: error.stack,
               component_stack: errorInfo.componentStack ?? null,
             },
             snapshot,
