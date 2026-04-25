@@ -9,18 +9,36 @@
 import { sanitizeNestedClaudeEnv } from './src/lib/sanitize-claude-env';
 sanitizeNestedClaudeEnv();
 
-// Dev-mode marker: `pnpm dev` writes dist/.dev-mode after the initial build;
-// `pnpm build` wipes dist/ so the marker is absent for published / prod runs.
-// When present, set NODE_ENV=development so IS_DEV (src/lib/constants.ts)
-// picks the dev telemetry key. Must run before any import that reads NODE_ENV
-// at module-load time.
+// Default NODE_ENV based on installation source. Without this, React's CJS
+// entry (node_modules/react/index.js) falls through to react.development.js
+// whenever NODE_ENV is unset — about 10× larger and noticeably slower on Ink
+// mount. We want dev React only for actual development; everything else
+// (real npx invocations, global installs, local installs) should get the
+// minified production build.
+//
+// Resolution order (first match wins):
+//   1. NODE_ENV already set        → respected (CI, vitest, pnpm scripts, ops)
+//   2. dist/.dev-mode marker       → 'development' (pnpm dev writes it)
+//   3. __dirname inside node_modules → 'production' (npx, global, local install)
+//   4. Anything else                → 'development' (pnpm try, tsx, direct node)
+//
+// The path-based fallback means contributors don't have to remember to set
+// NODE_ENV in package.json scripts — running `node dist/bin.js` from the
+// source tree, `tsx bin.ts`, `pnpm try`, or `pnpm link --global` (the bin
+// realpaths back to the repo) all stay in development. Only published
+// tarballs flip to production.
+//
+// Must run before any import that reads NODE_ENV at module-load time.
 import { existsSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
-if (
-  process.env.NODE_ENV === undefined &&
-  existsSync(resolvePath(__dirname, '.dev-mode'))
-) {
-  process.env.NODE_ENV = 'development';
+import { resolve as resolvePath, sep as pathSep } from 'node:path';
+if (process.env.NODE_ENV === undefined) {
+  if (existsSync(resolvePath(__dirname, '.dev-mode'))) {
+    process.env.NODE_ENV = 'development';
+  } else if (__dirname.includes(`${pathSep}node_modules${pathSep}`)) {
+    process.env.NODE_ENV = 'production';
+  } else {
+    process.env.NODE_ENV = 'development';
+  }
 }
 
 import { satisfies } from 'semver';
