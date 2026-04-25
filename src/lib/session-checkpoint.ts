@@ -73,7 +73,7 @@ const CheckpointSchema = z
       ...rest,
       selectedProjectId: selectedProjectId ?? selectedWorkspaceId ?? null,
       selectedProjectName: selectedProjectName ?? selectedWorkspaceName ?? null,
-      selectedEnvName: rest.selectedEnvName ?? null,
+      selectedEnvName: rest.selectedEnvName ?? selectedProjectName ?? null,
     };
   });
 
