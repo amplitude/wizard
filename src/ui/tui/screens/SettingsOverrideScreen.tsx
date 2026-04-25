@@ -82,6 +82,7 @@ export const SettingsOverrideScreen = ({
         </Box>
 
         <ConfirmationInput
+          idPrefix="settings-override"
           message="Back up to .wizard-backup and continue?"
           confirmLabel="Backup & continue [Enter]"
           cancelLabel="Exit [Esc]"
