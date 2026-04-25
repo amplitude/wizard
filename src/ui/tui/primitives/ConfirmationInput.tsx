@@ -1,12 +1,13 @@
 /**
  * ConfirmationInput — Continue/cancel prompt.
- * Enter confirms, escape cancels. Up/down arrows toggle focus.
+ * Enter confirms the focused option, Escape cancels.
+ * Tab / Shift-Tab cycle between options (via Ink's focus manager).
+ * Up / Down arrows toggle focus, preserved for muscle memory.
  * Options stack vertically to match PickerMenu.
  */
 
-import { Box, Text } from 'ink';
+import { Box, Text, useFocus, useFocusManager } from 'ink';
 import { useScreenInput } from '../hooks/useScreenInput.js';
-import { useState } from 'react';
 import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
 
@@ -16,12 +17,42 @@ interface ConfirmationInputProps {
   onCancel: () => void;
   confirmLabel?: string;
   cancelLabel?: string;
+  /**
+   * Optional id prefix used for focusable children. Lets multiple
+   * ConfirmationInput instances coexist on the same screen and lets
+   * tests target a specific instance, e.g. `<idPrefix>-confirm`.
+   */
+  idPrefix?: string;
 }
 
-enum FocusTarget {
-  Continue = 'continue',
-  Cancel = 'cancel',
+interface OptionProps {
+  id: string;
+  label: string;
+  icon: string;
+  autoFocus?: boolean;
+  onSelect: () => void;
 }
+
+const Option = ({ id, label, icon, autoFocus, onSelect }: OptionProps) => {
+  const { isFocused } = useFocus({ id, autoFocus });
+
+  // Each focused option owns its own Enter handler. When unfocused the
+  // hook is inert (isActive=false) so we never double-fire onConfirm.
+  useScreenInput(
+    (_input, key) => {
+      if (key.return) {
+        onSelect();
+      }
+    },
+    { isActive: isFocused },
+  );
+
+  return (
+    <Text bold={isFocused} color={isFocused ? Colors.accent : Colors.muted}>
+      {isFocused ? icon : ' '} {label}
+    </Text>
+  );
+};
 
 export const ConfirmationInput = ({
   message,
@@ -29,47 +60,46 @@ export const ConfirmationInput = ({
   onCancel,
   confirmLabel = 'Continue [Enter]',
   cancelLabel = 'Cancel [Esc]',
+  idPrefix = 'confirmation-input',
 }: ConfirmationInputProps) => {
-  const [focused, setFocused] = useState<FocusTarget>(FocusTarget.Continue);
+  const { focusNext, focusPrevious } = useFocusManager();
 
+  // Parent owns Escape + arrow-key cycling. Tab / Shift-Tab is handled
+  // automatically by Ink's focus manager.
   useScreenInput((_input, key) => {
-    if (key.upArrow || key.downArrow) {
-      setFocused((f) =>
-        f === FocusTarget.Continue ? FocusTarget.Cancel : FocusTarget.Continue,
-      );
+    if (key.upArrow) {
+      focusPrevious();
+      return;
     }
-    if (key.return) {
-      if (focused === FocusTarget.Continue) {
-        onConfirm();
-      } else {
-        onCancel();
-      }
+    if (key.downArrow) {
+      focusNext();
+      return;
     }
     if (key.escape) {
       onCancel();
     }
   });
 
+  const confirmId = `${idPrefix}-confirm`;
+  const cancelId = `${idPrefix}-cancel`;
+
   return (
     <Box flexDirection="column">
       <PromptLabel message={message} />
       <Box flexDirection="column" marginTop={1} marginLeft={2}>
-        <Text
-          bold={focused === FocusTarget.Continue}
-          color={
-            focused === FocusTarget.Continue ? Colors.accent : Colors.muted
-          }
-        >
-          {focused === FocusTarget.Continue ? Icons.triangleSmallRight : ' '}{' '}
-          {confirmLabel}
-        </Text>
-        <Text
-          bold={focused === FocusTarget.Cancel}
-          color={focused === FocusTarget.Cancel ? Colors.accent : Colors.muted}
-        >
-          {focused === FocusTarget.Cancel ? Icons.triangleSmallRight : ' '}{' '}
-          {cancelLabel}
-        </Text>
+        <Option
+          id={confirmId}
+          label={confirmLabel}
+          icon={Icons.triangleSmallRight}
+          autoFocus
+          onSelect={onConfirm}
+        />
+        <Option
+          id={cancelId}
+          label={cancelLabel}
+          icon={Icons.triangleSmallRight}
+          onSelect={onCancel}
+        />
       </Box>
     </Box>
   );
