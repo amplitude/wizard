@@ -1,5 +1,43 @@
 # Changelog
 
+## [1.5.0](https://github.com/amplitude/wizard/compare/wizard-v1.4.3...wizard-v1.5.0) (2026-04-25)
+
+
+### Features
+
+* add direct signup via headless provisioning endpoint ([#165](https://github.com/amplitude/wizard/issues/165)) ([15cfb36](https://github.com/amplitude/wizard/commit/15cfb360be9ee87e7e3ae9f68f07418b04c0be52))
+* add Guides & Surveys opt-in for browser-based frameworks ([#236](https://github.com/amplitude/wizard/issues/236)) ([62aba2e](https://github.com/amplitude/wizard/commit/62aba2e98a66a28343add16070d7388d45f883f5))
+* add Session Replay opt-in for browser-based frameworks ([#206](https://github.com/amplitude/wizard/issues/206)) ([0dfd9a2](https://github.com/amplitude/wizard/commit/0dfd9a2894684e0651ac79f01fca10b9039dcfbe))
+* brand frameworks with colored glyphs + emoji at 3 peaks ([#196](https://github.com/amplitude/wizard/issues/196)) ([c52da7a](https://github.com/amplitude/wizard/commit/c52da7afcb5a3577bd7cfec08ff917adf6e4d0b0))
+* **cli:** add background update notifier ([#230](https://github.com/amplitude/wizard/issues/230)) ([7449b67](https://github.com/amplitude/wizard/commit/7449b679ea48220468da84aa4de3d67209fd4afd))
+* detect dev server port for data-ingestion hint ([#193](https://github.com/amplitude/wizard/issues/193)) ([6f28ed3](https://github.com/amplitude/wizard/commit/6f28ed34e027dc97e72337aabe3787225397110f))
+* guide users to pit of success after env-var write ([#202](https://github.com/amplitude/wizard/issues/202)) ([82e73b2](https://github.com/amplitude/wizard/commit/82e73b22e82c968bda79b16a8cd9ded0d16921cb))
+* ship Sentry Logs, performance spans, and richer agent events ([#216](https://github.com/amplitude/wizard/issues/216)) ([8dcbbfa](https://github.com/amplitude/wizard/commit/8dcbbfab30b4088c33e500f756248f049a897188))
+* surface LLM retry state during agent runs ([#205](https://github.com/amplitude/wizard/issues/205)) ([4c43a2c](https://github.com/amplitude/wizard/commit/4c43a2c8aa66ba963af194b02dee19dd6a8735a7))
+* swap framework glyphs to brand emoji ([#200](https://github.com/amplitude/wizard/issues/200)) ([de36988](https://github.com/amplitude/wizard/commit/de36988c430ba4151d053d3de95364e9a6059c04))
+* **tui:** add /debug slash command ([#232](https://github.com/amplitude/wizard/issues/232)) ([21e02cc](https://github.com/amplitude/wizard/commit/21e02ccaa02c220c8ff911a028b60c934a2bd03c))
+* **tui:** graceful Ctrl+C with save-session banner and confirm-to-exit ([#226](https://github.com/amplitude/wizard/issues/226)) ([ee66f71](https://github.com/amplitude/wizard/commit/ee66f71c4b04c356987789ed12740ed990c25369))
+* **tui:** per-screen KeyHintBar registration ([#240](https://github.com/amplitude/wizard/issues/240)) ([448604d](https://github.com/amplitude/wizard/commit/448604d9dea14ade0b66786eae3d0216ab1b43aa))
+* **tui:** redacted diagnostic dump on TUI crash ([#238](https://github.com/amplitude/wizard/issues/238)) ([f84c7f3](https://github.com/amplitude/wizard/commit/f84c7f36f67ca1cbcaf38659eed52f0f6061d5e4))
+* unlock three underused library features (prompt caching, Static scrollback, strict CLI) ([#227](https://github.com/amplitude/wizard/issues/227)) ([6bda15c](https://github.com/amplitude/wizard/commit/6bda15c9aa908f24ebe0b4ec04b00bf340afe047))
+
+
+### Bug Fixes
+
+* accept event_name field in .amplitude-events.json ([#201](https://github.com/amplitude/wizard/issues/201)) ([d44778a](https://github.com/amplitude/wizard/commit/d44778a566903c8d097f2bc2011f287fe2a623b5))
+* cleanup single-use integration skills on success ([#210](https://github.com/amplitude/wizard/issues/210)) ([fa38462](https://github.com/amplitude/wizard/commit/fa38462dca9cf09cadef9e7801cf6a34fed5ce15))
+* **cli:** honor ExitCode in agent mode instead of forcing exit 0 ([#222](https://github.com/amplitude/wizard/issues/222)) ([0e1462c](https://github.com/amplitude/wizard/commit/0e1462c3249cf5b8bce0df781db038f68ac80e22))
+* **cli:** honor NO_COLOR, FORCE_COLOR, and non-TTY for chalk output ([#224](https://github.com/amplitude/wizard/issues/224)) ([f54812c](https://github.com/amplitude/wizard/commit/f54812c352fea73840f0127c50a29ba3d9445a0d))
+* **cli:** replace shell-interpolated execSync with execFileSync for keychain ops ([#223](https://github.com/amplitude/wizard/issues/223)) ([9795956](https://github.com/amplitude/wizard/commit/9795956dd11cb9137e3c5e59a84677da10131e7d))
+* **cli:** route LoggingUI errors and warnings to stderr ([#221](https://github.com/amplitude/wizard/issues/221)) ([6d90958](https://github.com/amplitude/wizard/commit/6d909587b8fea5b028ff098d10903154ef0fc63d))
+* **nextjs:** remove unnecessary 15.3.0 minimum version gate ([#228](https://github.com/amplitude/wizard/issues/228)) ([d43a679](https://github.com/amplitude/wizard/commit/d43a679c61119f7f45fd493341f479c8a65b6c56))
+* preserve Run screen elapsed timer across tab switches ([#195](https://github.com/amplitude/wizard/issues/195)) ([f7e890d](https://github.com/amplitude/wizard/commit/f7e890dfdbbba7539af6b8868812cdcc413302b1))
+* remove shell completions that break sourcing of shell rc ([#194](https://github.com/amplitude/wizard/issues/194)) ([c48a619](https://github.com/amplitude/wizard/commit/c48a619589cd774b7d62b5d418a3acb6dd9103bf))
+* tighten event plan description format ([#213](https://github.com/amplitude/wizard/issues/213)) ([6fc72a0](https://github.com/amplitude/wizard/commit/6fc72a0c98d69e50c27dd217a7db775d409eac02))
+* **tui:** clear retry banner on first message of recovery attempt ([#233](https://github.com/amplitude/wizard/issues/233)) ([ff9c5ad](https://github.com/amplitude/wizard/commit/ff9c5ad03c08c8dd4de0e27e4a487dd517c5e1f6))
+* **tui:** honest framework detection + checkpoint self-heal + intro polish ([#229](https://github.com/amplitude/wizard/issues/229)) ([7b6af9b](https://github.com/amplitude/wizard/commit/7b6af9b5f8ccde15496fb60536f13ea2fc0678a9))
+* **tui:** promote Colors.muted to WCAG AA contrast on dark background ([#225](https://github.com/amplitude/wizard/issues/225)) ([683230f](https://github.com/amplitude/wizard/commit/683230ff2ff418b2cdca79f59428eb496643b007))
+
 ## [1.4.3](https://github.com/amplitude/wizard/compare/wizard-v1.4.2...wizard-v1.4.3) (2026-04-21)
 
 
