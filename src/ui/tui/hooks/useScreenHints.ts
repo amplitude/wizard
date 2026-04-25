@@ -42,12 +42,16 @@ export function useScreenHints(hints: readonly KeyHint[] | undefined): void {
   }, [hints]);
 }
 
+const subscribeToScreenHints = (onChange: () => void) =>
+  $screenHints.listen(onChange);
+const getScreenHintsSnapshot = () => $screenHints.get();
+
 /** Subscribe to the current screen's hint list (used by ConsoleView). */
 export function useScreenHintsValue(): readonly KeyHint[] {
   return useSyncExternalStore(
-    (onChange) => $screenHints.subscribe(onChange),
-    () => $screenHints.get(),
-    () => $screenHints.get(),
+    subscribeToScreenHints,
+    getScreenHintsSnapshot,
+    getScreenHintsSnapshot,
   );
 }
 

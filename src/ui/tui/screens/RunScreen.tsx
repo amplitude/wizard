@@ -18,11 +18,6 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { WizardStore } from '../store.js';
-
-const RUN_HINTS: readonly KeyHint[] = Object.freeze([
-  { key: '←→', label: 'Tabs' },
-  { key: 'Ctrl+C', label: 'Cancel' },
-]);
 import {
   TabContainer,
   ProgressList,
@@ -43,6 +38,11 @@ import {
   ADDITIONAL_FEATURE_LABELS,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+
+const RUN_HINTS: readonly KeyHint[] = Object.freeze([
+  { key: '←→', label: 'Tabs' },
+  { key: 'Ctrl+C', label: 'Cancel' },
+]);
 
 const LOG_FILE = '/tmp/amplitude-wizard.log';
 
