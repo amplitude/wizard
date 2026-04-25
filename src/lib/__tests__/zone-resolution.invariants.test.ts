@@ -58,6 +58,13 @@ const ALLOWED_DIRECT_READS = new Set<string>([
   'src/lib/credential-resolution.ts',
   // bin.ts: pre-OAuth RegionSelect gate checks + a verbose-log display.
   'bin.ts',
+  // src/commands/default.ts: extracted from bin.ts during the per-command
+  // CommandModule split. Contains the same pre-OAuth RegionSelect gate
+  // checks and verbose-log display (now in the $0 handler).
+  'src/commands/default.ts',
+  // src/commands/helpers.ts: prose comment referencing `session.region`
+  // in resolveNonInteractiveCredentials; no runtime read.
+  'src/commands/helpers.ts',
 ]);
 
 /** Zone-fallback against session.region — e.g. `session.region ?? 'us'`. */
