@@ -386,6 +386,7 @@ describe('WizardStore', () => {
       store.enableFeature(AdditionalFeature.LLM);
       expect(wizardCaptureMock).toHaveBeenCalledWith('feature enabled', {
         feature: AdditionalFeature.LLM,
+        source: 'picklist',
       });
     });
 
