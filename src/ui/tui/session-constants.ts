@@ -20,13 +20,33 @@ export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 
 export const AdditionalFeature = {
   LLM: 'llm',
+  SessionReplay: 'session_replay',
 } as const;
 export type AdditionalFeature =
   (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
 
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: 'LLM analytics',
+  [AdditionalFeature.SessionReplay]: 'Session Replay',
 };
+
+export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.SessionReplay,
+]);
+
+export const TRAILING_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.LLM,
+]);
+
+/**
+ * Discovered features that map to an opt-in AdditionalFeature.
+ * Stripe is discovered but not opt-in — it's a passive doc link.
+ * Derived from AdditionalFeature values, which by convention match the
+ * corresponding DiscoveredFeature values.
+ */
+export const OPT_IN_DISCOVERED_FEATURES: ReadonlySet<string> = new Set(
+  Object.values(AdditionalFeature),
+);
 
 export const McpOutcome = {
   NoClients: 'no_clients',

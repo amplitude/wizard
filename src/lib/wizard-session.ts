@@ -99,6 +99,7 @@ export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 export const DiscoveredFeature = {
   Stripe: 'stripe',
   LLM: 'llm',
+  SessionReplay: 'session_replay',
 } as const;
 export type DiscoveredFeature =
   (typeof DiscoveredFeature)[keyof typeof DiscoveredFeature];
@@ -106,6 +107,7 @@ export type DiscoveredFeature =
 /** Additional features the agent can integrate after the main setup */
 export const AdditionalFeature = {
   LLM: 'llm',
+  SessionReplay: 'session_replay',
 } as const;
 export type AdditionalFeature =
   (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
@@ -113,12 +115,45 @@ export type AdditionalFeature =
 /** Human-readable labels for additional features (used in TUI progress) */
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: 'LLM analytics',
+  [AdditionalFeature.SessionReplay]: 'Session Replay',
 };
 
 /** Agent prompts for each additional feature, injected via the stop hook */
 export const ADDITIONAL_FEATURE_PROMPTS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: `Now integrate LLM analytics with Amplitude. Use the Amplitude MCP server to find the appropriate LLM analytics skill, install it, and follow its workflow. Amplitude basics are already installed. Update the setup report markdown file when complete with additions from this task. `,
+  [AdditionalFeature.SessionReplay]: `The user wants to enable Amplitude Session Replay. Please configure it now:
+
+1. If the project uses @amplitude/unified (preferred), add a sessionReplay block to the existing initAll() call: sessionReplay: { sampleRate: 1 }.
+2. If the project uses @amplitude/analytics-browser standalone, install @amplitude/plugin-session-replay-browser and register it as a plugin with sampleRate: 1.
+3. Do not add any comments about sample rates or production tuning.
+
+After making changes, give a one-sentence summary of what was configured.`,
 };
+
+/**
+ * Features that the agent configures inline as part of SDK initialization.
+ * Their prompts are appended to the initial integration prompt and they are
+ * NOT drained by the stop hook or rendered as separate task items.
+ */
+export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.SessionReplay,
+]);
+
+/**
+ * Features that run as a separate "Set up X" task after the main agent run,
+ * drained one at a time via the stop hook and rendered as trailing task items.
+ */
+export const TRAILING_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
+  AdditionalFeature.LLM,
+]);
+
+/**
+ * Discovered features that map to an opt-in AdditionalFeature.
+ * Stripe is discovered but not opt-in — it's a passive doc link.
+ */
+export const OPT_IN_DISCOVERED_FEATURES: ReadonlySet<string> = new Set(
+  Object.values(AdditionalFeature),
+);
 
 /** Outcome of the MCP server installation step */
 export const McpOutcome = {
@@ -355,6 +390,7 @@ export interface WizardSession {
   // Feature discovery
   discoveredFeatures: DiscoveredFeature[];
   llmOptIn: boolean;
+  sessionReplayOptIn: boolean;
 
   /** True once the user has clicked Continue on the IntroScreen. */
   introConcluded: boolean;
@@ -374,6 +410,15 @@ export interface WizardSession {
 
   // Additional features queue (drained via stop hook after main integration)
   additionalFeatureQueue: AdditionalFeature[];
+
+  /** The feature currently being processed by the stop hook, if any. */
+  additionalFeatureCurrent: AdditionalFeature | null;
+
+  /** Features the stop hook has finished processing, in order. */
+  additionalFeatureCompleted: AdditionalFeature[];
+
+  /** True once the user has confirmed (or skipped) the FeatureOptIn picklist. */
+  optInFeaturesComplete: boolean;
 
   // Resolved framework config (set after integration is known)
   frameworkConfig: FrameworkConfig | null;
@@ -525,6 +570,7 @@ export function buildSession(args: {
     runStartedAt: null,
     discoveredFeatures: [],
     llmOptIn: false,
+    sessionReplayOptIn: false,
     mcpComplete: false,
     mcpOutcome: null,
     mcpInstalledClients: [],
@@ -548,6 +594,9 @@ export function buildSession(args: {
     outroData: null,
     introConcluded: false,
     additionalFeatureQueue: [],
+    additionalFeatureCurrent: null,
+    additionalFeatureCompleted: [],
+    optInFeaturesComplete: false,
     frameworkConfig: null,
     amplitudePreDetected: false,
     amplitudePreDetectedChoicePending: false,

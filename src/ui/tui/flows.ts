@@ -10,7 +10,7 @@
  */
 
 import type { WizardSession } from '../../lib/wizard-session.js';
-import { RunPhase } from './session-constants.js';
+import { OPT_IN_DISCOVERED_FEATURES, RunPhase } from './session-constants.js';
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
@@ -18,6 +18,7 @@ import { RunPhase } from './session-constants.js';
 export enum Screen {
   Intro = 'intro',
   Setup = 'setup',
+  FeatureOptIn = 'feature-opt-in',
   Auth = 'auth',
   CreateProject = 'create-project',
   RegionSelect = 'region-select',
@@ -131,6 +132,19 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.Setup,
       show: (s) => needsSetup(s) && s.activationLevel !== 'full',
       isComplete: (s) => !needsSetup(s),
+    },
+    // 3b'. Feature opt-in picklist — shown only in interactive TUI mode
+    //      when at least one opt-in feature was discovered. Auto-confirmed
+    //      in CI/agent modes (skipped via the show predicate).
+    {
+      screen: Screen.FeatureOptIn,
+      show: (s) =>
+        s.discoveredFeatures.some((f) => OPT_IN_DISCOVERED_FEATURES.has(f)) &&
+        !s.optInFeaturesComplete &&
+        !s.ci &&
+        !s.agent &&
+        s.activationLevel !== 'full',
+      isComplete: (s) => s.optInFeaturesComplete || s.ci || s.agent,
     },
     // 3c. Agent run — skipped for full users (already instrumented)
     {

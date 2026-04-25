@@ -490,9 +490,13 @@ WizardSession
 │   dataIngestionConfirmed
 │
 ├─ Feature discovery
-│   discoveredFeatures: DiscoveredFeature[] ('stripe' | 'llm')
+│   discoveredFeatures: DiscoveredFeature[] ('stripe' | 'llm' | 'session_replay')
 │   llmOptIn: boolean
-│   additionalFeatureQueue: AdditionalFeature[] ('llm')
+│   sessionReplayOptIn: boolean
+│   additionalFeatureQueue: AdditionalFeature[] ('llm' | 'session_replay')
+│   additionalFeatureCurrent: AdditionalFeature | null
+│   additionalFeatureCompleted: AdditionalFeature[]
+│   optInFeaturesComplete: boolean
 │
 ├─ Post-agent state
 │   mcpComplete, mcpOutcome, mcpInstalledClients[]
@@ -969,7 +973,8 @@ npx @amplitude/wizard --ci --install-dir . --api-key <KEY> --project-id 12345
 | **DataSetupScreen** | `screens/DataSetupScreen.tsx` | `projectHasData` | `activationLevel`, `snippetConfigured` | Checks activation via API. Routes: none→setup, partial→options, full→skip |
 | **ActivationOptionsScreen** | `screens/ActivationOptionsScreen.tsx` | `snippetConfigured` | `outroData` | Help test locally, debug, docs, or exit |
 | **SetupScreen** | `screens/SetupScreen.tsx` | Framework questions | `frameworkContext[key]` | Auto-detects answers, shows picker for unresolved questions |
-| **RunScreen** | `screens/RunScreen.tsx` | `tasks`, `eventPlan`, `statusMessages`, `discoveredFeatures` | `requestedTab` (clear) | Observational: 3–4 tabs (Status, Event plan (conditional), All logs, Snake). Shows ProgressList + TipsCard |
+| **FeatureOptInScreen** | `screens/FeatureOptInScreen.tsx` | `discoveredFeatures` | `additionalFeatureQueue`, `optInFeaturesComplete` | Multi-select picklist (all on by default) for opt-in features (LLM, Session Replay). Skipped in CI/agent (auto-confirmed) and when nothing was discovered |
+| **RunScreen** | `screens/RunScreen.tsx` | `tasks`, `eventPlan`, `statusMessages`, `discoveredFeatures`, `additionalFeatureQueue`, `additionalFeatureCurrent`, `additionalFeatureCompleted` | `requestedTab` (clear) | Observational: 3–4 tabs (Status, Event plan (conditional), All logs, Snake). Shows ProgressList including queued additional features as task items |
 | **McpScreen** | `screens/McpScreen.tsx` | `runPhase`, `amplitudePreDetected` | `mcpComplete`, `mcpOutcome`, `mcpInstalledClients` | Detect editors → confirm → pick → install. Also handles pre-detected choice |
 | **DataIngestionCheckScreen** | `screens/DataIngestionCheckScreen.tsx` | `region`, org/project IDs | `dataIngestionConfirmed` | Polls activation API every 30s. Exit with q/Esc |
 | **ChecklistScreen** | `screens/ChecklistScreen.tsx` | `checklistChartComplete`, `checklistDashboardComplete` | `checklistComplete` | First chart → first dashboard. Dashboard locked until chart done |

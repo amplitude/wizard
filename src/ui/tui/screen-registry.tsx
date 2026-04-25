@@ -15,6 +15,7 @@ import { CreateProjectScreen } from './screens/CreateProjectScreen.js';
 import { RegionSelectScreen } from './screens/RegionSelectScreen.js';
 import { DataSetupScreen } from './screens/DataSetupScreen.js';
 import { ActivationOptionsScreen } from './screens/ActivationOptionsScreen.js';
+import { FeatureOptInScreen } from './screens/FeatureOptInScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
 import { DataIngestionCheckScreen } from './screens/DataIngestionCheckScreen.js';
@@ -85,6 +86,7 @@ export function createScreens(
     [Screen.RegionSelect]: <RegionSelectScreen store={store} />,
     [Screen.DataSetup]: <DataSetupScreen store={store} />,
     [Screen.ActivationOptions]: <ActivationOptionsScreen store={store} />,
+    [Screen.FeatureOptIn]: <FeatureOptInScreen store={store} />,
     [Screen.Options]: null,
     [Screen.Run]: <RunScreen store={store} />,
     [Screen.Mcp]: <McpScreen store={store} installer={services.mcpInstaller} />,

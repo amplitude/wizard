@@ -18,6 +18,7 @@ import {
 import {
   type AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
+  TRAILING_FEATURES,
   type RetryState,
 } from './wizard-session';
 import { registerCleanup } from '../utils/wizard-abort';
@@ -231,16 +232,28 @@ export type AgentConfig = {
  *
  * If `isAuthError()` returns true, all phases are skipped and stop is
  * allowed immediately — the agent cannot respond when auth has failed.
+ *
+ * `progress` hooks let the TUI render queued features as task items:
+ * `onFeatureStart` fires when a feature is dequeued; `onFeatureComplete`
+ * fires when the next stop signal arrives (i.e. the agent finished it).
  */
 export function createStopHook(
-  featureQueue: readonly AdditionalFeature[],
+  getFeatureQueue: () => readonly AdditionalFeature[],
   isAuthError: () => boolean = () => false,
+  progress?: {
+    onFeatureStart?: (feature: AdditionalFeature) => void;
+    onFeatureComplete?: (feature: AdditionalFeature) => void;
+  },
 ): HookCallback {
   let featureIndex = 0;
   let remarkRequested = false;
+  let activeFeature: AdditionalFeature | null = null;
 
   return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const stop_hook_active = input.stop_hook_active as boolean;
+    const featureQueue = getFeatureQueue().filter((f) =>
+      TRAILING_FEATURES.has(f),
+    );
     logToFile('Stop hook triggered', {
       stop_hook_active,
       featureIndex,
@@ -255,10 +268,19 @@ export function createStopHook(
       return Promise.resolve({});
     }
 
+    // The previous feature (if any) just finished — mark it complete before
+    // dequeuing the next one or moving on to the remark phase.
+    if (activeFeature) {
+      progress?.onFeatureComplete?.(activeFeature);
+      activeFeature = null;
+    }
+
     // Phase 1: drain feature queue
     if (featureIndex < featureQueue.length) {
       const feature = featureQueue[featureIndex++];
       const prompt = ADDITIONAL_FEATURE_PROMPTS[feature];
+      activeFeature = feature;
+      progress?.onFeatureStart?.(feature);
       logToFile(`Stop hook: injecting feature prompt for ${feature}`);
       return Promise.resolve({ decision: 'block', reason: prompt });
     }
@@ -1011,7 +1033,9 @@ export async function runAgent(
     spinnerMessage?: string;
     successMessage?: string;
     errorMessage?: string;
-    additionalFeatureQueue?: readonly AdditionalFeature[];
+    additionalFeatureQueue?: () => readonly AdditionalFeature[];
+    onFeatureStart?: (feature: AdditionalFeature) => void;
+    onFeatureComplete?: (feature: AdditionalFeature) => void;
   },
   middleware?: {
     onMessage(message: SDKMessage): void;
@@ -1379,8 +1403,12 @@ export async function runAgent(
             },
             hooks: buildHooksConfig({
               Stop: createStopHook(
-                config?.additionalFeatureQueue ?? [],
+                config?.additionalFeatureQueue ?? (() => []),
                 () => authErrorDetected,
+                {
+                  onFeatureStart: config?.onFeatureStart,
+                  onFeatureComplete: config?.onFeatureComplete,
+                },
               ),
             }),
             // Allow aborting a stalled query so we can retry cleanly

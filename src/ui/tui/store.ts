@@ -25,6 +25,7 @@ import { resolveZone } from '../../lib/zone-resolution.js';
 import {
   AdditionalFeature,
   McpOutcome,
+  OPT_IN_DISCOVERED_FEATURES,
   SlackOutcome,
   RunPhase,
 } from './session-constants.js';
@@ -713,12 +714,70 @@ export class WizardStore {
   }
 
   /**
+   * Confirm the FeatureOptIn picklist. Enqueues each selected feature
+   * via enableFeature() and marks the screen complete so the flow advances.
+   *
+   * `source` distinguishes interactive picklist confirms from the
+   * non-interactive auto-enable paths (CI, agent mode) so funnels stay
+   * separable.
+   */
+  confirmFeatureOptIns(
+    selected: AdditionalFeature[],
+    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
+  ): void {
+    const offered = this.session.discoveredFeatures.filter(
+      (f): f is AdditionalFeature => OPT_IN_DISCOVERED_FEATURES.has(f),
+    );
+    const deselected = offered.filter((f) => !selected.includes(f));
+    analytics.wizardCapture('feature opt-in confirmed', {
+      offered,
+      selected,
+      deselected,
+      source,
+    });
+    for (const feature of selected) {
+      this.enableFeature(feature, source);
+    }
+    this.$session.setKey('optInFeaturesComplete', true);
+    this.emitChange();
+  }
+
+  /**
+   * Set the additional feature currently being processed by the stop hook.
+   * Used by the Run screen to render it as an in-progress task.
+   */
+  setCurrentFeature(feature: AdditionalFeature | null): void {
+    this.$session.setKey('additionalFeatureCurrent', feature);
+    this.emitChange();
+  }
+
+  /**
+   * Mark a feature as completed by the stop hook (clears `current`).
+   * Used by the Run screen to render it as a done task.
+   */
+  markFeatureComplete(feature: AdditionalFeature): void {
+    if (!this.session.additionalFeatureCompleted.includes(feature)) {
+      this.$session.setKey('additionalFeatureCompleted', [
+        ...this.session.additionalFeatureCompleted,
+        feature,
+      ]);
+    }
+    if (this.session.additionalFeatureCurrent === feature) {
+      this.$session.setKey('additionalFeatureCurrent', null);
+    }
+    this.emitChange();
+  }
+
+  /**
    * Enable an additional feature: enqueue it for the stop hook
    * and set any feature-specific session flags.
    * Respects Amplitude Experiment feature flags — if the corresponding
    * flag is off the feature is silently skipped.
    */
-  enableFeature(feature: AdditionalFeature): void {
+  enableFeature(
+    feature: AdditionalFeature,
+    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
+  ): void {
     // Gate LLM analytics behind the wizard-llm-analytics feature flag
     if (feature === AdditionalFeature.LLM) {
       if (!analytics.isFeatureFlagEnabled(FLAG_LLM_ANALYTICS)) {
@@ -736,7 +795,10 @@ export class WizardStore {
     if (feature === AdditionalFeature.LLM) {
       this.$session.setKey('llmOptIn', true);
     }
-    analytics.wizardCapture('feature enabled', { feature });
+    if (feature === AdditionalFeature.SessionReplay) {
+      this.$session.setKey('sessionReplayOptIn', true);
+    }
+    analytics.wizardCapture('feature enabled', { feature, source });
     this.emitChange();
   }
 

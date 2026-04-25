@@ -101,9 +101,14 @@ flowchart TD
     ACTIVATION_OPTIONS -->|exit| OUTRO
 
     SETUP_Q{Unresolved setup questions?}
-    SETUP_Q -->|no| RUN
+    SETUP_Q -->|no| FEATURE_OPTIN
     SETUP_Q -->|yes| SETUP["SetupScreen<br/>(per-framework questions)"]
-    SETUP --> RUN
+    SETUP --> FEATURE_OPTIN
+
+    FEATURE_OPTIN{Opt-in features discovered?}
+    FEATURE_OPTIN -->|none, or CI/agent mode| RUN
+    FEATURE_OPTIN -->|one or more| OPTIN_SCREEN["FeatureOptInScreen<br/>(multi-select picklist · all on by default · ESC skips)"]
+    OPTIN_SCREEN --> RUN
 
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
 
@@ -111,10 +116,10 @@ flowchart TD
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
         AGENT --> SDK_INSTALL["1. Install SDK + add initialization code"]
         SDK_INSTALL --> INSTRUMENT["2. Instrument events from approved plan"]
-        INSTRUMENT --> FEATURES{Features discovered?}
-        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
-        FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
-        FEATURES -->|none| OUTCOME
+        INSTRUMENT --> ADDITIONAL["3. Drain additional feature queue<br/>(LLM, Session Replay shown as tasks)"]
+        ADDITIONAL --> FEATURES{Stripe detected?}
+        FEATURES -->|yes| STRIPE_TIP["Show Stripe doc-link tip"] --> OUTCOME
+        FEATURES -->|no| OUTCOME
         AGENT --> OUTCOME{Outcome?}
         OUTCOME -->|success| POST["Upload env vars to hosting"]
         OUTCOME -->|error| ERR["Set error state"]

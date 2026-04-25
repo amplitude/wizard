@@ -13,6 +13,8 @@ import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
 import { getVersionCheckInfo } from './lib/version-check';
+import { initFeatureFlags } from './lib/feature-flags';
+import { autoEnableOptInFeatures } from './lib/feature-discovery';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -34,7 +36,19 @@ type Args = {
   region?: 'us' | 'eu';
 };
 
-export async function runWizard(argv: Args, session?: WizardSession) {
+export async function runWizard(
+  argv: Args,
+  session?: WizardSession,
+  getAdditionalFeatureQueue?: () => readonly import('./lib/wizard-session').AdditionalFeature[],
+  featureProgress?: {
+    onFeatureStart?: (
+      feature: import('./lib/wizard-session').AdditionalFeature,
+    ) => void;
+    onFeatureComplete?: (
+      feature: import('./lib/wizard-session').AdditionalFeature,
+    ) => void;
+  },
+) {
   const finalArgs = {
     ...argv,
     ...readEnvironment(),
@@ -90,6 +104,16 @@ export async function runWizard(argv: Args, session?: WizardSession) {
     signup: session.signup ?? false,
   });
 
+  // Non-interactive modes (CI / agent) skip the FeatureOptIn picklist, so
+  // auto-enable every discovered opt-in feature here. The TUI flow handles
+  // its own discovery + picklist confirmation in bin.ts.
+  if ((session.ci || session.agent) && !session.optInFeaturesComplete) {
+    await initFeatureFlags().catch(() => {
+      // Flag init failure is non-fatal — LLM gate just stays off
+    });
+    autoEnableOptInFeatures(session, session.agent ? 'auto-agent' : 'auto-ci');
+  }
+
   const config = FRAMEWORK_REGISTRY[integration];
   session.frameworkConfig = config;
 
@@ -123,7 +147,12 @@ export async function runWizard(argv: Args, session?: WizardSession) {
   let retry = true;
   while (retry) {
     try {
-      await runAgentWizard(config, session);
+      await runAgentWizard(
+        config,
+        session,
+        getAdditionalFeatureQueue,
+        featureProgress,
+      );
       retry = false;
     } catch (error) {
       const errorMessage =

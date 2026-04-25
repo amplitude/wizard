@@ -237,6 +237,7 @@ describe('CI mode validation', () => {
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
       expect.anything(),
+      expect.any(Function),
     );
   });
 
@@ -260,6 +261,7 @@ describe('CI mode validation', () => {
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ apiKey: 'phx_test_key' }),
       expect.objectContaining({ apiKey: 'phx_test_key' }),
+      expect.any(Function),
     );
   });
 
@@ -273,6 +275,8 @@ describe('CI mode validation', () => {
     expect(mockRunWizard).toHaveBeenCalledWith(
       expect.objectContaining({ ci: false }),
       expect.anything(),
+      expect.any(Function),
+      expect.any(Object),
     );
   });
 });
@@ -321,8 +325,11 @@ describe('TUI auth task: region determines OAuth zone', () => {
   test('waits for region before starting OAuth', async () => {
     let storedCallback: (() => void) | null = null;
 
+    // Capture only the FIRST subscribe call (the auth task waiting for
+    // region + introConcluded). bin.ts also subscribes for feature
+    // discovery on integration change — ignore that one in this test.
     (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
-      storedCallback = cb; // capture but do NOT call yet
+      if (!storedCallback) storedCallback = cb;
       return vi.fn();
     });
 
@@ -892,6 +899,7 @@ describe('--email and --full-name flags', () => {
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
       }),
+      expect.any(Function),
     );
   });
 
