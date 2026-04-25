@@ -10,6 +10,7 @@ import {
 import {
   runAgent,
   createStopHook,
+  createPreCompactHook,
   wizardCanUseTool,
   buildWizardMetadata,
   isSkillInstallCommand,
@@ -1212,5 +1213,51 @@ describe('parseEventPlanContent', () => {
       JSON.stringify([{ name: 'a', description: 'b', file_path: 'x.ts' }]),
     );
     expect(out).toEqual([{ name: 'a', description: 'b' }]);
+  });
+});
+
+describe('createPreCompactHook', () => {
+  const signal = new AbortController().signal;
+
+  it('invokes the handler with normalized trigger and resolves to {}', async () => {
+    const handler = vi.fn();
+    const hook = createPreCompactHook(handler);
+
+    const out = await hook({ trigger: 'auto' }, undefined, { signal });
+
+    expect(handler).toHaveBeenCalledWith({ trigger: 'auto' });
+    expect(out).toEqual({});
+  });
+
+  it('forwards manual trigger verbatim', async () => {
+    const handler = vi.fn();
+    const hook = createPreCompactHook(handler);
+
+    await hook({ trigger: 'manual' }, undefined, { signal });
+
+    expect(handler).toHaveBeenCalledWith({ trigger: 'manual' });
+  });
+
+  it('defaults to "auto" when trigger is missing or unrecognized', async () => {
+    const handler = vi.fn();
+    const hook = createPreCompactHook(handler);
+
+    await hook({}, undefined, { signal });
+    await hook({ trigger: 'something-else' }, undefined, { signal });
+
+    expect(handler).toHaveBeenNthCalledWith(1, { trigger: 'auto' });
+    expect(handler).toHaveBeenNthCalledWith(2, { trigger: 'auto' });
+  });
+
+  it('swallows handler errors so a throw cannot abort compaction', async () => {
+    const handler = vi.fn(() => {
+      throw new Error('boom');
+    });
+    const hook = createPreCompactHook(handler);
+
+    await expect(
+      hook({ trigger: 'auto' }, undefined, { signal }),
+    ).resolves.toEqual({});
+    expect(handler).toHaveBeenCalledOnce();
   });
 });
