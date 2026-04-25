@@ -2102,6 +2102,298 @@ void yargs(hideBin(process.argv))
     },
   )
   .command(
+    'plan',
+    'Plan an Amplitude setup without making any changes (emits a plan + planId)',
+    (yargs) => {
+      return yargs.options({
+        'install-dir': {
+          describe: 'project directory to plan against',
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        const installDir = argv['install-dir'] ?? process.cwd();
+        const { resolveMode } = await import('./src/lib/mode-config.js');
+        const { jsonOutput } = resolveMode({
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+          // `plan` never writes — opt out of the agent-implies-writes back-compat.
+          requireExplicitWrites: true,
+          isTTY: Boolean(process.stdout.isTTY),
+        });
+        try {
+          const { runPlan } = await import('./src/lib/agent-ops.js');
+          const { plan, detected } = await runPlan(installDir);
+
+          if (jsonOutput) {
+            process.stdout.write(
+              JSON.stringify({
+                v: 1,
+                '@timestamp': new Date().toISOString(),
+                type: 'plan',
+                message: detected
+                  ? `plan ready: ${plan.frameworkName} (${plan.framework})`
+                  : 'plan ready: no framework detected',
+                data: {
+                  event: 'plan',
+                  planId: plan.planId,
+                  framework: plan.framework,
+                  frameworkName: plan.frameworkName,
+                  sdk: plan.sdk,
+                  events: plan.events,
+                  fileChanges: plan.fileChanges,
+                  requiresApproval: plan.requiresApproval,
+                  resumeFlags: ['apply', '--plan-id', plan.planId, '--yes'],
+                },
+              }) + '\n',
+            );
+          } else {
+            const ui = getUI();
+            ui.log.info(`Plan ID: ${chalk.bold(plan.planId)}`);
+            if (detected) {
+              ui.log.success(
+                `Detected ${chalk.bold(
+                  plan.frameworkName ?? plan.framework,
+                )} (SDK: ${plan.sdk ?? 'unknown'})`,
+              );
+            } else {
+              ui.note(
+                'No framework detected; the agent will fall back to Generic.',
+              );
+            }
+            ui.log.info(
+              `Run \`${CLI_INVOCATION} apply --plan-id ${plan.planId} --yes\` to execute.`,
+            );
+          }
+          process.exit(ExitCode.SUCCESS);
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          if (jsonOutput) {
+            process.stdout.write(
+              JSON.stringify({
+                v: 1,
+                '@timestamp': new Date().toISOString(),
+                type: 'error',
+                message: `plan failed: ${message}`,
+                data: { event: 'plan_failed' },
+              }) + '\n',
+            );
+          } else {
+            getUI().log.error(`Planning failed: ${message}`);
+          }
+          process.exit(ExitCode.GENERAL_ERROR);
+        }
+      })();
+    },
+  )
+  .command(
+    'apply',
+    'Execute a previously generated plan (requires --plan-id and --yes)',
+    (yargs) => {
+      return yargs.options({
+        'plan-id': {
+          describe: 'plan ID returned by `amplitude-wizard plan`',
+          type: 'string',
+          demandOption: true,
+        },
+        'install-dir': {
+          describe: 'project directory the plan was generated against',
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        const installDir = argv['install-dir'] ?? process.cwd();
+        const { resolveMode } = await import('./src/lib/mode-config.js');
+        const mode = resolveMode({
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+          yes: argv.yes as boolean | undefined,
+          force: argv.force as boolean | undefined,
+          autoApprove: argv['auto-approve'] as boolean | undefined,
+          agent: argv.agent as boolean | undefined,
+          requireExplicitWrites: true,
+          isTTY: Boolean(process.stdout.isTTY),
+        });
+
+        const { resolvePlan } = await import('./src/lib/agent-ops.js');
+        const planId = String(argv['plan-id']);
+        const result = await resolvePlan(planId);
+
+        const emitErr = (
+          msg: string,
+          code: ExitCode,
+          extra?: Record<string, unknown>,
+        ) => {
+          if (mode.jsonOutput) {
+            process.stdout.write(
+              JSON.stringify({
+                v: 1,
+                '@timestamp': new Date().toISOString(),
+                type: 'error',
+                message: msg,
+                data: { event: 'apply_failed', planId, ...extra },
+              }) + '\n',
+            );
+          } else {
+            getUI().log.error(msg);
+          }
+          process.exit(code);
+        };
+
+        if (result.kind === 'not_found') {
+          emitErr(
+            `apply failed: no plan with id ${planId}. Run \`${CLI_INVOCATION} plan\` first.`,
+            ExitCode.INVALID_ARGS,
+            { reason: 'not_found' },
+          );
+          return;
+        }
+        if (result.kind === 'invalid') {
+          emitErr(
+            `apply failed: plan ${planId} is invalid (${result.reason}).`,
+            ExitCode.INVALID_ARGS,
+            { reason: 'invalid' },
+          );
+          return;
+        }
+        if (result.kind === 'expired') {
+          emitErr(
+            `apply failed: plan ${planId} has expired (created ${result.createdAt}). Run \`${CLI_INVOCATION} plan\` again.`,
+            ExitCode.INVALID_ARGS,
+            { reason: 'expired', createdAt: result.createdAt },
+          );
+          return;
+        }
+
+        if (!mode.allowWrites) {
+          emitErr(
+            `apply requires --yes (or --force). Re-run: \`${CLI_INVOCATION} apply --plan-id ${planId} --yes\`.`,
+            ExitCode.WRITE_REFUSED,
+            { reason: 'writes_not_granted' },
+          );
+          return;
+        }
+
+        // Plan validated and writes granted — fall through to the regular
+        // wizard run, scoped to the plan's installDir + framework hint.
+        if (mode.jsonOutput) {
+          process.stdout.write(
+            JSON.stringify({
+              v: 1,
+              '@timestamp': new Date().toISOString(),
+              type: 'lifecycle',
+              message: `applying plan ${planId}`,
+              data: {
+                event: 'apply_started',
+                planId,
+                framework: result.plan.framework,
+              },
+            }) + '\n',
+          );
+        }
+        // Force agent mode for `apply` so the run is non-interactive.
+        // The full run wiring (passing the plan into the agent prompt) is
+        // a follow-up — for now, apply runs the standard wizard with
+        // agent-mode + writes granted, which is the same behavior as
+        // `--agent --yes` today, plus a validated planId for audit.
+        const { spawn } = await import('child_process');
+        const args = [
+          process.argv[1] ?? '',
+          '--agent',
+          '--yes',
+          '--install-dir',
+          installDir,
+        ];
+        if (mode.allowDestructive) args.push('--force');
+        const child = spawn(process.execPath, args, {
+          stdio: 'inherit',
+          env: {
+            ...process.env,
+            AMPLITUDE_WIZARD_PLAN_ID: planId,
+          },
+        });
+        child.on('exit', (code) => process.exit(code ?? ExitCode.AGENT_FAILED));
+      })();
+    },
+  )
+  .command(
+    'verify',
+    'Verify a project setup without running the agent (SDK + API key + framework checks)',
+    (yargs) => {
+      return yargs.options({
+        'install-dir': {
+          describe: 'project directory to verify',
+          type: 'string',
+        },
+      });
+    },
+    (argv) => {
+      void (async () => {
+        const installDir = argv['install-dir'] ?? process.cwd();
+        const { resolveMode } = await import('./src/lib/mode-config.js');
+        const { jsonOutput } = resolveMode({
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+          requireExplicitWrites: true,
+          isTTY: Boolean(process.stdout.isTTY),
+        });
+        try {
+          const { runVerify } = await import('./src/lib/agent-ops.js');
+          const result = await runVerify(installDir);
+          if (jsonOutput) {
+            process.stdout.write(
+              JSON.stringify({
+                v: 1,
+                '@timestamp': new Date().toISOString(),
+                type: 'result',
+                message:
+                  result.outcome === 'pass'
+                    ? 'verify: pass'
+                    : `verify: fail (${result.failures.length} issue${
+                        result.failures.length === 1 ? '' : 's'
+                      })`,
+                data: { event: 'verification_result', ...result },
+              }) + '\n',
+            );
+          } else {
+            const ui = getUI();
+            if (result.outcome === 'pass') {
+              ui.log.success('Verification passed.');
+            } else {
+              ui.log.error('Verification failed:');
+              for (const f of result.failures) ui.log.error(`  • ${f}`);
+            }
+          }
+          process.exit(
+            result.outcome === 'pass'
+              ? ExitCode.SUCCESS
+              : ExitCode.GENERAL_ERROR,
+          );
+        } catch (e) {
+          const message = e instanceof Error ? e.message : String(e);
+          if (jsonOutput) {
+            process.stdout.write(
+              JSON.stringify({
+                v: 1,
+                '@timestamp': new Date().toISOString(),
+                type: 'error',
+                message: `verify failed: ${message}`,
+                data: { event: 'verification_failed' },
+              }) + '\n',
+            );
+          } else {
+            getUI().log.error(`Verification failed: ${message}`);
+          }
+          process.exit(ExitCode.GENERAL_ERROR);
+        }
+      })();
+    },
+  )
+  .command(
     'status',
     'Show project setup state: framework, SDK, API key, auth (JSON-friendly)',
     (yargs) => {
