@@ -276,6 +276,7 @@ describe('CI mode validation', () => {
       expect.objectContaining({ ci: false }),
       expect.anything(),
       expect.any(Function),
+      expect.any(Object),
     );
   });
 });

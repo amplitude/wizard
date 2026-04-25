@@ -38,6 +38,14 @@ export async function runWizard(
   argv: Args,
   session?: WizardSession,
   getAdditionalFeatureQueue?: () => readonly import('./lib/wizard-session').AdditionalFeature[],
+  featureProgress?: {
+    onFeatureStart?: (
+      feature: import('./lib/wizard-session').AdditionalFeature,
+    ) => void;
+    onFeatureComplete?: (
+      feature: import('./lib/wizard-session').AdditionalFeature,
+    ) => void;
+  },
 ) {
   const finalArgs = {
     ...argv,
@@ -127,7 +135,12 @@ export async function runWizard(
   let retry = true;
   while (retry) {
     try {
-      await runAgentWizard(config, session, getAdditionalFeatureQueue);
+      await runAgentWizard(
+        config,
+        session,
+        getAdditionalFeatureQueue,
+        featureProgress,
+      );
       retry = false;
     } catch (error) {
       const errorMessage =

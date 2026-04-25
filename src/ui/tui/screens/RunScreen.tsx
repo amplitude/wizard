@@ -7,13 +7,13 @@
  *   - Logs: LogViewer tailing the wizard log file
  *   - Snake: easter egg game
  *
- * No marketing tips carousel. Conditional feature tips (Stripe, LLM) are
- * shown as single compact lines when relevant.
+ * Queued additional features (LLM, Session Replay) appear in the task list
+ * as pending → in_progress → completed items as the stop hook drains the
+ * queue. Stripe stays a passive doc-link tip when detected.
  */
 
 import { Box, Text } from 'ink';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
-import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import type { WizardStore } from '../store.js';
 import {
@@ -31,10 +31,7 @@ import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryBanner } from '../components/RetryBanner.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
-import {
-  AdditionalFeature,
-  ADDITIONAL_FEATURE_LABELS,
-} from '../session-constants.js';
+import { ADDITIONAL_FEATURE_LABELS } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 
 const LOG_FILE = '/tmp/amplitude-wizard.log';
@@ -81,7 +78,7 @@ const InlineEventPlan = ({ store }: { store: WizardStore }) => {
   );
 };
 
-/** Compact conditional tips — Stripe link, LLM toggle. */
+/** Compact conditional tips — Stripe doc link only (other features are queued tasks). */
 const ConditionalTips = ({ store }: { store: WizardStore }) => {
   const { discoveredFeatures } = store.session;
   const tips: ReactNode[] = [];
@@ -94,50 +91,6 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
         <TerminalLink url={OUTBOUND_URLS.stripeDataSource}>
           {OUTBOUND_URLS.stripeDataSource}
         </TerminalLink>
-      </Text>,
-    );
-  }
-
-  if (discoveredFeatures.includes(DiscoveredFeature.LLM)) {
-    const enabled = store.session.llmOptIn;
-    tips.push(
-      <Text key="llm" color={Colors.secondary}>
-        <Text color={Colors.accent}>{Icons.diamond}</Text>{' '}
-        {enabled ? (
-          <Text color={Colors.success}>
-            {Icons.checkmark} LLM analytics setup queued
-          </Text>
-        ) : (
-          <Text>
-            LLM dependencies detected {Icons.dash} press{' '}
-            <Text bold color={Colors.accent}>
-              L
-            </Text>{' '}
-            to enable LLM analytics
-          </Text>
-        )}
-      </Text>,
-    );
-  }
-
-  if (discoveredFeatures.includes(DiscoveredFeature.SessionReplay)) {
-    const enabled = store.session.sessionReplayOptIn;
-    tips.push(
-      <Text key="session-replay" color={Colors.secondary}>
-        <Text color={Colors.accent}>{Icons.diamond}</Text>{' '}
-        {enabled ? (
-          <Text color={Colors.success}>
-            {Icons.checkmark} Session Replay setup queued
-          </Text>
-        ) : (
-          <Text>
-            Session Replay available {Icons.dash} press{' '}
-            <Text bold color={Colors.accent}>
-              R
-            </Text>{' '}
-            to enable
-          </Text>
-        )}
       </Text>,
     );
   }
@@ -174,43 +127,42 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const elapsed = Math.floor((Date.now() - startedAt) / 1000);
   const spinnerFrame = tick % SPINNER_FRAMES.length;
 
-  // Handle feature toggle keys
-  useScreenInput((input) => {
-    if (
-      input.toLowerCase() === 'l' &&
-      store.session.discoveredFeatures.includes(DiscoveredFeature.LLM) &&
-      !store.session.llmOptIn
-    ) {
-      store.enableFeature(AdditionalFeature.LLM);
-    }
-    if (
-      input.toLowerCase() === 'r' &&
-      store.session.discoveredFeatures.includes(
-        DiscoveredFeature.SessionReplay,
-      ) &&
-      !store.session.sessionReplayOptIn
-    ) {
-      store.enableFeature(AdditionalFeature.SessionReplay);
-    }
-  });
-
   const progressItems: ProgressItem[] = store.tasks.map((t) => ({
     label: t.label,
     activeForm: t.activeForm,
     status: t.status,
   }));
 
-  // When all tasks are done but the queue has features, show a transitional item
-  const queue = store.session.additionalFeatureQueue;
-  const allDone =
-    progressItems.length > 0 &&
-    progressItems.every((t) => t.status === 'completed');
-  if (allDone && queue.length > 0) {
-    const nextLabel = ADDITIONAL_FEATURE_LABELS[queue[0]];
+  // Synthesize task items for additional features: completed (in run order),
+  // then the one currently being processed by the stop hook (in_progress),
+  // then the rest of the queue (pending).
+  const { additionalFeatureCompleted, additionalFeatureCurrent } =
+    store.session;
+  const queueRemainder = store.session.additionalFeatureQueue.filter(
+    (f) => f !== additionalFeatureCurrent,
+  );
+  for (const feature of additionalFeatureCompleted) {
+    const label = ADDITIONAL_FEATURE_LABELS[feature];
     progressItems.push({
-      label: `Set up ${nextLabel}`,
-      activeForm: `Setting up ${nextLabel}...`,
+      label: `Set up ${label}`,
+      activeForm: `Setting up ${label}...`,
+      status: 'completed',
+    });
+  }
+  if (additionalFeatureCurrent) {
+    const label = ADDITIONAL_FEATURE_LABELS[additionalFeatureCurrent];
+    progressItems.push({
+      label: `Set up ${label}`,
+      activeForm: `Setting up ${label}...`,
       status: 'in_progress',
+    });
+  }
+  for (const feature of queueRemainder) {
+    const label = ADDITIONAL_FEATURE_LABELS[feature];
+    progressItems.push({
+      label: `Set up ${label}`,
+      activeForm: `Setting up ${label}...`,
+      status: 'pending',
     });
   }
 

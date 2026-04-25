@@ -70,6 +70,10 @@ export async function runAgentWizard(
   config: FrameworkConfig,
   session: WizardSession,
   getAdditionalFeatureQueue?: () => readonly AdditionalFeature[],
+  featureProgress?: {
+    onFeatureStart?: (feature: AdditionalFeature) => void;
+    onFeatureComplete?: (feature: AdditionalFeature) => void;
+  },
 ): Promise<void> {
   if (session.debug) {
     enableDebugLogs();
@@ -338,6 +342,8 @@ export async function runAgentWizard(
       errorMessage: 'Integration failed',
       additionalFeatureQueue:
         getAdditionalFeatureQueue ?? (() => session.additionalFeatureQueue),
+      onFeatureStart: featureProgress?.onFeatureStart,
+      onFeatureComplete: featureProgress?.onFeatureComplete,
     },
     middleware,
   );

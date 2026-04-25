@@ -713,6 +713,44 @@ export class WizardStore {
   }
 
   /**
+   * Confirm the FeatureOptIn picklist. Enqueues each selected feature
+   * via enableFeature() and marks the screen complete so the flow advances.
+   */
+  confirmFeatureOptIns(selected: AdditionalFeature[]): void {
+    for (const feature of selected) {
+      this.enableFeature(feature);
+    }
+    this.$session.setKey('optInFeaturesComplete', true);
+    this.emitChange();
+  }
+
+  /**
+   * Set the additional feature currently being processed by the stop hook.
+   * Used by the Run screen to render it as an in-progress task.
+   */
+  setCurrentFeature(feature: AdditionalFeature | null): void {
+    this.$session.setKey('additionalFeatureCurrent', feature);
+    this.emitChange();
+  }
+
+  /**
+   * Mark a feature as completed by the stop hook (clears `current`).
+   * Used by the Run screen to render it as a done task.
+   */
+  markFeatureComplete(feature: AdditionalFeature): void {
+    if (!this.session.additionalFeatureCompleted.includes(feature)) {
+      this.$session.setKey('additionalFeatureCompleted', [
+        ...this.session.additionalFeatureCompleted,
+        feature,
+      ]);
+    }
+    if (this.session.additionalFeatureCurrent === feature) {
+      this.$session.setKey('additionalFeatureCurrent', null);
+    }
+    this.emitChange();
+  }
+
+  /**
    * Enable an additional feature: enqueue it for the stop hook
    * and set any feature-specific session flags.
    * Respects Amplitude Experiment feature flags — if the corresponding

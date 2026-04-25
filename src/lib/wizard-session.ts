@@ -386,6 +386,15 @@ export interface WizardSession {
   // Additional features queue (drained via stop hook after main integration)
   additionalFeatureQueue: AdditionalFeature[];
 
+  /** The feature currently being processed by the stop hook, if any. */
+  additionalFeatureCurrent: AdditionalFeature | null;
+
+  /** Features the stop hook has finished processing, in order. */
+  additionalFeatureCompleted: AdditionalFeature[];
+
+  /** True once the user has confirmed (or skipped) the FeatureOptIn picklist. */
+  optInFeaturesComplete: boolean;
+
   // Resolved framework config (set after integration is known)
   frameworkConfig: FrameworkConfig | null;
 
@@ -560,6 +569,9 @@ export function buildSession(args: {
     outroData: null,
     introConcluded: false,
     additionalFeatureQueue: [],
+    additionalFeatureCurrent: null,
+    additionalFeatureCompleted: [],
+    optInFeaturesComplete: false,
     frameworkConfig: null,
     amplitudePreDetected: false,
     amplitudePreDetectedChoicePending: false,
