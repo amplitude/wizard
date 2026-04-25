@@ -8,6 +8,7 @@
  */
 
 import type { WizardSession } from './wizard-session';
+import { toWorkspaceId } from './wizard-session';
 import { DEFAULT_AMPLITUDE_ZONE } from './constants';
 import { resolveZone } from './zone-resolution';
 import { extractAppId } from './api';
@@ -205,7 +206,7 @@ export async function resolveCredentials(
                 sortedEnvs[0];
               session.selectedOrgId = org.id;
               session.selectedOrgName = org.name;
-              session.selectedWorkspaceId = ws.id;
+              session.selectedWorkspaceId = toWorkspaceId(ws.id);
               session.selectedWorkspaceName = ws.name;
               if (matchedEnv) {
                 session.selectedEnvName = matchedEnv.name;
@@ -312,7 +313,7 @@ export async function resolveCredentials(
                   const apiKey = matchedEnv.app.apiKey;
                   session.selectedOrgId = org.id;
                   session.selectedOrgName = org.name;
-                  session.selectedWorkspaceId = ws.id;
+                  session.selectedWorkspaceId = toWorkspaceId(ws.id);
                   session.selectedWorkspaceName = ws.name;
                   session.selectedEnvName = matchedEnv.name;
                   session.selectedAppId = matchedEnv.app.id;
@@ -370,7 +371,7 @@ export async function resolveCredentials(
               if (ws?.environments?.some((e) => e.app?.apiKey === apiKey)) {
                 session.selectedOrgId = org.id;
                 session.selectedOrgName = org.name;
-                session.selectedWorkspaceId = ws.id;
+                session.selectedWorkspaceId = toWorkspaceId(ws.id);
                 session.selectedWorkspaceName = ws.name;
                 break;
               }
@@ -460,7 +461,9 @@ export async function resolveCredentials(
     projectConfig.ok &&
     projectConfig.config.WorkspaceId
   ) {
-    session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
+    session.selectedWorkspaceId = toWorkspaceId(
+      projectConfig.config.WorkspaceId,
+    );
   }
 
   // Safety check: in TUI mode, clear credentials if no org/workspace ID
@@ -527,7 +530,7 @@ export async function resolveEnvironmentSelection(
 
   session.selectedOrgId = org.id;
   session.selectedOrgName = org.name;
-  session.selectedWorkspaceId = ws.id;
+  session.selectedWorkspaceId = toWorkspaceId(ws.id);
   session.selectedWorkspaceName = ws.name;
   session.selectedEnvName = env.name;
 

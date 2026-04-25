@@ -19,6 +19,7 @@ import {
   type CloudRegion,
   type RetryState,
   buildSession,
+  toWorkspaceId,
 } from '../../lib/wizard-session.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
 import { resolveZone } from '../../lib/zone-resolution.js';
@@ -476,7 +477,10 @@ export class WizardStore {
     if (fields.orgName !== undefined)
       this.$session.setKey('selectedOrgName', fields.orgName);
     if (fields.workspaceId !== undefined)
-      this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
+      this.$session.setKey(
+        'selectedWorkspaceId',
+        toWorkspaceId(fields.workspaceId),
+      );
     if (fields.workspaceName !== undefined)
       this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
     if (fields.appId !== undefined)
@@ -632,7 +636,7 @@ export class WizardStore {
   ): void {
     this.$session.setKey('selectedOrgId', org.id);
     this.$session.setKey('selectedOrgName', org.name);
-    this.$session.setKey('selectedWorkspaceId', workspace.id);
+    this.$session.setKey('selectedWorkspaceId', toWorkspaceId(workspace.id));
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
     // Extract the Amplitude app ID from the lowest-rank environment.
