@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`SettingsOverrideScreen snapshots > renders nothing when no settings overrides are detected 1`] = `""`;
+
+exports[`SettingsOverrideScreen snapshots > renders the conflict modal when settings override blocking env vars 1`] = `
+"                  ╭──────────────────────────────────────────────────────────────╮
+                  │                                                              │
+                  │                     ◆ Settings Conflict                      │
+                  │                                                              │
+                  │   Your project's .claude/settings.json sets:                 │
+                  │                                                              │
+                  │     ● ANTHROPIC_BASE_URL                                     │
+                  │     ● ANTHROPIC_AUTH_TOKEN                                   │
+                  │                                                              │
+                  │   These overrides prevent the Wizard from reaching the       │
+                  │   Amplitude LLM Gateway. We can back up the file and         │
+                  │   continue.                                                  │
+                  │                                                              │
+                  │   ────────────────────────────────────────────────────────   │
+                  │                                                              │
+                  │    Back up to .wizard-backup and continue?                   │
+                  │                                                              │
+                  │       Backup & continue [Enter]                              │
+                  │       Exit [Esc]                                             │
+                  │                                                              │
+                  ╰──────────────────────────────────────────────────────────────╯"
+`;
