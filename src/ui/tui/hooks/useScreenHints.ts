@@ -2,18 +2,21 @@
  * useScreenHints — per-screen KeyHintBar registration (audit 2.3).
  *
  * Screens call `useScreenHints([{ key: 'Enter', label: 'Continue' }, ...])`
- * to declare which keys are active on that screen. The ConsoleView reads
- * the atom via `useScreenHintsValue()` and renders them alongside the
+ * to declare which keys are active on that screen. ConsoleView reads the
+ * atom via `useScreenHintsValue()` and renders them alongside the
  * always-present `/` and `Tab` defaults.
  *
  * Hints are module-scoped (not per-store) because at any moment only one
  * screen is active. On unmount / re-render with a different hint set, the
  * atom is overwritten so stale hints never stick around.
+ *
+ * Uses vanilla nanostores + useSyncExternalStore — matches the
+ * `useWizardStore` convention in this repo and avoids pulling in the
+ * `@nanostores/react` peer dep.
  */
 
 import { atom } from 'nanostores';
-import { useStore } from '@nanostores/react';
-import { useEffect } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import type { KeyHint } from '../components/KeyHintBar.js';
 
 /** Empty array literal reused so identity stays stable when no hints. */
@@ -41,7 +44,11 @@ export function useScreenHints(hints: readonly KeyHint[] | undefined): void {
 
 /** Subscribe to the current screen's hint list (used by ConsoleView). */
 export function useScreenHintsValue(): readonly KeyHint[] {
-  return useStore($screenHints);
+  return useSyncExternalStore(
+    (onChange) => $screenHints.subscribe(onChange),
+    () => $screenHints.get(),
+    () => $screenHints.get(),
+  );
 }
 
 /** Test-only — reset the module atom between test cases. */
