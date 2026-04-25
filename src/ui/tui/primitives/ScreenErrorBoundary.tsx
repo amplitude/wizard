@@ -27,8 +27,58 @@ export class ScreenErrorBoundary extends Component<Props, State> {
     return { error };
   }
 
-  componentDidCatch(error: Error): void {
+  componentDidCatch(
+    error: Error,
+    errorInfo: { componentStack?: string | null },
+  ): void {
     this.props.store.setScreenError(error);
+
+    // Audit 6.1 — emit a redacted diagnostic snapshot so support can
+    // reproduce the boundary trigger. Writes to stderr (leaving stdout
+    // clean for NDJSON consumers) and to the wizard log file.
+    try {
+      const store = this.props.store;
+      void import('../utils/diagnostics.js')
+        .then(({ createDiagnosticSnapshot }) => {
+          const snapshot = createDiagnosticSnapshot(
+            store,
+            store.version || 'dev',
+          );
+          const payload = {
+            error: {
+              name: error.name,
+              message: error.message,
+              component_stack: errorInfo.componentStack ?? null,
+            },
+            snapshot,
+          };
+          try {
+            process.stderr.write(
+              '\n[screen-error] diagnostic snapshot:\n' +
+                JSON.stringify(payload, null, 2) +
+                '\n',
+            );
+          } catch {
+            // broken pipe — ignore
+          }
+          void import('../../../utils/debug.js')
+            .then(({ logToFile }) => {
+              logToFile(
+                `[screen-error] ${error.name}: ${
+                  error.message
+                }\n${JSON.stringify(payload, null, 2)}`,
+              );
+            })
+            .catch(() => {
+              // non-fatal
+            });
+        })
+        .catch(() => {
+          // diagnostics import failure is non-fatal
+        });
+    } catch {
+      // Never let diagnostics bubble another error out of the boundary.
+    }
   }
 
   componentDidUpdate(prevProps: Props): void {
