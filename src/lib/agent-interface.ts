@@ -1097,6 +1097,23 @@ export async function runAgent(
      * hook factory — a throwing handler will not abort the compaction.
      */
     onPreCompact?: (input: { trigger: 'manual' | 'auto' }) => void;
+    /**
+     * Fires once when the inner Claude SDK reports its `session_id` (in
+     * the first `system/init` message). Use to persist the id alongside a
+     * `WizardPlan` so a future `apply --resume` can pass it back via
+     * `resumeSessionId` and pick up the conversation instead of starting
+     * a fresh agent that has to redo the cold-start work. Wrapped in
+     * try/catch — a throwing handler is logged and does not abort the run.
+     */
+    onSessionStart?: (sessionId: string) => void;
+    /**
+     * UUID of a prior Claude SDK session to resume. Forwarded to the SDK's
+     * `query({ options: { resume } })`. When set, the conversation
+     * history loads from the resumed session and the agent continues
+     * instead of starting fresh. Pair with `onSessionStart` to capture
+     * the new ID after a fork/resume cycle.
+     */
+    resumeSessionId?: string;
   },
   middleware?: {
     onMessage(message: SDKMessage): void;
@@ -1403,6 +1420,11 @@ export async function runAgent(
         const response = query({
           prompt: createPromptStream(),
           options: {
+            // Resume a prior Claude SDK session when `apply --resume` was
+            // invoked against a plan with a captured agentSessionId. The SDK
+            // either rehydrates the conversation or, on a stale id, falls
+            // back to a fresh run — agent-runner clears the id in that case.
+            ...(config?.resumeSessionId && { resume: config.resumeSessionId }),
             model: agentConfig.model,
             // Fallback model if primary is unavailable (e.g. Vertex outage).
             // Must be capable enough for code generation — haiku is too weak.
@@ -1557,6 +1579,22 @@ export async function runAgent(
           }
 
           if (message.type === 'system' && message.subtype === 'init') {
+            // Surface the SDK-assigned session id once per run so callers
+            // (apply command) can persist it for `apply --resume`. Wrap in
+            // try/catch — a throwing handler must not break the agent loop.
+            const sessionId =
+              (message as unknown as { session_id?: string }).session_id ??
+              null;
+            if (sessionId && config?.onSessionStart) {
+              try {
+                config.onSessionStart(sessionId);
+              } catch (e) {
+                logToFile(
+                  'onSessionStart handler threw:',
+                  e instanceof Error ? e.message : String(e),
+                );
+              }
+            }
             for (const server of (
               message as unknown as {
                 mcp_servers?: { name: string; status: string }[];

@@ -74,6 +74,21 @@ export const WizardPlanSchema = z.object({
    * orchestrator pre-approves a class of plans.
    */
   requiresApproval: z.literal(true).default(true),
+  /**
+   * Claude Agent SDK session ID. Captured the first time `apply` runs the
+   * inner agent against this plan. Lets a subsequent `apply --resume` pass
+   * it back to the SDK via the `resume:` option so an interrupted run
+   * (SIGINT, network drop, crashed terminal) picks up the conversation
+   * instead of starting a fresh agent that has to redo the SDK install,
+   * package detection, file reads, etc.
+   *
+   * Optional — fresh plans don't have one. Older sessions become unusable
+   * once the SDK garbage-collects them, so resume falls back to a fresh
+   * run and clears the field if the SDK rejects the ID.
+   */
+  agentSessionId: z.string().optional(),
+  /** ISO-8601 timestamp the session id was last captured. */
+  agentSessionUpdatedAt: z.string().optional(),
 });
 export type WizardPlan = z.infer<typeof WizardPlanSchema>;
 
@@ -183,6 +198,58 @@ export async function loadPlan(planId: string): Promise<LoadPlanResult> {
   }
 
   return { kind: 'ok', plan: result.data };
+}
+
+/**
+ * Apply a partial update to an existing plan on disk. Used by `apply` to
+ * record the inner Claude SDK's session id so a future `apply --resume`
+ * can pick up where the agent left off after a crash / SIGINT / network
+ * drop. Returns the updated plan, or null when the plan no longer exists
+ * (callers should treat this as best-effort and not abort on miss).
+ */
+export async function applyPlanPatch(
+  planId: string,
+  patch: Partial<
+    Pick<
+      WizardPlan,
+      'agentSessionId' | 'agentSessionUpdatedAt' | 'events' | 'fileChanges'
+    >
+  >,
+): Promise<WizardPlan | null> {
+  const result = await loadPlan(planId);
+  if (result.kind !== 'ok') return null;
+
+  const updated: WizardPlan = {
+    ...result.plan,
+    ...(patch.agentSessionId !== undefined && {
+      agentSessionId: patch.agentSessionId,
+      agentSessionUpdatedAt: new Date().toISOString(),
+    }),
+    ...(patch.events !== undefined && { events: patch.events }),
+    ...(patch.fileChanges !== undefined && { fileChanges: patch.fileChanges }),
+  };
+
+  atomicWriteJSON(planPath(updated.planId), updated, 0o600);
+  return updated;
+}
+
+/**
+ * Read the plan id and optional resume target from environment variables
+ * set by the `apply` command. Used by the inner agent runner to pick up
+ * resume context without `apply` having to inject it through the agent
+ * config object (which would couple too tightly to the spawn boundary).
+ *
+ * Both env vars are optional — agent-runner falls back to a fresh run
+ * when either is missing.
+ */
+export function getApplyContextFromEnv(): {
+  planId: string | null;
+  resumeSessionId: string | null;
+} {
+  return {
+    planId: process.env.AMPLITUDE_WIZARD_PLAN_ID ?? null,
+    resumeSessionId: process.env.AMPLITUDE_WIZARD_RESUME_SESSION_ID ?? null,
+  };
 }
 
 /** Delete plans older than the TTL. Best-effort; errors are swallowed. */
