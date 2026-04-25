@@ -32,8 +32,7 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
   useEffect(() => {
     if (store.session.projectHasData !== null) return;
 
-    const { credentials, region, selectedOrgId, selectedProjectId } =
-      store.session;
+    const { credentials, selectedOrgId, selectedProjectId } = store.session;
     // credentials.appId is 0 for OAuth users; fall back to the project UUID
     const appId = store.session.credentials?.appId || selectedProjectId || null;
 

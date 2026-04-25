@@ -8,7 +8,7 @@
  */
 
 import type { WizardSession } from './wizard-session';
-import { DEFAULT_AMPLITUDE_ZONE, type AmplitudeZone } from './constants';
+import { DEFAULT_AMPLITUDE_ZONE } from './constants';
 import { resolveZone } from './zone-resolution';
 import { extractAppId } from './api';
 import { analytics } from '../utils/analytics';
@@ -421,7 +421,7 @@ export async function resolveCredentials(
           const projectApiKey = await getAPIKey({
             installDir,
             idToken: storedToken.idToken,
-            zone: zone as AmplitudeZone,
+            zone: zone,
             projectId: session.selectedProjectId ?? undefined,
           });
           if (projectApiKey) {
