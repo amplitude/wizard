@@ -15,25 +15,18 @@
  * This is destructive (mutates `process.env`), intentional, and idempotent.
  */
 
-const NESTED_ENV_VARS = [
-  // Claude Code CLI markers
-  'CLAUDECODE',
-  'CLAUDE_CODE_ENTRYPOINT',
-  'CLAUDE_CODE_EXECPATH',
-  'CLAUDE_CODE_SSE_PORT',
-  'CLAUDE_CODE_ENABLE_TASKS',
-  'CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY',
-  'CLAUDE_CODE_MAX_OUTPUT_TOKENS',
-  'CLAUDE_CODE_USE_VERTEX',
-  'CLAUDE_CODE_USE_BEDROCK',
-  'CLAUDE_CODE_DEBUG_LOGS_DIR',
-  // Claude Agent SDK markers
-  'CLAUDE_AGENT_SDK_VERSION',
-  'DEBUG_CLAUDE_AGENT_SDK',
-  // Inherited OAuth — agent-interface sets its own after sanitizing,
-  // so this is always safe to clear.
-  'CLAUDE_CODE_OAUTH_TOKEN',
-];
+// Prefix-based matching so a future SDK release adding a new `CLAUDE_CODE_*`
+// or `CLAUDE_AGENT_SDK_*` marker gets stripped automatically. Hand-maintained
+// allowlists rot; the bug we fixed would come back silently.
+const NESTED_ENV_PREFIXES = ['CLAUDE_CODE_', 'CLAUDE_AGENT_SDK_'];
+
+// Exact-match keys that don't fit the prefix rule.
+const NESTED_ENV_EXACT = new Set(['CLAUDECODE', 'DEBUG_CLAUDE_AGENT_SDK']);
+
+function isNestedEnvKey(key: string): boolean {
+  if (NESTED_ENV_EXACT.has(key)) return true;
+  return NESTED_ENV_PREFIXES.some((p) => key.startsWith(p));
+}
 
 export interface SanitizeResult {
   cleared: string[];
@@ -48,15 +41,15 @@ export interface SanitizeResult {
  *
  * Does NOT touch:
  *   - `ANTHROPIC_API_KEY` — user-intent, handled by `initializeAgent`
- *   - `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` — overwritten by
- *     `initializeAgent` immediately after this call
+ *   - `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` — managed by
+ *     `initializeAgent` (set on gateway path, cleared on non-gateway paths)
  */
 export function sanitizeNestedClaudeEnv(
   env: NodeJS.ProcessEnv = process.env,
 ): SanitizeResult {
   const cleared: string[] = [];
-  for (const key of NESTED_ENV_VARS) {
-    if (env[key] !== undefined) {
+  for (const key of Object.keys(env)) {
+    if (isNestedEnvKey(key) && env[key] !== undefined) {
       delete env[key];
       cleared.push(key);
     }

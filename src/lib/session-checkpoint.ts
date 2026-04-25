@@ -29,30 +29,39 @@ const MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // ── Schema ─────────────────────────────────────────────────────────────
 
-const CheckpointSchema = z.object({
-  /** ISO-8601 timestamp of when the checkpoint was written. */
-  savedAt: z.string(),
+const CheckpointSchema = z
+  .object({
+    /** ISO-8601 timestamp of when the checkpoint was written. */
+    savedAt: z.string(),
 
-  /** The project directory this checkpoint belongs to. */
-  installDir: z.string(),
+    /** The project directory this checkpoint belongs to. */
+    installDir: z.string(),
 
-  // Region + org/workspace/project selection
-  region: z.enum(['us', 'eu']).nullable(),
-  selectedOrgId: z.string().nullable(),
-  selectedOrgName: z.string().nullable(),
-  selectedWorkspaceId: z.string().nullable(),
-  selectedWorkspaceName: z.string().nullable(),
-  selectedProjectName: z.string().nullable(),
+    // Region + org/workspace/project selection
+    region: z.enum(['us', 'eu']).nullable(),
+    selectedOrgId: z.string().nullable(),
+    selectedOrgName: z.string().nullable(),
+    selectedWorkspaceId: z.string().nullable(),
+    selectedWorkspaceName: z.string().nullable(),
+    selectedEnvName: z.string().nullable().optional(),
+    selectedProjectName: z.string().nullable().optional(),
 
-  // Framework detection
-  integration: z.string().nullable(),
-  detectedFrameworkLabel: z.string().nullable(),
-  detectionComplete: z.boolean(),
-  frameworkContext: z.record(z.string(), z.unknown()),
+    // Framework detection
+    integration: z.string().nullable(),
+    detectedFrameworkLabel: z.string().nullable(),
+    detectionComplete: z.boolean(),
+    frameworkContext: z.record(z.string(), z.unknown()),
 
-  // Intro
-  introConcluded: z.boolean(),
-});
+    // Intro
+    introConcluded: z.boolean(),
+  })
+  .transform((data) => {
+    const { selectedEnvName, ...rest } = data;
+    return {
+      ...rest,
+      selectedProjectName: rest.selectedProjectName ?? selectedEnvName ?? null,
+    };
+  });
 
 type Checkpoint = z.infer<typeof CheckpointSchema>;
 

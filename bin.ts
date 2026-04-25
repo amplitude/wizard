@@ -362,6 +362,7 @@ if (process.env.NODE_ENV === 'test') {
 }
 
 void yargs(hideBin(process.argv))
+  .scriptName(CLI_INVOCATION)
   .env('AMPLITUDE_WIZARD')
   // global options
   .options({
