@@ -43,7 +43,10 @@ export const loginCommand: CommandModule = {
           process.exit(0);
         }
 
-        const auth = await performAmplitudeAuth({ zone });
+        const auth = await performAmplitudeAuth({
+          zone,
+          installDir: process.cwd(),
+        });
         const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
         // Source `expiresAt` from the id_token's actual `exp` claim.
         // The wizard authenticates with the id_token (not the access

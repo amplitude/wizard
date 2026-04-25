@@ -540,6 +540,7 @@ async function askForWizardLogin(
   const auth = await performAmplitudeAuth({
     zone: DEFAULT_AMPLITUDE_ZONE,
     forceFresh: opts.forceFresh,
+    installDir: opts.installDir ?? process.cwd(),
   });
 
   // Wipe any cached project API key for this install dir — a stale key

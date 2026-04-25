@@ -28,6 +28,7 @@ import {
   storeToken,
   type StoredUser,
 } from './ampli-settings.js';
+import { clearStaleProjectState } from './clear-stale-project-state.js';
 import { withWizardSpan, addBreadcrumb } from '../lib/observability/index.js';
 
 // SVG assets inlined from ../javascript
@@ -349,6 +350,18 @@ export async function performAmplitudeAuth(options: {
   /** Skip cached credentials and require fresh browser auth. */
   forceFresh?: boolean;
   /**
+   * Project directory the wizard is running against. Used on a successful
+   * fresh-OAuth completion (browser-returned code → tokens) to wipe
+   * pre-existing per-project state so the new account doesn't inherit the
+   * prior account's API key, workspace binding, or session checkpoint.
+   * Symmetric with `performSignupOrAuth`'s wipe — see MCP-196.
+   *
+   * Not used on the cached-token short-circuit: that path returns the
+   * existing user's tokens unchanged, no auth event has occurred, the
+   * cached project state belongs to that same user.
+   */
+  installDir: string;
+  /**
    * Optional abort signal — when triggered, closes the local callback server
    * and rejects the auth promise with an AbortError. Lets SIGINT/cleanup
    * paths reclaim the OAuth port without waiting for the 2-minute timeout.
@@ -369,6 +382,7 @@ export async function performAmplitudeAuth(options: {
 async function performAmplitudeAuthInner(options: {
   zone?: AmplitudeZone;
   forceFresh?: boolean;
+  installDir: string;
   signal?: AbortSignal;
 }): Promise<AmplitudeAuthResult> {
   const zone = options.zone ?? DEFAULT_AMPLITUDE_ZONE;
@@ -544,6 +558,16 @@ async function performAmplitudeAuthInner(options: {
       email: '',
       zone,
     };
+    // Wipe pre-existing per-project state BEFORE persisting the new
+    // account's tokens. Mirrors the wipe in performSignupOrAuth — both
+    // "fresh tokens just landed for what may be a different account"
+    // entry points use the same helper so install-dir-keyed surfaces
+    // (keychain, .env.local, project ampli.json bindings, session
+    // checkpoint) don't carry over the prior account's data into the
+    // new one. Idempotent in the same-account case (just re-resolves
+    // from backend on the next read), correct in the different-account
+    // case. See MCP-196.
+    clearStaleProjectState(options.installDir);
     storeToken(pendingUser, {
       accessToken: tokenResponse.access_token,
       idToken: tokenResponse.id_token,
@@ -650,7 +674,7 @@ export type OAuthConfig = { scopes: string[]; signup?: boolean };
 export async function performOAuthFlow(
   _config: OAuthConfig,
 ): Promise<OAuthTokenResponse> {
-  const result = await performAmplitudeAuth({});
+  const result = await performAmplitudeAuth({ installDir: process.cwd() });
   return {
     access_token: result.accessToken,
     id_token: result.idToken,

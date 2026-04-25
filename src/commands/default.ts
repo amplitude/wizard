@@ -828,7 +828,11 @@ export const defaultCommand: CommandModule = {
               }
 
               if (auth === null) {
-                auth = await performAmplitudeAuth({ zone, forceFresh });
+                auth = await performAmplitudeAuth({
+                  zone,
+                  forceFresh,
+                  installDir: tui.store.session.installDir,
+                });
               }
 
               // Update login URL (clears the "copy this URL" hint)
@@ -914,6 +918,7 @@ export const defaultCommand: CommandModule = {
                   auth = await performAmplitudeAuth({
                     zone,
                     forceFresh: true,
+                    installDir: tui.store.session.installDir,
                   });
                   userInfo = await fetchAmplitudeUser(
                     auth.idToken,
@@ -1023,6 +1028,7 @@ export const defaultCommand: CommandModule = {
               let auth = await performAmplitudeAuth({
                 zone,
                 forceFresh: false,
+                installDir: tui.store.session.installDir,
               });
               tui.store.setLoginUrl(null);
 
@@ -1060,7 +1066,11 @@ export const defaultCommand: CommandModule = {
                     : String(probeErr),
                 );
                 tui.store.setLoginUrl(null);
-                auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                auth = await performAmplitudeAuth({
+                  zone,
+                  forceFresh: true,
+                  installDir: tui.store.session.installDir,
+                });
                 userInfo = await fetchAmplitudeUser(auth.idToken, zone);
               }
 
