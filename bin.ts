@@ -1592,25 +1592,6 @@ void yargs(hideBin(process.argv))
 
               // Signal detection is done — IntroScreen shows picker or results
               tui.store.setDetectionComplete();
-
-              // CI / agent modes auto-enable every discovered opt-in feature
-              // so the queue is populated before RunScreen — mirrors how
-              // AgentUI auto-approves prompts.
-              if (tui.store.session.ci || tui.store.session.agent) {
-                const { AdditionalFeature, DiscoveredFeature: DF } =
-                  await import('./src/lib/wizard-session.js');
-                const auto: import('./src/lib/wizard-session').AdditionalFeature[] =
-                  [];
-                for (const f of tui.store.session.discoveredFeatures) {
-                  if (f === DF.SessionReplay)
-                    auto.push(AdditionalFeature.SessionReplay);
-                  else if (f === DF.LLM) auto.push(AdditionalFeature.LLM);
-                }
-                tui.store.confirmFeatureOptIns(
-                  auto,
-                  tui.store.session.agent ? 'auto-agent' : 'auto-ci',
-                );
-              }
             })();
 
             // Gate runWizard on the user reaching RunScreen — at that point
