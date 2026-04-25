@@ -1583,12 +1583,30 @@ void yargs(hideBin(process.argv))
                 'react-router',
                 'javascript_web',
               ]);
+
+              // Check Session Replay for auto-detected framework
               if (
                 tui.store.session.integration &&
                 BROWSER_REPLAY_INTEGRATIONS.has(tui.store.session.integration)
               ) {
                 tui.store.addDiscoveredFeature(DiscoveredFeature.SessionReplay);
               }
+
+              // Re-check Session Replay when integration changes (handles manual selection)
+              tui.store.subscribe(() => {
+                const session = tui.store.session;
+                if (
+                  session.integration &&
+                  BROWSER_REPLAY_INTEGRATIONS.has(session.integration) &&
+                  !session.discoveredFeatures.includes(
+                    DiscoveredFeature.SessionReplay,
+                  )
+                ) {
+                  tui.store.addDiscoveredFeature(
+                    DiscoveredFeature.SessionReplay,
+                  );
+                }
+              });
 
               // Signal detection is done — IntroScreen shows picker or results
               tui.store.setDetectionComplete();
