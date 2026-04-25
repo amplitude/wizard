@@ -13,6 +13,8 @@ import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
 import { getVersionCheckInfo } from './lib/version-check';
+import { initFeatureFlags } from './lib/feature-flags';
+import { autoEnableOptInFeatures } from './lib/feature-discovery';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -101,6 +103,16 @@ export async function runWizard(
     ci: session.ci ?? false,
     signup: session.signup ?? false,
   });
+
+  // Non-interactive modes (CI / agent) skip the FeatureOptIn picklist, so
+  // auto-enable every discovered opt-in feature here. The TUI flow handles
+  // its own discovery + picklist confirmation in bin.ts.
+  if ((session.ci || session.agent) && !session.optInFeaturesComplete) {
+    await initFeatureFlags().catch(() => {
+      // Flag init failure is non-fatal — LLM gate just stays off
+    });
+    autoEnableOptInFeatures(session, session.agent ? 'auto-agent' : 'auto-ci');
+  }
 
   const config = FRAMEWORK_REGISTRY[integration];
   session.frameworkConfig = config;
