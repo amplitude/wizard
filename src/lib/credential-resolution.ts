@@ -253,6 +253,7 @@ export async function resolveCredentials(
                   session.selectedWorkspaceId = ws.id;
                   session.selectedWorkspaceName = ws.name;
                   session.selectedProjectName = matchedEnv.name;
+                  session.selectedProjectId = matchedEnv.app.id;
                   if (!session.userEmail && userInfo.email) {
                     session.userEmail = userInfo.email;
                   }
@@ -265,7 +266,7 @@ export async function resolveCredentials(
                     idToken: storedToken.idToken,
                     projectApiKey: apiKey,
                     host: getHostFromRegion(zone as AmplitudeZone),
-                    projectId: 0,
+                    projectId: Number(matchedEnv.app.id) || 0,
                   };
                   session.activationLevel = 'none';
                   session.projectHasData = false;
@@ -295,6 +296,7 @@ export async function resolveCredentials(
             // Single environment — auto-select
             const apiKey = envsWithKey[0].app!.apiKey!;
             session.selectedProjectName = envsWithKey[0].name;
+            session.selectedProjectId = envsWithKey[0].app!.id ?? null;
 
             // Populate org/workspace names
             for (const org of userInfo.orgs) {
@@ -322,7 +324,9 @@ export async function resolveCredentials(
               idToken: storedToken.idToken,
               projectApiKey: apiKey,
               host: getHostFromRegion(zone as AmplitudeZone),
-              projectId: 0,
+              projectId: session.selectedProjectId
+                ? Number(session.selectedProjectId) || 0
+                : 0,
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
@@ -462,7 +466,10 @@ export async function resolveEnvironmentSelection(
   session.selectedProjectName = env.name;
 
   // Extract the numeric analytics project ID for MCP-based event detection.
-  const projectId = extractProjectId(ws);
+  // Prefer the selected env's app.id — it matches the chosen environment
+  // exactly, whereas extractProjectId(ws) falls back to the lowest-ranked
+  // env's app when no env is selected.
+  const projectId = env.app?.id ?? extractProjectId(ws);
   session.selectedProjectId = projectId;
 
   persistApiKey(apiKey, session.installDir);
@@ -471,7 +478,7 @@ export async function resolveEnvironmentSelection(
     idToken: session.pendingAuthIdToken ?? undefined,
     projectApiKey: apiKey,
     host: getHostFromRegion(zone),
-    projectId: 0,
+    projectId: projectId ? Number(projectId) || 0 : 0,
   };
   session.activationLevel = 'none';
   session.projectHasData = false;

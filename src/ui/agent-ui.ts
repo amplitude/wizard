@@ -6,6 +6,13 @@
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
 import { createInterface } from 'readline';
+import { z } from 'zod';
+
+const EnvSelectionStdinSchema = z.object({
+  orgId: z.string().optional(),
+  workspaceId: z.string().optional(),
+  env: z.string().optional(),
+});
 
 // ── NDJSON event types ──────────────────────────────────────────────
 
@@ -461,21 +468,42 @@ export class AgentUI implements WizardUI {
     try {
       const line = await readStdinLine(60_000);
       if (line) {
-        const parsed = JSON.parse(line) as {
-          orgId?: string;
-          workspaceId?: string;
-          env?: string;
-        };
-        if (parsed.orgId && parsed.workspaceId && parsed.env) {
-          return {
-            orgId: parsed.orgId,
-            workspaceId: parsed.workspaceId,
-            env: parsed.env,
-          };
+        let raw: unknown;
+        try {
+          raw = JSON.parse(line);
+        } catch {
+          emit(
+            'log',
+            'Environment-selection stdin response is not valid JSON.',
+            { level: 'warn' },
+          );
+          raw = null;
+        }
+        if (raw) {
+          const result = EnvSelectionStdinSchema.safeParse(raw);
+          if (!result.success) {
+            emit(
+              'log',
+              `Environment-selection stdin response rejected: ${result.error.issues
+                .map((i) => `${i.path.join('.')}: ${i.message}`)
+                .join('; ')}`,
+              { level: 'warn' },
+            );
+          } else if (
+            result.data.orgId &&
+            result.data.workspaceId &&
+            result.data.env
+          ) {
+            return {
+              orgId: result.data.orgId,
+              workspaceId: result.data.workspaceId,
+              env: result.data.env,
+            };
+          }
         }
       }
     } catch {
-      // Stdin closed, timeout, or invalid JSON — fall through to auto-select
+      // Stdin closed or timeout — fall through to auto-select
     }
 
     // Fallback: auto-select the first environment
