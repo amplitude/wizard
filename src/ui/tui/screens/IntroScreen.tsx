@@ -25,8 +25,15 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
+import { useScreenHints } from '../hooks/useScreenHints.js';
 import { analytics } from '../../../utils/analytics.js';
 import { logToFile } from '../../../utils/debug.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
+
+const INTRO_HINTS: readonly KeyHint[] = Object.freeze([
+  { key: '↑↓', label: 'Navigate' },
+  { key: 'Enter', label: 'Select' },
+]);
 
 interface IntroScreenProps {
   store: WizardStore;
@@ -56,6 +63,7 @@ export function getFrameworkLabelSuffix({
 
 export const IntroScreen = ({ store }: IntroScreenProps) => {
   useWizardStore(store);
+  useScreenHints(INTRO_HINTS);
 
   const [cols, rows] = useStdoutDimensions();
 

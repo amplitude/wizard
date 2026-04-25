@@ -35,6 +35,7 @@ import {
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
 import { KeyHintBar, type KeyHint } from './KeyHintBar.js';
+import { useScreenHintsValue } from '../hooks/useScreenHints.js';
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -218,6 +219,11 @@ export const ConsoleView = ({
   screenHints,
   children,
 }: ConsoleViewProps) => {
+  // Per-screen hints registered via useScreenHints() take precedence over
+  // the legacy `screenHints` prop (still accepted for back-compat).
+  const registeredHints = useScreenHintsValue();
+  const effectiveHints =
+    registeredHints.length > 0 ? registeredHints : screenHints;
   const [inputActive, setInputActive] = useState(false);
   const [initialValue, setInitialValue] = useState('');
   const [inputKey, setInputKey] = useState(0);
@@ -537,7 +543,7 @@ export const ConsoleView = ({
 
       {/* Key hints + console input */}
       <KeyHintBar
-        hints={screenHints}
+        hints={effectiveHints as KeyHint[] | undefined}
         width={innerWidth}
         showAskHint={
           store.session.credentials !== null && store.session.introConcluded
