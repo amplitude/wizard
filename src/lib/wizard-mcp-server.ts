@@ -21,12 +21,18 @@ import { z } from 'zod';
 import {
   runDetect,
   runStatus,
+  runPlan,
+  runVerify,
+  runProjectsList,
   getAuthStatus,
   getAuthToken,
   type DetectResult,
   type StatusResult,
   type AuthStatusResult,
   type AuthTokenResult,
+  type PlanResult,
+  type VerifyResult,
+  type ProjectsListResult,
 } from './agent-ops.js';
 
 const SERVER_NAME = 'amplitude-wizard';
@@ -109,6 +115,112 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
     async (args: unknown) => {
       const { installDir } = (args ?? {}) as { installDir?: string };
       const result: StatusResult = await runStatus(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
+  // -- plan_setup ---------------------------------------------------------
+  server.registerTool(
+    'plan_setup',
+    {
+      title: 'Plan an Amplitude setup',
+      description:
+        'Run the planning phase: detect the framework, build a structured ' +
+        'WizardPlan (framework, sdk, intended file changes), and persist it ' +
+        'to disk under a fresh planId. NO files are touched. The returned ' +
+        '`planId` can be passed to `apply` (CLI: `amplitude-wizard apply ' +
+        '--plan-id <id> --yes`) to actually execute the plan within 24h. ' +
+        'This tool is read-only and safe to call repeatedly — each call ' +
+        'creates a new plan.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to plan against. Defaults to the current working directory.',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const result: PlanResult = await runPlan(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
+  // -- verify_setup -------------------------------------------------------
+  server.registerTool(
+    'verify_setup',
+    {
+      title: 'Verify an Amplitude setup',
+      description:
+        'Cheap, no-network check that the project has the Amplitude SDK ' +
+        'installed, an API key configured, and a detectable framework. ' +
+        'Returns { outcome: "pass" | "fail", failures: [...] } with ' +
+        'structured reasons for any failures. Does NOT poll for ingestion; ' +
+        'use the CLI for that.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to verify. Defaults to the current working directory.',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const result: VerifyResult = await runVerify(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
+  // -- list_projects ------------------------------------------------------
+  server.registerTool(
+    'list_projects',
+    {
+      title: 'List Amplitude projects',
+      description:
+        "List the authenticated user's accessible Amplitude " +
+        'projects/environments — one row per (org, workspace, environment) ' +
+        'tuple that has an API key. Returns rich metadata (orgName, ' +
+        'workspaceName, envName, rank, appId) on each choice plus pagination ' +
+        'totals. Supports a case-insensitive `query` for searching long ' +
+        'lists. Use this to surface a project picker to the human; pass the ' +
+        "chosen choice's appId back to the wizard via `--app-id`.",
+      inputSchema: {
+        query: z
+          .string()
+          .optional()
+          .describe(
+            'Case-insensitive substring filter applied across org/workspace/environment names and app IDs.',
+          ),
+        limit: z
+          .number()
+          .int()
+          .min(1)
+          .max(200)
+          .optional()
+          .describe('Page size (default 25, max 200).'),
+        offset: z
+          .number()
+          .int()
+          .min(0)
+          .optional()
+          .describe('Page offset (default 0).'),
+      },
+    },
+    async (args: unknown) => {
+      const { query, limit, offset } = (args ?? {}) as {
+        query?: string;
+        limit?: number;
+        offset?: number;
+      };
+      const result: ProjectsListResult = await runProjectsList({
+        query,
+        limit,
+        offset,
+      });
       return jsonContent(result);
     },
   );
