@@ -56,7 +56,7 @@ import {
 type SDKThinkingConfig =
   | {
       type: 'enabled';
-      budgetTokens?: number;
+      budgetTokens: number;
       display?: 'summarized' | 'omitted';
     }
   | { type: 'adaptive'; display?: 'summarized' | 'omitted' }
@@ -1422,7 +1422,11 @@ export async function runAgent(
             // 'summarized' keeps NDJSON logs / agent-mode output readable.
             // Sonnet 4.6 doesn't support adaptive thinking — must use
             // 'enabled' + explicit budget.
-            thinking: { type: 'enabled', budgetTokens: 3000, display: 'summarized' },
+            thinking: {
+              type: 'enabled',
+              budgetTokens: 3000,
+              display: 'summarized',
+            },
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
