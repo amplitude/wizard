@@ -80,6 +80,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             email: s.signupEmail,
             fullName: s.signupFullName,
             zone,
+            installDir: s.installDir,
           },
           { signal: controller.signal },
         );

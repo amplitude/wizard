@@ -519,6 +519,7 @@ const runDirectSignupIfRequested = async (
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
+      installDir: session.installDir,
     });
   } catch (err) {
     // Only the wrapper itself threw — emit wrapper_exception and bail.
@@ -1386,7 +1387,11 @@ void yargs(hideBin(process.argv))
                 }
 
                 if (auth === null) {
-                  auth = await performAmplitudeAuth({ zone, forceFresh });
+                  auth = await performAmplitudeAuth({
+                    zone,
+                    forceFresh,
+                    installDir: tui.store.session.installDir,
+                  });
                 }
 
                 // Update login URL (clears the "copy this URL" hint)
@@ -1438,6 +1443,7 @@ void yargs(hideBin(process.argv))
                     auth = await performAmplitudeAuth({
                       zone,
                       forceFresh: true,
+                      installDir: tui.store.session.installDir,
                     });
                     userInfo = await fetchAmplitudeUser(
                       auth.idToken,
@@ -1762,7 +1768,12 @@ void yargs(hideBin(process.argv))
             process.exit(0);
           }
 
-          const auth = await performAmplitudeAuth({ zone });
+          // `wizard login` runs as a CLI subcommand without a session
+          // context — installDir maps to the user's cwd.
+          const auth = await performAmplitudeAuth({
+            zone,
+            installDir: process.cwd(),
+          });
           const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
           storeToken(
             {

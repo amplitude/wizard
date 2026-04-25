@@ -494,6 +494,7 @@ async function askForWizardLogin(
   const auth = await performAmplitudeAuth({
     zone: DEFAULT_AMPLITUDE_ZONE,
     forceFresh: opts.forceFresh,
+    installDir: opts.installDir ?? process.cwd(),
   });
 
   // ── 2. Detect actual cloud region (EU users auth via US endpoint but
