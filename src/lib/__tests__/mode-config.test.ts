@@ -205,9 +205,39 @@ describe('evaluateWriteGate', () => {
     }
   });
 
-  it('allows Edit / Write when allowWrites is true', () => {
+  it('allows Edit / Write when allowWrites is true and no existing file context', () => {
     for (const tool of ['Edit', 'Write', 'MultiEdit']) {
       expect(evaluateWriteGate(tool, {}, writesOnly).kind).toBe('allow');
+    }
+  });
+
+  it('denies write tools when target file exists and allowDestructive is false', () => {
+    for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
+      const decision = evaluateWriteGate(tool, {}, writesOnly, {
+        targetFileExists: true,
+      });
+      expect(decision.kind).toBe('deny');
+      if (decision.kind === 'deny') {
+        expect(decision.resumeFlag).toBe('--force');
+        expect(decision.reason).toMatch(tool);
+      }
+    }
+  });
+
+  it('allows write tools when target file exists and allowDestructive is true', () => {
+    for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
+      expect(
+        evaluateWriteGate(tool, {}, allow, { targetFileExists: true }).kind,
+      ).toBe('allow');
+    }
+  });
+
+  it('allows write tools when targetFileExists is false regardless of allowDestructive', () => {
+    for (const tool of ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']) {
+      expect(
+        evaluateWriteGate(tool, {}, writesOnly, { targetFileExists: false })
+          .kind,
+      ).toBe('allow');
     }
   });
 

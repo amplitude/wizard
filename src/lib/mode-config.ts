@@ -157,13 +157,19 @@ export type WriteGateDecision =
  * capability grants. Pure function — no I/O, easy to unit test.
  *
  *   - Write tools (Edit/Write/MultiEdit/NotebookEdit) require `allowWrites`.
+ *   - Write tools targeting an existing file also require `allowDestructive`.
  *   - Bash commands matching destructive patterns require `allowDestructive`.
  *   - Everything else is allowed.
+ *
+ * The caller (PreToolUse hook) is responsible for checking the filesystem
+ * and passing `context.targetFileExists` so this function can enforce the
+ * `allowDestructive` contract without performing I/O itself.
  */
 export function evaluateWriteGate(
   toolName: string,
   toolInput: unknown,
   caps: CapabilityFlags,
+  context?: { targetFileExists?: boolean },
 ): WriteGateDecision {
   if (WRITE_TOOLS.has(toolName)) {
     if (!caps.allowWrites) {
@@ -173,12 +179,13 @@ export function evaluateWriteGate(
         resumeFlag: '--yes',
       };
     }
-    // Best-effort destructive detection for write tools: if the input has a
-    // `path` or `file_path` that refers to an existing file, that's a
-    // potential overwrite. The hook doesn't have filesystem access from
-    // here, so we lean conservative — block writes that look like full
-    // file replacements when --force is not set. The PreToolUse hook
-    // upstream can do an fs.statSync check before calling this.
+    if (!caps.allowDestructive && context?.targetFileExists) {
+      return {
+        kind: 'deny',
+        reason: `Tool "${toolName}" would overwrite an existing file and --force was not provided.`,
+        resumeFlag: '--force',
+      };
+    }
     return { kind: 'allow' };
   }
 
