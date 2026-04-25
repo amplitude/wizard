@@ -114,14 +114,14 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       typeof input.tool_name === 'string'
         ? input.tool_name
         : typeof input.toolName === 'string'
-        ? input.toolName
-        : 'unknown';
+          ? input.toolName
+          : 'unknown';
     const toolInput =
       typeof input.tool_input !== 'undefined'
         ? input.tool_input
         : typeof input.toolInput !== 'undefined'
-        ? input.toolInput
-        : null;
+          ? input.toolInput
+          : null;
     const summary = summarizeToolInput(toolName, toolInput);
     ui.emitToolCall({ tool: toolName, summary });
 
@@ -137,8 +137,8 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         typeof obj.file_path === 'string'
           ? obj.file_path
           : typeof obj.path === 'string'
-          ? obj.path
-          : null;
+            ? obj.path
+            : null;
       if (path) {
         ui.emitFileChangePlanned({ path, operation });
       }
@@ -153,16 +153,16 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       typeof input.tool_name === 'string'
         ? input.tool_name
         : typeof input.toolName === 'string'
-        ? input.toolName
-        : 'unknown';
+          ? input.toolName
+          : 'unknown';
     const operation = classifyWriteOperation(toolName);
     if (!operation) return Promise.resolve({});
     const toolInput =
       typeof input.tool_input !== 'undefined'
         ? input.tool_input
         : typeof input.toolInput !== 'undefined'
-        ? input.toolInput
-        : null;
+          ? input.toolInput
+          : null;
     const obj =
       toolInput && typeof toolInput === 'object'
         ? (toolInput as Record<string, unknown>)
@@ -171,8 +171,8 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       typeof obj.file_path === 'string'
         ? obj.file_path
         : typeof obj.path === 'string'
-        ? obj.path
-        : null;
+          ? obj.path
+          : null;
     if (path) {
       const content = typeof obj.content === 'string' ? obj.content : null;
       ui.emitFileChangeApplied({
@@ -210,7 +210,7 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           ui.emitVerificationResult({
             phase,
             success: false,
-            failures: [(e as Error).message],
+            failures: [String((e as Error).message ?? e)],
           });
         }
         throw e;
