@@ -69,11 +69,16 @@ const CheckpointSchema = z
       selectedProjectName,
       ...rest
     } = data;
+    const isLegacyCheckpoint =
+      selectedWorkspaceId !== undefined && selectedWorkspaceId !== null;
     return {
       ...rest,
       selectedProjectId: selectedProjectId ?? selectedWorkspaceId ?? null,
       selectedProjectName: selectedProjectName ?? selectedWorkspaceName ?? null,
-      selectedEnvName: rest.selectedEnvName ?? selectedProjectName ?? null,
+      selectedEnvName:
+        rest.selectedEnvName ??
+        (isLegacyCheckpoint ? selectedProjectName : null) ??
+        null,
     };
   });
 
