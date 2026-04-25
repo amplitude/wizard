@@ -108,7 +108,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // Resolve org: user-picked > single-org auto-select > pre-populated from session
   const prePopulatedOrg =
     session.selectedOrgId && pendingOrgs
-      ? pendingOrgs.find((o) => o.id === session.selectedOrgId) ?? null
+      ? (pendingOrgs.find((o) => o.id === session.selectedOrgId) ?? null)
       : null;
   const effectiveOrg: OrgEntry | null =
     selectedOrg ??
@@ -120,9 +120,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     effectiveOrg?.workspaces.length === 1 ? effectiveOrg.workspaces[0] : null;
   const prePopulatedWorkspace =
     session.selectedWorkspaceId && effectiveOrg
-      ? effectiveOrg.workspaces.find(
+      ? (effectiveOrg.workspaces.find(
           (ws) => ws.id === session.selectedWorkspaceId,
-        ) ?? null
+        ) ?? null)
       : null;
   const effectiveWorkspace =
     selectedWorkspace ?? singleWorkspace ?? prePopulatedWorkspace ?? null;
@@ -183,9 +183,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const s = store.session;
       if (s.credentials !== null) return;
 
-      const { readApiKeyWithSource, persistApiKey } = await import(
-        '../../../utils/api-key-store.js'
-      );
+      const { readApiKeyWithSource, persistApiKey } =
+        await import('../../../utils/api-key-store.js');
       if (cancelled) return;
 
       // 1. Check local storage first
@@ -447,17 +446,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         <Box flexDirection="column">
           {/* Welcome banner (audit 9.1) — tells users WHY we need OAuth
               before the browser window steals focus. */}
-          {completedSteps.length === 0 && (
-            <Box flexDirection="column" marginBottom={1}>
-              <Text bold color={Colors.heading}>
-                {Icons.dot} Sign in to Amplitude
-              </Text>
-              <Text color={Colors.secondary}>
-                We use your browser to securely fetch your API key — the wizard
-                never sees or stores your password.
-              </Text>
-            </Box>
-          )}
+          <Box flexDirection="column" marginBottom={1}>
+            <Text bold color={Colors.heading}>
+              {Icons.dot} Sign in to Amplitude
+            </Text>
+            <Text color={Colors.secondary}>
+              We use your browser to securely fetch your API key — the wizard
+              never sees or stores your password.
+            </Text>
+          </Box>
           <Box gap={1}>
             <BrailleSpinner color={Colors.accent} />
             <Text color={Colors.body}>
