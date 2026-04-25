@@ -11,6 +11,7 @@ import {
   runAgent,
   createStopHook,
   createPreCompactHook,
+  createPreToolUseHook,
   wizardCanUseTool,
   buildWizardMetadata,
   isSkillInstallCommand,
@@ -1259,5 +1260,133 @@ describe('createPreCompactHook', () => {
       hook({ trigger: 'auto' }, undefined, { signal }),
     ).resolves.toEqual({});
     expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
+describe('createPreToolUseHook', () => {
+  const signal = new AbortController().signal;
+
+  it('returns SDK allow output when decisionFn allows the tool', async () => {
+    const decisionFn = vi.fn(() => ({ allow: true }));
+    const hook = createPreToolUseHook(decisionFn);
+
+    const out = await hook(
+      { tool_name: 'Read', tool_input: { file_path: '/tmp/foo' } },
+      undefined,
+      { signal },
+    );
+
+    expect(decisionFn).toHaveBeenCalledWith('Read', { file_path: '/tmp/foo' });
+    expect(out).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'allow',
+      },
+    });
+  });
+
+  it('returns SDK deny output with reason when decisionFn denies the tool', async () => {
+    const decisionFn = vi.fn(() => ({
+      allow: false,
+      reason: 'env files are off-limits',
+    }));
+    const hook = createPreToolUseHook(decisionFn);
+
+    const out = await hook(
+      { tool_name: 'Read', tool_input: { file_path: '/repo/.env' } },
+      undefined,
+      { signal },
+    );
+
+    expect(decisionFn).toHaveBeenCalledWith('Read', {
+      file_path: '/repo/.env',
+    });
+    expect(out).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'env files are off-limits',
+      },
+    });
+  });
+
+  it('omits permissionDecisionReason when decisionFn provides no reason', async () => {
+    const decisionFn = vi.fn(() => ({ allow: false }));
+    const hook = createPreToolUseHook(decisionFn);
+
+    const out = (await hook(
+      { tool_name: 'Bash', tool_input: { command: 'rm -rf /' } },
+      undefined,
+      { signal },
+    )) as { hookSpecificOutput: Record<string, unknown> };
+
+    expect(out.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(out.hookSpecificOutput).not.toHaveProperty(
+      'permissionDecisionReason',
+    );
+  });
+
+  it('coerces missing or malformed tool_input to an empty object', async () => {
+    const decisionFn = vi.fn(() => ({ allow: true }));
+    const hook = createPreToolUseHook(decisionFn);
+
+    await hook({ tool_name: 'Glob' }, undefined, { signal });
+    await hook({ tool_name: 'Glob', tool_input: 'not-an-object' }, undefined, {
+      signal,
+    });
+
+    expect(decisionFn).toHaveBeenNthCalledWith(1, 'Glob', {});
+    expect(decisionFn).toHaveBeenNthCalledWith(2, 'Glob', {});
+  });
+
+  it('fail-safes to deny when decisionFn throws', async () => {
+    const decisionFn = vi.fn(() => {
+      throw new Error('policy bug');
+    });
+    const hook = createPreToolUseHook(decisionFn);
+
+    const out = await hook(
+      { tool_name: 'Bash', tool_input: { command: 'ls' } },
+      undefined,
+      { signal },
+    );
+
+    expect(out).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'Tool permission check failed unexpectedly.',
+      },
+    });
+    expect(decisionFn).toHaveBeenCalledOnce();
+  });
+
+  it('integrates with wizardCanUseTool to deny .env reads and allow safe reads', async () => {
+    // Mirror the real call-site adapter so behavior stays end-to-end equivalent
+    // to the previous canUseTool wiring.
+    const adapter = (toolName: string, input: Record<string, unknown>) => {
+      const result = wizardCanUseTool(toolName, input);
+      return result.behavior === 'allow'
+        ? { allow: true }
+        : { allow: false, reason: result.message };
+    };
+    const hook = createPreToolUseHook(adapter);
+
+    const denied = (await hook(
+      { tool_name: 'Read', tool_input: { file_path: '/repo/.env.local' } },
+      undefined,
+      { signal },
+    )) as { hookSpecificOutput: Record<string, unknown> };
+    expect(denied.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(denied.hookSpecificOutput.permissionDecisionReason).toMatch(
+      /wizard-tools/,
+    );
+
+    const allowed = (await hook(
+      { tool_name: 'Read', tool_input: { file_path: '/repo/src/index.ts' } },
+      undefined,
+      { signal },
+    )) as { hookSpecificOutput: Record<string, unknown> };
+    expect(allowed.hookSpecificOutput.permissionDecision).toBe('allow');
   });
 });

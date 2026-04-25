@@ -72,7 +72,6 @@ type SDKQueryOptions = {
   allowedTools?: string[];
   systemPrompt?: unknown;
   env?: Record<string, string | undefined>;
-  canUseTool?: (toolName: string, input: unknown) => Promise<unknown>;
   tools?: unknown;
   stderr?: (data: string) => void;
   hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
@@ -353,6 +352,67 @@ export function createPreCompactHook(
       logToFile('PreCompact handler threw:', err);
     }
     return Promise.resolve({});
+  };
+}
+
+/**
+ * Decision shape returned by a PreToolUse decision function.
+ * `allow: true` permits the tool call; `allow: false` denies it.
+ * `reason` is surfaced to the agent in the SDK's permissionDecisionReason.
+ */
+export type PreToolUseDecision = { allow: boolean; reason?: string };
+
+/**
+ * Builds a PreToolUse hook callback that translates a wizard-shaped
+ * decision function into the SDK's PreToolUseHookSpecificOutput shape.
+ *
+ * This is the idiomatic SDK path that replaces the deprecated `canUseTool`
+ * query option, which suffered from race conditions where stdin would
+ * close before permission responses could be sent. See:
+ *   https://github.com/anthropics/claude-code/issues/4775
+ *   https://github.com/anthropics/claude-agent-sdk-typescript/issues/41
+ *
+ * The handler is wrapped in try/catch — if the decision function throws,
+ * the hook fail-safes to deny so a buggy policy can never silently
+ * permit a tool call.
+ */
+export function createPreToolUseHook(
+  decisionFn: (
+    toolName: string,
+    input: Record<string, unknown>,
+  ) => PreToolUseDecision,
+): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const toolName = typeof input.tool_name === 'string' ? input.tool_name : '';
+    const toolInput =
+      input.tool_input && typeof input.tool_input === 'object'
+        ? (input.tool_input as Record<string, unknown>)
+        : {};
+
+    let decision: PreToolUseDecision;
+    try {
+      decision = decisionFn(toolName, toolInput);
+    } catch (err) {
+      // Fail-safe: if the policy throws, deny the tool call rather than
+      // silently allowing it. Mirrors the cautious posture of wizardCanUseTool.
+      logToFile('PreToolUse decision function threw:', err);
+      decision = {
+        allow: false,
+        reason: 'Tool permission check failed unexpectedly.',
+      };
+    }
+
+    logToFile('PreToolUse hook decision', { toolName, decision });
+
+    return Promise.resolve({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: decision.allow ? 'allow' : 'deny',
+        ...(decision.reason !== undefined && {
+          permissionDecisionReason: decision.reason,
+        }),
+      },
+    });
   };
 }
 
@@ -1135,9 +1195,12 @@ export async function runAgent(
   let receivedSuccessResult = false;
   let lastResultMessage: SDKMessage | null = null;
 
-  // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
+  // Workaround for SDK bug: stdin closes before async permission responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
-  // the result is received, keeping the stdin stream alive for permission responses.
+  // the result is received, keeping the stdin stream alive for hook/permission round-trips.
+  // The original motivation was the deprecated `canUseTool` callback (now migrated to a
+  // PreToolUse hook), but other SDK-side paths may still depend on stdin staying open,
+  // so the workaround is intentionally retained until those paths are audited.
   // signalDone is reassigned each retry attempt — the outer catch always has the latest.
   // See: https://github.com/anthropics/claude-code/issues/4775
   // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/41
@@ -1211,7 +1274,7 @@ export async function runAgent(
     // Tools needed for the wizard:
     // - File operations: Read, Write, Edit
     // - Search: Glob, Grep
-    // - Commands: Bash (with restrictions via canUseTool)
+    // - Commands: Bash (with restrictions via PreToolUse hook -> wizardCanUseTool)
     // - MCP discovery: ListMcpResourcesTool (to find available skills)
     // - Skills: Skill (to load installed Amplitude skills)
     // MCP tools (Amplitude) come from mcpServers, not allowedTools
@@ -1458,15 +1521,6 @@ export async function runAgent(
                 agentConfig.wizardFlags ?? {},
               ),
             },
-            canUseTool: (toolName: string, input: unknown) => {
-              logToFile('canUseTool called:', { toolName, input });
-              const result = wizardCanUseTool(
-                toolName,
-                input as Record<string, unknown>,
-              );
-              logToFile('canUseTool result:', result);
-              return Promise.resolve(result);
-            },
             tools: { type: 'preset', preset: 'claude_code' },
             // Capture stderr from CLI subprocess for debugging
             stderr: (data: string) => {
@@ -1486,6 +1540,12 @@ export async function runAgent(
               ),
               ...(config?.onPreCompact && {
                 PreCompact: createPreCompactHook(config.onPreCompact),
+              }),
+              PreToolUse: createPreToolUseHook((toolName, toolInput) => {
+                const result = wizardCanUseTool(toolName, toolInput);
+                return result.behavior === 'allow'
+                  ? { allow: true }
+                  : { allow: false, reason: result.message };
               }),
             }),
             // Allow aborting a stalled query so we can retry cleanly
