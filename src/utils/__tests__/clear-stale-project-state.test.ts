@@ -5,13 +5,16 @@ import * as path from 'node:path';
 import { createHash } from 'node:crypto';
 
 vi.mock('node:child_process', () => ({
-  execSync: vi.fn(),
+  execFileSync: vi.fn(),
 }));
 
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { clearStaleProjectState } from '../clear-stale-project-state.js';
 
-const mockExecSync = vi.mocked(execSync);
+// Implementation uses execFileSync (PR #223 swapped from execSync for shell-
+// injection safety). Keep the local name `mockExecSync` to match the sibling
+// api-key-store.test.ts convention.
+const mockExecSync = vi.mocked(execFileSync);
 const originalPlatform = process.platform;
 
 function setPlatform(platform: NodeJS.Platform) {
@@ -99,17 +102,20 @@ describe('clearStaleProjectState', () => {
   });
 
   it('attempts to delete the keychain entry on macOS', () => {
-    mockExecSync.mockReturnValue('' as ReturnType<typeof execSync>);
+    mockExecSync.mockReturnValue('' as ReturnType<typeof execFileSync>);
 
     clearStaleProjectState(tmpDir);
 
-    const calls = mockExecSync.mock.calls.map(([cmd]) => String(cmd));
+    // execFileSync(file, args) — verify a `security` invocation with
+    // `delete-generic-password` and our service name.
     expect(
-      calls.some(
-        (cmd) =>
-          cmd.includes('security delete-generic-password') &&
-          cmd.includes('amplitude-wizard'),
-      ),
+      mockExecSync.mock.calls.some(([file, args]) => {
+        if (file !== 'security' || !Array.isArray(args)) return false;
+        return (
+          args.includes('delete-generic-password') &&
+          args.includes('amplitude-wizard')
+        );
+      }),
     ).toBe(true);
   });
 
