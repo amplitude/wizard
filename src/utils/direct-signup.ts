@@ -33,6 +33,21 @@ const ErrorSchema = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 });
 
+const NeedsInformationSchema = z
+  .object({
+    type: z.literal('needs_information'),
+    needs_information: z
+      .object({
+        schema: z
+          .object({
+            required: z.array(z.string()).min(1),
+          })
+          .passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
+
 const TokenSchema = z.object({
   access_token: z.string(),
   id_token: z.string(),
@@ -55,8 +70,17 @@ function provisioningUrl(zone: AmplitudeZone): string {
 
 export interface DirectSignupInput {
   email: string;
-  fullName: string;
+  fullName: string | null;
   zone: AmplitudeZone;
+}
+
+export interface DirectSignupOptions {
+  /**
+   * Cancel the in-flight HTTP requests. Forwarded to axios as the
+   * `signal` config. Used by the TUI to drop the request when
+   * SigningUpScreen unmounts (e.g. the user quits mid-POST).
+   */
+  signal?: AbortSignal;
 }
 
 export type DirectSignupResult =
@@ -71,6 +95,7 @@ export type DirectSignupResult =
       };
     }
   | { kind: 'requires_redirect' }
+  | { kind: 'needs_information'; requiredFields: string[] }
   | { kind: 'error'; message: string };
 
 /**
@@ -80,6 +105,7 @@ export type DirectSignupResult =
  */
 export async function performDirectSignup(
   input: DirectSignupInput,
+  options: DirectSignupOptions = {},
 ): Promise<DirectSignupResult> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[input.zone];
   const url = provisioningUrl(input.zone);
@@ -99,12 +125,13 @@ export async function performDirectSignup(
         state,
         client_id: oAuthClientId,
         redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-        full_name: input.fullName,
+        ...(input.fullName !== null ? { full_name: input.fullName } : {}),
       },
       {
         headers: { 'Content-Type': 'application/json' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: options.signal,
       },
     );
   } catch (e) {
@@ -116,6 +143,14 @@ export async function performDirectSignup(
 
   const parsedRedirect = RedirectSchema.safeParse(response.data);
   if (parsedRedirect.success) return { kind: 'requires_redirect' };
+
+  const parsedNeedsInfo = NeedsInformationSchema.safeParse(response.data);
+  if (parsedNeedsInfo.success) {
+    return {
+      kind: 'needs_information',
+      requiredFields: parsedNeedsInfo.data.needs_information.schema.required,
+    };
+  }
 
   const parsedError = ErrorSchema.safeParse(response.data);
   if (parsedError.success) {
@@ -137,12 +172,24 @@ export async function performDirectSignup(
         message: `Provisioning failed with HTTP ${response.status}`,
       };
     }
+    // Surface the discriminant if the server shipped one — makes future
+    // triage materially easier when a new response arm appears in prod
+    // before the wizard knows how to parse it. `type` is just a tag, no
+    // PII risk.
+    const responseType =
+      response.data && typeof response.data === 'object'
+        ? (response.data as { type?: unknown }).type
+        : undefined;
     log.error('[direct-signup] unexpected response shape', {
       status: response.status,
+      type: typeof responseType === 'string' ? responseType : undefined,
     });
     return {
       kind: 'error',
-      message: `Unexpected response (${response.status})`,
+      message:
+        typeof responseType === 'string'
+          ? `Unexpected response (${response.status}, type=${responseType})`
+          : `Unexpected response (${response.status})`,
     };
   }
 
@@ -161,6 +208,7 @@ export async function performDirectSignup(
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: options.signal,
       },
     );
   } catch (e) {

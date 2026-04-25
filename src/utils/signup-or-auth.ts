@@ -93,6 +93,7 @@ async function fetchUserWithProvisioningRetry(
 export type SignupAttemptStatus =
   | 'success'
   | 'requires_redirect'
+  | 'needs_information'
   | 'signup_error'
   | 'user_fetch_failed'
   | 'wrapper_exception'
@@ -125,10 +126,23 @@ export interface SignupOrAuthInput {
   zone: AmplitudeZone;
 }
 
+export interface SignupOrAuthOptions {
+  /**
+   * Cancel the in-flight signup POST. Forwarded to `performDirectSignup`
+   * which passes it to axios. Used by SigningUpScreen to abort the
+   * request on unmount.
+   */
+  signal?: AbortSignal;
+}
+
 /**
- * Result of {@link performSignupOrAuth}. Extends {@link AmplitudeAuthResult}
- * with the user profile fetched inside the function, so callers can skip a
- * redundant `fetchAmplitudeUser` call.
+ * Result of {@link performSignupOrAuth}. Discriminated union that surfaces
+ * each non-success outcome as its own arm so callers can branch without
+ * relying on a null-means-what sentinel.
+ *
+ * Success arm extends {@link AmplitudeAuthResult} with the user profile
+ * fetched inside the function, so callers can skip a redundant
+ * `fetchAmplitudeUser` call.
  *
  * `userInfo` is:
  * - populated on the direct-signup success path when the internal fetch
@@ -136,18 +150,32 @@ export interface SignupOrAuthInput {
  * - `null` on the pending-sentinel path (internal fetch failed) — the
  *   caller is responsible for fetching userInfo itself in that case
  */
-export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
-  userInfo: AmplitudeUserInfo | null;
-};
+export type PerformSignupOrAuthResult =
+  | ({ kind: 'success' } & AmplitudeAuthResult & {
+        userInfo: AmplitudeUserInfo | null;
+      })
+  | { kind: 'requires_redirect' }
+  | { kind: 'needs_information'; requiredFields: string[] }
+  | { kind: 'error' };
+
+// Narrowed type used by WizardSession.signupAuth — only the success arm is
+// ever written to the session.
+export type SignupSuccessResult = Extract<
+  PerformSignupOrAuthResult,
+  { kind: 'success' }
+>;
 
 /**
  * Attempt direct signup via the headless provisioning endpoint.
  *
- * Returns the new account's tokens (and userInfo, when the internal fetch
- * succeeded) on success; returns `null` when:
- * - email or fullName is missing
- * - the endpoint returns `requires_redirect` / `needs_information` / `error`
- * - the direct-signup network call itself errors
+ * Returns a discriminated union:
+ * - `{ kind: 'success', ... }` — new account provisioned; tokens (and
+ *   userInfo when the internal fetch succeeded) are populated
+ * - `{ kind: 'requires_redirect' }` — endpoint bounced us to browser OAuth
+ * - `{ kind: 'needs_information', requiredFields }` — endpoint needs more
+ *   information (e.g. full_name) before it can provision
+ * - `{ kind: 'error' }` — email missing, endpoint returned error, or the
+ *   network call itself threw
  *
  * On success, also fetches the real user profile and persists the
  * `StoredUser` + tokens to `~/.ampli.json` so downstream
@@ -158,46 +186,60 @@ export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
  *
  * This function does NOT fall back to `performAmplitudeAuth()`. Callers
  * that want OAuth fallback (e.g. the TUI path) must call it explicitly
- * when this returns null. Agent/CI modes typically skip OAuth and let
+ * for the non-success arms. Agent/CI modes typically skip OAuth and let
  * `resolveNonInteractiveCredentials` handle cached-token resolution.
  */
 export async function performSignupOrAuth(
   input: SignupOrAuthInput,
-): Promise<PerformSignupOrAuthResult | null> {
-  if (input.email === null || input.fullName === null) {
-    log.debug('missing email or fullName; skipping direct signup');
-    return null;
+  options: SignupOrAuthOptions = {},
+): Promise<PerformSignupOrAuthResult> {
+  if (input.email === null) {
+    log.debug('missing email; skipping direct signup');
+    return { kind: 'error' };
   }
 
   log.debug('attempting direct signup');
   // performDirectSignup is contracted to catch its own network/parse errors
   // and return { kind: 'error' }. The try/catch here is belt-and-suspenders
-  // enforcement of the wrapper's documented null-on-any-error behavior —
-  // callers rely on the null return to decide fallback strategy.
+  // enforcement of the wrapper's documented error-arm-on-any-error behavior —
+  // callers rely on the error arm to decide fallback strategy.
   let result: Awaited<ReturnType<typeof performDirectSignup>>;
   try {
-    result = await performDirectSignup({
-      email: input.email,
-      fullName: input.fullName,
-      zone: input.zone,
-    });
+    result = await performDirectSignup(
+      {
+        email: input.email,
+        fullName: input.fullName,
+        zone: input.zone,
+      },
+      { signal: options.signal },
+    );
   } catch (err) {
     log.warn('direct signup threw unexpectedly', {
       message: err instanceof Error ? err.message : String(err),
     });
     trackSignupAttempt({ status: 'signup_error', zone: input.zone });
-    return null;
+    return { kind: 'error' };
   }
 
   if (result.kind === 'requires_redirect') {
     log.debug('direct signup did not succeed', { kind: result.kind });
     trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
-    return null;
+    return { kind: 'requires_redirect' };
+  }
+  if (result.kind === 'needs_information') {
+    log.debug('direct signup requires additional information', {
+      requiredFields: result.requiredFields,
+    });
+    trackSignupAttempt({ status: 'needs_information', zone: input.zone });
+    return {
+      kind: 'needs_information',
+      requiredFields: result.requiredFields,
+    };
   }
   if (result.kind === 'error') {
     log.debug('direct signup did not succeed', { kind: result.kind });
     trackSignupAttempt({ status: 'signup_error', zone: input.zone });
-    return null;
+    return { kind: 'error' };
   }
 
   const tokens = {
@@ -234,7 +276,7 @@ export async function performSignupOrAuth(
         zone: input.zone,
       },
     );
-    const parts = input.fullName.trim().split(/\s+/);
+    const parts = input.fullName ? input.fullName.trim().split(/\s+/) : [];
     user = {
       id: 'pending',
       firstName: parts[0] ?? '',
@@ -263,6 +305,7 @@ export async function performSignupOrAuth(
   }
 
   return {
+    kind: 'success',
     idToken: tokens.idToken,
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,

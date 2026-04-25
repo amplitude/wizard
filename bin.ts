@@ -119,7 +119,7 @@ import type { LogLevel } from './src/lib/observability';
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
 // prevents the TUI's ESM dynamic imports from resolving named exports.
 const lazyRunWizard = async (
-  ...args: Parameters<(typeof import('./src/run'))['runWizard']>
+  ...args: Parameters<typeof import('./src/run')['runWizard']>
 ) => {
   const { runWizard } = await import('./src/run.js');
   return runWizard(...args);
@@ -224,8 +224,9 @@ const resolveNonInteractiveCredentials = async (
   // the project API key.
   const envAccessToken =
     process.env.AMPLITUDE_TOKEN ?? process.env.AMPLITUDE_WIZARD_TOKEN;
-  const { resolveCredentials, resolveEnvironmentSelection } =
-    await import('./src/lib/credential-resolution.js');
+  const { resolveCredentials, resolveEnvironmentSelection } = await import(
+    './src/lib/credential-resolution.js'
+  );
   await resolveCredentials(session, {
     requireOrgId: false,
     org: options.org as string | undefined,
@@ -479,9 +480,10 @@ const resolveNonInteractiveCredentials = async (
  * Run the direct-signup wrapper for agent / CI / classic modes.
  *
  * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
- * set. On a non-null result, optionally runs `onSuccess` (classic uses this
- * to populate `session.credentials` via `resolveCredentials`). On null or
- * thrown errors, logs a human message that points at the mode's fallback
+ * set. On a `success` result, optionally runs `onSuccess` (classic uses this
+ * to populate `session.credentials` via `resolveCredentials`). On any
+ * non-success arm (`requires_redirect`, `needs_information`, `error`) or a
+ * thrown error, logs a human message that points at the mode's fallback
  * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
  */
 const runDirectSignupIfRequested = async (
@@ -511,9 +513,9 @@ const runDirectSignupIfRequested = async (
     );
     process.exit(ExitCode.AUTH_REQUIRED);
   }
-  let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
+  let result: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
-    tokens = await performSignupOrAuth({
+    result = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
@@ -531,12 +533,35 @@ const runDirectSignupIfRequested = async (
     );
     return;
   }
-  if (tokens === null) {
-    getUI().log.info(
-      `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
-    );
-    return;
+
+  switch (result.kind) {
+    case 'success':
+      // Fall through to the success path below.
+      break;
+    case 'requires_redirect':
+    case 'needs_information':
+    case 'error':
+      // Non-TUI modes (classic/agent/CI) have no interactive re-prompt
+      // for needs_information — bucket all non-success arms into the
+      // same "continue to fallback" path. The wrapper has already
+      // emitted the appropriate telemetry for each arm internally.
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+      return;
+    default:
+      // Exhaustiveness guard. If a new arm is added to
+      // PerformSignupOrAuthResult, `result satisfies never` fails at
+      // compile time; at runtime we fail closed to the fallback path
+      // rather than the success path below, which would attempt
+      // onSuccess() without credentials.
+      result satisfies never;
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+      return;
   }
+
   getUI().log.info('Direct signup succeeded; using newly created account.');
   if (onSuccess) {
     try {
@@ -1052,8 +1077,9 @@ void yargs(hideBin(process.argv))
 
             // If --api-key was provided, skip the OAuth/TUI auth flow entirely.
             if (session.apiKey) {
-              const { DEFAULT_HOST_URL } =
-                await import('./src/lib/constants.js');
+              const { DEFAULT_HOST_URL } = await import(
+                './src/lib/constants.js'
+              );
               session.credentials = {
                 accessToken: session.apiKey,
                 projectApiKey: session.apiKey,
@@ -1081,8 +1107,9 @@ void yargs(hideBin(process.argv))
 
               // Resolve credentials using shared logic (token refresh,
               // env auto-select, pendingOrgs population)
-              const { resolveCredentials } =
-                await import('./src/lib/credential-resolution.js');
+              const { resolveCredentials } = await import(
+                './src/lib/credential-resolution.js'
+              );
               await resolveCredentials(session);
 
               // Resolve org/workspace display names so /whoami shows them.
@@ -1166,9 +1193,9 @@ void yargs(hideBin(process.argv))
                           changed = true;
                           // Fall back to the first workspace if the stored ID is stale.
                           const ws = session.selectedWorkspaceId
-                            ? (org.workspaces.find(
+                            ? org.workspaces.find(
                                 (w) => w.id === session.selectedWorkspaceId,
-                              ) ?? org.workspaces[0])
+                              ) ?? org.workspaces[0]
                             : org.workspaces[0];
                           if (ws) {
                             session.selectedWorkspaceName = ws.name;
@@ -1209,8 +1236,9 @@ void yargs(hideBin(process.argv))
             // Dynamic-import keeps the Claude Agent SDK out of bin.ts load.
             try {
               const fs = await import('fs');
-              const { parseEventPlanContent } =
-                await import('./src/lib/agent-interface.js');
+              const { parseEventPlanContent } = await import(
+                './src/lib/agent-interface.js'
+              );
               const evtPath = resolve(
                 session.installDir,
                 '.amplitude-events.json',
@@ -1228,8 +1256,9 @@ void yargs(hideBin(process.argv))
             }
 
             // Initialize Amplitude Experiment feature flags (non-blocking).
-            const { initFeatureFlags } =
-              await import('./src/lib/feature-flags.js');
+            const { initFeatureFlags } = await import(
+              './src/lib/feature-flags.js'
+            );
             await initFeatureFlags().catch(() => {
               // Flag init failure is non-fatal — all flags default to off
             });
@@ -1237,16 +1266,18 @@ void yargs(hideBin(process.argv))
             // Apply SDK-level opt-out based on feature flags
             analytics.applyOptOut();
 
-            const { FRAMEWORK_REGISTRY } =
-              await import('./src/lib/registry.js');
+            const { FRAMEWORK_REGISTRY } = await import(
+              './src/lib/registry.js'
+            );
             const { detectAllFrameworks } = await import('./src/run.js');
             const installDir = session.installDir ?? process.cwd();
 
             // Verbose startup diagnostics — always written to the log file;
             // visible in the RunScreen "Logs" tab.
             if (session.verbose || session.debug) {
-              const { enableDebugLogs, logToFile } =
-                await import('./src/utils/debug.js');
+              const { enableDebugLogs, logToFile } = await import(
+                './src/utils/debug.js'
+              );
               enableDebugLogs();
               logToFile('[verbose] Amplitude Wizard starting');
               logToFile(`[verbose] node          : ${process.version}`);
@@ -1256,8 +1287,9 @@ void yargs(hideBin(process.argv))
               logToFile(`[verbose] argv          : ${process.argv.join(' ')}`);
             }
 
-            const { DETECTION_TIMEOUT_MS } =
-              await import('./src/lib/constants.js');
+            const { DETECTION_TIMEOUT_MS } = await import(
+              './src/lib/constants.js'
+            );
 
             // ── OAuth + account setup ──────────────────────────────
             // Runs concurrently with framework detection while AuthScreen shows.
@@ -1271,34 +1303,50 @@ void yargs(hideBin(process.argv))
               if (tui.store.session.credentials !== null) return;
 
               try {
-                const { ampliConfigExists } =
-                  await import('./src/lib/ampli-config.js');
-                const { performAmplitudeAuth } =
-                  await import('./src/utils/oauth.js');
+                const { ampliConfigExists } = await import(
+                  './src/lib/ampli-config.js'
+                );
+                const { performAmplitudeAuth } = await import(
+                  './src/utils/oauth.js'
+                );
                 const { fetchAmplitudeUser } = await import('./src/lib/api.js');
-                const { DEFAULT_AMPLITUDE_ZONE } =
-                  await import('./src/lib/constants.js');
-                const { storeToken } =
-                  await import('./src/utils/ampli-settings.js');
+                const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                  './src/lib/constants.js'
+                );
+                const { storeToken } = await import(
+                  './src/utils/ampli-settings.js'
+                );
 
                 const forceFresh = !ampliConfigExists(installDir);
 
-                // Wait for the user to dismiss the welcome screen AND pick a
-                // region before opening the OAuth URL. This ensures the logo
-                // and intro are visible before the browser opens.
+                // Wait for:
+                //   (a) the user to dismiss the welcome screen AND pick a region
+                //       (always required — gates the OAuth browser open)
+                //   (b) if --signup was passed, the SigningUpScreen ceremony to
+                //       terminate — either tokens obtained (signupAuth !== null)
+                //       or the screen abandoned after redirect/error/unknown
+                //       field (signupAbandoned === true). Without this, bin.ts
+                //       races SigningUpScreen's POST and opens the browser
+                //       before the signup flow can write its result to the
+                //       session.
+                const signupCeremonySettled = (s: typeof tui.store.session) =>
+                  !s.signup || s.signupAuth !== null || s.signupAbandoned;
+
                 await new Promise<void>((resolve) => {
-                  if (
-                    tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
-                  ) {
+                  const ready = () => {
+                    const s = tui.store.session;
+                    return (
+                      s.introConcluded &&
+                      s.region !== null &&
+                      signupCeremonySettled(s)
+                    );
+                  };
+                  if (ready()) {
                     resolve();
                     return;
                   }
                   const unsub = tui.store.subscribe(() => {
-                    if (
-                      tui.store.session.introConcluded &&
-                      tui.store.session.region !== null
-                    ) {
+                    if (ready()) {
                       unsub();
                       resolve();
                     }
@@ -1313,59 +1361,28 @@ void yargs(hideBin(process.argv))
                   { readDisk: false },
                 );
 
-                // Try direct signup first when --signup + email + fullName are provided
-                // and the feature flag is enabled. performSignupOrAuth returns null when
-                // any of those gates are missing, or when the server returns a non-success
-                // response — in which case we fall through to the existing OAuth flow
-                // (TUI has a browser; this fallback is valid).
-                //
-                // On signup success, the wrapper already fetched the real user
-                // profile (with provisioning retry) and persisted tokens to
-                // ~/.ampli.json — so we carry its userInfo through and skip the
-                // redundant fetch + storeToken below.
+                // Direct signup has already been attempted by the SigningUpScreen
+                // — results are written to session.signupAuth on success,
+                // or session.signupAbandoned on redirect/error/unsupported.
                 let auth: Awaited<
                   ReturnType<typeof performAmplitudeAuth>
                 > | null = null;
                 let signupUserInfo: Awaited<
                   ReturnType<typeof fetchAmplitudeUser>
                 > | null = null;
-                // True iff direct signup produced fresh tokens in this run.
-                // Used by the downstream fetchAmplitudeUser catch to
-                // distinguish a provisioning-lag recovery (signup succeeded,
-                // but user data not yet available) from the normal
-                // expired-token case.
                 let signupTokensObtained = false;
+
                 const { trackSignupAttempt } = await import(
                   './src/utils/signup-or-auth.js'
                 );
                 const s = tui.store.session;
-                if (s.signup && s.signupEmail && s.signupFullName) {
-                  const { performSignupOrAuth } = await import(
-                    './src/utils/signup-or-auth.js'
+                if (s.signupAuth !== null) {
+                  auth = s.signupAuth;
+                  signupUserInfo = s.signupAuth.userInfo;
+                  signupTokensObtained = true;
+                  getUI().log.info(
+                    'Direct signup succeeded; using newly created account.',
                   );
-                  try {
-                    const signupResult = await performSignupOrAuth({
-                      email: s.signupEmail,
-                      fullName: s.signupFullName,
-                      zone,
-                    });
-                    if (signupResult !== null) {
-                      auth = signupResult;
-                      signupUserInfo = signupResult.userInfo;
-                      signupTokensObtained = true;
-                      getUI().log.info(
-                        'Direct signup succeeded; using newly created account.',
-                      );
-                    }
-                  } catch (err) {
-                    trackSignupAttempt({ status: 'wrapper_exception', zone });
-                    getUI().log.warn(
-                      `Direct signup errored: ${
-                        err instanceof Error ? err.message : String(err)
-                      }. Falling back to OAuth.`,
-                    );
-                    auth = null;
-                  }
                 }
 
                 if (auth === null) {
@@ -1398,6 +1415,15 @@ void yargs(hideBin(process.argv))
                       // when a browser opens after "signup succeeded", and
                       // emit telemetry so we can measure how often the rare
                       // edge case actually hits production.
+                      //
+                      // Telemetry pairing: the wrapper in
+                      // performSignupOrAuth already emitted
+                      // `user_fetch_failed` for the failed first fetch.
+                      // The `browser_fallback_after_signup` event below
+                      // is the second half of the degradation chain
+                      // (we're falling back to OAuth). The two events
+                      // together describe a real two-layer failure —
+                      // not a double-count of one attempt.
                       getUI().log.info(
                         'Account created, but user data is still being provisioned. ' +
                           'Opening browser to complete sign-in…',
@@ -1529,8 +1555,9 @@ void yargs(hideBin(process.argv))
                 };
                 const depNames = Object.keys(allDeps);
 
-                const { DiscoveredFeature } =
-                  await import('./src/lib/wizard-session.js');
+                const { DiscoveredFeature } = await import(
+                  './src/lib/wizard-session.js'
+                );
 
                 if (
                   depNames.some((d) =>
@@ -1542,10 +1569,12 @@ void yargs(hideBin(process.argv))
 
                 // LLM SDK detection — sourced from Amplitude LLM analytics skill
                 // Gated by the wizard-llm-analytics feature flag.
-                const { isFlagEnabled } =
-                  await import('./src/lib/feature-flags.js');
-                const { FLAG_LLM_ANALYTICS } =
-                  await import('./src/lib/feature-flags.js');
+                const { isFlagEnabled } = await import(
+                  './src/lib/feature-flags.js'
+                );
+                const { FLAG_LLM_ANALYTICS } = await import(
+                  './src/lib/feature-flags.js'
+                );
                 if (isFlagEnabled(FLAG_LLM_ANALYTICS)) {
                   const LLM_PACKAGES = [
                     'openai',
@@ -1582,8 +1611,9 @@ void yargs(hideBin(process.argv))
 
             // Session checkpointing — save at key transitions so crash
             // recovery can skip already-completed steps.
-            const { saveCheckpoint, clearCheckpoint } =
-              await import('./src/lib/session-checkpoint.js');
+            const { saveCheckpoint, clearCheckpoint } = await import(
+              './src/lib/session-checkpoint.js'
+            );
             // After auth completes (most expensive step to repeat)
             tui.store.onEnterScreen(Screen.DataSetup, () => {
               saveCheckpoint(tui.store.session);
@@ -1632,8 +1662,9 @@ void yargs(hideBin(process.argv))
             // Before calling the AI agent, do a quick static check to see if
             // Amplitude is already installed in the project. If so, skip the
             // agent entirely and advance directly to MCP setup.
-            const { detectAmplitudeInProject } =
-              await import('./src/lib/detect-amplitude.js');
+            const { detectAmplitudeInProject } = await import(
+              './src/lib/detect-amplitude.js'
+            );
             const localDetection = detectAmplitudeInProject(installDir);
 
             if (localDetection.confidence !== 'none') {
@@ -1643,8 +1674,9 @@ void yargs(hideBin(process.argv))
                   localDetection.reason ?? 'unknown'
                 }) — prompting on MCP screen (continue vs run wizard)`,
               );
-              const { RunPhase, OutroKind } =
-                await import('./src/lib/wizard-session.js');
+              const { RunPhase, OutroKind } = await import(
+                './src/lib/wizard-session.js'
+              );
               tui.store.setAmplitudePreDetected();
               tui.store.setRunPhase(RunPhase.Completed);
               const runWizardAnyway =
@@ -1713,8 +1745,9 @@ void yargs(hideBin(process.argv))
         const zone = argv.region as 'us' | 'eu';
 
         try {
-          const { getStoredUser, getStoredToken } =
-            await import('./src/utils/ampli-settings.js');
+          const { getStoredUser, getStoredToken } = await import(
+            './src/utils/ampli-settings.js'
+          );
           // If a valid cached session exists, display the stored user without
           // re-fetching from the API (the cached idToken may be expired).
           const cachedToken = getStoredToken(undefined, zone);
@@ -1769,11 +1802,13 @@ void yargs(hideBin(process.argv))
     () => {},
     (argv) => {
       void (async () => {
-        const { getStoredUser, clearStoredCredentials } =
-          await import('./src/utils/ampli-settings.js');
+        const { getStoredUser, clearStoredCredentials } = await import(
+          './src/utils/ampli-settings.js'
+        );
         const { clearApiKey } = await import('./src/utils/api-key-store.js');
-        const { clearCheckpoint } =
-          await import('./src/lib/session-checkpoint.js');
+        const { clearCheckpoint } = await import(
+          './src/lib/session-checkpoint.js'
+        );
         const installDir =
           (argv.installDir as string | undefined) ?? process.cwd();
         const user = getStoredUser();
@@ -1800,8 +1835,9 @@ void yargs(hideBin(process.argv))
     () => {},
     (_argv) => {
       void (async () => {
-        const { getStoredUser, getStoredToken } =
-          await import('./src/utils/ampli-settings.js');
+        const { getStoredUser, getStoredToken } = await import(
+          './src/utils/ampli-settings.js'
+        );
         const user = getStoredUser();
         const token = getStoredToken();
         if (user && token && user.id !== 'pending') {
@@ -1855,8 +1891,9 @@ void yargs(hideBin(process.argv))
           return;
         }
         try {
-          const { trackWizardFeedback } =
-            await import('./src/utils/track-wizard-feedback.js');
+          const { trackWizardFeedback } = await import(
+            './src/utils/track-wizard-feedback.js'
+          );
           await trackWizardFeedback(message);
           getUI().log.success('Thanks — your feedback was sent.');
           process.exit(0);
@@ -2256,8 +2293,9 @@ void yargs(hideBin(process.argv))
           void (async () => {
             try {
               const { startTUI } = await import('./src/ui/tui/start-tui.js');
-              const { buildSession } =
-                await import('./src/lib/wizard-session.js');
+              const { buildSession } = await import(
+                './src/lib/wizard-session.js'
+              );
 
               const { Flow } = await import('./src/ui/tui/router.js');
               const tui = startTUI(WIZARD_VERSION, Flow.McpAdd);
@@ -2269,8 +2307,9 @@ void yargs(hideBin(process.argv))
             } catch {
               // TUI unavailable — fallback to logging
               setUI(new LoggingUI());
-              const { addMCPServerToClientsStep } =
-                await import('./src/steps/add-mcp-server-to-clients/index.js');
+              const { addMCPServerToClientsStep } = await import(
+                './src/steps/add-mcp-server-to-clients/index.js'
+              );
               await addMCPServerToClientsStep({
                 local: options.local,
               });
@@ -2296,8 +2335,9 @@ void yargs(hideBin(process.argv))
           void (async () => {
             try {
               const { startTUI } = await import('./src/ui/tui/start-tui.js');
-              const { buildSession } =
-                await import('./src/lib/wizard-session.js');
+              const { buildSession } = await import(
+                './src/lib/wizard-session.js'
+              );
 
               const { Flow } = await import('./src/ui/tui/router.js');
               const tui = startTUI(WIZARD_VERSION, Flow.McpRemove);
@@ -2309,8 +2349,9 @@ void yargs(hideBin(process.argv))
             } catch {
               // TUI unavailable — fallback to logging
               setUI(new LoggingUI());
-              const { removeMCPServerFromClientsStep } =
-                await import('./src/steps/add-mcp-server-to-clients/index.js');
+              const { removeMCPServerFromClientsStep } = await import(
+                './src/steps/add-mcp-server-to-clients/index.js'
+              );
               await removeMCPServerFromClientsStep({
                 local: options.local,
               });
@@ -2325,8 +2366,9 @@ void yargs(hideBin(process.argv))
         () => {
           void (async () => {
             try {
-              const { startAgentMcpServer } =
-                await import('./src/lib/wizard-mcp-server.js');
+              const { startAgentMcpServer } = await import(
+                './src/lib/wizard-mcp-server.js'
+              );
               await startAgentMcpServer();
             } catch (err) {
               const msg = err instanceof Error ? err.message : String(err);
@@ -2347,8 +2389,9 @@ void yargs(hideBin(process.argv))
     () => {},
     () => {
       void (async () => {
-        const { getAgentManifest } =
-          await import('./src/lib/agent-manifest.js');
+        const { getAgentManifest } = await import(
+          './src/lib/agent-manifest.js'
+        );
         process.stdout.write(
           JSON.stringify(getAgentManifest(), null, 2) + '\n',
         );

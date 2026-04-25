@@ -41,7 +41,7 @@ const provisionedOrgs = [
 describe('performSignupOrAuth', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns null when email is missing', async () => {
+  it('returns error when email is missing', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     const { analytics } = await import('../analytics');
 
@@ -52,32 +52,14 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: 'error' });
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       expect.anything(),
     );
   });
 
-  it('returns null when fullName is missing', async () => {
-    const { performDirectSignup } = await import('../direct-signup.js');
-    const { analytics } = await import('../analytics');
-
-    const result = await performSignupOrAuth({
-      email: 'ada@example.com',
-      fullName: null,
-      zone: 'us',
-    });
-
-    expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
-    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
-      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      expect.anything(),
-    );
-  });
-
-  it('returns null when direct signup returns requires_redirect', async () => {
+  it('returns requires_redirect when direct signup returns requires_redirect', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'requires_redirect',
@@ -90,7 +72,7 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).toHaveBeenCalledOnce();
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: 'requires_redirect' });
   });
 
   it('emits agentic signup attempted with status=requires_redirect on redirect path', async () => {
@@ -112,7 +94,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns null when direct signup returns error', async () => {
+  it('returns error when direct signup returns error', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'error',
@@ -125,7 +107,7 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: 'error' });
   });
 
   it('emits agentic signup attempted with status=signup_error on error kind', async () => {
@@ -193,8 +175,10 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(result).not.toBeNull();
-    expect(result).toMatchObject({ accessToken: 'direct-access' });
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.accessToken).toBe('direct-access');
+    }
     expect(replaceStoredUser).toHaveBeenCalledOnce();
   });
 
@@ -345,7 +329,10 @@ describe('performSignupOrAuth', () => {
         expect.objectContaining({ id: 'pending' }),
         expect.anything(),
       );
-      expect(result).toMatchObject({ accessToken: 'direct-access' });
+      expect(result.kind).toBe('success');
+      if (result.kind === 'success') {
+        expect(result.accessToken).toBe('direct-access');
+      }
     } finally {
       vi.useRealTimers();
     }
@@ -446,5 +433,60 @@ describe('performSignupOrAuth', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('performSignupOrAuth — needs_information arm', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns { kind: "needs_information", requiredFields } and tracks telemetry', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValueOnce({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+    const { analytics } = await import('../analytics');
+
+    const result = await performSignupOrAuth({
+      email: 'new@acme.com',
+      fullName: null,
+      zone: 'us',
+    });
+
+    expect(result).toEqual({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      expect.objectContaining({ status: 'needs_information', zone: 'us' }),
+    );
+  });
+});
+
+describe('performSignupOrAuth — missing fullName no longer short-circuits', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('passes null fullName through to performDirectSignup', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValueOnce({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+
+    await performSignupOrAuth({
+      email: 'new@acme.com',
+      fullName: null,
+      zone: 'us',
+    });
+
+    expect(performDirectSignup).toHaveBeenCalledWith(
+      {
+        email: 'new@acme.com',
+        fullName: null,
+        zone: 'us',
+      },
+      expect.anything(),
+    );
   });
 });

@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
+import type { SignupSuccessResult } from '../utils/signup-or-auth.js';
 
 /**
  * Zod schema for CLI args passed to `buildSession()`.
@@ -185,6 +186,26 @@ export interface WizardSession {
   signup: boolean;
   signupEmail: string | null;
   signupFullName: string | null;
+  /**
+   * Field names the signup endpoint requires before it can provision
+   * (e.g. `['full_name']`). Set when performSignupOrAuth returns
+   * `{ kind: 'needs_information' }`. Read by flow predicates that route
+   * the user into the appropriate collection screen.
+   */
+  signupRequiredFields: string[];
+  /**
+   * Success payload from direct signup — tokens + userInfo. Set by
+   * SigningUpScreen on the `success` arm of performSignupOrAuth; read by
+   * bin.ts to skip the OAuth browser flow. Narrowed to the success arm
+   * because only that case is ever written here.
+   */
+  signupAuth: SignupSuccessResult | null;
+  /**
+   * True once the direct-signup path has been abandoned for this run
+   * (e.g. endpoint bounced to redirect, returned an unknown required field,
+   * or errored). Read by the flow to fall through to the normal AuthScreen.
+   */
+  signupAbandoned: boolean;
   localMcp: boolean;
   apiKey?: string;
   menu: boolean;
@@ -499,6 +520,9 @@ export function buildSession(args: {
     // signup wrapper short-circuits with "missing email or fullName".
     signupEmail: parsed.success ? validated.signupEmail ?? null : null,
     signupFullName: parsed.success ? validated.signupFullName ?? null : null,
+    signupRequiredFields: [],
+    signupAuth: null,
+    signupAbandoned: false,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
