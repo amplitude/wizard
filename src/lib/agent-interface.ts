@@ -41,6 +41,27 @@ import {
   buildHooksConfig,
 } from './agent-hooks';
 
+/**
+ * Mirror of @anthropic-ai/claude-agent-sdk ThinkingConfig. We mirror locally
+ * because the SDK is dynamically imported elsewhere (ESM/CJS interop).
+ *
+ * - `'enabled'` + budgetTokens — fixed per-turn thinking budget. Required for
+ *   Sonnet 4.6 and other non-adaptive models.
+ * - `'adaptive'` — model decides depth (Opus 4.6+ only).
+ * - `'disabled'` — turn off extended thinking.
+ *
+ * `display: 'summarized'` keeps NDJSON / agent-mode output readable; without
+ * it raw thinking blocks bloat the transcript.
+ */
+type SDKThinkingConfig =
+  | {
+      type: 'enabled';
+      budgetTokens: number;
+      display?: 'summarized' | 'omitted';
+    }
+  | { type: 'adaptive'; display?: 'summarized' | 'omitted' }
+  | { type: 'disabled' };
+
 type SDKQueryOptions = {
   model?: string;
   fallbackModel?: string;
@@ -57,6 +78,7 @@ type SDKQueryOptions = {
   hooks?: Partial<Record<HookEvent, HookCallbackMatcher[]>>;
   abortSignal?: AbortSignal;
   maxTurns?: number;
+  thinking?: SDKThinkingConfig;
 };
 
 type SDKQueryFn = (params: {
@@ -297,6 +319,39 @@ export function createStopHook(
 
     // Phase 3: allow stop
     logToFile('Stop hook: allowing stop');
+    return Promise.resolve({});
+  };
+}
+
+/**
+ * Builds a PreCompact hook callback that fires just before the SDK compacts
+ * the conversation history. The callback is purely observational — the SDK
+ * does not let us alter the compacted summary — but firing here gives us:
+ *
+ *   1. Crash safety: persists the latest wizard checkpoint so a compaction
+ *      crash doesn't leave the user without a resumable state.
+ *   2. Diagnostics: file-log + analytics every compaction, with the trigger
+ *      ('manual' | 'auto'), so we can correlate "agent forgot something"
+ *      reports with actual compactions.
+ *
+ * The handler is wrapped in try/catch — a hook that throws would otherwise
+ * abort the compaction and tank the run.
+ */
+export function createPreCompactHook(
+  handler: (input: { trigger: 'manual' | 'auto' }) => void,
+): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const trigger =
+      input.trigger === 'manual' || input.trigger === 'auto'
+        ? input.trigger
+        : 'auto';
+    logToFile('PreCompact hook triggered', { trigger });
+    try {
+      handler({ trigger });
+    } catch (err) {
+      // Never let a hook error break the compaction — log and move on.
+      logToFile('PreCompact handler threw:', err);
+    }
     return Promise.resolve({});
   };
 }
@@ -1036,6 +1091,12 @@ export async function runAgent(
     additionalFeatureQueue?: () => readonly AdditionalFeature[];
     onFeatureStart?: (feature: AdditionalFeature) => void;
     onFeatureComplete?: (feature: AdditionalFeature) => void;
+    /**
+     * Fires just before the SDK compacts the conversation. Use to persist
+     * crash-recovery state and emit analytics. Wrapped in try/catch by the
+     * hook factory — a throwing handler will not abort the compaction.
+     */
+    onPreCompact?: (input: { trigger: 'manual' | 'auto' }) => void;
   },
   middleware?: {
     onMessage(message: SDKMessage): void;
@@ -1353,6 +1414,19 @@ export async function runAgent(
             mcpServers: agentConfig.mcpServers,
             // Safety nets: cap runaway tool loops and token spend
             maxTurns: 200,
+            // Extended thinking — give the model a small reasoning budget on
+            // every turn. The instrumentation-planning phase before
+            // confirm_event_plan is the most thinking-intensive moment, but
+            // file edits and event-name selection benefit too. budgetTokens
+            // is a per-turn ceiling, not a per-run total. display:
+            // 'summarized' keeps NDJSON logs / agent-mode output readable.
+            // Sonnet 4.6 doesn't support adaptive thinking — must use
+            // 'enabled' + explicit budget.
+            thinking: {
+              type: 'enabled',
+              budgetTokens: 3000,
+              display: 'summarized',
+            },
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
@@ -1410,6 +1484,9 @@ export async function runAgent(
                   onFeatureComplete: config?.onFeatureComplete,
                 },
               ),
+              ...(config?.onPreCompact && {
+                PreCompact: createPreCompactHook(config.onPreCompact),
+              }),
             }),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,

@@ -35,6 +35,7 @@ import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
+import { saveCheckpoint } from './session-checkpoint.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
@@ -348,6 +349,21 @@ export async function runAgentWizard(
         getAdditionalFeatureQueue ?? (() => session.additionalFeatureQueue),
       onFeatureStart: featureProgress?.onFeatureStart,
       onFeatureComplete: featureProgress?.onFeatureComplete,
+      // Fires just before the SDK summarizes context. Refresh the on-disk
+      // checkpoint so a compaction crash leaves the user with a resumable
+      // state, and capture an analytics breadcrumb for cost/quality analysis.
+      onPreCompact: ({ trigger }) => {
+        try {
+          saveCheckpoint(session);
+        } catch (err) {
+          logToFile('PreCompact: saveCheckpoint failed', err);
+        }
+        analytics.wizardCapture('agent compaction triggered', {
+          trigger,
+          integration: session.integration ?? null,
+          'detected framework': session.detectedFrameworkLabel ?? null,
+        });
+      },
     },
     middleware,
   );
