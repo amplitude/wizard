@@ -25,6 +25,7 @@ import { resolveZone } from '../../lib/zone-resolution.js';
 import {
   AdditionalFeature,
   McpOutcome,
+  OPT_IN_DISCOVERED_FEATURES,
   SlackOutcome,
   RunPhase,
 } from './session-constants.js';
@@ -715,10 +716,27 @@ export class WizardStore {
   /**
    * Confirm the FeatureOptIn picklist. Enqueues each selected feature
    * via enableFeature() and marks the screen complete so the flow advances.
+   *
+   * `source` distinguishes interactive picklist confirms from the
+   * non-interactive auto-enable paths (CI, agent mode) so funnels stay
+   * separable.
    */
-  confirmFeatureOptIns(selected: AdditionalFeature[]): void {
+  confirmFeatureOptIns(
+    selected: AdditionalFeature[],
+    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
+  ): void {
+    const offered = this.session.discoveredFeatures.filter(
+      (f): f is AdditionalFeature => OPT_IN_DISCOVERED_FEATURES.has(f),
+    );
+    const deselected = offered.filter((f) => !selected.includes(f));
+    analytics.wizardCapture('feature opt-in confirmed', {
+      offered,
+      selected,
+      deselected,
+      source,
+    });
     for (const feature of selected) {
-      this.enableFeature(feature);
+      this.enableFeature(feature, source);
     }
     this.$session.setKey('optInFeaturesComplete', true);
     this.emitChange();
@@ -756,7 +774,10 @@ export class WizardStore {
    * Respects Amplitude Experiment feature flags — if the corresponding
    * flag is off the feature is silently skipped.
    */
-  enableFeature(feature: AdditionalFeature): void {
+  enableFeature(
+    feature: AdditionalFeature,
+    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
+  ): void {
     // Gate LLM analytics behind the wizard-llm-analytics feature flag
     if (feature === AdditionalFeature.LLM) {
       if (!analytics.isFeatureFlagEnabled(FLAG_LLM_ANALYTICS)) {
@@ -777,7 +798,7 @@ export class WizardStore {
     if (feature === AdditionalFeature.SessionReplay) {
       this.$session.setKey('sessionReplayOptIn', true);
     }
-    analytics.wizardCapture('feature enabled', { feature });
+    analytics.wizardCapture('feature enabled', { feature, source });
     this.emitChange();
   }
 

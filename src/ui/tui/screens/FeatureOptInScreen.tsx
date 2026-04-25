@@ -14,6 +14,7 @@ import { useScreenInput } from '../hooks/useScreenInput.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
+import { analytics } from '../../../utils/analytics.js';
 import {
   AdditionalFeature,
   ADDITIONAL_FEATURE_LABELS,
@@ -63,6 +64,18 @@ export const FeatureOptInScreen = ({ store }: FeatureOptInScreenProps) => {
   useEffect(() => {
     if (empty) store.confirmFeatureOptIns([]);
   }, [empty, store]);
+
+  // Telemetry: capture which features the user was offered so we can compute
+  // per-feature selection rate (denominator = offered, numerator = enabled).
+  // Fires once on mount; empty deps are intentional — discoveredFeatures is
+  // stable for the lifetime of this screen.
+  useEffect(() => {
+    if (!empty) {
+      analytics.wizardCapture('feature opt-in shown', {
+        offered: optInFeatures,
+      });
+    }
+  }, []);
 
   if (empty) return null;
 

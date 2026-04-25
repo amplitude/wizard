@@ -10,7 +10,7 @@
  */
 
 import type { WizardSession } from '../../lib/wizard-session.js';
-import { RunPhase } from './session-constants.js';
+import { OPT_IN_DISCOVERED_FEATURES, RunPhase } from './session-constants.js';
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
@@ -139,7 +139,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     {
       screen: Screen.FeatureOptIn,
       show: (s) =>
-        s.discoveredFeatures.length > 0 &&
+        s.discoveredFeatures.some((f) => OPT_IN_DISCOVERED_FEATURES.has(f)) &&
         !s.optInFeaturesComplete &&
         !s.ci &&
         !s.agent &&

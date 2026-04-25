@@ -144,7 +144,10 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const { additionalFeatureCompleted, additionalFeatureCurrent } =
     store.session;
   const queueRemainder = store.session.additionalFeatureQueue.filter(
-    (f) => f !== additionalFeatureCurrent && TRAILING_FEATURES.has(f),
+    (f) =>
+      f !== additionalFeatureCurrent &&
+      !additionalFeatureCompleted.includes(f) &&
+      TRAILING_FEATURES.has(f),
   );
   for (const feature of additionalFeatureCompleted.filter((f) =>
     TRAILING_FEATURES.has(f),

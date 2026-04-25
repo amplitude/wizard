@@ -147,6 +147,14 @@ export const TRAILING_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
   AdditionalFeature.LLM,
 ]);
 
+/**
+ * Discovered features that map to an opt-in AdditionalFeature.
+ * Stripe is discovered but not opt-in — it's a passive doc link.
+ */
+export const OPT_IN_DISCOVERED_FEATURES: ReadonlySet<string> = new Set(
+  Object.values(AdditionalFeature),
+);
+
 /** Outcome of the MCP server installation step */
 export const McpOutcome = {
   NoClients: 'no_clients',

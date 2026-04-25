@@ -1606,7 +1606,10 @@ void yargs(hideBin(process.argv))
                     auto.push(AdditionalFeature.SessionReplay);
                   else if (f === DF.LLM) auto.push(AdditionalFeature.LLM);
                 }
-                tui.store.confirmFeatureOptIns(auto);
+                tui.store.confirmFeatureOptIns(
+                  auto,
+                  tui.store.session.agent ? 'auto-agent' : 'auto-ci',
+                );
               }
             })();
 

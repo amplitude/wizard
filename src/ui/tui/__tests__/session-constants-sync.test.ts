@@ -46,4 +46,10 @@ describe('session-constants sync', () => {
       [...canonical.TRAILING_FEATURES].sort(),
     );
   });
+
+  it('OPT_IN_DISCOVERED_FEATURES values match wizard-session', () => {
+    expect([...tui.OPT_IN_DISCOVERED_FEATURES].sort()).toStrictEqual(
+      [...canonical.OPT_IN_DISCOVERED_FEATURES].sort(),
+    );
+  });
 });
