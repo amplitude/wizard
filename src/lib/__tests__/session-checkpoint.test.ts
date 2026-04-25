@@ -39,68 +39,77 @@ function writeCheckpoint(
   return filePath;
 }
 
-describe('loadCheckpoint — self-healing of detectedFrameworkLabel', () => {
-  let installDir: string;
-  let filePath: string;
+// 10s per-describe timeout: each test does `await loadCheckpoint(...)` which
+// dynamic-imports `./registry.js` — that import pulls in all 18 framework
+// configs and can exceed the default 5s ceiling under parallel test-runner
+// load. Bumping at the describe level (rather than vitest.config.ts) keeps
+// the fix local and avoids collision with PRs touching global vitest config.
+describe(
+  'loadCheckpoint — self-healing of detectedFrameworkLabel',
+  { timeout: 10_000 },
+  () => {
+    let installDir: string;
+    let filePath: string;
 
-  beforeEach(() => {
-    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-ckpt-'));
-  });
-
-  afterEach(() => {
-    if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    fs.rmSync(installDir, { recursive: true, force: true });
-  });
-
-  it('overrides a stale "Generic" label when integration is a known framework', async () => {
-    filePath = writeCheckpoint(installDir, {
-      integration: Integration.javascript_web,
-      detectedFrameworkLabel: 'Generic', // stale — older buggy runs wrote this
+    beforeEach(() => {
+      installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-ckpt-'));
     });
 
-    const loaded = await loadCheckpoint(installDir);
-    expect(loaded?.integration).toBe(Integration.javascript_web);
-    expect(loaded?.detectedFrameworkLabel).toBe('JavaScript (Web)');
-  });
-
-  it('derives the label for Vue when integration is set', async () => {
-    filePath = writeCheckpoint(installDir, {
-      integration: Integration.vue,
-      detectedFrameworkLabel: null,
+    afterEach(() => {
+      if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      fs.rmSync(installDir, { recursive: true, force: true });
     });
 
-    const loaded = await loadCheckpoint(installDir);
-    expect(loaded?.detectedFrameworkLabel).toBe('Vue');
-  });
+    it('overrides a stale "Generic" label when integration is a known framework', async () => {
+      filePath = writeCheckpoint(installDir, {
+        integration: Integration.javascript_web,
+        detectedFrameworkLabel: 'Generic', // stale — older buggy runs wrote this
+      });
 
-  it('preserves null label for Generic integration', async () => {
-    filePath = writeCheckpoint(installDir, {
-      integration: Integration.generic,
-      detectedFrameworkLabel: null,
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded?.integration).toBe(Integration.javascript_web);
+      expect(loaded?.detectedFrameworkLabel).toBe('JavaScript (Web)');
     });
 
-    const loaded = await loadCheckpoint(installDir);
-    expect(loaded?.integration).toBe(Integration.generic);
-    expect(loaded?.detectedFrameworkLabel).toBeNull();
-  });
+    it('derives the label for Vue when integration is set', async () => {
+      filePath = writeCheckpoint(installDir, {
+        integration: Integration.vue,
+        detectedFrameworkLabel: null,
+      });
 
-  it('keeps the persisted label when integration is null', async () => {
-    filePath = writeCheckpoint(installDir, {
-      integration: null,
-      detectedFrameworkLabel: 'Custom',
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded?.detectedFrameworkLabel).toBe('Vue');
     });
 
-    const loaded = await loadCheckpoint(installDir);
-    expect(loaded?.detectedFrameworkLabel).toBe('Custom');
-  });
+    it('preserves null label for Generic integration', async () => {
+      filePath = writeCheckpoint(installDir, {
+        integration: Integration.generic,
+        detectedFrameworkLabel: null,
+      });
 
-  it('keeps the persisted label when integration is unknown', async () => {
-    filePath = writeCheckpoint(installDir, {
-      integration: 'made-up-framework',
-      detectedFrameworkLabel: 'Made Up',
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded?.integration).toBe(Integration.generic);
+      expect(loaded?.detectedFrameworkLabel).toBeNull();
     });
 
-    const loaded = await loadCheckpoint(installDir);
-    expect(loaded?.detectedFrameworkLabel).toBe('Made Up');
-  });
-});
+    it('keeps the persisted label when integration is null', async () => {
+      filePath = writeCheckpoint(installDir, {
+        integration: null,
+        detectedFrameworkLabel: 'Custom',
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded?.detectedFrameworkLabel).toBe('Custom');
+    });
+
+    it('keeps the persisted label when integration is unknown', async () => {
+      filePath = writeCheckpoint(installDir, {
+        integration: 'made-up-framework',
+        detectedFrameworkLabel: 'Made Up',
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded?.detectedFrameworkLabel).toBe('Made Up');
+    });
+  },
+);
