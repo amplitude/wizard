@@ -21,8 +21,11 @@ import { clearApiKey } from './api-key-store.js';
 import { clearCheckpoint } from '../lib/session-checkpoint.js';
 import { clearAuthFieldsInAmpliConfig } from '../lib/ampli-config.js';
 
-export function clearStaleProjectState(installDir: string): void {
+export function clearStaleProjectState(
+  installDir: string,
+  checkpointReason: 'success' | 'manual' | 'logout' = 'success',
+): void {
   clearApiKey(installDir);
-  clearCheckpoint(installDir);
+  clearCheckpoint(installDir, checkpointReason);
   clearAuthFieldsInAmpliConfig(installDir);
 }
