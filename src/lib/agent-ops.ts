@@ -254,6 +254,149 @@ export async function runVerify(installDir: string): Promise<VerifyResult> {
   };
 }
 
+// ── projects list ───────────────────────────────────────────────────
+
+export interface ProjectChoice {
+  /** Numeric Amplitude app ID — the canonical selector. */
+  appId: string;
+  /** Pre-built one-line label for picker rendering. */
+  label: string;
+  /** Breadcrumb description: "Org > Workspace > Env". */
+  description: string;
+  orgId: string;
+  orgName: string;
+  workspaceId: string;
+  workspaceName: string;
+  envName: string;
+  rank: number;
+  /** Per-choice resume flags: `['--app-id', appId]`. */
+  resumeFlags: string[];
+}
+
+export interface ProjectsListResult {
+  /** All choices matching the query (pre-pagination). */
+  total: number;
+  /** Choices included in this response (after query + pagination). */
+  returned: number;
+  /** Choice page. */
+  choices: ProjectChoice[];
+  /** Original query string, echoed back for pagination cursor reasoning. */
+  query: string | null;
+  /**
+   * When set, the call was non-fatally limited (e.g. user not logged in).
+   * Callers should surface as a `log` event, not an error.
+   */
+  warning?: string;
+}
+
+export interface ProjectsListInput {
+  /** Optional case-insensitive substring match across label fields. */
+  query?: string;
+  /** Page size. Defaults to 25, capped at 200. */
+  limit?: number;
+  /** Page offset. Defaults to 0. */
+  offset?: number;
+}
+
+/**
+ * List the authenticated user's accessible Amplitude projects/environments,
+ * one row per (org, workspace, env) tuple that has an API key. Powers the
+ * `projects list --agent --query <q>` command, which the
+ * `environment_selection` `needs_input` event references via
+ * `pagination.nextCommand` so outer agents can hand a search box to humans
+ * without dumping 500-row lists into context.
+ *
+ * Reads the cached OAuth token + zone from `~/.ampli.json`; returns a
+ * warning instead of throwing when the user is logged out so the CLI can
+ * still emit a useful NDJSON envelope.
+ */
+export async function runProjectsList(
+  input: ProjectsListInput = {},
+): Promise<ProjectsListResult> {
+  const limit = Math.max(1, Math.min(input.limit ?? 25, 200));
+  const offset = Math.max(0, input.offset ?? 0);
+  const query = input.query?.trim().toLowerCase() ?? null;
+
+  const user = getStoredUser();
+  if (!user || user.id === 'pending') {
+    return {
+      total: 0,
+      returned: 0,
+      choices: [],
+      query,
+      warning: 'Not logged in. Run `npx @amplitude/wizard login` first.',
+    };
+  }
+  const stored = getStoredToken(user.id, user.zone);
+  if (!stored?.idToken) {
+    return {
+      total: 0,
+      returned: 0,
+      choices: [],
+      query,
+      warning:
+        'No stored Amplitude id_token. Run `npx @amplitude/wizard login` first.',
+    };
+  }
+
+  const { fetchAmplitudeUser } = await import('./api.js');
+  const userInfo = await fetchAmplitudeUser(stored.idToken, user.zone);
+
+  // Flatten orgs/workspaces/environments to one choice per (env with apiKey).
+  const allChoices: ProjectChoice[] = [];
+  for (const org of userInfo.orgs) {
+    for (const ws of org.workspaces) {
+      const envs = (ws.environments ?? [])
+        .filter((e) => e.app?.apiKey)
+        .sort((a, b) => a.rank - b.rank);
+      for (const env of envs) {
+        const appId = env.app?.id ?? '';
+        if (!appId) continue;
+        allChoices.push({
+          appId,
+          label: `${org.name} / ${ws.name} / ${env.name}`,
+          description: `${org.name} > ${ws.name} > ${env.name}`,
+          orgId: org.id,
+          orgName: org.name,
+          workspaceId: ws.id,
+          workspaceName: ws.name,
+          envName: env.name,
+          rank: env.rank,
+          resumeFlags: ['--app-id', appId],
+        });
+      }
+    }
+  }
+
+  // Filter by query — match across every label field, case-insensitive.
+  const matching = query
+    ? allChoices.filter((c) => {
+        const haystack = [
+          c.label,
+          c.appId,
+          c.orgName,
+          c.workspaceName,
+          c.envName,
+        ]
+          .join(' ')
+          .toLowerCase();
+        return haystack.includes(query);
+      })
+    : allChoices;
+
+  // Stable sort by rank then label so pagination is deterministic across
+  // calls — outer agents that walk pages depend on consistent ordering.
+  matching.sort((a, b) => a.rank - b.rank || a.label.localeCompare(b.label));
+
+  const page = matching.slice(offset, offset + limit);
+  return {
+    total: matching.length,
+    returned: page.length,
+    choices: page,
+    query,
+  };
+}
+
 export function getAuthStatus(): AuthStatusResult {
   const user = getStoredUser();
   if (!user || user.id === 'pending') {
