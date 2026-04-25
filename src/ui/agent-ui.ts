@@ -6,7 +6,11 @@
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
 import type { RetryState } from '../lib/wizard-session';
-import type { NeedsInputChoice, NeedsInputData } from '../lib/agent-events';
+import type {
+  AgentEventType,
+  NeedsInputChoice,
+  NeedsInputData,
+} from '../lib/agent-events';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 
@@ -180,22 +184,10 @@ export function parseEnvSelectionStdinLine(line: string | null | undefined): {
 
 // ── NDJSON event types ──────────────────────────────────────────────
 
-type NDJSONEventType =
-  | 'lifecycle'
-  | 'log'
-  | 'status'
-  | 'progress'
-  | 'session_state'
-  | 'prompt'
-  | 'needs_input'
-  | 'diagnostic'
-  | 'result'
-  | 'error';
-
 interface NDJSONEvent {
   v: 1;
   '@timestamp': string;
-  type: NDJSONEventType;
+  type: AgentEventType;
   message: string;
   session_id?: string;
   run_id?: string;
@@ -226,7 +218,7 @@ function getCorrelationIds(): { session_id: string; run_id: string } {
 }
 
 function emit(
-  type: NDJSONEventType,
+  type: AgentEventType,
   message: string,
   extra?: Omit<NDJSONEvent, 'v' | '@timestamp' | 'type' | 'message'>,
 ): void {

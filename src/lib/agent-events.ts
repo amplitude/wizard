@@ -102,7 +102,25 @@ export interface NeedsInputData<V = string> {
   responseSchema?: Record<string, string>;
 }
 
-export type NeedsInputEvent<V = string> = AgentEventEnvelope<NeedsInputData<V>>;
+/**
+ * Wire-format shape of the `data` field in a `needs_input` NDJSON line.
+ *
+ * `emitNeedsInput` hoists `message` to the envelope level and injects the
+ * `event` discriminator, so the on-wire `data` omits `message` and includes
+ * `event: 'needs_input'`.
+ */
+export interface NeedsInputWireData<V = string> {
+  event: 'needs_input';
+  code: string;
+  choices: NeedsInputChoice<V>[];
+  recommended?: V;
+  resumeFlags?: { value: V; flags: string[] }[];
+  responseSchema?: Record<string, string>;
+}
+
+export type NeedsInputEvent<V = string> = AgentEventEnvelope<
+  NeedsInputWireData<V>
+>;
 
 // ── Type guard helpers ──────────────────────────────────────────────
 
