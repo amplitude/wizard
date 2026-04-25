@@ -100,6 +100,7 @@ export const DiscoveredFeature = {
   Stripe: 'stripe',
   LLM: 'llm',
   SessionReplay: 'session_replay',
+  Engagement: 'engagement',
 } as const;
 export type DiscoveredFeature =
   (typeof DiscoveredFeature)[keyof typeof DiscoveredFeature];
@@ -108,6 +109,7 @@ export type DiscoveredFeature =
 export const AdditionalFeature = {
   LLM: 'llm',
   SessionReplay: 'session_replay',
+  Engagement: 'engagement',
 } as const;
 export type AdditionalFeature =
   (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
@@ -116,6 +118,7 @@ export type AdditionalFeature =
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: 'LLM analytics',
   [AdditionalFeature.SessionReplay]: 'Session Replay',
+  [AdditionalFeature.Engagement]: 'Guides & Surveys',
 };
 
 /** Agent prompts for each additional feature, injected via the stop hook */
@@ -128,6 +131,14 @@ export const ADDITIONAL_FEATURE_PROMPTS: Record<AdditionalFeature, string> = {
 3. Do not add any comments about sample rates or production tuning.
 
 After making changes, give a one-sentence summary of what was configured.`,
+  [AdditionalFeature.Engagement]: `The user wants to enable Amplitude Guides & Surveys (the engagement plugin). Please configure it now:
+
+1. If the project uses @amplitude/unified (preferred), add an engagement block to the existing initAll() call: engagement: {}. The empty object is sufficient — the plugin initializes with sensible defaults and reads remote config.
+2. If the project uses @amplitude/analytics-browser standalone, install @amplitude/engagement-browser using the wizard-tools detect_package_manager output, then import { plugin as engagementPlugin } from '@amplitude/engagement-browser' and register it via amplitude.add(engagementPlugin()) before init().
+3. Do not add config options the user didn't ask for. Do not add comments about server zone or production tuning.
+4. Update the setup report markdown file when complete with what was configured.
+
+After making changes, give a one-sentence summary of what was configured.`,
 };
 
 /**
@@ -137,6 +148,7 @@ After making changes, give a one-sentence summary of what was configured.`,
  */
 export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
   AdditionalFeature.SessionReplay,
+  AdditionalFeature.Engagement,
 ]);
 
 /**
@@ -391,6 +403,7 @@ export interface WizardSession {
   discoveredFeatures: DiscoveredFeature[];
   llmOptIn: boolean;
   sessionReplayOptIn: boolean;
+  engagementOptIn: boolean;
 
   /** True once the user has clicked Continue on the IntroScreen. */
   introConcluded: boolean;
@@ -571,6 +584,7 @@ export function buildSession(args: {
     discoveredFeatures: [],
     llmOptIn: false,
     sessionReplayOptIn: false,
+    engagementOptIn: false,
     mcpComplete: false,
     mcpOutcome: null,
     mcpInstalledClients: [],

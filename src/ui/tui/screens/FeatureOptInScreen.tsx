@@ -27,6 +27,7 @@ interface FeatureOptInScreenProps {
 const FEATURE_HINTS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.SessionReplay]: 'Watch user sessions like a video',
   [AdditionalFeature.LLM]: 'Track AI agent calls',
+  [AdditionalFeature.Engagement]: 'In-product NPS, surveys, and tours',
 };
 
 /**
@@ -39,6 +40,8 @@ function toAdditionalFeature(
   if (feature === DiscoveredFeature.SessionReplay)
     return AdditionalFeature.SessionReplay;
   if (feature === DiscoveredFeature.LLM) return AdditionalFeature.LLM;
+  if (feature === DiscoveredFeature.Engagement)
+    return AdditionalFeature.Engagement;
   return null;
 }
 

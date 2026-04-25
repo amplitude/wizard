@@ -21,6 +21,7 @@ export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 export const AdditionalFeature = {
   LLM: 'llm',
   SessionReplay: 'session_replay',
+  Engagement: 'engagement',
 } as const;
 export type AdditionalFeature =
   (typeof AdditionalFeature)[keyof typeof AdditionalFeature];
@@ -28,10 +29,12 @@ export type AdditionalFeature =
 export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
   [AdditionalFeature.LLM]: 'LLM analytics',
   [AdditionalFeature.SessionReplay]: 'Session Replay',
+  [AdditionalFeature.Engagement]: 'Guides & Surveys',
 };
 
 export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
   AdditionalFeature.SessionReplay,
+  AdditionalFeature.Engagement,
 ]);
 
 export const TRAILING_FEATURES: ReadonlySet<AdditionalFeature> = new Set([

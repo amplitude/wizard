@@ -798,6 +798,9 @@ export class WizardStore {
     if (feature === AdditionalFeature.SessionReplay) {
       this.$session.setKey('sessionReplayOptIn', true);
     }
+    if (feature === AdditionalFeature.Engagement) {
+      this.$session.setKey('engagementOptIn', true);
+    }
     analytics.wizardCapture('feature enabled', { feature, source });
     this.emitChange();
   }
