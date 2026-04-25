@@ -148,6 +148,7 @@ After making changes, give a one-sentence summary of what was configured.`,
  */
 export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
   AdditionalFeature.SessionReplay,
+  AdditionalFeature.Engagement,
 ]);
 
 /**

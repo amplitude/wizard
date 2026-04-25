@@ -34,6 +34,7 @@ export const ADDITIONAL_FEATURE_LABELS: Record<AdditionalFeature, string> = {
 
 export const INLINE_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
   AdditionalFeature.SessionReplay,
+  AdditionalFeature.Engagement,
 ]);
 
 export const TRAILING_FEATURES: ReadonlySet<AdditionalFeature> = new Set([
