@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.6.0](https://github.com/amplitude/wizard/compare/wizard-v1.5.0...wizard-v1.6.0) (2026-04-25)
+
+
+### Features
+
+* **agent:** wire PreCompact hook + enable extended thinking ([#241](https://github.com/amplitude/wizard/issues/241)) ([d126c75](https://github.com/amplitude/wizard/commit/d126c75132deff6bcbc97d4a55090e7a54d3a664))
+
+
+### Bug Fixes
+
+* allow React minor/patch versions to dedupe with Ink peer ([#245](https://github.com/amplitude/wizard/issues/245)) ([771b79a](https://github.com/amplitude/wizard/commit/771b79aa6bdb3fb897d3048b35a528d0416443a4))
+
 ## [1.5.0](https://github.com/amplitude/wizard/compare/wizard-v1.4.3...wizard-v1.5.0) (2026-04-25)
 
 
