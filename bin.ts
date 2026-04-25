@@ -717,6 +717,25 @@ void yargs(hideBin(process.argv))
       describe: 'run non-interactively (for CI pipelines)',
       type: 'boolean',
     },
+    'auto-approve': {
+      default: false,
+      describe:
+        'silently pick the recommended choice on `needs_input` (no writes)',
+      type: 'boolean',
+    },
+    yes: {
+      alias: 'y',
+      default: false,
+      describe:
+        'skip all prompts; allow the inner agent to write files (required for `apply` subcommand)',
+      type: 'boolean',
+    },
+    force: {
+      default: false,
+      describe:
+        'allow destructive writes (overwrite/delete existing files); implies --yes',
+      type: 'boolean',
+    },
     'api-key': {
       // Dev-only escape hatch. In normal flows the wizard fetches the
       // project's API key via OAuth — the user should never have to paste one.
@@ -886,12 +905,6 @@ void yargs(hideBin(process.argv))
         agent: {
           default: false,
           describe: 'emit structured NDJSON output for automation',
-          type: 'boolean',
-        },
-        yes: {
-          alias: 'y',
-          default: false,
-          describe: 'Skip all prompts and use defaults (same as --ci)',
           type: 'boolean',
         },
         classic: {

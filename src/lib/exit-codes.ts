@@ -20,6 +20,14 @@ export const ExitCode = {
    * human and re-invoke with the chosen flag.
    */
   INPUT_REQUIRED: 12,
+  /**
+   * The inner agent attempted to write or run a destructive operation but
+   * the current invocation didn't grant `allowWrites` / `allowDestructive`.
+   * The PreToolUse write-gate (see `mode-config.ts: evaluateWriteGate`)
+   * denies the tool call, the wizard surfaces the deny reason, and exits
+   * here so outer agents can re-invoke with `--yes` or `--force`.
+   */
+  WRITE_REFUSED: 13,
   USER_CANCELLED: 130,
 } as const;
 
