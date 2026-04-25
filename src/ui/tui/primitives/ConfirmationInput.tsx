@@ -62,7 +62,10 @@ export const ConfirmationInput = ({
   cancelLabel = 'Cancel [Esc]',
   idPrefix = 'confirmation-input',
 }: ConfirmationInputProps) => {
-  const { focusNext, focusPrevious } = useFocusManager();
+  const { focusNext, focusPrevious, focus } = useFocusManager();
+
+  const confirmId = `${idPrefix}-confirm`;
+  const cancelId = `${idPrefix}-cancel`;
 
   // Parent owns Escape + arrow-key cycling. Tab / Shift-Tab is handled
   // automatically by Ink's focus manager.
@@ -76,12 +79,14 @@ export const ConfirmationInput = ({
       return;
     }
     if (key.escape) {
+      // Ink's focus manager clears activeFocusId on Escape before this
+      // handler runs, leaving both Options unfocused (Enter inert).
+      // Re-acquire focus so the component stays interactive if onCancel
+      // doesn't unmount it.
+      focus(confirmId);
       onCancel();
     }
   });
-
-  const confirmId = `${idPrefix}-confirm`;
-  const cancelId = `${idPrefix}-cancel`;
 
   return (
     <Box flexDirection="column">
