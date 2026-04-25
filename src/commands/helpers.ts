@@ -728,6 +728,17 @@ export const runDirectSignupIfRequested = async (
         `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
       );
       return;
+    default:
+      // Exhaustiveness guard. If a new arm is added to
+      // PerformSignupOrAuthResult, `result satisfies never` fails at
+      // compile time; at runtime we fail closed to the fallback path
+      // rather than the success path below, which would attempt
+      // onSuccess() without credentials.
+      result satisfies never;
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+      return;
   }
 
   getUI().log.info('Direct signup succeeded; using newly created account.');
