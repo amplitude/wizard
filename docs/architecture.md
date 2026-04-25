@@ -490,10 +490,11 @@ WizardSession
 │   dataIngestionConfirmed
 │
 ├─ Feature discovery
-│   discoveredFeatures: DiscoveredFeature[] ('stripe' | 'llm' | 'session_replay')
+│   discoveredFeatures: DiscoveredFeature[] ('stripe' | 'llm' | 'session_replay' | 'engagement')
 │   llmOptIn: boolean
 │   sessionReplayOptIn: boolean
-│   additionalFeatureQueue: AdditionalFeature[] ('llm' | 'session_replay')
+│   engagementOptIn: boolean
+│   additionalFeatureQueue: AdditionalFeature[] ('llm' | 'session_replay' | 'engagement')
 │   additionalFeatureCurrent: AdditionalFeature | null
 │   additionalFeatureCompleted: AdditionalFeature[]
 │   optInFeaturesComplete: boolean

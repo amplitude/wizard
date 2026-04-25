@@ -71,6 +71,7 @@ export function discoverFeatures(opts: {
 
   if (opts.integration && BROWSER_REPLAY_INTEGRATIONS.has(opts.integration)) {
     features.push(DiscoveredFeature.SessionReplay);
+    features.push(DiscoveredFeature.Engagement);
   }
 
   return features;
@@ -98,6 +99,8 @@ export function autoEnableOptInFeatures(
       additional = AdditionalFeature.SessionReplay;
     else if (feature === DiscoveredFeature.LLM)
       additional = AdditionalFeature.LLM;
+    else if (feature === DiscoveredFeature.Engagement)
+      additional = AdditionalFeature.Engagement;
     if (!additional) continue;
 
     if (!session.additionalFeatureQueue.includes(additional)) {
@@ -109,6 +112,8 @@ export function autoEnableOptInFeatures(
     if (additional === AdditionalFeature.LLM) session.llmOptIn = true;
     if (additional === AdditionalFeature.SessionReplay)
       session.sessionReplayOptIn = true;
+    if (additional === AdditionalFeature.Engagement)
+      session.engagementOptIn = true;
 
     analytics.wizardCapture('feature enabled', {
       feature: additional,
