@@ -9,6 +9,10 @@ import {
   mergeEnvValues,
   persistEventPlan,
   cleanupIntegrationSkills,
+  cleanupAmplitudeEventsFile,
+  cleanupWizardArtifacts,
+  ensureWizardArtifactsIgnored,
+  WIZARD_GITIGNORE_PATTERNS,
 } from '../wizard-tools';
 
 function makeTmpDir(): string {
@@ -331,5 +335,169 @@ describe('persistEventPlan', () => {
       'utf8',
     );
     expect(JSON.parse(raw)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ensureWizardArtifactsIgnored
+// ---------------------------------------------------------------------------
+
+describe('ensureWizardArtifactsIgnored', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  function readGitignore(): string {
+    return fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+  }
+
+  it('creates .gitignore with the wizard block when none exists', () => {
+    ensureWizardArtifactsIgnored(tmpDir);
+    const content = readGitignore();
+    expect(content).toContain('# Amplitude wizard');
+    for (const pattern of WIZARD_GITIGNORE_PATTERNS) {
+      expect(content).toContain(pattern);
+    }
+  });
+
+  it('appends the wizard block to an existing .gitignore', () => {
+    const existing = 'node_modules\n.env.local\n';
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), existing, 'utf8');
+    ensureWizardArtifactsIgnored(tmpDir);
+    const content = readGitignore();
+    // Preserves the original entries
+    expect(content).toContain('node_modules');
+    expect(content).toContain('.env.local');
+    // And the wizard block was appended
+    expect(content).toContain('# Amplitude wizard');
+    expect(content).toContain('.amplitude-events.json');
+  });
+
+  it('is idempotent — running twice does not duplicate entries', () => {
+    ensureWizardArtifactsIgnored(tmpDir);
+    const after1 = readGitignore();
+    ensureWizardArtifactsIgnored(tmpDir);
+    const after2 = readGitignore();
+    expect(after1).toBe(after2);
+    // Marker should appear exactly once
+    const occurrences = (after2.match(/# Amplitude wizard/g) ?? []).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it('updates an existing wizard block when patterns change', () => {
+    // Simulate an older wizard version having written a smaller block
+    fs.writeFileSync(
+      path.join(tmpDir, '.gitignore'),
+      'node_modules\n# Amplitude wizard\n.amplitude-events.json\n',
+      'utf8',
+    );
+    ensureWizardArtifactsIgnored(tmpDir);
+    const content = readGitignore();
+    // Now contains all current patterns
+    for (const pattern of WIZARD_GITIGNORE_PATTERNS) {
+      expect(content).toContain(pattern);
+    }
+    // User content above the block is preserved
+    expect(content).toContain('node_modules');
+    // Marker still appears exactly once (in-place replacement)
+    const occurrences = (content.match(/# Amplitude wizard/g) ?? []).length;
+    expect(occurrences).toBe(1);
+  });
+
+  it('survives an unwritable .gitignore without throwing', () => {
+    // Simulate a failure by passing a path under a non-existent dir
+    const bogus = path.join(tmpDir, 'does-not-exist', 'nested');
+    expect(() => ensureWizardArtifactsIgnored(bogus)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cleanupAmplitudeEventsFile
+// ---------------------------------------------------------------------------
+
+describe('cleanupAmplitudeEventsFile', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('removes .amplitude-events.json when present', () => {
+    const target = path.join(tmpDir, '.amplitude-events.json');
+    fs.writeFileSync(target, '[]', 'utf8');
+    cleanupAmplitudeEventsFile(tmpDir);
+    expect(fs.existsSync(target)).toBe(false);
+  });
+
+  it('is a no-op when the file does not exist', () => {
+    expect(() => cleanupAmplitudeEventsFile(tmpDir)).not.toThrow();
+  });
+
+  it('does not touch other files in the install dir', () => {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
+    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
+    cleanupAmplitudeEventsFile(tmpDir);
+    expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cleanupWizardArtifacts (composition)
+// ---------------------------------------------------------------------------
+
+describe('cleanupWizardArtifacts', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('removes integration skills AND the events file in one call', () => {
+    const skillDir = path.join(
+      tmpDir,
+      '.claude',
+      'skills',
+      'integration-nextjs',
+    );
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# nextjs');
+    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
+
+    cleanupWizardArtifacts(tmpDir);
+
+    expect(fs.existsSync(skillDir)).toBe(false);
+    expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+  });
+
+  it('still leaves instrumentation and taxonomy skills on disk', () => {
+    const keep = [
+      'add-analytics-instrumentation',
+      'amplitude-chart-dashboard-plan',
+      'amplitude-quickstart-taxonomy-agent',
+    ];
+    for (const name of keep) {
+      const dir = path.join(tmpDir, '.claude', 'skills', name);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'SKILL.md'), '# kept');
+    }
+
+    cleanupWizardArtifacts(tmpDir);
+
+    for (const name of keep) {
+      expect(fs.existsSync(path.join(tmpDir, '.claude', 'skills', name))).toBe(
+        true,
+      );
+    }
+  });
+
+  it('is a no-op on a clean install dir (no throw)', () => {
+    expect(() => cleanupWizardArtifacts(tmpDir)).not.toThrow();
   });
 });

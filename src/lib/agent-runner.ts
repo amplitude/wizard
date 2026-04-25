@@ -82,6 +82,46 @@ export async function runAgentWizard(
     enableDebugLogs();
   }
 
+  // Ensure the wizard's artifacts (event plan + the single-use integration
+  // skill + the kept-on-disk instrumentation/taxonomy skills) are gitignored
+  // before anything is installed. Idempotent — safe to call on every run.
+  // Without this, `git status` after a run is full of wizard scaffolding
+  // and `git add .` sweeps it into the user's commits.
+  const { ensureWizardArtifactsIgnored, cleanupWizardArtifacts } = await import(
+    './wizard-tools.js'
+  );
+  ensureWizardArtifactsIgnored(session.installDir);
+
+  try {
+    return await runAgentWizardBody(
+      config,
+      session,
+      getAdditionalFeatureQueue,
+      featureProgress,
+    );
+  } finally {
+    // Clean up single-use scaffolding regardless of success / error / cancel.
+    // Instrumentation and taxonomy skills stay on disk (users invoke them
+    // later); they're gitignored above so kept-on-disk doesn't mean
+    // committed-to-git. Pre-existing success-path call removed below.
+    cleanupWizardArtifacts(session.installDir);
+  }
+}
+
+/**
+ * Internal: the body of `runAgentWizard`, extracted so the public entry
+ * point can wrap it in a try/finally that always runs `cleanupWizardArtifacts`
+ * — regardless of whether the run succeeded, errored, or was cancelled.
+ */
+async function runAgentWizardBody(
+  config: FrameworkConfig,
+  session: WizardSession,
+  getAdditionalFeatureQueue?: () => readonly AdditionalFeature[],
+  featureProgress?: {
+    onFeatureStart?: (feature: AdditionalFeature) => void;
+    onFeatureComplete?: (feature: AdditionalFeature) => void;
+  },
+): Promise<void> {
   // Version check
   if (
     config.detection.getInstalledVersion ||
@@ -532,10 +572,8 @@ export async function runAgentWizard(
     continueUrl,
   };
 
-  // Remove single-use integration skills from the user's project.
-  // Instrumentation and taxonomy skills stay — users invoke them later.
-  const { cleanupIntegrationSkills } = await import('./wizard-tools.js');
-  cleanupIntegrationSkills(session.installDir);
+  // Wizard-artifact cleanup happens in `runAgentWizard`'s try/finally so
+  // it runs on success, error, AND cancel paths. Don't duplicate here.
 
   getUI().outro(`Successfully installed Amplitude!`);
 
