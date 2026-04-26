@@ -2,19 +2,20 @@
 
 exports[`LogViewer snapshots > renders inspect mode after jumping to the first error 1`] = `
 " INSPECT                                                              line 3/7 · col 1 · errors 1/2
- !  3 [2026-04-26T16:00:02Z] ERROR Failed to create project while talking to a
+    2 [2026-04-26T16:00:01Z] WARN Slow API response
+ !  3 [2026-04-26T16:00:02Z] ERROR Failed to create project while talking to an
     4 Traceback: line 1
     5 [2026-04-26T16:00:03Z] INFO Retrying
- !  6 [2026-04-26T16:00:04Z] ERROR Second failure happened in a very long diag
+ !  6 [2026-04-26T16:00:04Z] ERROR Second failure happened in a very long diagn
     7 Traceback: line 2
  Selected: [2026-04-26T16:00:02Z] ERROR Failed to create project while talkin
  ↑↓/jk scroll · h/l pan · ←→ tabs · f follow · n/p errors · g/G top/bottom · 0 reset
- New logs keep appending in inspect mode; \`f\` jumps back to the live tail.
-"
+ New logs keep appending in inspect mode; \`f\` jumps back to the live tail."
 `;
 
 exports[`LogViewer snapshots > renders the live follow tail view 1`] = `
 " LIVE FOLLOW                                                            line 6/6 · col 1 · errors 1
+    1 [2026-04-26T16:00:00Z] INFO Start wizard
     2 [2026-04-26T16:00:01Z] WARN Slow API response
  !  3 [2026-04-26T16:00:02Z] ERROR Failed to create project
     4 Traceback: line 1
@@ -22,8 +23,7 @@ exports[`LogViewer snapshots > renders the live follow tail view 1`] = `
  ›  6 [2026-04-26T16:00:04Z] INFO Completed successfully
  Selected: [2026-04-26T16:00:04Z] INFO Completed successfully
  ↑↓/jk scroll · h/l pan · ←→ tabs · f follow · n/p errors · g/G top/bottom · 0 reset
- New logs keep appending in inspect mode; \`f\` jumps back to the live tail.
-"
+ New logs keep appending in inspect mode; \`f\` jumps back to the live tail."
 `;
 
 exports[`LogViewer snapshots > renders the missing-log fallback state 1`] = `
@@ -33,8 +33,8 @@ exports[`LogViewer snapshots > renders the missing-log fallback state 1`] = `
 
 
 
+
  Selected: (No log file found)
  ↑↓/jk scroll · h/l pan · ←→ tabs · f follow · n/p errors · g/G top/bottom · 0 reset
- New logs keep appending in inspect mode; \`f\` jumps back to the live tail.
-"
+ New logs keep appending in inspect mode; \`f\` jumps back to the live tail."
 `;

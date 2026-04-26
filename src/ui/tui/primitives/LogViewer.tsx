@@ -24,7 +24,7 @@ import {
 
 /** Rows consumed by ConsoleView border + TitleBar + spacer + separator + input + tab bar chrome */
 const CHROME_ROWS = 8;
-const VIEWER_CHROME_ROWS = 5;
+const VIEWER_CHROME_ROWS = 4;
 const HORIZONTAL_STEP = 8;
 
 interface LogViewerProps {
@@ -64,7 +64,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
   const errorIndexes = useMemo(() => findErrorEntryIndexes(meta), [meta]);
   const selectedMeta = meta[selectedLine];
   const digits = Math.max(2, String(Math.max(lines.length, 1)).length);
-  const gutterWidth = digits + 4;
+  const gutterWidth = digits + 3;
   const lineWidth = Math.max(10, cols - gutterWidth - 2);
 
   const alignViewportToSelection = (nextSelectedLine: number) => {
