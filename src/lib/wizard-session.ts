@@ -320,6 +320,13 @@ export interface WizardSession {
   setupConfirmed: boolean;
   integration: Integration | null;
   frameworkContext: Record<string, unknown>;
+  /**
+   * Order in which keys were written into `frameworkContext`. Tracks
+   * answer history so back-navigation can pop the most recent setup
+   * answer. Maintained by `WizardStore.setFrameworkContext` and
+   * `popLastFrameworkContextAnswer`.
+   */
+  frameworkContextAnswerOrder: string[];
   typescript: boolean;
 
   /** Human-readable label for the detected framework variant (e.g., "Django with Wagtail CMS") */
@@ -744,6 +751,7 @@ export function buildSession(args: {
     setupConfirmed: false,
     integration: (validated.integration as Integration) ?? null,
     frameworkContext: {},
+    frameworkContextAnswerOrder: [],
     typescript: false,
     detectedFrameworkLabel: null,
     detectionComplete: false,

@@ -177,6 +177,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     integration: null,
                     frameworkConfig: null,
                     frameworkContext: {},
+                    frameworkContextAnswerOrder: [],
                     region: null,
                     selectedOrgId: null,
                     selectedOrgName: null,

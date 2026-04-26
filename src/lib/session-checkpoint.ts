@@ -58,6 +58,7 @@ const CheckpointSchema = z
     detectedFrameworkLabel: z.string().nullable(),
     detectionComplete: z.boolean(),
     frameworkContext: z.record(z.string(), z.unknown()),
+    frameworkContextAnswerOrder: z.array(z.string()).optional(),
 
     // Intro
     introConcluded: z.boolean(),
@@ -94,6 +95,7 @@ export function saveCheckpoint(session: WizardSession): void {
     detectedFrameworkLabel: session.detectedFrameworkLabel,
     detectionComplete: session.detectionComplete,
     frameworkContext: session.frameworkContext,
+    frameworkContextAnswerOrder: session.frameworkContextAnswerOrder,
 
     introConcluded: session.introConcluded,
   };
@@ -163,6 +165,7 @@ export async function loadCheckpoint(
     detectedFrameworkLabel: derivedLabel,
     detectionComplete: checkpoint.detectionComplete,
     frameworkContext: checkpoint.frameworkContext,
+    frameworkContextAnswerOrder: checkpoint.frameworkContextAnswerOrder ?? [],
     introConcluded: checkpoint.introConcluded,
   };
 }

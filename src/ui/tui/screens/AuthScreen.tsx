@@ -18,6 +18,7 @@ import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useContentArea } from '../context/ContentAreaContext.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -88,6 +89,10 @@ function useMeasuredRows(ref: RefObject<DOMElement | null>): number {
 
 export const AuthScreen = ({ store }: AuthScreenProps) => {
   useWizardStore(store);
+  // Esc → back to RegionSelect. Self-disables on the very first run
+  // (no region picked yet, canGoBack=false) so it doesn't hijack the
+  // OAuth-waiting phase.
+  useEscapeBack(store);
 
   const { session } = store;
   const contentArea = useContentArea();

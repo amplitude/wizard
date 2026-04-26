@@ -14,6 +14,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { SlackOutcome } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { ConfirmationInput, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import {
@@ -65,6 +66,13 @@ export const SlackScreen = ({
 
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Esc steps back to the previous step. Disabled in the standalone /slack
+  // overlay (no flow to back into) and during the brief auto-complete
+  // window when we detect Slack is already wired up.
+  useEscapeBack(store, {
+    enabled: !standalone && onComplete === undefined && phase === Phase.Prompt,
+  });
 
   // Clear any pending timer on unmount
   useEffect(() => {

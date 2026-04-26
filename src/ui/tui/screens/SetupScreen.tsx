@@ -7,9 +7,12 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useScreenHints } from '../hooks/useScreenHints.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { SetupQuestion } from '../../../lib/framework-config.js';
@@ -27,6 +30,29 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
   // Track which question index we're currently showing
   const [currentIndex, setCurrentIndex] = useState(0);
   const [resolving, setResolving] = useState(true);
+
+  // Esc steps back: first pop the most recent user-answered question (so
+  // back works between Setup questions), then if nothing's left to pop,
+  // delegate to the router so we walk past Setup entirely.
+  const hasUserAnswers = store.session.frameworkContextAnswerOrder.length > 0;
+  const canBackOutOfSetup = store.canGoBack();
+  const backAvailable = !resolving && (hasUserAnswers || canBackOutOfSetup);
+  useScreenInput(
+    (_input, key) => {
+      if (!key.escape) return;
+      if (store.popLastFrameworkContextAnswer()) {
+        setCurrentIndex((i) => Math.max(0, i - 1));
+        return;
+      }
+      store.goBack();
+    },
+    { isActive: backAvailable },
+  );
+  const hints = useMemo<readonly KeyHint[]>(
+    () => (backAvailable ? [{ key: 'Esc', label: 'Back' } as KeyHint] : []),
+    [backAvailable],
+  );
+  useScreenHints(hints);
 
   // On mount, run auto-detection for all questions
   useEffect(() => {

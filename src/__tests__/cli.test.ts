@@ -77,6 +77,7 @@ vi.mock('../lib/wizard-session', () => ({
     region: null,
     credentials: null,
     frameworkContext: {},
+    frameworkContextAnswerOrder: [],
     apiKeyNotice: null,
     ...args,
   }),

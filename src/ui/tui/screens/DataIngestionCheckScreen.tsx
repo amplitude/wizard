@@ -17,6 +17,7 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import {
   extractAppId,
   fetchAmplitudeUser,
@@ -32,10 +33,17 @@ import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import { detectBoundPort } from '../../../utils/port-detection.js';
 import { makeLink } from '../utils/terminal-rendering.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
 const CELEBRATION_DELAY_MS = 3_000;
+
+// Stable identities so useScreenHints' effect doesn't re-fire every render.
+const SKIP_HINT: readonly KeyHint[] = Object.freeze([
+  { key: 'q', label: 'Skip for now' },
+]);
+const NO_HINTS: readonly KeyHint[] = Object.freeze([]);
 
 /**
  * Framework-specific hints. For web frameworks we probe `ports` in order with
@@ -464,6 +472,15 @@ export const DataIngestionCheckScreen = ({
     };
   }, [session.integration, session.installDir]);
 
+  // Esc → step back to MCP install. q → "I'll come back later" exit.
+  // Both are hidden during the celebration phase: at that point the user
+  // wants to advance forward, not rewind past a successful run, and an
+  // accidental Esc should not undo the agent's work.
+  useEscapeBack(store, {
+    enabled: !celebrating,
+    extraHints: celebrating ? NO_HINTS : SKIP_HINT,
+  });
+
   useScreenInput((_char, key) => {
     // During celebration, wait for Enter to advance
     if (celebrating) {
@@ -472,7 +489,10 @@ export const DataIngestionCheckScreen = ({
       }
       return;
     }
-    if (key.escape || _char === 'q') {
+    // q → "I'll come back later" exit. Esc is owned by useEscapeBack
+    // above (back-nav), keeping the Esc=back convention consistent across
+    // the wizard.
+    if (_char === 'q') {
       if (pollingRef.current !== null) clearInterval(pollingRef.current);
       store.setOutroData({
         kind: OutroKind.Cancel,
