@@ -123,6 +123,15 @@ describe('resolveMode', () => {
       expect(r.allowDestructive).toBe(true);
     });
 
+    it('--force alone routes to CI mode (implies --yes)', () => {
+      // Pin the documented "implies --yes" behavior of --force at the
+      // resolveMode level. The bin.ts CI-branch check already includes
+      // options.force; this test pins the resolveMode side so a future
+      // refactor of bin.ts can't silently un-pair them.
+      const r = resolveMode({ force: true, isTTY: true });
+      expect(r.mode).toBe('ci');
+    });
+
     it('--agent (alone) implies autoApprove + allowWrites for back-compat', () => {
       const r = resolveMode({ agent: true, isTTY: true });
       expect(r.autoApprove).toBe(true);
