@@ -33,6 +33,9 @@ const MIN_VISIBLE_ROWS = 5;
  */
 const CHROME_FOOTER_RESERVE_ROWS = 3;
 
+/** Rows reserved for scroll indicators when the caller pre-computes the budget. */
+const SCROLL_INDICATOR_RESERVE_ROWS = 2;
+
 /**
  * Pure helper — translate total rows + reserved chrome rows into the
  * number of option rows that fit. Extracted for unit testing.
@@ -171,7 +174,7 @@ const SinglePickerMenu = <T,>({
 
   const chromeRows =
     availableRows !== undefined
-      ? 0
+      ? SCROLL_INDICATOR_RESERVE_ROWS
       : measuredHeader !== null
       ? measuredHeader + CHROME_FOOTER_RESERVE_ROWS
       : PICKER_CHROME_ROWS_FALLBACK;

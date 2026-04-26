@@ -464,13 +464,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       {/* Completed steps */}
       {completedSteps.length > 0 && (
-        <Box ref={completedStepsRef} flexDirection="column" marginBottom={1}>
+        <Box ref={completedStepsRef} flexDirection="column">
           {completedSteps.map((step, i) => (
             <Text key={i}>
               <Text color={Colors.success}>{Icons.checkmark} </Text>
               <Text color={Colors.body}>{step.label}</Text>
             </Text>
           ))}
+          <Box marginTop={1} />
         </Box>
       )}
 
