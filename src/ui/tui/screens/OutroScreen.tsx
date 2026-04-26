@@ -25,6 +25,8 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
+import { getLogFilePath } from '../../../lib/observability/index.js';
+import { writeBugReport } from '../../../lib/bug-report.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -36,12 +38,39 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   useWizardStore(store);
 
   const [showReport, setShowReport] = useState(false);
+  const [bugReportPathState, setBugReportPathState] = useState<string | null>(
+    null,
+  );
 
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
+  const isError = store.session.outroData?.kind === OutroKind.Error;
 
   // Any-key-to-exit for non-success states; success uses the picker.
-  useScreenInput((_input, key) => {
-    if (!isSuccess) process.exit(0);
+  // Exceptions on error: 'l'/'L' opens the log in the OS-default handler,
+  // 'c'/'C' writes a sanitized bug report to disk. Both keep the process
+  // alive so the user can review the outro after the action completes.
+  useScreenInput((input, key) => {
+    if (!isSuccess) {
+      if (isError && (input === 'l' || input === 'L')) {
+        analytics.wizardCapture('error outro log opened', {});
+        opn(getLogFilePath(), { wait: false }).catch(() => {
+          /* opn fails on some headless terminals — non-fatal */
+        });
+        return;
+      }
+      if (isError && (input === 'c' || input === 'C')) {
+        const written = writeBugReport({
+          errorMessage: store.session.outroData?.message ?? null,
+          integration: store.session.integration,
+        });
+        analytics.wizardCapture('error outro bug report written', {
+          success: written !== null,
+        });
+        setBugReportPathState(written);
+        return;
+      }
+      process.exit(0);
+    }
     if (showReport && key.escape) setShowReport(false);
   });
 
@@ -168,6 +197,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               {Icons.arrowRight} Run the wizard again with{' '}
               <Text bold>--debug</Text> for more detail
             </Text>
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>{' '}
+              <Text color={Colors.muted}>(press L to open)</Text>
+            </Text>
+            <Text color={Colors.secondary}>
+              {Icons.arrowRight} Press <Text bold>C</Text> to write a sanitized
+              bug report
+            </Text>
+            {bugReportPathState && (
+              <Text color={Colors.success}>
+                {Icons.checkmark} Bug report written to{' '}
+                <Text bold>{bugReportPathState}</Text>
+              </Text>
+            )}
             {outroData.docsUrl && (
               <Text color={Colors.secondary}>
                 {Icons.arrowRight} Docs:{' '}
@@ -208,19 +251,35 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       <Box marginTop={1}>
         {isSuccess ? (
           <PickerMenu
-            options={[
-              { label: 'View setup report', value: 'report' },
-              {
-                label: store.session.checklistDashboardUrl
-                  ? 'Open your analytics dashboard'
-                  : 'Open Amplitude',
-                value: 'dashboard',
-                hint: store.session.checklistDashboardUrl
-                  ? undefined
-                  : 'amplitude.com',
-              },
-              { label: 'Exit', value: 'exit' },
-            ]}
+            options={(() => {
+              const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+                readDisk: false,
+              });
+              const dashboardUrl = store.session.checklistDashboardUrl;
+              const inviteUrl = dashboardUrl
+                ? OUTBOUND_URLS.teammateInvite(zone, dashboardUrl)
+                : null;
+              return [
+                { label: 'View setup report', value: 'report' },
+                {
+                  label: dashboardUrl
+                    ? 'Open your analytics dashboard'
+                    : 'Open Amplitude',
+                  value: 'dashboard',
+                  hint: dashboardUrl ? undefined : 'amplitude.com',
+                },
+                ...(inviteUrl
+                  ? [
+                      {
+                        label: 'Send this dashboard to a teammate',
+                        value: 'teammate-invite',
+                        hint: 'opens share link',
+                      },
+                    ]
+                  : []),
+                { label: 'Exit', value: 'exit' },
+              ];
+            })()}
             onSelect={(value) => {
               const choice = Array.isArray(value) ? value[0] : value;
               analytics.wizardCapture('outro action', {
@@ -245,6 +304,24 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });
+              } else if (choice === 'teammate-invite') {
+                const zone = resolveZone(
+                  store.session,
+                  DEFAULT_AMPLITUDE_ZONE,
+                  { readDisk: false },
+                );
+                const dashboardUrl = store.session.checklistDashboardUrl;
+                const inviteUrl = dashboardUrl
+                  ? OUTBOUND_URLS.teammateInvite(zone, dashboardUrl)
+                  : null;
+                if (inviteUrl) {
+                  analytics.wizardCapture('teammate invite link opened', {
+                    zone,
+                  });
+                  opn(inviteUrl, { wait: false }).catch(() => {
+                    /* fire-and-forget */
+                  });
+                }
               } else {
                 process.exit(0);
               }
