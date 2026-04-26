@@ -92,6 +92,9 @@ npx @amplitude/wizard manifest            # introspect the CLI surface (JSON)
 npx @amplitude/wizard detect --json       # detect framework
 npx @amplitude/wizard status --json       # get full project state
 npx @amplitude/wizard auth status --json  # check if the human is logged in
+npx @amplitude/wizard plan --json         # build a setup plan (no writes) → planId
+npx @amplitude/wizard apply --plan-id <id> --yes   # execute a previously generated plan
+npx @amplitude/wizard verify --json       # confirm SDK + API key + framework are in place
 npx @amplitude/wizard --agent             # run the full wizard in NDJSON mode
 ```
 
@@ -121,6 +124,9 @@ npx @amplitude/wizard auth token            # stdout: <access-token>
 | `manifest` | JSON | Machine-readable CLI surface (flags, env vars, exit codes, glossary) |
 | `detect [--json]` | JSON or human | Detect the framework |
 | `status [--json]` | JSON or human | Full project state: framework, SDK, API key, auth |
+| `plan [--json]` | JSON or human | Build a structured setup plan (framework, SDK, file changes); persists a `planId` for 24h. No writes. |
+| `apply --plan-id <id> --yes` | NDJSON or human | Execute a previously generated plan. Requires `--yes`; pair with `--force` for destructive overwrites. |
+| `verify [--json]` | JSON or human | Cheap, no-network check that SDK + API key + framework are all in place. Exits non-zero on failure. |
 | `auth status [--json]` | JSON or human | Login state + token expiry |
 | `auth token` | raw token or JSON | Print stored OAuth token for scripts |
 
@@ -128,6 +134,14 @@ All commands auto-emit JSON when stdout is piped. Use `--human` to override
 and force human-readable output. `--json` enables JSON output without the
 auto-approve side effects of `--agent` (so you can script but still get
 prompted for confirmation when needed).
+
+**Plan / apply / verify.** For orchestrators that want a human in the loop on
+the diff, split the run into three phases: `plan` builds a `WizardPlan`
+(framework, SDK, intended file changes) and returns a `planId`; `apply
+--plan-id <id> --yes` executes it within 24 hours; `verify` confirms the
+result. `plan` and `verify` never write to disk. The `plan` JSON output
+includes a ready-to-run `resumeFlags` array — feed it straight back into
+`apply`.
 
 **Selecting an Amplitude project.** Amplitude's hierarchy is
 Org → Workspace → Project → Environment. When multiple match, pick one
@@ -156,9 +170,13 @@ full glossary.
 | `AMPLITUDE_TOKEN` | OAuth access-token override (requires prior login) |
 | `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 | `AMPLITUDE_WIZARD_AGENT=1` | Force agent mode (NDJSON, auto-approve) |
+| `AMPLITUDE_WIZARD_MAX_TURNS` | Override the inner agent's per-run turn cap (default 200) |
 
 **NDJSON schema.** Every event emitted in `--agent` mode carries a `v:1`
-version tag and a typed envelope. See
+version tag and a typed envelope. The stream includes inner-agent
+`lifecycle` events plus `file_change` events for every write the agent
+makes — orchestrators can render a live diff without tailing the
+filesystem. See
 [docs/dual-mode-architecture.md](./docs/dual-mode-architecture.md) for the
 full schema and deprecation policy.
 
@@ -253,6 +271,8 @@ Tools exposed:
 |------|---------|
 | `detect_framework` | Detect the framework used in a project |
 | `get_project_status` | Full setup state: framework, SDK, API key, auth |
+| `plan_setup` | Build a `WizardPlan` (framework, SDK, intended file changes) and return a `planId`. Read-only — no writes. Pair with the `apply` CLI subcommand to execute. |
+| `verify_setup` | No-network check that SDK + API key + framework are all in place. Returns `{ outcome, failures }`. |
 | `get_auth_status` | Whether the user is logged in and when their token expires |
 | `get_auth_token` | Return the stored OAuth access token (security-sensitive) |
 
@@ -313,7 +333,9 @@ team sharing). API keys use your OS keychain when available, otherwise
 | `--agent` | `AMPLITUDE_WIZARD_AGENT` | NDJSON output + auto-approve prompts |
 | `--json` | — | Machine-readable JSON (does NOT auto-approve prompts) |
 | `--human` | — | Force human output (overrides `--json` auto-detect when piped) |
-| `--yes` / `-y` | — | Skip all prompts, same as `--ci` |
+| `--yes` / `-y` | `AMPLITUDE_WIZARD_YES` | Skip all prompts and allow the inner agent to write files (required for `apply`) |
+| `--auto-approve` | `AMPLITUDE_WIZARD_AUTO_APPROVE` | Silently pick the recommended choice on `needs_input` prompts. Does **not** grant write capability — pair with `--yes` for that. |
+| `--force` | `AMPLITUDE_WIZARD_FORCE` | Allow destructive writes (overwrite/delete existing files); implies `--yes`. |
 | `--integration <name>` | — | Force a specific integration |
 | `--menu` | `AMPLITUDE_WIZARD_MENU` | Show framework selection menu |
 | `--force-install` | `AMPLITUDE_WIZARD_FORCE_INSTALL` | Install packages even if peer checks fail |
@@ -325,6 +347,7 @@ team sharing). API keys use your OS keychain when available, otherwise
 |---------|--------|
 | `AMPLITUDE_TOKEN` | OAuth access-token override (requires prior `amplitude-wizard login`) |
 | `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
+| `AMPLITUDE_WIZARD_MAX_TURNS` | Override the inner agent's per-run turn cap (default 200, max 10000). Useful for very long-running setups. |
 
 ### Exit codes
 
