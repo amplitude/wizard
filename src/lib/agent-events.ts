@@ -64,6 +64,76 @@ export interface AgentEventEnvelope<TData = unknown> {
 // `--auto-approve` nor `--yes` are set in agent mode, the wizard exits with
 // `INPUT_REQUIRED` (exit code 12) after emitting this event.
 
+/**
+ * UI rendering hints — a tiny "UI protocol over NDJSON" that lets the
+ * wizard nudge outer agents (Claude Code, Cursor, Codex) toward the right
+ * widget without assuming any specific renderer is available. Outer agents
+ * are free to ignore the hints and fall back to a plain numbered list, but
+ * when they're respected the human-facing UX is dramatically better.
+ */
+export interface UiHints {
+  /**
+   * Suggested widget. Outer agents pick the closest match they can render:
+   *   - 'searchable_select' — long lists; pair with `pagination`/`searchPlaceholder`
+   *   - 'select'            — short list, no search needed
+   *   - 'multiselect'       — pick N (not yet used)
+   *   - 'confirmation'      — yes/no
+   *   - 'secret_input'      — free text but mask on display (API key, token)
+   *   - 'text_input'        — free text, no masking
+   */
+  component:
+    | 'searchable_select'
+    | 'select'
+    | 'multiselect'
+    | 'confirmation'
+    | 'secret_input'
+    | 'text_input';
+  /** Importance signal — `required` blocks; `optional` can be skipped. */
+  priority?: 'required' | 'recommended' | 'optional';
+  /** Heading for the widget. Use the message for short context, title for the heading. */
+  title?: string;
+  /** One-sentence supporting context shown beneath the title. */
+  description?: string;
+  /** Placeholder shown in the search field of `searchable_select`. */
+  searchPlaceholder?: string;
+  /** Message rendered when `choices` is empty (e.g. "No projects yet — create one"). */
+  emptyState?: string;
+}
+
+/** Pagination signals for long choice lists. */
+export interface PaginationInfo {
+  /** Total number of choices the wizard knows about across all pages. */
+  total: number;
+  /** Number of choices included in this event. */
+  returned: number;
+  /**
+   * Optional CLI invocation an outer agent can run to fetch the next page or
+   * a search-filtered subset. Pre-built so orchestrators don't have to
+   * compose the command themselves.
+   */
+  nextCommand?: string[];
+  /** When set, indicates the choices in this event are filtered by `query`. */
+  query?: string;
+}
+
+/** Free-form fallback when the right answer isn't in `choices`. */
+export interface ManualEntryHint {
+  /**
+   * CLI flag the outer agent should use to pass the value back. Pairs with
+   * `--app-id 769610`-style rerun semantics so manual entry is just another
+   * resume flag.
+   */
+  flag: string;
+  /** Placeholder the renderer can show in the input. */
+  placeholder?: string;
+  /**
+   * Optional regex the outer agent SHOULD validate against before submitting.
+   * Stringified — outer agents that don't speak regex should treat this as
+   * documentation only.
+   */
+  pattern?: string;
+}
+
 export interface NeedsInputChoice<V = string> {
   /** Stable machine value to round-trip back via stdin or resume flags. */
   value: V;
@@ -71,6 +141,27 @@ export interface NeedsInputChoice<V = string> {
   label: string;
   /** Optional secondary hint (e.g. environment name, framework version). */
   hint?: string;
+  /**
+   * One-line supporting description — used by `searchable_select` widgets
+   * to render a secondary line under the label. Distinct from `hint` so
+   * outer agents can choose to render hint as a badge and description as
+   * a sub-label.
+   */
+  description?: string;
+  /**
+   * Structured key/value metadata the outer agent can use for richer
+   * rendering (org name, env name, region, last-used timestamp, etc.).
+   * Keep values primitive — strings, numbers, booleans — so they render
+   * cleanly in any widget.
+   */
+  metadata?: Record<string, string | number | boolean>;
+  /**
+   * Per-choice argv that re-invokes the wizard with this choice already
+   * picked. Equivalent to the top-level `resumeFlags` lookup keyed by
+   * `value`, but inlined on each choice so outer agents can produce
+   * "click this card to continue" copy without two-step lookups.
+   */
+  resumeFlags?: string[];
 }
 
 export interface NeedsInputData<V = string> {
@@ -86,13 +177,18 @@ export interface NeedsInputData<V = string> {
   code: string;
   /** Short human-readable description of the question. */
   message: string;
+  /** Rendering hints the outer agent can use to pick the right widget. */
+  ui?: UiHints;
   /** Available choices, in display order. */
   choices: NeedsInputChoice<V>[];
   /** Recommended choice value (used when `--auto-approve` is set). */
   recommended?: V;
+  /** Why `recommended` was chosen — surfaced in the UI as a tooltip / badge. */
+  recommendedReason?: string;
   /**
    * argv that, when re-invoked, resolves this prompt for each choice.
    * Outer agents prefer this to piping to stdin since it's stateless.
+   * Per-choice flags are also available on each `NeedsInputChoice.resumeFlags`.
    */
   resumeFlags?: { value: V; flags: string[] }[];
   /**
@@ -100,6 +196,15 @@ export interface NeedsInputData<V = string> {
    * Documents the round-trip format for stdin-driven orchestrators.
    */
   responseSchema?: Record<string, string>;
+  /** Pagination metadata for long choice lists. */
+  pagination?: PaginationInfo;
+  /**
+   * When `true`, the outer agent MAY collect free-form input from the user
+   * instead of one of the listed choices. `manualEntry` describes the flag
+   * to use when re-invoking with that input.
+   */
+  allowManualEntry?: boolean;
+  manualEntry?: ManualEntryHint;
 }
 
 /**
@@ -112,10 +217,15 @@ export interface NeedsInputData<V = string> {
 export interface NeedsInputWireData<V = string> {
   event: 'needs_input';
   code: string;
+  ui?: UiHints;
   choices: NeedsInputChoice<V>[];
   recommended?: V;
+  recommendedReason?: string;
   resumeFlags?: { value: V; flags: string[] }[];
   responseSchema?: Record<string, string>;
+  pagination?: PaginationInfo;
+  allowManualEntry?: boolean;
+  manualEntry?: ManualEntryHint;
 }
 
 export type NeedsInputEvent<V = string> = AgentEventEnvelope<
