@@ -34,25 +34,29 @@ const MIN_VISIBLE_ROWS = 5;
 const CHROME_FOOTER_RESERVE_ROWS = 3;
 
 /**
- * Pure helper — translate measured header height + terminal rows into
- * the number of option rows that fit. Extracted for unit testing.
+ * When a parent passes an explicit row budget, reserve space for chrome
+ * rendered outside the option list:
+ *  - 1 row: PromptLabel header (always rendered, even with no message —
+ *    it outputs a single space character so it occupies one row).
+ *  - 2 rows: optional "↑ N more" / "↓ N more" scroll indicators above and
+ *    below the visible window when the list is paginated.
  *
- * @param termRows Total terminal rows.
- * @param measuredHeaderRows Header height from `measureElement`, or
- *   `null` if not yet measured (first-frame fallback path).
- * @param totalOptionRows Total option rows we'd render in unbounded space
- *   (i.e. ceil(options.length / columns)).
+ * Without this reserve, total rendered height would be
+ *   1 (header) + 2 (indicators) + (availableRows − 2) options = availableRows + 1
+ * and the parent's `overflow="hidden"` would clip the bottom indicator.
+ */
+const CONSTRAINED_CHROME_RESERVE_ROWS = 3;
+
+/**
+ * Pure helper — translate total rows + reserved chrome rows into the
+ * number of option rows that fit. Extracted for unit testing.
  */
 export function computeVisibleCount(
-  termRows: number,
-  measuredHeaderRows: number | null,
+  totalRows: number,
   totalOptionRows: number,
+  chromeRows: number,
 ): number {
-  const chromeRows =
-    measuredHeaderRows !== null
-      ? measuredHeaderRows + CHROME_FOOTER_RESERVE_ROWS
-      : PICKER_CHROME_ROWS_FALLBACK;
-  const available = termRows - chromeRows;
+  const available = totalRows - chromeRows;
   const fits = Math.max(MIN_VISIBLE_ROWS, available);
   return Math.min(totalOptionRows, fits);
 }
@@ -69,6 +73,12 @@ interface PickerMenuProps<T> {
   mode?: 'single' | 'multi';
   centered?: boolean;
   columns?: 1 | 2 | 3 | 4;
+  /**
+   * Rows available for the option list inside a constrained parent region.
+   * Currently honoured only by single-mode pickers — multi-mode does not
+   * paginate, so this prop is ignored when `mode === 'multi'`.
+   */
+  availableRows?: number;
   /** In multi mode, values to start selected. Ignored in single mode. */
   defaultSelected?: T[];
   onSelect: (value: T | T[]) => void;
@@ -80,6 +90,7 @@ export const PickerMenu = <T,>({
   mode = 'single',
   centered = false,
   columns = 1,
+  availableRows,
   defaultSelected,
   onSelect,
 }: PickerMenuProps<T>) => {
@@ -102,6 +113,7 @@ export const PickerMenu = <T,>({
       options={options}
       centered={centered}
       columns={columns}
+      availableRows={availableRows}
       onSelect={onSelect}
     />
   );
@@ -148,23 +160,24 @@ const SinglePickerMenu = <T,>({
   options,
   centered = false,
   columns = 1,
+  availableRows,
   onSelect,
 }: {
   message?: string;
   options: PickerOption<T>[];
   centered?: boolean;
   columns?: number;
+  availableRows?: number;
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
   const [, termRows] = useStdoutDimensions();
   const scrollRef = useRef(0);
   const headerRef = useRef<DOMElement>(null);
-  // Measured header height — `null` until Ink has laid out the first frame.
-  // We re-measure on every render so wrapping changes (terminal resize,
-  // message text changes) update visibleCount on the next paint.
   const [measuredHeader, setMeasuredHeader] = useState<number | null>(null);
   const rowsPerCol = Math.ceil(options.length / columns);
+  const visibleRowsBudget =
+    availableRows ?? Math.max(MIN_VISIBLE_ROWS, termRows);
 
   useEffect(() => {
     if (!headerRef.current) return;
@@ -174,9 +187,15 @@ const SinglePickerMenu = <T,>({
     }
   });
 
+  const chromeRows =
+    availableRows !== undefined
+      ? CONSTRAINED_CHROME_RESERVE_ROWS
+      : measuredHeader !== null
+      ? measuredHeader + CHROME_FOOTER_RESERVE_ROWS
+      : PICKER_CHROME_ROWS_FALLBACK;
   const maxVisible =
     columns === 1
-      ? computeVisibleCount(termRows, measuredHeader, rowsPerCol)
+      ? computeVisibleCount(visibleRowsBudget, rowsPerCol, chromeRows)
       : rowsPerCol;
   const needsScroll = rowsPerCol > maxVisible;
 
@@ -195,7 +214,6 @@ const SinglePickerMenu = <T,>({
     const col = Math.floor(focused / rowsPerCol);
     const row = focused % rowsPerCol;
 
-    // Number keys 1–9 select options 0–8; 0 selects option 9
     const digit = parseInt(input, 10);
     if (!isNaN(digit) && !key.ctrl && !key.meta) {
       const idx = digit === 0 ? 9 : digit - 1;
@@ -275,7 +293,6 @@ const SinglePickerMenu = <T,>({
     );
   }
 
-  // Multi-column / short-list: render all items in column-first grid
   const columnArrays: PickerOption<T>[][] = [];
   for (let c = 0; c < columns; c++) {
     columnArrays.push(
@@ -337,7 +354,6 @@ const MultiPickerMenu = <T,>({
     const col = Math.floor(focused / rows);
     const row = focused % rows;
 
-    // Number keys 1–9 toggle options 0–8; 0 toggles option 9
     const digit = parseInt(input, 10);
     if (!isNaN(digit) && !key.ctrl && !key.meta) {
       const idx = digit === 0 ? 9 : digit - 1;
@@ -391,21 +407,13 @@ const MultiPickerMenu = <T,>({
       });
     }
     if (key.return) {
-      // Numeric sort — default Array.prototype.sort is lexicographic and
-      // would put index 10 before index 2.
       const values = [...selected]
         .sort((a, b) => a - b)
         .map((i) => options[i].value);
       if (values.length === 0 && !defaultSelected?.length) {
-        // Nothing was ever pre-selected and user pressed Enter without
-        // toggling anything — treat that as "use the focused row" so the
-        // picker always submits something. (This was the original behavior.)
         const focusedOpt = options[focused];
         if (focusedOpt) onSelect([focusedOpt.value]);
       } else {
-        // If the caller pre-selected items, an empty set means the user
-        // deliberately unchecked everything — pass [] so the caller can
-        // treat it as "skip" or whatever they want.
         onSelect(values);
       }
     }
