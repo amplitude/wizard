@@ -2242,7 +2242,6 @@ void yargs(hideBin(process.argv))
     },
     (argv) => {
       void (async () => {
-        const installDir = argv['install-dir'] ?? process.cwd();
         const { resolveMode } = await import('./src/lib/mode-config.js');
         const mode = resolveMode({
           json: argv.json as boolean | undefined,
@@ -2258,6 +2257,18 @@ void yargs(hideBin(process.argv))
         const { resolvePlan } = await import('./src/lib/agent-ops.js');
         const planId = String(argv['plan-id']);
         const result = await resolvePlan(planId);
+
+        // Resolve installDir with this precedence:
+        //   1. Explicit `--install-dir` on this `apply` invocation (user override)
+        //   2. The plan's stored `installDir` (so a cwd change between
+        //      `plan` and `apply` doesn't run wizard against the wrong dir)
+        //   3. process.cwd() fallback
+        // The plan stores the directory it was generated against; honoring it
+        // is what makes `plan` → `apply` work across cwd shifts.
+        const planInstallDir =
+          result.kind === 'ok' ? result.plan.installDir : undefined;
+        const installDir =
+          argv['install-dir'] ?? planInstallDir ?? process.cwd();
 
         const emitErr = (
           msg: string,
