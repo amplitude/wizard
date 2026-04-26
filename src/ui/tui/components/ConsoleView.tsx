@@ -8,7 +8,7 @@
 
 import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Spinner } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { OutroKind } from '../session-constants.js';
@@ -234,6 +234,17 @@ export const ConsoleView = ({
   // pushed above the rendered region into terminal scrollback the user can't
   // easily reach.
   const [history, setHistory] = useState<ConversationTurn[]>([]);
+  // Local "dismissed" flag so the user can hide the Q&A panel without
+  // wiping history. Auto-resets when a new turn arrives so a fresh answer
+  // is always visible.
+  const [qaDismissed, setQaDismissed] = useState(false);
+  const prevHistoryLengthRef = useRef(0);
+  useEffect(() => {
+    if (history.length > prevHistoryLengthRef.current) {
+      setQaDismissed(false);
+    }
+    prevHistoryLengthRef.current = history.length;
+  }, [history.length]);
 
   // Event plan prompt local state
   const [planInputMode, setPlanInputMode] = useState<'options' | 'feedback'>(
@@ -271,6 +282,13 @@ export const ConsoleView = ({
           store.resolvePrompt(pendingPrompt.kind === 'confirm' ? false : '');
           return;
         }
+        // Esc with no pending prompt dismisses the Q&A panel so it stops
+        // hogging vertical space. History is preserved — a new question or
+        // /clear will resurface it.
+        if (key.escape && history.length > 0 && !qaDismissed) {
+          setQaDismissed(true);
+          return;
+        }
       }
       if (screenError && (char === 'r' || char === 'R')) {
         store.clearScreenError();
@@ -296,6 +314,15 @@ export const ConsoleView = ({
       'is slash command': isSlashCommand,
     });
     if (isSlashCommand) {
+      // /clear is owned by ConsoleView (it lives in component state, not the
+      // store), so handle it here before delegating to executeCommand.
+      const cmd = value.trim().split(/\s+/)[0];
+      if (cmd === '/clear') {
+        setHistory([]);
+        setQaDismissed(false);
+        store.setCommandFeedback('Conversation cleared.');
+        return;
+      }
       const query = executeCommand(value, store);
       if (query) {
         handleSubmit(query);
@@ -401,12 +428,17 @@ export const ConsoleView = ({
       ? store.statusMessages[store.statusMessages.length - 1]
       : null;
 
-  // Cap how many recent turns we render in the live region. A full-screen Ink
-  // app can't rely on terminal scrollback (we used to use <Static> here, but
-  // those entries get pushed above the rendered region and effectively
-  // disappear), so we keep the most recent exchanges visible inline above the
-  // input and let older turns fall off.
-  const visibleHistory = history.slice(-6);
+  // Show only the most recent turn pair (1 user + 1 assistant). Older turns
+  // would otherwise stack vertically and push the actual screen content
+  // (Tasks, Progress, etc.) off-frame. Use /clear to wipe history entirely
+  // or Esc to temporarily hide the panel.
+  const visibleHistory = qaDismissed ? [] : history.slice(-2);
+
+  // Cap the Q&A panel to ~half the viewport so a single very long answer
+  // can't crowd out the screen content above. Anything beyond the cap is
+  // clipped via overflow="hidden" — the user can /clear or scroll the
+  // terminal scrollback to see more.
+  const qaPanelMaxHeight = Math.max(6, Math.floor(height * 0.5));
 
   return (
     <Box width={width} height={height} flexDirection="column">
@@ -505,13 +537,23 @@ export const ConsoleView = ({
 
       {/* Q&A history — rendered inline in the live region so answers stay
         visible. (Previously rendered via <Static>, which pushed content above
-        the visible TUI in fullscreen mode.) */}
+        the visible TUI in fullscreen mode.)
+        Capped to the most recent turn pair and clipped at ~half the viewport
+        so long answers can't crowd out the screen content above. */}
       {visibleHistory.length > 0 && (
-        <Box flexDirection="column" paddingX={Layout.paddingX}>
+        <Box
+          flexDirection="column"
+          paddingX={Layout.paddingX}
+          flexShrink={1}
+          overflow="hidden"
+          height={qaPanelMaxHeight}
+        >
           {history.length > visibleHistory.length && (
             <Text color={Colors.subtle}>
               … {history.length - visibleHistory.length} earlier message
-              {history.length - visibleHistory.length === 1 ? '' : 's'} hidden
+              {history.length - visibleHistory.length === 1
+                ? ''
+                : 's'} hidden — /clear to wipe
             </Text>
           )}
           {visibleHistory.map((turn, idx) =>
@@ -580,7 +622,9 @@ export const ConsoleView = ({
         ) : (
           <Text color={Colors.disabled}>
             {store.session.credentials !== null && store.session.introConcluded
-              ? 'Press / for commands or Tab to ask a question'
+              ? visibleHistory.length > 0
+                ? 'Press / for commands · Tab to ask · Esc to hide answer'
+                : 'Press / for commands or Tab to ask a question'
               : 'Press / for commands'}
           </Text>
         )}
