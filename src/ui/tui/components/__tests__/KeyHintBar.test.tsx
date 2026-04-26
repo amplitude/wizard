@@ -9,7 +9,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render } from 'ink-testing-library';
 import { KeyHintBar } from '../KeyHintBar.js';
 
@@ -74,5 +74,28 @@ describe('KeyHintBar', () => {
     const out = frameOf(<KeyHintBar width={80} hints={[]} />);
     expect(out).toContain('[/]');
     expect(out).toContain('Commands');
+  });
+
+  it('does not warn about duplicate React keys when a screen registers a hint that collides with the defaults', () => {
+    // Regression: a screen registering its own `/ Commands` hint used to
+    // collide with the always-on default, producing a noisy "Encountered
+    // two children with the same key" React warning.
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const { unmount } = render(
+        <KeyHintBar width={80} hints={[{ key: '/', label: 'Commands' }]} />,
+      );
+      unmount();
+      const sawDuplicateKeyWarning = errorSpy.mock.calls.some((args) =>
+        args.some(
+          (arg) =>
+            typeof arg === 'string' &&
+            arg.includes('two children with the same key'),
+        ),
+      );
+      expect(sawDuplicateKeyWarning).toBe(false);
+    } finally {
+      errorSpy.mockRestore();
+    }
   });
 });
