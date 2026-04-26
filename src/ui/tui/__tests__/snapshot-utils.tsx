@@ -36,10 +36,26 @@
  *   pnpm vitest run src/ui/tui/screens/__tests__/OutroScreen.snap.test.tsx -u
  */
 
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { render } from 'ink-testing-library';
 import type { ReactElement } from 'react';
 import { WizardStore } from '../store.js';
 import type { WizardSession } from '../store.js';
+
+/**
+ * Per-test-file scratch dir for `installDir`. Some screens (notably
+ * AuthScreen's auto-resolve effect) call store mutators that write
+ * ampli.json under `session.installDir`. Default `WizardSession.installDir`
+ * is `process.cwd()`, which would litter the repo root with a stray
+ * ampli.json during tests. Pointing every snapshot store at a tmp dir
+ * keeps tests hermetic without forcing each test to set installDir
+ * manually.
+ */
+const SNAPSHOT_INSTALL_DIR = fs.mkdtempSync(
+  path.join(os.tmpdir(), 'wizard-snapshot-'),
+);
 
 /**
  * Strip ANSI escapes so snapshots are readable in PR reviews AND
@@ -110,8 +126,12 @@ export function makeStoreForSnapshot(
   patch: Partial<WizardSession> = {},
 ): WizardStore {
   const store = new WizardStore();
-  if (Object.keys(patch).length > 0) {
-    store.session = { ...store.session, ...patch };
-  }
+  // Default to a tmp scratch dir (overridable via patch) so any incidental
+  // disk writes from store mutators don't pollute the repo root.
+  store.session = {
+    ...store.session,
+    installDir: SNAPSHOT_INSTALL_DIR,
+    ...patch,
+  };
   return store;
 }

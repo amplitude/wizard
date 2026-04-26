@@ -104,18 +104,14 @@ describe('AuthScreen snapshots', () => {
   });
 
   it('renders the project (environment) picker when the workspace has multiple env keys', () => {
-    // Pre-populate selectedOrgId/Name and selectedWorkspaceId/Name so that
-    // the screen's "auto-write ampli.json" useEffect short-circuits (its
-    // guard fires only when one of those names is missing). Without this
-    // the test would write the project's ampli.json file to disk as a
-    // side effect.
+    // No installDir / ID prepopulation needed: the snapshot util points
+    // installDir at a tmp dir, and the auto-resolve effect skips the
+    // ampli.json write when session IDs already match the resolved
+    // org/workspace. Either way no stray ampli.json appears at the
+    // repo root during tests.
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
-      selectedOrgId: 'org-1',
-      selectedOrgName: 'Acme',
-      selectedWorkspaceId: 'ws-1',
-      selectedWorkspaceName: 'Solo Workspace',
       pendingOrgs: [
         {
           id: 'org-1',
