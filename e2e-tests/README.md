@@ -2,11 +2,11 @@
 
 ## Running Tests Locally
 
-E2E Tests can be run locally from the root of the project with:
+E2E tests can be run locally from the root of the project with:
 
 `pnpm test:e2e`
 
-To run a specific test application
+To run a specific test application:
 
 `pnpm test:e2e NextJS`
 
@@ -17,7 +17,7 @@ To record new fixtures:
 ## Writing Framework tests
 
 Most of the E2E framework tests share a lot of common functionality such as
-terminal inputs and test setup/teardown. To accomodate for the large amount of
+terminal inputs and test setup/teardown. To accommodate the large number of
 frameworks we test, we expose the `createFrameworkTest` function.
 
 For example usage, see one of the tests in `e2e-tests/tests` such as
@@ -29,17 +29,17 @@ To adjust the default behaviour of the framework, also take a look at
 
 ## Fixture Generation
 
-To be able to mock our LLM calls in the E2E tests, we need to have a realistic
-fixture. To generate them, we a call to the `/query` endpoint in Amplitude. We
+To mock our LLM calls in the E2E tests, we need realistic fixtures. To
+generate them, we make a call to the `/query` endpoint in Amplitude. We
 save this response as a fixture in `e2e-tests/fixtures`. The filename represents
 the hashed request body to the endpoint. When we run the tests again, we reuse
 those fixtures.
 
-Whenever the request body to the LLM change we also regenerate the fixture. The
+Whenever the request body to the LLM changes we also regenerate the fixture. The
 request body can change because of a few things:
 
 - Prompt:
-  - The system propmt
+  - The system prompt
   - The provided framework files
   - etc.
 - LLM Model
@@ -51,10 +51,10 @@ and actually reflective of how they would work in production as well.
 Two environment variables control our fixture management:
 
 `RECORD_FIXTURES` performs a `/query` request to create a fixture if no matching
-fixture is found the for the request body. Can be `true or false`. If `false`
+fixture is found for the request body. Can be `true` or `false`. If `false`
 and no matching fixture is found, the test will fail.
 
-`CLEANUP_UNUSED_FIXTURES` deletes fixtures that were not used during an E2E jest
+`CLEANUP_UNUSED_FIXTURES` deletes fixtures that were not used during an E2E Jest
 run. Should only be set to true when running all E2E tests. Can be `true` or
 `false`
 

@@ -492,7 +492,37 @@ describe('cleanupWizardArtifacts', () => {
   });
   afterEach(() => cleanup(tmpDir));
 
-  it('removes integration skills AND the events file in one call', () => {
+  it('on success: removes integration skills, preserves the events file', () => {
+    // Regression: previously deleted .amplitude-events.json on every exit,
+    // breaking resumability. Now ALL exit paths preserve the file (it's
+    // gitignored so it can't pollute commits regardless), and only the
+    // success path deletes the single-use integration skill.
+    const skillDir = path.join(
+      tmpDir,
+      '.claude',
+      'skills',
+      'integration-nextjs',
+    );
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), '# nextjs');
+    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
+
+    cleanupWizardArtifacts(tmpDir, { onSuccess: true });
+
+    expect(fs.existsSync(skillDir)).toBe(false);
+    // .amplitude-events.json is now PRESERVED on success — it's the
+    // canonical record of the user's confirmed event plan.
+    expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
+      true,
+    );
+  });
+
+  it('on cancel/error (no onSuccess): preserves integration skills AND events file', () => {
+    // Regression for: a Ctrl+C / wizardAbort / transient error used to
+    // wipe .amplitude-events.json AND .claude/skills/integration-*,
+    // forcing a fresh re-confirm of the entire event plan and re-download
+    // of the SDK-setup skill. Now everything stays on disk so re-run
+    // resumes seamlessly.
     const skillDir = path.join(
       tmpDir,
       '.claude',
@@ -505,9 +535,9 @@ describe('cleanupWizardArtifacts', () => {
 
     cleanupWizardArtifacts(tmpDir);
 
-    expect(fs.existsSync(skillDir)).toBe(false);
+    expect(fs.existsSync(skillDir)).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
-      false,
+      true,
     );
   });
 
@@ -523,7 +553,7 @@ describe('cleanupWizardArtifacts', () => {
       fs.writeFileSync(path.join(dir, 'SKILL.md'), '# kept');
     }
 
-    cleanupWizardArtifacts(tmpDir);
+    cleanupWizardArtifacts(tmpDir, { onSuccess: true });
 
     for (const name of keep) {
       expect(fs.existsSync(path.join(tmpDir, '.claude', 'skills', name))).toBe(
@@ -534,5 +564,8 @@ describe('cleanupWizardArtifacts', () => {
 
   it('is a no-op on a clean install dir (no throw)', () => {
     expect(() => cleanupWizardArtifacts(tmpDir)).not.toThrow();
+    expect(() =>
+      cleanupWizardArtifacts(tmpDir, { onSuccess: true }),
+    ).not.toThrow();
   });
 });

@@ -11,7 +11,7 @@ The wizard authenticates you, detects your framework, runs an AI agent to
 instrument the SDK and events, verifies data is flowing, and walks you through
 your first chart and dashboard. All from the terminal.
 
-Requires Node.js >= 18.17.0.
+Requires Node.js >= 20.
 
 ## Supported frameworks
 

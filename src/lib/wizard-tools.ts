@@ -330,21 +330,34 @@ export function cleanupAmplitudeEventsFile(installDir: string): void {
 }
 
 /**
- * Run all wizard-artifact cleanup. Composes:
+ * Run wizard-artifact cleanup. Composes:
  *   - cleanupIntegrationSkills (remove `.claude/skills/integration-*`)
- *   - cleanupAmplitudeEventsFile (remove `.amplitude-events.json`)
  *
- * Safe to call from any exit path (success, error, cancel). Each step is
- * silent on its own errors so a failure in one doesn't block the others.
+ * Notes on what's intentionally PRESERVED:
+ *   - `.amplitude-events.json` stays on disk. It's the canonical record of
+ *     the user's confirmed event plan. Deleting it on every exit (the
+ *     short-lived behavior introduced in #261) broke resumability — a
+ *     user who Ctrl+C'd, hit a transient error, or just wanted to re-run
+ *     the wizard was forced to re-confirm their plan from scratch.
+ *     `ensureWizardArtifactsIgnored` keeps it out of git so it can't
+ *     pollute commits even when kept on disk.
+ *   - Instrumentation and taxonomy skills (everything in
+ *     `.claude/skills/` that isn't `integration-*`) — users invoke these
+ *     later for event discovery and dashboard planning.
  *
- * Instrumentation and taxonomy skills are intentionally NOT removed —
- * users invoke them later for event discovery and dashboard planning.
- * They're gitignored via {@link ensureWizardArtifactsIgnored} so they
- * don't pollute source control even when kept on disk.
+ * Each step is silent on its own errors so a failure in one doesn't block
+ * the others. Safe to call from any exit path; idempotent.
  */
-export function cleanupWizardArtifacts(installDir: string): void {
-  cleanupIntegrationSkills(installDir);
-  cleanupAmplitudeEventsFile(installDir);
+export function cleanupWizardArtifacts(
+  installDir: string,
+  options: { onSuccess?: boolean } = {},
+): void {
+  // Integration skills are single-use SDK-setup workflows — only delete
+  // them after a successful run, so the user can re-run cleanly without
+  // re-downloading the skill on cancel/error.
+  if (options.onSuccess) {
+    cleanupIntegrationSkills(installDir);
+  }
 }
 
 /**

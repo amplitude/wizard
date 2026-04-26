@@ -30,7 +30,7 @@ import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
-import { RetryBanner } from '../components/RetryBanner.js';
+import { RetryStatusChip } from '../components/RetryBanner.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
@@ -200,7 +200,9 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     <Box flexDirection="row" flexGrow={1}>
       {/* Left: tasks and status (takes all remaining width) */}
       <Box flexDirection="column" flexGrow={1} flexShrink={1} paddingX={1}>
-        {/* Header bar: progress count + elapsed + currently editing */}
+        {/* Header bar: progress count + elapsed + (transient retry hint) +
+            currently editing. Retry status renders inline as a muted chip
+            after a 3s grace period — see RetryStatusChip. */}
         <Box marginBottom={1} justifyContent="space-between">
           <Box gap={1}>
             <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
@@ -212,6 +214,10 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             <Text color={Colors.muted}>
               {Icons.dot} {formatElapsed(elapsed)}
             </Text>
+            <RetryStatusChip
+              retryState={store.session.retryState}
+              now={Date.now()}
+            />
           </Box>
           {currentFile && (
             <Text color={Colors.muted} wrap="truncate-end">
@@ -222,9 +228,6 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 
         {/* Tasks — the hero */}
         <ProgressList items={progressItems} title="Tasks" />
-
-        {/* Transient retry banner (shown during LLM/proxy retries) */}
-        <RetryBanner retryState={store.session.retryState} now={Date.now()} />
 
         {/* Inline event plan */}
         <InlineEventPlan store={store} />

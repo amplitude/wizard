@@ -75,7 +75,8 @@ export const DEFAULT_HOST_URL = IS_DEV
 
 // ── Analytics (internal) ──────────────────────────────────────────────
 
-// TODO: Replace with Amplitude analytics keys
+// OSS builds do not ship internal telemetry credentials. Private release flows
+// can inject real values at build time.
 export const ANALYTICS_AMPLITUDE_PUBLIC_PROJECT_WRITE_KEY = '';
 export const ANALYTICS_HOST_URL = '';
 export const ANALYTICS_TEAM_TAG = 'amplitude-wizard';
