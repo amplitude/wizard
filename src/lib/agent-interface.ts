@@ -40,6 +40,7 @@ import type { PackageManagerDetector } from './package-manager-detection';
 import { z } from 'zod';
 import type { SDKMessage } from './middleware/types';
 import { safeParseSDKMessage } from './middleware/schemas';
+import { createStormAnchor } from './middleware/retry';
 import {
   type HookCallback,
   type HookCallbackMatcher,
@@ -1300,6 +1301,16 @@ function extractHttpStatusFromMessage(msg: string): number | null {
 }
 
 /**
+ * Storm anchor for the outer retry loop. Shared across `publishRetryBanner`
+ * calls so consecutive retries reuse the same `startedAt` — required for
+ * the UI grace period in {@link RetryStatusChip} to ever clear during a
+ * storm of rapid post-stream / catch-path retries (each call resamples
+ * `Date.now()` otherwise, and `now - startedAt` never crosses the
+ * threshold). Reset by `clearRetryBanner` when the loop exits cleanly.
+ */
+const bannerStormAnchor = createStormAnchor();
+
+/**
  * Publish a retry banner to the UI. Used from the post-stream and catch-path
  * retry sites — the middleware-based path handles live `api_retry` messages.
  * Swallows UI errors so a failed update never aborts the retry loop.
@@ -1310,14 +1321,14 @@ function publishRetryBanner(input: {
   errorStatus: number | null;
   reason: string;
 }): void {
-  const now = Date.now();
+  const stormStartedAt = bannerStormAnchor.stamp();
   const state: RetryState = {
     attempt: input.attempt,
     maxRetries: input.maxRetries,
-    nextRetryAtMs: now,
+    nextRetryAtMs: Date.now(),
     errorStatus: input.errorStatus,
     reason: input.reason,
-    startedAt: now,
+    startedAt: stormStartedAt,
   };
   try {
     getUI().setRetryState(state);
@@ -1327,6 +1338,7 @@ function publishRetryBanner(input: {
 }
 
 function clearRetryBanner(): void {
+  bannerStormAnchor.reset();
   try {
     getUI().setRetryState(null);
   } catch {
