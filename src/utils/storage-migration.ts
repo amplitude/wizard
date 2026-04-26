@@ -25,6 +25,7 @@
  */
 
 import {
+  copyFileSync,
   existsSync,
   readdirSync,
   renameSync,
@@ -71,7 +72,19 @@ function moveFile(from: string, to: string): boolean {
     // handled correctly. A naïve `lastIndexOf('/')` returns -1 for
     // `C:\Users\...` and would point us at the filesystem root.
     ensureDir(dirname(to));
-    renameSync(from, to);
+    try {
+      renameSync(from, to);
+    } catch (renameErr: unknown) {
+      if (
+        renameErr instanceof Error &&
+        (renameErr as NodeJS.ErrnoException).code === 'EXDEV'
+      ) {
+        copyFileSync(from, to);
+        unlinkSync(from);
+      } else {
+        throw renameErr;
+      }
+    }
     logToFile(`storage-migration: moved ${from} → ${to}`);
     return true;
   } catch (err) {
