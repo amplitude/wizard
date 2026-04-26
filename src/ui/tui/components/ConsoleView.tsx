@@ -561,9 +561,12 @@ export const ConsoleView = ({
                 paddingY={1}
                 flexDirection="column"
               >
-                <Text color={Colors.accent}>
-                  {renderMarkdown(turn.content).trimEnd()}
-                </Text>
+                {/* No `color` prop here — `renderMarkdown` returns ANSI-styled
+                  text with its own resets. Wrapping it in a parent color
+                  causes Ink to re-emit the parent color at every wrap point,
+                  bleeding blue into wrapped continuation lines (e.g. "time
+                  as it runs." showing up blue after "...in real" wraps). */}
+                <Text>{renderMarkdown(turn.content).trimEnd()}</Text>
               </Box>
             ),
           )}
