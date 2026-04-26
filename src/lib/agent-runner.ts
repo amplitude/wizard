@@ -226,6 +226,10 @@ async function runAgentWizardBody(
     );
   }
 
+  // Record autocapture default from the framework config so the post-agent
+  // dashboard step can send the right value to Thunder's planner.
+  session.autocaptureEnabled = config.metadata.autocaptureEnabled ?? null;
+
   analytics.wizardCapture('agent started', {
     integration: config.metadata.integration,
   });
@@ -562,6 +566,28 @@ async function runAgentWizardBody(
   // Poll via MCP until events arrive, then emit a structured result event.
   if (session.agent) {
     await pollForDataIngestion(session, accessToken, cloudRegion);
+  }
+
+  // Dashboard creation — one idempotent Thunder REST call per wizard run.
+  // Replaces the previous in-agent MCP `create_chart` + `create_dashboard` loop.
+  // Terminal failures are intentionally swallowed here so the rest of the
+  // outro still renders; the step emits its own analytics + captureWizardError.
+  try {
+    const { createDashboardStep } = await import(
+      '../steps/create-dashboard-step.js'
+    );
+    await createDashboardStep({
+      session,
+      events: getUI().getEventPlan(),
+      accessToken,
+      zone: cloudRegion as import('./constants.js').AmplitudeZone,
+    });
+  } catch (err) {
+    logToFile(
+      `[agent-runner] createDashboardStep threw unexpectedly: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 
   // Build outro data and store it for OutroScreen

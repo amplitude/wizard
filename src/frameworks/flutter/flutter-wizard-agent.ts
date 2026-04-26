@@ -12,6 +12,7 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
     glyph: '🐦',
     glyphColor: '#54C5F8',
     integration: Integration.flutter,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/flutter/flutter-sdk-4',
   },

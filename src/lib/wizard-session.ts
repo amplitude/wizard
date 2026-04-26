@@ -16,6 +16,7 @@ import { z } from 'zod';
 import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
+import type { WizardDashboardWarningCode } from './api';
 
 /**
  * Zod schema for CLI args passed to `buildSession()`.
@@ -459,12 +460,33 @@ export interface WizardSession {
   dataIngestionConfirmed: boolean;
 
   /**
-   * URL of the dashboard created by the agent during the conclude phase.
-   * Set when the agent writes .amplitude-dashboard.json and the watcher
-   * picks it up. Shown in OutroScreen as a direct link.
-   * Null until the agent creates a dashboard.
+   * Result of the wizard's post-run call to Thunder's
+   * `POST /wizard/v1/dashboards` endpoint. Populated by `createDashboardStep`.
+   * Fields stay null on short-circuit (no events) or terminal failure — the
+   * agent run itself is still considered successful (contract §4).
    */
-  checklistDashboardUrl: string | null;
+  dashboardId: string | null;
+  dashboardUrl: string | null;
+  dashboardWarnings: Array<{
+    code: WizardDashboardWarningCode;
+    message: string;
+    chartTitle?: string;
+  }> | null;
+  /**
+   * UUIDv4 persisted to the session checkpoint so retries and crash-restarts
+   * reuse the same key. Rotated only on explicit `/dashboard` re-runs
+   * (contract §5).
+   */
+  dashboardIdempotencyKey: string | null;
+
+  /**
+   * Whether SDK-level autocapture is enabled for this integration.
+   * Set from the resolved FrameworkConfig (web frameworks typically true,
+   * backend/mobile false, unknown/generic null). Sent to Thunder in the
+   * dashboard-creation request so the planner can skip redundant chart
+   * types (pageview etc.).
+   */
+  autocaptureEnabled: boolean | null;
 
   /** Email address of the authenticated user (from ~/.ampli.json stored profile). */
   userEmail: string | null;
@@ -616,7 +638,11 @@ export function buildSession(args: {
     amplitudePreDetectedChoicePending: false,
 
     dataIngestionConfirmed: false,
-    checklistDashboardUrl: null,
+    dashboardId: null,
+    dashboardUrl: null,
+    dashboardWarnings: null,
+    dashboardIdempotencyKey: null,
+    autocaptureEnabled: null,
 
     userEmail: null,
     _restoredFromCheckpoint: false,

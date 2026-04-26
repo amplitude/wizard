@@ -15,6 +15,7 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
     glyph: '☕',
     glyphColor: '#ED8B00',
     integration: Integration.java,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/java/jre-java-sdk',
     gatherContext: (options) => {

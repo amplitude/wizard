@@ -28,6 +28,34 @@ import { analytics } from '../../../utils/analytics.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
+/**
+ * User-friendly copy for each `WizardDashboardWarningCode` returned by the
+ * Thunder dashboard-creation endpoint. Keeps the outro readable when the
+ * planner had to skip, cap, or dedupe charts.
+ */
+function formatDashboardWarning(warning: {
+  code: string;
+  message: string;
+  chartTitle?: string;
+}): string {
+  switch (warning.code) {
+    case 'RETENTION_SKIPPED_NO_ANCHOR':
+      return 'Retention chart skipped — no activation event found.';
+    case 'FUNNEL_SKIPPED_TOO_FEW_EVENTS':
+      return 'Funnel chart skipped — needs at least 3 sequenced events.';
+    case 'DUPLICATE_EVENT_NAMES':
+      return 'Duplicate event names were deduplicated.';
+    case 'ENGAGEMENT_EVENTS_CAPPED':
+      return 'Engagement chart limited to the top 4 events.';
+    case 'CHART_CREATION_FAILED':
+      return warning.chartTitle
+        ? `Chart "${warning.chartTitle}" couldn't be created.`
+        : "One chart couldn't be created.";
+    default:
+      return warning.message;
+  }
+}
+
 interface OutroScreenProps {
   store: WizardStore;
 }
@@ -125,17 +153,27 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Box>
           )}
 
-          {/* Dashboard link — shown when the agent created one */}
-          {store.session.checklistDashboardUrl && (
+          {/* Dashboard link — shown when the wizard's REST call returned one */}
+          {store.session.dashboardUrl && (
             <Box marginTop={1} flexDirection="column">
               <Text color={Colors.success} bold>
                 📊 Dashboard ready:
               </Text>
-              <Text color={Colors.muted}>
-                {store.session.checklistDashboardUrl}
-              </Text>
+              <Text color={Colors.muted}>{store.session.dashboardUrl}</Text>
             </Box>
           )}
+
+          {/* Partial-success warnings — planner skipped or capped charts */}
+          {store.session.dashboardWarnings &&
+            store.session.dashboardWarnings.length > 0 && (
+              <Box marginTop={1} flexDirection="column">
+                {store.session.dashboardWarnings.map((warning, i) => (
+                  <Text key={i} color={Colors.muted}>
+                    {Icons.dash} {formatDashboardWarning(warning)}
+                  </Text>
+                ))}
+              </Box>
+            )}
 
           {/* Single-line review note */}
           <Box marginTop={1}>
@@ -211,13 +249,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             options={[
               { label: 'View setup report', value: 'report' },
               {
-                label: store.session.checklistDashboardUrl
+                label: store.session.dashboardUrl
                   ? 'Open your analytics dashboard'
                   : 'Open Amplitude',
                 value: 'dashboard',
-                hint: store.session.checklistDashboardUrl
-                  ? undefined
-                  : 'amplitude.com',
+                hint: store.session.dashboardUrl ? undefined : 'amplitude.com',
               },
               { label: 'Exit', value: 'exit' },
             ]}
@@ -240,8 +276,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   },
                 );
                 const url =
-                  store.session.checklistDashboardUrl ??
-                  OUTBOUND_URLS.overview[zone];
+                  store.session.dashboardUrl ?? OUTBOUND_URLS.overview[zone];
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });

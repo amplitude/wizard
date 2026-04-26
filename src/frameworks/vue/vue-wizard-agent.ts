@@ -52,6 +52,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     glyphColor: '#42B883',
     integration: Integration.vue,
     targetsBrowser: true,
+    autocaptureEnabled: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     beta: true,
   },

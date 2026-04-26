@@ -12,6 +12,7 @@ export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
     glyph: '🐹',
     glyphColor: '#00ADD8',
     integration: Integration.go,
+    autocaptureEnabled: false,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/go/go-sdk',
   },
