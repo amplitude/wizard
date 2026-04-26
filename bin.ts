@@ -865,6 +865,16 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_CLASSIC env-var passthrough',
       type: 'boolean',
     },
+    // The `apply` subcommand spawns a child wizard process and passes the
+    // validated plan ID via `AMPLITUDE_WIZARD_PLAN_ID`. Without this hidden
+    // shadow, .env('AMPLITUDE_WIZARD') auto-maps that env var to `planId`
+    // on the default $0 command, and .strict() rejects it as unknown —
+    // crashing the apply child immediately after `apply_started`.
+    'plan-id': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_PLAN_ID env-var passthrough',
+      type: 'string',
+    },
   })
   .command(
     ['$0'],
