@@ -9,6 +9,7 @@
  * from both the CLI and the future external MCP server.
  */
 
+import path from 'path';
 import { detectAllFrameworks } from '../run';
 import {
   detectAmplitudeInProject,
@@ -166,7 +167,13 @@ export interface PlanResult {
  * inspect the returned plan and decide whether to call `apply`.
  */
 export async function runPlan(installDir: string): Promise<PlanResult> {
-  const detect = await runDetect(installDir);
+  // Resolve to an absolute path before anything else — including before
+  // persistence. A relative `installDir` (e.g. `.` or `./my-project`)
+  // resolves against the *plan-time* cwd and that resolution must be
+  // baked into the persisted plan; otherwise `apply` re-resolves against
+  // its own (possibly-different) cwd and the run lands in the wrong dir.
+  const resolvedInstallDir = path.resolve(installDir);
+  const detect = await runDetect(resolvedInstallDir);
   const integration = detect.integration;
 
   // Map integration → SDK package. The FrameworkConfig.detection block
@@ -186,7 +193,7 @@ export async function runPlan(installDir: string): Promise<PlanResult> {
   const fileChanges: FileChange[] = [];
 
   const plan = createAndPersistPlan({
-    installDir,
+    installDir: resolvedInstallDir,
     framework: integration ?? 'generic',
     frameworkName: detect.frameworkName,
     sdk,
