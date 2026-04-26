@@ -6,7 +6,7 @@
  * KeyHintBar integrated above the input line.
  */
 
-import { Box, Static, Text, useInput } from 'ink';
+import { Box, Text, useInput } from 'ink';
 import type { ReactNode } from 'react';
 import { useState, useEffect } from 'react';
 import { Spinner } from '@inkjs/ui';
@@ -228,9 +228,11 @@ export const ConsoleView = ({
   const [initialValue, setInitialValue] = useState('');
   const [inputKey, setInputKey] = useState(0);
   const [loading, setLoading] = useState(false);
-  // Conversation Q&A turns. Rendered via Ink <Static> so completed turns are
-  // written once above the live region and survive TUI exit / terminal
-  // scrollback. This mirrors how Claude Code persists agent output.
+  // Conversation Q&A turns. Rendered inline in the live region (above the
+  // separator/input) so answers stay visible inside the TUI. We previously
+  // used Ink's <Static>, but in a full-screen Ink app those entries get
+  // pushed above the rendered region into terminal scrollback the user can't
+  // easily reach.
   const [history, setHistory] = useState<ConversationTurn[]>([]);
 
   // Event plan prompt local state
@@ -306,7 +308,8 @@ export const ConsoleView = ({
     const context = buildSessionContext(store.session);
 
     // Pass at most the last 8 turns to the model for context (token budget).
-    // The <Static> history itself keeps the full scrollback.
+    // The local `history` state keeps the full conversation; only the most
+    // recent turns are rendered inline (see visibleHistory below).
     const modelHistory = history.slice(-8);
 
     queryConsole(value, context, creds, modelHistory)
@@ -398,35 +401,15 @@ export const ConsoleView = ({
       ? store.statusMessages[store.statusMessages.length - 1]
       : null;
 
+  // Cap how many recent turns we render in the live region. A full-screen Ink
+  // app can't rely on terminal scrollback (we used to use <Static> here, but
+  // those entries get pushed above the rendered region and effectively
+  // disappear), so we keep the most recent exchanges visible inline above the
+  // input and let older turns fall off.
+  const visibleHistory = history.slice(-6);
+
   return (
     <Box width={width} height={height} flexDirection="column">
-      {/* Permanent Q&A scrollback — each turn is written once above the live
-        region and survives TUI exit. Mirrors the append-only pattern Claude
-        Code uses for completed agent output. */}
-      {history.length > 0 && (
-        <Static items={history.map((turn, idx) => ({ ...turn, idx }))}>
-          {(turn) =>
-            turn.role === 'user' ? (
-              <Box key={`turn-${turn.idx}`} paddingX={Layout.paddingX}>
-                <Text color={Colors.muted}>{Icons.prompt} </Text>
-                <Text color={Colors.secondary}>{turn.content}</Text>
-              </Box>
-            ) : (
-              <Box
-                key={`turn-${turn.idx}`}
-                paddingX={Layout.paddingX}
-                paddingY={1}
-                flexDirection="column"
-              >
-                <Text color={Colors.accent}>
-                  {renderMarkdown(turn.content).trimEnd()}
-                </Text>
-              </Box>
-            )
-          }
-        </Static>
-      )}
-
       {/* Content area */}
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {pendingPrompt ? (
@@ -520,6 +503,38 @@ export const ConsoleView = ({
         </Box>
       )}
 
+      {/* Q&A history — rendered inline in the live region so answers stay
+        visible. (Previously rendered via <Static>, which pushed content above
+        the visible TUI in fullscreen mode.) */}
+      {visibleHistory.length > 0 && (
+        <Box flexDirection="column" paddingX={Layout.paddingX}>
+          {history.length > visibleHistory.length && (
+            <Text color={Colors.subtle}>
+              … {history.length - visibleHistory.length} earlier message
+              {history.length - visibleHistory.length === 1 ? '' : 's'} hidden
+            </Text>
+          )}
+          {visibleHistory.map((turn, idx) =>
+            turn.role === 'user' ? (
+              <Box key={`turn-${history.length - visibleHistory.length + idx}`}>
+                <Text color={Colors.muted}>{Icons.prompt} </Text>
+                <Text color={Colors.secondary}>{turn.content}</Text>
+              </Box>
+            ) : (
+              <Box
+                key={`turn-${history.length - visibleHistory.length + idx}`}
+                paddingY={1}
+                flexDirection="column"
+              >
+                <Text color={Colors.accent}>
+                  {renderMarkdown(turn.content).trimEnd()}
+                </Text>
+              </Box>
+            ),
+          )}
+        </Box>
+      )}
+
       {/* Separator */}
       <Box paddingX={1}>
         <Text color={Colors.border}>{separator}</Text>
@@ -533,8 +548,8 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Loading spinner — completed turns append to the Static scrollback
-        above; only the in-flight state lives in the live region. */}
+      {/* Loading spinner — shown only while a query is in flight. Completed
+        turns are rendered inline above the separator. */}
       {loading && (
         <Box paddingX={Layout.paddingX}>
           <Spinner />
