@@ -252,13 +252,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         {isSuccess ? (
           <PickerMenu
             options={(() => {
-              const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
-                readDisk: false,
-              });
               const dashboardUrl = store.session.checklistDashboardUrl;
-              const inviteUrl = dashboardUrl
-                ? OUTBOUND_URLS.teammateInvite(zone, dashboardUrl)
-                : null;
               return [
                 { label: 'View setup report', value: 'report' },
                 {
@@ -268,15 +262,6 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   value: 'dashboard',
                   hint: dashboardUrl ? undefined : 'amplitude.com',
                 },
-                ...(inviteUrl
-                  ? [
-                      {
-                        label: 'Send this dashboard to a teammate',
-                        value: 'teammate-invite',
-                        hint: 'opens share link',
-                      },
-                    ]
-                  : []),
                 { label: 'Exit', value: 'exit' },
               ];
             })()}
@@ -304,24 +289,6 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });
-              } else if (choice === 'teammate-invite') {
-                const zone = resolveZone(
-                  store.session,
-                  DEFAULT_AMPLITUDE_ZONE,
-                  { readDisk: false },
-                );
-                const dashboardUrl = store.session.checklistDashboardUrl;
-                const inviteUrl = dashboardUrl
-                  ? OUTBOUND_URLS.teammateInvite(zone, dashboardUrl)
-                  : null;
-                if (inviteUrl) {
-                  analytics.wizardCapture('teammate invite link opened', {
-                    zone,
-                  });
-                  opn(inviteUrl, { wait: false }).catch(() => {
-                    /* fire-and-forget */
-                  });
-                }
               } else {
                 process.exit(0);
               }
