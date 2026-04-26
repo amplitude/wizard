@@ -40,5 +40,7 @@ export {
   flushSentry,
   startWizardSpan,
   withWizardSpan,
+  wrapMcpServerWithSentry,
+  setSpanMeasurement,
 } from './sentry';
 export type { SentryConfig, WizardSpan } from './sentry';
