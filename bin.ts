@@ -2169,7 +2169,15 @@ void yargs(hideBin(process.argv))
                   events: plan.events,
                   fileChanges: plan.fileChanges,
                   requiresApproval: plan.requiresApproval,
-                  resumeFlags: ['apply', '--plan-id', plan.planId, '--yes'],
+                  resumeFlags: [
+                    'apply',
+                    '--plan-id',
+                    plan.planId,
+                    ...(installDir !== process.cwd()
+                      ? ['--install-dir', installDir]
+                      : []),
+                    '--yes',
+                  ],
                 },
               }) + '\n',
             );
@@ -2187,8 +2195,12 @@ void yargs(hideBin(process.argv))
                 'No framework detected; the agent will fall back to Generic.',
               );
             }
+            const installDirFlag =
+              installDir !== process.cwd()
+                ? ` --install-dir ${installDir}`
+                : '';
             ui.log.info(
-              `Run \`${CLI_INVOCATION} apply --plan-id ${plan.planId} --yes\` to execute.`,
+              `Run \`${CLI_INVOCATION} apply --plan-id ${plan.planId}${installDirFlag} --yes\` to execute.`,
             );
           }
           process.exit(ExitCode.SUCCESS);

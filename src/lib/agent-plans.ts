@@ -29,8 +29,6 @@ import { join, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
-import type { Integration } from './constants.js';
-
 // ── Plan shape ──────────────────────────────────────────────────────
 
 /** A single file the inner agent intends to create or modify. */
@@ -209,29 +207,4 @@ export async function pruneStalePlans(now = Date.now()): Promise<number> {
     // Ignore directory read failures (race with cleanup, etc.)
   }
   return pruned;
-}
-
-// ── Frameworks ──────────────────────────────────────────────────────
-
-export interface FrameworkPlanHints {
-  integration: Integration | null;
-  frameworkName: string | null;
-  sdk: string | null;
-}
-
-/**
- * Map a detection result to plan hints. The actual SDK choice depends on
- * the framework's `FrameworkConfig`; this is the small bridge between
- * detect output and the persisted plan.
- */
-export function frameworkHintsFromDetect(
-  integration: Integration | null,
-  frameworkName: string | null,
-  sdkResolver?: (i: Integration) => string | null,
-): FrameworkPlanHints {
-  return {
-    integration,
-    frameworkName,
-    sdk: integration && sdkResolver ? sdkResolver(integration) ?? null : null,
-  };
 }
