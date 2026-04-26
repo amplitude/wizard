@@ -682,9 +682,11 @@ const SAFE_SCRIPTS = [
 const DANGEROUS_OPERATORS = /[;`$()]/;
 
 // The agent doesn't always use the same field casing in .amplitude-events.json
-// — observed in the wild: name, event, eventName, event_name. Accept every
-// common variant so the event plan renders instead of falling back to an
-// empty name.
+// — observed in the wild: name, event, eventName, event_name (and the same
+// for description: description, event_description, eventDescription,
+// eventDescriptionAndReasoning). Accept every common variant so the event
+// plan renders instead of falling back to an empty name. Some skills also
+// imply a top-level `{ events: [...] }` wrapper; we unwrap it before parsing.
 const eventPlanSchema = z.array(
   z.looseObject({
     name: z.string().optional(),
@@ -692,6 +694,8 @@ const eventPlanSchema = z.array(
     eventName: z.string().optional(),
     event_name: z.string().optional(),
     description: z.string().optional(),
+    event_description: z.string().optional(),
+    eventDescription: z.string().optional(),
     eventDescriptionAndReasoning: z.string().optional(),
   }),
 );
@@ -711,11 +715,26 @@ export function parseEventPlanContent(
   } catch {
     return null;
   }
+  // Tolerate `{ events: [...] }` wrapper objects — some skills imply this
+  // shape and the parser would otherwise reject them outright.
+  if (
+    parsed &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    Array.isArray((parsed as { events?: unknown }).events)
+  ) {
+    parsed = (parsed as { events: unknown[] }).events;
+  }
   const result = eventPlanSchema.safeParse(parsed);
   if (!result.success) return null;
   return result.data.map((e) => ({
     name: e.name ?? e.event ?? e.eventName ?? e.event_name ?? '',
-    description: e.description ?? e.eventDescriptionAndReasoning ?? '',
+    description:
+      e.description ??
+      e.eventDescriptionAndReasoning ??
+      e.event_description ??
+      e.eventDescription ??
+      '',
   }));
 }
 

@@ -1541,6 +1541,37 @@ describe('parseEventPlanContent', () => {
     expect(out?.[0]?.description).toBe('long form reasoning');
   });
 
+  it('accepts snake_case event_description', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        { name: 'a', event_description: 'snake-case description' },
+      ]),
+    );
+    expect(out?.[0]?.description).toBe('snake-case description');
+  });
+
+  it('accepts camelCase eventDescription', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        { name: 'a', eventDescription: 'camel-case description' },
+      ]),
+    );
+    expect(out?.[0]?.description).toBe('camel-case description');
+  });
+
+  it('unwraps a top-level { events: [...] } wrapper', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify({
+        events: [
+          { event_name: 'wrapped event', event_description: 'inside events[]' },
+        ],
+      }),
+    );
+    expect(out).toEqual([
+      { name: 'wrapped event', description: 'inside events[]' },
+    ]);
+  });
+
   it('returns an empty-string name when no name field is present', () => {
     const out = parseEventPlanContent(JSON.stringify([{ description: 'x' }]));
     expect(out).toEqual([{ name: '', description: 'x' }]);
