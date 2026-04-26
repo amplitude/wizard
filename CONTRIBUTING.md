@@ -18,7 +18,7 @@ pnpm try
 pnpm build
 ```
 
-**Requirements:** Node.js >= 18.17.0, pnpm
+**Requirements:** Node.js >= 20, pnpm
 
 ### Local LLM proxy
 
@@ -81,7 +81,8 @@ A CI check enforces this on PR titles.
 
 ## Adding a new framework
 
-See the [`adding-framework-support` skill](./.claude/skills/adding-framework-support/SKILL.md) for a step-by-step guide. The short version:
+Use an existing framework under `src/frameworks/` and `skills/integration/` as
+your template. The short version:
 
 1. Add an enum value to `Integration` in `src/lib/constants.ts` (position controls detection priority)
 2. Create `src/frameworks/<name>/<name>-wizard-agent.ts` exporting a `FrameworkConfig`

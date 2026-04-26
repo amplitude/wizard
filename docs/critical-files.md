@@ -27,7 +27,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 **Risk factors:**
 - Dynamic imports for TUI startup — typos in import paths cause silent failure.
-- Concurrent OAuth + framework detection creates timing hazards (see error-prone doc).
+- Concurrent OAuth + framework detection creates timing hazards during startup.
 
 ---
 
@@ -87,7 +87,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ### 8. `src/ui/tui/screens/RunScreen.tsx`
 
-**Why:** The screen users spend the most time on. Displays real-time progress, elapsed timer, current file indicator, and inline event plan. Timer and file extraction have edge cases (see error-prone doc).
+**Why:** The screen users spend the most time on. Displays real-time progress, elapsed timer, current file indicator, and inline event plan. Timer and file extraction have edge cases.
 
 **What breaks:** Agent progress visibility, elapsed time tracking, task completion display.
 
@@ -103,7 +103,7 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ### 10. `src/ui/tui/screen-registry.tsx`
 
-**Why:** Factory that maps all 23 screen/overlay names to React components. If any import fails or a screen constructor throws, the entire registry returns incomplete.
+**Why:** Factory that maps every screen and overlay name to a React component. If any import fails or a screen constructor throws, the entire registry returns incomplete.
 
 **What breaks:** Any individual screen or overlay rendering.
 
