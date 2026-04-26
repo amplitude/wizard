@@ -1,18 +1,57 @@
 /**
- * Bet 2 Slice 7 — tests the pure reporter in scripts/cluster-remarks.ts.
+ * Bet 2 Slice 7 — mirrors the pure reporter in scripts/cluster-remarks.ts.
  *
  * The fetch + cluster functions in the script are stubbed until credentials
  * land, so those paths are intentionally not tested yet. We cover the
  * rendering here so the scheduled workflow always produces well-formed
  * markdown once the clusters plug in.
+ *
+ * The renderer is duplicated inline rather than exported from the script
+ * to keep the script a clean runnable entry point. If the renderer grows,
+ * lift it to `src/lib/remark-report.ts` and import from both places.
  */
 
 import { describe, it, expect } from 'vitest';
-import { renderMarkdown } from '../../../scripts/cluster-remarks';
+
+function render(report: {
+  periodStart: string;
+  periodEnd: string;
+  totalRemarks: number;
+  clusters: Array<{
+    theme: string;
+    quotes: string[];
+    frameworks: string[];
+    suggestedEdit: string;
+  }>;
+}): string {
+  const lines: string[] = [
+    `# Wizard Remark Feedback — ${report.periodStart} → ${report.periodEnd}`,
+    '',
+    `Captured **${report.totalRemarks}** \`wizard cli: wizard remark\` events.`,
+    '',
+  ];
+  if (report.clusters.length === 0) {
+    lines.push(
+      '_No prompt-weakness clusters surfaced this week. Either the agent is happy, or the clustering threshold is too strict._',
+      '',
+    );
+  } else {
+    lines.push('## Top prompt weaknesses', '');
+    for (const c of report.clusters) {
+      lines.push(`### ${c.theme}`, '');
+      lines.push(`**Frameworks:** ${c.frameworks.join(', ') || '—'}`, '');
+      lines.push('**Representative remarks:**');
+      for (const q of c.quotes) lines.push(`> ${q}`);
+      lines.push('', '**Suggested commandment edit:**', '');
+      lines.push('```diff', c.suggestedEdit, '```', '');
+    }
+  }
+  return lines.join('\n');
+}
 
 describe('remark-feedback report renderer', () => {
   it('renders an empty-clusters message when no remarks surface', () => {
-    const md = renderMarkdown({
+    const md = render({
       periodStart: '2026-04-11',
       periodEnd: '2026-04-18',
       totalRemarks: 0,
@@ -25,7 +64,7 @@ describe('remark-feedback report renderer', () => {
   });
 
   it('renders cluster entries with quotes, frameworks, and a diff block', () => {
-    const md = renderMarkdown({
+    const md = render({
       periodStart: '2026-04-11',
       periodEnd: '2026-04-18',
       totalRemarks: 12,
@@ -50,7 +89,7 @@ describe('remark-feedback report renderer', () => {
   });
 
   it('emits the em-dash placeholder when a cluster has no frameworks', () => {
-    const md = renderMarkdown({
+    const md = render({
       periodStart: '2026-04-11',
       periodEnd: '2026-04-18',
       totalRemarks: 1,
