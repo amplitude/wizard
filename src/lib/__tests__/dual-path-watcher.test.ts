@@ -147,9 +147,64 @@ describe('startDualPathWatcher', () => {
     expect(clearIntervalFn).toHaveBeenCalledWith('TIMER');
   });
 
-  it('the poll fallback attaches each path at most once even if both eventually appear', () => {
+  // Regression: bugbot caught that the previous implementation stopped
+  // polling as soon as ONE path attached. That broke dashboard flow —
+  // bundled context-hub skills only write the legacy path, so when
+  // canonical existed at startup (from a prior run), the wizard latched
+  // onto it and silently missed the agent's later write to legacy.
+  // Polling MUST continue until BOTH paths are attached.
+  it('keeps polling for the missing path when only one attaches at startup', () => {
+    let legacyReady = false;
+    const canonicalWatcher = makeFakeWatcher();
+    const legacyWatcher = makeFakeWatcher();
+    const watch = vi.fn((target: string) => {
+      if (target === '/p/canonical') return canonicalWatcher;
+      if (target === '/p/legacy' && legacyReady) return legacyWatcher;
+      return undefined;
+    });
+    const tickers: Array<() => void> = [];
+    const setIntervalFn = vi.fn((handler: () => void) => {
+      tickers.push(handler);
+      return 'TIMER';
+    });
+    const clearIntervalFn = vi.fn();
+
+    const handle = startDualPathWatcher({
+      canonicalPath: '/p/canonical',
+      legacyPath: '/p/legacy',
+      onChange,
+      watch,
+      setInterval: setIntervalFn,
+      clearInterval: clearIntervalFn,
+    });
+
+    // Canonical attached at startup; legacy missing → polling started.
+    expect(handle.watchers()).toEqual([canonicalWatcher]);
+    expect(setIntervalFn).toHaveBeenCalledTimes(1);
+    expect(clearIntervalFn).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledTimes(1); // initial canonical onChange
+
+    // Tick before legacy appears: nothing changes, polling continues.
+    tickers[0]();
+    expect(handle.watchers()).toEqual([canonicalWatcher]);
+    expect(clearIntervalFn).not.toHaveBeenCalled();
+
+    // Legacy now appears; tick attaches it and fires onChange exactly once.
+    legacyReady = true;
+    tickers[0]();
+    expect(handle.watchers()).toEqual([canonicalWatcher, legacyWatcher]);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    // Both attached → polling stopped.
+    expect(clearIntervalFn).toHaveBeenCalledWith('TIMER');
+
+    handle.dispose();
+    expect(canonicalWatcher.closed).toBe(true);
+    expect(legacyWatcher.closed).toBe(true);
+  });
+
+  it('stops polling and does not duplicate-attach once both paths exist', () => {
     let canonicalReady = false;
-    const legacyReady = false;
+    let legacyReady = false;
     const canonicalWatcher = makeFakeWatcher();
     const legacyWatcher = makeFakeWatcher();
     const watch = vi.fn((target: string) => {
@@ -173,19 +228,51 @@ describe('startDualPathWatcher', () => {
       clearInterval: clearIntervalFn,
     });
 
-    // Tick: canonical appears first, legacy still missing.
+    // Tick: canonical appears first.
     canonicalReady = true;
     tickers[0]();
     expect(handle.watchers()).toEqual([canonicalWatcher]);
-    expect(clearIntervalFn).toHaveBeenCalled();
+    expect(clearIntervalFn).not.toHaveBeenCalled();
 
-    // Even if a stray tick runs (e.g. timer cleared but enqueued), it
-    // must not double-attach the canonical path.
+    // Tick: legacy appears too.
+    legacyReady = true;
     tickers[0]();
-    expect(handle.watchers()).toEqual([canonicalWatcher]);
+    expect(handle.watchers()).toEqual([canonicalWatcher, legacyWatcher]);
+    expect(clearIntervalFn).toHaveBeenCalledWith('TIMER');
+
+    // Stray tick after timer cleared: must not re-attach.
+    tickers[0]();
+    expect(handle.watchers()).toEqual([canonicalWatcher, legacyWatcher]);
 
     handle.dispose();
-    expect(canonicalWatcher.closed).toBe(true);
+  });
+
+  it('a tick that fires after dispose() does not register a stray watcher', () => {
+    const watch = vi.fn(() => makeFakeWatcher());
+    const tickers: Array<() => void> = [];
+    const setIntervalFn = vi.fn((handler: () => void) => {
+      tickers.push(handler);
+      return 'TIMER';
+    });
+    const clearIntervalFn = vi.fn();
+
+    const handle = startDualPathWatcher({
+      canonicalPath: '/p/canonical',
+      legacyPath: '/p/legacy',
+      // Force initial attach to fail by mocking watch to return undefined first.
+      watch: vi.fn(() => undefined),
+      onChange,
+      setInterval: setIntervalFn,
+      clearInterval: clearIntervalFn,
+    });
+
+    handle.dispose();
+    // Even if a deferred timer tick runs, the disposed flag should
+    // prevent any watcher from being attached.
+    void watch;
+    expect(handle.watchers()).toEqual([]);
+    tickers[0]?.();
+    expect(handle.watchers()).toEqual([]);
   });
 
   it('dispose() is idempotent and safe to call before any watcher attaches', () => {
