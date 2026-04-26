@@ -636,7 +636,10 @@ export class WizardStore {
   ): void {
     this.$session.setKey('selectedOrgId', org.id);
     this.$session.setKey('selectedOrgName', org.name);
-    this.$session.setKey('selectedWorkspaceId', toWorkspaceId(workspace.id));
+    this.$session.setKey(
+      'selectedWorkspaceId',
+      workspace.id ? toWorkspaceId(workspace.id) : null,
+    );
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
     // Extract the Amplitude app ID from the lowest-rank environment.
