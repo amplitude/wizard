@@ -52,14 +52,24 @@ import {
 } from './storage-paths';
 
 /**
- * Sentinel file dropped under the cache root once the migration has
- * completed successfully. Versioned (`v1`) so future migrations can
- * trigger another pass without losing the cache root's existing
- * contents.
+ * Sentinel file dropped under the cache root once the EXPENSIVE
+ * user-scoped migration steps complete. Versioned (`v1`) so future
+ * migrations can trigger another pass without invalidating the rest
+ * of the cache root.
  *
- * Skipping migration on subsequent runs avoids rescanning every entry
- * in `tmpdir()` (which can hold tens of thousands of entries on shared
- * machines) on every wizard startup.
+ * Skips on subsequent runs:
+ *   - `readdirSync(tmpdir())` to find legacy `amplitude-wizard-state-*` files
+ *   - `readdirSync(<tmpdir>/amplitude-wizard-plans)` to migrate the plans dir
+ *   - moves of the legacy log / structured-log / update-check files
+ *
+ * Per-project migration steps (`<installDir>/.amplitude-events.json`,
+ * `.amplitude-dashboard.json`, the per-project checkpoint) intentionally
+ * run on every wizard startup regardless of the sentinel. Those are
+ * cheap (`existsSync` checks, no tmpdir scans), and gating them with
+ * the global sentinel would skip migration for any project the user
+ * runs the wizard against AFTER the first one — losing crash-recovery
+ * state and the preserved-across-runs event plan for every subsequent
+ * project.
  */
 const SENTINEL_FILENAME = '.migrated-v1';
 
@@ -67,8 +77,12 @@ function getSentinelPath(): string {
   return join(getCacheRoot(), SENTINEL_FILENAME);
 }
 
-/** Whether the migration shim has already finished a successful pass. */
-function migrationAlreadyRan(): boolean {
+/**
+ * Whether the user-scoped migration steps have already finished. Per-project
+ * steps still run regardless; this flag only controls the expensive
+ * `readdirSync(tmpdir())` and plans-dir scans.
+ */
+function userScopedMigrationDone(): boolean {
   try {
     return existsSync(getSentinelPath());
   } catch {
@@ -157,30 +171,51 @@ function moveFile(from: string, to: string): boolean {
  * `undefined` for global-only commands (e.g. `whoami`) — only the user-wide
  * legacy paths get migrated.
  *
- * Idempotent: writes a sentinel under the cache root once the migration
- * has succeeded; subsequent calls early-return so we don't rescan
- * `tmpdir()` on every startup. The sentinel is versioned so a future
- * schema change can force another pass without invalidating the rest
- * of the cache root.
+ * Two-tier idempotency:
+ *
+ *   - User-scoped steps (legacy log files, plans dir, agent-state scan)
+ *     run once per cache root. Writing `<cacheRoot>/.migrated-v1` after
+ *     they finish lets us skip the `readdirSync(tmpdir())` scan on
+ *     subsequent startups.
+ *
+ *   - Per-project steps (events, dashboard, checkpoint) run on EVERY
+ *     wizard startup regardless of the sentinel. Otherwise the second
+ *     project a user runs the wizard against would silently lose its
+ *     legacy `.amplitude-events.json` etc. — the sentinel from the
+ *     first project would tell us "already migrated" even though
+ *     project B's files have never been touched.
  */
 export function runMigrationShim(installDir?: string): void {
-  if (migrationAlreadyRan()) return;
   try {
-    // 1. Cache root: log + structured log + update-check.
-    // The legacy `.logl` extension was a quirk of `+ 'l'` string-concat;
-    // the new layout uses `.ndjson` everywhere (matches `getStructuredLogFile`).
-    moveFile(LEGACY_PATHS.log, join(getCacheRoot(), 'bootstrap.log'));
-    moveFile(LEGACY_PATHS.logl, join(getCacheRoot(), 'bootstrap.ndjson'));
-    moveFile(LEGACY_PATHS.updateCheck(), getUpdateCheckFile());
+    if (!userScopedMigrationDone()) {
+      // 1. Cache root: log + structured log + update-check.
+      // The legacy `.logl` extension was a quirk of `+ 'l'` string-concat;
+      // the new layout uses `.ndjson` everywhere (matches
+      // `getStructuredLogFile`).
+      moveFile(LEGACY_PATHS.log, join(getCacheRoot(), 'bootstrap.log'));
+      moveFile(LEGACY_PATHS.logl, join(getCacheRoot(), 'bootstrap.ndjson'));
+      moveFile(LEGACY_PATHS.updateCheck(), getUpdateCheckFile());
 
-    // 2. Cache root: agent-state files (per-attempt; rare to have leftovers
-    //    but cheap to migrate the whole pattern).
-    migrateStateFiles();
+      // 2. Cache root: agent-state files (per-attempt; rare to have
+      //    leftovers but cheap to migrate the whole pattern). Reads
+      //    every entry under `tmpdir()` — gated by the sentinel so
+      //    we don't repeat the scan on every startup.
+      migrateStateFiles();
 
-    // 3. Cache root: plans directory (whole tree).
-    migratePlansDir();
+      // 3. Cache root: plans directory (whole tree).
+      migratePlansDir();
 
-    // 4. Per-project: checkpoint + benchmark + events + dashboard.
+      // Mark the user-scoped migration complete. Written before the
+      // per-project block so a per-project failure (rare) doesn't
+      // force the expensive scans to repeat.
+      writeSentinel();
+    }
+
+    // 4. Per-project: checkpoint + benchmark + events + dashboard. These
+    //    are cheap `existsSync` checks per file, so we run them on every
+    //    wizard startup. Gating them with the global sentinel would
+    //    silently skip migration for the second-and-onward project the
+    //    user runs the wizard against.
     if (installDir) {
       const hash = projectHash(installDir);
       moveFile(LEGACY_PATHS.checkpoint(hash), getCheckpointFile(installDir));
@@ -210,10 +245,6 @@ export function runMigrationShim(installDir?: string): void {
         getDashboardFile(installDir),
       );
     }
-    // Mark the migration complete so subsequent startups skip the
-    // `tmpdir()` scan entirely. Written last so a partial failure
-    // (e.g. EXDEV mid-migration) gets retried on the next run.
-    writeSentinel();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logToFile(`storage-migration: top-level error: ${msg}`);

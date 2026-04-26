@@ -137,23 +137,37 @@ describe('runMigrationShim', () => {
   // Regression: bugbot caught that the migration unconditionally
   // scanned the entire `tmpdir()` on every wizard startup. Once the
   // first pass completes, a sentinel marks the cache root as migrated
-  // so subsequent calls early-return without scanning.
-  it('writes a sentinel after a successful migration and skips on subsequent runs', () => {
+  // so subsequent calls skip the expensive readdir scans.
+  it('writes a sentinel after the user-scoped migration completes', () => {
     const sentinel = join(cacheRoot, '.migrated-v1');
     expect(existsSync(sentinel)).toBe(false);
 
     runMigrationShim(installDir);
     expect(existsSync(sentinel)).toBe(true);
+  });
 
-    // Stage a legacy file post-sentinel; the shim should NOT pick it
-    // up because the sentinel says the migration is complete. (In
-    // production this scenario doesn't happen — once migration runs,
-    // the legacy paths stop being created — but verifying the early
-    // return makes the perf contract observable.)
+  // Regression: the global sentinel must NOT gate per-project
+  // migration. If a user upgrades and runs the wizard against project
+  // A first, the sentinel is written. Running against project B
+  // afterwards must still migrate project B's legacy files —
+  // otherwise the second-and-onward projects silently lose
+  // crash-recovery state and the preserved-across-runs event plan.
+  it('per-project migration runs even when the user-scoped sentinel exists', () => {
+    // Drop the sentinel as if a previous project already migrated.
+    mkdirSync(cacheRoot, { recursive: true });
+    writeFileSync(join(cacheRoot, '.migrated-v1'), 'migrated-at=...');
+
+    // Stage project B's legacy event plan (the wizard never saw this
+    // project before).
     const legacy = LEGACY_PATHS.events(installDir);
-    writeFileSync(legacy, '[]');
+    writeFileSync(legacy, '[{"name":"x","description":"y"}]');
+
     runMigrationShim(installDir);
-    expect(existsSync(legacy)).toBe(true); // migration didn't touch it
+
+    // Per-project moves still happened.
+    expect(existsSync(legacy)).toBe(false);
+    const canonical = getEventsFile(installDir);
+    expect(existsSync(canonical)).toBe(true);
   });
 
   it('preserves the canonical file when both legacy and canonical exist', () => {
