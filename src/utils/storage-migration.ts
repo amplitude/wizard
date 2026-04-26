@@ -31,6 +31,7 @@ import {
   renameSync,
   rmdirSync,
   unlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -49,6 +50,45 @@ import {
   LEGACY_PATHS,
   projectHash,
 } from './storage-paths';
+
+/**
+ * Sentinel file dropped under the cache root once the migration has
+ * completed successfully. Versioned (`v1`) so future migrations can
+ * trigger another pass without losing the cache root's existing
+ * contents.
+ *
+ * Skipping migration on subsequent runs avoids rescanning every entry
+ * in `tmpdir()` (which can hold tens of thousands of entries on shared
+ * machines) on every wizard startup.
+ */
+const SENTINEL_FILENAME = '.migrated-v1';
+
+function getSentinelPath(): string {
+  return join(getCacheRoot(), SENTINEL_FILENAME);
+}
+
+/** Whether the migration shim has already finished a successful pass. */
+function migrationAlreadyRan(): boolean {
+  try {
+    return existsSync(getSentinelPath());
+  } catch {
+    return false;
+  }
+}
+
+function writeSentinel(): void {
+  try {
+    ensureDir(getCacheRoot());
+    writeFileSync(
+      getSentinelPath(),
+      `migrated-at=${new Date().toISOString()}\n`,
+      { mode: 0o600 },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`storage-migration: failed to write sentinel: ${msg}`);
+  }
+}
 
 /**
  * Move a single file `from → to`. No-op if `from` is missing. Skips when
@@ -116,8 +156,15 @@ function moveFile(from: string, to: string): boolean {
  * legacy paths (events, dashboard, checkpoint) can be migrated. Pass
  * `undefined` for global-only commands (e.g. `whoami`) — only the user-wide
  * legacy paths get migrated.
+ *
+ * Idempotent: writes a sentinel under the cache root once the migration
+ * has succeeded; subsequent calls early-return so we don't rescan
+ * `tmpdir()` on every startup. The sentinel is versioned so a future
+ * schema change can force another pass without invalidating the rest
+ * of the cache root.
  */
 export function runMigrationShim(installDir?: string): void {
+  if (migrationAlreadyRan()) return;
   try {
     // 1. Cache root: log + structured log + update-check.
     // The legacy `.logl` extension was a quirk of `+ 'l'` string-concat;
@@ -163,6 +210,10 @@ export function runMigrationShim(installDir?: string): void {
         getDashboardFile(installDir),
       );
     }
+    // Mark the migration complete so subsequent startups skip the
+    // `tmpdir()` scan entirely. Written last so a partial failure
+    // (e.g. EXDEV mid-migration) gets retried on the next run.
+    writeSentinel();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logToFile(`storage-migration: top-level error: ${msg}`);

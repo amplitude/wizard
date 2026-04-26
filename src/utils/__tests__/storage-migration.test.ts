@@ -134,6 +134,28 @@ describe('runMigrationShim', () => {
     expect(() => runMigrationShim(installDir)).not.toThrow();
   });
 
+  // Regression: bugbot caught that the migration unconditionally
+  // scanned the entire `tmpdir()` on every wizard startup. Once the
+  // first pass completes, a sentinel marks the cache root as migrated
+  // so subsequent calls early-return without scanning.
+  it('writes a sentinel after a successful migration and skips on subsequent runs', () => {
+    const sentinel = join(cacheRoot, '.migrated-v1');
+    expect(existsSync(sentinel)).toBe(false);
+
+    runMigrationShim(installDir);
+    expect(existsSync(sentinel)).toBe(true);
+
+    // Stage a legacy file post-sentinel; the shim should NOT pick it
+    // up because the sentinel says the migration is complete. (In
+    // production this scenario doesn't happen — once migration runs,
+    // the legacy paths stop being created — but verifying the early
+    // return makes the perf contract observable.)
+    const legacy = LEGACY_PATHS.events(installDir);
+    writeFileSync(legacy, '[]');
+    runMigrationShim(installDir);
+    expect(existsSync(legacy)).toBe(true); // migration didn't touch it
+  });
+
   it('preserves the canonical file when both legacy and canonical exist', () => {
     const legacy = LEGACY_PATHS.events(installDir);
     const canonical = getEventsFile(installDir);

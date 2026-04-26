@@ -203,20 +203,30 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       // can attach the right log to a bug report. The full text goes to
       // stderr (one paste's worth), and the console gets a one-line summary
       // pointing at the run dir.
-      void import('../console-commands.js').then(({ getDiagnosticsText }) => {
-        const text = getDiagnosticsText(store.session.installDir);
-        try {
-          process.stderr.write('\n' + text + '\n\n');
-        } catch {
-          // broken pipe — non-fatal
-        }
-        store.setCommandFeedback(
-          `Storage paths printed to stderr. Logs: ${getLogFile(
-            store.session.installDir,
-          )}`,
-          30_000,
-        );
-      });
+      void import('../console-commands.js')
+        .then(({ getDiagnosticsText }) => {
+          const text = getDiagnosticsText(store.session.installDir);
+          try {
+            process.stderr.write('\n' + text + '\n\n');
+          } catch {
+            // broken pipe — non-fatal
+          }
+          store.setCommandFeedback(
+            `Storage paths printed to stderr. Logs: ${getLogFile(
+              store.session.installDir,
+            )}`,
+            30_000,
+          );
+        })
+        .catch(() => {
+          // Mirrors the /debug fallback: surface the log path so the user
+          // still has somewhere to look even if the dynamic import failed.
+          store.setCommandFeedback(
+            `Diagnostics unavailable. See ${getLogFile(
+              store.session.installDir,
+            )}.`,
+          );
+        });
       break;
     }
     case '/exit':
