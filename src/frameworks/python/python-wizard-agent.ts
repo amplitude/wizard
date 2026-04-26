@@ -190,7 +190,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
         `Installed the Amplitude Python package using ${packageManagerName}`,
         `Created Amplitude initialization using instance-based API (Amplitude class)`,
         `Configured exception autocapture and graceful shutdown`,
-        `Added example code for events, feature flags, and error capture (without PII)`,
+        `Added example code for events and user identification (without PII)`,
       ];
     },
     getOutroNextSteps: () => [

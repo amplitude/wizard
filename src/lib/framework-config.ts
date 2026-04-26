@@ -258,5 +258,4 @@ export function getWelcomeMessage(frameworkName: string): string {
 /**
  * Shared spinner message for all frameworks
  */
-export const SPINNER_MESSAGE =
-  'Writing your Amplitude setup with events, error capture and more...';
+export const SPINNER_MESSAGE = 'Writing your Amplitude setup...';
