@@ -19,7 +19,6 @@ import {
   parseEventPlanContent,
   MAX_BASH_SLEEP_SECONDS,
   AgentErrorType,
-  AgentSignals,
 } from '../agent-interface';
 import type { WizardOptions } from '../../utils/types';
 import type { SpinnerHandle } from '../../ui';
@@ -235,73 +234,10 @@ describe('runAgent', () => {
       expect(result.message).toContain('API Error');
     });
 
-    it('should report MCP_MISSING when agent output contains the error signal', async () => {
-      function* mcpMissingGenerator() {
-        yield {
-          type: 'assistant',
-          message: {
-            role: 'assistant',
-            content: [
-              {
-                type: 'text',
-                text: `${AgentSignals.ERROR_MCP_MISSING} Could not load skill menu`,
-              },
-            ],
-          },
-        };
-        yield {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          result: '',
-        };
-      }
-
-      mockQuery.mockReturnValue(mcpMissingGenerator());
-
-      const result = await runAgent(
-        defaultAgentConfig,
-        'test prompt',
-        defaultOptions,
-        mockSpinner as unknown as SpinnerHandle,
-      );
-
-      expect(result.error).toBe(AgentErrorType.MCP_MISSING);
-    });
-
-    it('should report RESOURCE_MISSING when agent output contains the error signal', async () => {
-      function* resourceMissingGenerator() {
-        yield {
-          type: 'assistant',
-          message: {
-            role: 'assistant',
-            content: [
-              {
-                type: 'text',
-                text: `${AgentSignals.ERROR_RESOURCE_MISSING} Could not find skill`,
-              },
-            ],
-          },
-        };
-        yield {
-          type: 'result',
-          subtype: 'success',
-          is_error: false,
-          result: '',
-        };
-      }
-
-      mockQuery.mockReturnValue(resourceMissingGenerator());
-
-      const result = await runAgent(
-        defaultAgentConfig,
-        'test prompt',
-        defaultOptions,
-        mockSpinner as unknown as SpinnerHandle,
-      );
-
-      expect(result.error).toBe(AgentErrorType.RESOURCE_MISSING);
-    });
+    // Note: MCP_MISSING / RESOURCE_MISSING detection moved from text-marker
+    // regex scanning to the structured `report_status` MCP tool in
+    // src/lib/wizard-tools.ts. The old [STATUS] / [ERROR-*] paths are gone.
+    // See src/lib/__tests__/wizard-tools.test.ts for report_status coverage.
 
     it('should report RATE_LIMIT when agent output contains API Error 429', async () => {
       function* rateLimitGenerator() {
