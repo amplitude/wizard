@@ -374,6 +374,7 @@ npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
 | `AMPLITUDE_SERVER_URL` | `https://api2.amplitude.com` | Telemetry server URL |
 | `DEMO_MODE_WIZARD` | — | When `1`, limits agent to 5 events for demo runs |
 | `CI` | — | Non-interactive mode detection; also set to `1` when invoking Vercel CLI |
+| `AMPLITUDE_WIZARD_MAX_TURNS` | `200` | Override the agent's maximum turn count. Useful for eval fixtures (low cap forces short runs) or quick iteration (`AMPLITUDE_WIZARD_MAX_TURNS=30 pnpm try`). Must be a positive integer ≤ `10000`; empty, non-numeric, zero, negative, or out-of-bounds values silently fall back to the default. |
 
 ### Framework-Specific SDK Environment Variables
 

@@ -40,6 +40,7 @@ import type { PackageManagerDetector } from './package-manager-detection';
 import { z } from 'zod';
 import type { SDKMessage } from './middleware/types';
 import { safeParseSDKMessage } from './middleware/schemas';
+import { createStormAnchor } from './middleware/retry';
 import {
   type HookCallback,
   type HookCallbackMatcher,
@@ -154,6 +155,29 @@ export enum AgentErrorType {
 }
 
 const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
+
+const DEFAULT_MAX_TURNS = 200;
+/**
+ * Upper sanity bound on AMPLITUDE_WIZARD_MAX_TURNS. A real run almost never
+ * needs more than a few hundred turns; anything north of this is far more
+ * likely to be a fat-fingered env var or shell expansion bug than a
+ * legitimate cap. We refuse rather than letting the agent loop unboundedly.
+ */
+const MAX_TURNS_SANITY_BOUND = 10000;
+
+/** Parse AMPLITUDE_WIZARD_MAX_TURNS as a positive integer within the sanity
+ * bound. Falls back to the default on any invalid value (empty, non-numeric,
+ * zero, negative, or larger than {@link MAX_TURNS_SANITY_BOUND}) so bad env
+ * state can't DoS the agent. */
+export function resolveMaxTurns(
+  envValue: string | undefined = process.env.AMPLITUDE_WIZARD_MAX_TURNS,
+): number {
+  if (!envValue) return DEFAULT_MAX_TURNS;
+  const parsed = Number.parseInt(envValue, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_TURNS;
+  if (parsed > MAX_TURNS_SANITY_BOUND) return DEFAULT_MAX_TURNS;
+  return parsed;
+}
 
 // Active StatusReporter slot. runAgent sets this at the start of each attempt
 // and clears it afterwards so the in-process wizard-tools `report_status` tool
@@ -681,43 +705,14 @@ const SAFE_SCRIPTS = [
  */
 const DANGEROUS_OPERATORS = /[;`$()]/;
 
-// The agent doesn't always use the same field casing in .amplitude-events.json
-// — observed in the wild: name, event, eventName, event_name. Accept every
-// common variant so the event plan renders instead of falling back to an
-// empty name.
-const eventPlanSchema = z.array(
-  z.looseObject({
-    name: z.string().optional(),
-    event: z.string().optional(),
-    eventName: z.string().optional(),
-    event_name: z.string().optional(),
-    description: z.string().optional(),
-    eventDescriptionAndReasoning: z.string().optional(),
-  }),
-);
-
-/**
- * Parse the agent-written `.amplitude-events.json` into the shape the
- * EventPlanViewer expects. Returns null if the input isn't valid JSON or
- * doesn't match the schema, so callers can distinguish "not ready yet" from
- * a structural problem. Exported for testing.
- */
-export function parseEventPlanContent(
-  content: string,
-): Array<{ name: string; description: string }> | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return null;
-  }
-  const result = eventPlanSchema.safeParse(parsed);
-  if (!result.success) return null;
-  return result.data.map((e) => ({
-    name: e.name ?? e.event ?? e.eventName ?? e.event_name ?? '',
-    description: e.description ?? e.eventDescriptionAndReasoning ?? '',
-  }));
-}
+// Canonical event-plan parser lives in event-plan-parser.ts so the TUI viewer
+// and the CLI plan reader (`agent-ops.ts#runPlan`) share one schema. Imported
+// here for use by the file-watcher in `runAgent`, and re-exported for tests
+// and callers that historically imported `parseEventPlanContent` from this
+// module. (Replaces the inlined `eventPlanSchema` + `parseEventPlanContent`
+// pair landed by PR #293 — see PR #295 for the extraction rationale.)
+import { parseEventPlanContent } from './event-plan-parser.js';
+export { parseEventPlanContent };
 
 /**
  * Check if command is a Amplitude skill installation from MCP.
@@ -1277,6 +1272,16 @@ function extractHttpStatusFromMessage(msg: string): number | null {
 }
 
 /**
+ * Storm anchor for the outer retry loop. Shared across `publishRetryBanner`
+ * calls so consecutive retries reuse the same `startedAt` — required for
+ * the UI grace period in {@link RetryStatusChip} to ever clear during a
+ * storm of rapid post-stream / catch-path retries (each call resamples
+ * `Date.now()` otherwise, and `now - startedAt` never crosses the
+ * threshold). Reset by `clearRetryBanner` when the loop exits cleanly.
+ */
+const bannerStormAnchor = createStormAnchor();
+
+/**
  * Publish a retry banner to the UI. Used from the post-stream and catch-path
  * retry sites — the middleware-based path handles live `api_retry` messages.
  * Swallows UI errors so a failed update never aborts the retry loop.
@@ -1287,14 +1292,14 @@ function publishRetryBanner(input: {
   errorStatus: number | null;
   reason: string;
 }): void {
-  const now = Date.now();
+  const stormStartedAt = bannerStormAnchor.stamp();
   const state: RetryState = {
     attempt: input.attempt,
     maxRetries: input.maxRetries,
-    nextRetryAtMs: now,
+    nextRetryAtMs: Date.now(),
     errorStatus: input.errorStatus,
     reason: input.reason,
-    startedAt: now,
+    startedAt: stormStartedAt,
   };
   try {
     getUI().setRetryState(state);
@@ -1304,6 +1309,7 @@ function publishRetryBanner(input: {
 }
 
 function clearRetryBanner(): void {
+  bannerStormAnchor.reset();
   try {
     getUI().setRetryState(null);
   } catch {
@@ -1604,6 +1610,36 @@ export async function runAgent(
       },
     };
 
+    /**
+     * Best-effort cleanup of the prior attempt's Query iterator before
+     * starting the next attempt. The SDK's `query()` is typed as
+     * `AsyncIterable<unknown>` here but its concrete `Query` implementation
+     * extends `AsyncGenerator`, so calling `.return()` at runtime signals
+     * the underlying subprocess to tear down stdio cleanly. Without this,
+     * a tool call still in flight from the prior attempt can fire our
+     * PreToolUse hook on a closed bridge, surfacing as `Error in hook
+     * callback hook_0: Error: Stream closed`. See issue #297. Errors
+     * thrown by `.return()` itself are expected during teardown and are
+     * swallowed.
+     */
+    const drainPriorResponse = async (
+      prior: AsyncIterable<unknown> | undefined,
+    ): Promise<void> => {
+      if (!prior) return;
+      const generator = prior as {
+        return?: (value?: unknown) => Promise<unknown>;
+      };
+      if (typeof generator.return !== 'function') return;
+      try {
+        await generator.return(undefined);
+      } catch (err) {
+        logToFile(
+          'drainPriorResponse: .return() threw (expected during teardown):',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -1686,8 +1722,21 @@ export async function runAgent(
         }, timeoutMs);
       };
 
+      const resolvedMaxTurns = resolveMaxTurns();
+      logToFile(
+        `Agent maxTurns resolved: ${resolvedMaxTurns} (env=${
+          process.env.AMPLITUDE_WIZARD_MAX_TURNS ?? '<unset>'
+        })`,
+      );
+
+      // Hoisted so the catch block can drain the prior iterator before
+      // the next attempt starts. Without this, an in-flight tool call from
+      // the prior subprocess could fire our PreToolUse hook on a closed
+      // stdio bridge, surfacing as `Error in hook callback hook_0: Error:
+      // Stream closed`. See issue #297.
+      let response: AsyncIterable<unknown> | undefined;
       try {
-        const response = query({
+        const sdkResponse = query({
           prompt: createPromptStream(),
           options: {
             model: agentConfig.model,
@@ -1699,8 +1748,10 @@ export async function runAgent(
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
-            // Safety nets: cap runaway tool loops and token spend
-            maxTurns: 200,
+            // Safety nets: cap runaway tool loops and token spend.
+            // AMPLITUDE_WIZARD_MAX_TURNS env var overrides the default
+            // (useful for evals + quick iteration). Invalid values fall back.
+            maxTurns: resolvedMaxTurns,
             // Extended thinking — give the model a small reasoning budget on
             // every turn. The instrumentation-planning phase before
             // confirm_event_plan is the most thinking-intensive moment, but
@@ -1791,12 +1842,13 @@ export async function runAgent(
             abortSignal: controller.signal,
           },
         });
+        response = sdkResponse;
 
         // Start stale timer — reset on each received message
         resetStaleTimer();
 
         // Process the async generator — validate each message at the boundary
-        for await (const rawMessage of response) {
+        for await (const rawMessage of sdkResponse) {
           receivedFirstMessage = true;
           lastMessageTime = Date.now();
           lastMessageType =
@@ -1940,6 +1992,8 @@ export async function runAgent(
           collectedText.length = 0;
           recentStatuses.length = 0;
           signalDone();
+          // Drain the prior iterator before the next attempt — see issue #297.
+          await drainPriorResponse(response);
           continue;
         }
 
@@ -1950,6 +2004,10 @@ export async function runAgent(
       } catch (innerError) {
         clearTimeout(staleTimer);
         signalDone(); // unblock the prompt stream for this attempt
+        // Always drain the prior iterator after an exception, regardless
+        // of whether we'll retry. Cheap and defends against the hook
+        // bridge race in issue #297.
+        await drainPriorResponse(response);
 
         // Stall-aborted or API error with retries remaining — try again
         if (controller.signal.aborted && attempt < MAX_RETRIES) {
@@ -1992,6 +2050,11 @@ export async function runAgent(
             errMsg.includes('API Error: 503') ||
             errMsg.includes('API Error: 529') ||
             errMsg.includes('DEADLINE_EXCEEDED') ||
+            // Hook bridge race during prior-attempt teardown — see
+            // issue #297. Defense in depth on top of `drainPriorResponse`:
+            // if a `Stream closed` does still bubble out, treat it as
+            // transient and retry cleanly instead of crashing the run.
+            errMsg.includes('Stream closed') ||
             errMsg.includes('invalid_request_error'));
         if (isTransientSdkError) {
           logToFile(

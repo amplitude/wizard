@@ -1,24 +1,28 @@
 /**
- * RetryBanner — regression coverage for the agent retry banner.
+ * RetryStatusChip — coverage for the calm inline retry indicator.
  *
- * The banner is shown on RunScreen during transient LLM/proxy retries (504,
- * stalls, etc.). PR #233 surfaced two specific bugs that we want to lock down:
+ * The chip used to be a loud amber banner that fired on every transient
+ * 429/504. This suite locks down the new contract:
  *
- *   1. The banner renders on a single line — JSX line breaks between
- *      `{expr}` tokens were collapsing to a stray space, producing
- *      "attempt 3/ 10" when the line wrapped.
- *   2. The countdown ETA is omitted (rather than reading "0s") when the
- *      next retry has already started, so the banner doesn't flash a
- *      misleading "next in 0s" frame on the way out.
- *
- * These are pure render-from-props tests — RetryBanner takes no store and
- * no Ink hooks beyond Box/Text, so we render directly.
+ *   - Hidden during the {@link RETRY_GRACE_MS} grace period — quick blips
+ *     don't reach the user.
+ *   - Status-code copy is softened ("slowing down…", "reconnecting…") and
+ *     the raw HTTP code is never surfaced.
+ *   - Attempt counter is suppressed for the common case; only kicks in as a
+ *     muted "still trying" suffix once a retry storm starts to look real.
+ *   - Renders inline (no `marginTop` row) so it can sit next to the elapsed
+ *     timer in the run-header gap row.
  */
 
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
-import { RetryBanner } from '../RetryBanner.js';
+import {
+  RetryStatusChip,
+  RetryBanner,
+  getRetryStatusText,
+  RETRY_GRACE_MS,
+} from '../RetryBanner.js';
 import type { RetryState } from '../../../../lib/wizard-session.js';
 
 // eslint-disable-next-line no-control-regex
@@ -34,78 +38,102 @@ function frameOf(node: React.ReactElement): string {
 
 const baseRetry = (overrides: Partial<RetryState> = {}): RetryState => ({
   attempt: 2,
-  maxRetries: 5,
+  maxRetries: 10,
   nextRetryAtMs: 0,
-  errorStatus: 504,
-  reason: 'gateway timeout',
+  errorStatus: 429,
+  reason: 'Rate limited — backing off',
   startedAt: 0,
   ...overrides,
 });
 
-describe('RetryBanner', () => {
+describe('getRetryStatusText (pure helper)', () => {
+  it('returns null when retryState is null', () => {
+    expect(getRetryStatusText(null, 0)).toBeNull();
+  });
+
+  it('returns null inside the grace window', () => {
+    const retry = baseRetry({ startedAt: 1_000 });
+    // 2s elapsed — under the 3s grace window.
+    expect(getRetryStatusText(retry, 1_000 + 2_000)).toBeNull();
+  });
+
+  it('returns soft 429 copy after the grace window', () => {
+    const retry = baseRetry({ errorStatus: 429, startedAt: 0 });
+    const text = getRetryStatusText(retry, RETRY_GRACE_MS + 1);
+    expect(text).toBe('slowing down to match Amplitude rate limits');
+  });
+
+  it('returns soft 5xx copy after the grace window', () => {
+    const retry = baseRetry({ errorStatus: 503, startedAt: 0 });
+    expect(getRetryStatusText(retry, RETRY_GRACE_MS + 1)).toBe(
+      'reconnecting to Amplitude',
+    );
+  });
+
+  it('returns generic "reconnecting" when errorStatus is null', () => {
+    const retry = baseRetry({ errorStatus: null, startedAt: 0 });
+    expect(getRetryStatusText(retry, RETRY_GRACE_MS + 1)).toBe('reconnecting');
+  });
+
+  it('appends "still trying" once attempts cross the sustained threshold', () => {
+    const retry = baseRetry({ errorStatus: 429, attempt: 5, startedAt: 0 });
+    expect(getRetryStatusText(retry, RETRY_GRACE_MS + 1)).toBe(
+      'slowing down to match Amplitude rate limits (still trying)',
+    );
+  });
+
+  it('does NOT append "still trying" below the threshold', () => {
+    const retry = baseRetry({ errorStatus: 429, attempt: 4, startedAt: 0 });
+    expect(getRetryStatusText(retry, RETRY_GRACE_MS + 1)).not.toContain(
+      'still trying',
+    );
+  });
+
+  it('never surfaces a raw HTTP code', () => {
+    for (const status of [400, 401, 429, 500, 503, 504]) {
+      const text = getRetryStatusText(
+        baseRetry({ errorStatus: status, startedAt: 0 }),
+        RETRY_GRACE_MS + 1,
+      );
+      expect(text).not.toBeNull();
+      expect(text!).not.toContain('HTTP');
+      expect(text!).not.toContain(String(status));
+    }
+  });
+
+  it('never surfaces an attempt counter fraction', () => {
+    const text = getRetryStatusText(
+      baseRetry({ attempt: 6, maxRetries: 10, startedAt: 0 }),
+      RETRY_GRACE_MS + 1,
+    );
+    expect(text).not.toMatch(/\d+\/\d+/);
+  });
+});
+
+describe('RetryStatusChip', () => {
   it('renders nothing when retryState is null', () => {
-    expect(frameOf(<RetryBanner retryState={null} now={0} />)).toBe('');
+    expect(frameOf(<RetryStatusChip retryState={null} now={0} />)).toBe('');
   });
 
-  it('shows reason, HTTP status, attempt counter, and ETA in seconds', () => {
-    const retry = baseRetry({
-      attempt: 3,
-      maxRetries: 10,
-      nextRetryAtMs: 12_500,
-      errorStatus: 504,
-      reason: 'gateway timeout',
-    });
-    const out = frameOf(<RetryBanner retryState={retry} now={5_000} />);
-
-    expect(out).toContain('gateway timeout');
-    expect(out).toContain('(HTTP 504)');
-    // 12.5s − 5s = 7.5s → ceil → 8s
-    expect(out).toContain('attempt 3/10, next in 8s');
-  });
-
-  it('renders the attempt counter on a single visual run (no internal split)', () => {
-    // The bug being guarded: JSX whitespace between `{}` tokens used to
-    // turn "attempt 3/10" into "attempt 3/ 10" once the banner wrapped.
-    const out = frameOf(
-      <RetryBanner
-        retryState={baseRetry({ attempt: 3, maxRetries: 10 })}
-        now={0}
-      />,
+  it('renders nothing during the grace window', () => {
+    const retry = baseRetry({ startedAt: 0 });
+    expect(frameOf(<RetryStatusChip retryState={retry} now={1_500} />)).toBe(
+      '',
     );
-    expect(out).not.toMatch(/attempt 3\/\s+10/);
-    expect(out).toContain('attempt 3/10');
   });
 
-  it('omits HTTP status when errorStatus is null (stall, SDK error)', () => {
+  it('renders a muted chip after the grace window', () => {
+    const retry = baseRetry({ errorStatus: 429, startedAt: 0 });
     const out = frameOf(
-      <RetryBanner
-        retryState={baseRetry({ errorStatus: null, reason: 'stalled' })}
-        now={0}
-      />,
+      <RetryStatusChip retryState={retry} now={RETRY_GRACE_MS + 1} />,
     );
-    expect(out).toContain('stalled');
-    expect(out).not.toContain('HTTP');
-  });
-
-  it('omits the ETA when the next retry is already due', () => {
-    // When `now` >= nextRetryAtMs we should not flash "next in 0s" — the
-    // banner has been kept alive for the next message to clear.
-    const out = frameOf(
-      <RetryBanner
-        retryState={baseRetry({ nextRetryAtMs: 1_000 })}
-        now={5_000}
-      />,
-    );
+    expect(out).toContain('slowing down to match Amplitude rate limits');
+    // No countdown — spinner conveys liveness.
     expect(out).not.toContain('next in');
-    expect(out).toContain('attempt 2/5');
   });
 
-  it('rounds the ETA up so the user never sees fractional seconds', () => {
-    // 1499ms remaining → ceil to 2s, never "1.499s" or "1s" (which would be
-    // misleadingly low).
-    const out = frameOf(
-      <RetryBanner retryState={baseRetry({ nextRetryAtMs: 1_499 })} now={0} />,
-    );
-    expect(out).toContain('next in 2s');
+  it('exports the legacy RetryBanner name as an alias', () => {
+    // Keep external imports compiling.
+    expect(RetryBanner).toBe(RetryStatusChip);
   });
 });
