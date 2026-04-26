@@ -113,7 +113,13 @@ export function renderMarkdown(report: ReportPayload): string {
       lines.push(`**Frameworks:** ${cluster.frameworks.join(', ') || '—'}`);
       lines.push('');
       lines.push('**Representative remarks:**');
-      for (const q of cluster.quotes) lines.push(`> ${q}`);
+      for (const q of cluster.quotes)
+        lines.push(
+          q
+            .split('\n')
+            .map((l) => `> ${l}`)
+            .join('\n'),
+        );
       lines.push('');
       lines.push('**Suggested commandment edit:**');
       lines.push('');
