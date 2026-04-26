@@ -13,6 +13,8 @@ interface PromptLabelProps {
 }
 
 export const PromptLabel = ({ message }: PromptLabelProps) => {
+  if (!message) return null;
+
   return (
     <Box>
       <Text bold color={Colors.accent}>

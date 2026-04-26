@@ -12,10 +12,11 @@
  * When credentials are set the router resolves past this screen.
  */
 
-import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { Box, Text, measureElement, type DOMElement } from 'ink';
+import { useState, useEffect, useRef, type RefObject } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
+import { useContentArea } from '../context/ContentAreaContext.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
@@ -67,10 +68,28 @@ function getSelectableEnvironments(
     .sort((a, b) => a.rank - b.rank);
 }
 
+function useMeasuredRows(ref: RefObject<DOMElement | null>): number {
+  const [rows, setRows] = useState(0);
+
+  useEffect(() => {
+    if (!ref.current) {
+      if (rows !== 0) setRows(0);
+      return;
+    }
+    const { height } = measureElement(ref.current);
+    if (height !== rows) {
+      setRows(height);
+    }
+  });
+
+  return rows;
+}
+
 export const AuthScreen = ({ store }: AuthScreenProps) => {
   useWizardStore(store);
 
   const { session } = store;
+  const contentArea = useContentArea();
 
   // Local step state — which org the user has selected in this render session
   const [selectedOrg, setSelectedOrg] = useState<OrgEntry | null>(null);
@@ -84,8 +103,16 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     'keychain' | 'env' | null
   >(null);
   const [pickerNotice, setPickerNotice] = useState<string | null>(null);
+  const completedStepsRef = useRef<DOMElement>(null);
+  const orgChromeRef = useRef<DOMElement>(null);
+  const workspaceChromeRef = useRef<DOMElement>(null);
+  const projectChromeRef = useRef<DOMElement>(null);
 
   const pendingOrgs = session.pendingOrgs;
+  const completedStepsRows = useMeasuredRows(completedStepsRef);
+  const orgChromeRows = useMeasuredRows(orgChromeRef);
+  const workspaceChromeRows = useMeasuredRows(workspaceChromeRef);
+  const projectChromeRows = useMeasuredRows(projectChromeRef);
 
   // Validate pre-populated org/workspace IDs against live data.
   // If the user's access changed (removed from org, switched accounts),
@@ -171,6 +198,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // True once the user has picked an environment (or it was auto-selected),
   // or there are no environments to pick from (falls through to manual key entry).
   const envResolved = selectedEnv !== null || selectableEnvs.length === 0;
+
+  const pickerBudget = (chromeRows: number): number | undefined => {
+    if (!contentArea) return undefined;
+    return Math.max(5, contentArea.height - completedStepsRows - chromeRows);
+  };
 
   // Resolve API key from local storage, selected environment, or backend fetch.
   useEffect(() => {
@@ -432,7 +464,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       {/* Completed steps */}
       {completedSteps.length > 0 && (
-        <Box flexDirection="column" marginBottom={1}>
+        <Box ref={completedStepsRef} flexDirection="column" marginBottom={1}>
           {completedSteps.map((step, i) => (
             <Text key={i}>
               <Text color={Colors.success}>{Icons.checkmark} </Text>
@@ -467,11 +499,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {/* Step 2: org picker (multiple orgs only) */}
       {needsOrgPick && pendingOrgs && (
         <Box flexDirection="column">
-          <Text bold color={Colors.heading}>
-            Select your organization
-          </Text>
-          <Box marginTop={1}>
+          <Box ref={orgChromeRef} flexDirection="column">
+            <Text bold color={Colors.heading}>
+              Select your organization
+            </Text>
+            <Box marginTop={1} />
+          </Box>
+          <Box>
             <PickerMenu<OrgEntry>
+              availableRows={pickerBudget(orgChromeRows)}
               options={pendingOrgs.map((org) => ({
                 label: org.name,
                 value: org,
@@ -488,19 +524,23 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {/* Step 3: workspace picker (multiple workspaces only) */}
       {needsWorkspacePick && effectiveOrg && (
         <Box flexDirection="column">
-          <Text bold color={Colors.heading}>
-            Select a workspace
-          </Text>
-          <Text color={Colors.secondary}>
-            in <Text color={Colors.body}>{effectiveOrg.name}</Text>
-          </Text>
-          {pickerNotice && (
-            <Box marginTop={1}>
-              <Text color={Colors.warning}>{pickerNotice}</Text>
-            </Box>
-          )}
-          <Box marginTop={1}>
+          <Box ref={workspaceChromeRef} flexDirection="column">
+            <Text bold color={Colors.heading}>
+              Select a workspace
+            </Text>
+            <Text color={Colors.secondary}>
+              in <Text color={Colors.body}>{effectiveOrg.name}</Text>
+            </Text>
+            {pickerNotice && (
+              <Box marginTop={1}>
+                <Text color={Colors.warning}>{pickerNotice}</Text>
+              </Box>
+            )}
+            <Box marginTop={1} />
+          </Box>
+          <Box>
             <PickerMenu<OrgEntry['workspaces'][number] | PickerAction>
+              availableRows={pickerBudget(workspaceChromeRows)}
               options={[
                 ...effectiveOrg.workspaces.map((ws) => ({
                   label: ws.name,
@@ -546,16 +586,20 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       {/* Step 4: project/environment picker (multiple environments only) */}
       {needsProjectPick && (
         <Box flexDirection="column">
-          <Text bold color={Colors.heading}>
-            Select a project
-          </Text>
-          {pickerNotice && (
-            <Box marginTop={1}>
-              <Text color={Colors.warning}>{pickerNotice}</Text>
-            </Box>
-          )}
-          <Box marginTop={1}>
+          <Box ref={projectChromeRef} flexDirection="column">
+            <Text bold color={Colors.heading}>
+              Select a project
+            </Text>
+            {pickerNotice && (
+              <Box marginTop={1}>
+                <Text color={Colors.warning}>{pickerNotice}</Text>
+              </Box>
+            )}
+            <Box marginTop={1} />
+          </Box>
+          <Box>
             <PickerMenu<EnvironmentEntry | PickerAction>
+              availableRows={pickerBudget(projectChromeRows)}
               options={[
                 ...selectableEnvs.map((env) => ({
                   label: env.name,
