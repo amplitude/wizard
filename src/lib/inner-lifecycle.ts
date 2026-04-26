@@ -175,10 +175,14 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         : null;
     if (path) {
       const content = typeof obj.content === 'string' ? obj.content : null;
+      // Use `content !== null` not `content` — empty string `''` is falsy
+      // and would drop `bytes` from the event. Outer agents need to
+      // distinguish "byte count unknown" (no content captured) from
+      // "zero-byte file" (empty `Write`).
       ui.emitFileChangeApplied({
         path,
         operation,
-        ...(content && { bytes: Buffer.byteLength(content, 'utf8') }),
+        ...(content !== null && { bytes: Buffer.byteLength(content, 'utf8') }),
       });
     }
     return Promise.resolve({});
