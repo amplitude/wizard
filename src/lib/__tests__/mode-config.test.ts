@@ -265,6 +265,19 @@ describe('evaluateWriteGate', () => {
     ).toBe('allow');
   });
 
+  it('does NOT flag `git push --force-with-lease` as destructive', () => {
+    // Regression: the regex used `--force\b`, and the word boundary between
+    // `e` (word char) and `-` (non-word) matched mid-token, so the safer
+    // --force-with-lease variant was treated identically to --force. That
+    // would push users toward the broader CLI --force flag as a workaround.
+    const decision = evaluateWriteGate(
+      'Bash',
+      { command: 'git push --force-with-lease origin main' },
+      writesOnly,
+    );
+    expect(decision.kind).toBe('allow');
+  });
+
   it('denies non-destructive Bash when allowWrites is false', () => {
     const decision = evaluateWriteGate(
       'Bash',

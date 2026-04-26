@@ -49,11 +49,14 @@ export interface ResolveModeOpts {
   human?: boolean;
   isTTY: boolean;
   /**
-   * When true, both `autoApprove` and `allowWrites` must be granted
+   * When true, BOTH `autoApprove` and `allowWrites` must be granted
    * explicitly via `--auto-approve` / `--yes` / `--ci` / `--force`.
-   * The bare `--agent` flag will NOT imply either capability. Used by
-   * the `apply` subcommand and any other command that wants strict
-   * opt-in. Default `false` preserves today's `--agent` behavior
+   * The bare `--agent` flag will NOT imply either capability. Despite
+   * the "writes" in the name, `autoApprove` is also gated — a future
+   * subcommand using this flag must pass `--auto-approve` (or higher)
+   * even to silently pick `recommended` on `needs_input`. Used by the
+   * `apply` subcommand and any other command that wants strict opt-in.
+   * Default `false` preserves today's `--agent` behavior
    * (auto-approve + writes implied).
    */
   requireExplicitWrites?: boolean;
@@ -145,7 +148,10 @@ const DESTRUCTIVE_BASH_PATTERNS: RegExp[] = [
   /\bgit\s+checkout\s+--\s/i,
   /\bgit\s+clean\s+-/i,
   /\bgit\s+restore\s+\./i,
-  /\bgit\s+push\s+.*--force\b/i,
+  // Match `--force` but exclude `--force-with-lease` (the explicitly safer
+  // push variant — flagging it as destructive would push users toward the
+  // broader CLI `--force` flag as a workaround).
+  /\bgit\s+push\s+.*--force(?!-)/i,
   /\bdrop\s+(table|database)\b/i,
   /\btruncate\s+table\b/i,
 ];
