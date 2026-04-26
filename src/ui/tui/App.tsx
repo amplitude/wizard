@@ -16,6 +16,7 @@ import { Box, Text } from 'ink';
 import type { WizardStore } from './store.js';
 import { createScreens, createServices } from './screen-registry.js';
 import { CommandModeContext } from './context/CommandModeContext.js';
+import { ContentAreaContext } from './context/ContentAreaContext.js';
 import { ConsoleView } from './components/ConsoleView.js';
 import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
@@ -95,19 +96,23 @@ export const App = ({ store }: AppProps) => {
             paddingX={Layout.paddingX}
             overflow="hidden"
           >
-            <DissolveTransition
-              transitionKey={store.currentScreen}
-              width={contentAreaWidth}
-              height={contentHeight}
-              direction={direction}
+            <ContentAreaContext.Provider
+              value={{ height: contentHeight, width: contentAreaWidth }}
             >
-              <ScreenErrorBoundary
-                store={store}
-                retryToken={store.screenErrorRetry}
+              <DissolveTransition
+                transitionKey={store.currentScreen}
+                width={contentAreaWidth}
+                height={contentHeight}
+                direction={direction}
               >
-                {activeScreen}
-              </ScreenErrorBoundary>
-            </DissolveTransition>
+                <ScreenErrorBoundary
+                  store={store}
+                  retryToken={store.screenErrorRetry}
+                >
+                  {activeScreen}
+                </ScreenErrorBoundary>
+              </DissolveTransition>
+            </ContentAreaContext.Provider>
           </Box>
         </ConsoleView>
       </Box>
