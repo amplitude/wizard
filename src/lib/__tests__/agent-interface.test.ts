@@ -12,6 +12,7 @@ import {
   createStopHook,
   createPreCompactHook,
   createPreToolUseHook,
+  createPostToolUseHook,
   wizardCanUseTool,
   buildWizardMetadata,
   isSkillInstallCommand,
@@ -20,6 +21,7 @@ import {
   MAX_BASH_SLEEP_SECONDS,
   AgentErrorType,
 } from '../agent-interface';
+import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
 import type { SpinnerHandle } from '../../ui';
 import {
@@ -1740,5 +1742,129 @@ describe('createPreToolUseHook', () => {
         permissionDecision: 'deny',
       });
     });
+  });
+});
+
+describe('createPostToolUseHook', () => {
+  const hookOpts = { signal: new AbortController().signal };
+  let state: AgentState;
+
+  beforeEach(() => {
+    state = new AgentState();
+    state.setAttemptId('postuse-test');
+  });
+
+  it('records modified file for Write', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Write', tool_input: { file_path: '/project/a.ts' } },
+      'tool-use-id',
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toContain('/project/a.ts');
+  });
+
+  it('records modified file for Edit / MultiEdit / NotebookEdit', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Edit', tool_input: { file_path: '/project/edit.ts' } },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      {
+        tool_name: 'MultiEdit',
+        tool_input: { file_path: '/project/multi.ts' },
+      },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      {
+        tool_name: 'NotebookEdit',
+        tool_input: { file_path: '/project/nb.ipynb' },
+      },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toEqual([
+      '/project/edit.ts',
+      '/project/multi.ts',
+      '/project/nb.ipynb',
+    ]);
+  });
+
+  it('falls back to `path` field when `file_path` is missing', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Write', tool_input: { path: '/project/p.ts' } },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toContain('/project/p.ts');
+  });
+
+  it('ignores non-write tools (Read / Bash / Grep)', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Read', tool_input: { file_path: '/project/r.ts' } },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      { tool_name: 'Bash', tool_input: { command: 'ls' } },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      { tool_name: 'Grep', tool_input: { pattern: 'foo' } },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toEqual([]);
+  });
+
+  it('returns {} (observer hook — never gates)', async () => {
+    const hook = createPostToolUseHook(state);
+    const out = await hook(
+      { tool_name: 'Write', tool_input: { file_path: '/x' } },
+      undefined,
+      hookOpts,
+    );
+    expect(out).toEqual({});
+  });
+
+  it('is resilient to missing tool_input', async () => {
+    const hook = createPostToolUseHook(state);
+    const out = await hook({ tool_name: 'Write' }, undefined, hookOpts);
+    expect(out).toEqual({});
+    expect(state.snapshot().modifiedFiles).toEqual([]);
+  });
+
+  it('swallows handler errors (a throw must not abort the run)', async () => {
+    // Simulate a state object whose recordModifiedFile throws.
+    const explodingState = {
+      recordModifiedFile() {
+        throw new Error('boom');
+      },
+    } as unknown as AgentState;
+    const hook = createPostToolUseHook(explodingState);
+    await expect(
+      hook(
+        { tool_name: 'Write', tool_input: { file_path: '/x' } },
+        undefined,
+        hookOpts,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it('reads camelCase toolName / toolInput shape too', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { toolName: 'Write', toolInput: { file_path: '/project/camel.ts' } },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toContain('/project/camel.ts');
   });
 });
