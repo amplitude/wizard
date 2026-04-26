@@ -2,16 +2,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createHash } from 'node:crypto';
 import { loadCheckpoint } from '../session-checkpoint';
 import { Integration } from '../constants';
+import {
+  CACHE_ROOT_OVERRIDE_ENV,
+  getCheckpointFile,
+  getRunDir,
+} from '../../utils/storage-paths';
 
 function checkpointPathFor(installDir: string): string {
-  const hash = createHash('sha256')
-    .update(installDir)
-    .digest('hex')
-    .slice(0, 12);
-  return path.join(os.tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`);
+  return getCheckpointFile(installDir);
 }
 
 function writeCheckpoint(
@@ -19,6 +19,8 @@ function writeCheckpoint(
   overrides: Record<string, unknown> = {},
 ): string {
   const filePath = checkpointPathFor(installDir);
+  // The run dir under the cache root has to exist before writeFileSync runs.
+  fs.mkdirSync(getRunDir(installDir), { recursive: true });
   const payload = {
     savedAt: new Date().toISOString(),
     installDir,
@@ -50,14 +52,27 @@ describe(
   () => {
     let installDir: string;
     let filePath: string;
+    let cacheRoot: string;
+    let originalOverride: string | undefined;
 
     beforeEach(() => {
       installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-ckpt-'));
+      // Redirect the cache root so the checkpoint file lands in a temp dir we
+      // can clean up, instead of polluting `~/.amplitude/wizard/`.
+      cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-ckpt-cache-'));
+      originalOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
     });
 
     afterEach(() => {
       if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
       fs.rmSync(installDir, { recursive: true, force: true });
+      fs.rmSync(cacheRoot, { recursive: true, force: true });
+      if (originalOverride === undefined) {
+        delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+      } else {
+        process.env[CACHE_ROOT_OVERRIDE_ENV] = originalOverride;
+      }
     });
 
     it('overrides a stale "Generic" label when integration is a known framework', async () => {

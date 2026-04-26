@@ -7,10 +7,12 @@
  */
 
 import { readFileSync, unlinkSync, existsSync } from 'fs';
-import { createHash } from 'crypto';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import {
+  ensureDir,
+  getCheckpointFile,
+  getRunDir,
+} from '../utils/storage-paths.js';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
@@ -22,8 +24,7 @@ import { Integration } from './constants.js';
 /** Per-project checkpoint file using a hash of installDir to avoid cross-instance clobbering. */
 function checkpointPath(installDir: string): string {
   const dir = installDir || process.cwd();
-  const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
-  return join(tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`);
+  return getCheckpointFile(dir);
 }
 
 /** Checkpoints older than 24 hours are considered stale. */
@@ -98,6 +99,8 @@ export function saveCheckpoint(session: WizardSession): void {
     introConcluded: session.introConcluded,
   };
 
+  // Ensure the per-project run dir exists; cache root may not have been created yet.
+  ensureDir(getRunDir(session.installDir));
   atomicWriteJSON(checkpointPath(session.installDir), checkpoint, 0o600);
 }
 

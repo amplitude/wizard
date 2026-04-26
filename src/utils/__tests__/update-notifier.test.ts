@@ -7,8 +7,10 @@ import {
   scheduleUpdateCheck,
   _drainPendingNoticeForTest,
 } from '../update-notifier.js';
+import { CACHE_ROOT_OVERRIDE_ENV } from '../storage-paths.js';
 
-const CACHE_FILE = path.join(os.tmpdir(), 'amplitude-wizard-update-check.json');
+let CACHE_ROOT: string;
+let originalCacheOverride: string | undefined;
 
 describe('buildRegistryUrl', () => {
   // Regression test for the Bugbot fix on PR #230. The previous
@@ -43,12 +45,11 @@ describe('scheduleUpdateCheck — deferred stderr write', () => {
 
   beforeEach(() => {
     _drainPendingNoticeForTest(); // reset module state
-    // Nuke the disk cache so each test gets a deterministic fetch.
-    try {
-      fs.unlinkSync(CACHE_FILE);
-    } catch {
-      // not present — fine
-    }
+    // Redirect the cache root so the disk cache lands somewhere we can clean
+    // up — and so we don't depend on `~/.amplitude/wizard/` being writable.
+    CACHE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-update-cache-'));
+    originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = CACHE_ROOT;
     process.env.AMPLITUDE_WIZARD_NO_UPDATE_CHECK = ''; // allow the check
     process.env.CI = '';
     process.env.DO_NOT_TRACK = '';
@@ -73,10 +74,11 @@ describe('scheduleUpdateCheck — deferred stderr write', () => {
     fetchSpy.mockRestore();
     stderrSpy.mockRestore();
     _drainPendingNoticeForTest();
-    try {
-      fs.unlinkSync(CACHE_FILE);
-    } catch {
-      // not present — fine
+    fs.rmSync(CACHE_ROOT, { recursive: true, force: true });
+    if (originalCacheOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
     }
   });
 

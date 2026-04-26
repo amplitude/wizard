@@ -12,6 +12,11 @@ import fs from 'fs';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
+import {
+  ensureDir,
+  getEventsFile,
+  getProjectMetaDir,
+} from '../utils/storage-paths';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
@@ -308,8 +313,10 @@ export function installBundledSkill(
  * gitignore should also be cleanup-eligible, and vice versa.
  *
  * Notes on each entry:
- *   - `.amplitude-events.json` — persisted event plan from confirm_event_plan.
- *     Useful for re-instrumentation but never belongs in source control.
+ *   - `.amplitude/` — per-project metadata dir holding `events.json` (the
+ *     approved event plan, kept across runs for re-instrumentation) and
+ *     `dashboard.json` (the URL of the dashboard the agent created). Useful
+ *     to keep on disk but never belongs in source control.
  *   - `.claude/skills/integration-...` — single-use SDK-setup workflows;
  *     removed at end of run. (Pattern is `integration-...slash` in gitignore.)
  *   - The instrumentation/taxonomy skills are kept on disk so users can
@@ -318,7 +325,7 @@ export function installBundledSkill(
  *     diff and surprise users who run `git add .` after the wizard.
  */
 export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
-  '.amplitude-events.json',
+  '.amplitude/',
   '.claude/skills/integration-*/',
   '.claude/skills/add-analytics-instrumentation/',
   '.claude/skills/amplitude-chart-dashboard-plan/',
@@ -401,42 +408,79 @@ function escapeRegex(s: string): string {
 }
 
 /**
- * Delete `<installDir>/.amplitude-events.json` if present.
+ * Delete legacy `<installDir>/.amplitude-events.json` if present.
  *
- * The wizard's `confirm_event_plan` MCP tool persists the approved plan to
- * this file so the TUI's Event Plan viewer can render it. The
- * commandments instruct the inner Claude agent to delete the file in the
- * conclude phase, but model variance means it's not always honored — so
- * the wizard cleans up itself as a backstop. Silent on errors.
+ * The wizard now writes the approved event plan to
+ * `<installDir>/.amplitude/events.json` (preserved across runs for
+ * re-instrumentation) and gitignores the whole `.amplitude/` directory.
+ * This helper exists to clean up the legacy top-level dotfile from older
+ * runs so users who upgrade don't end up with two stray files.
+ *
+ * Renamed from `cleanupAmplitudeEventsFile` — the previous behavior was to
+ * wipe the events plan after every successful run, which threw away an
+ * artifact users wanted for re-instrumentation. The new
+ * `<installDir>/.amplitude/events.json` is intentionally NOT cleaned up.
+ *
+ * Silent on errors.
  */
-export function cleanupAmplitudeEventsFile(installDir: string): void {
+export function cleanupLegacyAmplitudeEventsFile(installDir: string): void {
   const target = path.join(installDir, '.amplitude-events.json');
   try {
     if (fs.existsSync(target)) {
       fs.unlinkSync(target);
-      logToFile(`cleanupAmplitudeEventsFile: removed ${target}`);
+      logToFile(`cleanupLegacyAmplitudeEventsFile: removed ${target}`);
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logToFile(`cleanupAmplitudeEventsFile: ${msg}`);
+    logToFile(`cleanupLegacyAmplitudeEventsFile: ${msg}`);
+  }
+}
+
+/**
+ * Delete legacy `<installDir>/.amplitude-dashboard.json` if present.
+ *
+ * Older builds wrote the dashboard URL to a top-level dotfile and never
+ * cleaned it up — risk: it could be committed by accident. New runs write
+ * to `<installDir>/.amplitude/dashboard.json` which is gitignored as part
+ * of the whole `.amplitude/` directory. Silent on errors.
+ */
+export function cleanupLegacyAmplitudeDashboardFile(installDir: string): void {
+  const target = path.join(installDir, '.amplitude-dashboard.json');
+  try {
+    if (fs.existsSync(target)) {
+      fs.unlinkSync(target);
+      logToFile(`cleanupLegacyAmplitudeDashboardFile: removed ${target}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`cleanupLegacyAmplitudeDashboardFile: ${msg}`);
   }
 }
 
 /**
  * Run wizard-artifact cleanup. Composes:
- *   - cleanupIntegrationSkills (remove `.claude/skills/integration-*`)
+ *   - cleanupIntegrationSkills (remove `.claude/skills/integration-*`,
+ *     onSuccess only — preserves them on cancel/error so a re-run
+ *     doesn't re-download the skill)
+ *   - cleanupLegacyAmplitudeEventsFile (remove the legacy
+ *     `.amplitude-events.json` dotfile from older runs)
+ *   - cleanupLegacyAmplitudeDashboardFile (remove the legacy
+ *     `.amplitude-dashboard.json` dotfile from older runs)
  *
  * Notes on what's intentionally PRESERVED:
- *   - `.amplitude-events.json` stays on disk. It's the canonical record of
- *     the user's confirmed event plan. Deleting it on every exit (the
- *     short-lived behavior introduced in #261) broke resumability — a
- *     user who Ctrl+C'd, hit a transient error, or just wanted to re-run
- *     the wizard was forced to re-confirm their plan from scratch.
- *     `ensureWizardArtifactsIgnored` keeps it out of git so it can't
- *     pollute commits even when kept on disk.
+ *   - The current run's `<installDir>/.amplitude/events.json` and
+ *     `dashboard.json` stay on disk. `events.json` is the canonical
+ *     record of the user's confirmed event plan. Deleting it on every
+ *     exit (the short-lived behavior introduced in #261) broke
+ *     resumability — a user who Ctrl+C'd, hit a transient error, or
+ *     just wanted to re-run the wizard was forced to re-confirm their
+ *     plan from scratch. Both files are gitignored via the
+ *     `.amplitude/` pattern so they can't pollute commits even when
+ *     kept on disk.
  *   - Instrumentation and taxonomy skills (everything in
- *     `.claude/skills/` that isn't `integration-*`) — users invoke these
- *     later for event discovery and dashboard planning.
+ *     `.claude/skills/` that isn't `integration-*`) — users invoke
+ *     these later for event discovery and dashboard planning.
+ *     `ensureWizardArtifactsIgnored` keeps them out of git.
  *
  * Each step is silent on its own errors so a failure in one doesn't block
  * the others. Safe to call from any exit path; idempotent.
@@ -451,6 +495,11 @@ export function cleanupWizardArtifacts(
   if (options.onSuccess) {
     cleanupIntegrationSkills(installDir);
   }
+  // Legacy dotfile cleanup is always safe — these are old paths the
+  // current code never writes to. Removing them prevents stale artifacts
+  // from older builds polluting the user's project.
+  cleanupLegacyAmplitudeEventsFile(installDir);
+  cleanupLegacyAmplitudeDashboardFile(installDir);
 }
 
 /**
@@ -662,12 +711,21 @@ export function mergeEnvValues(
 // ---------------------------------------------------------------------------
 
 /**
- * Write the canonical event plan to `<workingDirectory>/.amplitude-events.json`
+ * Write the canonical event plan to `<workingDirectory>/.amplitude/events.json`
  * using the shape the wizard UI expects: `[{name, description}]`.
  *
+ * Also mirror the file to the legacy `<workingDirectory>/.amplitude-events.json`
+ * for backwards compatibility with bundled integration skills that still
+ * instruct the agent to read the legacy path. The cleanup step deletes the
+ * legacy mirror on completion; the canonical `.amplitude/events.json` is
+ * preserved across runs for re-instrumentation.
+ *
  * The agent is instructed (via commandments + integration skills) not to
- * write this file itself — the wizard tool is the single writer so the
+ * write either file itself — the wizard tool is the single writer so the
  * shape can't drift. Exported for testing.
+ *
+ * The `.amplitude/` directory is created lazily on first write and is
+ * gitignored as a single line.
  *
  * Returns true on success, false on any filesystem error (the caller logs
  * but doesn't fail the tool call over persistence issues).
@@ -677,8 +735,28 @@ export function persistEventPlan(
   events: Array<{ name: string; description: string }>,
 ): boolean {
   try {
-    const planPath = path.join(workingDirectory, '.amplitude-events.json');
-    atomicWriteJSON(planPath, events);
+    // Refuse to materialize an event plan in a directory the wizard wasn't
+    // pointed at. Without this guard, `getProjectMetaDir` + recursive mkdir
+    // would happily synthesize the parents — turning a typo or missing
+    // installDir into silent file creation in unexpected places.
+    if (!fs.existsSync(workingDirectory)) {
+      logToFile(
+        `persistEventPlan: working directory does not exist: ${workingDirectory}`,
+      );
+      return false;
+    }
+    // Canonical location — preserved across runs, gitignored as `.amplitude/`.
+    ensureDir(getProjectMetaDir(workingDirectory), 0o755);
+    atomicWriteJSON(getEventsFile(workingDirectory), events);
+    // Legacy mirror — bundled integration skills (owned by context-hub)
+    // still instruct the agent to read this path. Once context-hub ships
+    // an updated skill set pointing at `.amplitude/events.json` we can
+    // drop this mirror and the matching cleanup helper.
+    const legacyPlanPath = path.join(
+      workingDirectory,
+      '.amplitude-events.json',
+    );
+    atomicWriteJSON(legacyPlanPath, events);
     return true;
   } catch (err) {
     logToFile(

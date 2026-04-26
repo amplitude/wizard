@@ -4,7 +4,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, writeFileSync, rmSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  rmSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,10 +30,30 @@ import {
   type SerializedAgentState,
 } from '../agent-state';
 import { createUserPromptSubmitHook } from '../agent-interface';
+import { CACHE_ROOT_OVERRIDE_ENV } from '../../utils/storage-paths';
 
 const ATTEMPT_ID = 'att-hydrate';
-const snapshotPath = () =>
-  join(tmpdir(), `amplitude-wizard-state-${ATTEMPT_ID}.json`);
+
+let cacheRoot: string;
+let originalCacheOverride: string | undefined;
+
+const snapshotPath = () => join(cacheRoot, 'state', `${ATTEMPT_ID}.json`);
+
+beforeEach(() => {
+  cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-state-hydrate-'));
+  originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+  process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
+  mkdirSync(join(cacheRoot, 'state'), { recursive: true });
+});
+
+afterEach(() => {
+  rmSync(cacheRoot, { recursive: true, force: true });
+  if (originalCacheOverride === undefined) {
+    delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+  } else {
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+  }
+});
 
 function seedSnapshot(overrides: Partial<SerializedAgentState> = {}): void {
   const snap: SerializedAgentState = {

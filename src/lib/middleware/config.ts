@@ -10,6 +10,11 @@ import path from 'path';
 import { z } from 'zod';
 import { logToFile } from '../../utils/debug';
 import { AgentSignals } from '../agent-interface';
+import {
+  getBenchmarkFile,
+  getCacheRoot,
+  getLogFile,
+} from '../../utils/storage-paths';
 
 export interface BenchmarkConfig {
   /** Enable/disable individual metric plugins */
@@ -28,26 +33,50 @@ export interface BenchmarkConfig {
   };
 }
 
-const DEFAULT_CONFIG: BenchmarkConfig = {
-  plugins: {
-    tokens: true,
-    cache: true,
-    turns: true,
-    compactions: true,
-    contextSize: true,
-    cost: true,
-    duration: true,
-    summary: true,
-    jsonWriter: true,
-  },
-  output: {
-    benchmarkPath: '/tmp/amplitude-wizard-benchmark.json',
-    benchmarkEnabled: true,
-    logPath: '/tmp/amplitude-wizard.log',
-    logEnabled: true,
-    suppressWizardLogs: false,
-  },
+/** Plugin + flag defaults that don't depend on `installDir`. */
+const DEFAULT_PLUGINS: Record<string, boolean> = {
+  tokens: true,
+  cache: true,
+  turns: true,
+  compactions: true,
+  contextSize: true,
+  cost: true,
+  duration: true,
+  summary: true,
+  jsonWriter: true,
 };
+
+const DEFAULT_FLAGS = {
+  benchmarkEnabled: true,
+  logEnabled: true,
+  suppressWizardLogs: false,
+};
+
+/**
+ * Build the default benchmark config. When `installDir` is provided, the
+ * benchmark and log paths are scoped to that project's run dir under the
+ * cache root. Without `installDir`, paths fall back to a `_bootstrap` run
+ * dir — this only matters for the rare callers (and tests) that need a
+ * config object before installDir resolution.
+ */
+function buildDefaultConfig(installDir?: string): BenchmarkConfig {
+  const benchmarkPath = installDir
+    ? getBenchmarkFile(installDir)
+    : path.join(getCacheRoot(), 'runs', '_bootstrap', 'benchmark.json');
+  const logPath = installDir
+    ? getLogFile(installDir)
+    : path.join(getCacheRoot(), 'bootstrap.log');
+  return {
+    plugins: { ...DEFAULT_PLUGINS },
+    output: {
+      benchmarkPath,
+      benchmarkEnabled: DEFAULT_FLAGS.benchmarkEnabled,
+      logPath,
+      logEnabled: DEFAULT_FLAGS.logEnabled,
+      suppressWizardLogs: DEFAULT_FLAGS.suppressWizardLogs,
+    },
+  };
+}
 
 const BenchmarkConfigFileSchema = z
   .object({
@@ -66,6 +95,7 @@ const BenchmarkConfigFileSchema = z
   .passthrough();
 
 export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
+  const defaults = buildDefaultConfig(installDir);
   const configPath =
     process.env.AMPLITUDE_WIZARD_BENCHMARK_CONFIG ??
     path.join(installDir, '.benchmark-config.json');
@@ -75,8 +105,8 @@ export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
     if (!result.success) throw result.error;
     const parsed = result.data;
     const config: BenchmarkConfig = {
-      plugins: { ...DEFAULT_CONFIG.plugins, ...parsed.plugins },
-      output: { ...DEFAULT_CONFIG.output, ...parsed.output },
+      plugins: { ...defaults.plugins, ...parsed.plugins },
+      output: { ...defaults.output, ...parsed.output },
     };
 
     // Env var overrides for parallel runs
@@ -96,7 +126,7 @@ export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
     return config;
   } catch {
     // No config file or invalid JSON — use defaults
-    const config = structuredClone(DEFAULT_CONFIG);
+    const config = defaults;
 
     // Env var overrides
     if (process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE) {
@@ -110,6 +140,12 @@ export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
   }
 }
 
+/**
+ * Returns the default benchmark config with bootstrap paths. Tests and
+ * callers without an `installDir` rely on this; in-flight wizard runs
+ * should use {@link loadBenchmarkConfig} so paths land under the project's
+ * run dir.
+ */
 export function getDefaultConfig(): BenchmarkConfig {
-  return structuredClone(DEFAULT_CONFIG);
+  return buildDefaultConfig();
 }

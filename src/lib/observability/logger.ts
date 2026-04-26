@@ -11,9 +11,15 @@
  */
 
 import { appendFileSync, statSync, renameSync } from 'fs';
+import { dirname, join } from 'path';
 import type { ExecutionMode } from '../mode-config';
 import { redact, redactString } from './redact';
 import { getRunId, getSessionId } from './correlation';
+import {
+  ensureDir,
+  getCacheRoot,
+  getLogFile as getProjectLogFile,
+} from '../../utils/storage-paths';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -51,8 +57,32 @@ interface LogEntry {
 // ── State ───────────────────────────────────────────────────────────
 
 let config: LoggerConfig | null = null;
-let logFilePath = '/tmp/amplitude-wizard.log';
+/**
+ * Active log file path. Lazy-initialized from {@link bootstrapLogPath} so
+ * the first write before `initLogger` lands in the cache root, not in
+ * `/tmp`. Once `bin.ts` resolves `installDir`, it should call
+ * {@link setProjectLogFile} to switch to the per-project log.
+ */
+let logFilePath: string | null = null;
 let logFileEnabled = process.env.NODE_ENV !== 'test';
+
+/**
+ * Pre-installDir bootstrap log location. Used only for entries written
+ * before the wizard knows which project it's running in (early arg parsing,
+ * auth state). Switching to the per-project log via
+ * {@link setProjectLogFile} happens as soon as installDir is resolved.
+ */
+function bootstrapLogPath(): string {
+  return join(getCacheRoot(), 'bootstrap.log');
+}
+
+function activeLogPath(): string {
+  return logFilePath ?? bootstrapLogPath();
+}
+
+function activeStructuredLogPath(): string {
+  return activeLogPath() + 'l';
+}
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -106,8 +136,14 @@ export function initLogger(
 
   if (!logFileEnabled) return;
 
+  const activePath = activeLogPath();
+  // Make sure the cache root (or per-project run dir) exists before any
+  // append. mkdir failures are silent; the appendFileSync below will
+  // surface a more useful error if the directory really can't be created.
+  ensureDir(dirname(activePath));
+
   // Rotate if over limit (keep one backup). Rotate both .log and .logl files.
-  for (const path of [logFilePath, logFilePath + 'l']) {
+  for (const path of [activePath, activePath + 'l']) {
     try {
       const stats = statSync(path);
       if (stats.size > LOG_MAX_BYTES) {
@@ -138,10 +174,33 @@ export function initLogger(
   ].join('\n');
 
   try {
-    appendFileSync(logFilePath, header);
+    appendFileSync(activePath, header);
   } catch {
     // Non-critical — don't crash
   }
+}
+
+/**
+ * Switch the log file to the per-project location once `installDir` is known.
+ * Writes a marker line so the bootstrap → project transition is visible in
+ * both files. Idempotent.
+ */
+export function setProjectLogFile(installDir: string): void {
+  if (!installDir) return;
+  const target = getProjectLogFile(installDir);
+  if (logFilePath === target) return;
+  ensureDir(dirname(target));
+  // Leave a breadcrumb in the bootstrap log so debuggers can find the
+  // per-project log they should be reading instead.
+  if (logFileEnabled) {
+    try {
+      const marker = `[${new Date().toISOString()}] [logger] continuing in ${target}\n`;
+      appendFileSync(activeLogPath(), marker);
+    } catch {
+      // Non-critical
+    }
+  }
+  logFilePath = target;
 }
 
 /**
@@ -169,9 +228,14 @@ export function setSentrySink(
   sentrySink = sink;
 }
 
-/** Get the current log file path. */
+/** Get the current (active) log file path. */
 export function getLogFilePath(): string {
-  return logFilePath;
+  return activeLogPath();
+}
+
+/** Get the current structured (NDJSON) log file path. Suffix `l`. */
+export function getStructuredLogFilePath(): string {
+  return activeStructuredLogPath();
 }
 
 /** Override log file path and enabled state (for tests / config). */
@@ -196,6 +260,8 @@ function writeToFile(entry: LogEntry): void {
   if (!logFileEnabled) return;
   try {
     const redacted = redact(entry) as LogEntry;
+    const activePath = activeLogPath();
+    ensureDir(dirname(activePath));
 
     // 1. Human-readable line to the main log file (displayed in TUI Logs tab).
     const ctxStr =
@@ -205,10 +271,10 @@ function writeToFile(entry: LogEntry): void {
     const line = `[${redacted['@timestamp']}] [${redacted.run_id}] [${
       redacted.namespace
     }] ${LEVEL_LABEL[redacted.level]} ${redacted.msg}${ctxStr}\n`;
-    appendFileSync(logFilePath, line);
+    appendFileSync(activePath, line);
 
     // 2. Complete NDJSON to a companion .jsonl file (for programmatic analysis).
-    appendFileSync(logFilePath + 'l', JSON.stringify(redacted) + '\n');
+    appendFileSync(activePath + 'l', JSON.stringify(redacted) + '\n');
   } catch {
     // Silently ignore — logging must never crash the wizard
   }

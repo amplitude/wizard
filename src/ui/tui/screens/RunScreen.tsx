@@ -38,7 +38,7 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
-import { getLogFilePath } from '../../../lib/observability/index.js';
+import { getLogFile } from '../../../utils/storage-paths.js';
 
 const RUN_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '←→', label: 'Tabs' },
@@ -274,13 +274,13 @@ export const RunScreen = ({ store }: RunScreenProps) => {
     {
       id: 'logs',
       label: 'Logs',
-      // Resolve the log path at render time so a runtime override via
-      // AMPLITUDE_WIZARD_LOG (or a test/CI harness that calls
-      // configureLogFile()) is reflected here. Hardcoding /tmp/... meant
-      // any custom path silently desynced from the actual log file and
-      // the Logs tab showed "(No log file found)" forever even though
-      // logs were landing somewhere else.
-      component: <LogViewer filePath={getLogFilePath()} />,
+      // Per-project log file under ~/.amplitude/wizard/runs/<hash>/log.txt.
+      // Resolving from session.installDir keeps two parallel runs in
+      // separate logs (vs. the previous global /tmp/amplitude-wizard.log).
+      // PR 322 added getLogFilePath() with a runtime AMPLITUDE_WIZARD_LOG
+      // override; per-project pathing supersedes it. If a future PR wants
+      // both, getLogFile() can grow an env-override branch.
+      component: <LogViewer filePath={getLogFile(store.session.installDir)} />,
     },
     {
       id: 'snake',

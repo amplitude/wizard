@@ -2,11 +2,11 @@
  * Bet 2 Slice 3 — PreCompact agent-state serialization.
  *
  * Verifies AgentState accumulates modified files + last status, and persists
- * a well-formed JSON snapshot to the tmpdir path.
+ * a well-formed JSON snapshot to the cache-root path.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -19,22 +19,32 @@ vi.mock('../../utils/debug', () => ({
 }));
 
 import { AgentState, type SerializedAgentState } from '../agent-state';
+import { CACHE_ROOT_OVERRIDE_ENV } from '../../utils/storage-paths';
 
 describe('AgentState', () => {
   let state: AgentState;
+  let cacheRoot: string;
+  let originalOverride: string | undefined;
   const attemptId = 'att-xyz';
-  const snapshotPath = join(
-    tmpdir(),
-    `amplitude-wizard-state-${attemptId}.json`,
-  );
+  let snapshotPath: string;
 
   beforeEach(() => {
+    cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-state-cache-'));
+    originalOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
+    snapshotPath = join(cacheRoot, 'state', `${attemptId}.json`);
     state = new AgentState();
     state.setAttemptId(attemptId);
   });
 
   afterEach(() => {
     if (existsSync(snapshotPath)) rmSync(snapshotPath);
+    rmSync(cacheRoot, { recursive: true, force: true });
+    if (originalOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalOverride;
+    }
   });
 
   it('deduplicates modified files', () => {
