@@ -389,6 +389,88 @@ export function startWizardSpan(
 }
 
 /**
+ * Wrap a sync or async callback in an active Sentry span.
+ *
+ * Unlike `startWizardSpan` (inactive span — manual lifecycle, no context
+ * propagation), this uses `Sentry.startSpan` which sets the span as the
+ * active scope. Outbound HTTP requests, child spans, and errors thrown
+ * inside `fn` are automatically attached to this span — including any
+ * `axios` / `fetch` call picked up by the default httpIntegration.
+ *
+ * Use this for discrete operations like an OAuth exchange, a single MCP
+ * call, or a wizard step. Span status is set to `internal_error` if `fn`
+ * throws, then the error is rethrown so existing control flow is preserved.
+ *
+ * No-ops cleanly when Sentry is not initialized — `fn` runs as if the
+ * wrapper weren't there, with no overhead beyond the function call.
+ */
+export function withWizardSpan<T>(
+  name: string,
+  op: string,
+  attributes: Record<string, unknown> | undefined,
+  fn: () => T,
+): T {
+  if (!initialized) return fn();
+
+  // Build attributes outside Sentry.startSpan so a redact/serialization
+  // throw doesn't get conflated with a callback error. If attribute prep
+  // fails, fall through to a span without attributes rather than skipping
+  // the span entirely.
+  let safeAttrs: Record<string, string | number | boolean> | undefined;
+  try {
+    safeAttrs = attributes
+      ? toSpanAttributes(redact(attributes) as Record<string, unknown>)
+      : undefined;
+  } catch {
+    safeAttrs = undefined;
+  }
+
+  // `fnInvoked` lets us distinguish "Sentry.startSpan threw before our
+  // callback ran" from "our callback ran and threw". In the first case it's
+  // safe to fall back by running fn() directly; in the second case fn() has
+  // already executed and its error must propagate — re-running would
+  // silently double-execute the callback (Bugbot finding).
+  let fnInvoked = false;
+  try {
+    return Sentry.startSpan({ name, op, attributes: safeAttrs }, (span) => {
+      fnInvoked = true;
+      const markError = (): void => {
+        try {
+          span.setStatus({ code: 2, message: 'internal_error' });
+        } catch {
+          /* non-fatal */
+        }
+      };
+      try {
+        const result = fn();
+        // For async results, propagate error status if the promise rejects.
+        if (
+          result !== null &&
+          typeof result === 'object' &&
+          typeof (result as { then?: unknown }).then === 'function'
+        ) {
+          return (result as unknown as Promise<unknown>).catch((err) => {
+            markError();
+            throw err;
+          }) as unknown as T;
+        }
+        return result;
+      } catch (err) {
+        markError();
+        throw err;
+      }
+    });
+  } catch (err) {
+    if (fnInvoked) {
+      // Sentry rethrew our callback's error — propagate, don't re-run fn.
+      throw err;
+    }
+    // Span machinery threw before our callback ran — safe to fall back.
+    return fn();
+  }
+}
+
+/**
  * Flush pending Sentry events before exit (2s timeout).
  */
 export async function flushSentry(): Promise<void> {

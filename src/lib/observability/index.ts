@@ -38,5 +38,7 @@ export {
   setSentryUser,
   setSentryTag,
   flushSentry,
+  startWizardSpan,
+  withWizardSpan,
 } from './sentry';
-export type { SentryConfig } from './sentry';
+export type { SentryConfig, WizardSpan } from './sentry';

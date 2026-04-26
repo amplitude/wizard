@@ -12,6 +12,7 @@ import {
   type AmplitudeZone,
 } from '../lib/constants.js';
 import { logToFile } from './debug.js';
+import { withWizardSpan, addBreadcrumb } from '../lib/observability/index.js';
 
 /** Five minutes in milliseconds — refresh proactively before actual expiry. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
@@ -45,6 +46,7 @@ export async function tryRefreshToken(
     logToFile(
       '[token-refresh] access token expired but no refresh token stored',
     );
+    addBreadcrumb('auth', 'Silent refresh skipped — no refresh token');
     return null;
   }
 
@@ -55,13 +57,31 @@ export async function tryRefreshToken(
       zone,
     },
   );
+  addBreadcrumb('auth', 'Silent refresh starting', { zone });
 
-  // 3. Exchange the refresh token for a new access token
+  return withWizardSpan(
+    'auth.token_refresh',
+    'auth.token_refresh',
+    { zone },
+    async () => tryRefreshTokenInner(storedEntry.refreshToken!, zone, now),
+  );
+}
+
+async function tryRefreshTokenInner(
+  refreshToken: string,
+  zone: AmplitudeZone,
+  now: number,
+): Promise<{
+  accessToken: string;
+  expiresAt: number;
+  refreshToken?: string;
+} | null> {
+  // Exchange the refresh token for a new access token
   try {
     const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
     const body = new URLSearchParams({
       grant_type: 'refresh_token',
-      refresh_token: storedEntry.refreshToken,
+      refresh_token: refreshToken,
       client_id: oAuthClientId,
     });
 
@@ -73,6 +93,10 @@ export async function tryRefreshToken(
 
     if (!response.ok) {
       logToFile('[token-refresh] refresh request failed', {
+        status: response.status,
+        statusText: response.statusText,
+      });
+      addBreadcrumb('auth', 'Silent refresh failed (non-2xx)', {
         status: response.status,
         statusText: response.statusText,
       });
@@ -102,6 +126,9 @@ export async function tryRefreshToken(
       expiresAt: new Date(expiresAt).toISOString(),
       rotatedRefreshToken: !!newRefreshToken,
     });
+    addBreadcrumb('auth', 'Silent refresh succeeded', {
+      rotated_refresh_token: !!newRefreshToken,
+    });
 
     return { accessToken, expiresAt, refreshToken: newRefreshToken };
   } catch (err) {
@@ -109,6 +136,9 @@ export async function tryRefreshToken(
       '[token-refresh] refresh failed',
       err instanceof Error ? err.message : 'unknown error',
     );
+    addBreadcrumb('auth', 'Silent refresh threw', {
+      error: err instanceof Error ? err.message : String(err),
+    });
     return null;
   }
 }
