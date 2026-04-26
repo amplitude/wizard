@@ -957,6 +957,7 @@ void yargs(hideBin(process.argv))
         process.env.AMPLITUDE_WIZARD_AGENT === '1' ||
         (!options.ci &&
           !options.yes &&
+          !options.force &&
           !options.classic &&
           process.env.AMPLITUDE_WIZARD_CLASSIC !== '1' &&
           isNonInteractiveEnvironment())
@@ -996,7 +997,7 @@ void yargs(hideBin(process.argv))
             () => session.additionalFeatureQueue,
           );
         })();
-      } else if (options.ci || options.yes) {
+      } else if (options.ci || options.yes || options.force) {
         // CI mode: no prompts, auto-select first environment
         setUI(new LoggingUI());
         if (!options.installDir) options.installDir = process.cwd();

@@ -49,10 +49,12 @@ export interface ResolveModeOpts {
   human?: boolean;
   isTTY: boolean;
   /**
-   * When true, write capability must be granted explicitly via `--yes` /
-   * `--ci` / `--force`. Used by the `apply` subcommand and any other
-   * command that wants strict opt-in. Default `false` preserves today's
-   * `--agent` behavior (auto-approve + writes implied).
+   * When true, both `autoApprove` and `allowWrites` must be granted
+   * explicitly via `--auto-approve` / `--yes` / `--ci` / `--force`.
+   * The bare `--agent` flag will NOT imply either capability. Used by
+   * the `apply` subcommand and any other command that wants strict
+   * opt-in. Default `false` preserves today's `--agent` behavior
+   * (auto-approve + writes implied).
    */
   requireExplicitWrites?: boolean;
 }
