@@ -1438,6 +1438,15 @@ describe('createPreToolUseHook', () => {
       });
     });
 
+    it('detects sleep on a newline-separated line', async () => {
+      const result = await callHook('Bash', {
+        command: 'pnpm install\nsleep 60',
+      });
+      expect(result.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
     it('does not fire on commands that merely contain "sleep" as a substring', async () => {
       const result = await callHook('Bash', {
         command: 'pnpm run sleeptracker',

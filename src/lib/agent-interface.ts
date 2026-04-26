@@ -266,7 +266,7 @@ export type AgentConfig = {
 export const MAX_BASH_SLEEP_SECONDS = 5;
 
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
-const SLEEP_COMMAND_PATTERN = /(?:^|[;&|]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
+const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
 
 /**
  * Build a PreToolUse hook that enforces wizard Bash safety.
