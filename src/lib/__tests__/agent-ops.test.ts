@@ -14,6 +14,7 @@ import {
   getAuthToken,
   runStatus,
   runDetect,
+  runPlan,
 } from '../agent-ops.js';
 import { getStoredUser, getStoredToken } from '../../utils/ampli-settings.js';
 
@@ -170,5 +171,30 @@ describe('runDetect + runStatus', () => {
     expect(result.amplitudeInstalled).toBeDefined();
     expect(result.apiKey).toBeDefined();
     expect(result.auth).toEqual({ loggedIn: false, email: null, zone: null });
+  });
+
+  it('runPlan resolves a relative installDir to an absolute path before persisting', async () => {
+    // Regression: a relative `installDir` (e.g. `.` or `./foo`) used to be
+    // persisted verbatim; `apply` would later re-resolve it against its
+    // *own* cwd and run wizard against the wrong directory. Fix resolves
+    // to absolute at plan time so the persisted path is portable.
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({ name: 'x', main: 'index.js' }),
+    );
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(tmpDir);
+      const result = await runPlan('.');
+      expect(path.isAbsolute(result.plan.installDir)).toBe(true);
+      // path.resolve doesn't follow symlinks (e.g. /var → /private/var on
+      // macOS), so compare via fs.realpathSync to guard against the
+      // /private/tmp ↔ /tmp aliasing that would otherwise flake the test.
+      expect(fs.realpathSync(result.plan.installDir)).toBe(
+        fs.realpathSync(tmpDir),
+      );
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });
