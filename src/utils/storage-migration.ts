@@ -11,7 +11,7 @@
  *
  * Migration table:
  *   /tmp/amplitude-wizard.log                            → <cacheRoot>/bootstrap.log
- *   /tmp/amplitude-wizard.logl                           → <cacheRoot>/bootstrap.logl
+ *   /tmp/amplitude-wizard.logl                           → <cacheRoot>/bootstrap.ndjson
  *   $TMPDIR/amplitude-wizard-update-check.json           → <cacheRoot>/update-check.json
  *   $TMPDIR/amplitude-wizard-checkpoint-<hash>.json      → <runDir(installDir)>/checkpoint.json
  *   $TMPDIR/amplitude-wizard-benchmark.json              → <runDir(installDir)>/benchmark.json
@@ -32,7 +32,7 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { logToFile } from './debug';
 import {
   ensureDir,
@@ -67,7 +67,10 @@ function moveFile(from: string, to: string): boolean {
       }
       return false;
     }
-    ensureDir(parentDir(to));
+    // Use `path.dirname` so backslash-separated paths on Windows are
+    // handled correctly. A naïve `lastIndexOf('/')` returns -1 for
+    // `C:\Users\...` and would point us at the filesystem root.
+    ensureDir(dirname(to));
     renameSync(from, to);
     logToFile(`storage-migration: moved ${from} → ${to}`);
     return true;
@@ -78,11 +81,6 @@ function moveFile(from: string, to: string): boolean {
   }
 }
 
-function parentDir(p: string): string {
-  const ix = p.lastIndexOf('/');
-  return ix > 0 ? p.slice(0, ix) : '/';
-}
-
 /**
  * Run the one-shot migration. Pass the resolved `installDir` so per-project
  * legacy paths (events, dashboard, checkpoint) can be migrated. Pass
@@ -91,9 +89,11 @@ function parentDir(p: string): string {
  */
 export function runMigrationShim(installDir?: string): void {
   try {
-    // 1. Cache root: log + structured log + update-check
+    // 1. Cache root: log + structured log + update-check.
+    // The legacy `.logl` extension was a quirk of `+ 'l'` string-concat;
+    // the new layout uses `.ndjson` everywhere (matches `getStructuredLogFile`).
     moveFile(LEGACY_PATHS.log, join(getCacheRoot(), 'bootstrap.log'));
-    moveFile(LEGACY_PATHS.logl, join(getCacheRoot(), 'bootstrap.logl'));
+    moveFile(LEGACY_PATHS.logl, join(getCacheRoot(), 'bootstrap.ndjson'));
     moveFile(LEGACY_PATHS.updateCheck(), getUpdateCheckFile());
 
     // 2. Cache root: agent-state files (per-attempt; rare to have leftovers

@@ -41,14 +41,16 @@ function writeCheckpoint(
   return filePath;
 }
 
-// 10s per-describe timeout: each test does `await loadCheckpoint(...)` which
+// 20s per-describe timeout: each test does `await loadCheckpoint(...)` which
 // dynamic-imports `./registry.js` — that import pulls in all 18 framework
 // configs and can exceed the default 5s ceiling under parallel test-runner
-// load. Bumping at the describe level (rather than vitest.config.ts) keeps
-// the fix local and avoids collision with PRs touching global vitest config.
+// load. The previous 10s ceiling was occasionally hit on cold-cache runs
+// after this PR added more concurrent test files, so we bumped to 20s.
+// Bumping at the describe level (rather than vitest.config.ts) keeps the
+// fix local and avoids collision with PRs touching global vitest config.
 describe(
   'loadCheckpoint — self-healing of detectedFrameworkLabel',
-  { timeout: 10_000 },
+  { timeout: 20_000 },
   () => {
     let installDir: string;
     let filePath: string;

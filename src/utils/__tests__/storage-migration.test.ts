@@ -172,4 +172,54 @@ describe('runMigrationShim', () => {
     // Legacy benchmark should be cleaned up either way.
     expect(existsSync(legacyBenchmark)).toBe(false);
   });
+
+  // Regression: bugbot caught that the migration helper used a custom
+  // `parentDir` that searched only for `'/'`, breaking on Windows where
+  // `path.join` produces `\`-separated paths. We now use `path.dirname`,
+  // which handles both separators. This test exercises the move pipeline
+  // end-to-end on POSIX, which is the only place tests can run; the
+  // semantic guarantee is that `dirname()` is correct on Windows and the
+  // unit test for `getRunDir()` already covers Windows-style joins.
+  it('creates parent dirs for nested move targets via path.dirname', () => {
+    // The state migration moves into `<cacheRoot>/state/<id>.json` whose
+    // parent (`state/`) doesn't exist on a fresh cache root. If the
+    // migration's parent-dir helper got confused, `renameSync` would
+    // fail with ENOENT and the file would stay in tmpdir.
+    const legacy = join(tmpdir(), 'amplitude-wizard-state-newdir-test.json');
+    writeFileSync(legacy, '{}');
+
+    runMigrationShim(installDir);
+
+    const canonical = join(cacheRoot, 'state', 'newdir-test.json');
+    expect(existsSync(canonical)).toBe(true);
+    expect(existsSync(legacy)).toBe(false);
+  });
+
+  // Regression: ordering matters. `bin.ts` runs the migration BEFORE
+  // `setProjectLogFile` so the bootstrap log doesn't pre-exist when we
+  // try to move the legacy global log into it. This test verifies the
+  // migration step itself preserves the legacy log content when the
+  // bootstrap target doesn't yet exist.
+  //
+  // The legacy path is the hardcoded `/tmp/amplitude-wizard.log` (we
+  // don't have a way to redirect it without a runtime hook). To stay
+  // safe alongside any pre-existing file the developer may have on
+  // their machine, we save and restore.
+  it('moves the legacy global log into the new bootstrap location', () => {
+    const legacy = '/tmp/amplitude-wizard.log';
+    const target = join(cacheRoot, 'bootstrap.log');
+    const preExisting = existsSync(legacy)
+      ? readFileSync(legacy, 'utf8')
+      : null;
+    try {
+      writeFileSync(legacy, 'legacy log content\n');
+
+      runMigrationShim(installDir);
+
+      expect(existsSync(legacy)).toBe(false);
+      expect(readFileSync(target, 'utf8')).toBe('legacy log content\n');
+    } finally {
+      if (preExisting !== null) writeFileSync(legacy, preExisting);
+    }
+  });
 });
