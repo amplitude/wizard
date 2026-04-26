@@ -75,6 +75,43 @@ describe('createRetryMiddleware', () => {
     expect(onState.mock.calls.every(([s]) => s !== null)).toBe(true);
   });
 
+  it('anchors startedAt to the first retry of a storm, not each individual message', async () => {
+    // The UI grace period needs to measure "this storm has been going on
+    // for 3s" — if startedAt reset on every retry, a sustained 429 storm
+    // would never show the banner because the latest message keeps
+    // resetting the clock.
+    const onState = vi.fn();
+    const mw = createRetryMiddleware(onState);
+    mw.onMessage!(apiRetryMessage({ attempt: 0 }), {} as never, {} as never);
+    const firstStart = onState.mock.calls[0][0].startedAt;
+    // Yield to the event loop so Date.now() advances by ≥ 1ms even on
+    // fast machines — without this the test could pass spuriously.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    mw.onMessage!(apiRetryMessage({ attempt: 1 }), {} as never, {} as never);
+    mw.onMessage!(apiRetryMessage({ attempt: 2 }), {} as never, {} as never);
+    expect(onState.mock.calls[1][0].startedAt).toBe(firstStart);
+    expect(onState.mock.calls[2][0].startedAt).toBe(firstStart);
+  });
+
+  it('resets the storm anchor after a normal message clears the retry state', async () => {
+    const onState = vi.fn();
+    const mw = createRetryMiddleware(onState);
+    mw.onMessage!(apiRetryMessage({ attempt: 0 }), {} as never, {} as never);
+    const firstStart = onState.mock.calls[0][0].startedAt;
+    // Resolve the storm.
+    mw.onMessage!(
+      { type: 'assistant', message: { content: [] } } as SDKMessage,
+      {} as never,
+      {} as never,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    // New storm starts.
+    mw.onMessage!(apiRetryMessage({ attempt: 0 }), {} as never, {} as never);
+    const secondStart =
+      onState.mock.calls[onState.mock.calls.length - 1][0].startedAt;
+    expect(secondStart).toBeGreaterThan(firstStart);
+  });
+
   it('falls back when the SDK omits fields', () => {
     const onState = vi.fn();
     const mw = createRetryMiddleware(onState);

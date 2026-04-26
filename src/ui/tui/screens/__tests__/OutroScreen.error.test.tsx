@@ -27,7 +27,7 @@ import { OutroKind } from '../../session-constants.js';
 
 const GATEWAY_DOWN_MESSAGE = `Amplitude LLM gateway unavailable
 
-Every retry attempt failed with the same upstream error (API Error: 400 terminated). This is an issue with the Amplitude LLM gateway or its Vertex backend, not your project.
+Every retry attempt failed with the same upstream error (API Error: 400 terminated). This is an issue with the Amplitude LLM gateway, not your project.
 
 Workaround: re-run with a direct Anthropic API key to bypass the Amplitude gateway:
   ANTHROPIC_API_KEY=sk-ant-... npx @amplitude/wizard

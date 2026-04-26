@@ -23,7 +23,10 @@ function reasonForStatus(status: number | null): string {
   return 'Unexpected response';
 }
 
-function parseRetryMessage(message: SDKMessage): RetryState | null {
+function parseRetryMessage(
+  message: SDKMessage,
+  stormStartedAt: number,
+): RetryState | null {
   if (message.type !== 'system' || message.subtype !== 'api_retry') {
     return null;
   }
@@ -46,7 +49,11 @@ function parseRetryMessage(message: SDKMessage): RetryState | null {
     nextRetryAtMs: now + retryDelayMs,
     errorStatus,
     reason: reasonForStatus(errorStatus),
-    startedAt: now,
+    // Anchor `startedAt` to the *first* retry of the current storm — not
+    // this individual message — so consumers can measure "how long has this
+    // been going on" for grace-period decisions. Reset on the next normal
+    // message (see `active` reset below).
+    startedAt: stormStartedAt,
   };
 }
 
@@ -59,11 +66,18 @@ export function createRetryMiddleware(
   onState: (state: RetryState | null) => void,
 ): Middleware {
   let active = false;
+  let stormStartedAt = 0;
   return {
     name: 'retry',
     onMessage(message: SDKMessage) {
-      const next = parseRetryMessage(message);
+      // Only stamp the storm-start timestamp on the *first* retry of a run.
+      // Subsequent retries reuse it, so `startedAt` keeps climbing relative
+      // to `now` and the banner can decide "this has lasted long enough to
+      // bother the user".
+      const tentativeStart = active ? stormStartedAt : Date.now();
+      const next = parseRetryMessage(message, tentativeStart);
       if (next) {
+        if (!active) stormStartedAt = tentativeStart;
         active = true;
         onState(next);
         analytics.wizardCapture('llm retry', {
@@ -71,12 +85,13 @@ export function createRetryMiddleware(
           'max retries': next.maxRetries,
           'error status': next.errorStatus,
           reason: next.reason,
-          'retry delay ms': Math.max(0, next.nextRetryAtMs - next.startedAt),
+          'retry delay ms': Math.max(0, next.nextRetryAtMs - Date.now()),
         });
         return;
       }
       if (active) {
         active = false;
+        stormStartedAt = 0;
         onState(null);
       }
     },
