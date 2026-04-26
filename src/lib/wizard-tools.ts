@@ -317,6 +317,15 @@ export function installBundledSkill(
  *     approved event plan, kept across runs for re-instrumentation) and
  *     `dashboard.json` (the URL of the dashboard the agent created). Useful
  *     to keep on disk but never belongs in source control.
+ *   - `.amplitude-events.json` / `.amplitude-dashboard.json` — legacy
+ *     mirrors. The wizard tool dual-writes events here so bundled
+ *     context-hub integration skills (which still read the legacy path)
+ *     keep working; the agent's conclude-phase skill writes the
+ *     dashboard mirror itself. Both are cleaned up at end of run by
+ *     `cleanupWizardArtifacts`, but they exist on disk during the run
+ *     and would otherwise be staged by `git add .`. Drop these entries
+ *     once context-hub ships an updated skill set that reads/writes the
+ *     canonical `.amplitude/` paths.
  *   - `.claude/skills/integration-...` — single-use SDK-setup workflows;
  *     removed at end of run. (Pattern is `integration-...slash` in gitignore.)
  *   - The instrumentation/taxonomy skills are kept on disk so users can
@@ -326,6 +335,8 @@ export function installBundledSkill(
  */
 export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
   '.amplitude/',
+  '.amplitude-events.json',
+  '.amplitude-dashboard.json',
   '.claude/skills/integration-*/',
   '.claude/skills/add-analytics-instrumentation/',
   '.claude/skills/amplitude-chart-dashboard-plan/',

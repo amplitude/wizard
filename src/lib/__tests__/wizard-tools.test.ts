@@ -385,9 +385,13 @@ describe('ensureWizardArtifactsIgnored', () => {
     expect(content).toContain('.env.local');
     // And the wizard block was appended
     expect(content).toContain('# Amplitude wizard');
-    // The new project-meta dir is the canonical entry; one line covers both
-    // events.json and dashboard.json.
+    // Canonical `.amplitude/` covers events.json + dashboard.json.
     expect(content).toContain('.amplitude/');
+    // Legacy mirrors must also be ignored: bundled context-hub skills
+    // still write `.amplitude-events.json` and `.amplitude-dashboard.json`
+    // during runs, and a `git add .` mid-run would otherwise stage them.
+    expect(content).toContain('.amplitude-events.json');
+    expect(content).toContain('.amplitude-dashboard.json');
   });
 
   it('is idempotent — running twice does not duplicate entries', () => {
