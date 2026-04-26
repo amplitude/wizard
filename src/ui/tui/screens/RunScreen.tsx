@@ -38,13 +38,12 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import { getLogFile } from '../../../utils/storage-paths.js';
 
 const RUN_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '←→', label: 'Tabs' },
   { key: 'Ctrl+C', label: 'Cancel' },
 ]);
-
-const LOG_FILE = '/tmp/amplitude-wizard.log';
 
 /** File extensions used to detect "currently editing" from status messages. */
 const FILE_EXT_PATTERN =
@@ -272,7 +271,10 @@ export const RunScreen = ({ store }: RunScreenProps) => {
     {
       id: 'logs',
       label: 'Logs',
-      component: <LogViewer filePath={LOG_FILE} />,
+      // Per-project log file under ~/.amplitude/wizard/runs/<hash>/log.txt.
+      // Resolving from session.installDir keeps two parallel runs in
+      // separate logs (vs. the previous global /tmp/amplitude-wizard.log).
+      component: <LogViewer filePath={getLogFile(store.session.installDir)} />,
     },
     {
       id: 'snake',

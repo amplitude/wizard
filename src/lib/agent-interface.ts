@@ -25,6 +25,7 @@ import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
+import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import {
@@ -1472,47 +1473,78 @@ export async function runAgent(
       ...WIZARD_TOOL_NAMES,
     ];
 
-    // Watch for .amplitude-events.json and feed into the store (set up once, before retries)
-    const eventPlanPath = path.join(
+    // Watch for the event plan and feed it into the store.
+    //
+    // Canonical location: `.amplitude/events.json` (preserved across runs).
+    // Legacy fallback: `.amplitude-events.json` — older integration skills
+    // (owned by context-hub) still instruct the agent to write the legacy
+    // path during the conclude phase. Watching both keeps backwards compat
+    // until context-hub ships an updated skill set.
+    //
+    // Set up once before retries.
+    const eventPlanPath = getEventsFile(agentConfig.workingDirectory);
+    const legacyEventPlanPath = path.join(
       agentConfig.workingDirectory,
       '.amplitude-events.json',
     );
     const readEventPlan = () => {
-      try {
-        const content = fs.readFileSync(eventPlanPath, 'utf-8');
-        const events = parseEventPlanContent(content);
-        if (events) {
-          getUI().setEventPlan(events.filter((e) => e.name.trim().length > 0));
+      // Prefer the canonical path; fall back to the legacy mirror if it's
+      // the only one that exists.
+      for (const candidate of [eventPlanPath, legacyEventPlanPath]) {
+        try {
+          const content = fs.readFileSync(candidate, 'utf-8');
+          const events = parseEventPlanContent(content);
+          if (events) {
+            getUI().setEventPlan(
+              events.filter((e) => e.name.trim().length > 0),
+            );
+            return;
+          }
+        } catch {
+          // Try next candidate
         }
-      } catch {
-        // File doesn't exist yet
       }
     };
 
-    try {
-      eventPlanWatcher = fs.watch(eventPlanPath, () => readEventPlan());
+    const watchEventPlanPath = (target: string) => {
+      try {
+        return fs.watch(target, () => readEventPlan());
+      } catch {
+        return undefined;
+      }
+    };
+
+    let canonicalWatcher = watchEventPlanPath(eventPlanPath);
+    let legacyWatcher = watchEventPlanPath(legacyEventPlanPath);
+    if (canonicalWatcher || legacyWatcher) {
+      eventPlanWatcher = canonicalWatcher ?? legacyWatcher!;
       readEventPlan();
-    } catch {
-      // File doesn't exist yet — poll until it appears
+    } else {
+      // Neither file exists yet — poll until either appears.
       eventPlanInterval = setInterval(() => {
-        try {
-          fs.accessSync(eventPlanPath);
+        canonicalWatcher =
+          canonicalWatcher ?? watchEventPlanPath(eventPlanPath);
+        legacyWatcher =
+          legacyWatcher ?? watchEventPlanPath(legacyEventPlanPath);
+        if (canonicalWatcher || legacyWatcher) {
           readEventPlan();
           clearInterval(eventPlanInterval);
           eventPlanInterval = undefined;
-          eventPlanWatcher = fs.watch(eventPlanPath, () => readEventPlan());
-        } catch {
-          // Still waiting
+          eventPlanWatcher = canonicalWatcher ?? legacyWatcher!;
         }
       }, 1000);
     }
 
-    // Watch for .amplitude-dashboard.json written by the agent after dashboard creation.
-    // Parses the dashboard URL and forwards it to the UI so ChecklistScreen can
-    // surface a direct link without requiring any further user action.
-    // workingDirectory is the CLI install dir (process.cwd() or --install-dir),
-    // not untrusted network input. The filename is a hardcoded constant.
-    const dashboardFilePath = path.join(
+    // Watch for the dashboard URL handoff from the agent's conclude step.
+    //
+    // Canonical location: `.amplitude/dashboard.json`. Legacy fallback:
+    // `.amplitude-dashboard.json` — bundled integration skills currently
+    // tell the agent to write the legacy path; the wizard reads from both
+    // until context-hub ships an updated skill set. workingDirectory is
+    // the CLI install dir (process.cwd() or --install-dir), not untrusted
+    // network input.
+    const dashboardFilePath = getDashboardFile(agentConfig.workingDirectory); // nosemgrep
+    const legacyDashboardFilePath = path.join(
       agentConfig.workingDirectory,
       '.amplitude-dashboard.json',
     ); // nosemgrep
@@ -1520,33 +1552,46 @@ export async function runAgent(
       dashboardUrl: z.string().url(),
     });
     const readDashboardFile = () => {
-      try {
-        const content = fs.readFileSync(dashboardFilePath, 'utf-8');
-        const result = dashboardFileSchema.safeParse(JSON.parse(content));
-        if (result.success) {
-          getUI().setDashboardUrl(result.data.dashboardUrl);
+      for (const candidate of [dashboardFilePath, legacyDashboardFilePath]) {
+        try {
+          const content = fs.readFileSync(candidate, 'utf-8');
+          const result = dashboardFileSchema.safeParse(JSON.parse(content));
+          if (result.success) {
+            getUI().setDashboardUrl(result.data.dashboardUrl);
+            return;
+          }
+        } catch {
+          // Try next candidate
         }
-      } catch {
-        // File doesn't exist or isn't valid JSON yet
       }
     };
 
-    try {
-      dashboardWatcher = fs.watch(dashboardFilePath, () => readDashboardFile());
+    const watchDashboardPath = (target: string) => {
+      try {
+        return fs.watch(target, () => readDashboardFile());
+      } catch {
+        return undefined;
+      }
+    };
+
+    let canonicalDashboardWatcher = watchDashboardPath(dashboardFilePath);
+    let legacyDashboardWatcher = watchDashboardPath(legacyDashboardFilePath);
+    if (canonicalDashboardWatcher || legacyDashboardWatcher) {
+      dashboardWatcher = canonicalDashboardWatcher ?? legacyDashboardWatcher!;
       readDashboardFile();
-    } catch {
-      // File doesn't exist yet — poll until it appears
+    } else {
+      // Neither file exists yet — poll until either appears.
       dashboardInterval = setInterval(() => {
-        try {
-          fs.accessSync(dashboardFilePath);
+        canonicalDashboardWatcher =
+          canonicalDashboardWatcher ?? watchDashboardPath(dashboardFilePath);
+        legacyDashboardWatcher =
+          legacyDashboardWatcher ?? watchDashboardPath(legacyDashboardFilePath);
+        if (canonicalDashboardWatcher || legacyDashboardWatcher) {
           readDashboardFile();
           clearInterval(dashboardInterval);
           dashboardInterval = undefined;
-          dashboardWatcher = fs.watch(dashboardFilePath, () =>
-            readDashboardFile(),
-          );
-        } catch {
-          // Still waiting
+          dashboardWatcher =
+            canonicalDashboardWatcher ?? legacyDashboardWatcher!;
         }
       }, 1000);
     }

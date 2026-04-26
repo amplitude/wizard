@@ -131,8 +131,10 @@ import {
   initSentry,
   setTerminalSink,
   getLogFilePath,
+  setProjectLogFile,
 } from './src/lib/observability';
 import type { LogLevel } from './src/lib/observability';
+import { runMigrationShim } from './src/utils/storage-migration';
 
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
 // prevents the TUI's ESM dynamic imports from resolving named exports.
@@ -170,12 +172,30 @@ const CLI_INVOCATION: string = (() => {
 /**
  * Build a WizardSession from CLI argv, avoiding the repeated 12-field literal.
  */
+/**
+ * Bootstrap per-project storage state once `installDir` is known. Idempotent:
+ *
+ *   1. Switches the logger from `<cacheRoot>/bootstrap.log` to the
+ *      per-project file under `<cacheRoot>/runs/<hash>/log.txt`. Two
+ *      parallel wizard runs in different directories no longer share a log.
+ *   2. Runs the one-shot migration shim — moves any pre-refactor paths
+ *      (e.g. `/tmp/amplitude-wizard.log`, `<installDir>/.amplitude-events.json`)
+ *      into the new layout. Drop after one release.
+ *
+ * Called from `buildSessionFromOptions` so every entry path picks it up
+ * automatically (TUI, agent, CI, sub-commands).
+ */
+function bootstrapInstallDir(installDir: string): void {
+  setProjectLogFile(installDir);
+  runMigrationShim(installDir);
+}
+
 const buildSessionFromOptions = async (
   options: Record<string, unknown>,
   overrides?: { ci?: boolean },
 ) => {
   const { buildSession } = await import('./src/lib/wizard-session.js');
-  return buildSession({
+  const session = buildSession({
     debug: options.debug as boolean | undefined,
     verbose: options.verbose as boolean | undefined,
     forceInstall: options.forceInstall as boolean | undefined,
@@ -198,6 +218,8 @@ const buildSessionFromOptions = async (
     appId: options.appId as string | undefined,
     appName: options.appName as string | undefined,
   });
+  bootstrapInstallDir(session.installDir);
+  return session;
 };
 
 /**

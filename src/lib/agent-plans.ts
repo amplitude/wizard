@@ -24,11 +24,14 @@
  */
 
 import { promises as fs, existsSync, mkdirSync } from 'fs';
-import { tmpdir } from 'os';
 import { join, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
+import {
+  getPlansDir as getPlansDirFromStorage,
+  getPlanFile,
+} from '../utils/storage-paths.js';
 // ── Plan shape ──────────────────────────────────────────────────────
 
 /** A single file the inner agent intends to create or modify. */
@@ -78,11 +81,11 @@ export type WizardPlan = z.infer<typeof WizardPlanSchema>;
 // ── Storage location ────────────────────────────────────────────────
 
 /**
- * Plans live under `$TMPDIR/amplitude-wizard-plans/`. The directory is
- * created lazily on first write.
+ * Plans live under `<cacheRoot>/plans/`. The directory is created lazily on
+ * first write.
  */
 export function getPlansDir(): string {
-  return join(tmpdir(), 'amplitude-wizard-plans');
+  return getPlansDirFromStorage();
 }
 
 function ensurePlansDir(): string {
@@ -96,7 +99,7 @@ function ensurePlansDir(): string {
 function planPath(planId: string): string {
   // Plan IDs are UUIDs we generated. Defensive: use only the basename so a
   // path-like input can't traverse outside the plans dir.
-  return join(getPlansDir(), `${basename(planId)}.json`);
+  return getPlanFile(basename(planId));
 }
 
 // ── TTL ─────────────────────────────────────────────────────────────

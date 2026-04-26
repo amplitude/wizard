@@ -36,6 +36,7 @@ import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
 import { saveCheckpoint } from './session-checkpoint.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
+import { getLogFile } from '../utils/storage-paths';
 import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
@@ -488,7 +489,9 @@ async function runAgentWizardBody(
     await wizardAbort({
       message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
         agentResult.message || 'API Error: 400 terminated'
-      }). This is an issue with the Amplitude LLM gateway or its Vertex backend, not your project.\n\n${bypassHint}\n\nIf this persists, please report it (with the log file at /tmp/amplitude-wizard.log) to: wizard@amplitude.com`,
+      }). This is an issue with the Amplitude LLM gateway or its Vertex backend, not your project.\n\n${bypassHint}\n\nIf this persists, please report it (with the log file at ${getLogFile(
+        session.installDir,
+      )}) to: wizard@amplitude.com`,
       error: new WizardError(
         `LLM gateway unavailable: ${agentResult.message ?? 'unknown'}`,
         {

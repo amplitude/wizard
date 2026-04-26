@@ -16,6 +16,8 @@ export {
   setTerminalSink,
   configureLogFile,
   getLogFilePath,
+  getStructuredLogFilePath,
+  setProjectLogFile,
 } from './logger';
 export type { WizardLogger, LogLevel } from './logger';
 

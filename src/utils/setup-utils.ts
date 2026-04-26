@@ -27,6 +27,11 @@ import { storeToken } from './ampli-settings';
 import { detectRegionFromToken } from './urls';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
+import {
+  ensureDir,
+  getInstallationErrorLogFile,
+  getRunDir,
+} from './storage-paths';
 
 interface ProjectData {
   projectApiKey: string;
@@ -157,6 +162,11 @@ export async function installPackage({
       )} with ${chalk.bold(pkgManager.label)}.`,
     );
 
+    // Captured by the exec callback below; read in the catch arm to surface
+    // the path in the user-facing error message. Typed as a wide union so
+    // TypeScript doesn't narrow it to the initializer once a static-analysis
+    // pass concludes the closure can't mutate it.
+    const installErrorState: { logPath: string | null } = { logPath: null };
     try {
       await new Promise<void>((resolve, reject) => {
         childProcess.exec(
@@ -166,17 +176,21 @@ export async function installPackage({
           { cwd: installDir },
           (err, stdout, stderr) => {
             if (err) {
-              fs.writeFileSync(
-                join(
-                  process.cwd(),
-                  `amplitude-wizard-installation-error-${Date.now()}.log`,
-                ),
-                JSON.stringify({
-                  stdout,
-                  stderr,
-                }),
-                { encoding: 'utf8' },
-              );
+              // Land the error log under `~/.amplitude/wizard/runs/<hash>/`
+              // so it (a) doesn't litter the user's project root and (b)
+              // gets picked up by `/diagnostics --bundle`. Falls back to
+              // the installation dir if the cache root mkdir fails.
+              ensureDir(getRunDir(installDir));
+              const logPath = getInstallationErrorLogFile(installDir);
+              try {
+                fs.writeFileSync(logPath, JSON.stringify({ stdout, stderr }), {
+                  encoding: 'utf8',
+                });
+                installErrorState.logPath = logPath;
+              } catch {
+                // Best-effort — the underlying npm error is what really
+                // matters; logging is supplementary.
+              }
 
               reject(err);
             } else {
@@ -187,12 +201,13 @@ export async function installPackage({
       });
     } catch (e) {
       sdkInstallSpinner.stop('Installation failed.');
+      const logHint = installErrorState.logPath
+        ? `The wizard has saved the install error to:\n  ${installErrorState.logPath}\n\nIf you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${OUTBOUND_URLS.githubIssues}`
+        : `If you think this issue is caused by the Amplitude wizard, create an issue on GitHub:\n${OUTBOUND_URLS.githubIssues}`;
       getUI().log.error(
         `${chalk.red(
           'Encountered the following error during installation:',
-        )}\n\n${e}\n\n${chalk.dim(
-          `The wizard has created a \`amplitude-wizard-installation-error-*.log\` file. If you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${OUTBOUND_URLS.githubIssues}`,
-        )}`,
+        )}\n\n${e}\n\n${chalk.dim(logHint)}`,
       );
       await abort();
     }
