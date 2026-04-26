@@ -1445,12 +1445,12 @@ export async function runAgent(
     }
   }, 10_000);
 
-  // Event plan file watcher — cleaned up in finally block
-  let eventPlanWatcher: fs.FSWatcher | undefined;
+  // Event plan file watchers — cleaned up in finally block
+  const eventPlanWatchers: fs.FSWatcher[] = [];
   let eventPlanInterval: ReturnType<typeof setInterval> | undefined;
 
-  // Dashboard file watcher — cleaned up in finally block
-  let dashboardWatcher: fs.FSWatcher | undefined;
+  // Dashboard file watchers — cleaned up in finally block
+  const dashboardWatchers: fs.FSWatcher[] = [];
   let dashboardInterval: ReturnType<typeof setInterval> | undefined;
 
   try {
@@ -1517,7 +1517,8 @@ export async function runAgent(
     let canonicalWatcher = watchEventPlanPath(eventPlanPath);
     let legacyWatcher = watchEventPlanPath(legacyEventPlanPath);
     if (canonicalWatcher || legacyWatcher) {
-      eventPlanWatcher = canonicalWatcher ?? legacyWatcher!;
+      if (canonicalWatcher) eventPlanWatchers.push(canonicalWatcher);
+      if (legacyWatcher) eventPlanWatchers.push(legacyWatcher);
       readEventPlan();
     } else {
       // Neither file exists yet — poll until either appears.
@@ -1530,7 +1531,8 @@ export async function runAgent(
           readEventPlan();
           clearInterval(eventPlanInterval);
           eventPlanInterval = undefined;
-          eventPlanWatcher = canonicalWatcher ?? legacyWatcher!;
+          if (canonicalWatcher) eventPlanWatchers.push(canonicalWatcher);
+          if (legacyWatcher) eventPlanWatchers.push(legacyWatcher);
         }
       }, 1000);
     }
@@ -1577,7 +1579,10 @@ export async function runAgent(
     let canonicalDashboardWatcher = watchDashboardPath(dashboardFilePath);
     let legacyDashboardWatcher = watchDashboardPath(legacyDashboardFilePath);
     if (canonicalDashboardWatcher || legacyDashboardWatcher) {
-      dashboardWatcher = canonicalDashboardWatcher ?? legacyDashboardWatcher!;
+      if (canonicalDashboardWatcher)
+        dashboardWatchers.push(canonicalDashboardWatcher);
+      if (legacyDashboardWatcher)
+        dashboardWatchers.push(legacyDashboardWatcher);
       readDashboardFile();
     } else {
       // Neither file exists yet — poll until either appears.
@@ -1590,8 +1595,10 @@ export async function runAgent(
           readDashboardFile();
           clearInterval(dashboardInterval);
           dashboardInterval = undefined;
-          dashboardWatcher =
-            canonicalDashboardWatcher ?? legacyDashboardWatcher!;
+          if (canonicalDashboardWatcher)
+            dashboardWatchers.push(canonicalDashboardWatcher);
+          if (legacyDashboardWatcher)
+            dashboardWatchers.push(legacyDashboardWatcher);
         }
       }, 1000);
     }
@@ -2229,9 +2236,9 @@ export async function runAgent(
     throw error;
   } finally {
     clearInterval(heartbeatInterval);
-    eventPlanWatcher?.close();
+    for (const w of eventPlanWatchers) w.close();
     if (eventPlanInterval) clearInterval(eventPlanInterval);
-    dashboardWatcher?.close();
+    for (const w of dashboardWatchers) w.close();
     if (dashboardInterval) clearInterval(dashboardInterval);
     clearRetryBanner();
     _activeStatusReporter = undefined;

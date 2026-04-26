@@ -81,7 +81,9 @@ function activeLogPath(): string {
 }
 
 function activeStructuredLogPath(): string {
-  return activeLogPath() + 'l';
+  const p = activeLogPath();
+  const dot = p.lastIndexOf('.');
+  return dot > 0 ? p.slice(0, dot) + '.ndjson' : p + '.ndjson';
 }
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
@@ -142,8 +144,8 @@ export function initLogger(
   // surface a more useful error if the directory really can't be created.
   ensureDir(dirname(activePath));
 
-  // Rotate if over limit (keep one backup). Rotate both .log and .logl files.
-  for (const path of [activePath, activePath + 'l']) {
+  // Rotate if over limit (keep one backup). Rotate both the plain and NDJSON files.
+  for (const path of [activePath, activeStructuredLogPath()]) {
     try {
       const stats = statSync(path);
       if (stats.size > LOG_MAX_BYTES) {
@@ -233,7 +235,7 @@ export function getLogFilePath(): string {
   return activeLogPath();
 }
 
-/** Get the current structured (NDJSON) log file path. Suffix `l`. */
+/** Get the current structured (NDJSON) log file path. */
 export function getStructuredLogFilePath(): string {
   return activeStructuredLogPath();
 }

@@ -32,7 +32,7 @@ import {
   unlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { logToFile } from './debug';
 import {
   ensureDir,
@@ -67,7 +67,7 @@ function moveFile(from: string, to: string): boolean {
       }
       return false;
     }
-    ensureDir(parentDir(to));
+    ensureDir(dirname(to));
     renameSync(from, to);
     logToFile(`storage-migration: moved ${from} → ${to}`);
     return true;
@@ -76,11 +76,6 @@ function moveFile(from: string, to: string): boolean {
     logToFile(`storage-migration: failed to move ${from} → ${to}: ${msg}`);
     return false;
   }
-}
-
-function parentDir(p: string): string {
-  const ix = p.lastIndexOf('/');
-  return ix > 0 ? p.slice(0, ix) : '/';
 }
 
 /**
