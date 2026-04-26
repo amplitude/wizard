@@ -153,6 +153,13 @@ export function ensureDir(dir: string, mode = 0o700): void {
  * Pre-refactor paths. Kept here so the startup migration shim has a single
  * source of truth for "where the old layout used to put things." Drop after
  * one release.
+ *
+ * NB: `log` and `logl` are deliberately hardcoded to `/tmp/...` even though
+ * `tmpdir()` returns `/var/folders/...` on macOS. The OLD logger always
+ * wrote to the literal `/tmp/amplitude-wizard.log` (see git blame on
+ * `src/lib/observability/logger.ts` before this refactor); macOS resolves
+ * `/tmp` as a symlink to `/private/tmp` transparently for both reads and
+ * writes, so the migration finds whatever the old logger wrote.
  */
 export const LEGACY_PATHS = {
   /** Hardcoded global log (collided across parallel runs). */
