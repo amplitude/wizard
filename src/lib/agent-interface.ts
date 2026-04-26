@@ -1956,6 +1956,25 @@ export async function runAgent(
       logToFile(`Unhandled structured error code: ${code}`);
     }
 
+    // Backwards-compat: bundled skills (skills/integration/**) still emit
+    // [ERROR-MCP-MISSING] / [ERROR-RESOURCE-MISSING] text markers per their
+    // workflow files. #172 removed scanning, which silently dropped fatal
+    // signals from skill-driven flows. Re-scan as a fallback so old skills
+    // continue to surface errors correctly. The structured `report_status`
+    // path above is preferred and runs first.
+    if (outputText.includes('[ERROR-MCP-MISSING]')) {
+      logToFile('Agent error: MCP_MISSING (legacy text marker)');
+      spinner.stop('Agent could not access Amplitude MCP');
+      _activeStatusReporter = undefined;
+      return { error: AgentErrorType.MCP_MISSING };
+    }
+    if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
+      logToFile('Agent error: RESOURCE_MISSING (legacy text marker)');
+      spinner.stop('Agent could not access setup resource');
+      _activeStatusReporter = undefined;
+      return { error: AgentErrorType.RESOURCE_MISSING };
+    }
+
     // Check for API errors (rate limits, etc.)
     // Extract just the API error line(s), not the entire output
     const apiErrorMatch = outputText.match(/API Error: [^\n]+/g);
@@ -2022,6 +2041,19 @@ export async function runAgent(
       return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
     }
 
+    // Backwards-compat fallback for bundled skills emitting legacy text
+    // markers — see note in the non-throwing return path.
+    if (outputText.includes('[ERROR-MCP-MISSING]')) {
+      logToFile('Agent error (caught): MCP_MISSING (legacy text marker)');
+      spinner.stop('Agent could not access Amplitude MCP');
+      return { error: AgentErrorType.MCP_MISSING };
+    }
+    if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
+      logToFile('Agent error (caught): RESOURCE_MISSING (legacy text marker)');
+      spinner.stop('Agent could not access setup resource');
+      return { error: AgentErrorType.RESOURCE_MISSING };
+    }
+
     // See note in the non-throwing return path above — surface
     // GATEWAY_DOWN when every attempt died upstream.
     if (
@@ -2075,7 +2107,7 @@ function handleSDKMessage(
   spinner: SpinnerHandle,
   collectedText: string[],
   receivedSuccessResult = false,
-  _recentStatuses?: string[],
+  recentStatuses?: string[],
 ): void {
   logToFile(`SDK Message: ${message.type}`, JSON.stringify(message, null, 2));
 
@@ -2091,9 +2123,23 @@ function handleSDKMessage(
         for (const block of content) {
           if (block.type === 'text' && typeof block.text === 'string') {
             collectedText.push(block.text);
-            // Status updates now flow through the `report_status` MCP tool,
-            // wired to the spinner via StatusReporter in runAgent. No more
-            // [STATUS] text-marker scanning — see wizard-tools.ts.
+            // Backwards-compat: bundled skills (skills/integration/**)
+            // still emit `[STATUS] <text>` markers per their workflow
+            // files. #172 removed scanning here in favor of a structured
+            // `report_status` MCP tool, but didn't migrate the skills —
+            // silently breaking the spinner for skill-driven flows.
+            // Forward each marker match to the spinner. The structured
+            // path runs in parallel; whichever fires first wins.
+            const markerRe = /\[STATUS\]\s+([^\n]+)/g;
+            for (const m of block.text.matchAll(markerRe)) {
+              const detail = m[1].trim();
+              if (!detail) continue;
+              spinner.message(detail.slice(0, 80));
+              if (recentStatuses) {
+                recentStatuses.push(detail);
+                if (recentStatuses.length > 3) recentStatuses.shift();
+              }
+            }
           }
 
           // Intercept TodoWrite tool_use blocks for task progression

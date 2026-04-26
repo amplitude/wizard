@@ -234,10 +234,148 @@ describe('runAgent', () => {
       expect(result.message).toContain('API Error');
     });
 
-    // Note: MCP_MISSING / RESOURCE_MISSING detection moved from text-marker
-    // regex scanning to the structured `report_status` MCP tool in
-    // src/lib/wizard-tools.ts. The old [STATUS] / [ERROR-*] paths are gone.
-    // See src/lib/__tests__/wizard-tools.test.ts for report_status coverage.
+    // Backwards-compat: 31 bundled skills under skills/integration/**
+    // still emit [STATUS] / [ERROR-MCP-MISSING] / [ERROR-RESOURCE-MISSING]
+    // text markers per their workflow files. #172 migrated to a structured
+    // `report_status` MCP tool but didn't update the skills, silently
+    // dropping signals from skill-driven flows. The legacy text-marker
+    // scanner is now restored as a fallback alongside report_status.
+    it('reports MCP_MISSING when agent emits the [ERROR-MCP-MISSING] legacy marker', async () => {
+      function* mcpMissingGenerator() {
+        yield {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: '[ERROR-MCP-MISSING] Could not load skill menu — MCP not available',
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: '',
+        };
+      }
+      mockQuery.mockReturnValue(mcpMissingGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.MCP_MISSING);
+    });
+
+    it('reports RESOURCE_MISSING when agent emits the [ERROR-RESOURCE-MISSING] legacy marker', async () => {
+      function* resourceMissingGenerator() {
+        yield {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: '[ERROR-RESOURCE-MISSING] Could not find a suitable skill for this project.',
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: '',
+        };
+      }
+      mockQuery.mockReturnValue(resourceMissingGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.RESOURCE_MISSING);
+    });
+
+    it('forwards [STATUS] legacy markers to the spinner', async () => {
+      function* statusMarkerGenerator() {
+        yield {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: '[STATUS] Checking project structure',
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: '',
+        };
+      }
+      mockQuery.mockReturnValue(statusMarkerGenerator());
+
+      await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(mockSpinner.message).toHaveBeenCalledWith(
+        'Checking project structure',
+      );
+    });
+
+    it('forwards multiple [STATUS] markers in a single text block', async () => {
+      function* multiStatusGenerator() {
+        yield {
+          type: 'assistant',
+          message: {
+            role: 'assistant',
+            content: [
+              {
+                type: 'text',
+                text: 'Doing some work.\n[STATUS] Verifying dependencies\nMore work.\n[STATUS] Generating events',
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: '',
+        };
+      }
+      mockQuery.mockReturnValue(multiStatusGenerator());
+
+      await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(mockSpinner.message).toHaveBeenCalledWith(
+        'Verifying dependencies',
+      );
+      expect(mockSpinner.message).toHaveBeenCalledWith('Generating events');
+    });
 
     it('should report RATE_LIMIT when agent output contains API Error 429', async () => {
       function* rateLimitGenerator() {
