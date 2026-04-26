@@ -2204,7 +2204,7 @@ void yargs(hideBin(process.argv))
         },
         resume: {
           describe:
-            'resume the previous Claude SDK session captured against this plan (skip cold-start work after a SIGINT or crash)',
+            'resume the previous agent session captured against this plan (skip cold-start work after a SIGINT or crash)',
           type: 'boolean',
           default: false,
         },
