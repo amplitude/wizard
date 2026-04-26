@@ -2,16 +2,60 @@
  * PickerMenu — Single and multi select.
  * Single mode: custom renderer with small triangle indicator.
  * Multi mode: checkbox glyphs with space to toggle.
+ *
+ * Pagination uses Ink's `measureElement` to compute the actual rendered
+ * header height, so chrome rows are derived from real layout (accounting
+ * for PromptLabel text wrapping on narrow terminals) instead of a fixed
+ * constant. The hardcoded constant is retained as a first-frame fallback.
  */
 
-import { Box, Text } from 'ink';
-import { useState, useRef } from 'react';
+import { Box, Text, measureElement, type DOMElement } from 'ink';
+import { useState, useRef, useEffect } from 'react';
 import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 
-const PICKER_CHROME_ROWS = 16;
+/**
+ * First-frame fallback chrome size, used before `measureElement` has run.
+ * After the initial layout pass we replace this with the measured header
+ * height plus a small allowance for scroll indicators and bottom padding.
+ */
+const PICKER_CHROME_ROWS_FALLBACK = 16;
+
+/** Minimum number of visible options on extremely short terminals. */
+const MIN_VISIBLE_ROWS = 5;
+
+/**
+ * Reserve rows beyond the measured header for: optional "↑ N more" /
+ * "↓ N more" indicators (up to 2) plus a one-row safety buffer for the
+ * keyboard hint bar / cursor below the picker.
+ */
+const CHROME_FOOTER_RESERVE_ROWS = 3;
+
+/**
+ * Pure helper — translate measured header height + terminal rows into
+ * the number of option rows that fit. Extracted for unit testing.
+ *
+ * @param termRows Total terminal rows.
+ * @param measuredHeaderRows Header height from `measureElement`, or
+ *   `null` if not yet measured (first-frame fallback path).
+ * @param totalOptionRows Total option rows we'd render in unbounded space
+ *   (i.e. ceil(options.length / columns)).
+ */
+export function computeVisibleCount(
+  termRows: number,
+  measuredHeaderRows: number | null,
+  totalOptionRows: number,
+): number {
+  const chromeRows =
+    measuredHeaderRows !== null
+      ? measuredHeaderRows + CHROME_FOOTER_RESERVE_ROWS
+      : PICKER_CHROME_ROWS_FALLBACK;
+  const available = termRows - chromeRows;
+  const fits = Math.max(MIN_VISIBLE_ROWS, available);
+  return Math.min(totalOptionRows, fits);
+}
 
 interface PickerOption<T> {
   label: string;
@@ -115,11 +159,24 @@ const SinglePickerMenu = <T,>({
   const [focused, setFocused] = useState(0);
   const [, termRows] = useStdoutDimensions();
   const scrollRef = useRef(0);
+  const headerRef = useRef<DOMElement>(null);
+  // Measured header height — `null` until Ink has laid out the first frame.
+  // We re-measure on every render so wrapping changes (terminal resize,
+  // message text changes) update visibleCount on the next paint.
+  const [measuredHeader, setMeasuredHeader] = useState<number | null>(null);
   const rowsPerCol = Math.ceil(options.length / columns);
+
+  useEffect(() => {
+    if (!headerRef.current) return;
+    const { height } = measureElement(headerRef.current);
+    if (height > 0 && height !== measuredHeader) {
+      setMeasuredHeader(height);
+    }
+  });
 
   const maxVisible =
     columns === 1
-      ? Math.min(rowsPerCol, Math.max(5, termRows - PICKER_CHROME_ROWS))
+      ? computeVisibleCount(termRows, measuredHeader, rowsPerCol)
       : rowsPerCol;
   const needsScroll = rowsPerCol > maxVisible;
 
@@ -191,7 +248,9 @@ const SinglePickerMenu = <T,>({
 
     return (
       <Box flexDirection="column" alignItems={align}>
-        <PromptLabel message={message} />
+        <Box ref={headerRef} flexDirection="column">
+          <PromptLabel message={message} />
+        </Box>
         {hasAbove && (
           <Text color={Colors.muted}>
             {'  \u2191 '}
@@ -226,7 +285,9 @@ const SinglePickerMenu = <T,>({
 
   return (
     <Box flexDirection="column" alignItems={align}>
-      <PromptLabel message={message} />
+      <Box ref={headerRef} flexDirection="column">
+        <PromptLabel message={message} />
+      </Box>
       <Box flexDirection="row" gap={4}>
         {columnArrays.map((colOpts, colIdx) => (
           <Box key={colIdx} flexDirection="column">
