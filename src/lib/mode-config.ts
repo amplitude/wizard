@@ -104,16 +104,23 @@ export function resolveMode(opts: ResolveModeOpts): ModeConfig {
     allowWrites = true;
     allowDestructive = true;
   }
-  // Back-compat: today's `--agent` (no other flags) implies auto-approve
-  // and writes. New scoped commands (`apply`, `verify`) opt out via
-  // `requireExplicitWrites: true`.
-  if (isAgent && !requireExplicitWrites) {
+  // Back-compat: today's `--agent` (with no other capability flags) implies
+  // auto-approve and writes. New scoped commands (`apply`, `verify`) opt
+  // out via `requireExplicitWrites: true`.
+  //
+  // Critically, the back-compat ONLY fires when no explicit capability
+  // flag was passed. Otherwise `--auto-approve --agent` would silently
+  // grant writes despite `--auto-approve`'s documented "no writes"
+  // contract — a real risk because bin.ts auto-detects `--agent` in
+  // non-TTY contexts. (Bugbot finding.)
+  const hasExplicitCapabilityFlag =
+    Boolean(opts.autoApprove) ||
+    Boolean(opts.yes) ||
+    Boolean(opts.ci) ||
+    Boolean(opts.force);
+  if (isAgent && !requireExplicitWrites && !hasExplicitCapabilityFlag) {
     autoApprove = true;
     allowWrites = true;
-  } else if (isAgent) {
-    // Strict agent mode: `--auto-approve` / `--yes` / `--force` must be
-    // explicit. `autoApprove`/`allowWrites` stay at whatever the explicit
-    // flags above set them to.
   }
 
   const isInteractive = !autoApprove && opts.isTTY;

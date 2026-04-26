@@ -130,6 +130,24 @@ describe('resolveMode', () => {
       expect(r.allowDestructive).toBe(false);
     });
 
+    it('--agent + --auto-approve does NOT silently grant writes (back-compat suppressed)', () => {
+      // Regression: previously the back-compat path fired whenever
+      // --agent was set without requireExplicitWrites, even when an
+      // explicit --auto-approve was passed. That silently upgraded
+      // --auto-approve's documented "no writes" contract to writes.
+      // bin.ts auto-detects --agent in non-TTY contexts, so a user
+      // passing --auto-approve into a piped run could get writes
+      // they never asked for.
+      const r = resolveMode({
+        agent: true,
+        autoApprove: true,
+        isTTY: false,
+      });
+      expect(r.autoApprove).toBe(true);
+      expect(r.allowWrites).toBe(false);
+      expect(r.allowDestructive).toBe(false);
+    });
+
     it('--agent + requireExplicitWrites does NOT grant writes', () => {
       const r = resolveMode({
         agent: true,
