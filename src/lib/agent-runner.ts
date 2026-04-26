@@ -335,6 +335,15 @@ export async function runAgentWizard(
         retryMiddleware,
       ]);
 
+  // Read the apply-context env vars set by `wizard apply [--resume]` so a
+  // resumed run picks up the inner Claude SDK session that was captured the
+  // first time `apply` ran the plan. Both vars are optional — agent-runner
+  // falls back to a fresh run when either is missing or invalid.
+  const { getApplyContextFromEnv, applyPlanPatch } = await import(
+    './agent-plans.js'
+  );
+  const applyContext = getApplyContextFromEnv();
+
   const agentResult = await runAgent(
     agent,
     integrationPrompt,
@@ -349,6 +358,26 @@ export async function runAgentWizard(
         getAdditionalFeatureQueue ?? (() => session.additionalFeatureQueue),
       onFeatureStart: featureProgress?.onFeatureStart,
       onFeatureComplete: featureProgress?.onFeatureComplete,
+      // Resume the prior SDK session when --resume was passed. The SDK
+      // either rehydrates the conversation or, on a stale id, falls back
+      // to a fresh run (we clear the id on `onSessionStart` below).
+      ...(applyContext.resumeSessionId && {
+        resumeSessionId: applyContext.resumeSessionId,
+      }),
+      // Capture the SDK's session id (fresh OR forked from resume) so a
+      // future `apply --resume` can pass it back. Best-effort — failure to
+      // patch the plan must not break the run.
+      onSessionStart: (sessionId) => {
+        if (!applyContext.planId) return;
+        void applyPlanPatch(applyContext.planId, {
+          agentSessionId: sessionId,
+        }).catch((err: unknown) => {
+          logToFile(
+            'onSessionStart: applyPlanPatch failed',
+            err instanceof Error ? err.message : String(err),
+          );
+        });
+      },
       // Fires just before the SDK summarizes context. Refresh the on-disk
       // checkpoint so a compaction crash leaves the user with a resumable
       // state, and capture an analytics breadcrumb for cost/quality analysis.

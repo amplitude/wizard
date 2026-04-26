@@ -2202,6 +2202,12 @@ void yargs(hideBin(process.argv))
           describe: 'project directory the plan was generated against',
           type: 'string',
         },
+        resume: {
+          describe:
+            'resume the previous agent session captured against this plan (skip cold-start work after a SIGINT or crash)',
+          type: 'boolean',
+          default: false,
+        },
       });
     },
     (argv) => {
@@ -2280,17 +2286,46 @@ void yargs(hideBin(process.argv))
 
         // Plan validated and writes granted — fall through to the regular
         // wizard run, scoped to the plan's installDir + framework hint.
+        const wantsResume = Boolean(argv.resume);
+        const resumeSessionId = wantsResume
+          ? result.plan.agentSessionId ?? null
+          : null;
+        if (wantsResume && !resumeSessionId) {
+          // --resume was asked for but the plan has no captured session.
+          // Surface as a warning, then fall through to a fresh run rather
+          // than failing — a fresh run is the right default for a plan
+          // that has never been applied before.
+          if (mode.jsonOutput) {
+            process.stdout.write(
+              JSON.stringify({
+                v: 1,
+                '@timestamp': new Date().toISOString(),
+                type: 'log',
+                level: 'warn',
+                message: `--resume requested but plan ${planId} has no captured agent session yet. Running fresh.`,
+                data: { event: 'resume_unavailable', planId },
+              }) + '\n',
+            );
+          } else {
+            getUI().log.warn(
+              `--resume requested but plan ${planId} has no captured agent session yet. Running fresh.`,
+            );
+          }
+        }
         if (mode.jsonOutput) {
           process.stdout.write(
             JSON.stringify({
               v: 1,
               '@timestamp': new Date().toISOString(),
               type: 'lifecycle',
-              message: `applying plan ${planId}`,
+              message: resumeSessionId
+                ? `applying plan ${planId} (resuming session ${resumeSessionId})`
+                : `applying plan ${planId}`,
               data: {
                 event: 'apply_started',
                 planId,
                 framework: result.plan.framework,
+                ...(resumeSessionId && { resumeSessionId }),
               },
             }) + '\n',
           );
@@ -2300,6 +2335,11 @@ void yargs(hideBin(process.argv))
         // a follow-up — for now, apply runs the standard wizard with
         // agent-mode + writes granted, which is the same behavior as
         // `--agent --yes` today, plus a validated planId for audit.
+        //
+        // Resume flow: when --resume was passed AND the plan has a
+        // captured agent session id, we forward it via env. agent-runner
+        // reads AMPLITUDE_WIZARD_RESUME_SESSION_ID and passes it to the
+        // Claude SDK as `resume:`, which rehydrates the conversation.
         const { spawn } = await import('child_process');
         const args = [
           process.argv[1] ?? '',
@@ -2314,6 +2354,9 @@ void yargs(hideBin(process.argv))
           env: {
             ...process.env,
             AMPLITUDE_WIZARD_PLAN_ID: planId,
+            ...(resumeSessionId && {
+              AMPLITUDE_WIZARD_RESUME_SESSION_ID: resumeSessionId,
+            }),
           },
         });
         child.on('exit', (code) => process.exit(code ?? ExitCode.AGENT_FAILED));
