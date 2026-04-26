@@ -729,11 +729,14 @@ export function parseEventPlanContent(
   if (!result.success) return null;
   return result.data.map((e) => ({
     name: e.name ?? e.event ?? e.eventName ?? e.event_name ?? '',
+    // Standard aliases win over the verbose `eventDescriptionAndReasoning`
+    // legacy field — if an agent emits both a concise `event_description`
+    // and a long-form reasoning blob, prefer the concise one for the viewer.
     description:
       e.description ??
-      e.eventDescriptionAndReasoning ??
       e.event_description ??
       e.eventDescription ??
+      e.eventDescriptionAndReasoning ??
       '',
   }));
 }

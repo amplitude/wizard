@@ -1559,6 +1559,19 @@ describe('parseEventPlanContent', () => {
     expect(out?.[0]?.description).toBe('camel-case description');
   });
 
+  it('prefers concise event_description over verbose eventDescriptionAndReasoning', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        {
+          name: 'a',
+          event_description: 'concise',
+          eventDescriptionAndReasoning: 'long winded reasoning blob',
+        },
+      ]),
+    );
+    expect(out?.[0]?.description).toBe('concise');
+  });
+
   it('unwraps a top-level { events: [...] } wrapper', () => {
     const out = parseEventPlanContent(
       JSON.stringify({
