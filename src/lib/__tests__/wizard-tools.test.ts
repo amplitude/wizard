@@ -406,6 +406,41 @@ describe('ensureWizardArtifactsIgnored', () => {
     expect(occurrences).toBe(1);
   });
 
+  it('preserves user content below the wizard block when replacing it', () => {
+    // Regression: a previous version's regex `# Amplitude wizard(?:\n[^\n]*)*`
+    // was greedy and matched empty lines, so it consumed everything from the
+    // marker to EOF — silently deleting user gitignore entries below the
+    // wizard block when the block was replaced (e.g. on a wizard upgrade
+    // that adds a new pattern). This test pins the fix.
+    fs.writeFileSync(
+      path.join(tmpDir, '.gitignore'),
+      [
+        'node_modules',
+        '# Amplitude wizard',
+        '.amplitude-events.json',
+        '',
+        '# user blocks below — must survive',
+        'dist/',
+        '.env.production',
+      ].join('\n') + '\n',
+      'utf8',
+    );
+    ensureWizardArtifactsIgnored(tmpDir);
+    const content = readGitignore();
+    expect(content).toContain('node_modules');
+    // User content below the wizard block must be preserved
+    expect(content).toContain('# user blocks below — must survive');
+    expect(content).toContain('dist/');
+    expect(content).toContain('.env.production');
+    // And the wizard block was still updated with all current patterns
+    for (const pattern of WIZARD_GITIGNORE_PATTERNS) {
+      expect(content).toContain(pattern);
+    }
+    // Marker still appears exactly once
+    const occurrences = (content.match(/# Amplitude wizard/g) ?? []).length;
+    expect(occurrences).toBe(1);
+  });
+
   it('survives an unwritable .gitignore without throwing', () => {
     // Simulate a failure by passing a path under a non-existent dir
     const bogus = path.join(tmpDir, 'does-not-exist', 'nested');

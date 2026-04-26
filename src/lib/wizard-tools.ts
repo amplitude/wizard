@@ -266,10 +266,16 @@ export function ensureWizardArtifactsIgnored(installDir: string): void {
     // If the marker is already present, replace the block in place rather
     // than appending a second one. This handles the case where someone added
     // a new pattern to WIZARD_GITIGNORE_PATTERNS in a later wizard version.
+    //
+    // The trailing `(?:\n[^\n]+)*` matches consecutive non-empty lines after
+    // the marker — `[^\n]+` (one or more) instead of `[^\n]*` (zero or more)
+    // is critical: the latter matches empty content between two `\n`s and
+    // greedily consumes blank lines, which would silently swallow any user
+    // content below the wizard block.
     if (existing.includes(WIZARD_GITIGNORE_HEADER)) {
       const updated = existing.replace(
         new RegExp(
-          `${escapeRegex(WIZARD_GITIGNORE_HEADER)}(?:\\n[^\\n]*)*`,
+          `${escapeRegex(WIZARD_GITIGNORE_HEADER)}(?:\\n[^\\n]+)*`,
           'm',
         ),
         block,
