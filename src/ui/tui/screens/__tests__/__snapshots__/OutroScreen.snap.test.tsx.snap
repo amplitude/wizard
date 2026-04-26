@@ -1,0 +1,44 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`OutroScreen snapshots > renders the cancel state 1`] = `
+"
+  ─ Setup cancelled
+
+  Setup cancelled.
+
+  Manual setup: https://amplitude.com/docs/get-started/quickstart
+
+  Press any key to exit
+"
+`;
+
+exports[`OutroScreen snapshots > renders the error state with a message and docs fallback 1`] = `
+"
+  ✗ Setup failed
+
+  The agent could not detect your framework. Re-run with --menu to pick one manually.
+
+  → Check your API key and network connection
+  → Run the wizard again with --debug for more detail
+  → Docs: https://amplitude.com/docs/get-started/quickstart
+
+  Press any key to exit
+"
+`;
+
+exports[`OutroScreen snapshots > renders the success state with changes + continue link 1`] = `
+"
+  🎉 Amplitude is live!
+
+  ● Installed @amplitude/analytics-browser
+  ● Added .env.local with AMPLITUDE_API_KEY
+  ● Added 3 planned events to your tracking plan
+
+  Review changes in ./amplitude-setup-report.md
+
+
+  ▸ [1] View setup report
+    [2] Open Amplitude (amplitude.com)
+    [3] Exit
+"
+`;

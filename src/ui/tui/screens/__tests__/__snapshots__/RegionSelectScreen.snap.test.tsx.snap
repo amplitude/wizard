@@ -1,0 +1,23 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`RegionSelectScreen snapshots > renders the /region-forced switch with current region surfaced 1`] = `
+"Switch data-center region
+Current: US ─ pick a new region below
+
+
+▸ [1] United States (app.amplitude.com)
+  [2] Europe (app.eu.amplitude.com)
+
+· Data residency affects API endpoints and compliance. You can change this later with /region."
+`;
+
+exports[`RegionSelectScreen snapshots > renders the first-time region picker (US/EU) 1`] = `
+"Select your data region
+Select the region for your Amplitude project. This should match the region your organization uses.
+
+
+▸ [1] United States (app.amplitude.com)
+  [2] Europe (app.eu.amplitude.com)
+
+· Data residency affects API endpoints and compliance. You can change this later with /region."
+`;
