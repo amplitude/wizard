@@ -233,6 +233,11 @@ export function setProjectLogFile(installDir: string): void {
   }
   logFilePath = target;
   structuredLogFilePath = targetStructured;
+  // The new dir was just ensured; reset the per-write cache so any
+  // pre-cache entries (e.g. for the bootstrap dir) don't keep us from
+  // re-checking an unexpected path later.
+  ensuredDirs.clear();
+  ensuredDirs.add(dirname(target));
 }
 
 /**
@@ -316,13 +321,30 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
   error: 'ERROR',
 };
 
+/**
+ * Caches every directory we've already mkdir'd so the per-write
+ * `ensureDir` call collapses to a Set lookup after the first log line
+ * for a given directory. `initLogger` and `setProjectLogFile` already
+ * pre-create the dir, but the cache is also the safety net for the
+ * tiny window before `initLogger` runs (where `bootstrapLogPath()`
+ * is the active target and may not exist yet).
+ *
+ * Cleared by `setProjectLogFile` so the new project log dir gets
+ * ensured exactly once on the path switch.
+ */
+const ensuredDirs = new Set<string>();
+
 function writeToFile(entry: LogEntry): void {
   if (!logFileEnabled) return;
   try {
     const redacted = redact(entry) as LogEntry;
     const activePath = activeLogPath();
     const activeStructuredPath = activeStructuredLogPath();
-    ensureDir(dirname(activePath));
+    const dir = dirname(activePath);
+    if (!ensuredDirs.has(dir)) {
+      ensureDir(dir);
+      ensuredDirs.add(dir);
+    }
 
     // 1. Human-readable line to the main log file (displayed in TUI Logs tab).
     const ctxStr =
