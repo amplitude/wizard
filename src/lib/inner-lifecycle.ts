@@ -211,10 +211,16 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         return result;
       } catch (e) {
         if (ui) {
+          // `(e as Error).message` would throw TypeError if e is null /
+          // undefined / a string / etc. — both valid throws in JS. Defensive
+          // narrowing with instanceof avoids swallowing the original error
+          // behind a confusing TypeError and ensures the verification_result
+          // event still emits.
+          const failureMessage = e instanceof Error ? e.message : String(e);
           ui.emitVerificationResult({
             phase,
             success: false,
-            failures: [String((e as Error).message ?? e)],
+            failures: [failureMessage],
           });
         }
         throw e;
