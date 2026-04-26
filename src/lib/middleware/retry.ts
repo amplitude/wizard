@@ -15,6 +15,36 @@ import { analytics } from '../../utils/analytics';
 /** Default cap when the SDK doesn't include `max_retries`. */
 const FALLBACK_MAX_RETRIES = 10;
 
+/**
+ * Tiny storm-anchor helper shared by every code path that publishes a
+ * {@link RetryState}. It returns the timestamp of the *first* retry of the
+ * current storm — `stamp()` records `Date.now()` once and reuses it until
+ * `reset()` is called. This is what the UI grace period in
+ * `RetryStatusChip` measures against; without a shared anchor, paths that
+ * resample `Date.now()` per call (e.g. `publishRetryBanner` in
+ * `agent-interface.ts`) would never clear the grace and the chip would
+ * never appear during rapid outer-loop retry storms.
+ */
+export interface StormAnchor {
+  /** Returns the storm-start timestamp, lazily stamping it on first call. */
+  stamp(): number;
+  /** End the current storm — the next `stamp()` will start a new one. */
+  reset(): void;
+}
+
+export function createStormAnchor(): StormAnchor {
+  let startedAt: number | null = null;
+  return {
+    stamp(): number {
+      if (startedAt === null) startedAt = Date.now();
+      return startedAt;
+    },
+    reset(): void {
+      startedAt = null;
+    },
+  };
+}
+
 function reasonForStatus(status: number | null): string {
   if (status === null) return 'Reconnecting';
   if (status >= 500) return 'Amplitude gateway error';
@@ -66,32 +96,31 @@ export function createRetryMiddleware(
   onState: (state: RetryState | null) => void,
 ): Middleware {
   let active = false;
-  let stormStartedAt = 0;
+  const anchor = createStormAnchor();
   return {
     name: 'retry',
     onMessage(message: SDKMessage) {
-      // Only stamp the storm-start timestamp on the *first* retry of a run.
-      // Subsequent retries reuse it, so `startedAt` keeps climbing relative
-      // to `now` and the banner can decide "this has lasted long enough to
-      // bother the user".
-      const tentativeStart = active ? stormStartedAt : Date.now();
-      const next = parseRetryMessage(message, tentativeStart);
-      if (next) {
-        if (!active) stormStartedAt = tentativeStart;
-        active = true;
-        onState(next);
-        analytics.wizardCapture('llm retry', {
-          attempt: next.attempt,
-          'max retries': next.maxRetries,
-          'error status': next.errorStatus,
-          reason: next.reason,
-          'retry delay ms': Math.max(0, next.nextRetryAtMs - Date.now()),
-        });
-        return;
+      // Stamp lazily — only when we know this is an actual retry message,
+      // so non-retry traffic arriving before the first retry doesn't
+      // poison the storm anchor.
+      if (message.type === 'system' && message.subtype === 'api_retry') {
+        const next = parseRetryMessage(message, anchor.stamp());
+        if (next) {
+          active = true;
+          onState(next);
+          analytics.wizardCapture('llm retry', {
+            attempt: next.attempt,
+            'max retries': next.maxRetries,
+            'error status': next.errorStatus,
+            reason: next.reason,
+            'retry delay ms': Math.max(0, next.nextRetryAtMs - Date.now()),
+          });
+          return;
+        }
       }
       if (active) {
         active = false;
-        stormStartedAt = 0;
+        anchor.reset();
         onState(null);
       }
     },

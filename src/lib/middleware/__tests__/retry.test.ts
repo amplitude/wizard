@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createRetryMiddleware } from '../retry.js';
+import { createRetryMiddleware, createStormAnchor } from '../retry.js';
 import type { SDKMessage } from '../types.js';
 
 function apiRetryMessage(overrides: Partial<Record<string, unknown>> = {}) {
@@ -124,5 +124,43 @@ describe('createRetryMiddleware', () => {
     expect(state.attempt).toBe(1);
     expect(state.maxRetries).toBe(10);
     expect(state.errorStatus).toBeNull();
+  });
+});
+
+describe('createStormAnchor', () => {
+  // The storm anchor is shared between `createRetryMiddleware` and
+  // `publishRetryBanner` (in `agent-interface.ts`). Both paths produce
+  // RetryStates whose `startedAt` feeds the UI grace period — if either
+  // path resamples `Date.now()` on each call, the chip never appears
+  // during rapid retry storms (Cursor Bugbot caught exactly this regression
+  // on the first revision of this PR — see PR #286).
+
+  it('stamps once and reuses the same timestamp for subsequent calls', async () => {
+    const anchor = createStormAnchor();
+    const first = anchor.stamp();
+    await new Promise((r) => setTimeout(r, 5));
+    const second = anchor.stamp();
+    const third = anchor.stamp();
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+  });
+
+  it('starts a fresh storm after reset()', async () => {
+    const anchor = createStormAnchor();
+    const first = anchor.stamp();
+    anchor.reset();
+    await new Promise((r) => setTimeout(r, 5));
+    const second = anchor.stamp();
+    expect(second).toBeGreaterThan(first);
+  });
+
+  it('isolates state between separate anchors', () => {
+    const a = createStormAnchor();
+    const b = createStormAnchor();
+    a.stamp();
+    a.reset();
+    // b should still be unstamped — independent storms, independent state.
+    const bFirst = b.stamp();
+    expect(bFirst).toBeGreaterThan(0);
   });
 });
