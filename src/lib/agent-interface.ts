@@ -862,6 +862,31 @@ import { parseEventPlanContent } from './event-plan-parser.js';
 export { parseEventPlanContent };
 
 /**
+ * Pick the most recently modified existing file from a list of candidates.
+ *
+ * Used by the event-plan and dashboard watchers when both canonical
+ * (`<installDir>/.amplitude/...`) and legacy (`<installDir>/.amplitude-*`)
+ * paths might exist simultaneously — for example, when the migration
+ * shim moved an old run's canonical file into place but the agent later
+ * writes the legacy path during the current run. Returns null if none
+ * exist. Exported for testing.
+ */
+export function pickFreshestExisting(...paths: string[]): string | null {
+  let best: { path: string; mtimeMs: number } | null = null;
+  for (const p of paths) {
+    try {
+      const stat = fs.statSync(p);
+      if (best === null || stat.mtimeMs > best.mtimeMs) {
+        best = { path: p, mtimeMs: stat.mtimeMs };
+      }
+    } catch {
+      // File doesn't exist or is unreadable; skip.
+    }
+  }
+  return best?.path ?? null;
+}
+
+/**
  * Check if command is a Amplitude skill installation from MCP.
  * We control the MCP server, so we only need to verify:
  * 1. It installs to .claude/skills/
@@ -1677,23 +1702,26 @@ export async function runAgent(
       '.amplitude-events.json',
     );
     const readEventPlan = () => {
-      // Prefer the canonical path; fall back to the legacy mirror if it's
-      // the only one that exists. (Storage consolidation — PR 287.)
-      for (const candidate of [eventPlanPath, legacyEventPlanPath]) {
-        try {
-          const content = fs.readFileSync(candidate, 'utf-8');
-          const events = parseEventPlanContent(content);
-          if (events) {
-            const named = events.filter((e) => e.name.trim().length > 0);
-            // Memoize the latest successful parse so downstream code can
-            // surface it even if a later read fails (e.g. mid-write).
-            lastParsedEventPlan = named;
-            getUI().setEventPlan(named);
-            return;
-          }
-        } catch {
-          // Try next candidate
+      // Read whichever file was modified most recently. mtime-based
+      // selection handles the dashboard flow race (no code writes
+      // canonical during a run, so a stale canonical from a prior run
+      // would shadow the agent's fresh write to legacy) AND the
+      // events.json case where `persistEventPlan` writes both paths
+      // atomically.
+      const winner = pickFreshestExisting(eventPlanPath, legacyEventPlanPath);
+      if (!winner) return;
+      try {
+        const events = parseEventPlanContent(fs.readFileSync(winner, 'utf-8'));
+        if (events) {
+          const named = events.filter((e) => e.name.trim().length > 0);
+          // Memoize the latest successful parse so downstream code can
+          // surface it even if a later read fails (e.g. mid-write).
+          lastParsedEventPlan = named;
+          getUI().setEventPlan(named);
         }
+      } catch {
+        // Race: file vanished between stat and read. Next watcher
+        // event will retry.
       }
     };
     eventPlanHandle = startDualPathWatcher({
@@ -1719,17 +1747,24 @@ export async function runAgent(
       dashboardUrl: z.string().url(),
     });
     const readDashboardFile = () => {
-      for (const candidate of [dashboardFilePath, legacyDashboardFilePath]) {
-        try {
-          const content = fs.readFileSync(candidate, 'utf-8');
-          const result = dashboardFileSchema.safeParse(JSON.parse(content));
-          if (result.success) {
-            getUI().setDashboardUrl(result.data.dashboardUrl);
-            return;
-          }
-        } catch {
-          // Try next candidate
+      // Same mtime-based selection as `readEventPlan`. Critical here
+      // because nothing writes the canonical dashboard path during a
+      // run — only the agent writes legacy, so a migrated stale
+      // canonical from a prior run would otherwise shadow the agent's
+      // fresh URL.
+      const winner = pickFreshestExisting(
+        dashboardFilePath,
+        legacyDashboardFilePath,
+      );
+      if (!winner) return;
+      try {
+        const content = fs.readFileSync(winner, 'utf-8');
+        const result = dashboardFileSchema.safeParse(JSON.parse(content));
+        if (result.success) {
+          getUI().setDashboardUrl(result.data.dashboardUrl);
         }
+      } catch {
+        // File vanished or invalid JSON; next watcher event retries.
       }
     };
     dashboardHandle = startDualPathWatcher({

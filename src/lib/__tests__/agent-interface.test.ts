@@ -18,6 +18,7 @@ import {
   isSkillInstallCommand,
   matchesAllowedPrefix,
   parseEventPlanContent,
+  pickFreshestExisting,
   MAX_BASH_SLEEP_SECONDS,
   isAuthErrorMessage,
   HOOK_BRIDGE_RACE_RE,
@@ -31,6 +32,9 @@ import {
   AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
 } from '../wizard-session';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // Mock dependencies
 vi.mock('../../utils/analytics');
@@ -1594,6 +1598,61 @@ describe('buildWizardMetadata', () => {
   it('ignores unrelated flags', () => {
     const result = buildWizardMetadata({ 'other-flag': 'value' });
     expect(result).toEqual({ VARIANT: 'base' });
+  });
+});
+
+describe('pickFreshestExisting', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pick-freshest-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null when no candidates exist', () => {
+    const a = path.join(tmpDir, 'a');
+    const b = path.join(tmpDir, 'b');
+    expect(pickFreshestExisting(a, b)).toBeNull();
+  });
+
+  it('returns the only existing candidate', () => {
+    const a = path.join(tmpDir, 'a');
+    const b = path.join(tmpDir, 'b');
+    fs.writeFileSync(b, '');
+    expect(pickFreshestExisting(a, b)).toBe(b);
+  });
+
+  // Regression: bugbot caught the stale-canonical bug — the dashboard
+  // watcher always read the canonical path first, but during a run only
+  // the legacy path actually gets written (bundled context-hub skills
+  // write `.amplitude-dashboard.json`). If a migrated stale canonical
+  // existed from a prior run, the watcher returned its old URL and the
+  // agent's fresh write was never surfaced.
+  it('picks the freshest by mtime (legacy wins when written more recently)', () => {
+    const canonical = path.join(tmpDir, 'canonical');
+    const legacy = path.join(tmpDir, 'legacy');
+    fs.writeFileSync(canonical, 'stale');
+    // Backdate canonical so the test is deterministic regardless of
+    // filesystem timestamp resolution.
+    const oldTime = new Date(Date.now() - 60_000);
+    fs.utimesSync(canonical, oldTime, oldTime);
+    fs.writeFileSync(legacy, 'fresh');
+
+    expect(pickFreshestExisting(canonical, legacy)).toBe(legacy);
+  });
+
+  it('returns the canonical when it is the freshest', () => {
+    const canonical = path.join(tmpDir, 'canonical');
+    const legacy = path.join(tmpDir, 'legacy');
+    fs.writeFileSync(legacy, 'stale');
+    const oldTime = new Date(Date.now() - 60_000);
+    fs.utimesSync(legacy, oldTime, oldTime);
+    fs.writeFileSync(canonical, 'fresh');
+
+    expect(pickFreshestExisting(canonical, legacy)).toBe(canonical);
   });
 });
 
