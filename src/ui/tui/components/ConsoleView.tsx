@@ -434,12 +434,6 @@ export const ConsoleView = ({
   // or Esc to temporarily hide the panel.
   const visibleHistory = qaDismissed ? [] : history.slice(-2);
 
-  // Cap the Q&A panel to ~half the viewport so a single very long answer
-  // can't crowd out the screen content above. Anything beyond the cap is
-  // clipped via overflow="hidden" — the user can /clear or scroll the
-  // terminal scrollback to see more.
-  const qaPanelMaxHeight = Math.max(6, Math.floor(height * 0.5));
-
   return (
     <Box width={width} height={height} flexDirection="column">
       {/* Content area */}
@@ -538,7 +532,8 @@ export const ConsoleView = ({
       {/* Q&A history — rendered inline in the live region so answers stay
         visible. (Previously rendered via <Static>, which pushed content above
         the visible TUI in fullscreen mode.)
-        Capped to the most recent turn pair and clipped at ~half the viewport
+        Capped to the most recent turn pair; flexShrink + overflow="hidden"
+        let the panel give back rows when the rest of the chrome needs them
         so long answers can't crowd out the screen content above. */}
       {visibleHistory.length > 0 && (
         <Box
@@ -546,14 +541,12 @@ export const ConsoleView = ({
           paddingX={Layout.paddingX}
           flexShrink={1}
           overflow="hidden"
-          height={qaPanelMaxHeight}
         >
           {history.length > visibleHistory.length && (
             <Text color={Colors.subtle}>
               … {history.length - visibleHistory.length} earlier message
-              {history.length - visibleHistory.length === 1
-                ? ''
-                : 's'} hidden — /clear to wipe
+              {history.length - visibleHistory.length === 1 ? '' : 's'} hidden —
+              /clear to wipe
             </Text>
           )}
           {visibleHistory.map((turn, idx) =>
