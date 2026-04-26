@@ -58,8 +58,8 @@ export function tryToAppId(
 ): AppId | undefined {
   if (value === null || value === undefined || value === '') return undefined;
   const n = typeof value === 'number' ? value : Number(value);
-  if (!Number.isInteger(n) || n <= 0) return undefined;
-  return n as AppId;
+  const result = AppIdSchema.safeParse(n);
+  return result.success ? result.data : undefined;
 }
 
 /**
@@ -82,8 +82,8 @@ export const CliArgsSchema = z.object({
     .optional()
     .transform((v) => {
       if (v === undefined || v === '') return undefined;
-      const n = Number(v);
-      return Number.isInteger(n) && n > 0 ? (n as AppId) : undefined;
+      const result = AppIdSchema.safeParse(Number(v));
+      return result.success ? result.data : undefined;
     }),
   installDir: z
     .string()
