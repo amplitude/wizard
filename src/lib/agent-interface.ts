@@ -1535,6 +1535,10 @@ export async function runAgent(
         recentStatuses.length = 0;
         authErrorDetected = false;
         reportedError = null;
+        // Reset the agent recovery bag too — without this, modifiedFiles /
+        // lastStatus / compactionCount accumulated by a stalled attempt
+        // would leak into the next attempt's snapshot. (Bugbot catch.)
+        agentState.reset();
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received
