@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { resolveMaxTurns } from '../agent-interface';
 
 // Upper sanity bound mirrored from agent-interface.ts. Anything north of this
@@ -7,6 +7,21 @@ import { resolveMaxTurns } from '../agent-interface';
 const SANITY_BOUND = 10000;
 
 describe('resolveMaxTurns', () => {
+  let savedMaxTurns: string | undefined;
+
+  beforeEach(() => {
+    savedMaxTurns = process.env.AMPLITUDE_WIZARD_MAX_TURNS;
+    delete process.env.AMPLITUDE_WIZARD_MAX_TURNS;
+  });
+
+  afterEach(() => {
+    if (savedMaxTurns !== undefined) {
+      process.env.AMPLITUDE_WIZARD_MAX_TURNS = savedMaxTurns;
+    } else {
+      delete process.env.AMPLITUDE_WIZARD_MAX_TURNS;
+    }
+  });
+
   it('returns the default when the env var is unset', () => {
     expect(resolveMaxTurns(undefined)).toBe(200);
   });
