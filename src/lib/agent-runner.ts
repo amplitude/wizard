@@ -40,11 +40,7 @@ import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
-import {
-  wizardAbort,
-  registerCleanup,
-  WizardError,
-} from '../utils/wizard-abort';
+import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
@@ -96,36 +92,38 @@ export async function runAgentWizard(
   );
   ensureWizardArtifactsIgnored(session.installDir);
 
-  // Wire cleanup through TWO paths so it runs on every exit:
-  //   - registerCleanup → fires inside `wizardAbort` (the error-path
-  //     handlers in this file all delegate to wizardAbort, which calls
-  //     `process.exit()`. process.exit skips async finally blocks, so a
-  //     try/finally alone would NOT run cleanup on AUTH_ERROR /
-  //     MCP_MISSING / RESOURCE_MISSING / GATEWAY_DOWN / RATE_LIMIT /
-  //     API_ERROR — the very paths this PR is trying to cover).
-  //   - try/finally → fires on the success path (where the process
-  //     doesn't call wizardAbort) and on uncaught exceptions.
-  // cleanupWizardArtifacts is idempotent (each step `existsSync`-checks
-  // before unlinking) so double-firing is safe.
-  const cleanup = (): void => cleanupWizardArtifacts(session.installDir);
-  registerCleanup(cleanup);
-
-  try {
-    return await runAgentWizardBody(
-      config,
-      session,
-      getAdditionalFeatureQueue,
-      featureProgress,
-    );
-  } finally {
-    cleanup();
-  }
+  // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
+  // preserve the wizard's working artifacts (`.amplitude-events.json`,
+  // installed integration skills) so a re-run can pick up where the user
+  // left off without re-confirming the event plan or re-downloading
+  // skills. The gitignore (`ensureWizardArtifactsIgnored` above) keeps
+  // those files out of source control regardless, so leaving them on
+  // disk is harmless.
+  //
+  // Background: #261 originally wired cleanup through both `try/finally`
+  // and `registerCleanup` so it fired on every exit. That broke
+  // resumability — every Ctrl+C / transient error / cancel forced the
+  // user to re-confirm their entire instrumentation plan from scratch.
+  // The gitignore made the cleanup redundant for its stated purpose
+  // (preventing `git add .` pollution).
+  await runAgentWizardBody(
+    config,
+    session,
+    getAdditionalFeatureQueue,
+    featureProgress,
+  );
+  // Reached only on a successful body return — uncaught exceptions
+  // propagate naturally without running cleanup, which is exactly what
+  // we want (preserves resumability on cancel/error). Single-use
+  // integration skills are now safe to remove.
+  cleanupWizardArtifacts(session.installDir, { onSuccess: true });
 }
 
 /**
  * Internal: the body of `runAgentWizard`, extracted so the public entry
- * point can wrap it in a try/finally that always runs `cleanupWizardArtifacts`
- * — regardless of whether the run succeeded, errored, or was cancelled.
+ * point can run `cleanupWizardArtifacts({ onSuccess: true })` only on a
+ * successful body return. Uncaught exceptions propagate without running
+ * cleanup, preserving resumability on cancel/error.
  */
 async function runAgentWizardBody(
   config: FrameworkConfig,
