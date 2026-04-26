@@ -285,7 +285,12 @@ export const ConsoleView = ({
         // Esc with no pending prompt dismisses the Q&A panel so it stops
         // hogging vertical space. History is preserved — a new question or
         // /clear will resurface it.
-        if (key.escape && history.length > 0 && !qaDismissed) {
+        if (
+          key.escape &&
+          !pendingPrompt &&
+          history.length > 0 &&
+          !qaDismissed
+        ) {
           setQaDismissed(true);
           return;
         }
