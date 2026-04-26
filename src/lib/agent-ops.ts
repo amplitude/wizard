@@ -10,6 +10,7 @@
  */
 
 import path from 'path';
+import * as fs from 'fs';
 import { detectAllFrameworks } from '../run';
 import {
   detectAmplitudeInProject,
@@ -21,6 +22,7 @@ import {
   getStoredToken,
   type StoredUser,
 } from '../utils/ampli-settings';
+import { logToFile } from '../utils/debug';
 import { FRAMEWORK_REGISTRY } from './registry';
 import { Integration } from './constants';
 import {
@@ -29,7 +31,71 @@ import {
   type WizardPlan,
   type LoadPlanResult,
   type FileChange,
+  type PlannedEvent,
 } from './agent-plans.js';
+import { parseEventPlanContent } from './event-plan-parser.js';
+
+// ── Pre-existing event-plan reader ──────────────────────────────────
+//
+// `<installDir>/.amplitude-events.json` is the canonical record of an event
+// plan the user previously confirmed via `confirm_event_plan`. PR #274 made
+// this file persist across cancel/error so a re-run of `wizard plan` can
+// surface the prior plan as hints in the new plan emission.
+//
+// Parsing routes through `event-plan-parser.ts` so the TUI's Event Plan
+// viewer and this CLI reader stay locked to one schema. The parser is the
+// lightweight zod-only module — pulling it in here doesn't drag in the
+// Claude Agent SDK loader, the wizard UI singleton, or analytics, which
+// is the property `agent-ops` cares about (also used by the future
+// external MCP server).
+
+/**
+ * Read `<installDir>/.amplitude-events.json` if present and return its
+ * entries adapted to the WizardPlan `events` shape. Returns `[]` for any
+ * non-fatal failure (file missing, malformed JSON, schema mismatch,
+ * non-array content, all entries unparseable). Logs to the debug file so
+ * issues are recoverable post-mortem without breaking the plan emission.
+ */
+function readPreExistingEventHints(installDir: string): PlannedEvent[] {
+  const eventsPath = path.join(installDir, '.amplitude-events.json');
+  let raw: string;
+  try {
+    raw = fs.readFileSync(eventsPath, 'utf8');
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code !== 'ENOENT') {
+      logToFile(
+        `[runPlan] failed to read ${eventsPath}: ${err.message ?? err}`,
+      );
+    }
+    return [];
+  }
+
+  const events = parseEventPlanContent(raw);
+  if (events === null) {
+    // `null` covers both "not valid JSON" and "did not match the schema".
+    // The shared parser doesn't surface which, so we log a single generic
+    // line — the file path is enough to investigate post-mortem.
+    logToFile(
+      `[runPlan] ${eventsPath} could not be parsed as an event plan; skipping`,
+    );
+    return [];
+  }
+
+  // Adapt each entry to PlannedEvent: drop entries with no usable name,
+  // and clamp lengths so we never trip the WizardPlan zod validator
+  // (name max 80, desc max 500).
+  const adapted: PlannedEvent[] = [];
+  for (const entry of events) {
+    const name = entry.name.trim();
+    if (name.length === 0) continue;
+    adapted.push({
+      name: name.slice(0, 80),
+      description: entry.description.trim().slice(0, 500),
+    });
+  }
+  return adapted;
+}
 
 // ── detect ──────────────────────────────────────────────────────────
 
@@ -159,9 +225,19 @@ export interface PlanResult {
 }
 
 /**
- * Run the planning phase of the wizard: detect framework, gather any
- * pre-existing event hints (e.g. from `.amplitude-events.json`), persist a
- * `WizardPlan` to disk, and return it for the caller to emit as NDJSON.
+ * Run the planning phase of the wizard: detect framework, surface any
+ * pre-existing event hints from `<installDir>/.amplitude-events.json`
+ * (the canonical record written by `confirm_event_plan` and preserved
+ * across cancel/error since PR #274), persist a `WizardPlan` to disk,
+ * and return it for the caller to emit as NDJSON.
+ *
+ * Pre-existing events make `wizard plan` resumable: a user who confirmed
+ * an event plan, hit Ctrl+C, and re-ran `wizard plan` gets their previous
+ * selections reflected in the new plan emission. The same loose parser
+ * the TUI's Event Plan viewer uses is mirrored here, so casing variants
+ * the agent emits in the wild (`name`/`event`/`eventName`/`event_name`)
+ * all hydrate. Malformed or missing files quietly degrade to `events: []`
+ * — they are diagnostic noise, not a reason to fail the plan.
  *
  * No agent run, no file writes outside the plans directory. Outer agents
  * inspect the returned plan and decide whether to call `apply`.
@@ -186,9 +262,13 @@ export async function runPlan(installDir: string): Promise<PlanResult> {
       ? FRAMEWORK_REGISTRY[integration].detection.packageName
       : null;
 
+  // Pre-existing event plan from a prior cancelled/errored run, if any.
+  // Empty array on missing/malformed file — see `readPreExistingEventHints`.
+  const events = readPreExistingEventHints(resolvedInstallDir);
+
   // File-change hints are intentionally empty until the Planner phase can
-  // emit them. Outer agents see `events: []` and `fileChanges: []` and
-  // know the plan is detection-only; the real list arrives during `apply`
+  // emit them. Outer agents see `fileChanges: []` and know the plan is
+  // detection-only on that axis; the real list arrives during `apply`
   // via inner-agent lifecycle events (Gap 2 PR).
   const fileChanges: FileChange[] = [];
 
@@ -197,7 +277,7 @@ export async function runPlan(installDir: string): Promise<PlanResult> {
     framework: integration ?? 'generic',
     frameworkName: detect.frameworkName,
     sdk,
-    events: [],
+    events,
     fileChanges,
   });
 

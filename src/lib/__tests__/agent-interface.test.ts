@@ -782,6 +782,117 @@ describe('runAgent', () => {
       expect(firstPublishIndex).toBeGreaterThanOrEqual(0);
       expect(firstClearIndex).toBeGreaterThan(firstPublishIndex);
     });
+
+    // Regression coverage for issue #297 — the post-stream retry path
+    // would `signalDone() + continue` without draining the prior Query
+    // iterator, leaving the SDK subprocess alive long enough for
+    // in-flight tool calls to fire our PreToolUse hook on a closed stdio
+    // bridge ("Error in hook callback hook_0: Error: Stream closed").
+    it('drains the prior response iterator before retrying after a transient API error', async () => {
+      vi.useFakeTimers();
+
+      const returnSpy = vi.fn();
+      let queryCallCount = 0;
+      let firstAttemptReturnedAt: number | null = null;
+      let secondAttemptStartedAt: number | null = null;
+
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+        if (queryCallCount === 1) {
+          const gen = (async function* () {
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: true,
+              result: 'API Error: 400 terminated',
+            };
+          })();
+          // Spy on .return() so we can assert it was called on the prior
+          // iterator before the next attempt's `query()` was invoked.
+          const originalReturn = gen.return.bind(gen);
+          gen.return = (async (value?: unknown) => {
+            firstAttemptReturnedAt = queryCallCount;
+            returnSpy();
+            return originalReturn(value as never);
+          }) as typeof gen.return;
+          return gen;
+        }
+        secondAttemptStartedAt = queryCallCount;
+        return (async function* () {
+          yield {
+            type: 'result',
+            subtype: 'success',
+            is_error: false,
+            result: '',
+          };
+        })();
+      });
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      // Backoff between attempts is up to ~2.5s on attempt 1; advance
+      // generously to clear it.
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const result = await runPromise;
+
+      expect(result).toEqual({});
+      expect(queryCallCount).toBe(2);
+      expect(returnSpy).toHaveBeenCalledTimes(1);
+      // Cleanup must happen during attempt #1 (before #2 starts).
+      expect(firstAttemptReturnedAt).toBe(1);
+      expect(secondAttemptStartedAt).toBe(2);
+    });
+
+    // Issue #297 defense in depth: even if a `Stream closed` error does
+    // bubble out of the SDK (e.g. the cleanup happens too late), the
+    // catch path should treat it as transient and retry cleanly rather
+    // than crashing the run.
+    it('classifies Stream closed errors as transient and retries', async () => {
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+        if (queryCallCount === 1) {
+          // eslint-disable-next-line require-yield
+          return (async function* () {
+            throw new Error(
+              'Tool permission request failed: Error: Stream closed',
+            );
+          })();
+        }
+        return (async function* () {
+          yield {
+            type: 'result',
+            subtype: 'success',
+            is_error: false,
+            result: '',
+          };
+        })();
+      });
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const result = await runPromise;
+
+      expect(result).toEqual({});
+      expect(queryCallCount).toBe(2);
+    });
   });
 
   describe('race condition handling', () => {
@@ -1539,6 +1650,50 @@ describe('parseEventPlanContent', () => {
       ]),
     );
     expect(out?.[0]?.description).toBe('long form reasoning');
+  });
+
+  it('accepts snake_case event_description', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        { name: 'a', event_description: 'snake-case description' },
+      ]),
+    );
+    expect(out?.[0]?.description).toBe('snake-case description');
+  });
+
+  it('accepts camelCase eventDescription', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        { name: 'a', eventDescription: 'camel-case description' },
+      ]),
+    );
+    expect(out?.[0]?.description).toBe('camel-case description');
+  });
+
+  it('prefers concise event_description over verbose eventDescriptionAndReasoning', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        {
+          name: 'a',
+          event_description: 'concise',
+          eventDescriptionAndReasoning: 'long winded reasoning blob',
+        },
+      ]),
+    );
+    expect(out?.[0]?.description).toBe('concise');
+  });
+
+  it('unwraps a top-level { events: [...] } wrapper', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify({
+        events: [
+          { event_name: 'wrapped event', event_description: 'inside events[]' },
+        ],
+      }),
+    );
+    expect(out).toEqual([
+      { name: 'wrapped event', description: 'inside events[]' },
+    ]);
   });
 
   it('returns an empty-string name when no name field is present', () => {
