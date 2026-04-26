@@ -21,12 +21,16 @@ import { z } from 'zod';
 import {
   runDetect,
   runStatus,
+  runPlan,
+  runVerify,
   getAuthStatus,
   getAuthToken,
   type DetectResult,
   type StatusResult,
   type AuthStatusResult,
   type AuthTokenResult,
+  type PlanResult,
+  type VerifyResult,
 } from './agent-ops.js';
 
 const SERVER_NAME = 'amplitude-wizard';
@@ -109,6 +113,62 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
     async (args: unknown) => {
       const { installDir } = (args ?? {}) as { installDir?: string };
       const result: StatusResult = await runStatus(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
+  // -- plan_setup ---------------------------------------------------------
+  server.registerTool(
+    'plan_setup',
+    {
+      title: 'Plan an Amplitude setup',
+      description:
+        'Run the planning phase: detect the framework, build a structured ' +
+        'WizardPlan (framework, sdk, intended file changes), and persist it ' +
+        'to disk under a fresh planId. NO files are touched. The returned ' +
+        '`planId` can be passed to `apply` (CLI: `amplitude-wizard apply ' +
+        '--plan-id <id> --yes`) to actually execute the plan within 24h. ' +
+        'This tool is read-only and safe to call repeatedly — each call ' +
+        'creates a new plan.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to plan against. Defaults to the current working directory.',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const result: PlanResult = await runPlan(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
+  // -- verify_setup -------------------------------------------------------
+  server.registerTool(
+    'verify_setup',
+    {
+      title: 'Verify an Amplitude setup',
+      description:
+        'Cheap, no-network check that the project has the Amplitude SDK ' +
+        'installed, an API key configured, and a detectable framework. ' +
+        'Returns { outcome: "pass" | "fail", failures: [...] } with ' +
+        'structured reasons for any failures. Does NOT poll for ingestion; ' +
+        'use the CLI for that.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to verify. Defaults to the current working directory.',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const result: VerifyResult = await runVerify(installDir ?? process.cwd());
       return jsonContent(result);
     },
   );

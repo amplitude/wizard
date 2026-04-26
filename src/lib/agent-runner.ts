@@ -40,13 +40,28 @@ import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
-import {
-  wizardAbort,
-  registerCleanup,
-  WizardError,
-} from '../utils/wizard-abort';
+import { wizardAbort, WizardError } from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
+
+/** Path the wizard writes its debug log to — referenced in user-facing error copy. */
+const LOG_FILE_PATH = '/tmp/amplitude-wizard.log';
+/** Single source of truth for the support address shown in error messages. */
+const SUPPORT_EMAIL = 'wizard@amplitude.com';
+
+/**
+ * Build the "you can bypass the Amplitude gateway with a direct Anthropic
+ * key" hint shown in upstream-failure error messages. Shared by the
+ * GATEWAY_DOWN, terminated-400, rate-limit, and generic API_ERROR branches —
+ * all four are the same class of upstream-side problem from the user's
+ * perspective, so they should offer the same workaround.
+ */
+function buildGatewayBypassHint(): string {
+  const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+  return usingDirectKey
+    ? `You're already using a direct Anthropic API key, so this is likely an Anthropic-side issue. Wait a few minutes and re-run.`
+    : `Workaround: re-run with a direct Anthropic API key to bypass the Amplitude gateway:\n  ANTHROPIC_API_KEY=sk-ant-... npx @amplitude/wizard\n\nOr wait a few minutes and try again — gateway incidents typically resolve quickly.`;
+}
 
 /**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
@@ -96,36 +111,48 @@ export async function runAgentWizard(
   );
   ensureWizardArtifactsIgnored(session.installDir);
 
-  // Wire cleanup through TWO paths so it runs on every exit:
-  //   - registerCleanup → fires inside `wizardAbort` (the error-path
-  //     handlers in this file all delegate to wizardAbort, which calls
-  //     `process.exit()`. process.exit skips async finally blocks, so a
-  //     try/finally alone would NOT run cleanup on AUTH_ERROR /
-  //     MCP_MISSING / RESOURCE_MISSING / GATEWAY_DOWN / RATE_LIMIT /
-  //     API_ERROR — the very paths this PR is trying to cover).
-  //   - try/finally → fires on the success path (where the process
-  //     doesn't call wizardAbort) and on uncaught exceptions.
-  // cleanupWizardArtifacts is idempotent (each step `existsSync`-checks
-  // before unlinking) so double-firing is safe.
-  const cleanup = (): void => cleanupWizardArtifacts(session.installDir);
-  registerCleanup(cleanup);
-
-  try {
-    return await runAgentWizardBody(
-      config,
-      session,
-      getAdditionalFeatureQueue,
-      featureProgress,
-    );
-  } finally {
-    cleanup();
+  // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
+  // preserve the wizard's working artifacts (`.amplitude-events.json`,
+  // installed integration skills) so a re-run can pick up where the user
+  // left off without re-confirming the event plan or re-downloading
+  // skills. The gitignore (`ensureWizardArtifactsIgnored` above) keeps
+  // those files out of source control regardless, so leaving them on
+  // disk is harmless.
+  //
+  // Background: #261 originally wired cleanup through both `try/finally`
+  // and `registerCleanup` so it fired on every exit. That broke
+  // resumability — every Ctrl+C / transient error / cancel forced the
+  // user to re-confirm their entire instrumentation plan from scratch.
+  // The gitignore made the cleanup redundant for its stated purpose
+  // (preventing `git add .` pollution).
+  const success = await runAgentWizardBody(
+    config,
+    session,
+    getAdditionalFeatureQueue,
+    featureProgress,
+  );
+  // Cleanup runs only when the body explicitly signals success. Other
+  // exit paths preserve artifacts:
+  //   - body returns false  → non-success early return (e.g. version
+  //     check failure surfaced via getUI().cancel, which does NOT exit
+  //     the process). Skip cleanup so the user can re-run after
+  //     upgrading without re-downloading the integration skill.
+  //   - body throws         → propagates naturally; cleanup is skipped.
+  //   - wizardAbort path    → calls process.exit(); this line is never
+  //     reached, integration skills + events file stay on disk.
+  if (success) {
+    cleanupWizardArtifacts(session.installDir, { onSuccess: true });
   }
 }
 
 /**
  * Internal: the body of `runAgentWizard`, extracted so the public entry
- * point can wrap it in a try/finally that always runs `cleanupWizardArtifacts`
- * — regardless of whether the run succeeded, errored, or was cancelled.
+ * point can run `cleanupWizardArtifacts({ onSuccess: true })` only on a
+ * successful run. Returns `true` on a successful completion, `false` on
+ * non-throwing early-exit paths (e.g. version-check failure where we
+ * surface a cancel UI but don't throw or exit). Uncaught exceptions
+ * propagate without running cleanup, preserving resumability on
+ * cancel/error.
  */
 async function runAgentWizardBody(
   config: FrameworkConfig,
@@ -135,7 +162,7 @@ async function runAgentWizardBody(
     onFeatureStart?: (feature: AdditionalFeature) => void;
     onFeatureComplete?: (feature: AdditionalFeature) => void;
   },
-): Promise<void> {
+): Promise<boolean> {
   // Version check
   if (
     config.detection.getInstalledVersion ||
@@ -166,7 +193,10 @@ async function runAgentWizardBody(
         { docsUrl },
       );
       logToFile('[runAgentWizard] cancel displayed to user');
-      return;
+      // Non-success early return — caller skips success-path cleanup so
+      // the integration skill (and any prior `.amplitude-events.json`)
+      // stays on disk for a clean re-run after the user upgrades.
+      return false;
     }
   }
 
@@ -481,14 +511,10 @@ async function runAgentWizardBody(
     );
 
     const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
-    const bypassHint = usingDirectKey
-      ? `You're already using a direct Anthropic API key, so this is likely an Anthropic-side issue. Wait a few minutes and re-run.`
-      : `Workaround: re-run with a direct Anthropic API key to bypass the Amplitude gateway:\n  ANTHROPIC_API_KEY=sk-ant-... npx @amplitude/wizard\n\nOr wait a few minutes and try again — gateway incidents typically resolve quickly.`;
-
     await wizardAbort({
       message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
         agentResult.message || 'API Error: 400 terminated'
-      }). This is an issue with the Amplitude LLM gateway or its Vertex backend, not your project.\n\n${bypassHint}\n\nIf this persists, please report it (with the log file at /tmp/amplitude-wizard.log) to: wizard@amplitude.com`,
+      }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`,
       error: new WizardError(
         `LLM gateway unavailable: ${agentResult.message ?? 'unknown'}`,
         {
@@ -505,23 +531,57 @@ async function runAgentWizardBody(
     agentResult.error === AgentErrorType.RATE_LIMIT ||
     agentResult.error === AgentErrorType.API_ERROR
   ) {
+    // Subtype within API_ERROR: a terminal "400 terminated" mid-run is the
+    // same root cause as GATEWAY_DOWN (upstream dropping the connection),
+    // it just survived past the GATEWAY_DOWN guard because earlier attempts
+    // had succeeded. Frame it that way for the user instead of the bare
+    // "API Error" dump that used to surface — the Sentry issue 7442894144
+    // illustrates how unhelpful that is.
+    const rawMessage = agentResult.message ?? '';
+    const isTerminated400 = /400\s+terminated/i.test(rawMessage);
+    const isRateLimit = agentResult.error === AgentErrorType.RATE_LIMIT;
+
     captureWizardError(
       'Agent API',
-      agentResult.message ?? 'Unknown API error',
+      rawMessage || 'Unknown API error',
       'agent-runner',
       {
         integration: config.metadata.integration,
         'error type': agentResult.error,
+        // Lets us slice the Sentry stream by gateway-shaped failures so
+        // they group cleanly with GATEWAY_DOWN incidents.
+        'error subtype': isTerminated400
+          ? 'terminated_400'
+          : isRateLimit
+          ? 'rate_limit'
+          : 'other',
+        'using direct key': !!process.env.ANTHROPIC_API_KEY,
       },
     );
 
+    let userMessage: string;
+    if (isTerminated400) {
+      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+    } else if (isRateLimit) {
+      userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
+        rawMessage || 'API Error: 429'
+      }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
+    } else {
+      userMessage = `LLM gateway error\n\n${
+        rawMessage || 'Unknown error'
+      }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+    }
+
     await wizardAbort({
-      message: `API Error\n\n${
-        agentResult.message || 'Unknown error'
-      }\n\nPlease report this error to: wizard@amplitude.com`,
-      error: new WizardError(`API error: ${agentResult.message ?? 'unknown'}`, {
+      message: userMessage,
+      error: new WizardError(`API error: ${rawMessage || 'unknown'}`, {
         integration: config.metadata.integration,
         'error type': agentResult.error,
+        'error subtype': isTerminated400
+          ? 'terminated_400'
+          : isRateLimit
+          ? 'rate_limit'
+          : 'other',
       }),
       exitCode: ExitCode.NETWORK_ERROR,
     });
@@ -586,12 +646,15 @@ async function runAgentWizardBody(
     continueUrl,
   };
 
-  // Wizard-artifact cleanup happens in `runAgentWizard`'s try/finally so
-  // it runs on success, error, AND cancel paths. Don't duplicate here.
+  // Wizard-artifact cleanup happens in `runAgentWizard` after this
+  // function returns `true`. Cancel/error paths return `false` (or
+  // throw / call wizardAbort) so artifacts are preserved for a clean
+  // re-run.
 
   getUI().outro(`Successfully installed Amplitude!`);
 
   await analytics.shutdown('success');
+  return true;
 }
 
 /**

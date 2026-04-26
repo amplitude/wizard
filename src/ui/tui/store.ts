@@ -615,8 +615,16 @@ export class WizardStore {
   }
 
   /**
-   * Called from AuthScreen when the user finishes org + workspace selection.
-   * Writes ampli.json and records org/workspace on the session.
+   * Called from AuthScreen when org + workspace selection changes.
+   * Records org/workspace on the session, and (when `persist` is true)
+   * writes the IDs to the project's ampli.json.
+   *
+   * Pass `persist: false` from synthesisers that only mirror existing state
+   * (e.g. the auto-resolve effect that reflects values already loaded from
+   * ampli.json) — those code paths shouldn't trigger fresh disk writes
+   * during render. User-driven flows (picker selection, "start over",
+   * "create project") leave `persist` at its default of `true` so the
+   * config file stays in sync with what the user picked.
    */
   setOrgAndWorkspace(
     org: { id: string; name: string },
@@ -629,7 +637,10 @@ export class WizardStore {
       }> | null;
     },
     installDir: string,
+    options: { persist?: boolean } = {},
   ): void {
+    const { persist = true } = options;
+
     this.$session.setKey('selectedOrgId', org.id);
     this.$session.setKey('selectedOrgName', org.name);
     this.$session.setKey('selectedWorkspaceId', workspace.id);
@@ -643,19 +654,21 @@ export class WizardStore {
         .find((e) => e.app?.id)?.app?.id ?? null;
     this.$session.setKey('selectedAppId', appId);
 
-    // Write ampli.json to the project directory.
-    void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-      // readDisk: true — invoked from store mutation paths where the
-      // RegionSelect invariant isn't guaranteed (e.g. checkpoint restore).
-      const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE, {
-        readDisk: true,
+    if (persist) {
+      // Write ampli.json to the project directory.
+      void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
+        // readDisk: true — invoked from store mutation paths where the
+        // RegionSelect invariant isn't guaranteed (e.g. checkpoint restore).
+        const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE, {
+          readDisk: true,
+        });
+        writeAmpliConfig(installDir, {
+          OrgId: org.id,
+          WorkspaceId: workspace.id,
+          Zone: zone,
+        });
       });
-      writeAmpliConfig(installDir, {
-        OrgId: org.id,
-        WorkspaceId: workspace.id,
-        Zone: zone,
-      });
-    });
+    }
 
     this.emitChange();
   }
