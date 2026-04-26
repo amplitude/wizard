@@ -123,11 +123,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       session.selectedOrgId &&
       !pendingOrgs.some((o) => o.id === session.selectedOrgId)
     ) {
-      // Stale org — clear pre-populated values so the picker shows
+      // Stale org — clear pre-populated values so the picker shows.
+      // persist: false — this effect runs automatically when pendingOrgs
+      // arrive; the user's subsequent picker selection writes ampli.json
+      // with fresh values.
       store.setOrgAndWorkspace(
         { id: '', name: '' },
         { id: '', name: '' },
         session.installDir,
+        { persist: false },
       );
     }
   }, [pendingOrgs]);
@@ -162,15 +166,27 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         !session.selectedOrgName ||
         !session.selectedWorkspaceName)
     ) {
+      // Persist ampli.json only when this effect is committing genuinely
+      // new IDs (e.g. first-time single-org / single-workspace auto-select).
+      // When the IDs already match what's in the session, this effect is
+      // simply backfilling names that ampli.json doesn't store — the disk
+      // already has the correct values, so we skip the redundant write.
+      // That removes the render-time disk I/O the snapshot tests had to
+      // work around without changing the auth flow's observable outcome.
+      const idsAlreadyMatch =
+        session.selectedOrgId === effectiveOrg.id &&
+        session.selectedWorkspaceId === effectiveWorkspace.id;
       store.setOrgAndWorkspace(
         effectiveOrg,
         effectiveWorkspace,
         session.installDir,
+        { persist: !idsAlreadyMatch },
       );
     }
   }, [
     effectiveOrg?.id,
     effectiveWorkspace?.id,
+    session.selectedOrgId,
     session.selectedWorkspaceId,
     session.selectedOrgName,
     session.selectedWorkspaceName,

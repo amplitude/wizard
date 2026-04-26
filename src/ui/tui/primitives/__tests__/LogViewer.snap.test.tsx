@@ -1,0 +1,104 @@
+import React from 'react';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { render } from 'ink-testing-library';
+import { LogViewer } from '../LogViewer.js';
+
+vi.mock('../../hooks/useStdoutDimensions.js', () => ({
+  useStdoutDimensions: () => [80, 24] as const,
+}));
+
+// eslint-disable-next-line no-control-regex
+const ANSI_CSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]/g;
+// eslint-disable-next-line no-control-regex
+const ANSI_OSC_REGEX = /\x1b\][^\x07]*\x07/g;
+
+const sanitize = (frame: string): string =>
+  frame
+    .replace(ANSI_CSI_REGEX, '')
+    .replace(ANSI_OSC_REGEX, '')
+    .split('\n')
+    .map((line) => line.replace(/[ \t]+$/, ''))
+    .join('\n');
+
+describe('LogViewer snapshots', () => {
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-log-viewer-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  function writeLogFile(content: string): string {
+    const filePath = path.join(tempDir, 'wizard.log');
+    fs.writeFileSync(filePath, content);
+    return filePath;
+  }
+
+  function renderFrame(
+    filePath: string,
+    interact?: (
+      stdin: ReturnType<typeof render>['stdin'],
+      waitForFrame: () => Promise<void>,
+    ) => Promise<void> | void,
+  ): Promise<string> {
+    return (async () => {
+      const view = render(<LogViewer filePath={filePath} height={10} />);
+      const waitForFrame = () =>
+        new Promise<void>((resolve) => setTimeout(resolve, 0));
+      await waitForFrame();
+      await interact?.(view.stdin, waitForFrame);
+      await waitForFrame();
+      const frame = sanitize(view.lastFrame() ?? '');
+      view.unmount();
+      return frame;
+    })();
+  }
+
+  it('renders the live follow tail view', async () => {
+    const filePath = writeLogFile(
+      [
+        '[2026-04-26T16:00:00Z] INFO Start wizard',
+        '[2026-04-26T16:00:01Z] WARN Slow API response',
+        '[2026-04-26T16:00:02Z] ERROR Failed to create project',
+        'Traceback: line 1',
+        '[2026-04-26T16:00:03Z] INFO Retrying',
+        '[2026-04-26T16:00:04Z] INFO Completed successfully',
+      ].join('\n'),
+    );
+
+    await expect(renderFrame(filePath)).resolves.toMatchSnapshot();
+  });
+
+  it('renders inspect mode after jumping to the first error', async () => {
+    const filePath = writeLogFile(
+      [
+        '[2026-04-26T16:00:00Z] INFO Start wizard',
+        '[2026-04-26T16:00:01Z] WARN Slow API response',
+        '[2026-04-26T16:00:02Z] ERROR Failed to create project while talking to an extremely verbose upstream service',
+        'Traceback: line 1',
+        '[2026-04-26T16:00:03Z] INFO Retrying',
+        '[2026-04-26T16:00:04Z] ERROR Second failure happened in a very long diagnostic payload that requires horizontal panning',
+        'Traceback: line 2',
+      ].join('\n'),
+    );
+
+    const frame = await renderFrame(filePath, async (stdin, waitForFrame) => {
+      stdin.write('g');
+      await waitForFrame();
+      stdin.write('n');
+    });
+
+    expect(frame).toMatchSnapshot();
+  });
+
+  it('renders the missing-log fallback state', async () => {
+    const filePath = path.join(tempDir, 'missing.log');
+    await expect(renderFrame(filePath)).resolves.toMatchSnapshot();
+  });
+});
