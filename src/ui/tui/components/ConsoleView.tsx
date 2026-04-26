@@ -546,14 +546,13 @@ export const ConsoleView = ({
           paddingX={Layout.paddingX}
           flexShrink={1}
           overflow="hidden"
-          height={qaPanelMaxHeight}
+          maxHeight={qaPanelMaxHeight}
         >
           {history.length > visibleHistory.length && (
             <Text color={Colors.subtle}>
               … {history.length - visibleHistory.length} earlier message
-              {history.length - visibleHistory.length === 1
-                ? ''
-                : 's'} hidden — /clear to wipe
+              {history.length - visibleHistory.length === 1 ? '' : 's'} hidden —
+              /clear to wipe
             </Text>
           )}
           {visibleHistory.map((turn, idx) =>
