@@ -1,0 +1,14 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`EventPlanViewer snapshots > renders the waiting state before any events are proposed 1`] = `
+" Event plan
+
+ Waiting for the agent to propose events..."
+`;
+
+exports[`EventPlanViewer snapshots > renders visible events and skips blank names 1`] = `
+" Event plan
+
+ ● Project Created — Fires after successful project provisioning.
+ ● SDK Initialized"
+`;

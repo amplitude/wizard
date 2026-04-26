@@ -1,0 +1,18 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ProgressList snapshots > renders mixed task states with progress footer 1`] = `
+"Tasks
+
+◼ Detect framework
+▶ Creating project...
+◻ Write a very long instrumentation checklist item that
+  should wrap without breaking the icon gutter
+
+spinner Progress: 1/3 completed"
+`;
+
+exports[`ProgressList snapshots > renders the empty loading state 1`] = `
+"Tasks
+
+spinner Analyzing project..."
+`;
