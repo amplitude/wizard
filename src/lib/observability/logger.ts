@@ -309,6 +309,9 @@ function deriveStructuredPath(humanPath: string): string {
 
 // ── File writer ─────────────────────────────────────────────────────
 
+/** Directories already verified to exist — avoids a `mkdirSync` syscall per log line. */
+const ensuredDirs = new Set<string>();
+
 const LEVEL_LABEL: Record<LogLevel, string> = {
   debug: 'DEBUG',
   info: 'INFO ',
@@ -322,7 +325,11 @@ function writeToFile(entry: LogEntry): void {
     const redacted = redact(entry) as LogEntry;
     const activePath = activeLogPath();
     const activeStructuredPath = activeStructuredLogPath();
-    ensureDir(dirname(activePath));
+    const dir = dirname(activePath);
+    if (!ensuredDirs.has(dir)) {
+      ensureDir(dir);
+      ensuredDirs.add(dir);
+    }
 
     // 1. Human-readable line to the main log file (displayed in TUI Logs tab).
     const ctxStr =
