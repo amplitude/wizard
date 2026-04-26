@@ -106,24 +106,34 @@ export async function runAgentWizard(
   // user to re-confirm their entire instrumentation plan from scratch.
   // The gitignore made the cleanup redundant for its stated purpose
   // (preventing `git add .` pollution).
-  await runAgentWizardBody(
+  const success = await runAgentWizardBody(
     config,
     session,
     getAdditionalFeatureQueue,
     featureProgress,
   );
-  // Reached only on a successful body return — uncaught exceptions
-  // propagate naturally without running cleanup, which is exactly what
-  // we want (preserves resumability on cancel/error). Single-use
-  // integration skills are now safe to remove.
-  cleanupWizardArtifacts(session.installDir, { onSuccess: true });
+  // Cleanup runs only when the body explicitly signals success. Other
+  // exit paths preserve artifacts:
+  //   - body returns false  → non-success early return (e.g. version
+  //     check failure surfaced via getUI().cancel, which does NOT exit
+  //     the process). Skip cleanup so the user can re-run after
+  //     upgrading without re-downloading the integration skill.
+  //   - body throws         → propagates naturally; cleanup is skipped.
+  //   - wizardAbort path    → calls process.exit(); this line is never
+  //     reached, integration skills + events file stay on disk.
+  if (success) {
+    cleanupWizardArtifacts(session.installDir, { onSuccess: true });
+  }
 }
 
 /**
  * Internal: the body of `runAgentWizard`, extracted so the public entry
  * point can run `cleanupWizardArtifacts({ onSuccess: true })` only on a
- * successful body return. Uncaught exceptions propagate without running
- * cleanup, preserving resumability on cancel/error.
+ * successful run. Returns `true` on a successful completion, `false` on
+ * non-throwing early-exit paths (e.g. version-check failure where we
+ * surface a cancel UI but don't throw or exit). Uncaught exceptions
+ * propagate without running cleanup, preserving resumability on
+ * cancel/error.
  */
 async function runAgentWizardBody(
   config: FrameworkConfig,
@@ -133,7 +143,7 @@ async function runAgentWizardBody(
     onFeatureStart?: (feature: AdditionalFeature) => void;
     onFeatureComplete?: (feature: AdditionalFeature) => void;
   },
-): Promise<void> {
+): Promise<boolean> {
   // Version check
   if (
     config.detection.getInstalledVersion ||
@@ -164,7 +174,10 @@ async function runAgentWizardBody(
         { docsUrl },
       );
       logToFile('[runAgentWizard] cancel displayed to user');
-      return;
+      // Non-success early return — caller skips success-path cleanup so
+      // the integration skill (and any prior `.amplitude-events.json`)
+      // stays on disk for a clean re-run after the user upgrades.
+      return false;
     }
   }
 
@@ -584,12 +597,15 @@ async function runAgentWizardBody(
     continueUrl,
   };
 
-  // Wizard-artifact cleanup happens in `runAgentWizard`'s try/finally so
-  // it runs on success, error, AND cancel paths. Don't duplicate here.
+  // Wizard-artifact cleanup happens in `runAgentWizard` after this
+  // function returns `true`. Cancel/error paths return `false` (or
+  // throw / call wizardAbort) so artifacts are preserved for a clean
+  // re-run.
 
   getUI().outro(`Successfully installed Amplitude!`);
 
   await analytics.shutdown('success');
+  return true;
 }
 
 /**
