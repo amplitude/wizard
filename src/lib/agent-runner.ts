@@ -64,6 +64,52 @@ function buildGatewayBypassHint(): string {
 }
 
 /**
+ * Sentry subtype tags we attach to `API_ERROR` / `RATE_LIMIT` runs so we can
+ * group and alert on each upstream-shape separately. See
+ * {@link classifyApiErrorSubtype} for the rules.
+ */
+export type ApiErrorSubtype =
+  | 'stream_closed'
+  | 'terminated_400'
+  | 'rate_limit'
+  | 'other';
+
+/**
+ * Classify a surfaced API error into a Sentry-friendly subtype tag.
+ *
+ *   - `stream_closed`  — Hook bridge race during prior-attempt teardown
+ *                        (issue #297). PR #298 drains the prior iterator
+ *                        and treats this as transient inside the inner
+ *                        retry loop, so seeing it surface here means
+ *                        every retry exhausted with the same race —
+ *                        strong signal that the drain isn't fully
+ *                        effective and we need a deeper fix.
+ *   - `terminated_400` — Vertex/Anthropic killed the request mid-flight.
+ *                        Slipped past the GATEWAY_DOWN guard because
+ *                        earlier attempts had succeeded. (Sentry #7442894144)
+ *   - `rate_limit`     — Wizard exhausted retries against a 429 storm.
+ *   - `other`          — Unclassified API error. Catch-all.
+ *
+ * Pure for unit testing — no side effects. Exported so the
+ * agent-runner test can lock down the matching rules without standing up
+ * the full agent runtime.
+ */
+export function classifyApiErrorSubtype(input: {
+  errorType: AgentErrorType;
+  message: string;
+}): ApiErrorSubtype {
+  // Order matters: `stream_closed` first so a rate-limit message that
+  // happens to mention "stream closed" still classifies as the more
+  // specific bridge-race signal. In practice these strings are mutually
+  // exclusive on the rawMessage we receive, but the ordering makes the
+  // intent explicit.
+  if (/stream\s+closed/i.test(input.message)) return 'stream_closed';
+  if (/400\s+terminated/i.test(input.message)) return 'terminated_400';
+  if (input.errorType === AgentErrorType.RATE_LIMIT) return 'rate_limit';
+  return 'other';
+}
+
+/**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
  */
 function sessionToOptions(session: WizardSession): WizardOptions {
@@ -531,15 +577,30 @@ async function runAgentWizardBody(
     agentResult.error === AgentErrorType.RATE_LIMIT ||
     agentResult.error === AgentErrorType.API_ERROR
   ) {
-    // Subtype within API_ERROR: a terminal "400 terminated" mid-run is the
-    // same root cause as GATEWAY_DOWN (upstream dropping the connection),
-    // it just survived past the GATEWAY_DOWN guard because earlier attempts
-    // had succeeded. Frame it that way for the user instead of the bare
-    // "API Error" dump that used to surface — the Sentry issue 7442894144
-    // illustrates how unhelpful that is.
+    // Subtype within API_ERROR — these all share the "upstream dropped
+    // something" root cause but reach this branch by different paths:
+    //
+    //   terminated_400  — Vertex/Anthropic killed the request mid-flight.
+    //                     Slipped past the GATEWAY_DOWN guard because
+    //                     earlier attempts had succeeded. (Sentry #7442894144)
+    //   stream_closed   — Hook bridge race during prior-attempt teardown
+    //                     (issue #297). #298 drains the prior iterator
+    //                     and treats this as transient inside the inner
+    //                     retry loop, so seeing it surface here means
+    //                     every retry exhausted with the same bridge
+    //                     race — strong signal that the drain isn't
+    //                     fully effective and we need a deeper fix.
+    //   rate_limit      — Wizard exhausted retries against a 429 storm.
+    //   other           — Unclassified API error. Catch-all.
+    //
+    // Surfacing each subtype as its own Sentry tag lets us slice and
+    // alert separately, especially `stream_closed` which we expect to
+    // be near-zero post-#298.
     const rawMessage = agentResult.message ?? '';
-    const isTerminated400 = /400\s+terminated/i.test(rawMessage);
-    const isRateLimit = agentResult.error === AgentErrorType.RATE_LIMIT;
+    const errorSubtype = classifyApiErrorSubtype({
+      errorType: agentResult.error,
+      message: rawMessage,
+    });
 
     captureWizardError(
       'Agent API',
@@ -548,28 +609,33 @@ async function runAgentWizardBody(
       {
         integration: config.metadata.integration,
         'error type': agentResult.error,
-        // Lets us slice the Sentry stream by gateway-shaped failures so
-        // they group cleanly with GATEWAY_DOWN incidents.
-        'error subtype': isTerminated400
-          ? 'terminated_400'
-          : isRateLimit
-          ? 'rate_limit'
-          : 'other',
+        'error subtype': errorSubtype,
         'using direct key': !!process.env.ANTHROPIC_API_KEY,
       },
     );
 
     let userMessage: string;
-    if (isTerminated400) {
-      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
-    } else if (isRateLimit) {
-      userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
-        rawMessage || 'API Error: 429'
-      }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
-    } else {
-      userMessage = `LLM gateway error\n\n${
-        rawMessage || 'Unknown error'
-      }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+    switch (errorSubtype) {
+      case 'stream_closed':
+        // Stream closed survived past the inner retry loop's defense in
+        // depth (#298). Frame it as a connection issue with the same
+        // upstream-gateway treatment as terminated_400 — same family of
+        // root cause, same workaround.
+        userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+        break;
+      case 'terminated_400':
+        userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+        break;
+      case 'rate_limit':
+        userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
+          rawMessage || 'API Error: 429'
+        }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
+        break;
+      case 'other':
+        userMessage = `LLM gateway error\n\n${
+          rawMessage || 'Unknown error'
+        }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+        break;
     }
 
     await wizardAbort({
@@ -577,11 +643,7 @@ async function runAgentWizardBody(
       error: new WizardError(`API error: ${rawMessage || 'unknown'}`, {
         integration: config.metadata.integration,
         'error type': agentResult.error,
-        'error subtype': isTerminated400
-          ? 'terminated_400'
-          : isRateLimit
-          ? 'rate_limit'
-          : 'other',
+        'error subtype': errorSubtype,
       }),
       exitCode: ExitCode.NETWORK_ERROR,
     });
