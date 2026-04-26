@@ -32,6 +32,7 @@ import {
   type PlanResult,
   type VerifyResult,
 } from './agent-ops.js';
+import { wrapMcpServerWithSentry } from './observability/index.js';
 
 const SERVER_NAME = 'amplitude-wizard';
 const SERVER_VERSION = '1.0.0';
@@ -229,10 +230,15 @@ export async function startAgentMcpServer(): Promise<void> {
     '@modelcontextprotocol/sdk/server/stdio.js'
   );
 
-  const server = new McpServer({
+  const rawServer = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
   });
+
+  // Wrap with Sentry auto-instrumentation BEFORE registering tools so every
+  // tool call gets a span automatically. Wrapping is a no-op when telemetry
+  // is disabled — returns the raw server unchanged.
+  const server = wrapMcpServerWithSentry(rawServer);
 
   registerWizardTools(server as unknown as WizardMcpToolRegistrar);
 

@@ -15,6 +15,7 @@ import { atomicWriteJSON } from '../utils/atomic-write';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
+import { wrapMcpServerWithSentry } from './observability/index';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -1020,7 +1021,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
 
   // -- Assemble server ------------------------------------------------------
 
-  return createSdkMcpServer({
+  const rawServer = createSdkMcpServer({
     name: SERVER_NAME,
     version: '1.0.0',
     tools: [
@@ -1035,6 +1036,12 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       reportStatus,
     ],
   });
+
+  // Wrap with Sentry auto-instrumentation so every wizard-tools call gets a
+  // span in the active trace. No-op when telemetry is disabled — returns
+  // the raw server unchanged. The agent SDK types `createSdkMcpServer` as
+  // returning `unknown`, so we narrow to `object` here for the wrapper.
+  return wrapMcpServerWithSentry(rawServer as object);
 }
 
 /** Tool names exposed by the wizard-tools server, for use in allowedTools */
