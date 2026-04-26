@@ -14,6 +14,7 @@ import { join } from 'path';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
+import { toWorkspaceId } from './wizard-session.js';
 import { Integration } from './constants.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -148,7 +149,9 @@ export async function loadCheckpoint(
     region: checkpoint.region,
     selectedOrgId: checkpoint.selectedOrgId,
     selectedOrgName: checkpoint.selectedOrgName,
-    selectedWorkspaceId: checkpoint.selectedWorkspaceId,
+    selectedWorkspaceId: checkpoint.selectedWorkspaceId
+      ? toWorkspaceId(checkpoint.selectedWorkspaceId)
+      : null,
     selectedWorkspaceName: checkpoint.selectedWorkspaceName,
     selectedEnvName: checkpoint.selectedEnvName,
     integration,
