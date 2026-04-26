@@ -10,6 +10,7 @@ import type {
   AgentEventType,
   NeedsInputChoice,
   NeedsInputData,
+  NeedsInputWireData,
 } from '../lib/agent-events';
 import { createInterface } from 'readline';
 import { z } from 'zod';
@@ -375,16 +376,15 @@ export class AgentUI implements WizardUI {
    * emit + exit `ExitCode.INPUT_REQUIRED` (12).
    */
   emitNeedsInput<V = string>(data: NeedsInputData<V>): void {
-    emit('needs_input', data.message, {
-      data: {
-        event: 'needs_input',
-        code: data.code,
-        choices: data.choices,
-        recommended: data.recommended,
-        resumeFlags: data.resumeFlags,
-        responseSchema: data.responseSchema,
-      },
-    });
+    const wireData: NeedsInputWireData<V> = {
+      event: 'needs_input',
+      code: data.code,
+      choices: data.choices,
+      recommended: data.recommended,
+      resumeFlags: data.resumeFlags,
+      responseSchema: data.responseSchema,
+    };
+    emit('needs_input', data.message, { data: wireData });
   }
 
   // ── Logging ─────────────────────────────────────────────────────────

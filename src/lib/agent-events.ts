@@ -121,11 +121,3 @@ export interface NeedsInputWireData<V = string> {
 export type NeedsInputEvent<V = string> = AgentEventEnvelope<
   NeedsInputWireData<V>
 >;
-
-// ── Type guard helpers ──────────────────────────────────────────────
-
-export function isNeedsInputEvent(
-  event: AgentEventEnvelope<unknown>,
-): event is NeedsInputEvent<unknown> {
-  return event.type === 'needs_input';
-}
