@@ -34,10 +34,18 @@ const MIN_VISIBLE_ROWS = 5;
 const CHROME_FOOTER_RESERVE_ROWS = 3;
 
 /**
- * When a parent passes an explicit row budget, reserve space for the
- * optional scroll indicators that render outside the option list.
+ * When a parent passes an explicit row budget, reserve space for chrome
+ * rendered outside the option list:
+ *  - 1 row: PromptLabel header (always rendered, even with no message —
+ *    it outputs a single space character so it occupies one row).
+ *  - 2 rows: optional "↑ N more" / "↓ N more" scroll indicators above and
+ *    below the visible window when the list is paginated.
+ *
+ * Without this reserve, total rendered height would be
+ *   1 (header) + 2 (indicators) + (availableRows − 2) options = availableRows + 1
+ * and the parent's `overflow="hidden"` would clip the bottom indicator.
  */
-const SCROLL_INDICATOR_RESERVE_ROWS = 2;
+const CONSTRAINED_CHROME_RESERVE_ROWS = 3;
 
 /**
  * Pure helper — translate total rows + reserved chrome rows into the
@@ -65,7 +73,11 @@ interface PickerMenuProps<T> {
   mode?: 'single' | 'multi';
   centered?: boolean;
   columns?: 1 | 2 | 3 | 4;
-  /** Rows available for the option list inside a constrained parent region. */
+  /**
+   * Rows available for the option list inside a constrained parent region.
+   * Currently honoured only by single-mode pickers — multi-mode does not
+   * paginate, so this prop is ignored when `mode === 'multi'`.
+   */
   availableRows?: number;
   /** In multi mode, values to start selected. Ignored in single mode. */
   defaultSelected?: T[];
@@ -177,7 +189,7 @@ const SinglePickerMenu = <T,>({
 
   const chromeRows =
     availableRows !== undefined
-      ? SCROLL_INDICATOR_RESERVE_ROWS
+      ? CONSTRAINED_CHROME_RESERVE_ROWS
       : measuredHeader !== null
       ? measuredHeader + CHROME_FOOTER_RESERVE_ROWS
       : PICKER_CHROME_ROWS_FALLBACK;

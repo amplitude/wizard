@@ -46,16 +46,17 @@ describe('computeVisibleCount', () => {
   });
 
   describe('explicit parent-constrained budgets', () => {
-    it('reserves scroll-indicator rows from parent-provided budgets', () => {
-      expect(computeVisibleCount(9, 40, 2)).toBe(7);
+    it('reserves header + scroll-indicator rows from parent-provided budgets', () => {
+      // chromeRows=3 covers PromptLabel header (1 row) + up/down indicators (2 rows)
+      expect(computeVisibleCount(10, 40, 3)).toBe(7);
     });
 
     it('still caps visible rows to the option count after reserve rows', () => {
-      expect(computeVisibleCount(20, 7, 2)).toBe(7);
+      expect(computeVisibleCount(20, 7, 3)).toBe(7);
     });
 
     it('still enforces the minimum visible rows in tight parent budgets', () => {
-      expect(computeVisibleCount(6, 40, 2)).toBe(5);
+      expect(computeVisibleCount(6, 40, 3)).toBe(5);
     });
   });
 });
