@@ -6,6 +6,12 @@
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
 import type { RetryState } from '../lib/wizard-session';
+import type {
+  AgentEventType,
+  NeedsInputChoice,
+  NeedsInputData,
+  NeedsInputWireData,
+} from '../lib/agent-events';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 
@@ -179,21 +185,10 @@ export function parseEnvSelectionStdinLine(line: string | null | undefined): {
 
 // ── NDJSON event types ──────────────────────────────────────────────
 
-type NDJSONEventType =
-  | 'lifecycle'
-  | 'log'
-  | 'status'
-  | 'progress'
-  | 'session_state'
-  | 'prompt'
-  | 'diagnostic'
-  | 'result'
-  | 'error';
-
 interface NDJSONEvent {
   v: 1;
   '@timestamp': string;
-  type: NDJSONEventType;
+  type: AgentEventType;
   message: string;
   session_id?: string;
   run_id?: string;
@@ -224,7 +219,7 @@ function getCorrelationIds(): { session_id: string; run_id: string } {
 }
 
 function emit(
-  type: NDJSONEventType,
+  type: AgentEventType,
   message: string,
   extra?: Omit<NDJSONEvent, 'v' | '@timestamp' | 'type' | 'message'>,
 ): void {
@@ -365,6 +360,31 @@ export class AgentUI implements WizardUI {
         bypassEnv: data.bypassEnv,
       },
     });
+  }
+
+  /**
+   * Emit a structured `needs_input` event whenever the wizard would otherwise
+   * make a silent default choice. Outer agents inspect `choices` +
+   * `recommended`, surface the decision to a human, and resume with one of
+   * the `resumeFlags` argv arrays — or pipe a JSON line to stdin matching
+   * `responseSchema` when supported.
+   *
+   * This is the canonical replacement for any `silent auto-select`. When
+   * `--auto-approve` is set, callers should still emit this event (for
+   * audit) before proceeding with `recommended`. When neither
+   * `--auto-approve` nor `--yes` is set in agent mode, the caller should
+   * emit + exit `ExitCode.INPUT_REQUIRED` (12).
+   */
+  emitNeedsInput<V = string>(data: NeedsInputData<V>): void {
+    const wireData: NeedsInputWireData<V> = {
+      event: 'needs_input',
+      code: data.code,
+      choices: data.choices,
+      recommended: data.recommended,
+      resumeFlags: data.resumeFlags,
+      responseSchema: data.responseSchema,
+    };
+    emit('needs_input', data.message, { data: wireData });
   }
 
   // ── Logging ─────────────────────────────────────────────────────────
@@ -552,8 +572,22 @@ export class AgentUI implements WizardUI {
   // ── Prompts (auto-approve) ──────────────────────────────────────────
 
   promptConfirm(message: string): Promise<boolean> {
+    // Back-compat: keep the legacy `prompt` event so existing orchestrators
+    // that key off promptType: 'confirm' keep working.
     emit('prompt', message, {
       data: { promptType: 'confirm', autoResult: true },
+    });
+    // Also emit the structured `needs_input` so new orchestrators can
+    // inspect choices + resume flags. Default-yes preserves today's
+    // auto-approve semantics.
+    this.emitNeedsInput({
+      code: 'confirm',
+      message,
+      choices: [
+        { value: 'yes', label: 'Yes' },
+        { value: 'no', label: 'No' },
+      ],
+      recommended: 'yes',
     });
     return Promise.resolve(true);
   }
@@ -562,6 +596,12 @@ export class AgentUI implements WizardUI {
     const selected = options[0] ?? '';
     emit('prompt', message, {
       data: { promptType: 'choice', options, autoResult: selected },
+    });
+    this.emitNeedsInput({
+      code: 'choice',
+      message,
+      choices: options.map((opt) => ({ value: opt, label: opt })),
+      recommended: selected,
     });
     return Promise.resolve(selected);
   }
@@ -706,6 +746,32 @@ export class AgentUI implements WizardUI {
         },
       },
     );
+
+    // Also emit the canonical structured `needs_input` event. Newer
+    // orchestrators key off `type === 'needs_input'` instead of parsing
+    // the legacy `prompt` payload.
+    const needsInputChoices: NeedsInputChoice<string>[] = choices.map((c) => ({
+      value: String(c.appId ?? ''),
+      label: c.label,
+      hint: c.envName,
+    }));
+    const recommended =
+      needsInputChoices.find((c) => c.value !== '')?.value ?? undefined;
+    this.emitNeedsInput<string>({
+      code: 'environment_selection',
+      message: `Multiple Amplitude environments available — select one of ${choices.length}.`,
+      choices: needsInputChoices,
+      recommended,
+      resumeFlags: choices
+        .filter((c) => c.appId != null)
+        .map((c) => ({
+          value: String(c.appId),
+          flags: ['--app-id', String(c.appId)],
+        })),
+      responseSchema: {
+        appId: 'string (required, from choices[].value)',
+      },
+    });
 
     // Read one line from stdin. Parsing + matching is a pure helper so tests
     // can exercise it without stdin mocking. Outcomes:

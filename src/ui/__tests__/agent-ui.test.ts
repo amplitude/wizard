@@ -454,3 +454,99 @@ describe('resolveEnvSelectionFromStdin', () => {
     );
   });
 });
+
+describe('AgentUI.emitNeedsInput', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent =>
+    JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+
+  it('emits a needs_input envelope with code, choices, and recommended', () => {
+    const ui = new AgentUI();
+    ui.emitNeedsInput({
+      code: 'project_selection',
+      message: 'Pick an Amplitude project.',
+      choices: [
+        { value: '123', label: 'Production' },
+        { value: '456', label: 'Staging' },
+      ],
+      recommended: '456',
+      resumeFlags: [
+        { value: '123', flags: ['--app-id', '123'] },
+        { value: '456', flags: ['--app-id', '456'] },
+      ],
+    });
+
+    const event = lastEvent();
+    expect(event.v).toBe(1);
+    expect(event.type).toBe('needs_input');
+    expect(event.message).toBe('Pick an Amplitude project.');
+    expect(event.data).toMatchObject({
+      event: 'needs_input',
+      code: 'project_selection',
+      recommended: '456',
+    });
+    expect(event.data?.choices).toEqual([
+      { value: '123', label: 'Production' },
+      { value: '456', label: 'Staging' },
+    ]);
+    expect(event.data?.resumeFlags).toEqual([
+      { value: '123', flags: ['--app-id', '123'] },
+      { value: '456', flags: ['--app-id', '456'] },
+    ]);
+  });
+
+  it('promptConfirm emits a needs_input event in addition to the legacy prompt event', () => {
+    const ui = new AgentUI();
+    void ui.promptConfirm('Apply this plan?');
+
+    expect(writes.length).toBe(2);
+    const [legacy, modern] = writes.map(
+      (l) => JSON.parse(l.trim()) as NDJSONEvent,
+    );
+    expect(legacy.type).toBe('prompt');
+    expect(legacy.data).toMatchObject({ promptType: 'confirm' });
+    expect(modern.type).toBe('needs_input');
+    expect(modern.data).toMatchObject({
+      code: 'confirm',
+      recommended: 'yes',
+    });
+    expect(modern.data?.choices).toEqual([
+      { value: 'yes', label: 'Yes' },
+      { value: 'no', label: 'No' },
+    ]);
+  });
+
+  it('promptChoice emits a needs_input event with one choice per option', () => {
+    const ui = new AgentUI();
+    void ui.promptChoice('Pick a framework', ['nextjs', 'vue', 'svelte']);
+
+    expect(writes.length).toBe(2);
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.type).toBe('needs_input');
+    expect(modern.data).toMatchObject({
+      code: 'choice',
+      recommended: 'nextjs',
+    });
+    expect(modern.data?.choices).toEqual([
+      { value: 'nextjs', label: 'nextjs' },
+      { value: 'vue', label: 'vue' },
+      { value: 'svelte', label: 'svelte' },
+    ]);
+  });
+});

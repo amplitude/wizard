@@ -12,6 +12,14 @@ export const ExitCode = {
    * generic agent failures.
    */
   PROJECT_NAME_TAKEN: 11,
+  /**
+   * Agent-mode invocation needs a decision from the orchestrator (e.g. which
+   * environment / project to use) and `--auto-approve` was not set. The
+   * wizard emits a `needs_input` NDJSON event with `choices` + `resumeFlags`,
+   * then exits with this code so outer agents can surface the question to a
+   * human and re-invoke with the chosen flag.
+   */
+  INPUT_REQUIRED: 12,
   USER_CANCELLED: 130,
 } as const;
 
