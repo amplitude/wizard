@@ -1,0 +1,15 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`OutageScreen snapshots > renders the degraded-services banner with description, link, and prompt 1`] = `
+"◆ The setup agent is temporarily unavailable.
+
+Status: Elevated error rates affecting Anthropic API requests via gateway.
+Status page: https://status.anthropic.com
+
+The wizard may not work reliably while services are affected.
+
+ Continue anyway?
+
+    Continue [Enter]
+    Cancel [Esc]"
+`;
