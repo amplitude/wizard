@@ -1,0 +1,121 @@
+name: Auto-update PRs with main
+
+# When a commit lands on main, walk every open PR and have GitHub
+# replay the diff so reviewers and CI never see stale "out of date"
+# branches. Conflicts are surfaced via a `needs-rebase` label and an
+# Action Summary; nothing is force-pushed and nothing is destructive.
+#
+# Skips:
+# - Drafts (intentionally WIP)
+# - PRs from forks (we don't have permission)
+# - PRs labeled `do-not-auto-update` (escape hatch for stacked PRs
+#   that need to land in dependency order, or branches you've
+#   manually rebased and don't want overwritten)
+#
+# Graphite users: stacked PRs managed by Graphite should carry the
+# `do-not-auto-update` label. GitHub's "Update branch" replays the
+# diff onto main — that's correct for standalone PRs but breaks
+# Graphite's parent-child base refs. After a stack parent merges,
+# run `gt sync` locally; that's the supported restack path on the
+# free tier (we don't have Graphite's merge queue).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  pull-requests: write
+  contents: write
+
+concurrency:
+  group: auto-update-prs
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update open PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -uo pipefail
+
+          # Idempotent label create (no-op if it already exists)
+          gh label create needs-rebase \
+            --color FBCA04 \
+            --description "Auto-update with main hit a conflict" \
+            --repo "$REPO" 2>/dev/null || true
+
+          # Fetch open, non-draft, same-org PRs that aren't opted out
+          mapfile -t prs < <(
+            gh pr list --repo "$REPO" --state open --limit 200 \
+              --json number,isDraft,headRepositoryOwner,labels \
+              --jq ".[]
+                | select(.isDraft == false)
+                | select(.headRepositoryOwner.login == \"$OWNER\")
+                | select(.labels | map(.name) | contains([\"do-not-auto-update\"]) | not)
+                | .number"
+          )
+
+          if [ ${#prs[@]} -eq 0 ]; then
+            echo "No eligible PRs to update." | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          updated=()
+          already_current=()
+          conflicted=()
+
+          for pr in "${prs[@]}"; do
+            echo "::group::PR #$pr"
+            output=$(gh pr update-branch "$pr" --repo "$REPO" 2>&1) && rc=0 || rc=$?
+            echo "$output"
+
+            if [ $rc -eq 0 ]; then
+              if echo "$output" | grep -qi "already up to date\|already up-to-date"; then
+                already_current+=("$pr")
+              else
+                updated+=("$pr")
+              fi
+              # Clear stale label if the conflict is gone
+              gh pr edit "$pr" --repo "$REPO" --remove-label needs-rebase 2>/dev/null || true
+            else
+              conflicted+=("$pr")
+              gh pr edit "$pr" --repo "$REPO" --add-label needs-rebase 2>/dev/null || true
+            fi
+            echo "::endgroup::"
+          done
+
+          # Action summary
+          {
+            echo "## Auto-update results"
+            echo ""
+            echo "| Status | Count |"
+            echo "| --- | --- |"
+            echo "| Updated | ${#updated[@]} |"
+            echo "| Already current | ${#already_current[@]} |"
+            echo "| Conflicted (needs manual rebase) | ${#conflicted[@]} |"
+            echo ""
+            if [ ${#conflicted[@]} -gt 0 ]; then
+              echo "### Needs manual rebase"
+              echo ""
+              for pr in "${conflicted[@]}"; do
+                title=$(gh pr view "$pr" --repo "$REPO" --json title --jq .title 2>/dev/null || echo "")
+                echo "- [#$pr]($GITHUB_SERVER_URL/$REPO/pull/$pr) — $title"
+              done
+              echo ""
+              echo "Resolve locally:"
+              echo ""
+              echo "\`\`\`bash"
+              echo "git fetch origin main"
+              echo "git checkout <branch>"
+              echo "git rebase origin/main"
+              echo "# resolve conflicts, then:"
+              echo "git push --force-with-lease"
+              echo "\`\`\`"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
