@@ -3,14 +3,14 @@
 ## Running unit tests
 
 ```bash
-# From the wizard/ root — runs only health-check tests (fast, no build step)
-npx jest src/lib/health-checks/__tests__/health-checks.test.ts
+# From the wizard/ root, after `pnpm install`
+pnpm test -- src/lib/health-checks/__tests__/health-checks.test.ts
 
 # Watch mode
-npx jest src/lib/health-checks/__tests__/health-checks.test.ts --watch
+pnpm test:watch -- src/lib/health-checks/__tests__/health-checks.test.ts
 
 # With coverage
-npx jest src/lib/health-checks/__tests__/health-checks.test.ts --coverage
+pnpm test -- --coverage src/lib/health-checks/__tests__/health-checks.test.ts
 ```
 
 ## Running health checks live

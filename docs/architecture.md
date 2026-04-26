@@ -43,7 +43,7 @@ chart, first dashboard, and Slack integration.
 package.json → "bin": { "amplitude-wizard": "dist/bin.js" }
 ```
 
-`bin.ts` is the entry point. It uses yargs to define **9 top-level commands**:
+`bin.ts` is the entry point. It uses yargs to define the CLI surface below:
 
 | Command | What it does |
 |---------|-------------|
@@ -54,8 +54,11 @@ package.json → "bin": { "amplitude-wizard": "dist/bin.js" }
 | `feedback` | Submit product feedback |
 | `slack` | Connect Amplitude project to Slack (launches TUI SlackSetup flow) |
 | `region` | Switch data-center region (launches TUI RegionSelect flow) |
-| `mcp add` / `mcp remove` | Install or remove the Amplitude MCP server in editors |
-| `completion` | Generate shell completions (zsh/bash) |
+| `detect` | Detect the framework in the current project |
+| `status` | Show project setup state: framework, SDK, API key, auth |
+| `auth status` / `auth token` | Inspect the stored auth session or print the OAuth access token |
+| `mcp add` / `mcp remove` / `mcp serve` | Manage the Amplitude MCP server |
+| `manifest` | Print a machine-readable CLI description for AI agents |
 
 ### Global CLI flags
 
@@ -346,8 +349,8 @@ Parses arguments, initializes services, builds `WizardSession`, and hands off to
 the TUI or CI runner. Owns the boundary between "CLI tool" and "wizard logic."
 
 **bin.ts responsibilities (TUI mode):**
-1. Check Node.js >= 18.17.0
-2. Install shell completions silently
+1. Check the supported Node.js range
+2. Remove legacy shell-completion lines from the user's shell rc
 3. Import and call `startTUI()` — creates store, renders Ink app, swaps in InkUI
 4. Build session from CLI args via `buildSession()`
 5. Pre-populate credentials from `~/.ampli.json` for returning users (skips auth)
@@ -358,7 +361,7 @@ the TUI or CI runner. Owns the boundary between "CLI tool" and "wizard logic."
 10. Call `runWizard(args, session)` → `runAgentWizard()`
 
 **bin.ts responsibilities (CI mode):**
-1. Check Node.js >= 18.17.0
+1. Check the supported Node.js range
 2. `setUI(new LoggingUI())`
 3. Validate `--install-dir` is set (required in CI)
 4. Call `runWizard(args)` — builds session internally
@@ -1062,7 +1065,7 @@ javascript_web → python → javascriptNode → generic
 
 ### Adding a new framework
 
-Use the `adding-framework-support` skill (`.claude/skills/adding-framework-support/SKILL.md`).
+Use an existing framework directory and integration skill as your reference.
 The process:
 1. Add enum value to `Integration` in `constants.ts` (position matters)
 2. Create `src/frameworks/<name>/<name>-wizard-agent.ts` exporting a `FrameworkConfig`
@@ -1253,7 +1256,7 @@ Located in `src/**/__tests__/`. Run with vitest.
 
 ### BDD tests (`pnpm test:bdd`)
 
-Located in `features/*.feature` + `features/step-definitions/`. Run with Cucumber.js.
+Located in `features/`. Run with Cucumber.js.
 Gherkin scenarios test user-visible behavior.
 
 ### E2E tests (`pnpm test:e2e`)

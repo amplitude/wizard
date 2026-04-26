@@ -24,7 +24,7 @@ The flows cover:
 
 ### Entry points
 
-- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=18.17.0 required). Supports `--agent` (NDJSON machine output), `--ci`/`--yes` (non-interactive)
+- `bin.ts` — CLI entry point, yargs command definitions, mode flags (Node >=20 required by package metadata). Supports `--agent` (NDJSON machine output), `--ci`/`--yes` (non-interactive)
 - `src/run.ts` — main wizard orchestration, ties TUI to session
 - `src/ui/agent-ui.ts` — `AgentUI` — NDJSON `WizardUI` implementation for `--agent` mode. Auto-approves prompts, emits structured JSON events to stdout, redacts secrets from output
 
@@ -83,7 +83,9 @@ Each framework has its own directory containing a `*-wizard-agent.ts` file that 
 
 **Supported frameworks:** Next.js, Vue, React Router, Django, Flask, FastAPI, Swift, React Native, Android, Flutter, Go, Java, Unreal, Unity, Python (fallback), JavaScript/Node (fallback), JavaScript/Web (fallback), Generic (ultimate fallback)
 
-Adding a new framework? Use the `adding-framework-support` skill (`.claude/skills/adding-framework-support/SKILL.md`).
+Adding a new framework? Mirror an existing framework under `src/frameworks/`
+and its matching skill under `skills/integration/`, then follow the checklist
+below.
 
 ### Skills (`skills/`)
 
@@ -168,7 +170,7 @@ pnpm skills:refresh # pull all skills from context-hub (integration, instrumenta
 
 - **Unit tests:** `src/**/__tests__/` — vitest, run with `pnpm test`
 - **Router + flow tests:** `src/ui/tui/__tests__/router.test.ts` — parameterized router resolution tests. `src/ui/tui/__tests__/flow-invariants.test.ts` — fast-check property-based tests verifying flow invariants (24 tests: no backward navigation, unauthenticated users never see Run, error state skips post-success screens, etc.)
-- **BDD tests:** `features/*.feature` + `features/step-definitions/` — Cucumber.js, run with `pnpm test:bdd`
+- **BDD tests:** `features/` — Cucumber.js feature files and step definitions, run with `pnpm test:bdd`
 - **E2e tests:** `e2e-tests/` — build + run against test applications in `e2e-tests/test-applications/`
 - **Proxy tests:** `vitest.config.proxy.ts` — validate LLM proxy connectivity
 

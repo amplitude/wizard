@@ -83,7 +83,7 @@ const WIZARD_VERSION: string = (() => {
   }
 })();
 
-const NODE_VERSION_RANGE = '>=18.17.0';
+const NODE_VERSION_RANGE = '>=20';
 
 // Have to run this above the other imports because they are importing clack that
 // has the problematic imports.
