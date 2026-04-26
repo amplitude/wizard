@@ -11,6 +11,14 @@ import type {
   NeedsInputChoice,
   NeedsInputData,
   NeedsInputWireData,
+  InnerAgentStartedData,
+  ToolCallData,
+  FileChangePlannedData,
+  FileChangeAppliedData,
+  EventPlanProposedData,
+  EventPlanConfirmedData,
+  VerificationStartedData,
+  VerificationResultData,
 } from '../lib/agent-events';
 import { createInterface } from 'readline';
 import { z } from 'zod';
@@ -385,6 +393,100 @@ export class AgentUI implements WizardUI {
       responseSchema: data.responseSchema,
     };
     emit('needs_input', data.message, { data: wireData });
+  }
+
+  // ── Inner-agent lifecycle ───────────────────────────────────────────
+  //
+  // Emitted from agent-interface hooks (PreToolUse / PostToolUse /
+  // SessionStart / Stop) so outer agents can mirror what the inner Claude
+  // SDK is doing. Each emitter is a thin wrapper over `emit()` so the
+  // wire format stays consistent with the rest of agent-mode output.
+
+  /**
+   * Inner Claude SDK has booted and is about to start its first turn.
+   * Carries the model name and the wizard phase (plan / apply / verify /
+   * wizard) so the outer agent can attribute downstream events.
+   */
+  emitInnerAgentStarted(data: Omit<InnerAgentStartedData, 'event'>): void {
+    emit('lifecycle', `inner_agent_started: ${data.model}`, {
+      data: { event: 'inner_agent_started', ...data },
+    });
+  }
+
+  /**
+   * The inner agent is about to call a tool. Use the helper
+   * `summarizeToolInput` from `agent-events` to build a privacy-safe
+   * `summary` rather than passing the raw input through.
+   */
+  emitToolCall(data: Omit<ToolCallData, 'event'>): void {
+    emit(
+      'progress',
+      data.summary
+        ? `tool: ${data.tool} — ${data.summary}`
+        : `tool: ${data.tool}`,
+      { data: { event: 'tool_call', ...data } },
+    );
+  }
+
+  /**
+   * A write tool has been requested. Emitted from PreToolUse before any
+   * file change happens, so outer agents can preview and (optionally)
+   * abort. Pairs with `emitFileChangeApplied` on success.
+   */
+  emitFileChangePlanned(data: Omit<FileChangePlannedData, 'event'>): void {
+    emit('progress', `file_change_planned: ${data.operation} ${data.path}`, {
+      data: { event: 'file_change_planned', ...data },
+    });
+  }
+
+  /**
+   * A write tool has succeeded. Emitted from PostToolUse with the same
+   * path as the preceding `file_change_planned`. Outer agents pair these
+   * to build an audit trail of what the wizard wrote.
+   */
+  emitFileChangeApplied(data: Omit<FileChangeAppliedData, 'event'>): void {
+    emit('result', `file_change_applied: ${data.operation} ${data.path}`, {
+      data: { event: 'file_change_applied', ...data },
+    });
+  }
+
+  /**
+   * The inner agent has called `confirm_event_plan` with a proposed plan.
+   * Outer agents see the events list before any `track()` call is written.
+   */
+  emitEventPlanProposed(data: Omit<EventPlanProposedData, 'event'>): void {
+    emit('progress', `event_plan_proposed: ${data.events.length} events`, {
+      data: { event: 'event_plan_proposed', ...data },
+    });
+  }
+
+  /**
+   * The event plan has been resolved. `source` records who decided
+   * (auto / human / flag) so outer agents can audit decisions later.
+   */
+  emitEventPlanConfirmed(data: Omit<EventPlanConfirmedData, 'event'>): void {
+    emit('result', `event_plan_confirmed: ${data.decision} (${data.source})`, {
+      data: { event: 'event_plan_confirmed', ...data },
+    });
+  }
+
+  /** Verification phase has started — paired with `emitVerificationResult`. */
+  emitVerificationStarted(data: Omit<VerificationStartedData, 'event'>): void {
+    emit('progress', `verification_started: ${data.phase}`, {
+      data: { event: 'verification_started', ...data },
+    });
+  }
+
+  /** Verification phase has completed (success or failure with reasons). */
+  emitVerificationResult(data: Omit<VerificationResultData, 'event'>): void {
+    emit(
+      data.success ? 'result' : 'error',
+      `verification_result: ${data.phase} ${data.success ? 'pass' : 'fail'}`,
+      {
+        level: data.success ? 'success' : 'error',
+        data: { event: 'verification_result', ...data },
+      },
+    );
   }
 
   // ── Logging ─────────────────────────────────────────────────────────
