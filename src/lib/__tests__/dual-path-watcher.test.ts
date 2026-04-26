@@ -83,17 +83,25 @@ describe('startDualPathWatcher', () => {
       if (target === '/p/canonical') return canonicalWatcher;
       return undefined; // legacy doesn't exist
     });
+    const setIntervalFn = vi.fn(() => 'TIMER' as unknown);
+    const clearIntervalFn = vi.fn();
 
     const handle = startDualPathWatcher({
       canonicalPath: '/p/canonical',
       legacyPath: '/p/legacy',
       onChange,
       watch,
+      setInterval: setIntervalFn,
+      clearInterval: clearIntervalFn,
     });
 
     expect(handle.isWatching()).toBe(true);
     expect(handle.watchers()).toHaveLength(1);
     expect(onChange).toHaveBeenCalledTimes(1);
+    // Polling started to watch for the missing legacy path.
+    expect(setIntervalFn).toHaveBeenCalledTimes(1);
+
+    handle.dispose();
   });
 
   // Regression: bugbot caught that the inline implementation only stored
@@ -149,7 +157,7 @@ describe('startDualPathWatcher', () => {
 
   it('the poll fallback attaches each path at most once even if both eventually appear', () => {
     let canonicalReady = false;
-    const legacyReady = false;
+    let legacyReady = false;
     const canonicalWatcher = makeFakeWatcher();
     const legacyWatcher = makeFakeWatcher();
     const watch = vi.fn((target: string) => {
@@ -173,19 +181,67 @@ describe('startDualPathWatcher', () => {
       clearInterval: clearIntervalFn,
     });
 
-    // Tick: canonical appears first, legacy still missing.
+    // Tick: canonical appears first, legacy still missing — polling continues.
     canonicalReady = true;
     tickers[0]();
     expect(handle.watchers()).toEqual([canonicalWatcher]);
+    expect(clearIntervalFn).not.toHaveBeenCalled();
+
+    // Tick: legacy now also appears — polling stops.
+    legacyReady = true;
+    tickers[0]();
+    expect(handle.watchers()).toEqual([canonicalWatcher, legacyWatcher]);
     expect(clearIntervalFn).toHaveBeenCalled();
 
     // Even if a stray tick runs (e.g. timer cleared but enqueued), it
-    // must not double-attach the canonical path.
+    // must not double-attach either path.
     tickers[0]();
-    expect(handle.watchers()).toEqual([canonicalWatcher]);
+    expect(handle.watchers()).toEqual([canonicalWatcher, legacyWatcher]);
 
     handle.dispose();
     expect(canonicalWatcher.closed).toBe(true);
+    expect(legacyWatcher.closed).toBe(true);
+  });
+
+  it('polls for the missing legacy path when only canonical exists at startup', () => {
+    const canonicalWatcher = makeFakeWatcher();
+    const legacyWatcher = makeFakeWatcher();
+    let legacyReady = false;
+    const watch = vi.fn((target: string) => {
+      if (target === '/p/canonical') return canonicalWatcher;
+      if (target === '/p/legacy' && legacyReady) return legacyWatcher;
+      return undefined;
+    });
+    const tickers: Array<() => void> = [];
+    const setIntervalFn = vi.fn((handler: () => void) => {
+      tickers.push(handler);
+      return 'TIMER';
+    });
+    const clearIntervalFn = vi.fn();
+
+    const handle = startDualPathWatcher({
+      canonicalPath: '/p/canonical',
+      legacyPath: '/p/legacy',
+      onChange,
+      watch,
+      setInterval: setIntervalFn,
+      clearInterval: clearIntervalFn,
+    });
+
+    // Canonical attached at startup, onChange fired, but polling starts
+    // because legacy is still missing.
+    expect(handle.watchers()).toEqual([canonicalWatcher]);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(setIntervalFn).toHaveBeenCalledTimes(1);
+
+    // Legacy file appears (agent writes to it).
+    legacyReady = true;
+    tickers[0]();
+    expect(handle.watchers()).toEqual([canonicalWatcher, legacyWatcher]);
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(clearIntervalFn).toHaveBeenCalled();
+
+    handle.dispose();
   });
 
   it('dispose() is idempotent and safe to call before any watcher attaches', () => {

@@ -94,12 +94,23 @@ export function startDualPathWatcher(
 
   if (ok) {
     opts.onChange();
-  } else {
+  }
+
+  // Poll until BOTH paths are attached. This covers two cases:
+  //   1. Neither file exists at startup — poll until at least one appears.
+  //   2. One file exists but the other doesn't — the agent may write to
+  //      the missing path later (e.g. legacy dashboard during a run where
+  //      only canonical existed from migration). Without this, that write
+  //      would go unnoticed.
+  if (attached.size < 2) {
     pollHandle = setIntervalFn(() => {
-      const a = tryAttach(opts.canonicalPath);
-      const b = tryAttach(opts.legacyPath);
-      if (a || b) {
+      const before = attached.size;
+      tryAttach(opts.canonicalPath);
+      tryAttach(opts.legacyPath);
+      if (attached.size > before) {
         opts.onChange();
+      }
+      if (attached.size >= 2) {
         clearIntervalFn(pollHandle);
         pollHandle = undefined;
       }

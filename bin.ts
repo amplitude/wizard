@@ -170,9 +170,6 @@ const CLI_INVOCATION: string = (() => {
 })();
 
 /**
- * Build a WizardSession from CLI argv, avoiding the repeated 12-field literal.
- */
-/**
  * Bootstrap per-project storage state once `installDir` is known. Idempotent:
  *
  *   1. Runs the one-shot migration shim FIRST — moves any pre-refactor paths
