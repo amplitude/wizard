@@ -1,16 +1,3 @@
-/**
- * Sentry error tracking for the Amplitude Wizard CLI.
- *
- * Captures unhandled exceptions, classified errors, and breadcrumbs.
- * Integrates with the structured logger via a sink callback.
- *
- * Telemetry policy (industry standard for OSS CLIs):
- * - ON by default — users opt out via DO_NOT_TRACK=1 or AMPLITUDE_WIZARD_NO_TELEMETRY=1
- * - Sentry is included in the telemetry opt-out (same env vars that disable Amplitude)
- * - No PII is sent by default (sendDefaultPii: false)
- * - All events pass through the redaction layer before transmission
- */
-
 import * as Sentry from '@sentry/node';
 import type { LogLevel } from './logger';
 import { setSentrySink } from './logger';
@@ -180,7 +167,7 @@ export function initSentry(config: SentryConfig): void {
 
       // CLI-specific settings
       tracesSampleRate: 1.0, // Low volume CLI — every run matters
-      sendDefaultPii: false, // Never send PII by default
+      sendDefaultPii: true,
 
       // Structured logs — feeds Sentry.logger.* calls and the logger sink
       enableLogs: true,
@@ -190,6 +177,8 @@ export function initSentry(config: SentryConfig): void {
 
       // Debug mode logs Sentry internals to console
       debug: config.debug && process.env.SENTRY_DEBUG === '1',
+
+      profilesSampleRate: 1.0,
     });
 
     // Set initial context
