@@ -46,12 +46,16 @@ describe('computeVisibleCount', () => {
   });
 
   describe('explicit parent-constrained budgets', () => {
-    it('uses the provided row budget directly when picker chrome is external', () => {
-      expect(computeVisibleCount(9, 40, 0)).toBe(9);
+    it('reserves scroll-indicator rows from parent-provided budgets', () => {
+      expect(computeVisibleCount(9, 40, 2)).toBe(7);
     });
 
-    it('still caps visible rows to the option count', () => {
-      expect(computeVisibleCount(20, 7, 0)).toBe(7);
+    it('still caps visible rows to the option count after reserve rows', () => {
+      expect(computeVisibleCount(20, 7, 2)).toBe(7);
+    });
+
+    it('still enforces the minimum visible rows in tight parent budgets', () => {
+      expect(computeVisibleCount(6, 40, 2)).toBe(5);
     });
   });
 });
