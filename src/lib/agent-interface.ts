@@ -40,6 +40,7 @@ import type { PackageManagerDetector } from './package-manager-detection';
 import { z } from 'zod';
 import type { SDKMessage } from './middleware/types';
 import { safeParseSDKMessage } from './middleware/schemas';
+import { createStormAnchor } from './middleware/retry';
 import {
   type HookCallback,
   type HookCallbackMatcher,
@@ -154,6 +155,29 @@ export enum AgentErrorType {
 }
 
 const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
+
+const DEFAULT_MAX_TURNS = 200;
+/**
+ * Upper sanity bound on AMPLITUDE_WIZARD_MAX_TURNS. A real run almost never
+ * needs more than a few hundred turns; anything north of this is far more
+ * likely to be a fat-fingered env var or shell expansion bug than a
+ * legitimate cap. We refuse rather than letting the agent loop unboundedly.
+ */
+const MAX_TURNS_SANITY_BOUND = 10000;
+
+/** Parse AMPLITUDE_WIZARD_MAX_TURNS as a positive integer within the sanity
+ * bound. Falls back to the default on any invalid value (empty, non-numeric,
+ * zero, negative, or larger than {@link MAX_TURNS_SANITY_BOUND}) so bad env
+ * state can't DoS the agent. */
+export function resolveMaxTurns(
+  envValue: string | undefined = process.env.AMPLITUDE_WIZARD_MAX_TURNS,
+): number {
+  if (!envValue) return DEFAULT_MAX_TURNS;
+  const parsed = Number.parseInt(envValue, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_MAX_TURNS;
+  if (parsed > MAX_TURNS_SANITY_BOUND) return DEFAULT_MAX_TURNS;
+  return parsed;
+}
 
 // Active StatusReporter slot. runAgent sets this at the start of each attempt
 // and clears it afterwards so the in-process wizard-tools `report_status` tool
@@ -1277,6 +1301,16 @@ function extractHttpStatusFromMessage(msg: string): number | null {
 }
 
 /**
+ * Storm anchor for the outer retry loop. Shared across `publishRetryBanner`
+ * calls so consecutive retries reuse the same `startedAt` — required for
+ * the UI grace period in {@link RetryStatusChip} to ever clear during a
+ * storm of rapid post-stream / catch-path retries (each call resamples
+ * `Date.now()` otherwise, and `now - startedAt` never crosses the
+ * threshold). Reset by `clearRetryBanner` when the loop exits cleanly.
+ */
+const bannerStormAnchor = createStormAnchor();
+
+/**
  * Publish a retry banner to the UI. Used from the post-stream and catch-path
  * retry sites — the middleware-based path handles live `api_retry` messages.
  * Swallows UI errors so a failed update never aborts the retry loop.
@@ -1287,14 +1321,14 @@ function publishRetryBanner(input: {
   errorStatus: number | null;
   reason: string;
 }): void {
-  const now = Date.now();
+  const stormStartedAt = bannerStormAnchor.stamp();
   const state: RetryState = {
     attempt: input.attempt,
     maxRetries: input.maxRetries,
-    nextRetryAtMs: now,
+    nextRetryAtMs: Date.now(),
     errorStatus: input.errorStatus,
     reason: input.reason,
-    startedAt: now,
+    startedAt: stormStartedAt,
   };
   try {
     getUI().setRetryState(state);
@@ -1304,6 +1338,7 @@ function publishRetryBanner(input: {
 }
 
 function clearRetryBanner(): void {
+  bannerStormAnchor.reset();
   try {
     getUI().setRetryState(null);
   } catch {
@@ -1686,6 +1721,13 @@ export async function runAgent(
         }, timeoutMs);
       };
 
+      const resolvedMaxTurns = resolveMaxTurns();
+      logToFile(
+        `Agent maxTurns resolved: ${resolvedMaxTurns} (env=${
+          process.env.AMPLITUDE_WIZARD_MAX_TURNS ?? '<unset>'
+        })`,
+      );
+
       try {
         const response = query({
           prompt: createPromptStream(),
@@ -1699,8 +1741,10 @@ export async function runAgent(
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
-            // Safety nets: cap runaway tool loops and token spend
-            maxTurns: 200,
+            // Safety nets: cap runaway tool loops and token spend.
+            // AMPLITUDE_WIZARD_MAX_TURNS env var overrides the default
+            // (useful for evals + quick iteration). Invalid values fall back.
+            maxTurns: resolvedMaxTurns,
             // Extended thinking — give the model a small reasoning budget on
             // every turn. The instrumentation-planning phase before
             // confirm_event_plan is the most thinking-intensive moment, but
