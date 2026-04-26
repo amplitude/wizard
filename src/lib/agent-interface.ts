@@ -27,6 +27,10 @@ import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
 import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
+import {
+  startDualPathWatcher,
+  type DualPathWatcherHandle,
+} from './dual-path-watcher';
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
@@ -1632,13 +1636,13 @@ export async function runAgent(
     }
   }, 10_000);
 
-  // Event plan file watcher — cleaned up in finally block
-  let eventPlanWatcher: fs.FSWatcher | undefined;
-  let eventPlanInterval: ReturnType<typeof setInterval> | undefined;
-
-  // Dashboard file watcher — cleaned up in finally block
-  let dashboardWatcher: fs.FSWatcher | undefined;
-  let dashboardInterval: ReturnType<typeof setInterval> | undefined;
+  // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
+  // and their legacy `.amplitude-events.json` / `.amplitude-dashboard.json`
+  // mirrors (still written by bundled context-hub integration skills).
+  // The handle's `dispose()` closes EVERY watcher it created, so cleanup
+  // can't miss a handle when both paths exist simultaneously.
+  let eventPlanHandle: DualPathWatcherHandle | undefined;
+  let dashboardHandle: DualPathWatcherHandle | undefined;
 
   try {
     // Tools needed for the wizard:
@@ -1667,8 +1671,6 @@ export async function runAgent(
     // (owned by context-hub) still instruct the agent to write the legacy
     // path during the conclude phase. Watching both keeps backwards compat
     // until context-hub ships an updated skill set.
-    //
-    // Set up once before retries.
     const eventPlanPath = getEventsFile(agentConfig.workingDirectory);
     const legacyEventPlanPath = path.join(
       agentConfig.workingDirectory,
@@ -1694,35 +1696,11 @@ export async function runAgent(
         }
       }
     };
-
-    const watchEventPlanPath = (target: string) => {
-      try {
-        return fs.watch(target, () => readEventPlan());
-      } catch {
-        return undefined;
-      }
-    };
-
-    let canonicalWatcher = watchEventPlanPath(eventPlanPath);
-    let legacyWatcher = watchEventPlanPath(legacyEventPlanPath);
-    if (canonicalWatcher || legacyWatcher) {
-      eventPlanWatcher = canonicalWatcher ?? legacyWatcher!;
-      readEventPlan();
-    } else {
-      // Neither file exists yet — poll until either appears.
-      eventPlanInterval = setInterval(() => {
-        canonicalWatcher =
-          canonicalWatcher ?? watchEventPlanPath(eventPlanPath);
-        legacyWatcher =
-          legacyWatcher ?? watchEventPlanPath(legacyEventPlanPath);
-        if (canonicalWatcher || legacyWatcher) {
-          readEventPlan();
-          clearInterval(eventPlanInterval);
-          eventPlanInterval = undefined;
-          eventPlanWatcher = canonicalWatcher ?? legacyWatcher!;
-        }
-      }, 1000);
-    }
+    eventPlanHandle = startDualPathWatcher({
+      canonicalPath: eventPlanPath,
+      legacyPath: legacyEventPlanPath,
+      onChange: readEventPlan,
+    });
 
     // Watch for the dashboard URL handoff from the agent's conclude step.
     //
@@ -1754,36 +1732,11 @@ export async function runAgent(
         }
       }
     };
-
-    const watchDashboardPath = (target: string) => {
-      try {
-        return fs.watch(target, () => readDashboardFile());
-      } catch {
-        return undefined;
-      }
-    };
-
-    let canonicalDashboardWatcher = watchDashboardPath(dashboardFilePath);
-    let legacyDashboardWatcher = watchDashboardPath(legacyDashboardFilePath);
-    if (canonicalDashboardWatcher || legacyDashboardWatcher) {
-      dashboardWatcher = canonicalDashboardWatcher ?? legacyDashboardWatcher!;
-      readDashboardFile();
-    } else {
-      // Neither file exists yet — poll until either appears.
-      dashboardInterval = setInterval(() => {
-        canonicalDashboardWatcher =
-          canonicalDashboardWatcher ?? watchDashboardPath(dashboardFilePath);
-        legacyDashboardWatcher =
-          legacyDashboardWatcher ?? watchDashboardPath(legacyDashboardFilePath);
-        if (canonicalDashboardWatcher || legacyDashboardWatcher) {
-          readDashboardFile();
-          clearInterval(dashboardInterval);
-          dashboardInterval = undefined;
-          dashboardWatcher =
-            canonicalDashboardWatcher ?? legacyDashboardWatcher!;
-        }
-      }, 1000);
-    }
+    dashboardHandle = startDualPathWatcher({
+      canonicalPath: dashboardFilePath,
+      legacyPath: legacyDashboardFilePath,
+      onChange: readDashboardFile,
+    });
 
     // Retry loop: if the agent stalls (no message for the configured timeout), abort
     // and re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES.
@@ -2578,10 +2531,12 @@ export async function runAgent(
     throw error;
   } finally {
     clearInterval(heartbeatInterval);
-    eventPlanWatcher?.close();
-    if (eventPlanInterval) clearInterval(eventPlanInterval);
-    dashboardWatcher?.close();
-    if (dashboardInterval) clearInterval(dashboardInterval);
+    // `dispose()` closes EVERY watcher the helper created plus any
+    // pending poll-fallback timer — there's no path where one of the
+    // two file handles can leak when both canonical and legacy paths
+    // exist (the bug that was previously inline here).
+    eventPlanHandle?.dispose();
+    dashboardHandle?.dispose();
     clearRetryBanner();
     _activeStatusReporter = undefined;
   }

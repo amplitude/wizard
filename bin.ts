@@ -183,19 +183,29 @@ const CLI_INVOCATION: string = (() => {
 /**
  * Bootstrap per-project storage state once `installDir` is known. Idempotent:
  *
- *   1. Switches the logger from `<cacheRoot>/bootstrap.log` to the
- *      per-project file under `<cacheRoot>/runs/<hash>/log.txt`. Two
- *      parallel wizard runs in different directories no longer share a log.
- *   2. Runs the one-shot migration shim — moves any pre-refactor paths
+ *   1. Runs the one-shot migration shim FIRST — moves any pre-refactor paths
  *      (e.g. `/tmp/amplitude-wizard.log`, `<installDir>/.amplitude-events.json`)
  *      into the new layout. Drop after one release.
+ *   2. THEN switches the logger from `<cacheRoot>/bootstrap.log` to the
+ *      per-project file under `<cacheRoot>/runs/<hash>/log.txt`. Two
+ *      parallel wizard runs in different directories no longer share a log.
+ *
+ * Order matters: migration runs before the logger switches because
+ * `setProjectLogFile` writes a "continuing in <target>" marker to the
+ * bootstrap log. If that marker created `<cacheRoot>/bootstrap.log` first,
+ * the migration's "skip when destination exists" branch would discard the
+ * legacy `/tmp/amplitude-wizard.log` content instead of moving it across.
  *
  * Called from `buildSessionFromOptions` so every entry path picks it up
- * automatically (TUI, agent, CI, sub-commands).
+ * automatically (TUI, agent, CI, sub-commands). Skipped under
+ * `NODE_ENV=test` because vitest module mocks don't always intercept the
+ * dynamic-import chain bin.ts uses, and CLI tests aren't exercising the
+ * storage migration anyway — there's a dedicated test suite for that.
  */
 function bootstrapInstallDir(installDir: string): void {
-  setProjectLogFile(installDir);
+  if (process.env.NODE_ENV === 'test') return;
   runMigrationShim(installDir);
+  setProjectLogFile(installDir);
 }
 
 const buildSessionFromOptions = async (
