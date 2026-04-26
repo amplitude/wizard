@@ -87,6 +87,11 @@ vi.mock('../lib/constants', () => ({
   DEFAULT_AMPLITUDE_ZONE: 'us',
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
   EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  // The bin.ts split widened the import graph — at least one extracted
+  // command (or its transitive dep, e.g. wizard-tools / commandments) now
+  // pulls DEMO_MODE through the mocked constants module. Mocking it false
+  // matches the production default (DEMO_MODE_WIZARD env unset).
+  DEMO_MODE: false,
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
@@ -229,17 +234,27 @@ describe('CI mode validation', () => {
     vi.resetModules();
   });
 
-  test('invokes runWizard in CI mode without --api-key when --install-dir is set', async () => {
-    await runCLI(['--ci', '--install-dir', '/tmp/test']);
-    await waitFor(() => mockRunWizard.mock.calls.length > 0);
+  // 15s timeout: this is the only test in the file that exercises the full
+  // CI credential-resolution path without an --api-key shortcut. Combined
+  // with `runCLI` calling `vi.resetModules()` + `await import('../../bin.ts')`
+  // (which now imports all 14 `src/commands/*.ts` modules transitively after
+  // the bin.ts split), it pushes past the default 5s testTimeout under
+  // parallel-load. Other CI-mode tests use --api-key and stay fast.
+  test(
+    'invokes runWizard in CI mode without --api-key when --install-dir is set',
+    { timeout: 15_000 },
+    async () => {
+      await runCLI(['--ci', '--install-dir', '/tmp/test']);
+      await waitFor(() => mockRunWizard.mock.calls.length > 0);
 
-    expect(process.exit).not.toHaveBeenCalled();
-    expect(mockRunWizard).toHaveBeenCalledWith(
-      expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
-      expect.anything(),
-      expect.any(Function),
-    );
-  });
+      expect(process.exit).not.toHaveBeenCalled();
+      expect(mockRunWizard).toHaveBeenCalledWith(
+        expect.objectContaining({ ci: true, installDir: '/tmp/test' }),
+        expect.anything(),
+        expect.any(Function),
+      );
+    },
+  );
 
   test('defaults --install-dir to cwd when --ci is set without it', async () => {
     await runCLI(['--ci', '--api-key', 'phx_test']);
