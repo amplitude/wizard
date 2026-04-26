@@ -194,19 +194,33 @@ describe('runMigrationShim', () => {
   });
 
   it('does not migrate the global benchmark file when a project version exists', () => {
-    const legacyBenchmark = join(tmpdir(), 'amplitude-wizard-benchmark.json');
+    // The legacy benchmark path is the literal `/tmp/...` that the old
+    // `middleware/config.ts` hardcoded. Use `LEGACY_PATHS.benchmark`
+    // (string) — deriving from `tmpdir()` would give `/var/folders/...`
+    // on macOS and miss the file the migration is looking for.
+    const legacyBenchmark = LEGACY_PATHS.benchmark;
     const canonical = getBenchmarkFile(installDir);
     mkdirSync(join(cacheRoot, 'runs', projectHash(installDir)), {
       recursive: true,
     });
     writeFileSync(canonical, '{"new":true}');
-    writeFileSync(legacyBenchmark, '{"old":true}');
+    // Save and restore — `/tmp/amplitude-wizard-benchmark.json` is a
+    // shared path; a real benchmark run alongside this test could be
+    // clobbered otherwise.
+    const preExisting = existsSync(legacyBenchmark)
+      ? readFileSync(legacyBenchmark, 'utf8')
+      : null;
+    try {
+      writeFileSync(legacyBenchmark, '{"old":true}');
 
-    runMigrationShim(installDir);
+      runMigrationShim(installDir);
 
-    expect(readFileSync(canonical, 'utf8')).toBe('{"new":true}');
-    // Legacy benchmark should be cleaned up either way.
-    expect(existsSync(legacyBenchmark)).toBe(false);
+      expect(readFileSync(canonical, 'utf8')).toBe('{"new":true}');
+      // Legacy benchmark should be cleaned up either way.
+      expect(existsSync(legacyBenchmark)).toBe(false);
+    } finally {
+      if (preExisting !== null) writeFileSync(legacyBenchmark, preExisting);
+    }
   });
 
   // Regression: bugbot caught that the migration helper used a custom

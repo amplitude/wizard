@@ -165,8 +165,14 @@ export const LEGACY_PATHS = {
   /** Hardcoded global log (collided across parallel runs). */
   log: '/tmp/amplitude-wizard.log',
   logl: '/tmp/amplitude-wizard.logl',
-  /** Global benchmark file (was clobbered across projects). */
-  benchmark: (): string => join(tmpdir(), 'amplitude-wizard-benchmark.json'),
+  /**
+   * Global benchmark file (was clobbered across projects). Hardcoded
+   * to literal `/tmp/` to match the old `middleware/config.ts` default
+   * (`benchmarkPath: '/tmp/amplitude-wizard-benchmark.json'`). On macOS
+   * `tmpdir()` is `/var/folders/...`, so deriving from it would have
+   * silently missed the legacy file during migration.
+   */
+  benchmark: '/tmp/amplitude-wizard-benchmark.json',
   /** Per-project checkpoint, tmpdir-scoped. */
   checkpoint: (hash: string): string =>
     join(tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`),

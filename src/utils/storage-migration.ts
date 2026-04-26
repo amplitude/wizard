@@ -14,7 +14,7 @@
  *   /tmp/amplitude-wizard.logl                           → <cacheRoot>/bootstrap.ndjson
  *   $TMPDIR/amplitude-wizard-update-check.json           → <cacheRoot>/update-check.json
  *   $TMPDIR/amplitude-wizard-checkpoint-<hash>.json      → <runDir(installDir)>/checkpoint.json
- *   $TMPDIR/amplitude-wizard-benchmark.json              → <runDir(installDir)>/benchmark.json
+ *   /tmp/amplitude-wizard-benchmark.json                 → <runDir(installDir)>/benchmark.json
  *   $TMPDIR/amplitude-wizard-state-<id>.json             → <cacheRoot>/state/<id>.json
  *   $TMPDIR/amplitude-wizard-plans/                      → <cacheRoot>/plans/
  *   <installDir>/.amplitude-events.json                  → <installDir>/.amplitude/events.json
@@ -223,7 +223,10 @@ export function runMigrationShim(installDir?: string): void {
       // projects), so its contents may belong to a different project. Only
       // move if the new per-project benchmark doesn't already exist; if both
       // exist, the new one wins and the old one gets cleaned up.
-      const oldBenchmark = join(tmpdir(), 'amplitude-wizard-benchmark.json');
+      // Path is hardcoded `/tmp/...` to match the old
+      // `middleware/config.ts` default — see `LEGACY_PATHS.benchmark`
+      // for why we don't derive it from `tmpdir()`.
+      const oldBenchmark = LEGACY_PATHS.benchmark;
       if (existsSync(oldBenchmark)) {
         if (!existsSync(getBenchmarkFile(installDir))) {
           moveFile(oldBenchmark, getBenchmarkFile(installDir));
