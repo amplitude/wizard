@@ -1311,10 +1311,10 @@ review on workflow/manifest changes.
 | LLM Gateway | Configured via `ANTHROPIC_BASE_URL` | `src/utils/urls.ts` |
 | MCP server (US) | `https://mcp.amplitude.com/mcp` | `src/steps/.../defaults.ts` |
 | MCP server (EU) | `https://mcp.eu.amplitude.com/mcp` | `src/steps/.../defaults.ts` |
-| Node.js minimum | `18.17.0` | `bin.ts` |
+| Node.js minimum | `>=20` | `bin.ts` |
 | Credential store | `~/.ampli.json` | `src/utils/ampli-settings.ts` |
 | Detection timeout | `10,000ms` | `src/lib/constants.ts` |
-| Stall detection | `20,000ms` per message | `src/lib/agent-interface.ts` |
+| Stall detection | `60,000ms` cold-start / `120,000ms` mid-run | `src/lib/agent-interface.ts` |
 
 ---
 
