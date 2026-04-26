@@ -40,7 +40,6 @@ import { render } from 'ink-testing-library';
 import type { ReactElement } from 'react';
 import { WizardStore } from '../store.js';
 import type { WizardSession } from '../store.js';
-import type { Flow } from '../router.js';
 
 /**
  * Strip ANSI color/style escapes so snapshots are readable in PR reviews.
@@ -61,20 +60,6 @@ const trimTrailingWs = (s: string): string =>
     .split('\n')
     .map((line) => line.replace(/[ \t]+$/, ''))
     .join('\n');
-
-export interface SnapshotOptions {
-  /**
-   * Optional session patch applied before render. Use this to control
-   * which branch of the screen is exercised — e.g. `{ outroData: { ... } }`
-   * for OutroScreen success vs error vs cancel.
-   */
-  sessionPatch?: Partial<WizardSession>;
-  /**
-   * Flow to construct the WizardStore with. Defaults to `Wizard`. Override
-   * for screens that only render under specific flows (e.g. SUSI).
-   */
-  flow?: Flow;
-}
 
 export interface RenderedSnapshot {
   /** Sanitized terminal output, ready to feed `toMatchSnapshot()`. */
