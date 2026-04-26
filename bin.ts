@@ -735,6 +735,25 @@ void yargs(hideBin(process.argv))
       describe: 'run non-interactively (for CI pipelines)',
       type: 'boolean',
     },
+    'auto-approve': {
+      default: false,
+      describe:
+        'silently pick the recommended choice on `needs_input` (no writes)',
+      type: 'boolean',
+    },
+    yes: {
+      alias: 'y',
+      default: false,
+      describe:
+        'skip all prompts; allow the inner agent to write files (required for `apply` subcommand)',
+      type: 'boolean',
+    },
+    force: {
+      default: false,
+      describe:
+        'allow destructive writes (overwrite/delete existing files); implies --yes',
+      type: 'boolean',
+    },
     'api-key': {
       // Dev-only escape hatch. In normal flows the wizard fetches the
       // project's API key via OAuth — the user should never have to paste one.
@@ -906,12 +925,6 @@ void yargs(hideBin(process.argv))
           describe: 'emit structured NDJSON output for automation',
           type: 'boolean',
         },
-        yes: {
-          alias: 'y',
-          default: false,
-          describe: 'Skip all prompts and use defaults (same as --ci)',
-          type: 'boolean',
-        },
         classic: {
           default: false,
           describe: 'use the classic prompt-based UI',
@@ -944,6 +957,12 @@ void yargs(hideBin(process.argv))
         process.env.AMPLITUDE_WIZARD_AGENT === '1' ||
         (!options.ci &&
           !options.yes &&
+          !options.force &&
+          // --auto-approve grants ONLY auto-approve, not writes — so a
+          // user who passes only --auto-approve in a non-TTY env should
+          // NOT be auto-promoted to agent mode (which would otherwise
+          // route through resolveMode's --agent back-compat path).
+          !options['auto-approve'] &&
           !options.classic &&
           process.env.AMPLITUDE_WIZARD_CLASSIC !== '1' &&
           isNonInteractiveEnvironment())
@@ -983,7 +1002,7 @@ void yargs(hideBin(process.argv))
             () => session.additionalFeatureQueue,
           );
         })();
-      } else if (options.ci || options.yes) {
+      } else if (options.ci || options.yes || options.force) {
         // CI mode: no prompts, auto-select first environment
         setUI(new LoggingUI());
         if (!options.installDir) options.installDir = process.cwd();
