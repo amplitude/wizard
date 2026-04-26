@@ -283,6 +283,30 @@ describe('evaluateWriteGate', () => {
     ).toBe('allow');
   });
 
+  it('does NOT flag package-manager `rm` (pnpm/npm/yarn/bun) as destructive', () => {
+    // Regression: `\brm\s+-` was too broad — `\brm` matched the `rm` in
+    // `pnpm rm`, so routine uninstalls were treated as destructive
+    // filesystem ops and required --force to proceed.
+    const safe = [
+      'pnpm rm -D some-package',
+      'npm rm --save lodash',
+      'yarn rm jest',
+      'bun rm typescript',
+    ];
+    for (const cmd of safe) {
+      const decision = evaluateWriteGate('Bash', { command: cmd }, writesOnly);
+      expect(decision.kind).toBe('allow');
+    }
+  });
+
+  it('still flags standalone destructive rm', () => {
+    const dangerous = ['rm -rf node_modules', 'cd / && rm -rf foo'];
+    for (const cmd of dangerous) {
+      const decision = evaluateWriteGate('Bash', { command: cmd }, writesOnly);
+      expect(decision.kind).toBe('deny');
+    }
+  });
+
   it('does NOT flag `git push --force-with-lease` as destructive', () => {
     // Regression: the regex used `--force\b`, and the word boundary between
     // `e` (word char) and `-` (non-word) matched mid-token, so the safer

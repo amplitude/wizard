@@ -11,8 +11,15 @@ export type ExecutionMode = 'interactive' | 'ci' | 'agent';
  *                          false, the PreToolUse hook denies write attempts
  *                          and the wizard exits `WRITE_REFUSED`.
  *   - `allowDestructive`— OK to overwrite or delete files that already exist
- *                          in the repo. When false, write tools may still
- *                          create new files but can't clobber.
+ *                          in the repo, and OK to run destructive Bash
+ *                          commands (rm -rf, git reset --hard, DROP TABLE).
+ *                          For Edit/Write/MultiEdit/NotebookEdit, the
+ *                          PreToolUse hook is responsible for checking
+ *                          whether the target already exists and passing
+ *                          `targetFileExists` to `evaluateWriteGate`. The
+ *                          hook stat's the target before the call; this
+ *                          interface defers the existence check rather
+ *                          than performing I/O itself.
  *
  * The flags are designed to compose: most invocations want `autoApprove +
  * allowWrites` (today's `--yes` semantics); the new `plan` command wants
@@ -150,7 +157,13 @@ export function resolveMode(opts: ResolveModeOpts): ModeConfig {
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 const DESTRUCTIVE_BASH_PATTERNS: RegExp[] = [
-  /\brm\s+-/i, // rm -rf, rm -r, rm -f
+  // rm -rf, rm -r, rm -f at start or after a chain operator. The previous
+  // `\brm\s+-` matched ANY `rm` after a word boundary, so package-manager
+  // uninstalls like `pnpm rm -D foo` were flagged as destructive
+  // filesystem ops. Anchor to start-of-string or chain operators so
+  // standalone `rm` is caught but `pnpm rm` / `npm rm` / `yarn rm` /
+  // `bun rm` aren't.
+  /(?:^|[;&|]\s*)rm\s+-/i,
   /\bgit\s+reset\s+--hard\b/i,
   /\bgit\s+checkout\s+--\s/i,
   /\bgit\s+clean\s+-/i,
