@@ -1271,10 +1271,10 @@ void yargs(hideBin(process.argv))
             }
 
             // Initialize Amplitude Experiment feature flags (non-blocking).
-            const { initFeatureFlags } = await import(
-              './src/lib/feature-flags.js'
-            );
-            await initFeatureFlags().catch(() => {
+            // Goes through analytics so the Experiment user bag carries the
+            // same device_id as the events — otherwise device-targeted flags
+            // fall through to the default variant.
+            await analytics.initFlags().catch(() => {
               // Flag init failure is non-fatal — all flags default to off
             });
 
