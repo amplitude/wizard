@@ -57,7 +57,7 @@ jobs:
               --jq ".[]
                 | select(.isDraft == false)
                 | select(.headRepositoryOwner.login == \"$OWNER\")
-                | select(.labels | map(.name) | contains([\"do-not-auto-update\"]) | not)
+                | select(.labels | any(.name == \"do-not-auto-update\") | not)
                 | .number"
           )
 
