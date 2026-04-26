@@ -129,4 +129,29 @@ describe('JourneyStepper', () => {
     expect(activeIdx).toBeGreaterThanOrEqual(0);
     expect(completedIdx).toBe(-1);
   });
+
+  it('keeps the active cursor on Setup while on the feature opt-in screen', () => {
+    // Regression guard: FeatureOptIn previously wasn't mapped into any
+    // STEP_SCREENS group, which made getCompletedScreens walk past the end
+    // of the flat screen list and mark every step ✓ — and then "snap back"
+    // to ● Setup when the user advanced to Run. Both bugs share one fix:
+    // FeatureOptIn must live inside STEP_SCREENS.Setup.
+    const store = makeStore({
+      introConcluded: true,
+      region: 'us',
+      credentials: CREDS,
+      selectedOrgName: 'Acme',
+      selectedWorkspaceName: 'Amplitude',
+      selectedEnvName: 'Production',
+      projectHasData: false,
+      activationLevel: 'none',
+      discoveredFeatures: ['session_replay'],
+      optInFeaturesComplete: false,
+    });
+    const out = frameOf(<JourneyStepper store={store} width={120} />);
+    expect(out).toContain('Setup ←');
+    // Verify, Done must still be future — no premature ✓.
+    expect(out).not.toContain('✓ Verify');
+    expect(out).not.toContain('✓ Done');
+  });
 });
