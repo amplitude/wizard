@@ -77,7 +77,7 @@ export const App = ({ store }: AppProps) => {
           <HeaderBar
             width={width}
             orgName={store.session.selectedOrgName}
-            workspaceName={store.session.selectedWorkspaceName}
+            projectName={store.session.selectedProjectName}
             envName={store.session.selectedEnvName}
           />
 

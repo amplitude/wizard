@@ -411,7 +411,7 @@ describe('WizardStore', () => {
     store.concludeIntro();
     // RegionSelect: set region (skips it)
     store.setRegion('us');
-    // Auth: set credentials + org/workspace/env (Auth screen isComplete
+    // Auth: set credentials + org/project/env (Auth screen isComplete
     // requires all four: credentials and all three names)
     store.setCredentials({
       accessToken: 'tok',
@@ -419,11 +419,11 @@ describe('WizardStore', () => {
       host: 'h',
       appId: 1,
     });
-    // Set org/workspace/env names directly to satisfy Auth.isComplete
+    // Set org/project/env names directly to satisfy Auth.isComplete
     // (it only checks names, not IDs — so we don't have to set IDs and
-    // trigger setOrgAndWorkspace's ampli.json write).
+    // trigger setOrgAndProject's ampli.json write).
     store.session.selectedOrgName = 'Acme';
-    store.session.selectedWorkspaceName = 'Amplitude';
+    store.session.selectedProjectName = 'Amplitude';
     store.setSelectedEnvName('Production');
     // DataSetup: set projectHasData (DataSetup screen isComplete)
     store.setProjectHasData(false);
@@ -794,13 +794,13 @@ describe('WizardStore', () => {
       });
 
       store.pushOverlay(Overlay.Outage); // -> outage
-      // Org/workspace/env names are required for Auth.isComplete. Assign
+      // Org/project/env names are required for Auth.isComplete. Assign
       // directly so subscribers only fire for the three explicit mutations
       // this test is exercising (setCredentials, setRegion, popOverlay).
       // Only names — IDs intentionally omitted to avoid setRegion below
       // triggering an ampli.json write.
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedEnvName = 'Production';
       store.setCredentials({
         // -> outage (overlay still on top)
@@ -991,12 +991,12 @@ describe('WizardStore', () => {
       expect(store.currentScreen).toBe(Screen.Auth);
 
       // Step 3: Authenticate (credentials set by AuthScreen SUSI flow).
-      // Org/workspace/env are resolved as part of the SUSI flow too; set them
+      // Org/project/env are resolved as part of the SUSI flow too; set them
       // directly (no setter) so Auth.isComplete passes without bumping the
       // version counter this test asserts on. Only names — Auth.isComplete
       // checks names, not IDs, and omitting IDs avoids side effects.
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedEnvName = 'Production';
       store.setCredentials({
         accessToken: 'tok',

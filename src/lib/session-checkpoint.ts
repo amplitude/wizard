@@ -38,14 +38,19 @@ const CheckpointSchema = z
     /** The project directory this checkpoint belongs to. */
     installDir: z.string(),
 
-    // Region + org/workspace/project selection
+    // Region + org/project/environment selection
     region: z.enum(['us', 'eu']).nullable(),
     selectedOrgId: z.string().nullable(),
     selectedOrgName: z.string().nullable(),
-    selectedWorkspaceId: z.string().nullable(),
-    selectedWorkspaceName: z.string().nullable(),
-    selectedEnvName: z.string().nullable().optional(),
+    // New (post-rename) fields.
+    selectedProjectId: z.string().nullable().optional(),
     selectedProjectName: z.string().nullable().optional(),
+    selectedEnvName: z.string().nullable().optional(),
+    // Legacy fields kept for back-compat reads.
+    // - selectedWorkspaceId/Name: renamed to selectedProjectId/Name when
+    //   the codebase adopted the website's "project" terminology.
+    selectedWorkspaceId: z.string().nullable().optional(),
+    selectedWorkspaceName: z.string().nullable().optional(),
 
     // Framework detection
     integration: z.string().nullable(),
@@ -57,9 +62,17 @@ const CheckpointSchema = z
     introConcluded: z.boolean(),
   })
   .transform((data) => {
-    const { selectedProjectName, ...rest } = data;
+    const {
+      selectedWorkspaceId,
+      selectedWorkspaceName,
+      selectedProjectId,
+      selectedProjectName,
+      ...rest
+    } = data;
     return {
       ...rest,
+      selectedProjectId: selectedProjectId ?? selectedWorkspaceId ?? null,
+      selectedProjectName: selectedProjectName ?? selectedWorkspaceName ?? null,
       selectedEnvName: rest.selectedEnvName ?? selectedProjectName ?? null,
     };
   });
@@ -80,8 +93,8 @@ export function saveCheckpoint(session: WizardSession): void {
     region: session.region,
     selectedOrgId: session.selectedOrgId,
     selectedOrgName: session.selectedOrgName,
-    selectedWorkspaceId: session.selectedWorkspaceId,
-    selectedWorkspaceName: session.selectedWorkspaceName,
+    selectedProjectId: session.selectedProjectId,
+    selectedProjectName: session.selectedProjectName,
     selectedEnvName: session.selectedEnvName,
 
     integration: session.integration,
@@ -148,8 +161,8 @@ export async function loadCheckpoint(
     region: checkpoint.region,
     selectedOrgId: checkpoint.selectedOrgId,
     selectedOrgName: checkpoint.selectedOrgName,
-    selectedWorkspaceId: checkpoint.selectedWorkspaceId,
-    selectedWorkspaceName: checkpoint.selectedWorkspaceName,
+    selectedProjectId: checkpoint.selectedProjectId,
+    selectedProjectName: checkpoint.selectedProjectName,
     selectedEnvName: checkpoint.selectedEnvName,
     integration,
     detectedFrameworkLabel: derivedLabel,

@@ -2,7 +2,7 @@
  * Credential resolution — shared between TUI, agent, and CI modes.
  *
  * Reads stored OAuth tokens, refreshes them if needed, fetches the user's
- * org/workspace/environment list, and populates session credentials when
+ * org/project/environment list, and populates session credentials when
  * possible. When multiple environments exist, populates `pendingOrgs` so
  * the caller (TUI AuthScreen or AgentUI NDJSON prompt) can handle selection.
  */
@@ -29,7 +29,7 @@ export async function resolveCredentials(
   session: WizardSession,
   options?: {
     /**
-     * When true, clears credentials if no org/workspace ID is set.
+     * When true, clears credentials if no org/project ID is set.
      * TUI mode uses this so AuthScreen can force selection.
      * Agent/CI mode should set false — a local API key is sufficient.
      */
@@ -39,15 +39,17 @@ export async function resolveCredentials(
     /** Environment name filter (from --env flag). Case-insensitive match. */
     env?: string;
     /**
-     * Workspace ID filter (from --workspace-id flag). Matches workspace.id
-     * exactly. Lets agents disambiguate when multiple workspaces have
-     * environments with the same name.
+     * Project ID filter (from --project-id flag). Matches project.id
+     * exactly. Lets agents disambiguate when multiple projects have
+     * environments with the same name. (The backend GraphQL layer still
+     * calls this a "workspace" — we expose it as `projectId` to match
+     * the rest of the wizard.)
      */
-    workspaceId?: string;
+    projectId?: string;
     /**
      * Numeric Amplitude app ID filter (from --app-id flag; --project-id is
      * a legacy alias). Matches environment.app.id exactly. Globally unique
-     * — one app ID maps to exactly one (org, workspace, env) triple.
+     * — one app ID maps to exactly one (org, project, env) triple.
      */
     appId?: string;
     /**
@@ -168,20 +170,20 @@ export async function resolveCredentials(
         session.activationLevel = 'none';
         session.projectHasData = false;
 
-        // Hydrate org / workspace / env names when ampli.json has IDs but names
+        // Hydrate org / project / env names when ampli.json has IDs but names
         // are still null. Without this the wizard can reach Setup with only
         // IDs resolved, so the header and /whoami can't show the project.
         const storedOrgId = projectConfig.ok
           ? projectConfig.config.OrgId
           : undefined;
-        const storedWorkspaceId = projectConfig.ok
-          ? projectConfig.config.WorkspaceId
+        const storedProjectId = projectConfig.ok
+          ? projectConfig.config.ProjectId
           : undefined;
         const needsNameHydration =
           !session.selectedOrgName ||
-          !session.selectedWorkspaceName ||
+          !session.selectedProjectName ||
           !session.selectedEnvName;
-        if (needsNameHydration && (storedOrgId || storedWorkspaceId)) {
+        if (needsNameHydration && (storedOrgId || storedProjectId)) {
           try {
             const { fetchAmplitudeUser } = await import('./api.js');
             const userInfo = await fetchAmplitudeUser(
@@ -193,11 +195,11 @@ export async function resolveCredentials(
             }
             for (const org of userInfo.orgs) {
               if (storedOrgId && org.id !== storedOrgId) continue;
-              const ws = storedWorkspaceId
-                ? org.workspaces.find((w) => w.id === storedWorkspaceId)
-                : org.workspaces[0];
-              if (!ws) continue;
-              const sortedEnvs = (ws.environments ?? [])
+              const project = storedProjectId
+                ? org.projects.find((p) => p.id === storedProjectId)
+                : org.projects[0];
+              if (!project) continue;
+              const sortedEnvs = (project.environments ?? [])
                 .slice()
                 .sort((a, b) => a.rank - b.rank);
               const matchedEnv =
@@ -205,14 +207,14 @@ export async function resolveCredentials(
                 sortedEnvs[0];
               session.selectedOrgId = org.id;
               session.selectedOrgName = org.name;
-              session.selectedWorkspaceId = ws.id;
-              session.selectedWorkspaceName = ws.name;
+              session.selectedProjectId = project.id;
+              session.selectedProjectName = project.name;
               if (matchedEnv) {
                 session.selectedEnvName = matchedEnv.name;
                 // Prefer the matched env's app.id (exact env the user picked);
-                // fall back to extractAppId(ws) which returns the lowest-rank
-                // env's app when no env is selected.
-                const appId = matchedEnv.app?.id ?? extractAppId(ws);
+                // fall back to extractAppId(project) which returns the
+                // lowest-rank env's app when no env is selected.
+                const appId = matchedEnv.app?.id ?? extractAppId(project);
                 if (appId) {
                   session.selectedAppId = appId;
                   if (session.credentials) {
@@ -223,7 +225,7 @@ export async function resolveCredentials(
               logToFile(
                 `[credential-resolution] hydrated names from local key: ${
                   org.name
-                } / ${ws.name} / ${matchedEnv?.name ?? '(env unknown)'}`,
+                } / ${project.name} / ${matchedEnv?.name ?? '(env unknown)'}`,
               );
               break;
             }
@@ -244,9 +246,9 @@ export async function resolveCredentials(
           const userInfo = await fetchAmplitudeUser(storedToken.idToken, zone);
           analytics.setDistinctId(userInfo.email);
           analytics.identifyUser({ email: userInfo.email });
-          const workspaceId = session.selectedWorkspaceId ?? undefined;
+          const projectId = session.selectedProjectId ?? undefined;
 
-          // Find the relevant workspace and its environments
+          // Find the relevant project and its environments
           let envsWithKey: Array<{
             name: string;
             rank: number;
@@ -256,11 +258,11 @@ export async function resolveCredentials(
             } | null;
           }> = [];
           for (const org of userInfo.orgs) {
-            const ws = workspaceId
-              ? org.workspaces.find((w) => w.id === workspaceId)
-              : org.workspaces[0];
-            if (ws?.environments) {
-              envsWithKey = ws.environments
+            const project = projectId
+              ? org.projects.find((p) => p.id === projectId)
+              : org.projects[0];
+            if (project?.environments) {
+              envsWithKey = project.environments
                 .filter((env) => env.app?.apiKey)
                 .sort((a, b) => a.rank - b.rank);
               break;
@@ -269,8 +271,8 @@ export async function resolveCredentials(
 
           // Scope resolution. The agent-mode public contract is `--project-id`
           // only — project IDs are globally unique so one flag resolves to
-          // exactly one (org, workspace, env) tuple. Legacy filters
-          // (--org / --workspace-id / --env) still parse for CI scripts,
+          // exactly one (org, project, env) tuple. Legacy filters
+          // (--org / --project-id / --env) still parse for CI scripts,
           // but --project-id takes precedence when both are passed to
           // avoid the "mismatching flags silently fall through" foot-gun.
           const appIdFilter = options?.appId;
@@ -280,26 +282,24 @@ export async function resolveCredentials(
           const orgFilter = appIdFilter
             ? undefined
             : options?.org?.toLowerCase();
-          const workspaceIdFilter = appIdFilter
-            ? undefined
-            : options?.workspaceId;
+          const projectIdFilter = appIdFilter ? undefined : options?.projectId;
           const hasSpecificFilter = Boolean(
-            appIdFilter || envMatch || workspaceIdFilter,
+            appIdFilter || envMatch || projectIdFilter,
           );
           if (hasSpecificFilter) {
             for (const org of userInfo.orgs) {
               if (orgFilter && !org.name.toLowerCase().includes(orgFilter)) {
                 continue;
               }
-              for (const ws of org.workspaces) {
-                if (workspaceIdFilter && ws.id !== workspaceIdFilter) {
+              for (const project of org.projects) {
+                if (projectIdFilter && project.id !== projectIdFilter) {
                   continue;
                 }
-                // Sort by rank so when only --workspace-id narrows (no
-                // --project-id / --env), we pick the highest-ranked env
+                // Sort by rank so when only --project-id narrows (no
+                // --app-id / --env), we pick the highest-ranked env
                 // (Production over Development), matching every other
                 // env-selection path in the codebase.
-                const matchedEnv = (ws.environments ?? [])
+                const matchedEnv = (project.environments ?? [])
                   .filter((e) => {
                     if (!e.app?.apiKey) return false;
                     if (appIdFilter && e.app.id !== appIdFilter) return false;
@@ -312,15 +312,15 @@ export async function resolveCredentials(
                   const apiKey = matchedEnv.app.apiKey;
                   session.selectedOrgId = org.id;
                   session.selectedOrgName = org.name;
-                  session.selectedWorkspaceId = ws.id;
-                  session.selectedWorkspaceName = ws.name;
+                  session.selectedProjectId = project.id;
+                  session.selectedProjectName = project.name;
                   session.selectedEnvName = matchedEnv.name;
                   session.selectedAppId = matchedEnv.app.id;
                   if (!session.userEmail && userInfo.email) {
                     session.userEmail = userInfo.email;
                   }
                   logToFile(
-                    `[credential-resolution] filter matched: ${org.name} / ${ws.name} / ${matchedEnv.name} (project-id=${matchedEnv.app.id})`,
+                    `[credential-resolution] filter matched: ${org.name} / ${project.name} / ${matchedEnv.name} (app-id=${matchedEnv.app.id})`,
                   );
                   persistApiKey(apiKey, installDir);
                   session.credentials = {
@@ -342,7 +342,7 @@ export async function resolveCredentials(
               logToFile(
                 `[credential-resolution] filters did not match any env: app-id=${
                   appIdFilter ?? '(none)'
-                }, workspace-id=${workspaceIdFilter ?? '(none)'}, env=${
+                }, project-id=${projectIdFilter ?? '(none)'}, env=${
                   options?.env ?? '(none)'
                 }, org=${options?.org ?? '(none)'}`,
               );
@@ -362,16 +362,18 @@ export async function resolveCredentials(
             session.selectedEnvName = selectedEnv.name;
             session.selectedAppId = selectedAppId;
 
-            // Populate org/workspace names
+            // Populate org/project names
             for (const org of userInfo.orgs) {
-              const ws = workspaceId
-                ? org.workspaces.find((w) => w.id === workspaceId)
-                : org.workspaces[0];
-              if (ws?.environments?.some((e) => e.app?.apiKey === apiKey)) {
+              const project = projectId
+                ? org.projects.find((p) => p.id === projectId)
+                : org.projects[0];
+              if (
+                project?.environments?.some((e) => e.app?.apiKey === apiKey)
+              ) {
                 session.selectedOrgId = org.id;
                 session.selectedOrgName = org.name;
-                session.selectedWorkspaceId = ws.id;
-                session.selectedWorkspaceName = ws.name;
+                session.selectedProjectId = project.id;
+                session.selectedProjectName = project.name;
                 break;
               }
             }
@@ -420,7 +422,7 @@ export async function resolveCredentials(
             installDir,
             idToken: storedToken.idToken,
             zone: zone,
-            workspaceId: session.selectedWorkspaceId ?? undefined,
+            projectId: session.selectedProjectId ?? undefined,
           });
           if (projectApiKey) {
             persistApiKey(projectApiKey, installDir);
@@ -446,7 +448,7 @@ export async function resolveCredentials(
     }
   }
 
-  // Pre-populate org/workspace from ampli.json so activation checks
+  // Pre-populate org/project from ampli.json so activation checks
   // have the IDs they need even when the SUSI flow was skipped.
   if (
     !session.selectedOrgId &&
@@ -456,14 +458,14 @@ export async function resolveCredentials(
     session.selectedOrgId = String(projectConfig.config.OrgId);
   }
   if (
-    !session.selectedWorkspaceId &&
+    !session.selectedProjectId &&
     projectConfig.ok &&
-    projectConfig.config.WorkspaceId
+    projectConfig.config.ProjectId
   ) {
-    session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
+    session.selectedProjectId = projectConfig.config.ProjectId;
   }
 
-  // Safety check: in TUI mode, clear credentials if no org/workspace ID
+  // Safety check: in TUI mode, clear credentials if no org/project ID
   // so AuthScreen can force selection. In agent/CI mode, a local API key
   // is sufficient — skip this check.
   if (
@@ -473,7 +475,7 @@ export async function resolveCredentials(
     !session.pendingOrgs
   ) {
     logToFile(
-      '[credential-resolution] credentials set but no org/workspace — clearing to force AuthScreen',
+      '[credential-resolution] credentials set but no org/project — clearing to force AuthScreen',
     );
     session.credentials = null;
   }
@@ -482,13 +484,13 @@ export async function resolveCredentials(
 /**
  * Resolve environment selection from pendingOrgs.
  *
- * Given a selected org ID, workspace ID, and environment name,
+ * Given a selected org ID, project ID, and environment name,
  * populates session.credentials from the matching environment.
  * Returns true if credentials were populated.
  */
 export async function resolveEnvironmentSelection(
   session: WizardSession,
-  selection: { orgId: string; workspaceId: string; env: string },
+  selection: { orgId: string; projectId: string; env: string },
 ): Promise<boolean> {
   if (!session.pendingOrgs) return false;
 
@@ -502,15 +504,15 @@ export async function resolveEnvironmentSelection(
     return false;
   }
 
-  const ws = org.workspaces.find((w) => w.id === selection.workspaceId);
-  if (!ws) {
+  const project = org.projects.find((p) => p.id === selection.projectId);
+  if (!project) {
     logToFile(
-      `[credential-resolution] workspace not found: ${selection.workspaceId}`,
+      `[credential-resolution] project not found: ${selection.projectId}`,
     );
     return false;
   }
 
-  const env = ws.environments?.find(
+  const env = project.environments?.find(
     (e) => e.name.toLowerCase() === selection.env.toLowerCase(),
   );
   if (!env?.app?.apiKey) {
@@ -527,15 +529,15 @@ export async function resolveEnvironmentSelection(
 
   session.selectedOrgId = org.id;
   session.selectedOrgName = org.name;
-  session.selectedWorkspaceId = ws.id;
-  session.selectedWorkspaceName = ws.name;
+  session.selectedProjectId = project.id;
+  session.selectedProjectName = project.name;
   session.selectedEnvName = env.name;
 
   // Extract the numeric Amplitude app ID for MCP-based event detection.
   // Prefer the selected env's app.id — it matches the chosen environment
-  // exactly, whereas extractAppId(ws) falls back to the lowest-ranked
+  // exactly, whereas extractAppId(project) falls back to the lowest-ranked
   // env's app when no env is selected.
-  const appId = env.app?.id ?? extractAppId(ws);
+  const appId = env.app?.id ?? extractAppId(project);
   session.selectedAppId = appId;
 
   persistApiKey(apiKey, session.installDir);
@@ -550,7 +552,7 @@ export async function resolveEnvironmentSelection(
   session.projectHasData = false;
 
   logToFile(
-    `[credential-resolution] resolved environment: ${org.name} / ${ws.name} / ${env.name}`,
+    `[credential-resolution] resolved environment: ${org.name} / ${project.name} / ${env.name}`,
   );
   return true;
 }

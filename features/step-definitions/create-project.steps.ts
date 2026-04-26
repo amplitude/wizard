@@ -44,7 +44,7 @@ Given('the user is authenticated with an org selected', function () {
     {
       id: 'org-1',
       name: 'Acme',
-      workspaces: [{ id: 'ws-1', name: 'Default' }],
+      projects: [{ id: 'ws-1', name: 'Default' }],
     },
   ];
   session.selectedOrgId = 'org-1';
@@ -56,14 +56,14 @@ Given('the user is on the CreateProject screen', function () {
     {
       id: 'org-1',
       name: 'Acme',
-      workspaces: [{ id: 'ws-1', name: 'Default' }],
+      projects: [{ id: 'ws-1', name: 'Default' }],
     },
   ];
   session.selectedOrgId = 'org-1';
   session.selectedOrgName = 'Acme';
   session.createProject = {
     pending: true,
-    source: 'workspace',
+    source: 'project',
     suggestedName: null,
   };
   assert.strictEqual(router.resolve(session), Screen.CreateProject);
@@ -78,7 +78,7 @@ Given('no project has an API key', function () {
     {
       id: 'org-1',
       name: 'Acme',
-      workspaces: [
+      projects: [
         {
           id: 'ws-1',
           name: 'Default',
@@ -94,11 +94,11 @@ Given('no project has an API key', function () {
 // ── When ──────────────────────────────────────────────────────────────────
 
 When(
-  'the user picks "Create new project…" from the workspace picker',
+  'the user picks "Create new project…" from the project picker',
   function () {
     session.createProject = {
       pending: true,
-      source: 'workspace',
+      source: 'project',
       suggestedName: null,
     };
   },
@@ -111,7 +111,7 @@ When('the user cancels', function () {
 When('the create-project call succeeds and credentials are set', function () {
   // Emulate what CreateProjectScreen does on success.
   session.selectedEnvName = 'My New Project';
-  session.selectedWorkspaceName = 'My New Project';
+  session.selectedProjectName = 'My New Project';
   session.credentials = { ...CREDS, appId: 999 };
   session.projectHasData = false;
   session.createProject = {
