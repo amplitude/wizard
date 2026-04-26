@@ -40,6 +40,7 @@ import type { PackageManagerDetector } from './package-manager-detection';
 import { z } from 'zod';
 import type { SDKMessage } from './middleware/types';
 import { safeParseSDKMessage } from './middleware/schemas';
+import { createStormAnchor } from './middleware/retry';
 import {
   type HookCallback,
   type HookCallbackMatcher,
@@ -704,43 +705,14 @@ const SAFE_SCRIPTS = [
  */
 const DANGEROUS_OPERATORS = /[;`$()]/;
 
-// The agent doesn't always use the same field casing in .amplitude-events.json
-// — observed in the wild: name, event, eventName, event_name. Accept every
-// common variant so the event plan renders instead of falling back to an
-// empty name.
-const eventPlanSchema = z.array(
-  z.looseObject({
-    name: z.string().optional(),
-    event: z.string().optional(),
-    eventName: z.string().optional(),
-    event_name: z.string().optional(),
-    description: z.string().optional(),
-    eventDescriptionAndReasoning: z.string().optional(),
-  }),
-);
-
-/**
- * Parse the agent-written `.amplitude-events.json` into the shape the
- * EventPlanViewer expects. Returns null if the input isn't valid JSON or
- * doesn't match the schema, so callers can distinguish "not ready yet" from
- * a structural problem. Exported for testing.
- */
-export function parseEventPlanContent(
-  content: string,
-): Array<{ name: string; description: string }> | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content);
-  } catch {
-    return null;
-  }
-  const result = eventPlanSchema.safeParse(parsed);
-  if (!result.success) return null;
-  return result.data.map((e) => ({
-    name: e.name ?? e.event ?? e.eventName ?? e.event_name ?? '',
-    description: e.description ?? e.eventDescriptionAndReasoning ?? '',
-  }));
-}
+// Canonical event-plan parser lives in event-plan-parser.ts so the TUI viewer
+// and the CLI plan reader (`agent-ops.ts#runPlan`) share one schema. Imported
+// here for use by the file-watcher in `runAgent`, and re-exported for tests
+// and callers that historically imported `parseEventPlanContent` from this
+// module. (Replaces the inlined `eventPlanSchema` + `parseEventPlanContent`
+// pair landed by PR #293 — see PR #295 for the extraction rationale.)
+import { parseEventPlanContent } from './event-plan-parser.js';
+export { parseEventPlanContent };
 
 /**
  * Check if command is a Amplitude skill installation from MCP.
@@ -1300,6 +1272,16 @@ function extractHttpStatusFromMessage(msg: string): number | null {
 }
 
 /**
+ * Storm anchor for the outer retry loop. Shared across `publishRetryBanner`
+ * calls so consecutive retries reuse the same `startedAt` — required for
+ * the UI grace period in {@link RetryStatusChip} to ever clear during a
+ * storm of rapid post-stream / catch-path retries (each call resamples
+ * `Date.now()` otherwise, and `now - startedAt` never crosses the
+ * threshold). Reset by `clearRetryBanner` when the loop exits cleanly.
+ */
+const bannerStormAnchor = createStormAnchor();
+
+/**
  * Publish a retry banner to the UI. Used from the post-stream and catch-path
  * retry sites — the middleware-based path handles live `api_retry` messages.
  * Swallows UI errors so a failed update never aborts the retry loop.
@@ -1310,14 +1292,14 @@ function publishRetryBanner(input: {
   errorStatus: number | null;
   reason: string;
 }): void {
-  const now = Date.now();
+  const stormStartedAt = bannerStormAnchor.stamp();
   const state: RetryState = {
     attempt: input.attempt,
     maxRetries: input.maxRetries,
-    nextRetryAtMs: now,
+    nextRetryAtMs: Date.now(),
     errorStatus: input.errorStatus,
     reason: input.reason,
-    startedAt: now,
+    startedAt: stormStartedAt,
   };
   try {
     getUI().setRetryState(state);
@@ -1327,6 +1309,7 @@ function publishRetryBanner(input: {
 }
 
 function clearRetryBanner(): void {
+  bannerStormAnchor.reset();
   try {
     getUI().setRetryState(null);
   } catch {
