@@ -26,7 +26,7 @@ import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken } from '../utils/ampli-settings';
 import { LINTING_TOOLS } from './safe-tools';
-import { AgentState } from './agent-state';
+import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import {
   createWizardToolsServer,
   WIZARD_TOOL_NAMES,
@@ -458,6 +458,39 @@ export function createPreCompactHook(
       logToFile('PreCompact handler threw:', err);
     }
     return Promise.resolve({});
+  };
+}
+
+/**
+ * Factory: UserPromptSubmit hook — hydrates recovery context after a
+ * compaction.
+ *
+ * If a PreCompact snapshot exists at `state.snapshotPath()`, the hook
+ * consumes it (reads + deletes) and returns `additionalContext` that
+ * prepends a short recovery note listing modified files and the last
+ * status. The snapshot is deleted so hydration fires at most once per
+ * compaction cycle.
+ *
+ * When no snapshot exists (first turn, or no compaction has happened) the
+ * hook is a no-op and returns `{}` so the SDK uses the prompt unchanged.
+ */
+export function createUserPromptSubmitHook(state: AgentState): HookCallback {
+  return (
+    _input: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const snap = consumeSnapshot(state.snapshotPath());
+    if (!snap) return Promise.resolve({});
+
+    const note = buildRecoveryNote(snap);
+    logToFile(
+      `UserPromptSubmit: hydrated recovery note (${snap.modifiedFiles.length} files, compactionCount=${snap.compactionCount})`,
+    );
+    return Promise.resolve({
+      hookSpecificOutput: {
+        hookEventName: 'UserPromptSubmit',
+        additionalContext: note,
+      },
+    });
   };
 }
 
@@ -1502,6 +1535,9 @@ export async function runAgent(
         recentStatuses.length = 0;
         authErrorDetected = false;
         reportedError = null;
+        // Reset the agent recovery bag too — without this, modifiedFiles /
+        // lastStatus / compactionCount accumulated by a stalled attempt
+        // would leak into the next attempt's snapshot. (Bugbot catch.)
         agentState.reset();
       }
 
@@ -1650,6 +1686,7 @@ export async function runAgent(
               ...(config?.onPreCompact && {
                 PreCompact: createPreCompactHook(config.onPreCompact),
               }),
+              UserPromptSubmit: createUserPromptSubmitHook(agentState),
             }),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
