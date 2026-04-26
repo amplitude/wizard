@@ -285,7 +285,19 @@ export const ConsoleView = ({
         // Esc with no pending prompt dismisses the Q&A panel so it stops
         // hogging vertical space. History is preserved — a new question or
         // /clear will resurface it.
-        if (key.escape && history.length > 0 && !qaDismissed) {
+        //
+        // The `!pendingPrompt` guard is critical: an event-plan prompt
+        // falls through the previous `if` (kind === 'event-plan') AND has
+        // its own useInput handler below that also fires on Esc. Without
+        // this guard, Esc during an event-plan prompt would dismiss the
+        // Q&A panel as a side effect of exiting the prompt feedback. The
+        // comment above documented the intent; this restores it.
+        if (
+          key.escape &&
+          !pendingPrompt &&
+          history.length > 0 &&
+          !qaDismissed
+        ) {
           setQaDismissed(true);
           return;
         }
