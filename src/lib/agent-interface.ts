@@ -1610,6 +1610,36 @@ export async function runAgent(
       },
     };
 
+    /**
+     * Best-effort cleanup of the prior attempt's Query iterator before
+     * starting the next attempt. The SDK's `query()` is typed as
+     * `AsyncIterable<unknown>` here but its concrete `Query` implementation
+     * extends `AsyncGenerator`, so calling `.return()` at runtime signals
+     * the underlying subprocess to tear down stdio cleanly. Without this,
+     * a tool call still in flight from the prior attempt can fire our
+     * PreToolUse hook on a closed bridge, surfacing as `Error in hook
+     * callback hook_0: Error: Stream closed`. See issue #297. Errors
+     * thrown by `.return()` itself are expected during teardown and are
+     * swallowed.
+     */
+    const drainPriorResponse = async (
+      prior: AsyncIterable<unknown> | undefined,
+    ): Promise<void> => {
+      if (!prior) return;
+      const generator = prior as {
+        return?: (value?: unknown) => Promise<unknown>;
+      };
+      if (typeof generator.return !== 'function') return;
+      try {
+        await generator.return(undefined);
+      } catch (err) {
+        logToFile(
+          'drainPriorResponse: .return() threw (expected during teardown):',
+          err instanceof Error ? err.message : String(err),
+        );
+      }
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -1699,8 +1729,14 @@ export async function runAgent(
         })`,
       );
 
+      // Hoisted so the catch block can drain the prior iterator before
+      // the next attempt starts. Without this, an in-flight tool call from
+      // the prior subprocess could fire our PreToolUse hook on a closed
+      // stdio bridge, surfacing as `Error in hook callback hook_0: Error:
+      // Stream closed`. See issue #297.
+      let response: AsyncIterable<unknown> | undefined;
       try {
-        const response = query({
+        const sdkResponse = query({
           prompt: createPromptStream(),
           options: {
             model: agentConfig.model,
@@ -1806,12 +1842,13 @@ export async function runAgent(
             abortSignal: controller.signal,
           },
         });
+        response = sdkResponse;
 
         // Start stale timer — reset on each received message
         resetStaleTimer();
 
         // Process the async generator — validate each message at the boundary
-        for await (const rawMessage of response) {
+        for await (const rawMessage of sdkResponse) {
           receivedFirstMessage = true;
           lastMessageTime = Date.now();
           lastMessageType =
@@ -1955,6 +1992,8 @@ export async function runAgent(
           collectedText.length = 0;
           recentStatuses.length = 0;
           signalDone();
+          // Drain the prior iterator before the next attempt — see issue #297.
+          await drainPriorResponse(response);
           continue;
         }
 
@@ -1965,6 +2004,10 @@ export async function runAgent(
       } catch (innerError) {
         clearTimeout(staleTimer);
         signalDone(); // unblock the prompt stream for this attempt
+        // Always drain the prior iterator after an exception, regardless
+        // of whether we'll retry. Cheap and defends against the hook
+        // bridge race in issue #297.
+        await drainPriorResponse(response);
 
         // Stall-aborted or API error with retries remaining — try again
         if (controller.signal.aborted && attempt < MAX_RETRIES) {
@@ -2007,6 +2050,11 @@ export async function runAgent(
             errMsg.includes('API Error: 503') ||
             errMsg.includes('API Error: 529') ||
             errMsg.includes('DEADLINE_EXCEEDED') ||
+            // Hook bridge race during prior-attempt teardown — see
+            // issue #297. Defense in depth on top of `drainPriorResponse`:
+            // if a `Stream closed` does still bubble out, treat it as
+            // transient and retry cleanly instead of crashing the run.
+            errMsg.includes('Stream closed') ||
             errMsg.includes('invalid_request_error'));
         if (isTransientSdkError) {
           logToFile(
