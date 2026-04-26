@@ -411,11 +411,29 @@ export function withWizardSpan<T>(
   fn: () => T,
 ): T {
   if (!initialized) return fn();
+
+  // Build attributes outside Sentry.startSpan so a redact/serialization
+  // throw doesn't get conflated with a callback error. If attribute prep
+  // fails, fall through to a span without attributes rather than skipping
+  // the span entirely.
+  let safeAttrs: Record<string, string | number | boolean> | undefined;
   try {
-    const safeAttrs = attributes
+    safeAttrs = attributes
       ? toSpanAttributes(redact(attributes) as Record<string, unknown>)
       : undefined;
+  } catch {
+    safeAttrs = undefined;
+  }
+
+  // `fnInvoked` lets us distinguish "Sentry.startSpan threw before our
+  // callback ran" from "our callback ran and threw". In the first case it's
+  // safe to fall back by running fn() directly; in the second case fn() has
+  // already executed and its error must propagate — re-running would
+  // silently double-execute the callback (Bugbot finding).
+  let fnInvoked = false;
+  try {
     return Sentry.startSpan({ name, op, attributes: safeAttrs }, (span) => {
+      fnInvoked = true;
       const markError = (): void => {
         try {
           span.setStatus({ code: 2, message: 'internal_error' });
@@ -442,8 +460,12 @@ export function withWizardSpan<T>(
         throw err;
       }
     });
-  } catch {
-    // If span machinery itself throws, fall through to the raw callback.
+  } catch (err) {
+    if (fnInvoked) {
+      // Sentry rethrew our callback's error — propagate, don't re-run fn.
+      throw err;
+    }
+    // Span machinery threw before our callback ran — safe to fall back.
     return fn();
   }
 }
