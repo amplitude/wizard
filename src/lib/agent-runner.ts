@@ -40,7 +40,11 @@ import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
-import { wizardAbort, WizardError } from '../utils/wizard-abort';
+import {
+  wizardAbort,
+  registerCleanup,
+  WizardError,
+} from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
@@ -92,6 +96,20 @@ export async function runAgentWizard(
   );
   ensureWizardArtifactsIgnored(session.installDir);
 
+  // Wire cleanup through TWO paths so it runs on every exit:
+  //   - registerCleanup → fires inside `wizardAbort` (the error-path
+  //     handlers in this file all delegate to wizardAbort, which calls
+  //     `process.exit()`. process.exit skips async finally blocks, so a
+  //     try/finally alone would NOT run cleanup on AUTH_ERROR /
+  //     MCP_MISSING / RESOURCE_MISSING / GATEWAY_DOWN / RATE_LIMIT /
+  //     API_ERROR — the very paths this PR is trying to cover).
+  //   - try/finally → fires on the success path (where the process
+  //     doesn't call wizardAbort) and on uncaught exceptions.
+  // cleanupWizardArtifacts is idempotent (each step `existsSync`-checks
+  // before unlinking) so double-firing is safe.
+  const cleanup = (): void => cleanupWizardArtifacts(session.installDir);
+  registerCleanup(cleanup);
+
   try {
     return await runAgentWizardBody(
       config,
@@ -100,11 +118,7 @@ export async function runAgentWizard(
       featureProgress,
     );
   } finally {
-    // Clean up single-use scaffolding regardless of success / error / cancel.
-    // Instrumentation and taxonomy skills stay on disk (users invoke them
-    // later); they're gitignored above so kept-on-disk doesn't mean
-    // committed-to-git. Pre-existing success-path call removed below.
-    cleanupWizardArtifacts(session.installDir);
+    cleanup();
   }
 }
 
