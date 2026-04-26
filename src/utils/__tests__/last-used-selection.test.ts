@@ -32,7 +32,7 @@ describe('getLastUsedSelection', () => {
     expect(getLastUsedSelection(cfg)).toEqual({
       orgId: undefined,
       workspaceId: undefined,
-      projectId: undefined,
+      appId: undefined,
     });
   });
 });
@@ -40,13 +40,13 @@ describe('getLastUsedSelection', () => {
 describe('storeLastUsedSelection', () => {
   it('round-trips the full triple', () => {
     storeLastUsedSelection(
-      { orgId: 'org-1', workspaceId: 'ws-2', projectId: 'proj-3' },
+      { orgId: 'org-1', workspaceId: 'ws-2', appId: 'app-3' },
       cfg,
     );
     expect(getLastUsedSelection(cfg)).toEqual({
       orgId: 'org-1',
       workspaceId: 'ws-2',
-      projectId: 'proj-3',
+      appId: 'app-3',
     });
   });
 
@@ -55,20 +55,20 @@ describe('storeLastUsedSelection', () => {
     expect(getLastUsedSelection(cfg)).toEqual({
       orgId: 'org-only',
       workspaceId: undefined,
-      projectId: undefined,
+      appId: undefined,
     });
   });
 
-  it('clears workspace + project when only orgId changes', () => {
+  it('clears workspace + app when only orgId changes', () => {
     storeLastUsedSelection(
-      { orgId: 'org-1', workspaceId: 'ws-1', projectId: 'proj-1' },
+      { orgId: 'org-1', workspaceId: 'ws-1', appId: 'app-1' },
       cfg,
     );
     storeLastUsedSelection({ orgId: 'org-2' }, cfg);
     expect(getLastUsedSelection(cfg)).toEqual({
       orgId: 'org-2',
       workspaceId: undefined,
-      projectId: undefined,
+      appId: undefined,
     });
   });
 

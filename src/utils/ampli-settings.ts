@@ -216,7 +216,10 @@ const WizardNamespaceSchema = z
   .object({
     lastUsedOrgId: z.string().optional(),
     lastUsedWorkspaceId: z.string().optional(),
-    lastUsedProjectId: z.string().optional(),
+    // Matches `selectedAppId` on the wizard session — both refer to the
+    // numeric Amplitude app/environment id. Keep the terminology in sync
+    // so a future caller doesn't reintroduce the retired `project` term.
+    lastUsedAppId: z.string().optional(),
   })
   .passthrough();
 
@@ -238,26 +241,30 @@ function writeWizardNamespace(
 }
 
 /**
- * Returns the last-used org/workspace/project selection triple. Each field
- * is individually optional — a user who has never had a workspace picked can
+ * Returns the last-used org/workspace/app selection triple. Each field is
+ * individually optional — a user who has never had a workspace picked can
  * still have an orgId from an org-only run.
+ *
+ * Field naming matches the canonical session shape (`selectedAppId`,
+ * `selectedWorkspaceId`, `selectedOrgId`) so callers can spread directly
+ * into the picker pre-focus logic without re-keying.
  */
 export function getLastUsedSelection(configPath?: string): {
   orgId?: string;
   workspaceId?: string;
-  projectId?: string;
+  appId?: string;
 } {
   const ns = readWizardNamespace(configPath);
   return {
     orgId: ns.lastUsedOrgId,
     workspaceId: ns.lastUsedWorkspaceId,
-    projectId: ns.lastUsedProjectId,
+    appId: ns.lastUsedAppId,
   };
 }
 
 /**
  * Persist the last-used selection triple. Pass undefined to clear a level
- * (e.g. when the user selects a different org, the old workspace/project
+ * (e.g. when the user selects a different org, the old workspace/app
  * shouldn't pre-focus the picker anymore). Other wizard-scoped settings
  * inside the `wizard` namespace are preserved.
  */
@@ -265,7 +272,7 @@ export function storeLastUsedSelection(
   selection: {
     orgId?: string;
     workspaceId?: string;
-    projectId?: string;
+    appId?: string;
   },
   configPath?: string,
 ): void {
@@ -275,7 +282,7 @@ export function storeLastUsedSelection(
       ...current,
       lastUsedOrgId: selection.orgId,
       lastUsedWorkspaceId: selection.workspaceId,
-      lastUsedProjectId: selection.projectId,
+      lastUsedAppId: selection.appId,
     },
     configPath,
   );
