@@ -79,7 +79,7 @@ describe('OutroScreen — error variants', () => {
     expect(frame).toContain('Dashboard ready');
     expect(frame).toContain('https://app.amplitude.com/analytics/d/abc123');
     expect(frame).toContain('Open your analytics dashboard');
-    expect(frame).not.toContain('Open Amplitude\n');
+    expect(frame).not.toContain('Open Amplitude');
   });
 
   it('uses the generic Open Amplitude label when no dashboard URL is set', () => {
