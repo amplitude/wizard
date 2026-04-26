@@ -138,6 +138,14 @@ export enum AgentErrorType {
   API_ERROR = 'WIZARD_API_ERROR',
   /** Authentication failed — bearer token invalid or expired */
   AUTH_ERROR = 'WIZARD_AUTH_ERROR',
+  /**
+   * Every retry attempt failed with the same upstream-gateway signature
+   * (400 terminated / DEADLINE_EXCEEDED). Indicates the Amplitude LLM
+   * gateway or its Vertex backend is unhealthy — not a wizard bug. The
+   * runner surfaces a specific actionable message including the
+   * ANTHROPIC_API_KEY bypass workaround.
+   */
+  GATEWAY_DOWN = 'WIZARD_GATEWAY_DOWN',
 }
 
 const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
@@ -242,6 +250,93 @@ export type AgentConfig = {
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
 };
+
+/**
+ * Maximum number of seconds the agent may sleep in a single Bash call.
+ *
+ * Long sleeps are the proximate cause of "API Error: 400 terminated" cascades:
+ * the agent emits a Bash tool_use that idles the upstream API streaming
+ * connection. The Amplitude LLM gateway / Vertex closes idle streams after
+ * ~30s, the next API call returns 400, and the agent escalates by sleeping
+ * even longer (3s → 5s → 10s → 30s → 60s) trying to "wait for MCP recovery".
+ *
+ * Capping at 5s keeps short, legitimate pauses (e.g. waiting for a brief
+ * dev-server boot) working while breaking the runaway sleep loop.
+ */
+export const MAX_BASH_SLEEP_SECONDS = 5;
+
+/** Matches `sleep <number>` at the start of a command or after a chain operator. */
+const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
+
+/**
+ * Build a PreToolUse hook that enforces wizard Bash safety.
+ *
+ * Why this exists: the Claude Agent SDK runs with
+ * `tools: { type: 'preset', preset: 'claude_code' }` and
+ * `permissionMode: 'acceptEdits'`. In that configuration, `canUseTool` is
+ * NOT invoked for the built-in `Bash` tool — only for MCP tools. Logs from
+ * production runs confirm zero `canUseTool` entries for Bash even though
+ * `wizardCanUseTool` is wired into options.
+ *
+ * PreToolUse hooks fire unconditionally for every tool, so this is the
+ * authoritative place to gate Bash. We delegate the canonical allowlist
+ * to `wizardCanUseTool` and additionally cap `sleep <N>` to
+ * MAX_BASH_SLEEP_SECONDS to break the 400-terminated sleep cascade.
+ */
+export function createPreToolUseHook(): HookCallback {
+  return (input) => {
+    const toolName = (input.tool_name as string | undefined) ?? '';
+    const toolInput =
+      (input.tool_input as Record<string, unknown> | undefined) ?? {};
+
+    // Cap long sleeps before the canonical allowlist check, so the
+    // diagnostic message is specific instead of "command not in allowlist".
+    if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
+      const match = command.match(SLEEP_COMMAND_PATTERN);
+      if (match) {
+        const seconds = Number.parseFloat(match[1]);
+        if (Number.isFinite(seconds) && seconds > MAX_BASH_SLEEP_SECONDS) {
+          logToFile(
+            `Denying long sleep (${seconds}s > ${MAX_BASH_SLEEP_SECONDS}s): ${command}`,
+          );
+          captureWizardError(
+            'Bash Policy',
+            'Long sleep blocked',
+            'createPreToolUseHook',
+            { 'sleep seconds': seconds, command },
+          );
+          return Promise.resolve({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`,
+            },
+          });
+        }
+      }
+    }
+
+    // Delegate to the canonical allowlist. Apply to Bash here; for other
+    // tools (Read/Write/Edit/Grep on .env, MCP tools) we keep canUseTool
+    // as the primary gate since it already runs reliably for those.
+    if (toolName === 'Bash') {
+      const decision = wizardCanUseTool(toolName, toolInput);
+      if (decision.behavior === 'deny') {
+        return Promise.resolve({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: decision.message,
+          },
+        });
+      }
+    }
+
+    return Promise.resolve({});
+  };
+}
 
 /**
  * Create a stop hook callback that drains the additional feature queue,
@@ -1134,6 +1229,12 @@ export async function runAgent(
   // Track if we received a successful result (before any cleanup errors)
   let receivedSuccessResult = false;
   let lastResultMessage: SDKMessage | null = null;
+  // Cross-attempt counters used by the post-loop error classifier (and the
+  // outer catch). When upstreamGatewayFailures === attemptCount and we
+  // never observed a success, we surface GATEWAY_DOWN. Hoisted to the
+  // outer function scope so both error-emit paths can see them.
+  let attemptCount = 0;
+  let upstreamGatewayFailures = 0;
 
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
@@ -1308,7 +1409,14 @@ export async function runAgent(
 
     // Retry loop: if the agent stalls (no message for the configured timeout), abort
     // and re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES.
-    const MAX_RETRIES = 3;
+    //
+    // Raised from 3 → 5 (6 total attempts). Production logs from gateway
+    // incidents show transient 400-terminated bursts that clear in 30–60s
+    // — 4 attempts in 14s of backoff was too aggressive and exited the
+    // wizard during recoverable blips. With jittered exponential backoff
+    // (cap 30s) the total recovery budget is now ~90s, which rides through
+    // typical Vertex/gateway restarts without giving up.
+    const MAX_RETRIES = 5;
     // Cold-start timeout: subprocess spawn + MCP server connections + first LLM response
     const INITIAL_STALL_TIMEOUT_MS = 60_000;
     // Mid-run timeout: between consecutive messages during active work.
@@ -1329,9 +1437,14 @@ export async function runAgent(
     let postStreamRetryActive = false;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      attemptCount = attempt + 1;
       if (attempt > 0) {
-        // Exponential backoff: 2s, 4s, 8s
-        const backoffMs = Math.min(2_000 * Math.pow(2, attempt - 1), 8_000);
+        // Exponential backoff with jitter, cap 30s.
+        // 2s, 4s, 8s, 16s, 30s + ±25% jitter to avoid thundering herd
+        // when many wizard sessions retry against a recovering gateway.
+        const baseMs = Math.min(2_000 * Math.pow(2, attempt - 1), 30_000);
+        const jitter = baseMs * (0.75 + Math.random() * 0.5);
+        const backoffMs = Math.round(jitter);
         logToFile(
           `Agent stall retry: attempt ${attempt + 1} of ${
             MAX_RETRIES + 1
@@ -1422,6 +1535,12 @@ export async function runAgent(
             // 'summarized' keeps NDJSON logs / agent-mode output readable.
             // Sonnet 4.6 doesn't support adaptive thinking — must use
             // 'enabled' + explicit budget.
+            //
+            // Note: thinking blocks bloat the streaming envelope and have
+            // correlated with "API Error: 400 terminated" cascades when
+            // the gateway is unhealthy. The retry/jitter/GATEWAY_DOWN
+            // mitigations in this file are sized to ride out those blips
+            // without dropping thinking.
             thinking: {
               type: 'enabled',
               budgetTokens: 3000,
@@ -1476,6 +1595,11 @@ export async function runAgent(
               }
             },
             hooks: buildHooksConfig({
+              // PreToolUse fires for every tool regardless of permissionMode,
+              // so it's our authoritative gate for Bash safety. canUseTool
+              // alone is not invoked for Bash under
+              // `tools: { preset: 'claude_code' } + permissionMode: 'acceptEdits'`.
+              PreToolUse: createPreToolUseHook(),
               Stop: createStopHook(
                 config?.additionalFeatureQueue ?? (() => []),
                 () => authErrorDetected,
@@ -1600,6 +1724,19 @@ export async function runAgent(
         const matchedTransientError = transientErrorMatchers.find((m) =>
           partialOutput.includes(m.pattern),
         );
+        // Track upstream-gateway-shaped failures on EVERY attempt that
+        // ended that way (even the last one, where we won't retry). This
+        // is what lets the post-loop classifier compare
+        // `upstreamGatewayFailures === attemptCount` to detect
+        // GATEWAY_DOWN.
+        if (
+          !receivedSuccessResult &&
+          matchedTransientError &&
+          (matchedTransientError.label === 'api_400' ||
+            matchedTransientError.label === 'deadline_exceeded')
+        ) {
+          upstreamGatewayFailures++;
+        }
         const hitTransientApiError =
           !receivedSuccessResult &&
           !authErrorDetected &&
@@ -1661,6 +1798,15 @@ export async function runAgent(
         // These resolve on a fresh retry with a new conversation.
         const errMsg =
           innerError instanceof Error ? innerError.message : String(innerError);
+        // Track upstream-gateway-shaped thrown errors on EVERY attempt
+        // (including the final one). Mirrors the post-stream branch.
+        if (
+          !receivedSuccessResult &&
+          (errMsg.includes('API Error: 400') ||
+            errMsg.includes('DEADLINE_EXCEEDED'))
+        ) {
+          upstreamGatewayFailures++;
+        }
         const isTransientSdkError =
           attempt < MAX_RETRIES &&
           !authErrorDetected &&
@@ -1739,6 +1885,25 @@ export async function runAgent(
       return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
     }
 
+    // Every attempt died with an upstream-gateway-shaped error and we
+    // never observed a successful result — the gateway is unhealthy,
+    // not the wizard. Surface as GATEWAY_DOWN so the runner can show a
+    // specific, actionable message (try ANTHROPIC_API_KEY bypass).
+    if (
+      attemptCount > 0 &&
+      upstreamGatewayFailures >= attemptCount &&
+      !receivedSuccessResult
+    ) {
+      logToFile(
+        `Agent error: GATEWAY_DOWN (${upstreamGatewayFailures}/${attemptCount} attempts failed upstream)`,
+      );
+      spinner.stop('LLM gateway unavailable');
+      return {
+        error: AgentErrorType.GATEWAY_DOWN,
+        message: apiErrorMessage,
+      };
+    }
+
     if (outputText.includes('API Error:')) {
       logToFile('Agent error: API_ERROR');
       spinner.stop('API error occurred');
@@ -1771,6 +1936,23 @@ export async function runAgent(
       logToFile('Agent error (caught): RATE_LIMIT');
       spinner.stop('Rate limit exceeded');
       return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
+    }
+
+    // See note in the non-throwing return path above — surface
+    // GATEWAY_DOWN when every attempt died upstream.
+    if (
+      attemptCount > 0 &&
+      upstreamGatewayFailures >= attemptCount &&
+      !receivedSuccessResult
+    ) {
+      logToFile(
+        `Agent error (caught): GATEWAY_DOWN (${upstreamGatewayFailures}/${attemptCount} attempts failed upstream)`,
+      );
+      spinner.stop('LLM gateway unavailable');
+      return {
+        error: AgentErrorType.GATEWAY_DOWN,
+        message: apiErrorMessage,
+      };
     }
 
     if (outputText.includes('API Error:')) {

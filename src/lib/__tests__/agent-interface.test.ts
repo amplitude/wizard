@@ -11,11 +11,13 @@ import {
   runAgent,
   createStopHook,
   createPreCompactHook,
+  createPreToolUseHook,
   wizardCanUseTool,
   buildWizardMetadata,
   isSkillInstallCommand,
   matchesAllowedPrefix,
   parseEventPlanContent,
+  MAX_BASH_SLEEP_SECONDS,
   AgentErrorType,
   AgentSignals,
 } from '../agent-interface';
@@ -497,14 +499,110 @@ describe('runAgent', () => {
       // .catch() handler and doesn't become an unhandled rejection mid-advance.
       const rejectCheck = expect(runPromise).rejects.toThrow('Stall aborted');
 
-      // Fires all 4 stall timers (1 × 60s cold-start + 3 × 120s mid-run) plus
-      // backoff delays (2s + 4s + 8s = 14s) in sequence.
+      // Fires all 6 stall timers (1 × 60s cold-start + 5 × 120s mid-run) plus
+      // jittered backoff delays (worst case ~2.5s + 5s + 10s + 20s + 37.5s ≈ 75s).
       // advanceTimersByTimeAsync processes microtasks between each timer firing,
       // so each retry's new timer gets registered before the next fires.
-      await vi.advanceTimersByTimeAsync(500_000);
+      // Generous budget of 1500s covers all timers + backoffs comfortably.
+      await vi.advanceTimersByTimeAsync(1_500_000);
 
       await rejectCheck;
-      expect(queryCallCount).toBe(4); // MAX_RETRIES=3 → 4 total attempts
+      expect(queryCallCount).toBe(6); // MAX_RETRIES=5 → 6 total attempts
+    });
+
+    it('classifies all-attempts-failed-with-400-terminated as GATEWAY_DOWN', async () => {
+      // Regression test for the production incident where every retry
+      // attempt died with the same upstream-gateway signature. The
+      // wizard previously surfaced a generic API_ERROR with no path
+      // forward; now we surface GATEWAY_DOWN so the runner can show the
+      // ANTHROPIC_API_KEY workaround.
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+        return (async function* () {
+          // Each attempt yields a result message with is_error=true and the
+          // characteristic "API Error: 400 terminated" payload. This
+          // exercises the post-stream transient-error branch (not the
+          // catch path) so we cover the most common production shape.
+          yield {
+            type: 'result',
+            subtype: 'success',
+            is_error: true,
+            result: 'API Error: 400 terminated',
+          };
+        })();
+      });
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      // Advance past all backoff windows (max ~75s worst-case + buffer)
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      const result = await runPromise;
+
+      // All 6 attempts hit 400 terminated → GATEWAY_DOWN
+      expect(queryCallCount).toBe(6);
+      expect(result.error).toBe(AgentErrorType.GATEWAY_DOWN);
+      expect(result.message).toContain('400 terminated');
+    });
+
+    it('does not classify mixed errors as GATEWAY_DOWN', async () => {
+      // If even one attempt fails for a different reason (e.g. stall),
+      // we should NOT surface GATEWAY_DOWN — that's reserved for the
+      // unambiguous "every attempt died upstream" pattern.
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          queryCallCount++;
+          if (queryCallCount === 1) {
+            // First attempt: stall (different cause)
+            const signal = params.options.abortSignal as AbortSignal;
+            // eslint-disable-next-line require-yield
+            return (async function* () {
+              await new Promise<never>((_, reject) => {
+                signal.addEventListener('abort', () =>
+                  reject(new Error('Stall aborted')),
+                );
+              });
+            })();
+          }
+          // Subsequent attempts: 400 terminated
+          return (async function* () {
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: true,
+              result: 'API Error: 400 terminated',
+            };
+          })();
+        },
+      );
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await vi.advanceTimersByTimeAsync(1_500_000);
+
+      const result = await runPromise;
+
+      // Should be API_ERROR (or RATE_LIMIT etc.), not GATEWAY_DOWN —
+      // because not every attempt was a 400.
+      expect(result.error).not.toBe(AgentErrorType.GATEWAY_DOWN);
     });
 
     it('does not retry on non-stall errors', async () => {
@@ -1259,5 +1357,140 @@ describe('createPreCompactHook', () => {
       hook({ trigger: 'auto' }, undefined, { signal }),
     ).resolves.toEqual({});
     expect(handler).toHaveBeenCalledOnce();
+  });
+});
+
+describe('createPreToolUseHook', () => {
+  const hookOpts = { signal: new AbortController().signal };
+
+  const callHook = (
+    toolName: string,
+    toolInput: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const hook = createPreToolUseHook();
+    return hook(
+      { tool_name: toolName, tool_input: toolInput },
+      'tool-use-id',
+      hookOpts,
+    );
+  };
+
+  describe('long sleep guard', () => {
+    it(`denies sleep longer than ${MAX_BASH_SLEEP_SECONDS}s (the smoking gun for "API Error: 400 terminated")`, async () => {
+      const result = await callHook('Bash', {
+        command: 'sleep 30 && echo "ready"',
+      });
+      expect(result.hookSpecificOutput).toMatchObject({
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+      });
+      const reason = (
+        result.hookSpecificOutput as { permissionDecisionReason: string }
+      ).permissionDecisionReason;
+      expect(reason).toContain('400 terminated');
+    });
+
+    it('denies very long sleep (45s)', async () => {
+      const result = await callHook('Bash', {
+        command: 'sleep 45 && echo "ready"',
+      });
+      expect(result.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('denies bare sleep without chain operator', async () => {
+      const result = await callHook('Bash', { command: 'sleep 60' });
+      expect(result.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it(`allows short sleep at threshold (${MAX_BASH_SLEEP_SECONDS}s)`, async () => {
+      const result = await callHook('Bash', {
+        command: `sleep ${MAX_BASH_SLEEP_SECONDS}`,
+      });
+      // Falls through to wizardCanUseTool which denies "sleep" as not on
+      // allowlist — that's fine. The point of this test is that the
+      // sleep-cap branch did NOT fire (would otherwise mention 400 terminated).
+      const reason =
+        (
+          result.hookSpecificOutput as
+            | { permissionDecisionReason?: string }
+            | undefined
+        )?.permissionDecisionReason ?? '';
+      expect(reason).not.toContain('400 terminated');
+    });
+
+    it('case-insensitive sleep match', async () => {
+      const result = await callHook('Bash', { command: 'SLEEP 30' });
+      expect(result.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('detects sleep after && chain', async () => {
+      const result = await callHook('Bash', {
+        command: 'pnpm install && sleep 30',
+      });
+      expect(result.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('detects sleep on a newline-separated line', async () => {
+      const result = await callHook('Bash', {
+        command: 'pnpm install\nsleep 60',
+      });
+      expect(result.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('does not fire on commands that merely contain "sleep" as a substring', async () => {
+      const result = await callHook('Bash', {
+        command: 'pnpm run sleeptracker',
+      });
+      const reason =
+        (
+          result.hookSpecificOutput as
+            | { permissionDecisionReason?: string }
+            | undefined
+        )?.permissionDecisionReason ?? '';
+      expect(reason).not.toContain('400 terminated');
+    });
+  });
+
+  describe('non-Bash tools', () => {
+    it('does not block Read', async () => {
+      const result = await callHook('Read', { file_path: '/project/foo.ts' });
+      expect(result).toEqual({});
+    });
+
+    it('does not block MCP tools', async () => {
+      const result = await callHook('mcp__amplitude-wizard__get_events', {});
+      expect(result).toEqual({});
+    });
+
+    it('does not block TodoWrite', async () => {
+      const result = await callHook('TodoWrite', { todos: [] });
+      expect(result).toEqual({});
+    });
+  });
+
+  describe('Bash allowlist delegation', () => {
+    it('allows pnpm install', async () => {
+      const result = await callHook('Bash', {
+        command: 'pnpm install @amplitude/unified',
+      });
+      expect(result).toEqual({});
+    });
+
+    it('denies arbitrary shell commands via wizardCanUseTool', async () => {
+      const result = await callHook('Bash', { command: 'curl example.com' });
+      expect(result.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
   });
 });

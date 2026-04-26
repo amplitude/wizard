@@ -418,6 +418,38 @@ export async function runAgentWizard(
     });
   }
 
+  if (agentResult.error === AgentErrorType.GATEWAY_DOWN) {
+    captureWizardError(
+      'Agent API',
+      agentResult.message ?? 'LLM gateway unavailable',
+      'agent-runner',
+      {
+        integration: config.metadata.integration,
+        'error type': agentResult.error,
+      },
+    );
+
+    const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+    const bypassHint = usingDirectKey
+      ? `You're already using a direct Anthropic API key, so this is likely an Anthropic-side issue. Wait a few minutes and re-run.`
+      : `Workaround: re-run with a direct Anthropic API key to bypass the Amplitude gateway:\n  ANTHROPIC_API_KEY=sk-ant-... npx @amplitude/wizard\n\nOr wait a few minutes and try again — gateway incidents typically resolve quickly.`;
+
+    await wizardAbort({
+      message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
+        agentResult.message || 'API Error: 400 terminated'
+      }). This is an issue with the Amplitude LLM gateway or its Vertex backend, not your project.\n\n${bypassHint}\n\nIf this persists, please report it (with the log file at /tmp/amplitude-wizard.log) to: wizard@amplitude.com`,
+      error: new WizardError(
+        `LLM gateway unavailable: ${agentResult.message ?? 'unknown'}`,
+        {
+          integration: config.metadata.integration,
+          'error type': agentResult.error,
+          'using direct key': usingDirectKey,
+        },
+      ),
+      exitCode: ExitCode.NETWORK_ERROR,
+    });
+  }
+
   if (
     agentResult.error === AgentErrorType.RATE_LIMIT ||
     agentResult.error === AgentErrorType.API_ERROR

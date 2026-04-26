@@ -15,6 +15,8 @@ const WIZARD_COMMANDMENTS = [
 
   'When installing packages, start the installation as a background task and then continue with other work. Do not block waiting for installs to finish unless explicitly instructed.',
 
+  'NEVER use `sleep`, busy-wait loops, or polling Bash commands to wait for MCP servers, gateways, or other services to "recover". If an MCP tool returns an error, retry it AT MOST ONCE; if it still fails, report the failure to the user and proceed with the next step (or stop). Do not chain longer and longer sleeps trying to wait out an upstream issue — long Bash sleeps idle the API streaming connection and produce cascading "API Error: 400 terminated" failures. Bash sleeps over a few seconds will be denied by the wizard.',
+
   'Before writing to any file, you MUST read that exact file immediately beforehand using the Read tool, even if you have already read it earlier in the run. This avoids tool failures and stale edits.',
 
   'Treat feature flags, custom properties, and event names as part of an analytics contract. Prefer reusing existing names and patterns in the project. When you must introduce new ones, make them clear, descriptive, and consistent with existing conventions, and avoid scattering the same flag or property across many unrelated callsites. For instrumentation runs, load the bundled **amplitude-quickstart-taxonomy-agent** skill (taxonomy category via wizard-tools) and align new event names and properties with its starter-kit rules (business-outcome naming, small property sets, no redundant pageview events, funnel-friendly linkage).',
