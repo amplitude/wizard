@@ -25,6 +25,7 @@
  */
 
 import {
+  copyFileSync,
   existsSync,
   readdirSync,
   renameSync,
@@ -53,6 +54,15 @@ import {
  * Move a single file `from → to`. No-op if `from` is missing. Skips when
  * `to` already exists (the new layout wins; old file is best-effort cleaned).
  * Silent on errors.
+ *
+ * Cross-filesystem safety: legacy paths often live in tmpfs (`$TMPDIR`,
+ * `/tmp`) while the new cache root is under `$HOME`. On Linux these are
+ * commonly two different filesystems, and `renameSync` throws `EXDEV`
+ * across mounts. We try `renameSync` first (atomic, fastest) and fall
+ * back to `copyFileSync + unlinkSync` on `EXDEV`. The fallback isn't
+ * atomic, but the migration shim is best-effort and any partial state
+ * (e.g. file copied but not unlinked) is recoverable on the next run
+ * because `existsSync(to)` makes the move idempotent.
  */
 function moveFile(from: string, to: string): boolean {
   try {
@@ -71,7 +81,27 @@ function moveFile(from: string, to: string): boolean {
     // handled correctly. A naïve `lastIndexOf('/')` returns -1 for
     // `C:\Users\...` and would point us at the filesystem root.
     ensureDir(dirname(to));
-    renameSync(from, to);
+    try {
+      renameSync(from, to);
+    } catch (err) {
+      // On Linux, /tmp is often tmpfs while $HOME lives on a different
+      // filesystem; renameSync throws EXDEV across mounts. Fall back to
+      // copy + unlink for cross-device moves. Re-throw any other error.
+      if (
+        err instanceof Error &&
+        (err as NodeJS.ErrnoException).code === 'EXDEV'
+      ) {
+        copyFileSync(from, to);
+        try {
+          unlinkSync(from);
+        } catch {
+          // Source still exists but destination is in place; the next
+          // migration run will see `existsSync(to)` and clean it up.
+        }
+      } else {
+        throw err;
+      }
+    }
     logToFile(`storage-migration: moved ${from} → ${to}`);
     return true;
   } catch (err) {
