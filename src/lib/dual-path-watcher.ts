@@ -75,41 +75,68 @@ export function startDualPathWatcher(
   const handles: fs.FSWatcher[] = [];
   const attached = new Set<string>();
   let pollHandle: unknown;
+  let disposed = false;
 
-  const tryAttach = (target: string): boolean => {
-    if (attached.has(target)) return true;
+  /**
+   * Returns `'newly-attached'` only when this call actually attached a
+   * watcher. The caller uses that to decide whether `onChange` should
+   * fire — distinguishing a fresh attach from "already attached" or
+   * "still unavailable" lets us avoid duplicate UI updates.
+   */
+  const tryAttach = (target: string): 'newly-attached' | 'already' | 'miss' => {
+    if (disposed) return 'miss';
+    if (attached.has(target)) return 'already';
     const w = watch(target, opts.onChange);
-    if (!w) return false;
+    if (!w) return 'miss';
     attached.add(target);
     handles.push(w);
-    return true;
+    return 'newly-attached';
   };
 
-  const ok = tryAttach(opts.canonicalPath) || tryAttach(opts.legacyPath);
-  // We always try to attach the OTHER path as well — short-circuit
-  // attaching only one and leaving the other to the poll fallback would
-  // miss subsequent file appearances.
-  tryAttach(opts.canonicalPath);
-  tryAttach(opts.legacyPath);
+  const allAttached = (): boolean =>
+    attached.has(opts.canonicalPath) && attached.has(opts.legacyPath);
 
-  if (ok) {
-    opts.onChange();
-  } else {
+  /**
+   * Start polling iff we haven't already AND one or both paths are still
+   * missing. Stops polling once both are attached.
+   *
+   * Critical: polling continues even after one path attaches. The
+   * previous implementation stopped polling as soon as ANY path
+   * attached, which broke the dashboard flow — bundled context-hub
+   * skills only ever write the legacy path, so when canonical existed
+   * at startup (e.g. from a prior run) the wizard latched onto it and
+   * silently missed the agent's eventual write to the legacy path.
+   */
+  const startPolling = () => {
+    if (pollHandle !== undefined || disposed || allAttached()) return;
     pollHandle = setIntervalFn(() => {
       const a = tryAttach(opts.canonicalPath);
       const b = tryAttach(opts.legacyPath);
-      if (a || b) {
+      if (a === 'newly-attached' || b === 'newly-attached') {
         opts.onChange();
+      }
+      if (allAttached()) {
         clearIntervalFn(pollHandle);
         pollHandle = undefined;
       }
     }, pollMs);
+  };
+
+  const initialCanonical = tryAttach(opts.canonicalPath);
+  const initialLegacy = tryAttach(opts.legacyPath);
+  if (
+    initialCanonical === 'newly-attached' ||
+    initialLegacy === 'newly-attached'
+  ) {
+    opts.onChange();
   }
+  if (!allAttached()) startPolling();
 
   return {
     watchers: () => handles,
     isWatching: () => handles.length > 0,
     dispose: () => {
+      disposed = true;
       for (const h of handles) {
         try {
           h.close();
