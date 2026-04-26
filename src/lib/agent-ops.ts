@@ -11,7 +11,6 @@
 
 import path from 'path';
 import * as fs from 'fs';
-import { z } from 'zod';
 import { detectAllFrameworks } from '../run';
 import {
   detectAmplitudeInProject,
@@ -34,6 +33,7 @@ import {
   type FileChange,
   type PlannedEvent,
 } from './agent-plans.js';
+import { parseEventPlanContent } from './event-plan-parser.js';
 
 // ── Pre-existing event-plan reader ──────────────────────────────────
 //
@@ -42,25 +42,12 @@ import {
 // this file persist across cancel/error so a re-run of `wizard plan` can
 // surface the prior plan as hints in the new plan emission.
 //
-// We deliberately re-declare the loose parser schema here instead of
-// importing `parseEventPlanContent` from `agent-interface.ts`: that module
-// pulls in the Claude Agent SDK loader, the wizard UI singleton, analytics,
-// etc. — none of which `agent-ops` (a pure CLI/ops module) wants to touch.
-// Schema kept in sync with `agent-interface.ts#eventPlanSchema`. Some skills
-// also imply a top-level `{ events: [...] }` wrapper; we unwrap it before
-// parsing (matching the TUI parser's behaviour).
-const eventPlanFileSchema = z.array(
-  z.looseObject({
-    name: z.string().optional(),
-    event: z.string().optional(),
-    eventName: z.string().optional(),
-    event_name: z.string().optional(),
-    description: z.string().optional(),
-    event_description: z.string().optional(),
-    eventDescription: z.string().optional(),
-    eventDescriptionAndReasoning: z.string().optional(),
-  }),
-);
+// Parsing routes through `event-plan-parser.ts` so the TUI's Event Plan
+// viewer and this CLI reader stay locked to one schema. The parser is the
+// lightweight zod-only module — pulling it in here doesn't drag in the
+// Claude Agent SDK loader, the wizard UI singleton, or analytics, which
+// is the property `agent-ops` cares about (also used by the future
+// external MCP server).
 
 /**
  * Read `<installDir>/.amplitude-events.json` if present and return its
@@ -84,63 +71,27 @@ function readPreExistingEventHints(installDir: string): PlannedEvent[] {
     return [];
   }
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
+  const events = parseEventPlanContent(raw);
+  if (events === null) {
+    // `null` covers both "not valid JSON" and "did not match the schema".
+    // The shared parser doesn't surface which, so we log a single generic
+    // line — the file path is enough to investigate post-mortem.
     logToFile(
-      `[runPlan] ${eventsPath} is not valid JSON: ${(e as Error).message}`,
+      `[runPlan] ${eventsPath} could not be parsed as an event plan; skipping`,
     );
     return [];
   }
 
-  // Tolerate `{ events: [...] }` wrapper objects — some skills imply this
-  // shape and the parser would otherwise reject them outright.
-  if (
-    parsed &&
-    typeof parsed === 'object' &&
-    !Array.isArray(parsed) &&
-    Array.isArray((parsed as { events?: unknown }).events)
-  ) {
-    parsed = (parsed as { events: unknown[] }).events;
-  }
-
-  const result = eventPlanFileSchema.safeParse(parsed);
-  if (!result.success) {
-    logToFile(
-      `[runPlan] ${eventsPath} did not match expected event-plan shape; skipping`,
-    );
-    return [];
-  }
-
-  // Adapt each entry to PlannedEvent: pick the first non-empty alias for
-  // name/description, drop entries with no usable name, and clamp lengths
-  // so we never trip the WizardPlan zod validator (name max 80, desc max 500).
+  // Adapt each entry to PlannedEvent: drop entries with no usable name,
+  // and clamp lengths so we never trip the WizardPlan zod validator
+  // (name max 80, desc max 500).
   const adapted: PlannedEvent[] = [];
-  for (const entry of result.data) {
-    const name = (
-      entry.name ??
-      entry.event ??
-      entry.eventName ??
-      entry.event_name ??
-      ''
-    ).trim();
+  for (const entry of events) {
+    const name = entry.name.trim();
     if (name.length === 0) continue;
-    // Standard aliases win over the verbose `eventDescriptionAndReasoning`
-    // legacy field — if an agent emits both a concise `event_description`
-    // and a long-form reasoning blob, prefer the concise one for the plan.
-    // Mirrors the ordering in agent-interface.ts#parseEventPlanContent
-    // (e3f25614).
-    const description = (
-      entry.description ??
-      entry.event_description ??
-      entry.eventDescription ??
-      entry.eventDescriptionAndReasoning ??
-      ''
-    ).trim();
     adapted.push({
       name: name.slice(0, 80),
-      description: description.slice(0, 500),
+      description: entry.description.trim().slice(0, 500),
     });
   }
   return adapted;
