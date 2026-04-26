@@ -209,6 +209,145 @@ export function installBundledSkill(
 }
 
 /**
+ * Patterns the wizard writes into the user's project that should never be
+ * committed to git. Kept as a const so `ensureWizardArtifactsIgnored` and
+ * `cleanupWizardArtifacts` stay in sync with each other — anything we
+ * gitignore should also be cleanup-eligible, and vice versa.
+ *
+ * Notes on each entry:
+ *   - `.amplitude-events.json` — persisted event plan from confirm_event_plan.
+ *     Useful for re-instrumentation but never belongs in source control.
+ *   - `.claude/skills/integration-...` — single-use SDK-setup workflows;
+ *     removed at end of run. (Pattern is `integration-...slash` in gitignore.)
+ *   - The instrumentation/taxonomy skills are kept on disk so users can
+ *     invoke them later ("Claude, use the chart-dashboard-plan skill"), but
+ *     they're still gitignored — committing them would balloon every PR
+ *     diff and surprise users who run `git add .` after the wizard.
+ */
+export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
+  '.amplitude-events.json',
+  '.claude/skills/integration-*/',
+  '.claude/skills/add-analytics-instrumentation/',
+  '.claude/skills/amplitude-chart-dashboard-plan/',
+  '.claude/skills/amplitude-quickstart-taxonomy-agent/',
+];
+
+/** Marker comment identifying the block as wizard-managed. */
+const WIZARD_GITIGNORE_HEADER = '# Amplitude wizard';
+
+/**
+ * Append the wizard's artifact patterns to `<installDir>/.gitignore`.
+ * Idempotent: re-running after the patterns are already present is a no-op.
+ * Creates the file if it doesn't exist.
+ *
+ * Patterns are written in a single contiguous block under a marker comment
+ * so future edits / removals can target the block without disturbing the
+ * user's other gitignore content. Silent on I/O errors so a gitignore
+ * write failure never blocks the wizard run.
+ */
+export function ensureWizardArtifactsIgnored(installDir: string): void {
+  const gitignorePath = path.join(installDir, '.gitignore');
+  try {
+    let existing = '';
+    if (fs.existsSync(gitignorePath)) {
+      existing = fs.readFileSync(gitignorePath, 'utf8');
+    }
+
+    // Already covered? Match by checking every pattern is present as a
+    // standalone line. Cheap to re-check on every run.
+    const lines = existing.split('\n').map((l) => l.trim());
+    const missing = WIZARD_GITIGNORE_PATTERNS.filter((p) => !lines.includes(p));
+    if (missing.length === 0) return;
+
+    const block = [WIZARD_GITIGNORE_HEADER, ...WIZARD_GITIGNORE_PATTERNS].join(
+      '\n',
+    );
+
+    // If the marker is already present, replace the block in place rather
+    // than appending a second one. This handles the case where someone added
+    // a new pattern to WIZARD_GITIGNORE_PATTERNS in a later wizard version.
+    //
+    // The trailing `(?:\n[^\n]+)*` matches consecutive non-empty lines after
+    // the marker — `[^\n]+` (one or more) instead of `[^\n]*` (zero or more)
+    // is critical: the latter matches empty content between two `\n`s and
+    // greedily consumes blank lines, which would silently swallow any user
+    // content below the wizard block.
+    if (existing.includes(WIZARD_GITIGNORE_HEADER)) {
+      const updated = existing.replace(
+        new RegExp(
+          `${escapeRegex(WIZARD_GITIGNORE_HEADER)}(?:\\n[^\\n]+)*`,
+          'm',
+        ),
+        block,
+      );
+      fs.writeFileSync(gitignorePath, updated, 'utf8');
+      return;
+    }
+
+    // No marker yet — append a fresh block, separated by a blank line if
+    // the file is non-empty.
+    const separator =
+      existing.length === 0 || existing.endsWith('\n\n')
+        ? ''
+        : existing.endsWith('\n')
+        ? '\n'
+        : '\n\n';
+    fs.writeFileSync(
+      gitignorePath,
+      `${existing}${separator}${block}\n`,
+      'utf8',
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`ensureWizardArtifactsIgnored: ${msg}`);
+  }
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Delete `<installDir>/.amplitude-events.json` if present.
+ *
+ * The wizard's `confirm_event_plan` MCP tool persists the approved plan to
+ * this file so the TUI's Event Plan viewer can render it. The
+ * commandments instruct the inner Claude agent to delete the file in the
+ * conclude phase, but model variance means it's not always honored — so
+ * the wizard cleans up itself as a backstop. Silent on errors.
+ */
+export function cleanupAmplitudeEventsFile(installDir: string): void {
+  const target = path.join(installDir, '.amplitude-events.json');
+  try {
+    if (fs.existsSync(target)) {
+      fs.unlinkSync(target);
+      logToFile(`cleanupAmplitudeEventsFile: removed ${target}`);
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`cleanupAmplitudeEventsFile: ${msg}`);
+  }
+}
+
+/**
+ * Run all wizard-artifact cleanup. Composes:
+ *   - cleanupIntegrationSkills (remove `.claude/skills/integration-*`)
+ *   - cleanupAmplitudeEventsFile (remove `.amplitude-events.json`)
+ *
+ * Safe to call from any exit path (success, error, cancel). Each step is
+ * silent on its own errors so a failure in one doesn't block the others.
+ *
+ * Instrumentation and taxonomy skills are intentionally NOT removed —
+ * users invoke them later for event discovery and dashboard planning.
+ * They're gitignored via {@link ensureWizardArtifactsIgnored} so they
+ * don't pollute source control even when kept on disk.
+ */
+export function cleanupWizardArtifacts(installDir: string): void {
+  cleanupIntegrationSkills(installDir);
+  cleanupAmplitudeEventsFile(installDir);
+}
+
+/**
  * Remove wizard-installed integration skills from `<installDir>/.claude/skills/`.
  *
  * Integration skills are a single-use SDK-setup workflow — they're dead

@@ -40,7 +40,11 @@ import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
-import { wizardAbort, WizardError } from '../utils/wizard-abort';
+import {
+  wizardAbort,
+  registerCleanup,
+  WizardError,
+} from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
@@ -82,6 +86,56 @@ export async function runAgentWizard(
     enableDebugLogs();
   }
 
+  // Ensure the wizard's artifacts (event plan + the single-use integration
+  // skill + the kept-on-disk instrumentation/taxonomy skills) are gitignored
+  // before anything is installed. Idempotent — safe to call on every run.
+  // Without this, `git status` after a run is full of wizard scaffolding
+  // and `git add .` sweeps it into the user's commits.
+  const { ensureWizardArtifactsIgnored, cleanupWizardArtifacts } = await import(
+    './wizard-tools.js'
+  );
+  ensureWizardArtifactsIgnored(session.installDir);
+
+  // Wire cleanup through TWO paths so it runs on every exit:
+  //   - registerCleanup → fires inside `wizardAbort` (the error-path
+  //     handlers in this file all delegate to wizardAbort, which calls
+  //     `process.exit()`. process.exit skips async finally blocks, so a
+  //     try/finally alone would NOT run cleanup on AUTH_ERROR /
+  //     MCP_MISSING / RESOURCE_MISSING / GATEWAY_DOWN / RATE_LIMIT /
+  //     API_ERROR — the very paths this PR is trying to cover).
+  //   - try/finally → fires on the success path (where the process
+  //     doesn't call wizardAbort) and on uncaught exceptions.
+  // cleanupWizardArtifacts is idempotent (each step `existsSync`-checks
+  // before unlinking) so double-firing is safe.
+  const cleanup = (): void => cleanupWizardArtifacts(session.installDir);
+  registerCleanup(cleanup);
+
+  try {
+    return await runAgentWizardBody(
+      config,
+      session,
+      getAdditionalFeatureQueue,
+      featureProgress,
+    );
+  } finally {
+    cleanup();
+  }
+}
+
+/**
+ * Internal: the body of `runAgentWizard`, extracted so the public entry
+ * point can wrap it in a try/finally that always runs `cleanupWizardArtifacts`
+ * — regardless of whether the run succeeded, errored, or was cancelled.
+ */
+async function runAgentWizardBody(
+  config: FrameworkConfig,
+  session: WizardSession,
+  getAdditionalFeatureQueue?: () => readonly AdditionalFeature[],
+  featureProgress?: {
+    onFeatureStart?: (feature: AdditionalFeature) => void;
+    onFeatureComplete?: (feature: AdditionalFeature) => void;
+  },
+): Promise<void> {
   // Version check
   if (
     config.detection.getInstalledVersion ||
@@ -532,10 +586,8 @@ export async function runAgentWizard(
     continueUrl,
   };
 
-  // Remove single-use integration skills from the user's project.
-  // Instrumentation and taxonomy skills stay — users invoke them later.
-  const { cleanupIntegrationSkills } = await import('./wizard-tools.js');
-  cleanupIntegrationSkills(session.installDir);
+  // Wizard-artifact cleanup happens in `runAgentWizard`'s try/finally so
+  // it runs on success, error, AND cancel paths. Don't duplicate here.
 
   getUI().outro(`Successfully installed Amplitude!`);
 
