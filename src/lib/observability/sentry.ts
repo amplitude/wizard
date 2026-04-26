@@ -389,6 +389,66 @@ export function startWizardSpan(
 }
 
 /**
+ * Wrap a sync or async callback in an active Sentry span.
+ *
+ * Unlike `startWizardSpan` (inactive span — manual lifecycle, no context
+ * propagation), this uses `Sentry.startSpan` which sets the span as the
+ * active scope. Outbound HTTP requests, child spans, and errors thrown
+ * inside `fn` are automatically attached to this span — including any
+ * `axios` / `fetch` call picked up by the default httpIntegration.
+ *
+ * Use this for discrete operations like an OAuth exchange, a single MCP
+ * call, or a wizard step. Span status is set to `internal_error` if `fn`
+ * throws, then the error is rethrown so existing control flow is preserved.
+ *
+ * No-ops cleanly when Sentry is not initialized — `fn` runs as if the
+ * wrapper weren't there, with no overhead beyond the function call.
+ */
+export function withWizardSpan<T>(
+  name: string,
+  op: string,
+  attributes: Record<string, unknown> | undefined,
+  fn: () => T,
+): T {
+  if (!initialized) return fn();
+  try {
+    const safeAttrs = attributes
+      ? toSpanAttributes(redact(attributes) as Record<string, unknown>)
+      : undefined;
+    return Sentry.startSpan({ name, op, attributes: safeAttrs }, (span) => {
+      const markError = (): void => {
+        try {
+          span.setStatus({ code: 2, message: 'internal_error' });
+        } catch {
+          /* non-fatal */
+        }
+      };
+      try {
+        const result = fn();
+        // For async results, propagate error status if the promise rejects.
+        if (
+          result !== null &&
+          typeof result === 'object' &&
+          typeof (result as { then?: unknown }).then === 'function'
+        ) {
+          return (result as unknown as Promise<unknown>).catch((err) => {
+            markError();
+            throw err;
+          }) as unknown as T;
+        }
+        return result;
+      } catch (err) {
+        markError();
+        throw err;
+      }
+    });
+  } catch {
+    // If span machinery itself throws, fall through to the raw callback.
+    return fn();
+  }
+}
+
+/**
  * Flush pending Sentry events before exit (2s timeout).
  */
 export async function flushSentry(): Promise<void> {

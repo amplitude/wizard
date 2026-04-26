@@ -12,6 +12,7 @@ import path from 'path';
 import { logToFile } from '../utils/debug.js';
 import { WIZARD_USER_AGENT } from './constants.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
+import { withWizardSpan, addBreadcrumb } from './observability/index.js';
 
 export const AMPLITUDE_MCP_URL =
   process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
@@ -44,6 +45,21 @@ function getClaudeCodeExecutablePath(): string {
  * Returns null if the session cannot be established.
  */
 async function openMcpSession(
+  accessToken: string,
+  mcpUrl: string,
+  signal?: AbortSignal,
+): Promise<
+  ((id: number, name: string, args: unknown) => Promise<string | null>) | null
+> {
+  return withWizardSpan(
+    'mcp.session.init',
+    'mcp.session',
+    { 'mcp.url': mcpUrl },
+    async () => openMcpSessionInner(accessToken, mcpUrl, signal),
+  );
+}
+
+async function openMcpSessionInner(
   accessToken: string,
   mcpUrl: string,
   signal?: AbortSignal,
@@ -105,43 +121,56 @@ async function openMcpSession(
     id: number,
     name: string,
     args: unknown,
-  ): Promise<string | null> => {
-    try {
-      const res = await fetch(mcpUrl, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Mcp-Session-Id': sessionId,
-          Accept: 'application/json, text/event-stream',
-        },
-        body: JSON.stringify({
-          jsonrpc: '2.0',
-          id,
-          method: 'tools/call',
-          params: { name, arguments: args },
-        }),
-        signal,
-      });
-      const body = await res.text();
-      const sseData = body.match(/^data: (.+)$/m)?.[1] ?? '';
-      const rpc = JSON.parse(sseData) as {
-        result?: { content?: Array<{ text?: string }> };
-        error?: { code?: number; message?: string };
-      };
-      if (rpc.error) {
-        logToFile(`[MCP] ${name} rpc error: ${JSON.stringify(rpc.error)}`);
-        return null;
-      }
-      return rpc.result?.content?.[0]?.text ?? null;
-    } catch (err) {
-      logToFile(
-        `[MCP] ${name} error: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-      return null;
-    }
-  };
+  ): Promise<string | null> =>
+    withWizardSpan(
+      `mcp.tool.${name}`,
+      'mcp.tool_call',
+      { 'mcp.tool': name, 'mcp.session_id': sessionId },
+      async () => {
+        try {
+          const res = await fetch(mcpUrl, {
+            method: 'POST',
+            headers: {
+              ...headers,
+              'Mcp-Session-Id': sessionId,
+              Accept: 'application/json, text/event-stream',
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id,
+              method: 'tools/call',
+              params: { name, arguments: args },
+            }),
+            signal,
+          });
+          const body = await res.text();
+          const sseData = body.match(/^data: (.+)$/m)?.[1] ?? '';
+          const rpc = JSON.parse(sseData) as {
+            result?: { content?: Array<{ text?: string }> };
+            error?: { code?: number; message?: string };
+          };
+          if (rpc.error) {
+            logToFile(`[MCP] ${name} rpc error: ${JSON.stringify(rpc.error)}`);
+            addBreadcrumb('mcp', `Tool ${name} returned RPC error`, {
+              code: rpc.error.code,
+              message: rpc.error.message,
+            });
+            return null;
+          }
+          return rpc.result?.content?.[0]?.text ?? null;
+        } catch (err) {
+          logToFile(
+            `[MCP] ${name} error: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          addBreadcrumb('mcp', `Tool ${name} threw`, {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          return null;
+        }
+      },
+    );
 }
 
 // ── Agent fallback ────────────────────────────────────────────────────────────
@@ -149,6 +178,28 @@ async function openMcpSession(
 const AGENT_FALLBACK_TIMEOUT_MS = 30_000;
 
 async function runAgentFallback(
+  accessToken: string,
+  mcpUrl: string,
+  agentPrompt: string,
+  timeoutMs: number,
+  externalSignal?: AbortSignal,
+): Promise<string> {
+  return withWizardSpan(
+    'mcp.fallback.agent',
+    'mcp.fallback',
+    { 'mcp.url': mcpUrl, timeout_ms: timeoutMs },
+    async () =>
+      runAgentFallbackInner(
+        accessToken,
+        mcpUrl,
+        agentPrompt,
+        timeoutMs,
+        externalSignal,
+      ),
+  );
+}
+
+async function runAgentFallbackInner(
   accessToken: string,
   mcpUrl: string,
   agentPrompt: string,
@@ -267,6 +318,40 @@ export async function callAmplitudeMcp<T>(
     abortSignal,
   } = opts;
 
+  return withWizardSpan(
+    `mcp.call.${label}`,
+    'mcp.call',
+    { 'mcp.label': label, 'mcp.url': mcpUrl },
+    async () => {
+      addBreadcrumb('mcp', `callAmplitudeMcp:${label} starting`);
+      const result = await callAmplitudeMcpInner(
+        accessToken,
+        mcpUrl,
+        direct,
+        agentPrompt,
+        parseAgent,
+        label,
+        agentTimeoutMs,
+        abortSignal,
+      );
+      addBreadcrumb('mcp', `callAmplitudeMcp:${label} done`, {
+        ok: result !== null,
+      });
+      return result;
+    },
+  );
+}
+
+async function callAmplitudeMcpInner<T>(
+  accessToken: string,
+  mcpUrl: string,
+  direct: (callTool: CallToolFn) => Promise<T | null>,
+  agentPrompt: string,
+  parseAgent: (text: string) => T | null,
+  label: string,
+  agentTimeoutMs: number,
+  abortSignal?: AbortSignal,
+): Promise<T | null> {
   // ── Direct path ────────────────────────────────────────────────────────────
   let directResult: T | null = null;
   let useFallback = false;
