@@ -4,6 +4,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('../agent-ops.js', () => ({
   runDetect: vi.fn(),
   runStatus: vi.fn(),
+  runPlan: vi.fn(),
+  runVerify: vi.fn(),
   getAuthStatus: vi.fn(),
   getAuthToken: vi.fn(),
 }));
@@ -12,12 +14,16 @@ import { registerWizardTools } from '../wizard-mcp-server.js';
 import {
   runDetect,
   runStatus,
+  runPlan,
+  runVerify,
   getAuthStatus,
   getAuthToken,
 } from '../agent-ops.js';
 
 const mockedRunDetect = vi.mocked(runDetect);
 const mockedRunStatus = vi.mocked(runStatus);
+const mockedRunPlan = vi.mocked(runPlan);
+const mockedRunVerify = vi.mocked(runVerify);
 const mockedGetAuthStatus = vi.mocked(getAuthStatus);
 const mockedGetAuthToken = vi.mocked(getAuthToken);
 
@@ -64,19 +70,23 @@ describe('registerWizardTools', () => {
   beforeEach(() => {
     mockedRunDetect.mockReset();
     mockedRunStatus.mockReset();
+    mockedRunPlan.mockReset();
+    mockedRunVerify.mockReset();
     mockedGetAuthStatus.mockReset();
     mockedGetAuthToken.mockReset();
     fake = makeFakeServer();
     registerWizardTools(fake);
   });
 
-  it('registers exactly the four expected tools by name', () => {
+  it('registers exactly the six expected tools by name', () => {
     const names = fake.tools.map((t) => t.name).sort();
     expect(names).toEqual([
       'detect_framework',
       'get_auth_status',
       'get_auth_token',
       'get_project_status',
+      'plan_setup',
+      'verify_setup',
     ]);
   });
 
@@ -211,5 +221,110 @@ describe('registerWizardTools', () => {
       token: string | null;
     };
     expect(parsed.token).toBe('oauth-token-xyz');
+  });
+
+  // ── plan_setup ──────────────────────────────────────────────────────
+
+  it('plan_setup forwards installDir to runPlan and JSON-wraps the result', async () => {
+    mockedRunPlan.mockResolvedValue({
+      plan: {
+        v: 1,
+        planId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        createdAt: new Date().toISOString(),
+        installDir: '/tmp/example',
+        framework: 'nextjs',
+        frameworkName: 'Next.js',
+        sdk: '@amplitude/analytics-browser',
+        events: [],
+        fileChanges: [],
+        requiresApproval: true,
+      },
+      detected: true,
+    });
+
+    const tool = fake.tools.find((t) => t.name === 'plan_setup')!;
+    const parsed = parseToolResult(
+      await tool.handler({ installDir: '/tmp/example' }),
+    ) as { plan: { framework: string }; detected: boolean };
+
+    expect(mockedRunPlan).toHaveBeenCalledWith('/tmp/example');
+    expect(parsed.plan.framework).toBe('nextjs');
+    expect(parsed.detected).toBe(true);
+  });
+
+  it('plan_setup defaults to process.cwd() when installDir is omitted', async () => {
+    mockedRunPlan.mockResolvedValue({
+      plan: {
+        v: 1,
+        planId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
+        createdAt: new Date().toISOString(),
+        installDir: process.cwd(),
+        framework: 'generic',
+        frameworkName: null,
+        sdk: null,
+        events: [],
+        fileChanges: [],
+        requiresApproval: true,
+      },
+      detected: false,
+    });
+    const tool = fake.tools.find((t) => t.name === 'plan_setup')!;
+    await tool.handler({});
+    expect(mockedRunPlan).toHaveBeenCalledWith(process.cwd());
+  });
+
+  it('plan_setup is documented as read-only / does not write files', () => {
+    const tool = fake.tools.find((t) => t.name === 'plan_setup')!;
+    const description = (tool.config.description ?? '').toLowerCase();
+    // Don't lock to exact wording — just require something signalling
+    // "no writes / read-only" so the LLM picking the tool doesn't assume
+    // it executes the install.
+    expect(
+      description.includes('no files') ||
+        description.includes('read-only') ||
+        description.includes('not touched') ||
+        description.includes('does not write'),
+    ).toBe(true);
+  });
+
+  // ── verify_setup ────────────────────────────────────────────────────
+
+  it('verify_setup forwards installDir and surfaces failures', async () => {
+    mockedRunVerify.mockResolvedValue({
+      installDir: '/tmp/example',
+      framework: { integration: 'nextjs', name: 'Next.js' },
+      amplitudeInstalled: { confidence: 'high', reason: 'pkg.json' },
+      apiKeyConfigured: false,
+      outcome: 'fail',
+      failures: ['amplitude API key is not configured'],
+    });
+
+    const tool = fake.tools.find((t) => t.name === 'verify_setup')!;
+    const parsed = parseToolResult(
+      await tool.handler({ installDir: '/tmp/example' }),
+    ) as { outcome: string; failures: string[] };
+
+    expect(mockedRunVerify).toHaveBeenCalledWith('/tmp/example');
+    expect(parsed.outcome).toBe('fail');
+    expect(parsed.failures).toContain('amplitude API key is not configured');
+  });
+
+  it('verify_setup returns pass with no failures on a healthy setup', async () => {
+    mockedRunVerify.mockResolvedValue({
+      installDir: '/tmp/example',
+      framework: { integration: 'nextjs', name: 'Next.js' },
+      amplitudeInstalled: { confidence: 'high', reason: 'pkg.json' },
+      apiKeyConfigured: true,
+      outcome: 'pass',
+      failures: [],
+    });
+
+    const tool = fake.tools.find((t) => t.name === 'verify_setup')!;
+    const parsed = parseToolResult(await tool.handler({})) as {
+      outcome: string;
+      failures: string[];
+    };
+    expect(parsed.outcome).toBe('pass');
+    expect(parsed.failures).toEqual([]);
   });
 });
