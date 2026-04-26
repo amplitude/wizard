@@ -125,6 +125,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
 
         if (modeRef.current === 'follow') {
           setSelectedLine(nextLastIndex);
+          setHorizontalOffset(0);
           setViewportTop(
             clampViewportTop(
               safeLines.length - viewportHeight,
@@ -224,6 +225,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
       } else {
         setMode('follow');
         setSelectedLine(Math.max(lines.length - 1, 0));
+        setHorizontalOffset(0);
         setViewportTop(
           clampViewportTop(
             lines.length - viewportHeight,
