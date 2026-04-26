@@ -34,8 +34,47 @@ import {
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
+import { collectDiagnostics } from '../../../lib/diagnostics-collector.js';
 import { KeyHintBar, type KeyHint } from './KeyHintBar.js';
 import { useScreenHintsValue } from '../hooks/useScreenHints.js';
+
+async function submitFeedbackWithConsent(
+  message: string,
+  store: WizardStore,
+): Promise<void> {
+  try {
+    const includeDiagnostics = await store.promptConfirm(
+      'Share diagnostics about your framework and OS to help us improve?',
+    );
+    analytics.wizardCapture('feedback diagnostics consent', {
+      consented: includeDiagnostics,
+    });
+    const diagnostics = includeDiagnostics
+      ? await collectDiagnostics({
+          session: store.session,
+          wizardVersion: store.version,
+          detectedFrameworks: store.session.detectionResults ?? undefined,
+        }).catch((err: unknown) => {
+          analytics.wizardCapture('feedback diagnostics failed', {
+            'error message': err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
+    await trackWizardFeedback(message, diagnostics);
+    store.setCommandFeedback(
+      diagnostics
+        ? 'Thanks — your feedback and diagnostics were sent.'
+        : 'Thanks — your feedback was sent.',
+    );
+  } catch (err: unknown) {
+    store.setCommandFeedback(
+      `Could not send feedback: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
@@ -100,17 +139,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         store.setCommandFeedback('Usage: /feedback <your message>');
         break;
       }
-      void trackWizardFeedback(message)
-        .then(() =>
-          store.setCommandFeedback('Thanks — your feedback was sent.'),
-        )
-        .catch((err: unknown) => {
-          store.setCommandFeedback(
-            `Could not send feedback: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        });
+      void submitFeedbackWithConsent(message, store);
       break;
     }
     case '/mcp':
