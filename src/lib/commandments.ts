@@ -43,7 +43,7 @@ CRITICAL — do NOT manually write .amplitude-events.json.
 
   `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 
-  `Use the report_status tool (wizard-tools MCP) for all progress updates and fatal error signals. Call report_status with kind="status" for in-progress updates (e.g. "installing SDK", "drafting event plan") — these appear in the wizard's spinner. Call report_status with kind="error" for fatal conditions that halt the run (codes: MCP_MISSING, RESOURCE_MISSING). Do NOT emit [STATUS], [ERROR-MCP-MISSING], or [ERROR-RESOURCE-MISSING] text markers in your output — they are no longer scanned.`,
+  `Prefer the report_status tool (wizard-tools MCP) for progress updates and fatal error signals. Call report_status with kind="status" for in-progress updates (e.g. "installing SDK", "drafting event plan") — these appear in the wizard's spinner. Call report_status with kind="error" for fatal conditions that halt the run (codes: MCP_MISSING, RESOURCE_MISSING). Legacy [STATUS] / [ERROR-MCP-MISSING] / [ERROR-RESOURCE-MISSING] text markers from older bundled skills are still recognized for backwards compat, but new code should use report_status.`,
 
   ...(DEMO_MODE
     ? [
