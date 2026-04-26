@@ -1,0 +1,11 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`IntroScreen snapshots > renders the detecting state with spinner and "Detecting project framework" copy 1`] = `
+"
+                                          Amplitude Wizard
+                                AI-powered analytics setup in minutes
+
+
+                                   ⠋ Detecting project framework…
+"
+`;

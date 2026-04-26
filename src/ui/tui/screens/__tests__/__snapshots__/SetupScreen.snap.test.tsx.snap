@@ -1,0 +1,3 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`SetupScreen snapshots > renders the "Detecting project configuration" spinner on mount 1`] = `"Detecting project configuration…"`;

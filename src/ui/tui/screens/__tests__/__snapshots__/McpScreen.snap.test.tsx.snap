@@ -1,0 +1,10 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`McpScreen snapshots > renders the install mode intro + "looking for supported AI tools" spinner 1`] = `
+"💬 Chat with your Amplitude data
+We’ll wire the Amplitude MCP into Claude Code, Cursor, Claude Desktop, and other AI tools you have
+installed. You can then ask questions, build charts, and check metrics from chat (e.g. “show me
+yesterday’s signups”).
+
+⠋ Looking for supported AI tools…"
+`;

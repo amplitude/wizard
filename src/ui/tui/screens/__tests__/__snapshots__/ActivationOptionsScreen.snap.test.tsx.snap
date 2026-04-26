@@ -1,0 +1,27 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ActivationOptionsScreen snapshots > renders the "installed - waiting for events" headline when snippet is configured 1`] = `
+"Your SDK is installed ─ waiting for events
+
+We can see your project is configured but hasn't received many events yet.
+What would you like to do?
+
+
+▸ [1] Help me test locally (run the setup agent)
+  [2] I'm blocked (get help)
+  [3] Take me to the docs (https://amplitude.com/docs/sdks)
+  [4] I'm done for now (exit and resume later)"
+`;
+
+exports[`ActivationOptionsScreen snapshots > renders the "partially set up" headline when snippet is not configured 1`] = `
+"Your SDK is partially set up ─ waiting for events
+
+We can see your project is configured but hasn't received many events yet.
+What would you like to do?
+
+
+▸ [1] Help me test locally (run the setup agent)
+  [2] I'm blocked (get help)
+  [3] Take me to the docs (https://amplitude.com/docs/sdks)
+  [4] I'm done for now (exit and resume later)"
+`;

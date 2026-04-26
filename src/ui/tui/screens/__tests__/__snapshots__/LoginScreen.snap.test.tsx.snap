@@ -1,0 +1,7 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`LoginScreen snapshots > renders the "Refreshing credentials" spinner state on mount 1`] = `
+"Re-authenticate
+
+⠋ Refreshing credentials…"
+`;
