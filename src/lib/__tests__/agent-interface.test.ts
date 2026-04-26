@@ -154,8 +154,8 @@ describe('runAgent', () => {
         },
       );
 
-      // Should return success (empty object), not throw
-      expect(result).toEqual({});
+      // Should return success (empty planned events list), not throw
+      expect(result).toEqual({ plannedEvents: [] });
       expect(mockSpinner.stop).toHaveBeenCalledWith('Test success');
     });
 
@@ -398,7 +398,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Done');
     });
@@ -707,8 +707,8 @@ describe('runAgent', () => {
         },
       );
 
-      // Should return success (empty object), not error
-      expect(result).toEqual({});
+      // Should return success (empty planned events list), not error
+      expect(result).toEqual({ plannedEvents: [] });
       expect(mockSpinner.stop).toHaveBeenCalledWith('Test success');
 
       // ui.log.error should NOT have been called (errors suppressed for user)

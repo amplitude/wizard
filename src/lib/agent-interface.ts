@@ -1341,7 +1341,11 @@ export async function runAgent(
     onMessage(message: SDKMessage): void;
     finalize(resultMessage: SDKMessage, totalDurationMs: number): unknown;
   },
-): Promise<{ error?: AgentErrorType; message?: string }> {
+): Promise<{
+  error?: AgentErrorType;
+  message?: string;
+  plannedEvents?: Array<{ name: string; description: string }>;
+}> {
   const {
     spinnerMessage = 'Customizing your Amplitude setup...',
     successMessage = 'Amplitude integration complete',
@@ -1351,13 +1355,30 @@ export async function runAgent(
   spinner.start(spinnerMessage);
 
   if (agentConfig.useLocalClaude) {
-    return runAgentLocally(
+    const result = await runAgentLocally(
       prompt,
       agentConfig.workingDirectory,
       spinner,
       successMessage,
       errorMessage,
     );
+    // Read .amplitude-events.json if the local agent wrote one
+    let plannedEvents: Array<{ name: string; description: string }> | undefined;
+    try {
+      const eventPlanPath = path.join(
+        agentConfig.workingDirectory,
+        '.amplitude-events.json',
+      );
+      const content = fs.readFileSync(eventPlanPath, 'utf-8');
+      const events = parseEventPlanContent(content);
+      if (events) {
+        plannedEvents = events;
+        getUI().setEventPlan(events);
+      }
+    } catch {
+      // File doesn't exist — no planned events
+    }
+    return { ...result, plannedEvents };
   }
 
   const { query } = await getSDKModule();
@@ -1388,10 +1409,19 @@ export async function runAgent(
   // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/41
   let signalDone: () => void = Function.prototype as () => void;
 
+  // Captured from the .amplitude-events.json watcher so the caller can commit
+  // the instrumented plan to the tracking plan even after the agent deletes
+  // the file during the conclude phase.
+  let lastParsedEventPlan: Array<{ name: string; description: string }> = [];
+
   // Helper to handle successful completion (used in normal path and race condition recovery)
   const completeWithSuccess = (
     suppressedError?: Error,
-  ): { error?: AgentErrorType; message?: string } => {
+  ): {
+    error?: AgentErrorType;
+    message?: string;
+    plannedEvents?: Array<{ name: string; description: string }>;
+  } => {
     const durationMs = Date.now() - startTime;
     const durationSeconds = Math.round(durationMs / 1000);
 
@@ -1433,7 +1463,7 @@ export async function runAgent(
       logToFile(`${AgentSignals.BENCHMARK} Middleware finalize error:`, e);
     }
     spinner.stop(successMessage);
-    return {};
+    return { plannedEvents: lastParsedEventPlan };
   };
 
   // Heartbeat interval — every 10s print the last 3 STATUS messages so the
@@ -1482,7 +1512,9 @@ export async function runAgent(
         const content = fs.readFileSync(eventPlanPath, 'utf-8');
         const events = parseEventPlanContent(content);
         if (events) {
-          getUI().setEventPlan(events.filter((e) => e.name.trim().length > 0));
+          const named = events.filter((e) => e.name.trim().length > 0);
+          lastParsedEventPlan = named;
+          getUI().setEventPlan(named);
         }
       } catch {
         // File doesn't exist yet
