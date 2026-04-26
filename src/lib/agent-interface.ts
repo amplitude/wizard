@@ -770,12 +770,91 @@ export function matchesAllowedPrefix(command: string): boolean {
 }
 
 /**
+ * Recognize the "background a package install + report PID" shell idiom
+ * the wizard commandments instruct agents to use. Returns true ONLY when
+ * the command matches one of:
+ *
+ *   <pkg-mgr> <safe-script> [args...] [2>&1] &
+ *   <pkg-mgr> <safe-script> [args...] [2>&1] & echo "..."
+ *   <pkg-mgr> <safe-script> [args...] [2>&1] &\necho "..."
+ *
+ * Where `<pkg-mgr> <safe-script>` is the same allowlist `matchesAllowedPrefix`
+ * accepts (pnpm/npm/yarn/bun + add/install/etc.).
+ *
+ * The base command is checked for any other chaining/dangerous operators
+ * before we approve, so commands like `pnpm add foo; rm -rf /` or
+ * `pnpm add foo $(curl evil) &` still get caught by the deny rules below.
+ */
+export function isSafeBackgroundedInstall(command: string): boolean {
+  // Strip stderr redirection (2>&1, 2>&2, 1>&2, …) so we can pattern-match
+  // the underlying base command + & terminator.
+  const stripped = command.replace(/\s*\d*>&\d+\s*/g, ' ').trim();
+
+  // Split on the first `&` that backgrounds the command. The base must come
+  // before the `&`; everything after is the (optional) trailer.
+  const ampIdx = stripped.indexOf('&');
+  if (ampIdx === -1) return false;
+  const base = stripped.slice(0, ampIdx).trim();
+  const trailer = stripped.slice(ampIdx + 1).trim();
+
+  // Reject if the base contains any other shell metacharacter — the deny
+  // rules below would catch them anyway, but checking here keeps the
+  // decision local and explicit.
+  if (/[;`$()|&]/.test(base)) return false;
+  if (!matchesAllowedPrefix(base)) return false;
+
+  // No trailer is fine: `pnpm add foo &`
+  if (trailer === '') return true;
+
+  // Trailer must be a single echo statement with safe content. Any other
+  // structure (extra `&`, `;`, `|`, command substitution, backticks) is
+  // rejected so we don't accidentally let through chained commands like
+  // `pnpm add foo & echo ok; <chained>` or
+  // `pnpm add foo & echo "$(curl evil.com)"`.
+  //
+  // Forbid these anywhere in the trailer, even inside quotes — bash expands
+  // `$()`, `${...}`, and backticks inside double quotes.
+  if (/[`;|&]/.test(trailer)) return false;
+  if (/\$\(|\$\{/.test(trailer)) return false;
+
+  // Strip ONE optional leading newline (literal `\n` or escaped `\\n`) so
+  // patterns like `& \necho "..."` still validate. After this, no further
+  // newlines are permitted: bash treats newlines as command terminators,
+  // so any internal `\n` in the trailer would let an attacker append a
+  // second command (e.g. `echo ok\ncurl evil.com`).
+  const trimmed = trailer.replace(/^(?:\\n|\n)\s*/, '');
+  if (/[\n\r]/.test(trimmed)) return false;
+
+  // Single `echo` with EITHER:
+  //   - a double-quoted string with no `$`-expansion except `$!`, `$?`, `$$`, or `$<digit>`
+  //   - a single-quoted string (literal, no expansion)
+  //   - bare alphanumeric/punctuation text (note: ` ` is the ONLY whitespace
+  //     allowed here — `\s` would also match `\n` and re-open the bypass)
+  const echoMatch = trimmed.match(
+    /^echo +(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_:.,!?\-+/= ]*))$/,
+  );
+  if (!echoMatch) return false;
+
+  const doubleQuoted = echoMatch[1];
+  if (doubleQuoted !== undefined) {
+    // Inside double quotes bash performs parameter expansion. We already
+    // rejected `$(` and `${` above, so the only `$` patterns that can
+    // appear are `$<char>`. Allow only the harmless special parameters
+    // (`$!`, `$?`, `$$`, `$0`-`$9`); reject `$alpha` (env var leak risk).
+    if (/\$[^!?$0-9]/.test(doubleQuoted)) return false;
+  }
+
+  return true;
+}
+
+/**
  * Permission hook that allows only safe commands.
  * - Package manager install commands
  * - Build/typecheck/lint commands for verification
  * - Piping to tail/head for output limiting is allowed
  * - Stderr redirection (2>&1) is allowed
  * - Amplitude skill installation commands from MCP
+ * - Backgrounded package installs (`<pkg-mgr> add foo 2>&1 & echo "..."`)
  */
 export function wizardCanUseTool(
   toolName: string,
@@ -828,6 +907,26 @@ export function wizardCanUseTool(
   if (isSkillInstallCommand(command)) {
     logToFile(`Allowing skill installation command: ${command}`);
     debug(`Allowing skill installation command: ${command}`);
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  // Allow the specific shell idiom the commandments tell agents to use:
+  // `<pkg-mgr> add/install ... [2>&1] & [echo "..."]`.
+  //
+  // The wizard commandment in src/lib/commandments.ts says "When installing
+  // packages, start the installation as a background task and then continue
+  // with other work." Agents follow this by emitting:
+  //   `pnpm add @amplitude/unified 2>&1 & echo "Installation started (PID: $!)"`
+  // …which contains `&` (background) and `$()` (in the echo string), both of
+  // which the generic deny rules below would catch. We pre-approve this
+  // specific pattern so the agent can actually do what the commandment
+  // tells it to do, without weakening the deny rules for other commands.
+  //
+  // Backwards-compat: every existing deny rule below stays in place and
+  // unchanged. This is purely an additional allow path.
+  if (isSafeBackgroundedInstall(command)) {
+    logToFile(`Allowing backgrounded package install: ${command}`);
+    debug(`Allowing backgrounded package install: ${command}`);
     return { behavior: 'allow', updatedInput: input };
   }
 
