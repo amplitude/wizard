@@ -1057,13 +1057,18 @@ export class WizardStore {
     }
   }
 
-  setFrameworkContext(key: string, value: unknown): void {
+  setFrameworkContext(key: string, value: unknown, autoDetected = false): void {
     const ctx = { ...this.$session.get().frameworkContext, [key]: value };
     this.$session.setKey('frameworkContext', ctx);
-    // Track answer order so back-nav pops the most recent user answer.
-    const order = this.$session.get().frameworkContextAnswerOrder;
-    const next = order.filter((k) => k !== key).concat(key);
-    this.$session.setKey('frameworkContextAnswerOrder', next);
+    if (!autoDetected) {
+      // Only track user-answered keys so back-nav can distinguish them
+      // from auto-detected entries. popLastFrameworkContextAnswer returns
+      // false when no user answers remain, letting the router walk back
+      // past Setup transparently.
+      const order = this.$session.get().frameworkContextAnswerOrder;
+      const next = order.filter((k) => k !== key).concat(key);
+      this.$session.setKey('frameworkContextAnswerOrder', next);
+    }
     this.emitChange();
   }
 
@@ -1205,7 +1210,11 @@ export class WizardStore {
    * prior revertible step, or an overlay is currently active.
    */
   goBack(): boolean {
+    // Suppress direction/transition in emitChange during reverts so the
+    // single _detectTransition below fires with the correct 'pop' direction.
+    this._reverting = true;
     const ok = this.router.goBack(this.session, this);
+    this._reverting = false;
     if (!ok) return false;
     // router already flipped direction to 'pop'. Bump version + run the
     // transition hooks so React + analytics observe the move.
@@ -1213,6 +1222,9 @@ export class WizardStore {
     this._detectTransition();
     return true;
   }
+
+  /** True while a revert callback is executing inside goBack(). */
+  private _reverting = false;
 
   // ── Change notification ─────────────────────────────────────────
 
@@ -1225,9 +1237,13 @@ export class WizardStore {
    * The router re-resolves the active screen on next render.
    */
   emitChange(): void {
-    this.router._setDirection('push');
+    if (!this._reverting) {
+      this.router._setDirection('push');
+    }
     this.$version.set(this.$version.get() + 1);
-    this._detectTransition();
+    if (!this._reverting) {
+      this._detectTransition();
+    }
   }
 
   // ── Overlay navigation ──────────────────────────────────────────

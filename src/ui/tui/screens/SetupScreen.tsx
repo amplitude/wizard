@@ -66,7 +66,7 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
             installDir: store.session.installDir,
           });
           if (detected !== null) {
-            store.setFrameworkContext(q.key, detected);
+            store.setFrameworkContext(q.key, detected, true);
           }
         } catch {
           // Detection failed — will ask the user
