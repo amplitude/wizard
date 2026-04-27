@@ -178,6 +178,98 @@ export function loadBundledSkillMenu(): SkillMenu {
 }
 
 /**
+ * Strict skill-id allowlist: lowercase alphanumeric with hyphens or underscores
+ * only. Used to gate any path.join with a skillId so a hostile or malformed
+ * id can never escape the skills root via traversal characters (`..`, `/`).
+ */
+const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_-]*$/;
+
+/**
+ * Check whether a bundled skill exists on disk by searching across all
+ * category subdirectories under skills/. Used to decide whether to pre-stage
+ * a skill before the agent runs vs leave the agent to discover via the
+ * load_skill_menu fallback.
+ */
+export function bundledSkillExists(skillId: string): boolean {
+  // Reject any skillId that's not a strict basename — defense in depth before
+  // the path.join below (skillId comes from internal callers but we treat it
+  // as untrusted at the boundary).
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return false;
+  const skillsRoot = getSkillsRootDir();
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      // Same defense for category names read off disk.
+      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      // skillId and category are both validated against SKILL_ID_ALLOWLIST
+      // above, so neither can contain `..` or path separators.
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const candidate = path.join(skillsRoot, category, skillId);
+      if (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        // candidate is derived solely from the validated inputs above.
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        fs.existsSync(path.join(candidate, 'SKILL.md'))
+      ) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Pre-stage a deterministic set of skills into the user's `.claude/skills/`
+ * directory before the agent runs, so the agent can load them via the Skill
+ * tool without having to call load_skill_menu / install_skill in a loop.
+ *
+ * The constant skills (taxonomy + instrumentation + dashboard) are always
+ * the same; the integration skill is resolved per framework via the optional
+ * resolver and may be null if no matching skill exists on disk.
+ *
+ * Returns the list of skill IDs that were successfully staged.
+ */
+export function preStageSkills(
+  installDir: string,
+  integrationSkillId: string | null,
+): { staged: string[]; integrationStaged: boolean } {
+  const constantSkills = [
+    'amplitude-quickstart-taxonomy-agent',
+    'add-analytics-instrumentation',
+    'amplitude-chart-dashboard-plan',
+  ];
+  const staged: string[] = [];
+  for (const id of constantSkills) {
+    if (!bundledSkillExists(id)) {
+      logToFile(`preStageSkills: skipping ${id} — not bundled`);
+      continue;
+    }
+    const result = installBundledSkill(id, installDir);
+    if (result.success) {
+      staged.push(id);
+    } else {
+      logToFile(`preStageSkills: failed to stage ${id}: ${result.error}`);
+    }
+  }
+  let integrationStaged = false;
+  if (integrationSkillId && bundledSkillExists(integrationSkillId)) {
+    const result = installBundledSkill(integrationSkillId, installDir);
+    if (result.success) {
+      staged.push(integrationSkillId);
+      integrationStaged = true;
+    } else {
+      logToFile(
+        `preStageSkills: failed to stage integration skill ${integrationSkillId}: ${result.error}`,
+      );
+    }
+  }
+  logToFile(`preStageSkills: staged [${staged.join(', ')}]`);
+  return { staged, integrationStaged };
+}
+
+/**
  * Install a bundled skill by copying it to the project's .claude/skills/ dir.
  * Searches across all category subdirectories under skills/.
  */
