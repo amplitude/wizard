@@ -1605,8 +1605,8 @@ export async function runAgent(
     }
 
     // Watch for .amplitude-dashboard.json written by the agent after dashboard creation.
-    // Parses the dashboard URL and forwards it to the UI so ChecklistScreen can
-    // surface a direct link without requiring any further user action.
+    // Parses the dashboard URL and forwards it to the UI so the OutroScreen can
+    // surface a direct link to the newly created dashboard.
     // workingDirectory is the CLI install dir (process.cwd() or --install-dir),
     // not untrusted network input. The filename is a hardcoded constant.
     const dashboardFilePath = path.join(
@@ -1628,24 +1628,33 @@ export async function runAgent(
       }
     };
 
+    // Read immediately in case the file exists from a prior run.
+    readDashboardFile();
+    // Watch the working directory for dashboard file creation. Directory-level
+    // watching fires on creation without requiring the file to exist at setup
+    // time, eliminating the 1-second polling gap that could cause the
+    // conclude step's create-then-delete cycle to be missed entirely.
     try {
-      dashboardWatcher = fs.watch(dashboardFilePath, () => readDashboardFile());
-      readDashboardFile();
+      dashboardWatcher = fs.watch(
+        agentConfig.workingDirectory,
+        (_event, filename) => {
+          if (filename === '.amplitude-dashboard.json') {
+            readDashboardFile();
+          }
+        },
+      );
     } catch {
-      // File doesn't exist yet — poll until it appears
+      // Directory watching unavailable — fall back to polling.
       dashboardInterval = setInterval(() => {
         try {
           fs.accessSync(dashboardFilePath);
           readDashboardFile();
           clearInterval(dashboardInterval);
           dashboardInterval = undefined;
-          dashboardWatcher = fs.watch(dashboardFilePath, () =>
-            readDashboardFile(),
-          );
         } catch {
           // Still waiting
         }
-      }, 1000);
+      }, 500);
     }
 
     // Retry loop: if the agent stalls (no message for the configured timeout), abort
