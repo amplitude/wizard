@@ -61,10 +61,6 @@ export const FeatureOptInScreen = ({ store }: FeatureOptInScreenProps) => {
   for (const f of store.session.discoveredFeatures) {
     const additional = toAdditionalFeature(f);
     if (!additional) continue;
-    // Skip features that were already enabled elsewhere in the session
-    // (defensive — keeps the picker from showing duplicates if some other
-    // path enabled a feature ahead of the picker).
-    if (store.session.additionalFeatureQueue.includes(additional)) continue;
     optInFeatures.push(additional);
   }
 
