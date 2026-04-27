@@ -2479,7 +2479,7 @@ void yargs(hideBin(process.argv))
                         })),
                         recommended: result.choices[0]?.appId,
                         recommendedReason: result.choices[0]
-                          ? `Lowest rank in the first matching workspace (${result.choices[0].description}).`
+                          ? `Highest-ranked environment in the first matching workspace (${result.choices[0].description}).`
                           : undefined,
                         responseSchema: {
                           appId: 'string (required, from choices[].value)',
