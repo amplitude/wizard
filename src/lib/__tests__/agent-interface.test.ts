@@ -20,6 +20,7 @@ import {
   MAX_BASH_SLEEP_SECONDS,
   isAuthErrorMessage,
   HOOK_BRIDGE_RACE_RE,
+  partitionHookBridgeRace,
   AgentErrorType,
 } from '../agent-interface';
 import type { WizardOptions } from '../../utils/types';
@@ -1952,9 +1953,9 @@ describe('isAuthErrorMessage', () => {
 describe('HOOK_BRIDGE_RACE_RE', () => {
   // The SDK subprocess emits these whenever an aborted/teardown-pending
   // query() still has in-flight tool calls that fire registered hooks
-  // over a closed IPC bridge. We match and suppress them in the stderr
-  // capture so the visible log doesn't fill up; the suppressed count
-  // is logged once per attempt so regressions remain observable.
+  // over a closed IPC bridge. The regex itself is line-anchored — the
+  // partition helper splits stderr chunks into lines before testing so
+  // a chunk batching a race line with a real error keeps the real error.
   // See issue #297.
 
   it.each([
@@ -1965,17 +1966,6 @@ describe('HOOK_BRIDGE_RACE_RE', () => {
     expect(HOOK_BRIDGE_RACE_RE.test(line)).toBe(true);
   });
 
-  it('matches the line even when prefixed with timestamp / surrounding text', () => {
-    // The SDK sometimes wraps the line with its own prefix; the stderr
-    // callback receives chunks, not pre-trimmed lines, so we test the
-    // partial-match behavior we rely on.
-    expect(
-      HOOK_BRIDGE_RACE_RE.test(
-        '[2026-04-27T04:18:08.152Z] Error in hook callback hook_0: Error: Stream closed\n',
-      ),
-    ).toBe(true);
-  });
-
   it.each([
     'Error in hook callback hook_0: Error: Some other failure',
     'Error in hook callback: Error: Stream closed', // missing hook_<N>
@@ -1983,7 +1973,104 @@ describe('HOOK_BRIDGE_RACE_RE', () => {
     'API Error: 400 terminated',
     'WizardError: Authentication failed',
     '',
+    // The regex is line-anchored, so prefixes/suffixes mean partition is
+    // responsible for splitting first. Anchored single line shouldn't match.
+    '[2026-04-27T04:18:08.152Z] Error in hook callback hook_0: Error: Stream closed',
+    'Error in hook callback hook_0: Error: Stream closed extra noise',
   ])('does NOT match unrelated stderr: %j', (line) => {
     expect(HOOK_BRIDGE_RACE_RE.test(line)).toBe(false);
+  });
+});
+
+describe('partitionHookBridgeRace', () => {
+  // Bugbot finding: stderr callback receives raw chunks from the
+  // subprocess pipe, so a chunk-level `regex.test() → return` would
+  // drop genuine errors that happen to be batched alongside the race
+  // line. Partition splits the chunk and only suppresses matching lines.
+
+  it('returns zero suppressed and empty passthrough for empty input', () => {
+    expect(partitionHookBridgeRace('')).toEqual({
+      suppressed: 0,
+      passthrough: '',
+    });
+  });
+
+  it('suppresses a single race line with no passthrough', () => {
+    expect(
+      partitionHookBridgeRace(
+        'Error in hook callback hook_0: Error: Stream closed\n',
+      ),
+    ).toEqual({ suppressed: 1, passthrough: '' });
+  });
+
+  it('counts multiple race lines in one chunk', () => {
+    expect(
+      partitionHookBridgeRace(
+        [
+          'Error in hook callback hook_0: Error: Stream closed',
+          'Error in hook callback hook_1: Error: Stream closed',
+          'Error in hook callback hook_2: Error: Stream closed',
+        ].join('\n') + '\n',
+      ),
+    ).toEqual({ suppressed: 3, passthrough: '' });
+  });
+
+  it('preserves a genuine error riding alongside a race line in the same chunk', () => {
+    // Critical regression test for Bugbot finding: two stderr writes
+    // batched into one chunk must not drop the real error.
+    const chunk =
+      'Error in hook callback hook_0: Error: Stream closed\n' +
+      'TypeError: Cannot read property foo of undefined\n';
+    expect(partitionHookBridgeRace(chunk)).toEqual({
+      suppressed: 1,
+      passthrough: 'TypeError: Cannot read property foo of undefined\n',
+    });
+  });
+
+  it('preserves multiple genuine errors interleaved with race lines', () => {
+    const chunk = [
+      'Error in hook callback hook_0: Error: Stream closed',
+      'WARN: agent took 30s on tool call',
+      'Error in hook callback hook_1: Error: Stream closed',
+      'TypeError: foo is not a function',
+      'Error in hook callback hook_2: Error: Stream closed',
+    ].join('\n');
+    expect(partitionHookBridgeRace(chunk)).toEqual({
+      suppressed: 3,
+      passthrough:
+        'WARN: agent took 30s on tool call\nTypeError: foo is not a function',
+    });
+  });
+
+  it('passes non-race chunks through unchanged', () => {
+    const chunk = 'TypeError: foo is not a function\n';
+    expect(partitionHookBridgeRace(chunk)).toEqual({
+      suppressed: 0,
+      passthrough: chunk,
+    });
+  });
+
+  it('preserves trailing newline behavior', () => {
+    // With trailing newline
+    expect(partitionHookBridgeRace('genuine error\n').passthrough).toBe(
+      'genuine error\n',
+    );
+    // Without trailing newline
+    expect(partitionHookBridgeRace('genuine error').passthrough).toBe(
+      'genuine error',
+    );
+  });
+
+  it('does not match a race-shaped substring on the same line as other text', () => {
+    // Regex is anchored, so `^...$` per line. A line like
+    // "[ts] Error in hook callback hook_0: Error: Stream closed"
+    // is NOT just the race text — it has a prefix, so it's a real log
+    // line and we should keep it.
+    const chunk =
+      '[2026-04-27T04:18:08.152Z] Error in hook callback hook_0: Error: Stream closed\n';
+    expect(partitionHookBridgeRace(chunk)).toEqual({
+      suppressed: 0,
+      passthrough: chunk,
+    });
   });
 });

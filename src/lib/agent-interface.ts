@@ -340,15 +340,58 @@ export function isAuthErrorMessage(serialized: string): boolean {
  *
  * Already retried-and-recovered upstream (see `drainPriorResponse`
  * + the `'Stream closed'` arm of the transient-error retry list in
- * `runAgent`). The stderr handler in `runAgent` filters lines matching
- * this pattern and logs a one-line suppression count at attempt
- * boundary; everything else (genuine subprocess crashes, MCP server
- * stderr, etc.) still flows to the log.
+ * `runAgent`). The stderr handler filters lines matching this pattern
+ * and logs a one-line suppression count at attempt boundary; everything
+ * else (genuine subprocess crashes, MCP server stderr, etc.) still
+ * flows through.
+ *
+ * Anchored with `^...$` so a chunk containing both a race line AND a
+ * genuine error keeps the genuine error — the partition helper splits
+ * chunks line-by-line before testing.
  *
  * Exported for unit tests. See issue #297.
  */
 export const HOOK_BRIDGE_RACE_RE =
-  /Error in hook callback hook_\d+: Error: Stream closed/;
+  /^Error in hook callback hook_\d+: Error: Stream closed$/;
+
+/**
+ * Splits a raw stderr chunk into the count of suppressed
+ * hook-bridge-race lines and the remaining text that should still be
+ * logged.
+ *
+ * Why partition instead of `regex.test(data) → return`: the SDK's
+ * stderr callback receives raw byte chunks from the subprocess pipe.
+ * Multiple stderr writes can be batched into a single chunk, so a
+ * chunk-level match would drop genuine errors riding alongside the
+ * race-line noise. We split on `\n`, suppress only matching lines,
+ * and reconstruct the rest preserving the original chunk's trailing
+ * newline behavior.
+ *
+ * Exported for unit tests.
+ */
+export function partitionHookBridgeRace(data: string): {
+  suppressed: number;
+  passthrough: string;
+} {
+  if (data.length === 0) return { suppressed: 0, passthrough: '' };
+  const hadTrailingNewline = data.endsWith('\n');
+  const lines = data.split('\n');
+  if (hadTrailingNewline) lines.pop(); // drop the empty trailing element
+  let suppressed = 0;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (HOOK_BRIDGE_RACE_RE.test(line)) {
+      suppressed++;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (kept.length === 0) return { suppressed, passthrough: '' };
+  return {
+    suppressed,
+    passthrough: kept.join('\n') + (hadTrailingNewline ? '\n' : ''),
+  };
+}
 
 /**
  * Build a PreToolUse hook that enforces wizard Bash safety.
@@ -1880,21 +1923,22 @@ export async function runAgent(
               return Promise.resolve(result);
             },
             tools: { type: 'preset', preset: 'claude_code' },
-            // Capture stderr from CLI subprocess for debugging
+            // Capture stderr from CLI subprocess for debugging.
+            //
+            // Known-benign hook-bridge-race lines (see HOOK_BRIDGE_RACE_RE)
+            // are partitioned out and counted; everything else passes
+            // through. Chunk-level matching would drop a genuine error
+            // riding alongside a race line in the same batched chunk —
+            // partitionHookBridgeRace splits before filtering so that
+            // can't happen. Summary count is logged at attempt boundary.
             stderr: (data: string) => {
-              if (HOOK_BRIDGE_RACE_RE.test(data)) {
-                // Known-benign hook-bridge race during prior-attempt
-                // teardown — already handled by drainPriorResponse + the
-                // transient-error retry arm. Count and suppress so the
-                // visible log doesn't fill with `hook_<N>: Stream closed`
-                // when the SDK takes a moment to wind down a doomed
-                // subprocess. Summary is logged at attempt boundary.
-                hookBridgeRaceSuppressed++;
-                return;
-              }
-              logToFile('CLI stderr:', data);
-              if (options.debug) {
-                debug('CLI stderr:', data);
+              const { suppressed, passthrough } = partitionHookBridgeRace(data);
+              hookBridgeRaceSuppressed += suppressed;
+              if (passthrough.length > 0) {
+                logToFile('CLI stderr:', passthrough);
+                if (options.debug) {
+                  debug('CLI stderr:', passthrough);
+                }
               }
             },
             hooks: buildHooksConfig({
