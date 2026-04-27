@@ -41,22 +41,38 @@ CRITICAL — do NOT manually write .amplitude-events.json.
 
   `Autocapture — the Amplitude feature that automatically tracks element clicks, form interactions, page/screen views, sessions, app lifecycle events, and file downloads — is commonly enabled by the wizard for web SDKs (@amplitude/unified, @amplitude/analytics-browser) but is NOT available or not on by default for every SDK (e.g. Swift requires an opt-in plugin, backend SDKs don't track element interactions at all, and an existing project may have it disabled). Before proposing events, check the SDK init code you just wrote (or that already exists) to see whether autocapture is on and what it covers for this platform. If it IS on, do NOT propose custom events that merely duplicate its coverage — names like "[X] Clicked", "[X] Tapped", "[X] Pressed", "Form Submitted", "Form Started", "Input Changed", "Page Viewed", or "Screen Viewed" are redundant and must be excluded. Either way, prefer events for business outcomes, state changes, async success/failure, and multi-step flow milestones over raw interaction events (see skills/instrumentation/discover-event-surfaces/references/best-practices.md section R4). If autocapture is on and the project is a landing page or starter template whose only interactions are plain clicks and links, lean toward a minimal plan and let autocapture do the work — confirm_event_plan still requires at least one event, so pick the single most meaningful state change. Keep this reasoning internal — do NOT write autocapture justifications into the description field.`,
 
-  `Browser SDK init defaults — when initializing @amplitude/unified (initAll) or @amplitude/analytics-browser (init), pass this exact options object so the project gets the same out-of-the-box coverage as Amplitude's public CDN snippet:
+  `Browser SDK init defaults — match Amplitude's public CDN snippet so projects get the same out-of-the-box coverage. CRITICAL: the unified SDK (initAll) and the standalone browser SDK (init) accept DIFFERENT option shapes — do not copy one onto the other or autocapture will silently no-op.
 
+  Common autocapture block (used by BOTH init shapes below):
     {
-      fetchRemoteConfig: true,
-      autocapture: {
-        attribution: true,
-        fileDownloads: true,
-        formInteractions: true,
-        pageViews: true,
-        sessions: true,
-        elementInteractions: true,
-        networkTracking: true,
-        webVitals: true,
-        frustrationInteractions: true,
-      },
+      attribution: true,
+      fileDownloads: true,
+      formInteractions: true,
+      pageViews: true,
+      sessions: true,
+      elementInteractions: true,
+      networkTracking: true,
+      webVitals: true,
+      frustrationInteractions: true,
     }
+
+  @amplitude/analytics-browser (standalone) — flat options:
+    init(API_KEY, {
+      fetchRemoteConfig: true,
+      autocapture: { ...common block above },
+    })
+
+  @amplitude/unified (initAll) — analytics options nested under "analytics":
+    initAll(API_KEY, {
+      analytics: {
+        fetchRemoteConfig: true,
+        autocapture: { ...common block above },
+      },
+      // sessionReplay: { sampleRate: 1 }  ← only if sessionReplayOptIn
+      // engagement: {}                    ← only if engagementOptIn
+    })
+
+  Reference: https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk and the bundled integration skill's browser-unified-sdk.md / amplitude-quickstart.md confirm the nested shape for initAll.
 
   These options are ONLY valid for the browser / unified SDK. Do NOT pass an autocapture block — or any of these keys — to:
     - @amplitude/analytics-node (server) — accepts apiKey, optional serverZone ('US' | 'EU'), flushQueueSize, flushIntervalMillis. No autocapture concept.

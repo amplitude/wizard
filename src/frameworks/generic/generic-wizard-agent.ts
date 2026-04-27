@@ -74,21 +74,24 @@ SDK selection (choose the FIRST match):
     Recommended: @amplitude/unified
       npm install @amplitude/unified
       import { initAll } from '@amplitude/unified';
+      // initAll nests analytics options under an \`analytics\` key
       initAll(API_KEY, {
-        fetchRemoteConfig: true,
-        autocapture: {
-          attribution: true,
-          fileDownloads: true,
-          formInteractions: true,
-          pageViews: true,
-          sessions: true,
-          elementInteractions: true,
-          networkTracking: true,
-          webVitals: true,
-          frustrationInteractions: true,
+        analytics: {
+          fetchRemoteConfig: true,
+          autocapture: {
+            attribution: true,
+            fileDownloads: true,
+            formInteractions: true,
+            pageViews: true,
+            sessions: true,
+            elementInteractions: true,
+            networkTracking: true,
+            webVitals: true,
+            frustrationInteractions: true,
+          },
         },
       });
-    Alternative: @amplitude/analytics-browser
+    Alternative: @amplitude/analytics-browser (flat options, no analytics wrapper)
       npm install @amplitude/analytics-browser
       amplitude.init(API_KEY, {
         fetchRemoteConfig: true,
