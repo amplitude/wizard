@@ -18,6 +18,7 @@ import {
   matchesAllowedPrefix,
   parseEventPlanContent,
   MAX_BASH_SLEEP_SECONDS,
+  isAuthErrorMessage,
   AgentErrorType,
 } from '../agent-interface';
 import type { WizardOptions } from '../../utils/types';
@@ -1895,5 +1896,54 @@ describe('createPreToolUseHook', () => {
         permissionDecision: 'deny',
       });
     });
+  });
+});
+
+describe('isAuthErrorMessage', () => {
+  // The auth-error detector decides whether the wizard routes a failed
+  // agent run to the friendly "your session expired, log in again" path
+  // (AUTH_ERROR / AUTH_REQUIRED exit) or to the generic "report to
+  // wizard@amplitude.com" API error path. Production Sentry traces
+  // (WIZARD-CLI-A / -7 / -F) showed the old single-pattern check
+  // ('authentication_failed') missing the actual gateway 401 body, which
+  // contains 'authentication_error' and 'Invalid or expired token'.
+
+  it('matches the legacy OAuth fault code', () => {
+    const body = JSON.stringify({
+      type: 'result',
+      is_error: true,
+      error: { code: 'authentication_failed' },
+    });
+    expect(isAuthErrorMessage(body)).toBe(true);
+  });
+
+  it('matches the Anthropic gateway authentication_error type', () => {
+    // Real-world payload from WIZARD-CLI-A
+    const body = JSON.stringify({
+      type: 'result',
+      is_error: true,
+      result:
+        'API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"Invalid or expired token"}}',
+    });
+    expect(isAuthErrorMessage(body)).toBe(true);
+  });
+
+  it('matches the Anthropic 401 message body', () => {
+    const body = JSON.stringify({
+      type: 'result',
+      is_error: true,
+      result: 'Invalid or expired token',
+    });
+    expect(isAuthErrorMessage(body)).toBe(true);
+  });
+
+  it.each([
+    ['empty string', ''],
+    ['unrelated API error', 'API Error: 500 Internal Server Error'],
+    ['gateway-down 400', 'API Error: 400 terminated'],
+    ['rate-limit 429', 'API Error: 429 rate_limited'],
+    ['MCP missing', '[ERROR-MCP-MISSING] could not load skill menu'],
+  ])('does NOT match %s', (_, body) => {
+    expect(isAuthErrorMessage(body)).toBe(false);
   });
 });

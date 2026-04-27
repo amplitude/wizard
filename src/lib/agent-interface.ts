@@ -303,6 +303,35 @@ export const MAX_BASH_SLEEP_SECONDS = 5;
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
 
 /**
+ * Substrings that indicate the LLM gateway rejected a request because the
+ * caller's OAuth token is invalid or expired. Three patterns observed in
+ * production Sentry traces (WIZARD-CLI-A, WIZARD-CLI-7, WIZARD-CLI-F):
+ *
+ *   - `authentication_failed`  — older OAuth fault code
+ *   - `authentication_error`   — current Anthropic gateway error.type
+ *                                (`{"error":{"type":"authentication_error",...}}`)
+ *   - `Invalid or expired token` — Anthropic 401 message body
+ *
+ * Match any of these → route to the friendly auth-recovery path in
+ * agent-runner instead of the generic "report to wizard@amplitude.com"
+ * API-error path. Substring (not regex) so JSON-stringified message
+ * bodies match without escaping concerns.
+ */
+const AUTH_ERROR_PATTERNS = [
+  'authentication_failed',
+  'authentication_error',
+  'Invalid or expired token',
+] as const;
+
+/**
+ * Returns true if `serialized` (typically a JSON-stringified SDK result
+ * message) contains any known auth-error pattern. Exported for unit tests.
+ */
+export function isAuthErrorMessage(serialized: string): boolean {
+  return AUTH_ERROR_PATTERNS.some((p) => serialized.includes(p));
+}
+
+/**
  * Build a PreToolUse hook that enforces wizard Bash safety.
  *
  * Why this exists: the Claude Agent SDK runs with
@@ -1897,14 +1926,24 @@ export async function runAgent(
             );
           }
 
-          // Detect authentication failures so the stop hook can skip reflection
+          // Detect authentication failures so the stop hook can skip
+          // reflection AND so agent-runner routes to the friendly
+          // "your session expired, run again to log in" path instead
+          // of the unhelpful "API Error 401, report to wizard@amplitude.com"
+          // path. Patterns observed in production Sentry traces:
+          //   - `authentication_failed`  — older OAuth fault code
+          //   - `authentication_error`   — current Anthropic gateway pattern
+          //                                ({"error":{"type":"authentication_error",...}})
+          //   - `Invalid or expired token` — Anthropic 401 message body
+          // Without these the agent run aborts as a generic API_ERROR and
+          // the user sees the wrong remediation. See WIZARD-CLI-A / -7 / -F.
           if (
             message.type === 'result' &&
             message.is_error &&
-            JSON.stringify(message).includes('authentication_failed')
+            isAuthErrorMessage(JSON.stringify(message))
           ) {
             authErrorDetected = true;
-            logToFile('Auth error detected: authentication_failed in result');
+            logToFile('Auth error detected in result message');
           }
 
           if (message.type === 'system' && message.subtype === 'init') {
