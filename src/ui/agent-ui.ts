@@ -930,21 +930,14 @@ export class AgentUI implements WizardUI {
       responseSchema: {
         appId: 'string (required, from choices[].value)',
       },
-      // Pagination is signalled even when all choices fit so outer agents can
-      // surface the total. `nextCommand` lets them re-fetch a search-filtered
-      // subset via `wizard projects list --agent --query <q>`.
+      // Pagination is signalled even when all choices fit so outer agents
+      // can surface the total. `nextCommand` is omitted here because this
+      // prompt returns every choice up front — search-filtered re-fetches
+      // are exposed via `searchPlaceholder` + `wizard projects list --agent
+      // --query <q>` discoverability rather than as a stub command.
       pagination: {
         total: choices.length,
         returned: needsInputChoices.length,
-        nextCommand: [
-          'npx',
-          '@amplitude/wizard',
-          'projects',
-          'list',
-          '--agent',
-          '--query',
-          '',
-        ],
       },
       // Allow free-form `--app-id` entry when none of the listed choices fit
       // (e.g. a brand-new project the cached fetch missed).
