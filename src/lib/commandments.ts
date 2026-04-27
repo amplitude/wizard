@@ -25,19 +25,39 @@ const WIZARD_COMMANDMENTS = [
 
   'Do not spawn subagents unless explicitly instructed to do so.',
 
-  'Use the TodoWrite tool to track your progress. Create a todo list at the start describing the high-level areas of work, mark each as in_progress when you begin it, and completed when done.',
+  'Use the TodoWrite tool to track your progress. Create the FULL todo list AT THE START describing every high-level area of work you expect to do during this run (SDK install, env vars, event plan, instrumentation, dashboard, setup report, etc.). Then only mark items as in_progress / completed — do NOT add new top-level todos mid-run except in genuinely unforeseen circumstances. The wizard renders this list as a "X / Y tasks complete" progress bar in the user-facing UI; growing the denominator from 5 to 8 to 12 over the course of the run looks like the wizard is broken and confusing. Plan once, execute, and only adjust the list when a real surprise forces it.',
 
   `After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.
 
 CRITICAL — confirm_event_plan format:
-  name: MUST be a short lowercase label using spaces for separators (2-5 words). Examples: "user signed up", "product added to cart", "search performed", "checkout started", "auth error".
+  name: MUST be Title Case following [Noun] [Past-Tense Verb] (2-5 words). Examples: "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started", "Property Extracted". The name passed here is the EXACT string the agent will pass as the first argument to track() — do not translate or reformat it between this tool call and the implementation.
   description: ONE short sentence (≤20 words) stating when this event fires. Do NOT include file paths, property lists, autocapture rationale, or implementation notes — the user only wants to know when the event fires.
-  WRONG name: "Fires on the product detail page after product data loads"
-  RIGHT name: "product viewed"
+  WRONG name: "user_signed_up" (snake_case), "userSignedUp" (camelCase), "user signed up" (lowercase), "Fires when user submits the signup form" (description in name field)
+  RIGHT name: "User Signed Up"
+  The only exception to Title Case is when Phase 1 of the full-repo-instrumentation skill confirms an existing codebase convention (5+ existing tracking calls, ≥80% consistent, intentionally codified). One or two stray strings do NOT qualify.
   Names longer than 50 characters will be automatically truncated.
 
 CRITICAL — do NOT manually write .amplitude-events.json.
-  The confirm_event_plan tool persists the approved plan to that file for you, in the canonical [{name, description}] shape the wizard UI expects. Writing the file yourself with a different shape (event_name, eventName, file_path, etc.) will cause the Event Plan viewer to render blank bullets.`,
+  The confirm_event_plan tool persists the approved plan to that file for you, in the canonical [{name, description}] shape the wizard UI expects. Writing the file yourself with a different shape (event_name, eventName, file_path, etc.) will cause the names in the manifest to drift from the names in the actual track() calls.
+
+CRITICAL — full-repo instrumentation event count.
+  When running the full-repo-instrumentation skill (initial instrumentation across an entire codebase, not a small targeted change), the approved plan MUST contain 10–30 events at critical/high/medium priority, sized to the repo:
+    - ~10–15 for a small repo (1–2 product areas, simple flows)
+    - ~15–25 for a medium repo (3–4 areas, multiple components)
+    - ~25–30 for a large repo (multiple features, full user journeys)
+  Fewer than 10 is acceptable ONLY for a genuinely tiny surface (one-page demo, two-command CLI) — verify by re-reading product-map.json before settling on a small plan. If your initial plan has fewer than 10 events on a non-trivial repo, you have under-scoped: re-read user flows for segmentation dimensions, alternate paths, configuration events, and friction points you skipped, then call confirm_event_plan again with the expanded plan. This rule does not apply to incremental reruns scoped to a single changed area, nor to non-full-repo workflows (diff-intake, single-file instrumentation, etc.).
+
+CRITICAL — funnel-start coverage.
+  Every product area with a multi-step user flow MUST have a "funnel start" event marked critical — the moment the user expresses intent to enter the flow (clicks into a checkout flow card, opens the signup form, opens a paywall, etc.). The "no raw clicks without outcomes" rule does NOT apply to funnel-start events; entry-point intent is itself the outcome. If your plan has end events without matching start events, you cannot compute conversion rates — re-scope and add the missing starts.
+
+CRITICAL — async-branch coverage.
+  When you place a track call inside an async handler (server action, API route, webhook handler, payment confirmation, mutation), walk every terminal branch (success, failure, validation-error, early return, switch case) and decide for each one whether a track call fires there OR whether downstream coverage exists. Webhook switches over event types (\`switch (event.type) { ... }\`) are the most common place this gets missed — every case that represents a meaningful user-facing outcome must either fire a track call or be explicitly noted in the plan reasoning as covered elsewhere.
+
+CRITICAL — property symmetry across multi-callsite events.
+  When the same event name fires from more than one callsite (same event_type emitted from multiple files, e.g. a "Donation Completed" event fired from three different result pages), the property keys MUST be identical across every callsite. Compute the union of useful in-scope variables across all callsites, then emit every key from that union at every callsite — fill in flow-specific values from a constant if necessary (e.g. \`payment_flow: "embedded_checkout"\` vs \`payment_flow: "hosted_checkout"\`). Asymmetric properties on the same event silently break charts.
+
+CRITICAL — identify wiring.
+  For any flow with authenticated users or a post-conversion identifier (email at checkout, customer ID after payment, session-bound user ID after sign-in), the plan MUST include an identify call (\`amplitude.setUserId\` + \`amplitude.identify(new Identify().set(...))\` for browser/node SDKs; \`client.identify(Identify(user_id=..., user_properties={...}))\` for Python) placed at the earliest point the identifier becomes available. If the codebase has zero auth and no post-conversion identifier, state that explicitly in the plan and skip identify wiring; otherwise it is mandatory.`,
 
   `Autocapture — the Amplitude feature that automatically tracks element clicks, form interactions, page/screen views, sessions, app lifecycle events, and file downloads — is commonly enabled by the wizard for web SDKs (@amplitude/unified, @amplitude/analytics-browser) but is NOT available or not on by default for every SDK (e.g. Swift requires an opt-in plugin, backend SDKs don't track element interactions at all, and an existing project may have it disabled). Before proposing events, check the SDK init code you just wrote (or that already exists) to see whether autocapture is on and what it covers for this platform. If it IS on, do NOT propose custom events that merely duplicate its coverage — names like "[X] Clicked", "[X] Tapped", "[X] Pressed", "Form Submitted", "Form Started", "Input Changed", "Page Viewed", or "Screen Viewed" are redundant and must be excluded. Either way, prefer events for business outcomes, state changes, async success/failure, and multi-step flow milestones over raw interaction events (see skills/instrumentation/discover-event-surfaces/references/best-practices.md section R4). If autocapture is on and the project is a landing page or starter template whose only interactions are plain clicks and links, lean toward a minimal plan and let autocapture do the work — confirm_event_plan still requires at least one event, so pick the single most meaningful state change. Keep this reasoning internal — do NOT write autocapture justifications into the description field.`,
 

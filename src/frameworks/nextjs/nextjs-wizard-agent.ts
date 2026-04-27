@@ -60,6 +60,12 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
         },
       ],
     },
+    getIntegrationSkillId: (context) => {
+      const router = context.router ?? NextJsRouter.APP_ROUTER;
+      return router === NextJsRouter.PAGES_ROUTER
+        ? 'integration-nextjs-pages-router'
+        : 'integration-nextjs-app-router';
+    },
   },
 
   detection: {

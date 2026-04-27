@@ -54,6 +54,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     targetsBrowser: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     beta: true,
+    getIntegrationSkillId: () => 'integration-vue-3',
   },
 
   detection: {

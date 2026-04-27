@@ -274,7 +274,19 @@ export const ConsoleView = ({
   const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
   const pendingPrompt = store.pendingPrompt;
 
-  // Watch for activation keys while the input is dormant
+  // Watch for activation keys while the input is dormant.
+  //
+  // The event-plan feedback box has its own text-input handler below; if we
+  // also activated the slash console on `/` while the user is typing
+  // free-text feedback, every "/" mid-sentence would pop the command palette
+  // (e.g. "press / for help" or "use the doc/text together" would trigger
+  // it). Skip activation when the event-plan feedback prompt is the active
+  // text-entry surface so its own handler can take the keystroke verbatim.
+  const eventPlanFeedbackActive =
+    !!pendingPrompt &&
+    pendingPrompt.kind === 'event-plan' &&
+    planInputMode === 'feedback';
+
   useInput(
     (char, key) => {
       if (key.escape || char === 'q' || char === 'Q') {
@@ -316,7 +328,7 @@ export const ConsoleView = ({
         activate('');
       }
     },
-    { isActive: !inputActive },
+    { isActive: !inputActive && !eventPlanFeedbackActive },
   );
 
   const handleSubmit = (value: string) => {

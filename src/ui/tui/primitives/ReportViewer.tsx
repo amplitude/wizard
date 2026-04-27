@@ -17,6 +17,9 @@ import { renderMarkdown } from '../utils/terminal-rendering.js';
 /** Rows consumed by ConsoleView border + TitleBar + separator + tab bar chrome */
 const CHROME_ROWS = 10;
 
+/** ANSI SGR reset — closes bold/color/background. */
+const ANSI_RESET = '\x1b[0m';
+
 interface ReportViewerProps {
   filePath: string;
 }
@@ -36,7 +39,16 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
         if (raw === prevRawRef.current) return; // skip redundant re-renders
         prevRawRef.current = raw;
         const rendered = renderMarkdown(raw);
-        setLines(rendered.split('\n'));
+        // marked-terminal wraps long headings/code blocks across multiple
+        // lines but only emits the closing reset at the end of the block.
+        // When we split on \n and render each line in its own <Text>, any
+        // line whose color span continues onto the next line leaks its
+        // open-color into the rest of the terminal — which is what caused
+        // the entire screen to turn lilac/pink after viewing the setup
+        // report. Append a hard reset to each line so styling cannot bleed
+        // past line boundaries even if the source rendering forgets to
+        // close itself.
+        setLines(rendered.split('\n').map((l) => l + ANSI_RESET));
       } catch {
         setLines(['(No report found — the agent may still be running)']);
       }

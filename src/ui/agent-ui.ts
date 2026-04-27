@@ -22,6 +22,12 @@ import type {
 } from '../lib/agent-events';
 import { createInterface } from 'readline';
 import { z } from 'zod';
+import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
+
+// Belt-and-suspenders: bin.ts also installs these. Idempotent, so a
+// second call from this module covers test harnesses and any other
+// entry point that imports AgentUI without going through bin.ts.
+installPipeErrorHandlers();
 
 /**
  * Stdin response schema for `promptEnvironmentSelection`.
@@ -241,7 +247,10 @@ function emit(
     run_id,
     ...extra,
   };
-  process.stdout.write(JSON.stringify(event) + '\n');
+  // safePipeWrite swallows EPIPE-class errors so a closed receiver
+  // doesn't crash the wizard mid-run. The data is silently dropped —
+  // there's nothing on the other end to receive it. See pipe-errors.ts.
+  safePipeWrite(process.stdout, JSON.stringify(event) + '\n');
 }
 
 // ── Implementation ──────────────────────────────────────────────────
@@ -387,10 +396,15 @@ export class AgentUI implements WizardUI {
     const wireData: NeedsInputWireData<V> = {
       event: 'needs_input',
       code: data.code,
+      ui: data.ui,
       choices: data.choices,
       recommended: data.recommended,
+      recommendedReason: data.recommendedReason,
       resumeFlags: data.resumeFlags,
       responseSchema: data.responseSchema,
+      pagination: data.pagination,
+      allowManualEntry: data.allowManualEntry,
+      manualEntry: data.manualEntry,
     };
     emit('needs_input', data.message, { data: wireData });
   }
@@ -685,6 +699,11 @@ export class AgentUI implements WizardUI {
     this.emitNeedsInput({
       code: 'confirm',
       message,
+      ui: {
+        component: 'confirmation',
+        priority: 'required',
+        title: message,
+      },
       choices: [
         { value: 'yes', label: 'Yes' },
         { value: 'no', label: 'No' },
@@ -699,9 +718,19 @@ export class AgentUI implements WizardUI {
     emit('prompt', message, {
       data: { promptType: 'choice', options, autoResult: selected },
     });
+    // Pick widget by list size: ≥10 options → searchable, else plain select.
+    const component = options.length >= 10 ? 'searchable_select' : 'select';
     this.emitNeedsInput({
       code: 'choice',
       message,
+      ui: {
+        component,
+        priority: 'required',
+        title: message,
+        ...(component === 'searchable_select' && {
+          searchPlaceholder: 'Filter options…',
+        }),
+      },
       choices: options.map((opt) => ({ value: opt, label: opt })),
       recommended: selected,
     });
@@ -852,18 +881,55 @@ export class AgentUI implements WizardUI {
     // Also emit the canonical structured `needs_input` event. Newer
     // orchestrators key off `type === 'needs_input'` instead of parsing
     // the legacy `prompt` payload.
+    //
+    // Each choice carries rich metadata (org / workspace / env / region) so
+    // the outer agent can render a true searchable picker with a label
+    // line, a description line, and a metadata footer.
     const needsInputChoices: NeedsInputChoice<string>[] = choices.map((c) => ({
       value: String(c.appId ?? ''),
       label: c.label,
       hint: c.envName,
+      // Show a "Org > Workspace > Env" breadcrumb in widgets that support
+      // a description line (Linear / Cursor / Granola pickers all do).
+      description: `${c.orgName} > ${c.workspaceName} > ${c.envName}`,
+      metadata: {
+        orgId: c.orgId,
+        orgName: c.orgName,
+        workspaceId: c.workspaceId,
+        workspaceName: c.workspaceName,
+        envName: c.envName,
+        appId: String(c.appId ?? ''),
+        rank: c.rank,
+      },
+      ...(c.appId != null && {
+        resumeFlags: ['--app-id', String(c.appId)],
+      }),
     }));
-    const recommended =
-      needsInputChoices.find((c) => c.value !== '')?.value ?? undefined;
+    // Recommend the highest-ranked env that has an API key (rank 1 = Production
+    // at most orgs). This lines up with the auto-select fallback below so
+    // `--auto-approve` and "no input" both pick the same environment.
+    const recommendedChoice =
+      needsInputChoices.find((c) => c.value !== '') ?? undefined;
+    const recommended = recommendedChoice?.value;
+    const recommendedReason = recommendedChoice
+      ? `Highest-ranked environment in the first available workspace (${recommendedChoice.description}).`
+      : undefined;
     this.emitNeedsInput<string>({
       code: 'environment_selection',
       message: `Multiple Amplitude environments available — select one of ${choices.length}.`,
+      ui: {
+        component: 'searchable_select',
+        priority: 'required',
+        title: 'Select an Amplitude environment',
+        description:
+          'Choose where events from this app should be sent. Each choice is one (org, workspace, environment) tuple.',
+        searchPlaceholder: 'Search by org, workspace, environment, or app ID…',
+        emptyState:
+          'No Amplitude environments found. Create a project at https://app.amplitude.com first.',
+      },
       choices: needsInputChoices,
       recommended,
+      recommendedReason,
       resumeFlags: choices
         .filter((c) => c.appId != null)
         .map((c) => ({
@@ -872,6 +938,23 @@ export class AgentUI implements WizardUI {
         })),
       responseSchema: {
         appId: 'string (required, from choices[].value)',
+      },
+      // Pagination is signalled even when all choices fit so outer agents
+      // can surface the total. `nextCommand` is omitted here because this
+      // prompt returns every choice up front — search-filtered re-fetches
+      // are exposed via `searchPlaceholder` + `wizard projects list --agent
+      // --query <q>` discoverability rather than as a stub command.
+      pagination: {
+        total: choices.length,
+        returned: needsInputChoices.length,
+      },
+      // Allow free-form `--app-id` entry when none of the listed choices fit
+      // (e.g. a brand-new project the cached fetch missed).
+      allowManualEntry: true,
+      manualEntry: {
+        flag: '--app-id',
+        placeholder: 'Enter Amplitude app ID (e.g. 769610)',
+        pattern: '^\\d+$',
       },
     });
 

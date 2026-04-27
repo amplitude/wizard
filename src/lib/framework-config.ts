@@ -100,6 +100,20 @@ export interface FrameworkMetadata<
   setup?: {
     questions: SetupQuestion[];
   };
+
+  /**
+   * Optional resolver that returns the bundled integration skill ID for this
+   * framework given its gathered context. Lets the runner pre-stage the skill
+   * before the agent launches so the agent doesn't have to call
+   * load_skill_menu / install_skill at runtime.
+   *
+   * If omitted, the runner falls back to a default `integration-${integration}`
+   * lookup against the bundled skills directory.
+   *
+   * Return null if no bundled skill is available for this framework + context
+   * combination — the runner will leave skill discovery to the agent.
+   */
+  getIntegrationSkillId?: (context: TContext) => string | null;
 }
 
 /**
