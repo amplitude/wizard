@@ -406,6 +406,25 @@ async function runAgentWizardBody(
   const skipAmplitudeMcp =
     config.prompts.buildPrompt !== undefined || !accessToken;
 
+  // Pre-stage all bundled skills the agent will need into the user's
+  // .claude/skills/ directory. The taxonomy / instrumentation / dashboard
+  // skills are constants; the integration skill is resolved per framework
+  // (with a sensible default fallback). When a skill is pre-staged we drop
+  // the corresponding load_skill_menu / install_skill steps from the prompt.
+  const { preStageSkills, bundledSkillExists } = await import(
+    './wizard-tools.js'
+  );
+  const integrationSkillId = config.metadata.getIntegrationSkillId
+    ? config.metadata.getIntegrationSkillId(frameworkContext)
+    : (() => {
+        const fallback = `integration-${config.metadata.integration}`;
+        return bundledSkillExists(fallback) ? fallback : null;
+      })();
+  const { integrationStaged } = preStageSkills(
+    session.installDir,
+    integrationSkillId,
+  );
+
   const integrationPrompt =
     buildIntegrationPrompt(
       config,
@@ -418,6 +437,7 @@ async function runAgentWizardBody(
       },
       frameworkContext,
       skipAmplitudeMcp,
+      integrationStaged ? integrationSkillId : null,
     ) + buildInlineFeatureSection(session.additionalFeatureQueue);
 
   // Initialize and run agent
@@ -878,6 +898,14 @@ ${items}
 
 /**
  * Build the integration prompt for the agent.
+ *
+ * `preStagedIntegrationSkillId` is the integration skill that the runner
+ * already copied into `.claude/skills/<id>/`. When non-null the prompt skips
+ * the load_skill_menu / install_skill discovery loop; otherwise the agent
+ * falls back to discovering an integration skill at runtime.
+ *
+ * Taxonomy + instrumentation + dashboard skills are always pre-staged when
+ * bundled, so the prompt loads them by ID without menu/install steps.
  */
 function buildIntegrationPrompt(
   config: FrameworkConfig,
@@ -890,6 +918,7 @@ function buildIntegrationPrompt(
   },
   frameworkContext: Record<string, unknown>,
   skipAmplitudeMcp: boolean,
+  preStagedIntegrationSkillId: string | null,
 ): string {
   if (config.prompts.buildPrompt) {
     return config.prompts.buildPrompt({
@@ -917,9 +946,20 @@ function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
+  // Integration-skill block: either reference the pre-staged skill directly,
+  // or fall back to the legacy load_skill_menu / install_skill flow when the
+  // runner couldn't pre-stage one (rare — typically TanStack Router and
+  // similar variants without a deterministic resolver).
+  const integrationSkillStep = preStagedIntegrationSkillId
+    ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard has already pre-staged this integration skill for ${config.metadata.name}; do NOT call load_skill_menu or install_skill for the integration category.`
+    : `STEP 1: Call load_skill_menu (from the wizard-tools MCP server) with category "integration" to see available skills.
+   If the tool fails, call report_status with kind="error", code="MCP_MISSING", detail="Could not load skill menu" and halt.
+   Pick the skill that matches this project's framework, then call install_skill with that skill ID, then load \`.claude/skills/<skillId>/SKILL.md\` via the Skill tool.
+   If no suitable integration skill is found, call report_status with kind="error", code="RESOURCE_MISSING", detail="Could not find a suitable skill for this project" and halt.`;
+
   return `You are setting up Amplitude analytics in this ${
     config.metadata.name
-  } project. Use the wizard-tools MCP server to load and install skills.
+  } project. The wizard has pre-staged the skills you'll need into \`.claude/skills/\` — load them with the Skill tool by ID instead of calling load_skill_menu / install_skill.
 
 Project context:
 - Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}
@@ -934,35 +974,25 @@ Project context:
 
 Instructions (follow these steps IN ORDER - do not skip or reorder):
 
-STEP 1: Call load_skill_menu (from the wizard-tools MCP server) to see available skills.
-   If the tool fails, call report_status with kind="error", code="MCP_MISSING", detail="Could not load skill menu" and halt.
+${integrationSkillStep}
 
-   Choose a skill from the \`integration\` category that matches this project's framework. Do NOT pick skills from other categories (error-tracking, feature-flags, etc.) — those are handled separately.
-   If no suitable integration skill is found, call report_status with kind="error", code="RESOURCE_MISSING", detail="Could not find a suitable skill for this project" and halt.
+STEP 2: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
 
-STEP 2: Call install_skill (from the wizard-tools MCP server) with the chosen skill ID (e.g., "integration-nextjs-app-router").
-   Do NOT run any shell commands to install skills.
-
-STEP 3: Load the installed skill's SKILL.md file to understand what references are available.
-
-STEP 4: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
-
-STEP 5: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
+STEP 3: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
    - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
    - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
      config.metadata.name
    }, which you'll find in example code. The tool will also ensure .gitignore coverage. Don't assume the presence of keys means the value is up to date. Write the correct value each time.
    - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
 
-STEP 6: Add event tracking to this project using the instrumentation skills.
+STEP 4: Add event tracking to this project. The taxonomy and instrumentation skills are already pre-staged at \`.claude/skills/\` — load them by ID with the Skill tool. Do NOT call load_skill_menu or install_skill for these.
    - If you enabled Amplitude Autocapture in the SDK init code during integration (typical for web SDKs, not for Swift unless the plugin was added, and not applicable to backend SDKs), the events you propose to confirm_event_plan MUST exclude anything Autocapture already covers for this platform — no "Clicked", "Tapped", "Submitted", or "Viewed" events. If Autocapture is off or unsupported, propose events normally but still favor business-outcome and state-change events over raw interaction events.
-   - Call load_skill_menu with category "taxonomy" and install **amplitude-quickstart-taxonomy-agent** using install_skill. Load its SKILL.md and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
-   - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
-   - Install the "add-analytics-instrumentation" skill using install_skill.
-   - Load the installed skill's SKILL.md file to understand the workflow.
-   - Follow the skill's workflow using the "File / Directory" input type: analyze the project's main source directory to discover user-facing features and surfaces that should be instrumented.
+   - Load \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\` and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
+   - Load \`.claude/skills/add-analytics-instrumentation/SKILL.md\` and follow its workflow using the "File / Directory" input type: analyze the project's main source directory to discover user-facing features and surfaces that should be instrumented.
    - The skill will guide you through discovering candidate events, filtering to the most critical ones, and producing a concrete tracking plan with exact file locations and tracking code.
    - Implement the tracking calls for all priority-3 (critical) events identified by the skill.
+
+STEP 5: Create the Amplitude dashboard. Load \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` via the Skill tool and follow it exactly. Do NOT call load_skill_menu or install_skill for this skill.
 
 Important: Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager the project uses. Do not manually search for lockfiles or config files. Always install packages as a background task. Don't await completion; proceed with other work immediately after starting the installation. You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
 

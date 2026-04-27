@@ -105,6 +105,23 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
       }
       return {};
     },
+    getIntegrationSkillId: (context) => {
+      // Mirrors the frameworkIdMap in prompts.getAdditionalContextLines
+      switch (context.routerMode) {
+        case ReactRouterMode.V6:
+          return 'integration-react-react-router-6';
+        case ReactRouterMode.V7_FRAMEWORK:
+          return 'integration-react-react-router-7-framework';
+        case ReactRouterMode.V7_DATA:
+          return 'integration-react-react-router-7-data';
+        case ReactRouterMode.V7_DECLARATIVE:
+          return 'integration-react-react-router-7-declarative';
+        default:
+          // TanStack Router (no routerMode) and unresolved cases: leave to the
+          // agent's load_skill_menu fallback.
+          return null;
+      }
+    },
   },
 
   detection: {
