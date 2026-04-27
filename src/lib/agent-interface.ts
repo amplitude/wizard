@@ -37,6 +37,7 @@ import { createInnerLifecycleHooks } from './inner-lifecycle';
 import { classifyWriteOperation } from './agent-events';
 import {
   createWizardToolsServer,
+  persistDashboard,
   WIZARD_TOOL_NAMES,
   type StatusReport,
   type StatusReporter,
@@ -1759,9 +1760,19 @@ export async function runAgent(
       if (!winner) return;
       try {
         const content = fs.readFileSync(winner, 'utf-8');
-        const result = dashboardFileSchema.safeParse(JSON.parse(content));
+        const parsed: unknown = JSON.parse(content);
+        const result = dashboardFileSchema.safeParse(parsed);
         if (result.success) {
           getUI().setDashboardUrl(result.data.dashboardUrl);
+          // Mirror to canonical `.amplitude/dashboard.json` so the
+          // dashboard URL survives legacy-file cleanup. The agent
+          // (via bundled skills) only writes the legacy path.
+          if (winner === legacyDashboardFilePath) {
+            persistDashboard(
+              agentConfig.workingDirectory,
+              parsed as Record<string, unknown>,
+            );
+          }
         }
       } catch {
         // File vanished or invalid JSON; next watcher event retries.

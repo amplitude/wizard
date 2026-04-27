@@ -14,6 +14,7 @@ import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
 import {
   ensureDir,
+  getDashboardFile,
   getEventsFile,
   getProjectMetaDir,
 } from '../utils/storage-paths';
@@ -506,9 +507,10 @@ export function cleanupWizardArtifacts(
   if (options.onSuccess) {
     cleanupIntegrationSkills(installDir);
   }
-  // Legacy dotfile cleanup is always safe — these are old paths the
-  // current code never writes to. Removing them prevents stale artifacts
-  // from older builds polluting the user's project.
+  // Legacy dotfile cleanup — both paths are mirrored to their canonical
+  // `.amplitude/` equivalents before this point (`persistEventPlan` for
+  // events, `persistDashboard` for the dashboard), so removing the
+  // top-level dotfiles is safe and prevents accidental git commits.
   cleanupLegacyAmplitudeEventsFile(installDir);
   cleanupLegacyAmplitudeDashboardFile(installDir);
 }
@@ -772,6 +774,38 @@ export function persistEventPlan(
   } catch (err) {
     logToFile(
       `persistEventPlan: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+/**
+ * Mirror the dashboard payload to the canonical
+ * `<workingDirectory>/.amplitude/dashboard.json` so it survives legacy-file
+ * cleanup. Bundled integration skills instruct the agent to write only the
+ * legacy `.amplitude-dashboard.json`; this function copies the content to the
+ * canonical path that `cleanupWizardArtifacts` preserves.
+ *
+ * Called from the dashboard file-watcher in `agent-interface.ts` whenever a
+ * valid dashboard file is detected. Idempotent and silent on errors.
+ */
+export function persistDashboard(
+  workingDirectory: string,
+  content: Record<string, unknown>,
+): boolean {
+  try {
+    if (!fs.existsSync(workingDirectory)) {
+      logToFile(
+        `persistDashboard: working directory does not exist: ${workingDirectory}`,
+      );
+      return false;
+    }
+    ensureDir(getProjectMetaDir(workingDirectory), 0o755);
+    atomicWriteJSON(getDashboardFile(workingDirectory), content);
+    return true;
+  } catch (err) {
+    logToFile(
+      `persistDashboard: ${err instanceof Error ? err.message : String(err)}`,
     );
     return false;
   }
