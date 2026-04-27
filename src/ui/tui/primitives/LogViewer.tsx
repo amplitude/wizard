@@ -320,6 +320,13 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
     horizontalOffset,
     Math.max(10, cols - 14),
   );
+  const errorCount = errorIndexes.length;
+  const errorStatus =
+    errorCount === 0
+      ? 'no errors'
+      : selectedErrorOrdinal > 0
+      ? `error ${selectedErrorOrdinal} of ${errorCount}`
+      : `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`;
 
   return (
     <Box flexDirection="column" height={visibleLines} paddingX={1}>
@@ -329,12 +336,10 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
         </Text>
         <Text color={Colors.muted}>
           line {Math.min(selectedLine + 1, Math.max(lines.length, 1))}/
-          {Math.max(lines.length, 1)} · col {horizontalOffset + 1}
-          {errorIndexes.length > 0
-            ? ` · errors ${
-                selectedErrorOrdinal > 0 ? `${selectedErrorOrdinal}/` : ''
-              }${errorIndexes.length}`
-            : ' · no errors'}
+          {Math.max(lines.length, 1)} · col {horizontalOffset + 1} ·{' '}
+          <Text color={errorCount > 0 ? Colors.warning : Colors.muted}>
+            {errorStatus}
+          </Text>
         </Text>
       </Box>
 
@@ -385,8 +390,8 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
       </Text>
 
       <Text color={Colors.muted} wrap="truncate-end">
-        ↑↓/jk scroll · h/l pan · ←→ tabs · f follow · n/p errors · g/G
-        top/bottom · 0 reset
+        ↑↓/jk scroll · h/l pan · ←→ tabs · f follow ·{' '}
+        {errorCount > 0 ? 'n/p next/prev error · ' : ''}g/G top/bottom · 0 reset
       </Text>
 
       <Text color={Colors.subtle} wrap="truncate-end">
