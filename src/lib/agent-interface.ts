@@ -332,6 +332,25 @@ export function isAuthErrorMessage(serialized: string): boolean {
 }
 
 /**
+ * Matches the SDK's known-benign hook-bridge-race stderr line. The
+ * claude-code subprocess emits this when an aborted/teardown-pending
+ * `query()` still has in-flight tool calls — each call invokes the
+ * registered hook (PreToolUse / Stop / UserPromptSubmit / PreCompact,
+ * indexed in registration order) over a now-closed IPC bridge.
+ *
+ * Already retried-and-recovered upstream (see `drainPriorResponse`
+ * + the `'Stream closed'` arm of the transient-error retry list in
+ * `runAgent`). The stderr handler in `runAgent` filters lines matching
+ * this pattern and logs a one-line suppression count at attempt
+ * boundary; everything else (genuine subprocess crashes, MCP server
+ * stderr, etc.) still flows to the log.
+ *
+ * Exported for unit tests. See issue #297.
+ */
+export const HOOK_BRIDGE_RACE_RE =
+  /Error in hook callback hook_\d+: Error: Stream closed/;
+
+/**
  * Build a PreToolUse hook that enforces wizard Bash safety.
  *
  * Why this exists: the Claude Agent SDK runs with
@@ -1669,6 +1688,21 @@ export async function runAgent(
       }
     };
 
+    /**
+     * Emit a one-line summary if the stderr filter swallowed any
+     * hook-bridge-race lines during the just-finished attempt. Keeps
+     * the noise volume observable (regressions show up as a growing
+     * suppressed count) without flooding the per-line log.
+     */
+    const logSuppressedHookBridgeNoise = (count: number, attempt: number) => {
+      if (count === 0) return;
+      logToFile(
+        `Suppressed ${count} hook-bridge-race stderr line${
+          count === 1 ? '' : 's'
+        } from prior subprocess (attempt ${attempt + 1}; see issue #297)`,
+      );
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -1719,6 +1753,11 @@ export async function runAgent(
         };
         await resultReceived;
       };
+
+      // Per-attempt counter for known-benign hook-bridge-race stderr lines
+      // (see HOOK_BRIDGE_RACE_RE). Logged once at attempt boundary so the
+      // noise volume stays visible without cluttering the per-line stream.
+      let hookBridgeRaceSuppressed = 0;
 
       // AbortController lets us cancel a stalled query so we can retry
       const controller = new AbortController();
@@ -1843,6 +1882,16 @@ export async function runAgent(
             tools: { type: 'preset', preset: 'claude_code' },
             // Capture stderr from CLI subprocess for debugging
             stderr: (data: string) => {
+              if (HOOK_BRIDGE_RACE_RE.test(data)) {
+                // Known-benign hook-bridge race during prior-attempt
+                // teardown — already handled by drainPriorResponse + the
+                // transient-error retry arm. Count and suppress so the
+                // visible log doesn't fill with `hook_<N>: Stream closed`
+                // when the SDK takes a moment to wind down a doomed
+                // subprocess. Summary is logged at attempt boundary.
+                hookBridgeRaceSuppressed++;
+                return;
+              }
               logToFile('CLI stderr:', data);
               if (options.debug) {
                 debug('CLI stderr:', data);
@@ -2033,12 +2082,14 @@ export async function runAgent(
           signalDone();
           // Drain the prior iterator before the next attempt — see issue #297.
           await drainPriorResponse(response);
+          logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
           continue;
         }
 
         // Clean completion — exit the retry loop
         postStreamRetryActive = false;
         clearRetryBanner();
+        logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
         break;
       } catch (innerError) {
         clearTimeout(staleTimer);
@@ -2047,6 +2098,7 @@ export async function runAgent(
         // of whether we'll retry. Cheap and defends against the hook
         // bridge race in issue #297.
         await drainPriorResponse(response);
+        logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
 
         // Stall-aborted or API error with retries remaining — try again
         if (controller.signal.aborted && attempt < MAX_RETRIES) {

@@ -19,6 +19,7 @@ import {
   parseEventPlanContent,
   MAX_BASH_SLEEP_SECONDS,
   isAuthErrorMessage,
+  HOOK_BRIDGE_RACE_RE,
   AgentErrorType,
 } from '../agent-interface';
 import type { WizardOptions } from '../../utils/types';
@@ -1945,5 +1946,44 @@ describe('isAuthErrorMessage', () => {
     ['MCP missing', '[ERROR-MCP-MISSING] could not load skill menu'],
   ])('does NOT match %s', (_, body) => {
     expect(isAuthErrorMessage(body)).toBe(false);
+  });
+});
+
+describe('HOOK_BRIDGE_RACE_RE', () => {
+  // The SDK subprocess emits these whenever an aborted/teardown-pending
+  // query() still has in-flight tool calls that fire registered hooks
+  // over a closed IPC bridge. We match and suppress them in the stderr
+  // capture so the visible log doesn't fill up; the suppressed count
+  // is logged once per attempt so regressions remain observable.
+  // See issue #297.
+
+  it.each([
+    ['hook_0', 'Error in hook callback hook_0: Error: Stream closed'],
+    ['hook_1', 'Error in hook callback hook_1: Error: Stream closed'],
+    ['hook_42', 'Error in hook callback hook_42: Error: Stream closed'],
+  ])('matches the SDK race line for %s', (_, line) => {
+    expect(HOOK_BRIDGE_RACE_RE.test(line)).toBe(true);
+  });
+
+  it('matches the line even when prefixed with timestamp / surrounding text', () => {
+    // The SDK sometimes wraps the line with its own prefix; the stderr
+    // callback receives chunks, not pre-trimmed lines, so we test the
+    // partial-match behavior we rely on.
+    expect(
+      HOOK_BRIDGE_RACE_RE.test(
+        '[2026-04-27T04:18:08.152Z] Error in hook callback hook_0: Error: Stream closed\n',
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    'Error in hook callback hook_0: Error: Some other failure',
+    'Error in hook callback: Error: Stream closed', // missing hook_<N>
+    'Error in hook callback hook_X: Error: Stream closed', // non-numeric
+    'API Error: 400 terminated',
+    'WizardError: Authentication failed',
+    '',
+  ])('does NOT match unrelated stderr: %j', (line) => {
+    expect(HOOK_BRIDGE_RACE_RE.test(line)).toBe(false);
   });
 });
