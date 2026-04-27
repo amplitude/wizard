@@ -263,7 +263,25 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
     }
 
     if (input === '0') {
+      // Full reset back to a known-good state: follow mode, latest line,
+      // col 1. The previous behavior only zeroed horizontalOffset, which
+      // was a no-op in the very-common case where horizontalOffset was
+      // already 0 (e.g. "(No log file found)" / short logs / no panning
+      // done yet). Users hit `0` expecting it to do something — anything
+      // — and got silence. "Reset" should mean "get me back to the
+      // default view," and the default for a tail viewer is following
+      // the live tail at column 1.
+      setMode('follow');
       setHorizontalOffset(0);
+      const lastIndex = Math.max(lines.length - 1, 0);
+      setSelectedLine(lastIndex);
+      setViewportTop(
+        clampViewportTop(
+          lines.length - viewportHeight,
+          lines.length,
+          viewportHeight,
+        ),
+      );
       return;
     }
 
