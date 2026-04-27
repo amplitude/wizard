@@ -15,6 +15,7 @@ import path from 'path';
 import { z } from 'zod';
 
 import { callAmplitudeMcp, AMPLITUDE_MCP_URL } from '../lib/mcp-with-fallback';
+import { parseEventPlanContent } from '../lib/event-plan-parser';
 import { getUI } from '../ui';
 import { analytics } from '../utils/analytics';
 import { logToFile } from '../utils/debug';
@@ -25,33 +26,9 @@ const EVENTS_FILE = '.amplitude-events.json';
 const DASHBOARD_FILE = '.amplitude-dashboard.json';
 const DASHBOARD_TIMEOUT_MS = 90_000;
 
-// The agent is asked to write `{ events: [{ name, description, file }] }`,
-// but historically other skills have emitted `event`, `event_type`, or
-// `eventName` for the event-name key. Accept all of them and normalize to
-// `name` downstream. Mirrors the tolerance in bin.ts (setEventPlan).
-const EventEntrySchema = z
-  .object({
-    name: z.string().optional(),
-    event: z.string().optional(),
-    event_type: z.string().optional(),
-    eventName: z.string().optional(),
-    description: z.string().optional(),
-    eventDescriptionAndReasoning: z.string().optional(),
-    file: z.string().optional(),
-  })
-  .transform((e) => ({
-    name: (e.name ?? e.event ?? e.event_type ?? e.eventName ?? '').trim(),
-    description: e.description ?? e.eventDescriptionAndReasoning,
-    file: e.file,
-  }))
-  .refine((e) => e.name.length > 0, {
-    message:
-      'event must have a name (key: name, event, event_type, or eventName)',
-  });
-
-const EventsFileSchema = z.object({
-  events: z.array(EventEntrySchema).min(1),
-});
+interface EventsFile {
+  events: Array<{ name: string; description: string }>;
+}
 
 const DashboardFileSchema = z.object({
   dashboardUrl: z.string().url(),
@@ -67,7 +44,6 @@ const DashboardFileSchema = z.object({
     .optional(),
 });
 
-type EventsFile = z.infer<typeof EventsFileSchema>;
 type DashboardResult = z.infer<typeof DashboardFileSchema>;
 
 export interface CreateDashboardStepArgs {
@@ -107,22 +83,41 @@ export async function createDashboardStep(
   const spinner = ui.spinner();
   spinner.start('Creating charts and dashboard in Amplitude…');
 
+  // Wrap the entire dashboard run in try/finally so an unexpected throw from
+  // runCreateDashboard (e.g. SDK module load failure outside the agent's own
+  // try/catch) cannot leave the spinner running. The function's contract is
+  // "never throws" — enforce that here even when callees violate it.
   const startedAt = Date.now();
-  const result = await runCreateDashboard({
-    accessToken,
-    events,
-    session,
-  });
+  let result: DashboardResult | null = null;
+  let unexpectedError: unknown = null;
+  try {
+    result = await runCreateDashboard({
+      accessToken,
+      events,
+      session,
+    });
+  } catch (err) {
+    unexpectedError = err;
+    logToFile(
+      `[createDashboard] unexpected error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
   const durationMs = Date.now() - startedAt;
 
   if (!result) {
-    spinner.stop('Dashboard step timed out — skipping');
+    spinner.stop(
+      unexpectedError
+        ? 'Dashboard step failed — skipping'
+        : 'Dashboard step timed out — skipping',
+    );
     ui.log.warn(
       'Amplitude is configured, but the wizard could not create a starter dashboard within 90 seconds. Open app.amplitude.com to create one manually.',
     );
     analytics.wizardCapture('dashboard failed', {
       integration,
-      reason: 'timeout or mcp error',
+      reason: unexpectedError ? 'unexpected error' : 'timeout or mcp error',
       'duration ms': durationMs,
     });
     return;
@@ -152,18 +147,41 @@ export async function createDashboardStep(
 // ── Helpers (exported for testing) ─────────────────────────────────────────
 
 export const __test__ = {
-  EventsFileSchema,
+  readEventsFromContent,
   parseAgentOutput,
   extractJsonContaining,
 };
 
+/**
+ * Parse `.amplitude-events.json` content into the shape this step needs.
+ * Delegates to `parseEventPlanContent`, the canonical parser used by the
+ * TUI's Event Plan viewer and the CLI plan reader, so this step stays in
+ * lock-step with the rest of the codebase on field-name tolerance
+ * (`name` / `event` / `eventName` / `event_name`, etc.) and shape
+ * unwrapping (`{ events: [...] }` vs bare array).
+ *
+ * Returns `null` if the content is unparseable, missing required keys, or
+ * yields zero entries with non-empty names.
+ */
+function readEventsFromContent(content: string): EventsFile | null {
+  const events = parseEventPlanContent(content);
+  if (!events) return null;
+  const filtered = events.filter((e) => e.name.length > 0);
+  if (filtered.length === 0) return null;
+  return { events: filtered };
+}
+
 function readEventsFile(eventsPath: string): EventsFile | null {
   if (!fs.existsSync(eventsPath)) return null;
   try {
-    const raw: unknown = JSON.parse(fs.readFileSync(eventsPath, 'utf8'));
-    // Tolerant of both { events: [...] } and the bare [...] shape.
-    const normalized = Array.isArray(raw) ? { events: raw } : raw;
-    return EventsFileSchema.parse(normalized);
+    const content = fs.readFileSync(eventsPath, 'utf8');
+    const events = readEventsFromContent(content);
+    if (!events) {
+      logToFile(
+        `[createDashboard] ${eventsPath} parsed but had no usable events`,
+      );
+    }
+    return events;
   } catch (err) {
     logToFile(
       `[createDashboard] ${eventsPath} is invalid: ${

@@ -1,74 +1,92 @@
 /**
- * Regression tests for the two issues Cursor Bugbot surfaced:
- *   1. Schema must tolerate `event_type`/`event`/`eventName` (agents drift
- *      from the canonical key name).
- *   2. The fallback JSON extractor must handle nested braces (the dashboard
- *      result embeds a `charts` array of objects).
+ * Regression tests for the create-dashboard step.
+ *
+ * 1. The events-file reader delegates to parseEventPlanContent (the canonical
+ *    parser) so it tolerates every field-name variant the agent emits in the
+ *    wild — `name`, `event`, `eventName`, `event_name`.
+ * 2. The fallback JSON extractor handles nested braces (the dashboard result
+ *    embeds a `charts` array of objects).
  */
 
 import { describe, it, expect } from 'vitest';
 import { __test__ } from '../create-dashboard';
 
-const { EventsFileSchema, parseAgentOutput, extractJsonContaining } = __test__;
+const { readEventsFromContent, parseAgentOutput, extractJsonContaining } =
+  __test__;
 
-describe('EventsFileSchema', () => {
-  it('accepts canonical `name` key', () => {
-    const result = EventsFileSchema.parse({
-      events: [
+describe('readEventsFromContent', () => {
+  it('accepts canonical `name` key with bare top-level array', () => {
+    const out = readEventsFromContent(
+      JSON.stringify([
         { name: 'Signup Completed', description: 'User finished signup' },
-      ],
-    });
-    expect(result.events[0].name).toBe('Signup Completed');
+      ]),
+    );
+    expect(out?.events[0].name).toBe('Signup Completed');
+    expect(out?.events[0].description).toBe('User finished signup');
+  });
+
+  it('unwraps a `{ events: [...] }` wrapper object', () => {
+    const out = readEventsFromContent(
+      JSON.stringify({ events: [{ name: 'Project Created' }] }),
+    );
+    expect(out?.events[0].name).toBe('Project Created');
   });
 
   it('accepts legacy `event` key and normalizes to `name`', () => {
-    const result = EventsFileSchema.parse({
-      events: [{ event: 'Project Created' }],
-    });
-    expect(result.events[0].name).toBe('Project Created');
+    const out = readEventsFromContent(
+      JSON.stringify([{ event: 'Project Created' }]),
+    );
+    expect(out?.events[0].name).toBe('Project Created');
   });
 
-  it('accepts `event_type` key (from the old commandment wording)', () => {
-    const result = EventsFileSchema.parse({
-      events: [{ event_type: 'Invite Sent' }],
-    });
-    expect(result.events[0].name).toBe('Invite Sent');
+  it('accepts `eventName` (camelCase) key', () => {
+    const out = readEventsFromContent(
+      JSON.stringify([{ eventName: 'Checkout Started' }]),
+    );
+    expect(out?.events[0].name).toBe('Checkout Started');
   });
 
-  it('accepts `eventName` key', () => {
-    const result = EventsFileSchema.parse({
-      events: [{ eventName: 'Checkout Started' }],
-    });
-    expect(result.events[0].name).toBe('Checkout Started');
+  it('accepts `event_name` (snake_case) key — observed in the wild', () => {
+    // Regression: the previous create-dashboard parser missed this variant
+    // even though the canonical event-plan-parser handles it.
+    const out = readEventsFromContent(
+      JSON.stringify([{ event_name: 'External Resource Opened' }]),
+    );
+    expect(out?.events[0].name).toBe('External Resource Opened');
   });
 
   it('prefers `name` when multiple keys are present', () => {
-    const result = EventsFileSchema.parse({
-      events: [{ name: 'Canonical', event: 'Legacy' }],
-    });
-    expect(result.events[0].name).toBe('Canonical');
+    const out = readEventsFromContent(
+      JSON.stringify([{ name: 'Canonical', event: 'Legacy' }]),
+    );
+    expect(out?.events[0].name).toBe('Canonical');
   });
 
-  it('rejects entries with no recognizable name key', () => {
-    expect(() =>
-      EventsFileSchema.parse({ events: [{ description: 'x' }] }),
-    ).toThrow();
+  it('returns null when no entry has a recognizable name key', () => {
+    const out = readEventsFromContent(
+      JSON.stringify([{ description: 'orphan' }]),
+    );
+    expect(out).toBeNull();
   });
 
-  it('rejects empty events array', () => {
-    expect(() => EventsFileSchema.parse({ events: [] })).toThrow();
+  it('returns null for an empty array', () => {
+    expect(readEventsFromContent('[]')).toBeNull();
+  });
+
+  it('returns null for invalid JSON', () => {
+    expect(readEventsFromContent('{not json')).toBeNull();
   });
 
   it('accepts `eventDescriptionAndReasoning` as description alias', () => {
-    const result = EventsFileSchema.parse({
-      events: [
+    const out = readEventsFromContent(
+      JSON.stringify([
         {
           name: 'Foo',
           eventDescriptionAndReasoning: 'Fires when users foo',
         },
-      ],
-    });
-    expect(result.events[0].description).toBe('Fires when users foo');
+      ]),
+    );
+    expect(out?.events[0].description).toBe('Fires when users foo');
   });
 });
 
