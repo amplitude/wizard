@@ -42,6 +42,12 @@ const FEATURE_HINTS: Record<AdditionalFeature, string> = {
 /**
  * Map a discovered feature to its corresponding additional feature.
  * Stripe is not an opt-in feature so it returns null.
+ *
+ * NOTE: structural copy of `discoveredToAdditional` in
+ * src/lib/feature-discovery.ts. The TUI can't import from that module
+ * directly — see session-constants.ts for the tsx ESM/CJS dual-loading
+ * rationale. Keep both copies in sync when adding DiscoveredFeature
+ * variants.
  */
 function toAdditionalFeature(
   feature: DiscoveredFeature,
@@ -113,10 +119,15 @@ export const FeatureOptInScreen = ({ store }: FeatureOptInScreenProps) => {
       <PickerMenu<AdditionalFeature>
         mode="multi"
         options={options}
-        // defaultSelected=[] — these are explicit opt-ins. SR records user
-        // sessions (privacy / DPA implications); G&S adds runtime UI; LLM
-        // adds a tracking surface. The user must affirmatively check.
+        // defaultSelected=[] + allowEmpty — these are explicit opt-ins.
+        // SR records user sessions (privacy / DPA implications); G&S
+        // adds runtime UI; LLM adds a tracking surface. The user must
+        // affirmatively check. allowEmpty disables PickerMenu's
+        // "ENTER without checking selects the focused option" fallback,
+        // which would otherwise silently enable Session Replay just for
+        // tabbing through and pressing Enter.
         defaultSelected={[]}
+        allowEmpty
         onSelect={(value) => {
           const selected = Array.isArray(value) ? value : [value];
           store.confirmFeatureOptIns(selected);

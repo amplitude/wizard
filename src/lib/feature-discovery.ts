@@ -78,8 +78,16 @@ export function discoverFeatures(opts: {
 }
 
 /**
- * Map a DiscoveredFeature to its corresponding AdditionalFeature, or null if
- * the discovery is informational only (e.g. Stripe).
+ * Map a DiscoveredFeature to its corresponding AdditionalFeature, or null
+ * if the discovery is informational only (e.g. Stripe).
+ *
+ * NOTE: a structural copy of this mapping also lives in
+ * src/ui/tui/screens/FeatureOptInScreen.tsx (`toAdditionalFeature`). The
+ * TUI layer can't import from this module at runtime because of the tsx
+ * ESM/CJS dual-loading bug documented in src/ui/tui/session-constants.ts
+ * — wizard-session's `as const` + same-name-type exports fail to resolve
+ * when the module is first loaded as CJS and then re-imported as ESM.
+ * If you add a new DiscoveredFeature variant, update BOTH copies.
  */
 function discoveredToAdditional(
   feature: DiscoveredFeature,
