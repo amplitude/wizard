@@ -74,37 +74,40 @@ SDK selection (choose the FIRST match):
     Recommended: @amplitude/unified
       npm install @amplitude/unified
       import { initAll } from '@amplitude/unified';
-      // initAll nests analytics options under an \`analytics\` key
+      // initAll nests analytics options under an \`analytics\` key — the
+      // CDN script's flat shape does NOT translate directly to npm.
       initAll(API_KEY, {
         analytics: {
-          fetchRemoteConfig: true,
+          remoteConfig: { fetchRemoteConfig: true },
           autocapture: {
             attribution: true,
-            fileDownloads: true,
-            formInteractions: true,
             pageViews: true,
             sessions: true,
+            formInteractions: true,
+            fileDownloads: true,
             elementInteractions: true,
+            frustrationInteractions: true,
+            pageUrlEnrichment: true,
             networkTracking: true,
             webVitals: true,
-            frustrationInteractions: true,
           },
         },
       });
     Alternative: @amplitude/analytics-browser (flat options, no analytics wrapper)
       npm install @amplitude/analytics-browser
       amplitude.init(API_KEY, {
-        fetchRemoteConfig: true,
+        remoteConfig: { fetchRemoteConfig: true },
         autocapture: {
           attribution: true,
-          fileDownloads: true,
-          formInteractions: true,
           pageViews: true,
           sessions: true,
+          formInteractions: true,
+          fileDownloads: true,
           elementInteractions: true,
+          frustrationInteractions: true,
+          pageUrlEnrichment: true,
           networkTracking: true,
           webVitals: true,
-          frustrationInteractions: true,
         },
       });
     Static site (no build pipeline): CDN snippet — see https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2
