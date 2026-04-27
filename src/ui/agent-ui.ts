@@ -22,6 +22,12 @@ import type {
 } from '../lib/agent-events';
 import { createInterface } from 'readline';
 import { z } from 'zod';
+import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
+
+// Belt-and-suspenders: bin.ts also installs these. Idempotent, so a
+// second call from this module covers test harnesses and any other
+// entry point that imports AgentUI without going through bin.ts.
+installPipeErrorHandlers();
 
 /**
  * Stdin response schema for `promptEnvironmentSelection`.
@@ -241,7 +247,10 @@ function emit(
     run_id,
     ...extra,
   };
-  process.stdout.write(JSON.stringify(event) + '\n');
+  // safePipeWrite swallows EPIPE-class errors so a closed receiver
+  // doesn't crash the wizard mid-run. The data is silently dropped —
+  // there's nothing on the other end to receive it. See pipe-errors.ts.
+  safePipeWrite(process.stdout, JSON.stringify(event) + '\n');
 }
 
 // ── Implementation ──────────────────────────────────────────────────

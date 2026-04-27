@@ -303,6 +303,97 @@ export const MAX_BASH_SLEEP_SECONDS = 5;
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
 
 /**
+ * Substrings that indicate the LLM gateway rejected a request because the
+ * caller's OAuth token is invalid or expired. Three patterns observed in
+ * production Sentry traces (WIZARD-CLI-A, WIZARD-CLI-7, WIZARD-CLI-F):
+ *
+ *   - `authentication_failed`  — older OAuth fault code
+ *   - `authentication_error`   — current Anthropic gateway error.type
+ *                                (`{"error":{"type":"authentication_error",...}}`)
+ *   - `Invalid or expired token` — Anthropic 401 message body
+ *
+ * Match any of these → route to the friendly auth-recovery path in
+ * agent-runner instead of the generic "report to wizard@amplitude.com"
+ * API-error path. Substring (not regex) so JSON-stringified message
+ * bodies match without escaping concerns.
+ */
+const AUTH_ERROR_PATTERNS = [
+  'authentication_failed',
+  'authentication_error',
+  'Invalid or expired token',
+] as const;
+
+/**
+ * Returns true if `serialized` (typically a JSON-stringified SDK result
+ * message) contains any known auth-error pattern. Exported for unit tests.
+ */
+export function isAuthErrorMessage(serialized: string): boolean {
+  return AUTH_ERROR_PATTERNS.some((p) => serialized.includes(p));
+}
+
+/**
+ * Matches the SDK's known-benign hook-bridge-race stderr line. The
+ * claude-code subprocess emits this when an aborted/teardown-pending
+ * `query()` still has in-flight tool calls — each call invokes the
+ * registered hook (PreToolUse / Stop / UserPromptSubmit / PreCompact,
+ * indexed in registration order) over a now-closed IPC bridge.
+ *
+ * Already retried-and-recovered upstream (see `drainPriorResponse`
+ * + the `'Stream closed'` arm of the transient-error retry list in
+ * `runAgent`). The stderr handler filters lines matching this pattern
+ * and logs a one-line suppression count at attempt boundary; everything
+ * else (genuine subprocess crashes, MCP server stderr, etc.) still
+ * flows through.
+ *
+ * Anchored with `^...$` so a chunk containing both a race line AND a
+ * genuine error keeps the genuine error — the partition helper splits
+ * chunks line-by-line before testing.
+ *
+ * Exported for unit tests. See issue #297.
+ */
+export const HOOK_BRIDGE_RACE_RE =
+  /^Error in hook callback hook_\d+: Error: Stream closed$/;
+
+/**
+ * Splits a raw stderr chunk into the count of suppressed
+ * hook-bridge-race lines and the remaining text that should still be
+ * logged.
+ *
+ * Why partition instead of `regex.test(data) → return`: the SDK's
+ * stderr callback receives raw byte chunks from the subprocess pipe.
+ * Multiple stderr writes can be batched into a single chunk, so a
+ * chunk-level match would drop genuine errors riding alongside the
+ * race-line noise. We split on `\n`, suppress only matching lines,
+ * and reconstruct the rest preserving the original chunk's trailing
+ * newline behavior.
+ *
+ * Exported for unit tests.
+ */
+export function partitionHookBridgeRace(data: string): {
+  suppressed: number;
+  passthrough: string;
+} {
+  if (data.length === 0) return { suppressed: 0, passthrough: '' };
+  const hadTrailingNewline = data.endsWith('\n');
+  const lines = data.split('\n');
+  if (hadTrailingNewline) lines.pop(); // drop the empty trailing element
+  let suppressed = 0;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (HOOK_BRIDGE_RACE_RE.test(line)) {
+      suppressed++;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (kept.length === 0) return { suppressed, passthrough: '' };
+  return {
+    suppressed,
+    passthrough: kept.join('\n') + (hadTrailingNewline ? '\n' : ''),
+  };
+}
+
+/**
  * Build a PreToolUse hook that enforces wizard Bash safety.
  *
  * Why this exists: the Claude Agent SDK runs with
@@ -1640,6 +1731,21 @@ export async function runAgent(
       }
     };
 
+    /**
+     * Emit a one-line summary if the stderr filter swallowed any
+     * hook-bridge-race lines during the just-finished attempt. Keeps
+     * the noise volume observable (regressions show up as a growing
+     * suppressed count) without flooding the per-line log.
+     */
+    const logSuppressedHookBridgeNoise = (count: number, attempt: number) => {
+      if (count === 0) return;
+      logToFile(
+        `Suppressed ${count} hook-bridge-race stderr line${
+          count === 1 ? '' : 's'
+        } from prior subprocess (attempt ${attempt + 1}; see issue #297)`,
+      );
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -1690,6 +1796,11 @@ export async function runAgent(
         };
         await resultReceived;
       };
+
+      // Per-attempt counter for known-benign hook-bridge-race stderr lines
+      // (see HOOK_BRIDGE_RACE_RE). Logged once at attempt boundary so the
+      // noise volume stays visible without cluttering the per-line stream.
+      let hookBridgeRaceSuppressed = 0;
 
       // AbortController lets us cancel a stalled query so we can retry
       const controller = new AbortController();
@@ -1812,11 +1923,22 @@ export async function runAgent(
               return Promise.resolve(result);
             },
             tools: { type: 'preset', preset: 'claude_code' },
-            // Capture stderr from CLI subprocess for debugging
+            // Capture stderr from CLI subprocess for debugging.
+            //
+            // Known-benign hook-bridge-race lines (see HOOK_BRIDGE_RACE_RE)
+            // are partitioned out and counted; everything else passes
+            // through. Chunk-level matching would drop a genuine error
+            // riding alongside a race line in the same batched chunk —
+            // partitionHookBridgeRace splits before filtering so that
+            // can't happen. Summary count is logged at attempt boundary.
             stderr: (data: string) => {
-              logToFile('CLI stderr:', data);
-              if (options.debug) {
-                debug('CLI stderr:', data);
+              const { suppressed, passthrough } = partitionHookBridgeRace(data);
+              hookBridgeRaceSuppressed += suppressed;
+              if (passthrough.length > 0) {
+                logToFile('CLI stderr:', passthrough);
+                if (options.debug) {
+                  debug('CLI stderr:', passthrough);
+                }
               }
             },
             hooks: buildHooksConfig({
@@ -1897,14 +2019,24 @@ export async function runAgent(
             );
           }
 
-          // Detect authentication failures so the stop hook can skip reflection
+          // Detect authentication failures so the stop hook can skip
+          // reflection AND so agent-runner routes to the friendly
+          // "your session expired, run again to log in" path instead
+          // of the unhelpful "API Error 401, report to wizard@amplitude.com"
+          // path. Patterns observed in production Sentry traces:
+          //   - `authentication_failed`  — older OAuth fault code
+          //   - `authentication_error`   — current Anthropic gateway pattern
+          //                                ({"error":{"type":"authentication_error",...}})
+          //   - `Invalid or expired token` — Anthropic 401 message body
+          // Without these the agent run aborts as a generic API_ERROR and
+          // the user sees the wrong remediation. See WIZARD-CLI-A / -7 / -F.
           if (
             message.type === 'result' &&
             message.is_error &&
-            JSON.stringify(message).includes('authentication_failed')
+            isAuthErrorMessage(JSON.stringify(message))
           ) {
             authErrorDetected = true;
-            logToFile('Auth error detected: authentication_failed in result');
+            logToFile('Auth error detected in result message');
           }
 
           if (message.type === 'system' && message.subtype === 'init') {
@@ -1994,12 +2126,14 @@ export async function runAgent(
           signalDone();
           // Drain the prior iterator before the next attempt — see issue #297.
           await drainPriorResponse(response);
+          logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
           continue;
         }
 
         // Clean completion — exit the retry loop
         postStreamRetryActive = false;
         clearRetryBanner();
+        logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
         break;
       } catch (innerError) {
         clearTimeout(staleTimer);
@@ -2008,6 +2142,7 @@ export async function runAgent(
         // of whether we'll retry. Cheap and defends against the hook
         // bridge race in issue #297.
         await drainPriorResponse(response);
+        logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
 
         // Stall-aborted or API error with retries remaining — try again
         if (controller.signal.aborted && attempt < MAX_RETRIES) {
