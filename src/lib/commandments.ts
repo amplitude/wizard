@@ -66,30 +66,45 @@ CRITICAL — do NOT manually write .amplitude-events.json.
 
   Remote config: top-level \`fetchRemoteConfig: true\` is DEPRECATED. Use the nested form: \`remoteConfig: { fetchRemoteConfig: true }\`.
 
+  CRITICAL — every option in the generated init code must have an inline \`// comment\` on the same line that briefly explains what it does. The wizard does NOT show users a checkbox picker — instead, users tune behavior by reading these comments and commenting out lines they don't want. If the comments are missing, the user has no surface to opt out of features they don't actually want. Example for the autocapture block:
+
+      autocapture: {
+        attribution: true,           // UTM / referrer attribution events
+        pageViews: true,             // SPA route changes + initial load
+        sessions: true,              // Session start / end events
+        formInteractions: true,      // Form starts + submits
+        fileDownloads: true,         // Downloads of common file types
+        elementInteractions: true,   // Click + change on instrumented els
+        frustrationInteractions: true, // Rage clicks, dead clicks
+        pageUrlEnrichment: true,     // Adds path / search to event props
+        networkTracking: true,       // XHR + fetch request events
+        webVitals: true,             // CWV (LCP, INP, CLS) on page hide
+      },
+
   @amplitude/analytics-browser (standalone) — flat options:
     init(API_KEY, {
-      remoteConfig: { fetchRemoteConfig: true },
-      autocapture: { ...full set above },
+      remoteConfig: { fetchRemoteConfig: true }, // remote SDK config from Amplitude
+      autocapture: { ...full set above with inline comments },
     })
 
   @amplitude/unified (initAll) — analytics options nested under "analytics":
     initAll(API_KEY, {
       analytics: {
-        remoteConfig: { fetchRemoteConfig: true },
-        autocapture: { ...full set above },
+        remoteConfig: { fetchRemoteConfig: true }, // remote SDK config from Amplitude
+        autocapture: { ...full set above with inline comments },
       },
-      // sessionReplay: { sampleRate: 1 }  ← only if sessionReplayOptIn
-      // engagement: {}                    ← only if engagementOptIn
+      sessionReplay: { sampleRate: 1 }, // Record user sessions; comment out to disable
+      engagement: {},                   // In-product Guides & Surveys; comment out to disable
     })
+
+  Session Replay and Guides & Surveys are AUTO-ENABLED for unified SDK browser projects (they ship with @amplitude/unified). Do NOT gate them on \`sessionReplayOptIn\` / \`engagementOptIn\` — those flags are always set when the wizard is configuring a unified browser project. Users opt out by commenting out the sessionReplay or engagement line in the generated init code, not via a wizard prompt.
 
   These options are ONLY valid for the browser / unified SDK. Do NOT pass an autocapture block — or any of these keys — to:
     - @amplitude/analytics-node (server) — accepts apiKey, optional serverZone ('US' | 'EU'), flushQueueSize, flushIntervalMillis. No autocapture concept.
     - Mobile SDKs (@amplitude/analytics-react-native, @amplitude/analytics-android, @amplitude/analytics-swift, @amplitude/analytics-flutter) — each has its own DefaultTrackingOptions / autocapture schema with platform-specific keys (e.g. screenViews on Swift; appLifecycles on Android). Follow the per-SDK README, do not copy the browser shape.
     - Backend SDKs in other languages (Python, Java, Go, Ruby, .NET) — server-side, no autocapture surface.
 
-  When in doubt, consult https://amplitude.com/docs/sdks and the specific SDK's README before adding any option. Inventing an option name (or copying browser keys onto a non-browser SDK) will cause runtime errors or silently no-op. Refer to https://amplitude.com/docs/sdks/client-side-vs-server-side for guidance on which SDK applies to which surface.
-
-  Session Replay and Guides & Surveys are SEPARATE plugins on top of these defaults — they are NOT enabled by the autocapture options above. Add them ONLY if the user explicitly opted in (the wizard surfaces sessionReplayOptIn / engagementOptIn in the session). Do not enable them silently.`,
+  When in doubt, consult https://amplitude.com/docs/sdks and the specific SDK's README before adding any option. Inventing an option name (or copying browser keys onto a non-browser SDK) will cause runtime errors or silently no-op. Refer to https://amplitude.com/docs/sdks/client-side-vs-server-side for guidance on which SDK applies to which surface.`,
 
   `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 

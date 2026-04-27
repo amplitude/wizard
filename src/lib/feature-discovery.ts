@@ -126,7 +126,7 @@ function enableAdditionalFeature(
 
 /**
  * Auto-enable every opt-in additional feature discovered in the project.
- * Mirrors the TUI picklist's "all defaults on" behavior for CI / agent runs.
+ * Mirrors the TUI's "all defaults on" behavior for CI / agent runs.
  * Mutates the session in place and fires per-feature telemetry.
  */
 export function autoEnableOptInFeatures(
@@ -146,5 +146,34 @@ export function autoEnableOptInFeatures(
     enableAdditionalFeature(session, additional, source);
   }
 
+  session.optInFeaturesComplete = true;
+}
+
+/**
+ * Sync version used by the interactive TUI: takes the session's already-
+ * populated `discoveredFeatures` (filled by `addDiscoveredFeature` calls
+ * from bin.ts) and auto-enables every opt-in addon found there. No
+ * picker, no opt-out — Session Replay, Guides & Surveys, and LLM (when
+ * the feature flag is on) all flow into the additional feature queue
+ * automatically. The agent receives inline-comment instructions via the
+ * commandments so users can still tune individual options by editing
+ * the generated init code.
+ *
+ * Why no opt-in picker:
+ *   - The unified browser SDK ships with autocapture + SR + G&S in one
+ *     package. There's no install cost to enabling them.
+ *   - Quota concerns (autocapture / SR running up event volume) are
+ *     surfaced via per-option inline comments in the generated code,
+ *     where users can comment out lines they don't want — a clearer
+ *     opt-out surface than a one-shot picker.
+ *   - Matches the experience users get from data-setup's npm snippet,
+ *     so wizard output and copy-paste docs converge.
+ */
+export function autoEnableInlineAddons(session: WizardSession): void {
+  for (const feature of session.discoveredFeatures) {
+    const additional = discoveredToAdditional(feature);
+    if (!additional) continue;
+    enableAdditionalFeature(session, additional, 'auto-inline');
+  }
   session.optInFeaturesComplete = true;
 }

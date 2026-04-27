@@ -727,6 +727,35 @@ export class WizardStore {
   }
 
   /**
+   * Auto-enable every opt-in addon (Session Replay, Guides & Surveys,
+   * LLM when the feature flag is on) that's been discovered for the
+   * current integration. Routes through `enableFeature` so React
+   * subscribers get notified and per-feature analytics fire.
+   *
+   * No opt-in picker — the unified browser SDK ships with all three
+   * addons in one package. Quota / privacy concerns are surfaced via
+   * per-option inline comments in the agent-generated init code, which
+   * users can comment out individually — a clearer opt-out surface
+   * than a one-shot picker.
+   */
+  autoEnableInlineAddons(): void {
+    for (const feature of this.session.discoveredFeatures) {
+      let additional: AdditionalFeature | null = null;
+      if (feature === ('session_replay' as AdditionalFeature)) {
+        additional = AdditionalFeature.SessionReplay;
+      } else if (feature === ('llm' as AdditionalFeature)) {
+        additional = AdditionalFeature.LLM;
+      } else if (feature === ('engagement' as AdditionalFeature)) {
+        additional = AdditionalFeature.Engagement;
+      }
+      if (!additional) continue;
+      this.enableFeature(additional, 'auto-ci');
+    }
+    this.$session.setKey('optInFeaturesComplete', true);
+    this.emitChange();
+  }
+
+  /**
    * Confirm the FeatureOptIn picklist. Enqueues each selected feature
    * via enableFeature() and marks the screen complete so the flow advances.
    *

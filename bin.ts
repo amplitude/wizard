@@ -1588,17 +1588,16 @@ void yargs(hideBin(process.argv))
                 })) {
                   tui.store.addDiscoveredFeature(f);
                 }
-                // No need to imperatively "skip when empty" — the
-                // FeatureOptIn flow entry's `show` predicate already
-                // returns false when no opt-in feature is discovered,
-                // so the screen is bypassed naturally and re-evaluated
-                // every time discovery re-runs (e.g. after the user
-                // manually picks an integration). Session Replay and
-                // Guides & Surveys remain opt-IN (default-off in the
-                // picker) — they're not auto-enabled even for
-                // unified-SDK web frameworks. Recording sessions and
-                // showing surveys is a privacy decision the developer
-                // must make explicitly.
+                // Auto-enable every discovered opt-in addon
+                // (Session Replay + Guides & Surveys for unified-SDK
+                // web; LLM when the feature flag is on). Matches the
+                // out-of-box experience of the data-setup npm snippet
+                // and avoids burying first-time users under a privacy /
+                // quota picker that most don't have context to answer.
+                // Per-option inline comments in the generated init
+                // code give users a clear, code-level opt-out surface
+                // for any specific feature they want to disable.
+                tui.store.autoEnableInlineAddons();
               };
               runDiscovery();
 

@@ -71,43 +71,45 @@ Choose the correct SDK based on the project type, then fetch its docs:
 
 SDK selection (choose the FIRST match):
 - Browser / SPA / SSG (JS running in a browser):
-    Recommended: @amplitude/unified
+    Recommended: @amplitude/unified (bundles browser SDK + Session Replay + Guides & Surveys)
       npm install @amplitude/unified
       import { initAll } from '@amplitude/unified';
-      // initAll nests analytics options under an \`analytics\` key — the
-      // CDN script's flat shape does NOT translate directly to npm.
+      // Every option line must have an inline // comment — users tune
+      // behavior by commenting out lines, not via a wizard prompt.
       initAll(API_KEY, {
         analytics: {
-          remoteConfig: { fetchRemoteConfig: true },
+          remoteConfig: { fetchRemoteConfig: true }, // remote SDK config from Amplitude
           autocapture: {
-            attribution: true,
-            pageViews: true,
-            sessions: true,
-            formInteractions: true,
-            fileDownloads: true,
-            elementInteractions: true,
-            frustrationInteractions: true,
-            pageUrlEnrichment: true,
-            networkTracking: true,
-            webVitals: true,
+            attribution: true,             // UTM / referrer attribution events
+            pageViews: true,               // SPA route changes + initial load
+            sessions: true,                // Session start / end events
+            formInteractions: true,        // Form starts + submits
+            fileDownloads: true,           // Downloads of common file types
+            elementInteractions: true,     // Click + change on instrumented els
+            frustrationInteractions: true, // Rage clicks, dead clicks
+            pageUrlEnrichment: true,       // Adds path / search to event props
+            networkTracking: true,         // XHR + fetch request events
+            webVitals: true,               // CWV (LCP, INP, CLS) on page hide
           },
         },
+        sessionReplay: { sampleRate: 1 }, // Record sessions; comment out to disable
+        engagement: {},                   // In-product Guides & Surveys; comment out to disable
       });
-    Alternative: @amplitude/analytics-browser (flat options, no analytics wrapper)
+    Alternative: @amplitude/analytics-browser (flat options; SR + G&S not bundled, install separately if wanted)
       npm install @amplitude/analytics-browser
       amplitude.init(API_KEY, {
-        remoteConfig: { fetchRemoteConfig: true },
+        remoteConfig: { fetchRemoteConfig: true }, // remote SDK config from Amplitude
         autocapture: {
-          attribution: true,
-          pageViews: true,
-          sessions: true,
-          formInteractions: true,
-          fileDownloads: true,
-          elementInteractions: true,
-          frustrationInteractions: true,
-          pageUrlEnrichment: true,
-          networkTracking: true,
-          webVitals: true,
+          attribution: true,             // UTM / referrer attribution events
+          pageViews: true,               // SPA route changes + initial load
+          sessions: true,                // Session start / end events
+          formInteractions: true,        // Form starts + submits
+          fileDownloads: true,           // Downloads of common file types
+          elementInteractions: true,     // Click + change on instrumented els
+          frustrationInteractions: true, // Rage clicks, dead clicks
+          pageUrlEnrichment: true,       // Adds path / search to event props
+          networkTracking: true,         // XHR + fetch request events
+          webVitals: true,               // CWV (LCP, INP, CLS) on page hide
         },
       });
     Static site (no build pipeline): CDN snippet — see https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2
