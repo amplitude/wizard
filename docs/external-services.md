@@ -367,7 +367,7 @@ npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NODE_ENV` | — | `test`/`development` routes wizard telemetry to the dev Amplitude project and points the LLM gateway at localhost. Does **not** affect the data ingestion URL written into the user's project — that always defaults to prod (override with `AMPLITUDE_WIZARD_INGESTION_HOST`) |
+| `NODE_ENV` | — | `test`/`development` routes wizard telemetry to the dev Amplitude project. Does **not** affect any user-facing URLs — both the LLM gateway and the data ingestion host always default to prod (override with `WIZARD_LLM_PROXY_URL` and `AMPLITUDE_WIZARD_INGESTION_HOST` respectively if you actually run a local proxy). |
 | `OAUTH_HOST` | Zone-specific | Override OAuth host |
 | `OAUTH_CLIENT_ID` | Zone-specific | Override OAuth client ID |
 | `AMPLITUDE_API_KEY` | dev: `ce58b28cace35f7df0eb241b0cd72044` / prod: `e5a2c9bdffe949f7da77e6b481e118fa` | Telemetry project API key (auto-selected by `NODE_ENV`) |

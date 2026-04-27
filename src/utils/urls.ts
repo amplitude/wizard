@@ -66,27 +66,19 @@ export async function detectRegionFromToken(
  * Get the LLM proxy URL for the Claude Agent SDK.
  *
  * Routes through Amplitude's LLM gateway, which validates OAuth tokens
- * and proxies to the Claude model.
+ * and proxies to the Claude model. The Claude Agent SDK uses this as
+ * `ANTHROPIC_BASE_URL` and appends `/v1/messages`.
  *
- * Override with WIZARD_LLM_PROXY_URL env var for explicit URL override.
- * The Claude Agent SDK uses this as ANTHROPIC_BASE_URL and appends /v1/messages.
- *
- * In dev mode (`NODE_ENV=development|test`) the wizard talks to a locally
- * running gateway. Previously we inferred dev mode from the host string
- * containing `localhost`; now that `getHostFromRegion()` always returns a
- * prod URL, we read `NODE_ENV` directly. We read it per-call (not via the
- * cached `IS_DEV` constant) so tests can toggle without re-importing.
+ * Always defaults to the prod gateway — running a local LLM gateway is rare
+ * and must be opt-in. Set `WIZARD_LLM_PROXY_URL` to point the wizard at a
+ * local proxy (e.g. when developing the gateway itself). Even in dev/test
+ * we default to prod, because (a) most contributors don't run a local
+ * gateway, and (b) tests don't make real network calls anyway — they mock.
  */
 export const getLlmGatewayUrlFromHost = (host: string) => {
-  // Allow explicit override for local proxy development
   const proxyOverride = process.env.WIZARD_LLM_PROXY_URL;
   if (proxyOverride) {
     return proxyOverride;
-  }
-
-  const nodeEnv = process.env.NODE_ENV ?? '';
-  if (nodeEnv === 'development' || nodeEnv === 'test') {
-    return 'http://localhost:3030/wizard';
   }
 
   if (host.includes('eu.amplitude.com')) {
