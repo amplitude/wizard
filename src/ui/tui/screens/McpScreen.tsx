@@ -18,6 +18,7 @@ import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
 
@@ -81,12 +82,18 @@ export const McpScreen = ({
     store.session;
   const dataSetupComplete = runPhase === RunPhase.Completed;
 
+  // When shown as an /mcp slash-command overlay, onComplete is provided and
+  // the user explicitly asked for MCP setup. Don't hijack their request with
+  // the pre-detected picker (that's meant for the main wizard flow only).
+  const isOverlay = onComplete !== undefined;
+  const showPreDetectedChoice = amplitudePreDetectedChoicePending && !isOverlay;
+
   const [phase, setPhase] = useState<Phase>(Phase.Detecting);
   const [clients, setClients] = useState<McpClientInfo[]>([]);
   const [resultClients, setResultClients] = useState<string[]>([]);
 
   useEffect(() => {
-    if (amplitudePreDetectedChoicePending) {
+    if (showPreDetectedChoice) {
       return;
     }
     void (async () => {
@@ -123,7 +130,7 @@ export const McpScreen = ({
         );
       }
     })();
-  }, [installer, amplitudePreDetectedChoicePending]);
+  }, [installer, showPreDetectedChoice]);
 
   const handleConfirm = () => {
     if (isRemove) {
@@ -201,7 +208,7 @@ export const McpScreen = ({
           </Text>
         </Box>
       )}
-      {amplitudePreDetectedChoicePending && !isRemove && (
+      {showPreDetectedChoice && !isRemove && (
         <Box marginBottom={1} flexDirection="column">
           <Text color={Colors.secondary}>
             The installer skipped the automated setup step because Amplitude is
@@ -229,25 +236,39 @@ export const McpScreen = ({
           </Box>
         </Box>
       )}
-      {!amplitudePreDetectedChoicePending && (
+      {!showPreDetectedChoice && (
         <>
           <Text bold color={Colors.accent}>
             {isRemove
               ? 'Remove Amplitude from your AI tools'
               : '💬 Chat with your Amplitude data'}
           </Text>
+          {!isRemove && (
+            <Text color={Colors.muted}>
+              We’ll wire the Amplitude MCP into Claude Code, Cursor, Claude
+              Desktop, and other AI tools you have installed. You can then ask
+              questions, build charts, and check metrics from chat (e.g. “show
+              me yesterday’s signups”).
+            </Text>
+          )}
 
           <Box marginTop={1} flexDirection="column">
             {phase === Phase.Detecting && (
-              <Text color={Colors.muted}>
-                Detecting supported editors{Icons.ellipsis}
-              </Text>
+              <Box>
+                <BrailleSpinner color={Colors.muted} />
+                <Text color={Colors.muted}>
+                  {' '}
+                  Looking for supported AI tools{Icons.ellipsis}
+                </Text>
+              </Box>
             )}
 
             {phase === Phase.None && (
               <Text color={Colors.muted}>
-                No {isRemove ? 'installed' : 'supported'} MCP clients detected.
-                Skipping{Icons.ellipsis}
+                {isRemove
+                  ? 'Amplitude isn’t installed in any detected AI tool. Skipping'
+                  : 'No supported AI tools found on this machine. Skipping'}
+                {Icons.ellipsis}
               </Text>
             )}
 
@@ -273,23 +294,35 @@ export const McpScreen = ({
             )}
 
             {phase === Phase.Pick && (
-              <PickerMenu
-                message="Select editor to install MCP server"
-                options={clients.map((c) => ({
-                  label: c.name,
-                  value: c.name,
-                }))}
-                mode="multi"
-                onSelect={(selected) => {
-                  const names = Array.isArray(selected) ? selected : [selected];
-                  if (names.length === 0) return;
-                  analytics.wizardCapture('MCP Clients Selected', {
-                    selected_clients: names,
-                    available_clients: clients.map((c) => c.name),
-                  });
-                  void doInstall(names);
-                }}
-              />
+              <>
+                <Text color={Colors.secondary}>
+                  Everything is pre-selected. Space to uncheck anything you
+                  don’t want, then Enter to continue.
+                </Text>
+                <PickerMenu
+                  message="Select AI tool to install MCP server"
+                  options={clients.map((c) => ({
+                    label: c.name,
+                    value: c.name,
+                  }))}
+                  mode="multi"
+                  defaultSelected={clients.map((c) => c.name)}
+                  onSelect={(selected) => {
+                    const names = Array.isArray(selected)
+                      ? selected
+                      : [selected];
+                    if (names.length === 0) {
+                      handleSkip();
+                      return;
+                    }
+                    analytics.wizardCapture('MCP Clients Selected', {
+                      selected_clients: names,
+                      available_clients: clients.map((c) => c.name),
+                    });
+                    void doInstall(names);
+                  }}
+                />
+              </>
             )}
 
             {phase === Phase.Working && (

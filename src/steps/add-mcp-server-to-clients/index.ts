@@ -21,16 +21,19 @@ export const getSupportedClients = async (): Promise<MCPClient[]> => {
     new ZedClient(),
     new CodexMCPClient(),
   ];
-  const supportedClients: MCPClient[] = [];
-
   debug('Checking for supported MCP clients...');
-  for (const client of allClients) {
-    const isSupported = await client.isClientSupported();
-    debug(`${client.name}: ${isSupported ? '✓ supported' : '✗ not supported'}`);
-    if (isSupported) {
-      supportedClients.push(client);
-    }
-  }
+  // Run support checks in parallel — Claude Code + Codex shell out via
+  // spawnSync/execSync, so doing them sequentially doubles wall-clock time.
+  const supportFlags = await Promise.all(
+    allClients.map(async (client) => {
+      const isSupported = await client.isClientSupported();
+      debug(
+        `${client.name}: ${isSupported ? '✓ supported' : '✗ not supported'}`,
+      );
+      return isSupported;
+    }),
+  );
+  const supportedClients = allClients.filter((_, i) => supportFlags[i]);
   debug(
     `Found ${supportedClients.length} supported client(s): ${supportedClients
       .map((c) => c.name)
