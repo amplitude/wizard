@@ -36,11 +36,8 @@ exports[`OutroScreen snapshots > renders the success state with changes + contin
   ● Added .env.local with AMPLITUDE_API_KEY
   ● Added 3 planned events to your tracking plan
 
-  Review changes in ./amplitude-setup-report.md
 
-
-  ▸ [1] View setup report
-    [2] Open Amplitude (amplitude.com)
-    [3] Exit
+  ▸ [1] Open Amplitude (amplitude.com)
+    [2] Exit
 "
 `;

@@ -76,7 +76,7 @@ describe('OutroScreen — error variants', () => {
       checklistDashboardUrl: 'https://app.amplitude.com/analytics/d/abc123',
     });
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-    expect(frame).toContain('Dashboard ready');
+    expect(frame).toContain('Your dashboard is ready');
     expect(frame).toContain('https://app.amplitude.com/analytics/d/abc123');
     expect(frame).toContain('Open your analytics dashboard');
     expect(frame).not.toContain('Open Amplitude');
@@ -88,7 +88,7 @@ describe('OutroScreen — error variants', () => {
     });
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
     expect(frame).toContain('Open Amplitude');
-    expect(frame).not.toContain('Dashboard ready');
+    expect(frame).not.toContain('Your dashboard is ready');
   });
 
   it('falls back to "Finishing up…" when outroData is still null', () => {

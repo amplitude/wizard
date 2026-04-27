@@ -11,6 +11,7 @@
 
 import { Box, Text } from 'ink';
 import { useState } from 'react';
+import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
@@ -163,27 +164,45 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Box>
           )}
 
-          {/* Dashboard link — shown when the agent created one */}
+          {/* Dashboard link — the hero of the outro. The wizard always creates
+              a dashboard during the conclude phase; surface it as a clickable
+              link with a clear "this is your next step" framing so users
+              don't bounce out of the terminal wondering "what now?". */}
           {store.session.checklistDashboardUrl && (
             <Box marginTop={1} flexDirection="column">
-              <Text color={Colors.success} bold>
-                📊 Dashboard ready:
+              <Text color={Colors.accent} bold>
+                {Icons.diamond} Your dashboard is ready
               </Text>
-              <TerminalLink url={store.session.checklistDashboardUrl}>
-                {store.session.checklistDashboardUrl}
-              </TerminalLink>
+              <Box marginLeft={2}>
+                <Text color={Colors.body}>
+                  <TerminalLink url={store.session.checklistDashboardUrl}>
+                    {store.session.checklistDashboardUrl}
+                  </TerminalLink>
+                </Text>
+              </Box>
+              <Box marginLeft={2}>
+                <Text color={Colors.muted}>
+                  Open it now to see your first charts populate as users hit the
+                  app.
+                </Text>
+              </Box>
             </Box>
           )}
 
-          {/* Single-line review note */}
-          <Box marginTop={1}>
-            <Text color={Colors.muted}>
-              Review changes in{' '}
-              <Text bold color={Colors.secondary}>
-                ./amplitude-setup-report.md
+          {/* Single-line review note — only when a fresh report was actually
+              written this run. Without the existence check, a stale report
+              from a previous run (different workspace) would be advertised
+              as if it described this run. */}
+          {fs.existsSync(reportPath) && (
+            <Box marginTop={1}>
+              <Text color={Colors.muted}>
+                Review changes in{' '}
+                <Text bold color={Colors.secondary}>
+                  ./amplitude-setup-report.md
+                </Text>
               </Text>
-            </Text>
-          </Box>
+            </Box>
+          )}
         </Box>
       )}
 
@@ -260,17 +279,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       <Box marginTop={1}>
         {isSuccess ? (
           <PickerMenu
+            // Dashboard first — it's the most useful next step. Report comes
+            // second, and only when a fresh one exists on disk for this run.
+            // Without the existsSync gate, the option would point at a stale
+            // report from a previous run (e.g. against a different workspace).
             options={(() => {
               const dashboardUrl = store.session.checklistDashboardUrl;
               return [
-                { label: 'View setup report', value: 'report' },
                 {
                   label: dashboardUrl
                     ? 'Open your analytics dashboard'
                     : 'Open Amplitude',
                   value: 'dashboard',
-                  hint: dashboardUrl ? undefined : 'amplitude.com',
+                  hint: dashboardUrl
+                    ? 'Recommended next step'
+                    : 'amplitude.com',
                 },
+                ...(fs.existsSync(reportPath)
+                  ? [{ label: 'View setup report', value: 'report' }]
+                  : []),
                 { label: 'Exit', value: 'exit' },
               ];
             })()}

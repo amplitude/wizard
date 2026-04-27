@@ -13,6 +13,8 @@ import {
   ensureWizardArtifactsIgnored,
   buildFallbackReport,
   writeFallbackReportIfMissing,
+  archiveSetupReportFile,
+  PREVIOUS_SETUP_REPORT_FILENAME,
   WIZARD_GITIGNORE_PATTERNS,
 } from '../wizard-tools';
 
@@ -466,6 +468,97 @@ describe('ensureWizardArtifactsIgnored', () => {
     // Simulate a failure by passing a path under a non-existent dir
     const bogus = path.join(tmpDir, 'does-not-exist', 'nested');
     expect(() => ensureWizardArtifactsIgnored(bogus)).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cleanupAmplitudeEventsFile
+// ---------------------------------------------------------------------------
+
+describe('cleanupAmplitudeEventsFile', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('removes .amplitude-events.json when present', () => {
+    const target = path.join(tmpDir, '.amplitude-events.json');
+    fs.writeFileSync(target, '[]', 'utf8');
+    cleanupAmplitudeEventsFile(tmpDir);
+    expect(fs.existsSync(target)).toBe(false);
+  });
+
+  it('is a no-op when the file does not exist', () => {
+    expect(() => cleanupAmplitudeEventsFile(tmpDir)).not.toThrow();
+  });
+
+  it('does not touch other files in the install dir', () => {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
+    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
+    cleanupAmplitudeEventsFile(tmpDir);
+    expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// archiveSetupReportFile
+// ---------------------------------------------------------------------------
+
+describe('archiveSetupReportFile', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('renames an existing report to amplitude-setup-report.previous.md', () => {
+    const target = path.join(tmpDir, 'amplitude-setup-report.md');
+    const archive = path.join(tmpDir, PREVIOUS_SETUP_REPORT_FILENAME);
+    fs.writeFileSync(target, '# old report\n', 'utf8');
+
+    archiveSetupReportFile(tmpDir);
+
+    expect(fs.existsSync(target)).toBe(false);
+    expect(fs.existsSync(archive)).toBe(true);
+    // Content is preserved verbatim — archive is a rename, not a copy+rewrite.
+    expect(fs.readFileSync(archive, 'utf8')).toBe('# old report\n');
+  });
+
+  it('is a no-op when no report exists', () => {
+    expect(() => archiveSetupReportFile(tmpDir)).not.toThrow();
+    expect(fs.readdirSync(tmpDir)).toHaveLength(0);
+  });
+
+  it('overwrites an existing previous.md so only the immediately-prior report is kept', () => {
+    const target = path.join(tmpDir, 'amplitude-setup-report.md');
+    const archive = path.join(tmpDir, PREVIOUS_SETUP_REPORT_FILENAME);
+
+    // Simulate run N+1: previous.md already holds run N's content; the
+    // current report holds run N+1's. Archiving promotes N+1 to previous,
+    // and the older run-N content is intentionally rolled off.
+    fs.writeFileSync(archive, 'run N (older — should roll off)');
+    fs.writeFileSync(target, 'run N+1 (becomes previous)');
+
+    archiveSetupReportFile(tmpDir);
+
+    expect(fs.existsSync(target)).toBe(false);
+    expect(fs.readFileSync(archive, 'utf8')).toBe('run N+1 (becomes previous)');
+    // Project root holds AT MOST 2 wizard reports — never a growing pile.
+    const allReports = fs
+      .readdirSync(tmpDir)
+      .filter((f) => f.startsWith('amplitude-setup-report'));
+    expect(allReports.sort()).toEqual([PREVIOUS_SETUP_REPORT_FILENAME]);
+  });
+
+  it('does not touch other files in the install dir', () => {
+    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
+    fs.writeFileSync(path.join(tmpDir, 'amplitude-setup-report.md'), '#');
+    archiveSetupReportFile(tmpDir);
+    expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(true);
   });
 });
 

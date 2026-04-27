@@ -193,6 +193,10 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const completed = progressItems.filter(
     (t) => t.status === 'completed',
   ).length;
+  const inProgress = progressItems.filter(
+    (t) => t.status === 'in_progress',
+  ).length;
+  const pending = progressItems.filter((t) => t.status === 'pending').length;
   const total = progressItems.length;
 
   return (
@@ -207,7 +211,13 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
             <Text color={Colors.body} bold>
               {total > 0
-                ? `${completed}/${total} tasks complete`
+                ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                  // mid-run, which makes the progress bar look like it's
+                  // going backwards (6 tasks → 9 tasks). Show absolute
+                  // counts instead so the user sees forward motion.
+                  pending + inProgress > 0
+                  ? `${completed} done · ${inProgress + pending} to go`
+                  : `${completed} tasks complete`
                 : 'Agent running'}
             </Text>
             <Text color={Colors.muted}>

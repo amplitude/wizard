@@ -262,8 +262,21 @@ export async function runAgentWizard(
     ensureWizardArtifactsIgnored,
     cleanupWizardArtifacts,
     writeFallbackReportIfMissing,
+    archiveSetupReportFile,
   } = await import('./wizard-tools.js');
   ensureWizardArtifactsIgnored(session.installDir);
+
+  // Move any prior `amplitude-setup-report.md` to
+  // `amplitude-setup-report.previous.md` BEFORE the run starts so the
+  // outro never advertises a stale report from a previous run (e.g.
+  // against a different workspace) as if it described THIS run. The
+  // fresh report still lands at the canonical filename when the agent
+  // reaches its conclude phase; if it never gets there (full activation,
+  // cancel, etc.) the canonical filename stays absent and the outro
+  // hides the "View setup report" option. We keep exactly one prior
+  // report — not a growing timestamped pile — because the project root
+  // shouldn't carry an audit trail. (PR 316.)
+  archiveSetupReportFile(session.installDir);
 
   // Helper bound to this run's session. The fallback never overwrites
   // an agent-authored report (see writeFallbackReportIfMissing's
