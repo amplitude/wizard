@@ -473,7 +473,9 @@ export class WizardStore {
     appId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
-      this.$session.setKey('selectedOrgId', fields.orgId);
+      // Mirror setOrgAndWorkspace: collapse '' -> null so isAuthenticated
+      // doesn't treat an empty org id as a real one.
+      this.$session.setKey('selectedOrgId', fields.orgId || null);
     if (fields.orgName !== undefined)
       this.$session.setKey('selectedOrgName', fields.orgName);
     if (fields.workspaceId !== undefined)

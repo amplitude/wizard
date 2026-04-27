@@ -308,13 +308,20 @@ describe('WizardStore', () => {
       expect(store.session.selectedWorkspaceName).toBe('');
     });
 
-    it('restoreSessionIds clears selectedWorkspaceId when called with empty workspace id', () => {
+    it('restoreSessionIds clears selectedOrgId/WorkspaceId when called with empty inputs', () => {
       // Defense-in-depth: keep restoreSessionIds consistent with
-      // setOrgAndWorkspace so neither write path throws on empty input.
+      // setOrgAndWorkspace so neither write path throws on empty input
+      // and neither leaves isAuthenticated reporting a meaningless empty id.
       const store = createStore();
       expect(() =>
-        store.restoreSessionIds({ workspaceId: '', workspaceName: '' }),
+        store.restoreSessionIds({
+          orgId: '',
+          orgName: '',
+          workspaceId: '',
+          workspaceName: '',
+        }),
       ).not.toThrow();
+      expect(store.session.selectedOrgId).toBeNull();
       expect(store.session.selectedWorkspaceId).toBeNull();
     });
 
