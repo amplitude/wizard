@@ -51,7 +51,12 @@ export const FeatureOptInScreen = ({ store }: FeatureOptInScreenProps) => {
   const optInFeatures: AdditionalFeature[] = [];
   for (const f of store.session.discoveredFeatures) {
     const additional = toAdditionalFeature(f);
-    if (additional) optInFeatures.push(additional);
+    if (!additional) continue;
+    // Skip features that were already auto-enabled (e.g. Session Replay and
+    // Guides & Surveys for unified-SDK web frameworks). The picklist should
+    // only ask about features the user actually has a meaningful choice over.
+    if (store.session.additionalFeatureQueue.includes(additional)) continue;
+    optInFeatures.push(additional);
   }
 
   // ESC = continue with nothing selected.

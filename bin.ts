@@ -1588,6 +1588,12 @@ void yargs(hideBin(process.argv))
                 })) {
                   tui.store.addDiscoveredFeature(f);
                 }
+                // Inline addons (Session Replay + Guides & Surveys) ship with
+                // the unified browser SDK — there's no real choice to surface,
+                // so we auto-enable them and skip the picklist for those. If
+                // a non-inline opt-in (LLM) was also discovered, the picklist
+                // still appears for that one only.
+                tui.store.applyAutoInlineOptIns();
               };
               runDiscovery();
 

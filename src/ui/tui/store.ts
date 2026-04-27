@@ -727,6 +727,47 @@ export class WizardStore {
   }
 
   /**
+   * Auto-enable inline addons (Session Replay, Guides & Surveys) discovered
+   * for the current integration. Inline features ship with the unified browser
+   * SDK and are configured as part of the same `initAll()` call — there's no
+   * real choice to surface, so we enable them silently and (when no other
+   * opt-ins remain) skip the FeatureOptIn picklist entirely.
+   *
+   * Returns true when the picklist can be skipped (all opt-ins were auto-
+   * enabled). Returns false when at least one non-inline opt-in (e.g. LLM)
+   * remains and still warrants the picklist.
+   */
+  applyAutoInlineOptIns(): boolean {
+    const optIns = this.session.discoveredFeatures.filter(
+      (f): f is AdditionalFeature => OPT_IN_DISCOVERED_FEATURES.has(f),
+    );
+    if (optIns.length === 0) {
+      this.$session.setKey('optInFeaturesComplete', true);
+      this.emitChange();
+      return true;
+    }
+
+    const inlineSet = new Set<AdditionalFeature>([
+      AdditionalFeature.SessionReplay,
+      AdditionalFeature.Engagement,
+    ]);
+    const inline = optIns.filter((f) => inlineSet.has(f));
+    const nonInline = optIns.filter((f) => !inlineSet.has(f));
+
+    for (const feature of inline) {
+      this.enableFeature(feature, 'auto-ci');
+    }
+
+    if (nonInline.length === 0) {
+      this.$session.setKey('optInFeaturesComplete', true);
+      this.emitChange();
+      return true;
+    }
+    this.emitChange();
+    return false;
+  }
+
+  /**
    * Confirm the FeatureOptIn picklist. Enqueues each selected feature
    * via enableFeature() and marks the screen complete so the flow advances.
    *
