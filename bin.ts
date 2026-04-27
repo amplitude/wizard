@@ -9,6 +9,14 @@
 import { sanitizeNestedClaudeEnv } from './src/lib/sanitize-claude-env';
 sanitizeNestedClaudeEnv();
 
+// Install EPIPE-tolerant error handlers on stdout/stderr before any
+// downstream module can write. Without this, a closed receiver
+// (parent process dies, output piped through `head`, outer agent
+// crashes) crashes the wizard with an uncaught EPIPE. See production
+// Sentry: WIZARD-CLI-8 (agent-ui emit), WIZARD-CLI-5 (afterWriteDispatched).
+import { installPipeErrorHandlers } from './src/utils/pipe-errors';
+installPipeErrorHandlers();
+
 // Default NODE_ENV based on installation source. Without this, React's CJS
 // entry (node_modules/react/index.js) falls through to react.development.js
 // whenever NODE_ENV is unset — about 10× larger and noticeably slower on Ink
