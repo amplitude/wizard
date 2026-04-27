@@ -13,6 +13,8 @@ import {
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
   WIZARD_GITIGNORE_PATTERNS,
+  WIZARD_TOOL_NAMES,
+  WIZARD_TOOLS_SERVER_NAME,
 } from '../wizard-tools';
 
 function makeTmpDir(): string {
@@ -567,5 +569,49 @@ describe('cleanupWizardArtifacts', () => {
     expect(() =>
       cleanupWizardArtifacts(tmpDir, { onSuccess: true }),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// WIZARD_TOOL_NAMES (BA-61)
+// ---------------------------------------------------------------------------
+
+describe('WIZARD_TOOL_NAMES', () => {
+  // The agent allowedTools list is built from this constant. Adding a tool
+  // without registering its name here means the agent cannot call it.
+
+  it('exports the wizard-tools server name', () => {
+    expect(WIZARD_TOOLS_SERVER_NAME).toBe('wizard-tools');
+  });
+
+  it('includes wizard_feedback so the agent can report blockers', () => {
+    expect(WIZARD_TOOL_NAMES).toContain('wizard-tools:wizard_feedback');
+  });
+
+  it('includes every existing wizard-tools tool', () => {
+    expect(WIZARD_TOOL_NAMES).toEqual(
+      expect.arrayContaining([
+        'wizard-tools:check_env_keys',
+        'wizard-tools:set_env_values',
+        'wizard-tools:detect_package_manager',
+        'wizard-tools:load_skill_menu',
+        'wizard-tools:install_skill',
+        'wizard-tools:confirm',
+        'wizard-tools:choose',
+        'wizard-tools:confirm_event_plan',
+        'wizard-tools:report_status',
+        'wizard-tools:wizard_feedback',
+      ]),
+    );
+  });
+
+  it('has no duplicate entries', () => {
+    expect(new Set(WIZARD_TOOL_NAMES).size).toBe(WIZARD_TOOL_NAMES.length);
+  });
+
+  it('every entry is namespaced under the wizard-tools server', () => {
+    for (const name of WIZARD_TOOL_NAMES) {
+      expect(name.startsWith('wizard-tools:')).toBe(true);
+    }
   });
 });

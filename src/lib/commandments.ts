@@ -13,6 +13,8 @@ const WIZARD_COMMANDMENTS = [
 
   'Always use the detect_package_manager tool from the wizard-tools MCP server to determine the package manager. Do not guess based on lockfiles or hard-code npm, yarn, pnpm, bun, pip, etc.',
 
+  'EVERY call to a wizard-tools MCP tool (mcp__wizard-tools__*) MUST include a `reason` argument: a short sentence (≤25 words) explaining what you are trying to accomplish at this step. This is captured in Agent Analytics so the team can understand intent across runs. Write a real rationale tied to the immediate goal — not a paraphrase of the tool description, not a generic phrase like "calling tool", and not the literal string "reason". When you (the agent) get truly stuck — unresolvable error, missing prerequisite, ambiguous codebase shape — call wizard_feedback (severity="warn" if you can continue degraded, "error" if not) instead of silently continuing or repeating failed tool calls.',
+
   'When installing packages, start the installation as a background task and then continue with other work. Do not block waiting for installs to finish unless explicitly instructed.',
 
   'NEVER use `sleep`, busy-wait loops, or polling Bash commands to wait for MCP servers, gateways, or other services to "recover". If an MCP tool returns an error, retry it AT MOST ONCE; if it still fails, report the failure to the user and proceed with the next step (or stop). Do not chain longer and longer sleeps trying to wait out an upstream issue — long Bash sleeps idle the API streaming connection and produce cascading "API Error: 400 terminated" failures. Bash sleeps over a few seconds will be denied by the wizard.',
