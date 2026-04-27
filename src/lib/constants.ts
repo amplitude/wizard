@@ -76,10 +76,14 @@ export const DEFAULT_URL = 'https://amplitude.com';
  * available (e.g. CI mode without OAuth, --api-key path). Always points at
  * a real prod ingestion endpoint so dev contributors don't leak
  * `localhost:8010` into a user's `.env.local` or setup report. Override
- * via `AMPLITUDE_WIZARD_INGESTION_HOST` for local proxying.
+ * via `AMPLITUDE_WIZARD_INGESTION_HOST` for local proxying — empty or
+ * whitespace-only values are ignored to keep us in lockstep with
+ * `getHostFromRegion()`.
  */
+const ingestionHostOverride =
+  process.env.AMPLITUDE_WIZARD_INGESTION_HOST?.trim();
 export const DEFAULT_HOST_URL =
-  process.env.AMPLITUDE_WIZARD_INGESTION_HOST ?? 'https://api2.amplitude.com';
+  ingestionHostOverride || 'https://api2.amplitude.com';
 
 // ── Analytics (internal) ──────────────────────────────────────────────
 

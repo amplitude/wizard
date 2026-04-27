@@ -58,18 +58,34 @@ describe('getHostFromRegion', () => {
     expect(getHostFromRegion('us')).toBe('https://proxy.example.com');
     expect(getHostFromRegion('eu')).toBe('https://proxy.example.com');
   });
+
+  it('falls back to prod when AMPLITUDE_WIZARD_INGESTION_HOST is empty or whitespace', () => {
+    process.env.AMPLITUDE_WIZARD_INGESTION_HOST = '';
+    expect(getHostFromRegion('us')).toBe('https://api2.amplitude.com');
+    expect(getHostFromRegion('eu')).toBe('https://api.eu.amplitude.com');
+
+    process.env.AMPLITUDE_WIZARD_INGESTION_HOST = '   ';
+    expect(getHostFromRegion('us')).toBe('https://api2.amplitude.com');
+    expect(getHostFromRegion('eu')).toBe('https://api.eu.amplitude.com');
+  });
 });
 
 // ── getLlmGatewayUrlFromHost ──────────────────────────────────────────────────
 
 describe('getLlmGatewayUrlFromHost', () => {
   const originalProxyUrl = process.env.WIZARD_LLM_PROXY_URL;
+  const originalNodeEnv = process.env.NODE_ENV;
 
   afterEach(() => {
     if (originalProxyUrl === undefined) {
       delete process.env.WIZARD_LLM_PROXY_URL;
     } else {
       process.env.WIZARD_LLM_PROXY_URL = originalProxyUrl;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
     }
   });
 
@@ -80,29 +96,42 @@ describe('getLlmGatewayUrlFromHost', () => {
     );
   });
 
-  it('returns localhost proxy for localhost host', () => {
+  it('returns localhost proxy when NODE_ENV=development', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
-    expect(getLlmGatewayUrlFromHost('http://localhost:8010')).toBe(
+    process.env.NODE_ENV = 'development';
+    // Host is irrelevant in dev mode — even prod URLs route to localhost.
+    expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
       'http://localhost:3030/wizard',
     );
   });
 
-  it('returns EU gateway for eu.amplitude.com host', () => {
+  it('returns localhost proxy when NODE_ENV=test', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.NODE_ENV = 'test';
+    expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
+      'http://localhost:3030/wizard',
+    );
+  });
+
+  it('returns EU gateway for eu.amplitude.com host in prod', () => {
+    delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.NODE_ENV = 'production';
     expect(getLlmGatewayUrlFromHost('https://eu.amplitude.com')).toBe(
       'https://core.eu.amplitude.com/wizard',
     );
   });
 
-  it('returns EU gateway for api.eu.amplitude.com host', () => {
+  it('returns EU gateway for api.eu.amplitude.com host in prod', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.NODE_ENV = 'production';
     expect(getLlmGatewayUrlFromHost('https://api.eu.amplitude.com')).toBe(
       'https://core.eu.amplitude.com/wizard',
     );
   });
 
-  it('returns US gateway for api2.amplitude.com host', () => {
+  it('returns US gateway for api2.amplitude.com host in prod', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.NODE_ENV = 'production';
     expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
       'https://core.amplitude.com/wizard',
     );

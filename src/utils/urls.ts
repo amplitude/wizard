@@ -15,7 +15,9 @@ import type { CloudRegion } from './types';
  * (e.g. pointing the wizard at a local Amplitude proxy).
  */
 export const getHostFromRegion = (region: CloudRegion) => {
-  const override = process.env.AMPLITUDE_WIZARD_INGESTION_HOST;
+  // Trim before truthiness check so empty / whitespace-only env values fall
+  // through to the prod default — matches `DEFAULT_HOST_URL` in constants.ts.
+  const override = process.env.AMPLITUDE_WIZARD_INGESTION_HOST?.trim();
   if (override) {
     return override;
   }
@@ -68,6 +70,12 @@ export async function detectRegionFromToken(
  *
  * Override with WIZARD_LLM_PROXY_URL env var for explicit URL override.
  * The Claude Agent SDK uses this as ANTHROPIC_BASE_URL and appends /v1/messages.
+ *
+ * In dev mode (`NODE_ENV=development|test`) the wizard talks to a locally
+ * running gateway. Previously we inferred dev mode from the host string
+ * containing `localhost`; now that `getHostFromRegion()` always returns a
+ * prod URL, we read `NODE_ENV` directly. We read it per-call (not via the
+ * cached `IS_DEV` constant) so tests can toggle without re-importing.
  */
 export const getLlmGatewayUrlFromHost = (host: string) => {
   // Allow explicit override for local proxy development
@@ -76,7 +84,8 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
     return proxyOverride;
   }
 
-  if (host.includes('localhost')) {
+  const nodeEnv = process.env.NODE_ENV ?? '';
+  if (nodeEnv === 'development' || nodeEnv === 'test') {
     return 'http://localhost:3030/wizard';
   }
 
