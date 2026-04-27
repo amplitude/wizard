@@ -2,7 +2,7 @@ import { Given, When, Then } from '@cucumber/cucumber';
 import assert from 'node:assert';
 import { Overlay, type WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen } from '../../src/ui/tui/flows.js';
-import type { WizardSession } from '../../src/lib/wizard-session.js';
+import { RunPhase, type WizardSession } from '../../src/lib/wizard-session.js';
 import {
   getWhoamiText,
   parseFeedbackSlashInput,
@@ -86,6 +86,12 @@ When('I enter the slash command {string}', function (command: string) {
     s.dataIngestionConfirmed = false;
     s.mcpComplete = false;
     s.mcpOutcome = null;
+    // If the wizard had reached Outro, outroData would short-circuit
+    // router.resolve and block the re-auth flow. A region switch is a
+    // hard reset — clear outroData and reset runPhase so the user lands
+    // back on RegionSelect → Auth → ... for the new zone.
+    s.outroData = null;
+    s.runPhase = RunPhase.Idle;
   }
   if (command === '/logout') {
     session(this).credentials = null;

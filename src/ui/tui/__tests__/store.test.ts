@@ -23,6 +23,7 @@ import {
 vi.mock('../../../utils/analytics.js', () => ({
   analytics: {
     capture: vi.fn(),
+    captureException: vi.fn(),
     wizardCapture: vi.fn(),
     setTag: vi.fn(),
     setSessionProperty: vi.fn(),

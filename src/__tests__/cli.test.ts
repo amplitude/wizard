@@ -36,6 +36,7 @@ const {
     resetForAgentAfterPreDetected: vi.fn(),
     setOutroData: vi.fn(),
     setRunPhase: vi.fn(),
+    setUserEmail: vi.fn(),
   };
   return {
     mockStore,

@@ -42,6 +42,10 @@ const ALLOWED_DIRECT_READS = new Set<string>([
   'src/ui/tui/console-commands.ts',
   'src/ui/tui/utils/diagnostics.ts',
   'src/ui/tui/screens/RegionSelectScreen.tsx',
+  // IntroScreen: shows the user's currently selected region (display) and
+  // gates the "Change region" picker option on whether a region is set.
+  // Both are intent-display, not zone resolution.
+  'src/ui/tui/screens/IntroScreen.tsx',
   'src/lib/console-query.ts',
   // Intent persistence — checkpoint stores raw user intent, not the
   // resolved effective zone. Restore must round-trip intent exactly.

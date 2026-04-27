@@ -1408,8 +1408,13 @@ void yargs(hideBin(process.argv))
                 },
               );
 
-              // Populate user email for /whoami display
-              session.userEmail = userInfo.email;
+              // Populate user email for /whoami display. Use the store
+              // setter (not the closed-over `session` ref from line 1101) —
+              // every nanostores `setKey` replaces the top-level object, so
+              // by the time the re-auth watcher fires this cycle the local
+              // `session` ref is many generations stale and a direct mutation
+              // would silently land on a discarded object.
+              tui.store.setUserEmail(userInfo.email);
               analytics.setDistinctId(userInfo.email);
               analytics.identifyUser({ email: userInfo.email });
 

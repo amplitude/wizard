@@ -251,6 +251,18 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Update the cached user email used by `/whoami`. Required because nanostores'
+   * map-based storage replaces the top-level session object on every `setKey`,
+   * so closed-over `session` references in long-lived callbacks (e.g. the
+   * re-auth watcher in bin.ts) become stale and direct mutation would land on
+   * a discarded object.
+   */
+  setUserEmail(email: string | null): void {
+    this.$session.setKey('userEmail', email);
+    this.emitChange();
+  }
+
   setApiKeyNotice(notice: string | null): void {
     this.$session.setKey('apiKeyNotice', notice);
     this.emitChange();
