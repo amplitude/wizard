@@ -29,7 +29,7 @@ const {
     setDetectionComplete: vi.fn(),
     setFrameworkContext: vi.fn(),
     addDiscoveredFeature: vi.fn(),
-    applyAutoInlineOptIns: vi.fn(),
+    skipFeatureOptInIfEmpty: vi.fn(),
     onEnterScreen: vi.fn(),
     completeSetup: vi.fn(),
     setAmplitudePreDetected: vi.fn(),

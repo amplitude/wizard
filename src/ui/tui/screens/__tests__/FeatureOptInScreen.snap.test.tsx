@@ -8,8 +8,9 @@
  *   - The empty state renders nothing (snapshot is empty) so the screen
  *     can't deadlock the flow.
  *   - With Session Replay + LLM discovered, both labels + their hint
- *     copy show up. The defaultSelected list is used so all checkboxes
- *     start ticked.
+ *     copy show up. The picker defaults to NOTHING checked — these are
+ *     explicit opt-ins (SR has privacy implications, G&S adds a runtime
+ *     surface, LLM adds tracking dependencies).
  *   - The Engagement-only case verifies the third option label, which
  *     was added later than the others (#236).
  */
@@ -44,7 +45,8 @@ describe('FeatureOptInScreen snapshots', () => {
       <FeatureOptInScreen store={store} />,
       store,
     );
-    expect(frame).toContain('Add more to your setup');
+    expect(frame).toContain('Optional add-ons');
+    expect(frame).toContain('None are checked by default');
     expect(frame).toContain('Watch user sessions like a video');
     expect(frame).toContain('Track AI agent calls');
     // ESC affordance must be visible — without it the user has no way to skip.

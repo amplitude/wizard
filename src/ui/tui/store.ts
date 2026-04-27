@@ -727,44 +727,25 @@ export class WizardStore {
   }
 
   /**
-   * Auto-enable inline addons (Session Replay, Guides & Surveys) discovered
-   * for the current integration. Inline features ship with the unified browser
-   * SDK and are configured as part of the same `initAll()` call — there's no
-   * real choice to surface, so we enable them silently and (when no other
-   * opt-ins remain) skip the FeatureOptIn picklist entirely.
+   * Skip the FeatureOptIn picklist when no opt-in features were discovered
+   * for the current integration. Pure session bookkeeping — no features
+   * are enabled here.
    *
-   * Returns true when the picklist can be skipped (all opt-ins were auto-
-   * enabled). Returns false when at least one non-inline opt-in (e.g. LLM)
-   * remains and still warrants the picklist.
+   * Session Replay and Guides & Surveys are intentionally OPT-IN, not
+   * opt-out: the picker shows them default-off and the user must
+   * explicitly check them. SR in particular is a privacy / DPA decision
+   * that should never ship into production code by silent default.
+   * See `skipPicklistIfNoOptIns` in feature-discovery.ts for the
+   * full rationale.
    */
-  applyAutoInlineOptIns(): boolean {
-    const optIns = this.session.discoveredFeatures.filter(
+  skipFeatureOptInIfEmpty(): void {
+    const hasOptIn = this.session.discoveredFeatures.some(
       (f): f is AdditionalFeature => OPT_IN_DISCOVERED_FEATURES.has(f),
     );
-    if (optIns.length === 0) {
+    if (!hasOptIn) {
       this.$session.setKey('optInFeaturesComplete', true);
       this.emitChange();
-      return true;
     }
-
-    const inlineSet = new Set<AdditionalFeature>([
-      AdditionalFeature.SessionReplay,
-      AdditionalFeature.Engagement,
-    ]);
-    const inline = optIns.filter((f) => inlineSet.has(f));
-    const nonInline = optIns.filter((f) => !inlineSet.has(f));
-
-    for (const feature of inline) {
-      this.enableFeature(feature, 'auto-ci');
-    }
-
-    if (nonInline.length === 0) {
-      this.$session.setKey('optInFeaturesComplete', true);
-      this.emitChange();
-      return true;
-    }
-    this.emitChange();
-    return false;
   }
 
   /**

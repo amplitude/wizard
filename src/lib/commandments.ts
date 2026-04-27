@@ -41,6 +41,32 @@ CRITICAL — do NOT manually write .amplitude-events.json.
 
   `Autocapture — the Amplitude feature that automatically tracks element clicks, form interactions, page/screen views, sessions, app lifecycle events, and file downloads — is commonly enabled by the wizard for web SDKs (@amplitude/unified, @amplitude/analytics-browser) but is NOT available or not on by default for every SDK (e.g. Swift requires an opt-in plugin, backend SDKs don't track element interactions at all, and an existing project may have it disabled). Before proposing events, check the SDK init code you just wrote (or that already exists) to see whether autocapture is on and what it covers for this platform. If it IS on, do NOT propose custom events that merely duplicate its coverage — names like "[X] Clicked", "[X] Tapped", "[X] Pressed", "Form Submitted", "Form Started", "Input Changed", "Page Viewed", or "Screen Viewed" are redundant and must be excluded. Either way, prefer events for business outcomes, state changes, async success/failure, and multi-step flow milestones over raw interaction events (see skills/instrumentation/discover-event-surfaces/references/best-practices.md section R4). If autocapture is on and the project is a landing page or starter template whose only interactions are plain clicks and links, lean toward a minimal plan and let autocapture do the work — confirm_event_plan still requires at least one event, so pick the single most meaningful state change. Keep this reasoning internal — do NOT write autocapture justifications into the description field.`,
 
+  `Browser SDK init defaults — when initializing @amplitude/unified (initAll) or @amplitude/analytics-browser (init), pass this exact options object so the project gets the same out-of-the-box coverage as Amplitude's public CDN snippet:
+
+    {
+      fetchRemoteConfig: true,
+      autocapture: {
+        attribution: true,
+        fileDownloads: true,
+        formInteractions: true,
+        pageViews: true,
+        sessions: true,
+        elementInteractions: true,
+        networkTracking: true,
+        webVitals: true,
+        frustrationInteractions: true,
+      },
+    }
+
+  These options are ONLY valid for the browser / unified SDK. Do NOT pass an autocapture block — or any of these keys — to:
+    - @amplitude/analytics-node (server) — accepts apiKey, optional serverZone ('US' | 'EU'), flushQueueSize, flushIntervalMillis. No autocapture concept.
+    - Mobile SDKs (@amplitude/analytics-react-native, @amplitude/analytics-android, @amplitude/analytics-swift, @amplitude/analytics-flutter) — each has its own DefaultTrackingOptions / autocapture schema with platform-specific keys (e.g. screenViews on Swift; appLifecycles on Android). Follow the per-SDK README, do not copy the browser shape.
+    - Backend SDKs in other languages (Python, Java, Go, Ruby, .NET) — server-side, no autocapture surface.
+
+  When in doubt, consult https://amplitude.com/docs/sdks and the specific SDK's README before adding any option. Inventing an option name (or copying browser keys onto a non-browser SDK) will cause runtime errors or silently no-op. Refer to https://amplitude.com/docs/sdks/client-side-vs-server-side for guidance on which SDK applies to which surface.
+
+  Session Replay and Guides & Surveys are SEPARATE plugins on top of these defaults — they are NOT enabled by the autocapture options above. Add them ONLY if the user explicitly opted in (the wizard surfaces sessionReplayOptIn / engagementOptIn in the session). Do not enable them silently.`,
+
   `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 
   `Prefer the report_status tool (wizard-tools MCP) for progress updates and fatal error signals. Call report_status with kind="status" for in-progress updates (e.g. "installing SDK", "drafting event plan") — these appear in the wizard's spinner. Call report_status with kind="error" for fatal conditions that halt the run (codes: MCP_MISSING, RESOURCE_MISSING). Legacy [STATUS] / [ERROR-MCP-MISSING] / [ERROR-RESOURCE-MISSING] text markers from older bundled skills are still recognized for backwards compat, but new code should use report_status.`,

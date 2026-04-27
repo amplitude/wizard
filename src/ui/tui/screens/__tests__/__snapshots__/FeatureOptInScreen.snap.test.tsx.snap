@@ -1,12 +1,12 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`FeatureOptInScreen snapshots > lists Session Replay + LLM with hint copy when both are discovered 1`] = `
-"Add more to your setup
-We'll wire these up after the main integration. ─ ESC to skip
+"Optional add-ons
+Pick any you want enabled. None are checked by default. ─ ESC to skip
 
 
  (space to toggle, enter to submit)
 
-  ◼ [1] Session Replay (Watch user sessions like a video)
-  ◼ [2] LLM analytics (Track AI agent calls)"
+  ◻ [1] Session Replay (Watch user sessions like a video)
+  ◻ [2] LLM analytics (Track AI agent calls)"
 `;

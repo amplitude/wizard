@@ -2,8 +2,17 @@
  * FeatureOptInScreen — multi-select picklist for opt-in additional features.
  *
  * Shown after detection finds at least one opt-in feature (LLM, Session
- * Replay) and only in interactive TUI mode. ESC continues with nothing
- * selected. ENTER confirms the current selection. All checkboxes default on.
+ * Replay, Guides & Surveys) and only in interactive TUI mode. ESC continues
+ * with nothing selected. ENTER confirms the current selection.
+ *
+ * Defaults: NOTHING is checked. These are explicit opt-ins:
+ *   - Session Replay records user sessions and is a privacy / DPA decision
+ *     that should never ship into production code by silent default.
+ *   - Guides & Surveys ships a runtime that talks to remote config and
+ *     surfaces UI overlays — also a deliberate product decision.
+ *   - LLM analytics adds a new dependency surface.
+ *
+ * The user must explicitly check what they want.
  */
 
 import { Box, Text } from 'ink';
@@ -52,9 +61,9 @@ export const FeatureOptInScreen = ({ store }: FeatureOptInScreenProps) => {
   for (const f of store.session.discoveredFeatures) {
     const additional = toAdditionalFeature(f);
     if (!additional) continue;
-    // Skip features that were already auto-enabled (e.g. Session Replay and
-    // Guides & Surveys for unified-SDK web frameworks). The picklist should
-    // only ask about features the user actually has a meaningful choice over.
+    // Skip features that were already enabled elsewhere in the session
+    // (defensive — keeps the picker from showing duplicates if some other
+    // path enabled a feature ahead of the picker).
     if (store.session.additionalFeatureQueue.includes(additional)) continue;
     optInFeatures.push(additional);
   }
@@ -97,18 +106,21 @@ export const FeatureOptInScreen = ({ store }: FeatureOptInScreenProps) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.accent}>
-          Add more to your setup
+          Optional add-ons
         </Text>
         <Text color={Colors.secondary}>
-          We&apos;ll wire these up after the main integration. {Icons.dash} ESC
-          to skip
+          Pick any you want enabled. None are checked by default. {Icons.dash}{' '}
+          ESC to skip
         </Text>
       </Box>
 
       <PickerMenu<AdditionalFeature>
         mode="multi"
         options={options}
-        defaultSelected={optInFeatures}
+        // defaultSelected=[] — these are explicit opt-ins. SR records user
+        // sessions (privacy / DPA implications); G&S adds runtime UI; LLM
+        // adds a tracking surface. The user must affirmatively check.
+        defaultSelected={[]}
         onSelect={(value) => {
           const selected = Array.isArray(value) ? value : [value];
           store.confirmFeatureOptIns(selected);

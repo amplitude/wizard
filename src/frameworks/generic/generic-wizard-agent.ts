@@ -74,10 +74,36 @@ SDK selection (choose the FIRST match):
     Recommended: @amplitude/unified
       npm install @amplitude/unified
       import { initAll } from '@amplitude/unified';
-      initAll(API_KEY, { analytics: { autocapture: true } });
+      initAll(API_KEY, {
+        fetchRemoteConfig: true,
+        autocapture: {
+          attribution: true,
+          fileDownloads: true,
+          formInteractions: true,
+          pageViews: true,
+          sessions: true,
+          elementInteractions: true,
+          networkTracking: true,
+          webVitals: true,
+          frustrationInteractions: true,
+        },
+      });
     Alternative: @amplitude/analytics-browser
       npm install @amplitude/analytics-browser
-      amplitude.init(API_KEY, { autocapture: { pageViews: true, sessions: true, formInteractions: true, fileDownloads: true } });
+      amplitude.init(API_KEY, {
+        fetchRemoteConfig: true,
+        autocapture: {
+          attribution: true,
+          fileDownloads: true,
+          formInteractions: true,
+          pageViews: true,
+          sessions: true,
+          elementInteractions: true,
+          networkTracking: true,
+          webVitals: true,
+          frustrationInteractions: true,
+        },
+      });
     Static site (no build pipeline): CDN snippet — see https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2
 - Node.js server:
     npm install @amplitude/analytics-node

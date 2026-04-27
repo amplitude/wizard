@@ -8,11 +8,7 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 
-import {
-  DiscoveredFeature,
-  AdditionalFeature,
-  INLINE_FEATURES,
-} from './wizard-session';
+import { DiscoveredFeature, AdditionalFeature } from './wizard-session';
 import type { WizardSession } from './wizard-session';
 import { isFlagEnabled, FLAG_LLM_ANALYTICS } from './feature-flags';
 import { analytics } from '../utils/analytics';
@@ -146,36 +142,28 @@ export function autoEnableOptInFeatures(
 }
 
 /**
- * Auto-enable inline addons (Session Replay + Guides & Surveys) for projects
- * using the unified browser SDK. The unified SDK is the single recommendation
- * for new browser integrations and the inline plugins are configured as part
- * of the same `initAll()` call — there's no real choice to surface to the
- * user, so we just enable both and skip the picklist for these features.
+ * Skip the FeatureOptIn picklist when no opt-in features were discovered
+ * for this project. Pure session bookkeeping — no features are enabled
+ * (the picker handles enabling whatever the user explicitly chose).
  *
- * If the project also has discovered non-inline opt-ins (e.g. LLM), we leave
- * `optInFeaturesComplete=false` so the picklist still shows for those.
+ * Why this exists: Session Replay and Guides & Surveys are intentionally
+ * OPT-IN, not opt-out. We previously auto-enabled both for unified-SDK
+ * web frameworks on the theory that "the unified SDK already includes
+ * them, so there's no real choice." That's correct technically, but
+ * Amplitude wants users to make an explicit, informed call about
+ * recording sessions and showing surveys before either ships into
+ * production code. Auto-enabling SR is also a privacy / DPA decision
+ * that should not be made silently on the user's behalf.
  *
- * Returns true if all opt-in features were auto-enabled (no picklist needed).
+ * Returns true when the picklist can be skipped entirely (no opt-in
+ * features at all). Returns false when at least one opt-in feature is
+ * present and warrants the picker.
  */
-export function autoEnableInlineOptIns(session: WizardSession): boolean {
-  const optIns = session.discoveredFeatures
-    .map(discoveredToAdditional)
-    .filter((f): f is AdditionalFeature => f !== null);
-
-  if (optIns.length === 0) {
-    session.optInFeaturesComplete = true;
-    return true;
-  }
-
-  const inline = optIns.filter((f) => INLINE_FEATURES.has(f));
-  const nonInline = optIns.filter((f) => !INLINE_FEATURES.has(f));
-
-  for (const feature of inline) {
-    enableAdditionalFeature(session, feature, 'auto-inline');
-  }
-
-  // No non-inline opt-ins remaining → no picklist needed.
-  if (nonInline.length === 0) {
+export function skipPicklistIfNoOptIns(session: WizardSession): boolean {
+  const hasOptIn = session.discoveredFeatures.some(
+    (f) => discoveredToAdditional(f) !== null,
+  );
+  if (!hasOptIn) {
     session.optInFeaturesComplete = true;
     return true;
   }
