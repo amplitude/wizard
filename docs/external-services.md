@@ -367,11 +367,12 @@ npx -y mcp-remote@latest <url> --header "Authorization: Bearer <token>"
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `NODE_ENV` | — | `test`/`development` switches URLs to localhost and routes telemetry to the dev Amplitude project |
+| `NODE_ENV` | — | `test`/`development` routes wizard telemetry to the dev Amplitude project. Does **not** affect any user-facing URLs — both the LLM gateway and the data ingestion host always default to prod (override with `WIZARD_LLM_PROXY_URL` and `AMPLITUDE_WIZARD_INGESTION_HOST` respectively if you actually run a local proxy). |
 | `OAUTH_HOST` | Zone-specific | Override OAuth host |
 | `OAUTH_CLIENT_ID` | Zone-specific | Override OAuth client ID |
 | `AMPLITUDE_API_KEY` | dev: `ce58b28cace35f7df0eb241b0cd72044` / prod: `e5a2c9bdffe949f7da77e6b481e118fa` | Telemetry project API key (auto-selected by `NODE_ENV`) |
 | `AMPLITUDE_SERVER_URL` | `https://api2.amplitude.com` | Telemetry server URL |
+| `AMPLITUDE_WIZARD_INGESTION_HOST` | Region-based (`https://api2.amplitude.com` / `https://api.eu.amplitude.com`) | Override the Amplitude data ingestion host the wizard writes into the user's `.env.local` and references in generated SDK init code. Only set this when intentionally proxying ingestion (e.g. local Amplitude proxy). |
 | `DEMO_MODE_WIZARD` | — | When `1`, limits agent to 5 events for demo runs |
 | `CI` | — | Non-interactive mode detection; also set to `1` when invoking Vercel CLI |
 | `AMPLITUDE_WIZARD_MAX_TURNS` | `200` | Override the agent's maximum turn count. Useful for eval fixtures (low cap forces short runs) or quick iteration (`AMPLITUDE_WIZARD_MAX_TURNS=30 pnpm try`). Must be a positive integer ≤ `10000`; empty, non-numeric, zero, negative, or out-of-bounds values silently fall back to the default. |
