@@ -1765,8 +1765,9 @@ export async function runAgent(
         if (result.success) {
           getUI().setDashboardUrl(result.data.dashboardUrl);
           // Mirror to canonical `.amplitude/dashboard.json` so the
-          // dashboard URL survives legacy-file cleanup. The agent
-          // (via bundled skills) only writes the legacy path.
+          // dashboard URL has a stable location. The agent (via bundled
+          // skills) only writes the legacy path; both files are
+          // gitignored and preserved across runs.
           if (winner === legacyDashboardFilePath) {
             persistDashboard(
               agentConfig.workingDirectory,

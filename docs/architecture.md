@@ -737,9 +737,11 @@ Both are gitignored (the project meta dir as a single `.amplitude/`
 line). The agent contract is unchanged: `confirm_event_plan` is the
 canonical writer for `events.json`. A legacy mirror at
 `<installDir>/.amplitude-events.json` is also written for backwards
-compatibility with bundled integration skills, and gets cleaned up on
-exit. The `/diagnostics` slash command prints the full layout for the
-current project — useful when filing bug reports.
+compatibility with bundled integration skills; both the canonical and
+legacy paths are gitignored and preserved across runs (the legacy
+mirror is dropped once context-hub ships a skill set that reads the
+canonical path). The `/diagnostics` slash command prints the full
+layout for the current project — useful when filing bug reports.
 
 ---
 

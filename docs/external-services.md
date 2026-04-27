@@ -283,7 +283,9 @@ This file is shared with the `ampli` CLI — the wizard intentionally uses the s
 | `<project>/.gitignore` | Ensure `.env.local` and `.amplitude/` are ignored | `src/utils/api-key-store.ts`, `src/lib/wizard-tools.ts` |
 | `<project>/.amplitude/events.json` | Agent-generated event tracking plan (preserved across runs) | `src/lib/wizard-tools.ts` |
 | `<project>/.amplitude/dashboard.json` | URL of the dashboard the agent created | Agent conclude phase |
-| `<project>/.amplitude-events.json` | Legacy mirror of `events.json` for bundled-skill compatibility (cleaned up on exit) | `src/lib/wizard-tools.ts` |
+| `<project>/.amplitude-events.json` | Legacy mirror of `events.json` for bundled-skill compatibility (gitignored, preserved across runs) | `src/lib/wizard-tools.ts` |
+| `<project>/.amplitude-dashboard.json` | Legacy mirror of `dashboard.json` written by the agent's conclude-phase skill (gitignored, preserved across runs) | Agent conclude phase |
+| `<project>/amplitude-setup-report.md` | User-facing setup summary the OutroScreen points at (gitignored, overwritten on next run) | Agent conclude phase |
 
 ### Editor Config Files Modified (MCP Server Installation)
 

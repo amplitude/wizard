@@ -9,8 +9,6 @@ import {
   mergeEnvValues,
   persistEventPlan,
   cleanupIntegrationSkills,
-  cleanupLegacyAmplitudeEventsFile,
-  cleanupLegacyAmplitudeDashboardFile,
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
   buildFallbackReport,
@@ -392,6 +390,9 @@ describe('ensureWizardArtifactsIgnored', () => {
     // during runs, and a `git add .` mid-run would otherwise stage them.
     expect(content).toContain('.amplitude-events.json');
     expect(content).toContain('.amplitude-dashboard.json');
+    // User-facing setup report stays at the project root for
+    // discoverability after exit. Gitignored so it doesn't get committed.
+    expect(content).toContain('amplitude-setup-report.md');
   });
 
   it('is idempotent — running twice does not duplicate entries', () => {
@@ -469,76 +470,6 @@ describe('ensureWizardArtifactsIgnored', () => {
 });
 
 // ---------------------------------------------------------------------------
-// cleanupLegacyAmplitudeEventsFile
-// ---------------------------------------------------------------------------
-
-describe('cleanupLegacyAmplitudeEventsFile', () => {
-  let tmpDir: string;
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-  });
-  afterEach(() => cleanup(tmpDir));
-
-  it('removes the legacy .amplitude-events.json when present', () => {
-    const target = path.join(tmpDir, '.amplitude-events.json');
-    fs.writeFileSync(target, '[]', 'utf8');
-    cleanupLegacyAmplitudeEventsFile(tmpDir);
-    expect(fs.existsSync(target)).toBe(false);
-  });
-
-  it('is a no-op when the file does not exist', () => {
-    expect(() => cleanupLegacyAmplitudeEventsFile(tmpDir)).not.toThrow();
-  });
-
-  it('does not touch other files in the install dir', () => {
-    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
-    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
-    cleanupLegacyAmplitudeEventsFile(tmpDir);
-    expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
-      false,
-    );
-  });
-
-  it('does NOT touch the canonical .amplitude/events.json', () => {
-    const canonicalDir = path.join(tmpDir, '.amplitude');
-    const canonicalFile = path.join(canonicalDir, 'events.json');
-    fs.mkdirSync(canonicalDir, { recursive: true });
-    fs.writeFileSync(canonicalFile, '[{"name":"x","description":"y"}]');
-    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
-    cleanupLegacyAmplitudeEventsFile(tmpDir);
-    // Legacy gone, canonical preserved across runs.
-    expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
-      false,
-    );
-    expect(fs.existsSync(canonicalFile)).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// cleanupLegacyAmplitudeDashboardFile
-// ---------------------------------------------------------------------------
-
-describe('cleanupLegacyAmplitudeDashboardFile', () => {
-  let tmpDir: string;
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-  });
-  afterEach(() => cleanup(tmpDir));
-
-  it('removes the legacy .amplitude-dashboard.json when present', () => {
-    const target = path.join(tmpDir, '.amplitude-dashboard.json');
-    fs.writeFileSync(target, '{"dashboardUrl":"https://x"}', 'utf8');
-    cleanupLegacyAmplitudeDashboardFile(tmpDir);
-    expect(fs.existsSync(target)).toBe(false);
-  });
-
-  it('is a no-op when the file does not exist', () => {
-    expect(() => cleanupLegacyAmplitudeDashboardFile(tmpDir)).not.toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
 // cleanupWizardArtifacts (composition)
 // ---------------------------------------------------------------------------
 
@@ -549,13 +480,14 @@ describe('cleanupWizardArtifacts', () => {
   });
   afterEach(() => cleanup(tmpDir));
 
-  it('on success: removes integration skills + legacy dotfiles, preserves canonical events', () => {
-    // Regression: previously deleted .amplitude-events.json on every exit,
-    // breaking resumability. Now the canonical .amplitude/events.json is
-    // preserved on ALL exit paths (it's gitignored so it can't pollute
-    // commits), only the single-use integration skill is removed on
-    // success, and legacy dotfiles from older builds are always cleaned
-    // up so they don't linger in the user's project.
+  it('on success: removes only the single-use integration skill — preserves all data files', () => {
+    // Regression: previously deleted .amplitude-events.json (and later
+    // .amplitude-dashboard.json) on every exit, breaking resumability and
+    // surprising users who wanted those artifacts for re-instrumentation.
+    // Current policy: only the single-use integration skill is removed on
+    // success; the canonical `.amplitude/` files, the legacy dotfile
+    // mirrors, and the user-facing setup report all stay on disk. They're
+    // listed in WIZARD_GITIGNORE_PATTERNS so they can't pollute commits.
     const skillDir = path.join(
       tmpDir,
       '.claude',
@@ -568,25 +500,36 @@ describe('cleanupWizardArtifacts', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.amplitude-dashboard.json'),
       '{"dashboardUrl":"https://x"}',
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'amplitude-setup-report.md'),
+      '# Setup\n',
     );
 
     cleanupWizardArtifacts(tmpDir, { onSuccess: true });
 
+    // Single-use integration skill removed.
     expect(fs.existsSync(skillDir)).toBe(false);
-    // Legacy dotfiles always cleaned up.
+    // Legacy dotfiles preserved — context-hub skills still read them, and
+    // re-instrumentation needs them across runs.
     expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
-      false,
+      true,
     );
     expect(fs.existsSync(path.join(tmpDir, '.amplitude-dashboard.json'))).toBe(
-      false,
+      true,
+    );
+    // Setup report preserved — the user is meant to read it after exit.
+    expect(fs.existsSync(path.join(tmpDir, 'amplitude-setup-report.md'))).toBe(
+      true,
     );
   });
 
-  it('on cancel/error (no onSuccess): preserves integration skills, still cleans legacy dotfiles', () => {
+  it('on cancel/error (no onSuccess): preserves everything, including integration skills', () => {
     // Regression for: a Ctrl+C / wizardAbort / transient error used to
     // wipe .claude/skills/integration-*, forcing a re-download of the
     // SDK-setup skill on re-run. Integration skills now stay so re-run
-    // resumes seamlessly. Legacy dotfile cleanup is always safe to run.
+    // resumes seamlessly. Legacy dotfiles and setup report are also
+    // preserved — gitignored, never deleted.
     const skillDir = path.join(
       tmpDir,
       '.claude',
@@ -599,16 +542,23 @@ describe('cleanupWizardArtifacts', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.amplitude-dashboard.json'),
       '{"dashboardUrl":"https://x"}',
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, 'amplitude-setup-report.md'),
+      '# Setup\n',
     );
 
     cleanupWizardArtifacts(tmpDir);
 
     expect(fs.existsSync(skillDir)).toBe(true);
     expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
-      false,
+      true,
     );
     expect(fs.existsSync(path.join(tmpDir, '.amplitude-dashboard.json'))).toBe(
-      false,
+      true,
+    );
+    expect(fs.existsSync(path.join(tmpDir, 'amplitude-setup-report.md'))).toBe(
+      true,
     );
   });
 
