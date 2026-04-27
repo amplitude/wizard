@@ -6,6 +6,10 @@
 // The prebuild script (sync-version.mjs) acts as a safety net.
 const VERSION = '1.7.0'; // x-release-please-version
 
+/** Public alias for the wizard version. Same value as the internal `VERSION`
+ * but exported for consumers (e.g. the bug-report module). */
+export const WIZARD_VERSION = VERSION;
+
 // ── Integration / CLI ───────────────────────────────────────────────
 
 /**

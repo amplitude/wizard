@@ -356,6 +356,7 @@ async function runAgentWizardBody(
       accessToken = stored.accessToken;
       // Silently refresh if the access token has expired but the refresh window is still valid
       if (user && new Date() > new Date(stored.expiresAt)) {
+        const refreshStartedAt = Date.now();
         try {
           const refreshed = await refreshAccessToken(stored.refreshToken);
           storeToken(user, {
@@ -365,8 +366,17 @@ async function runAgentWizardBody(
             expiresAt: refreshed.expiresAt,
           });
           accessToken = refreshed.accessToken;
-        } catch {
-          // Refresh failed — proceed with the existing token; auth error will surface during the run
+          analytics.wizardCapture('auth refreshed silently', {
+            'duration ms': Date.now() - refreshStartedAt,
+          });
+        } catch (err) {
+          // Refresh failed — proceed with the existing token; auth error will
+          // surface during the run. Instrument the reason so we can distinguish
+          // expired refresh tokens from network failures in dashboards.
+          analytics.wizardCapture('auth refresh failed', {
+            reason: err instanceof Error ? err.message : 'unknown',
+            'duration ms': Date.now() - refreshStartedAt,
+          });
         }
       }
     }
