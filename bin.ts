@@ -2430,7 +2430,10 @@ void yargs(hideBin(process.argv))
                   // Emit a `needs_input`-shaped envelope so outer agents can
                   // render the same picker they would for the inline prompt.
                   const hasMore = offset + result.returned < result.total;
-                  const nextOffset = offset + limit;
+                  // Use `result.returned`, not the user-supplied `limit`, so
+                  // an over-the-cap value (e.g. `--limit 9999` clamped to
+                  // 200 internally) doesn't skip past unread items.
+                  const nextOffset = offset + result.returned;
                   process.stdout.write(
                     JSON.stringify({
                       v: 1,
