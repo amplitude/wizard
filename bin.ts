@@ -1630,6 +1630,10 @@ void yargs(hideBin(process.argv))
             void (async () => {
               await authTask;
               const { Overlay } = await import('./src/ui/tui/router.js');
+              // Tracks consecutive runOAuthCycle failures so we can back off
+              // and surface a hint instead of hot-looping (or going silent)
+              // when the new zone's OAuth keeps failing.
+              let consecutiveFailures = 0;
               while (true) {
                 // Wait for credentials to be populated first — either by the
                 // initial authTask above or by AuthScreen's SUSI pickers.
@@ -1663,10 +1667,43 @@ void yargs(hideBin(process.argv))
                   // previously signed into the target region. Only users
                   // switching to a never-visited zone see the browser.
                   await runOAuthCycle(false);
+                  consecutiveFailures = 0;
                 } catch (err) {
+                  consecutiveFailures += 1;
                   if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
                     console.error('Re-auth error:', err);
                   }
+                  // runOAuthCycle threw before setOAuthComplete, so
+                  // credentials are still null and the inner waiters above
+                  // would resolve immediately on the next loop iteration —
+                  // hot-spinning the OAuth attempt. Surface a hint and back
+                  // off so the user sees something and a retry storm can't
+                  // chew CPU. The retry loop is intentionally bounded; users
+                  // can still recover via `/login` or by re-picking a region.
+                  tui.store.setCommandFeedback(
+                    consecutiveFailures === 1
+                      ? "Authentication didn't complete. Retrying — use /login to retry manually."
+                      : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
+                    consecutiveFailures >= 3 ? 8000 : 4000,
+                  );
+                  if (consecutiveFailures >= 3) {
+                    // After 3 strikes, stop auto-retrying so we don't burn
+                    // tokens or trigger rate limits. The user can resume via
+                    // /login or /region; both clear credentials and unblock
+                    // the watcher.
+                    await waitForSessionState(
+                      () =>
+                        tui.store.currentScreen === Overlay.Login ||
+                        tui.store.session.regionForced,
+                    );
+                    consecutiveFailures = 0;
+                    continue;
+                  }
+                  // Brief backoff before the next attempt so transient
+                  // network blips have time to recover.
+                  await new Promise<void>((r) =>
+                    setTimeout(r, 1500 * consecutiveFailures),
+                  );
                 }
               }
             })();
