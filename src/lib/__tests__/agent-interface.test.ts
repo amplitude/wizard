@@ -766,7 +766,7 @@ describe('runAgent', () => {
       await vi.advanceTimersByTimeAsync(3_000);
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(attempt2FirstMessageSeen).toBe(true);
 
@@ -842,7 +842,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(returnSpy).toHaveBeenCalledTimes(1);
       // Cleanup must happen during attempt #1 (before #2 starts).
@@ -890,7 +890,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
     });
   });
