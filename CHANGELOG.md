@@ -1,5 +1,54 @@
 # Changelog
 
+## [1.7.0](https://github.com/amplitude/wizard/compare/wizard-v1.6.0...wizard-v1.7.0) (2026-04-26)
+
+
+### Features
+
+* **agent:** AMPLITUDE_WIZARD_MAX_TURNS env override for the maxTurns cap ([#291](https://github.com/amplitude/wizard/issues/291)) ([2c304f1](https://github.com/amplitude/wizard/commit/2c304f1ec9d4f4fc921b17efd95864820be36d6c))
+* **agent:** generic needs_input NDJSON event + INPUT_REQUIRED exit code ([#253](https://github.com/amplitude/wizard/issues/253)) ([207be5d](https://github.com/amplitude/wizard/commit/207be5dbeee7af1f9e29723173177ff8c1034b65))
+* **agent:** inner-agent lifecycle + file_change NDJSON events ([#270](https://github.com/amplitude/wizard/issues/270)) ([31be2eb](https://github.com/amplitude/wizard/commit/31be2ebdfcf7e67032c0b8357356240227304fc1))
+* **agent:** runPlan reads pre-existing .amplitude-events.json into the plan ([#295](https://github.com/amplitude/wizard/issues/295)) ([8939987](https://github.com/amplitude/wizard/commit/89399879d173eb5aeccc389edb54bd6746496dcd))
+* AgentState recovery bag for PreCompact persistence ([#267](https://github.com/amplitude/wizard/issues/267)) ([e638af4](https://github.com/amplitude/wizard/commit/e638af427110cfdf1900bfbe66f4fc57e9750438))
+* **cli:** --auto-approve / --yes / --force capability matrix + write-gate ([#254](https://github.com/amplitude/wizard/issues/254)) ([548617c](https://github.com/amplitude/wizard/commit/548617c3d77941948ea40824adc463258645b893))
+* **cli:** plan / apply / verify subcommands with plan persistence ([#269](https://github.com/amplitude/wizard/issues/269)) ([b419869](https://github.com/amplitude/wizard/commit/b419869415a6fa7de99d9bb30ba4fa91bde253e5))
+* **mcp:** expose plan / verify on wizard-mcp-server ([#285](https://github.com/amplitude/wizard/issues/285)) ([c503547](https://github.com/amplitude/wizard/commit/c50354728627c667b87cf9d219a01bbe320826d9))
+* **observability:** instrument OAuth, MCP, and steps with Sentry spans ([#264](https://github.com/amplitude/wizard/issues/264)) ([8ba1168](https://github.com/amplitude/wizard/commit/8ba11686d2a9d69060f6af01068c268561faa75f))
+* structured status reporting via report_status MCP tool ([#172](https://github.com/amplitude/wizard/issues/172)) ([24b0015](https://github.com/amplitude/wizard/commit/24b0015f384db01484e1266e96022adc71b11fa4))
+* **tui:** migrate forms to Ink useFocus / useFocusManager ([#251](https://github.com/amplitude/wizard/issues/251)) ([77e8f46](https://github.com/amplitude/wizard/commit/77e8f46702fd5067efd35287853ff754fc310bae))
+* **tui:** use measureElement for PickerMenu pagination ([#252](https://github.com/amplitude/wizard/issues/252)) ([c4c3ae1](https://github.com/amplitude/wizard/commit/c4c3ae1950a710728dd887e7652f84f65eac0fcc))
+* UserPromptSubmit hydrates recovery note after compaction (Bet 2 slice 4) ([#268](https://github.com/amplitude/wizard/issues/268)) ([2127196](https://github.com/amplitude/wizard/commit/212719699edadf3d150a6c407503b01415fcae49))
+* **wizard:** gitignore + always-clean wizard artifacts after a run ([#261](https://github.com/amplitude/wizard/issues/261)) ([177497e](https://github.com/amplitude/wizard/commit/177497e1ef72593002d2637735fca4c49ae7c95c))
+
+
+### Bug Fixes
+
+* **agent:** allow backgrounded package installs the commandments tell agents to use ([#272](https://github.com/amplitude/wizard/issues/272)) ([dd8e11f](https://github.com/amplitude/wizard/commit/dd8e11fecb2ad8b0cd76048ce1c2f693206212e1))
+* **agent:** broaden parseEventPlanContent aliases for skill-shape variations ([#293](https://github.com/amplitude/wizard/issues/293)) ([c40b206](https://github.com/amplitude/wizard/commit/c40b20688c96a0101953b6c4ca8b1beddab4727b))
+* **agent:** drain prior Query iterator between retry attempts ([#298](https://github.com/amplitude/wizard/issues/298)) ([09f1822](https://github.com/amplitude/wizard/commit/09f18229c043db3e3baa43fe1f1116888b793380))
+* **agent:** re-scan legacy [STATUS] / [ERROR-*] text markers for skill backwards compat ([#273](https://github.com/amplitude/wizard/issues/273)) ([4a945b5](https://github.com/amplitude/wizard/commit/4a945b55a23defa13cac08d7923a7a5f2b4d6c80))
+* **agent:** ride out gateway 400-terminated cascades ([#266](https://github.com/amplitude/wizard/issues/266)) ([efbe3f5](https://github.com/amplitude/wizard/commit/efbe3f5f4baf204c860e23d10417c474b28706d6))
+* **cli:** declare plan-id hidden shadow option for env-var passthrough ([#309](https://github.com/amplitude/wizard/issues/309)) ([6e5cf90](https://github.com/amplitude/wizard/commit/6e5cf90b0dabf672b933eb796682f1b25b927386))
+* **copy:** remove misleading "error capture" claims from wizard output ([#276](https://github.com/amplitude/wizard/issues/276)) ([9894a2a](https://github.com/amplitude/wizard/commit/9894a2a3e1618555605592acd38f9184f845e930))
+* **observability:** tag stream_closed errors as their own Sentry subtype ([#302](https://github.com/amplitude/wizard/issues/302)) ([460ebd6](https://github.com/amplitude/wizard/commit/460ebd65996c3c1dc0df0af3c07deed27eb4196f))
+* **tui:** constrain auth picker menus to content area ([#283](https://github.com/amplitude/wizard/issues/283)) ([0757b11](https://github.com/amplitude/wizard/commit/0757b11389cf56daeff1cd491fa1a937b9e87ce3))
+* **tui:** correct off-by-one in LogViewer gutter width and chrome rows ([#294](https://github.com/amplitude/wizard/issues/294)) ([bd0dedb](https://github.com/amplitude/wizard/commit/bd0dedba6ea1621a67889f7433a96c1bd2416c8b))
+* **tui:** drop parent color on rendered markdown in Q&A panel ([#277](https://github.com/amplitude/wizard/issues/277)) ([3a17dfe](https://github.com/amplitude/wizard/commit/3a17dfe8b748a2ee433846d628d954baba1baed8))
+* **tui:** hang-indent wrapped task labels in ProgressList ([#248](https://github.com/amplitude/wizard/issues/248)) ([d6feab9](https://github.com/amplitude/wizard/commit/d6feab96fa018d6187ba2f5e3e3f85f5fbea3dd7))
+* **tui:** improve logs tui navigation and error inspection ([#282](https://github.com/amplitude/wizard/issues/282)) ([6b4cae1](https://github.com/amplitude/wizard/commit/6b4cae157e395292d10e55a40ab40a73ddf3d315))
+* **tui:** include FeatureOptIn screen in Setup stepper group ([#281](https://github.com/amplitude/wizard/issues/281)) ([270f54b](https://github.com/amplitude/wizard/commit/270f54b2867b72b009ccb128370ea1a3fc996785))
+* **tui:** make Q&A panel dismissable and bound its height ([#278](https://github.com/amplitude/wizard/issues/278)) ([efb9caa](https://github.com/amplitude/wizard/commit/efb9caa428287866ea1740dfa5768dc78f82afec))
+* **tui:** move AuthScreen credential persistence out of render path ([#280](https://github.com/amplitude/wizard/issues/280)) ([1ef3960](https://github.com/amplitude/wizard/commit/1ef39604f8205e43b629974bcad2039d3b62f843))
+* **tui:** namespace KeyHintBar keys to prevent duplicates ([#279](https://github.com/amplitude/wizard/issues/279)) ([eb9e9e2](https://github.com/amplitude/wizard/commit/eb9e9e2e8de015b4eb0670f5da7bb1a21c120728))
+* **tui:** render Tab-to-ask Q&A inline so answers stay visible ([#265](https://github.com/amplitude/wizard/issues/265)) ([c3ee894](https://github.com/amplitude/wizard/commit/c3ee8947a2b427a6c30624cbf50b8509df3d4724))
+* **ux:** tame retry banner and improve upstream-error copy ([#286](https://github.com/amplitude/wizard/issues/286)) ([4cbeaa0](https://github.com/amplitude/wizard/commit/4cbeaa0fafc49ed46e5d0c76b9df5683a012ea64))
+* **wizard:** preserve .amplitude-events.json + integration skills on cancel/error ([#274](https://github.com/amplitude/wizard/issues/274)) ([5ed8d8b](https://github.com/amplitude/wizard/commit/5ed8d8b0ccad03760c4152fde22c6516a77784c7))
+
+
+### Performance Improvements
+
+* default NODE_ENV based on installation source (not just unset) ([#249](https://github.com/amplitude/wizard/issues/249)) ([ec01e49](https://github.com/amplitude/wizard/commit/ec01e49354fc60235f5a8c5540adda217535707d))
+
 ## [1.6.0](https://github.com/amplitude/wizard/compare/wizard-v1.5.0...wizard-v1.6.0) (2026-04-25)
 
 
