@@ -287,11 +287,13 @@ describe('WizardStore', () => {
       expect(store.session.frameworkContext['srcDir']).toBe('src');
     });
 
-    it('setOrgAndWorkspace clears selectedWorkspaceId when called with empty workspace id', () => {
+    it('setOrgAndWorkspace clears org/workspace IDs when called with empty inputs', () => {
       // Regression: AuthScreen "Start Over", stale-org clear, and the
       // create-project fallback all pass `{ id: '', name: '' }` to reset
-      // session state. Calling `toWorkspaceId('')` would throw because
-      // WorkspaceIdSchema requires `min(1)` — collapse to null instead.
+      // session state. Both fields must collapse to null:
+      //  - `toWorkspaceId('')` would throw (WorkspaceIdSchema requires min(1)).
+      //  - An empty string `selectedOrgId` would still satisfy
+      //    `isAuthenticated`, leaving the session in a meaningless state.
       const store = createStore();
       expect(() =>
         store.setOrgAndWorkspace(
@@ -301,6 +303,7 @@ describe('WizardStore', () => {
           { persist: false },
         ),
       ).not.toThrow();
+      expect(store.session.selectedOrgId).toBeNull();
       expect(store.session.selectedWorkspaceId).toBeNull();
       expect(store.session.selectedWorkspaceName).toBe('');
     });
@@ -322,7 +325,7 @@ describe('WizardStore', () => {
       expect(store.session.selectedWorkspaceName).toBe('Prod');
     });
 
-    it('setOrgAndWorkspace brands non-empty workspace ids', () => {
+    it('setOrgAndWorkspace brands non-empty ids', () => {
       const store = createStore();
       store.setOrgAndWorkspace(
         { id: 'org-1', name: 'Acme' },
@@ -331,6 +334,7 @@ describe('WizardStore', () => {
         { persist: false },
       );
       // Branded value is structurally still the input string at runtime.
+      expect(store.session.selectedOrgId).toBe('org-1');
       expect(store.session.selectedWorkspaceId).toBe('ws-42');
     });
 

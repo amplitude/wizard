@@ -650,11 +650,14 @@ export class WizardStore {
   ): void {
     const { persist = true } = options;
 
-    this.$session.setKey('selectedOrgId', org.id);
-    this.$session.setKey('selectedOrgName', org.name);
     // Callers (e.g. AuthScreen "Start Over", stale-org clear, create-project
-    // fallback) pass `{ id: '', name: '' }` to reset session state. An empty
-    // string fails `WorkspaceIdSchema`'s `min(1)` check, so collapse to null.
+    // fallback) pass `{ id: '', name: '' }` to reset session state.
+    // - `selectedOrgId` is `string | null`, so collapse `''` -> `null` to keep
+    //   `isAuthenticated` honest (an empty org id is not a real org).
+    // - `selectedWorkspaceId` is branded; an empty string fails
+    //   `WorkspaceIdSchema`'s `min(1)` check, so likewise collapse to null.
+    this.$session.setKey('selectedOrgId', org.id || null);
+    this.$session.setKey('selectedOrgName', org.name);
     this.$session.setKey(
       'selectedWorkspaceId',
       workspace.id ? toWorkspaceId(workspace.id) : null,
