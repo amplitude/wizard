@@ -2410,6 +2410,7 @@ void yargs(hideBin(process.argv))
               const { jsonOutput } = resolveMode({
                 json: argv.json as boolean | undefined,
                 human: argv.human as boolean | undefined,
+                agent: argv.agent as boolean | undefined,
                 requireExplicitWrites: true,
                 isTTY: Boolean(process.stdout.isTTY),
               });
