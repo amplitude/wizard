@@ -7,7 +7,15 @@ import {
   RunPhase,
   McpOutcome,
 } from '../store.js';
-import { vi, describe, it, expect, type Mock, beforeEach } from 'vitest';
+import {
+  vi,
+  describe,
+  it,
+  expect,
+  type Mock,
+  beforeEach,
+  afterAll,
+} from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -54,6 +62,14 @@ const wizardCaptureMock = analytics.wizardCapture as Mock;
 describe('WizardStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+  afterAll(() => {
+    // Clean up the per-store tmpdirs accumulated by createStore() so the
+    // suite doesn't leak directories into $TMPDIR across runs.
+    for (const dir of createdDirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    createdDirs.length = 0;
   });
   // ── Construction ─────────────────────────────────────────────────
 
