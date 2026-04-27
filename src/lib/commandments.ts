@@ -25,7 +25,7 @@ const WIZARD_COMMANDMENTS = [
 
   'Do not spawn subagents unless explicitly instructed to do so.',
 
-  'Use the TodoWrite tool to track your progress. Create a todo list at the start describing the high-level areas of work, mark each as in_progress when you begin it, and completed when done.',
+  'Use the TodoWrite tool to track your progress. Create the FULL todo list AT THE START describing every high-level area of work you expect to do during this run (SDK install, env vars, event plan, instrumentation, dashboard, setup report, etc.). Then only mark items as in_progress / completed — do NOT add new top-level todos mid-run except in genuinely unforeseen circumstances. The wizard renders this list as a "X / Y tasks complete" progress bar in the user-facing UI; growing the denominator from 5 to 8 to 12 over the course of the run looks like the wizard is broken and confusing. Plan once, execute, and only adjust the list when a real surprise forces it.',
 
   `After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.
 
