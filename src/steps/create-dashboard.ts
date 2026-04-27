@@ -107,17 +107,36 @@ export async function createDashboardStep(
   const durationMs = Date.now() - startedAt;
 
   if (!result) {
-    spinner.stop(
-      unexpectedError
-        ? 'Dashboard step failed — skipping'
-        : 'Dashboard step timed out — skipping',
-    );
-    ui.log.warn(
-      'Amplitude is configured, but the wizard could not create a starter dashboard within 90 seconds. Open app.amplitude.com to create one manually.',
-    );
+    // Distinguish three failure modes for accurate user-visible messaging:
+    // - unexpected throw (e.g. SDK module load)
+    // - hard timeout (we hit the 90s ceiling)
+    // - MCP/agent returned null quickly (parse error, empty output, session
+    //   handshake refused, etc.)
+    let spinnerMessage: string;
+    let warnMessage: string;
+    let reason: string;
+    if (unexpectedError) {
+      spinnerMessage = 'Dashboard step failed — skipping';
+      warnMessage =
+        'Amplitude is configured, but the wizard hit an unexpected error creating a starter dashboard. Open app.amplitude.com to create one manually.';
+      reason = 'unexpected error';
+    } else if (durationMs >= DASHBOARD_TIMEOUT_MS) {
+      spinnerMessage = 'Dashboard step timed out — skipping';
+      warnMessage = `Amplitude is configured, but the wizard could not create a starter dashboard within ${
+        DASHBOARD_TIMEOUT_MS / 1000
+      } seconds. Open app.amplitude.com to create one manually.`;
+      reason = 'timeout';
+    } else {
+      spinnerMessage = 'Dashboard step skipped';
+      warnMessage =
+        'Amplitude is configured, but the wizard could not create a starter dashboard. Open app.amplitude.com to create one manually.';
+      reason = 'mcp error or unparseable response';
+    }
+    spinner.stop(spinnerMessage);
+    ui.log.warn(warnMessage);
     analytics.wizardCapture('dashboard failed', {
       integration,
-      reason: unexpectedError ? 'unexpected error' : 'timeout or mcp error',
+      reason,
       'duration ms': durationMs,
     });
     return;
