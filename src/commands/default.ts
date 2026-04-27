@@ -405,11 +405,12 @@ export const defaultCommand: CommandModule = {
 
           // Load event plan from a previous run (if it exists) so the
           // Events tab is available immediately on returning runs.
-          // Dynamic-import keeps the Claude Agent SDK out of bin.ts load.
+          // Import from the lightweight parser module (not agent-interface)
+          // so we don't pull in the Claude Agent SDK / UI singleton here.
           try {
             const fs = await import('fs');
             const { parseEventPlanContent } = await import(
-              '../lib/agent-interface.js'
+              '../lib/event-plan-parser.js'
             );
             const evtPath = resolve(
               session.installDir,
