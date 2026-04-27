@@ -984,7 +984,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
             name: z
               .string()
               .describe(
-                'Short lowercase event name using spaces for separators, e.g. "user signed up", "product added to cart", "search performed". This is displayed as a bold label — keep it concise (2-5 words). Do NOT put descriptions or file paths here.',
+                'Event name in Title Case following [Noun] [Past-Tense Verb] pattern, e.g. "User Signed Up", "Product Added To Cart", "Search Performed". This is displayed as a bold label — keep it concise (2-5 words). Do NOT put descriptions or file paths here.',
               ),
             description: z
               .string()
