@@ -1638,7 +1638,7 @@ export async function runAgent(
       dashboardWatcher = fs.watch(
         agentConfig.workingDirectory,
         (_event, filename) => {
-          if (filename === '.amplitude-dashboard.json') {
+          if (filename === '.amplitude-dashboard.json' || filename === null) {
             readDashboardFile();
           }
         },
