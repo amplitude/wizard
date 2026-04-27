@@ -23,7 +23,7 @@ succeeds. Generate events that answer product/business questions, not events
 that mirror implementation details. Aim for **breadth and quality** — a
 downstream skill will narrow the list.
 
-Read the `taxonomy` skill at `../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md` to understand core
+Read the `taxonomy` skill at `../taxonomy/SKILL.md` to understand core
 analytics philosophy and naming standards.
 
 ---
