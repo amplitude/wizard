@@ -99,6 +99,13 @@ describe('LogViewer snapshots', () => {
 
   it('renders the missing-log fallback state', async () => {
     const filePath = path.join(tempDir, 'missing.log');
-    await expect(renderFrame(filePath)).resolves.toMatchSnapshot();
+    // Mask the resolved tempdir path so the snapshot is stable across runs.
+    // The viewer prints the absolute path under the placeholder so users
+    // can debug a hardcoded-vs-configured path mismatch — that's the
+    // diagnostic value we care about — but the exact bytes change on
+    // every test run, so we sub a stable token before snapshotting.
+    const frame = await renderFrame(filePath);
+    const masked = frame.replace(filePath, '<TEMP>/missing.log');
+    expect(masked).toMatchSnapshot();
   });
 });
