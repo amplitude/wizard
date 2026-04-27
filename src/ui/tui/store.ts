@@ -477,9 +477,14 @@ export class WizardStore {
     if (fields.orgName !== undefined)
       this.$session.setKey('selectedOrgName', fields.orgName);
     if (fields.workspaceId !== undefined)
+      // Mirror setOrgAndWorkspace: collapse empty strings to null instead of
+      // throwing in WorkspaceIdSchema's `min(1)` check. No current caller
+      // passes an empty string (CreateProjectScreen omits workspaceId,
+      // DataIngestionCheckScreen reads from API responses), but keeping the
+      // guard consistent across both write paths prevents future regressions.
       this.$session.setKey(
         'selectedWorkspaceId',
-        toWorkspaceId(fields.workspaceId),
+        fields.workspaceId ? toWorkspaceId(fields.workspaceId) : null,
       );
     if (fields.workspaceName !== undefined)
       this.$session.setKey('selectedWorkspaceName', fields.workspaceName);

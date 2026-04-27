@@ -305,6 +305,23 @@ describe('WizardStore', () => {
       expect(store.session.selectedWorkspaceName).toBe('');
     });
 
+    it('restoreSessionIds clears selectedWorkspaceId when called with empty workspace id', () => {
+      // Defense-in-depth: keep restoreSessionIds consistent with
+      // setOrgAndWorkspace so neither write path throws on empty input.
+      const store = createStore();
+      expect(() =>
+        store.restoreSessionIds({ workspaceId: '', workspaceName: '' }),
+      ).not.toThrow();
+      expect(store.session.selectedWorkspaceId).toBeNull();
+    });
+
+    it('restoreSessionIds brands non-empty workspace ids', () => {
+      const store = createStore();
+      store.restoreSessionIds({ workspaceId: 'ws-77', workspaceName: 'Prod' });
+      expect(store.session.selectedWorkspaceId).toBe('ws-77');
+      expect(store.session.selectedWorkspaceName).toBe('Prod');
+    });
+
     it('setOrgAndWorkspace brands non-empty workspace ids', () => {
       const store = createStore();
       store.setOrgAndWorkspace(
