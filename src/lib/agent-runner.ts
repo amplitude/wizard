@@ -960,9 +960,9 @@ STEP 6: Add event tracking to this project using the instrumentation skills.
    - Call load_skill_menu with category "instrumentation" to see available instrumentation skills.
    - Install the "add-analytics-instrumentation" skill using install_skill.
    - Load the installed skill's SKILL.md file to understand the workflow.
-   - Follow the skill's workflow using the "File / Directory" input type: analyze the project's main source directory to discover and prioritize candidate events that should be instrumented.
-   - The skill produces a concrete tracking plan with priority labels (1 / 2 / 3) and exact file locations. The skill's own instructions narrow execution to priority-3 by default — IGNORE that narrowing for the wizard run.
-   - Implement the tracking calls for **all priority-3 (critical) AND all priority-2 (useful) events** identified by the skill, plus any events the user explicitly requests via confirm_event_plan feedback. Override the skill's "priority-3 only" default — the wizard run is broader by design. Do not silently drop events to keep the plan small. If the user says "also add X, Y, Z" or proposes 8 events themselves via the feedback loop, instrument every one of them — even if the priority is 1 or unlisted. The only events you should ever exclude from the proposed plan are ones already covered by Autocapture or ones that would duplicate an event the project already instruments. Err on the side of MORE events, not fewer — the user can always delete events later, but undiscovered surfaces are far more expensive to find and instrument after the fact.
+   - Follow the skill's workflow using the "File / Directory" input type: analyze the project's main source directory to discover user-facing features and surfaces that should be instrumented.
+   - The skill will guide you through discovering candidate events, filtering to the most critical ones, and producing a concrete tracking plan with exact file locations and tracking code.
+   - Implement the tracking calls for all priority-3 (critical) events identified by the skill.
 
 Important: Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager the project uses. Do not manually search for lockfiles or config files. Always install packages as a background task. Don't await completion; proceed with other work immediately after starting the installation. You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
 
