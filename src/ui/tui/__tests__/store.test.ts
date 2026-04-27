@@ -287,6 +287,36 @@ describe('WizardStore', () => {
       expect(store.session.frameworkContext['srcDir']).toBe('src');
     });
 
+    it('setOrgAndWorkspace clears selectedWorkspaceId when called with empty workspace id', () => {
+      // Regression: AuthScreen "Start Over", stale-org clear, and the
+      // create-project fallback all pass `{ id: '', name: '' }` to reset
+      // session state. Calling `toWorkspaceId('')` would throw because
+      // WorkspaceIdSchema requires `min(1)` — collapse to null instead.
+      const store = createStore();
+      expect(() =>
+        store.setOrgAndWorkspace(
+          { id: '', name: '' },
+          { id: '', name: '' },
+          '/tmp/no-such-dir',
+          { persist: false },
+        ),
+      ).not.toThrow();
+      expect(store.session.selectedWorkspaceId).toBeNull();
+      expect(store.session.selectedWorkspaceName).toBe('');
+    });
+
+    it('setOrgAndWorkspace brands non-empty workspace ids', () => {
+      const store = createStore();
+      store.setOrgAndWorkspace(
+        { id: 'org-1', name: 'Acme' },
+        { id: 'ws-42', name: 'Amplitude' },
+        '/tmp/no-such-dir',
+        { persist: false },
+      );
+      // Branded value is structurally still the input string at runtime.
+      expect(store.session.selectedWorkspaceId).toBe('ws-42');
+    });
+
     it('every setter emits exactly one change event', () => {
       const store = createStore();
       const cb = vi.fn();

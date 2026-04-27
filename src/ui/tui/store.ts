@@ -647,7 +647,13 @@ export class WizardStore {
 
     this.$session.setKey('selectedOrgId', org.id);
     this.$session.setKey('selectedOrgName', org.name);
-    this.$session.setKey('selectedWorkspaceId', toWorkspaceId(workspace.id));
+    // Callers (e.g. AuthScreen "Start Over", stale-org clear, create-project
+    // fallback) pass `{ id: '', name: '' }` to reset session state. An empty
+    // string fails `WorkspaceIdSchema`'s `min(1)` check, so collapse to null.
+    this.$session.setKey(
+      'selectedWorkspaceId',
+      workspace.id ? toWorkspaceId(workspace.id) : null,
+    );
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
     // Extract the Amplitude app ID from the lowest-rank environment.
