@@ -2,9 +2,22 @@ import axios from 'axios';
 import { IS_DEV, WIZARD_USER_AGENT } from '../lib/constants';
 import type { CloudRegion } from './types';
 
+/**
+ * Resolve the Amplitude data ingestion host for a given region.
+ *
+ * This is the URL the user's Amplitude SDK targets — it MUST always be a
+ * real Amplitude ingestion endpoint (or an explicit override). We never
+ * substitute the wizard's local LLM-gateway port here, even in dev:
+ * dev contributors who write `.env.local` or a setup report against a
+ * test app would otherwise leak `localhost:8010` into shared output.
+ *
+ * Override with `AMPLITUDE_WIZARD_INGESTION_HOST` for advanced cases
+ * (e.g. pointing the wizard at a local Amplitude proxy).
+ */
 export const getHostFromRegion = (region: CloudRegion) => {
-  if (IS_DEV) {
-    return 'http://localhost:8010';
+  const override = process.env.AMPLITUDE_WIZARD_INGESTION_HOST;
+  if (override) {
+    return override;
   }
 
   if (region === 'eu') {

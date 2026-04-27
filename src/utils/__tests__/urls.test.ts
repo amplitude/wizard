@@ -1,5 +1,9 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { getCloudUrlFromRegion, getLlmGatewayUrlFromHost } from '../urls.js';
+import {
+  getCloudUrlFromRegion,
+  getHostFromRegion,
+  getLlmGatewayUrlFromHost,
+} from '../urls.js';
 
 // ── getCloudUrlFromRegion ─────────────────────────────────────────────────────
 
@@ -10,6 +14,49 @@ describe('getCloudUrlFromRegion', () => {
 
   it('returns US cloud URL for us region', () => {
     expect(getCloudUrlFromRegion('us')).toBe('https://app.amplitude.com');
+  });
+});
+
+// ── getHostFromRegion ─────────────────────────────────────────────────────────
+
+describe('getHostFromRegion', () => {
+  const originalIngestionHost = process.env.AMPLITUDE_WIZARD_INGESTION_HOST;
+  const originalNodeEnv = process.env.NODE_ENV;
+
+  afterEach(() => {
+    if (originalIngestionHost === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_INGESTION_HOST;
+    } else {
+      process.env.AMPLITUDE_WIZARD_INGESTION_HOST = originalIngestionHost;
+    }
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
+    }
+  });
+
+  it('returns the US prod ingestion host for us region', () => {
+    delete process.env.AMPLITUDE_WIZARD_INGESTION_HOST;
+    expect(getHostFromRegion('us')).toBe('https://api2.amplitude.com');
+  });
+
+  it('returns the EU prod ingestion host for eu region', () => {
+    delete process.env.AMPLITUDE_WIZARD_INGESTION_HOST;
+    expect(getHostFromRegion('eu')).toBe('https://api.eu.amplitude.com');
+  });
+
+  it('never returns a localhost URL even when NODE_ENV=development', () => {
+    delete process.env.AMPLITUDE_WIZARD_INGESTION_HOST;
+    process.env.NODE_ENV = 'development';
+    expect(getHostFromRegion('us')).not.toContain('localhost');
+    expect(getHostFromRegion('eu')).not.toContain('localhost');
+  });
+
+  it('AMPLITUDE_WIZARD_INGESTION_HOST overrides both regions', () => {
+    process.env.AMPLITUDE_WIZARD_INGESTION_HOST = 'https://proxy.example.com';
+    expect(getHostFromRegion('us')).toBe('https://proxy.example.com');
+    expect(getHostFromRegion('eu')).toBe('https://proxy.example.com');
   });
 });
 
