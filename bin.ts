@@ -1588,14 +1588,17 @@ void yargs(hideBin(process.argv))
                 })) {
                   tui.store.addDiscoveredFeature(f);
                 }
-                // If discovery turned up no opt-in features at all, skip
-                // the FeatureOptIn picker entirely. Session Replay and
+                // No need to imperatively "skip when empty" — the
+                // FeatureOptIn flow entry's `show` predicate already
+                // returns false when no opt-in feature is discovered,
+                // so the screen is bypassed naturally and re-evaluated
+                // every time discovery re-runs (e.g. after the user
+                // manually picks an integration). Session Replay and
                 // Guides & Surveys remain opt-IN (default-off in the
-                // picker) — they're not auto-enabled even for unified-SDK
-                // web frameworks. Recording sessions and showing surveys
-                // to users is a privacy decision the developer must make
-                // explicitly, not one we can silently default on.
-                tui.store.skipFeatureOptInIfEmpty();
+                // picker) — they're not auto-enabled even for
+                // unified-SDK web frameworks. Recording sessions and
+                // showing surveys is a privacy decision the developer
+                // must make explicitly.
               };
               runDiscovery();
 

@@ -727,28 +727,6 @@ export class WizardStore {
   }
 
   /**
-   * Skip the FeatureOptIn picklist when no opt-in features were discovered
-   * for the current integration. Pure session bookkeeping — no features
-   * are enabled here.
-   *
-   * Session Replay and Guides & Surveys are intentionally OPT-IN, not
-   * opt-out: the picker shows them default-off and the user must
-   * explicitly check them. SR in particular is a privacy / DPA decision
-   * that should never ship into production code by silent default.
-   * See `skipPicklistIfNoOptIns` in feature-discovery.ts for the
-   * full rationale.
-   */
-  skipFeatureOptInIfEmpty(): void {
-    const hasOptIn = this.session.discoveredFeatures.some(
-      (f): f is AdditionalFeature => OPT_IN_DISCOVERED_FEATURES.has(f),
-    );
-    if (!hasOptIn) {
-      this.$session.setKey('optInFeaturesComplete', true);
-      this.emitChange();
-    }
-  }
-
-  /**
    * Confirm the FeatureOptIn picklist. Enqueues each selected feature
    * via enableFeature() and marks the screen complete so the flow advances.
    *

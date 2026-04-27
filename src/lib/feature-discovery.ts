@@ -140,32 +140,3 @@ export function autoEnableOptInFeatures(
 
   session.optInFeaturesComplete = true;
 }
-
-/**
- * Skip the FeatureOptIn picklist when no opt-in features were discovered
- * for this project. Pure session bookkeeping — no features are enabled
- * (the picker handles enabling whatever the user explicitly chose).
- *
- * Why this exists: Session Replay and Guides & Surveys are intentionally
- * OPT-IN, not opt-out. We previously auto-enabled both for unified-SDK
- * web frameworks on the theory that "the unified SDK already includes
- * them, so there's no real choice." That's correct technically, but
- * Amplitude wants users to make an explicit, informed call about
- * recording sessions and showing surveys before either ships into
- * production code. Auto-enabling SR is also a privacy / DPA decision
- * that should not be made silently on the user's behalf.
- *
- * Returns true when the picklist can be skipped entirely (no opt-in
- * features at all). Returns false when at least one opt-in feature is
- * present and warrants the picker.
- */
-export function skipPicklistIfNoOptIns(session: WizardSession): boolean {
-  const hasOptIn = session.discoveredFeatures.some(
-    (f) => discoveredToAdditional(f) !== null,
-  );
-  if (!hasOptIn) {
-    session.optInFeaturesComplete = true;
-    return true;
-  }
-  return false;
-}
