@@ -133,13 +133,23 @@ describe('LogViewer snapshots', () => {
 
   it('renders the missing-log fallback state', async () => {
     const filePath = path.join(tempDir, 'missing.log');
-    // Mask the resolved tempdir path so the snapshot is stable across runs.
-    // The viewer prints the absolute path under the placeholder so users
-    // can debug a hardcoded-vs-configured path mismatch — that's the
-    // diagnostic value we care about — but the exact bytes change on
-    // every test run, so we sub a stable token before snapshotting.
     const frame = await renderFrame(filePath);
-    const masked = frame.replace(filePath, '<TEMP>/missing.log');
+    // Mask the resolved tempdir path so the snapshot is stable across
+    // platforms. The viewer prints the absolute path under the
+    // placeholder so users can debug a hardcoded-vs-configured mismatch
+    // — that's the diagnostic value we care about — but the exact bytes
+    // vary by tmpdir convention (`/var/folders/...` on macOS is much
+    // longer than `/tmp/...` on Linux CI) and the LogViewer truncates
+    // long paths to fit the 80-column terminal. A literal
+    // `frame.replace(filePath, ...)` only matches the unwrapped path,
+    // which silently no-ops on macOS and breaks the snapshot in CI.
+    //
+    // Regex-mask the rendered "path:" line instead so the snapshot is
+    // platform-agnostic.
+    const masked = frame.replace(
+      /^(\s*\d+\s+path:)\s+\S.*$/m,
+      '$1 <TEMP>/missing.log',
+    );
     expect(masked).toMatchSnapshot();
   });
 });

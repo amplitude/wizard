@@ -30,7 +30,7 @@ exports[`LogViewer snapshots > renders the missing-log fallback state 1`] = `
 " LIVE FOLLOW                                                           line 1/4 · col 1 · no errors
  ›  1 Waiting for the agent to start writing logs…
     2
-    3 path: /var/folders/h2/335_bvtx7tlbbfy_r97_krd00000gn/T/wizard-log-viewer-
+    3 path: <TEMP>/missing.log
     4 (file is created the first time the agent flushes a log line)
 
 
