@@ -206,6 +206,88 @@ export function clearStoredCredentials(configPath?: string): void {
   writeConfig({}, configPath);
 }
 
+// ── Wizard-scoped settings namespace ──────────────────────────────────
+//
+// `~/.ampli.json` is shared with the ampli CLI; reserved keys at the top
+// level are owned by ampli (User-*, etc.). Wizard-only settings live under
+// the `wizard` key so we never collide with ampli's schema.
+
+const WizardNamespaceSchema = z
+  .object({
+    lastUsedOrgId: z.string().optional(),
+    lastUsedWorkspaceId: z.string().optional(),
+    // Matches `selectedAppId` on the wizard session — both refer to the
+    // numeric Amplitude app/environment id. Keep the terminology in sync
+    // so a future caller doesn't reintroduce the retired `project` term.
+    lastUsedAppId: z.string().optional(),
+  })
+  .passthrough();
+
+type WizardNamespace = z.infer<typeof WizardNamespaceSchema>;
+
+function readWizardNamespace(configPath?: string): WizardNamespace {
+  const config = readConfig(configPath);
+  const parsed = WizardNamespaceSchema.safeParse(config['wizard'] ?? {});
+  return parsed.success ? parsed.data : {};
+}
+
+function writeWizardNamespace(
+  next: WizardNamespace,
+  configPath?: string,
+): void {
+  const config = readConfig(configPath);
+  config['wizard'] = next;
+  writeConfig(config, configPath);
+}
+
+/**
+ * Returns the last-used org/workspace/app selection triple. Each field is
+ * individually optional — a user who has never had a workspace picked can
+ * still have an orgId from an org-only run.
+ *
+ * Field naming matches the canonical session shape (`selectedAppId`,
+ * `selectedWorkspaceId`, `selectedOrgId`) so callers can spread directly
+ * into the picker pre-focus logic without re-keying.
+ */
+export function getLastUsedSelection(configPath?: string): {
+  orgId?: string;
+  workspaceId?: string;
+  appId?: string;
+} {
+  const ns = readWizardNamespace(configPath);
+  return {
+    orgId: ns.lastUsedOrgId,
+    workspaceId: ns.lastUsedWorkspaceId,
+    appId: ns.lastUsedAppId,
+  };
+}
+
+/**
+ * Persist the last-used selection triple. Pass undefined to clear a level
+ * (e.g. when the user selects a different org, the old workspace/app
+ * shouldn't pre-focus the picker anymore). Other wizard-scoped settings
+ * inside the `wizard` namespace are preserved.
+ */
+export function storeLastUsedSelection(
+  selection: {
+    orgId?: string;
+    workspaceId?: string;
+    appId?: string;
+  },
+  configPath?: string,
+): void {
+  const current = readWizardNamespace(configPath);
+  writeWizardNamespace(
+    {
+      ...current,
+      lastUsedOrgId: selection.orgId,
+      lastUsedWorkspaceId: selection.workspaceId,
+      lastUsedAppId: selection.appId,
+    },
+    configPath,
+  );
+}
+
 /**
  * Updates the stored user's zone in ~/.ampli.json, migrating the entry to the
  * new zone key. Returns the updated user, or undefined if no user is stored.
