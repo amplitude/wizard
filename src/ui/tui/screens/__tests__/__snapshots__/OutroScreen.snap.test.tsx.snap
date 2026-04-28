@@ -6,6 +6,9 @@ exports[`OutroScreen snapshots > renders the cancel state 1`] = `
 
   Setup cancelled.
 
+  Resume later
+  Pick up where you left off — run npx @amplitude/wizard in this directory anytime.
+
   Manual setup: https://amplitude.com/docs/get-started/quickstart
 
   Press any key to exit

@@ -285,6 +285,22 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.body}>{outroData.message}</Text>
             </Box>
           )}
+          {/* Resume-later note — closes the cancel outro on a forward-
+              looking beat instead of a dead stop. The wizard is checkpoint-
+              aware (session-checkpoint.ts) so re-running in the same dir
+              picks up region/org/framework selections automatically. */}
+          <Box marginTop={1} flexDirection="column">
+            <Text color={Colors.secondary} bold>
+              Resume later
+            </Text>
+            <Text color={Colors.body}>
+              Pick up where you left off — run{' '}
+              <Text bold color={Colors.heading}>
+                npx @amplitude/wizard
+              </Text>{' '}
+              in this directory anytime.
+            </Text>
+          </Box>
           {outroData.docsUrl && (
             <Box marginTop={1}>
               <Text color={Colors.secondary}>

@@ -55,6 +55,11 @@ describe('OutroScreen snapshots', () => {
       },
     });
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    // Resume-later guidance is non-negotiable — the cancel outro must
+    // close on a forward-looking beat, not a dead stop. Asserting
+    // explicitly so a future copy refactor can't quietly drop it.
+    expect(frame).toContain('Resume later');
+    expect(frame).toContain('npx @amplitude/wizard');
     expect(frame).toMatchSnapshot();
   });
 });
