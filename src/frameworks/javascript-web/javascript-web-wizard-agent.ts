@@ -14,6 +14,7 @@ import {
   type JavaScriptContext,
 } from './utils';
 import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 
 export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   metadata: {
@@ -117,7 +118,8 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
         `Has TypeScript: ${context.hasTypeScript ? 'yes' : 'no'}`,
         `Framework docs ID: js (use amplitude://docs/frameworks/js for documentation if available)`,
         `Project type: Generic JavaScript/TypeScript application (no specific framework detected)`,
-        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+        BROWSER_UNIFIED_SDK_PROMPT_LINE,
+        `Initialize from the project's main entry point (e.g. src/main.ts, src/index.ts, or wherever the app boots) before any tracked user code runs. For static-HTML / no-bundler projects, the CDN <script> tag flow is appropriate instead — but the npm path is preferred whenever a build pipeline exists.`,
       ];
 
       if (context.hasBundler) {

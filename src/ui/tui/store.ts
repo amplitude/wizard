@@ -25,7 +25,6 @@ import { resolveZone } from '../../lib/zone-resolution.js';
 import {
   AdditionalFeature,
   McpOutcome,
-  OPT_IN_DISCOVERED_FEATURES,
   SlackOutcome,
   RunPhase,
 } from './session-constants.js';
@@ -727,29 +726,31 @@ export class WizardStore {
   }
 
   /**
-   * Confirm the FeatureOptIn picklist. Enqueues each selected feature
-   * via enableFeature() and marks the screen complete so the flow advances.
+   * Auto-enable every opt-in addon (Session Replay, Guides & Surveys,
+   * LLM when the feature flag is on) that's been discovered for the
+   * current integration. Routes through `enableFeature` so React
+   * subscribers get notified and per-feature analytics fire.
    *
-   * `source` distinguishes interactive picklist confirms from the
-   * non-interactive auto-enable paths (CI, agent mode) so funnels stay
-   * separable.
+   * No opt-in picker — the unified browser SDK ships with all three
+   * addons in one package. Quota / privacy concerns are surfaced via
+   * per-option inline comments in the agent-generated init code, which
+   * users can comment out individually — a clearer opt-out surface
+   * than a one-shot picker.
    */
-  confirmFeatureOptIns(
-    selected: AdditionalFeature[],
-    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
+  autoEnableInlineAddons(
+    source: 'auto-tui' | 'auto-ci' | 'auto-agent' = 'auto-tui',
   ): void {
-    const offered = this.session.discoveredFeatures.filter(
-      (f): f is AdditionalFeature => OPT_IN_DISCOVERED_FEATURES.has(f),
-    );
-    const deselected = offered.filter((f) => !selected.includes(f));
-    analytics.wizardCapture('feature opt-in confirmed', {
-      offered,
-      selected,
-      deselected,
-      source,
-    });
-    for (const feature of selected) {
-      this.enableFeature(feature, source);
+    for (const feature of this.session.discoveredFeatures) {
+      let additional: AdditionalFeature | null = null;
+      if (feature === ('session_replay' as AdditionalFeature)) {
+        additional = AdditionalFeature.SessionReplay;
+      } else if (feature === ('llm' as AdditionalFeature)) {
+        additional = AdditionalFeature.LLM;
+      } else if (feature === ('engagement' as AdditionalFeature)) {
+        additional = AdditionalFeature.Engagement;
+      }
+      if (!additional) continue;
+      this.enableFeature(additional, source);
     }
     this.$session.setKey('optInFeaturesComplete', true);
     this.emitChange();
@@ -789,7 +790,7 @@ export class WizardStore {
    */
   enableFeature(
     feature: AdditionalFeature,
-    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
+    source: 'picklist' | 'auto-tui' | 'auto-ci' | 'auto-agent' = 'picklist',
   ): void {
     // Gate LLM analytics behind the wizard-llm-analytics feature flag
     if (feature === AdditionalFeature.LLM) {

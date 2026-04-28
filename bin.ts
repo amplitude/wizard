@@ -1596,6 +1596,16 @@ void yargs(hideBin(process.argv))
                 })) {
                   tui.store.addDiscoveredFeature(f);
                 }
+                // Auto-enable every discovered opt-in addon
+                // (Session Replay + Guides & Surveys for unified-SDK
+                // web; LLM when the feature flag is on). Matches the
+                // out-of-box experience of the data-setup npm snippet
+                // and avoids burying first-time users under a privacy /
+                // quota picker that most don't have context to answer.
+                // Per-option inline comments in the generated init
+                // code give users a clear, code-level opt-out surface
+                // for any specific feature they want to disable.
+                tui.store.autoEnableInlineAddons('auto-tui');
               };
               runDiscovery();
 

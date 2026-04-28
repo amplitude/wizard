@@ -10,6 +10,7 @@ import {
 } from '../../utils/package-json';
 import { tryGetPackageJson } from '../../utils/setup-utils';
 import { getUI } from '../../ui';
+import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import {
   getReactRouterMode,
   getReactRouterModeName,
@@ -197,7 +198,8 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
       return [
         `Router mode: ${modeName}`,
         `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
-        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+        BROWSER_UNIFIED_SDK_PROMPT_LINE,
+        `Initialize from the project's main entry point (typically src/main.tsx, src/index.tsx, or root.tsx for React Router 7 framework mode) before <RouterProvider /> mounts so the SDK is available on the first render.`,
       ];
     },
   },

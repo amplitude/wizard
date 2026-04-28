@@ -10,6 +10,7 @@ import {
 } from '../../utils/package-json';
 import { tryGetPackageJson } from '../../utils/setup-utils';
 import { createVersionBucket } from '../../utils/semver';
+import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 
 const FILE_SCAN_IGNORES = [
   '**/node_modules/**',
@@ -100,7 +101,8 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
       const frameworkId = 'vue';
       return [
         `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
-        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+        BROWSER_UNIFIED_SDK_PROMPT_LINE,
+        `Initialize from the project's main entry point (typically src/main.ts or src/main.js) before app.mount() so the SDK loads alongside your Vue root.`,
       ];
     },
   },
