@@ -15,7 +15,6 @@ import { atomicWriteJSON } from '../utils/atomic-write';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
-import { wrapMcpServerWithSentry } from './observability/index';
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -689,6 +688,178 @@ export function persistEventPlan(
 }
 
 // ---------------------------------------------------------------------------
+// Setup-report fallback writer
+// ---------------------------------------------------------------------------
+
+/**
+ * Information the fallback writer needs to produce a minimal report.
+ * All fields are optional — the writer degrades gracefully when something
+ * isn't available (e.g. the dashboard step never ran, the events file was
+ * never persisted, the framework wasn't detected).
+ */
+export interface FallbackReportContext {
+  /** Project root where the report file lands. Required. */
+  installDir: string;
+  /** Detected integration name (e.g. "nextjs", "vue"). */
+  integration?: string | null;
+  /** Dashboard URL returned by the Amplitude MCP. */
+  dashboardUrl?: string | null;
+  /** Workspace / project name shown in Amplitude UI. */
+  workspaceName?: string | null;
+  /** Environment name (e.g. "production", "development"). */
+  envName?: string | null;
+}
+
+/**
+ * Read the canonical event plan from `.amplitude-events.json` if present.
+ * Returns an empty array on any failure — the fallback writer is best-effort
+ * and a missing / malformed events file just means the report has no events
+ * table, not that the report should be skipped.
+ */
+function readPersistedEventPlan(
+  installDir: string,
+): Array<{ name: string; description: string }> {
+  try {
+    const planPath = path.join(installDir, '.amplitude-events.json');
+    if (!fs.existsSync(planPath)) return [];
+    const raw = fs.readFileSync(planPath, 'utf8');
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter(
+        (e): e is { name: string; description: string } =>
+          typeof e === 'object' &&
+          e !== null &&
+          typeof (e as { name?: unknown }).name === 'string' &&
+          typeof (e as { description?: unknown }).description === 'string',
+      )
+      .map((e) => ({ name: e.name, description: e.description }));
+  } catch (err) {
+    logToFile(
+      `readPersistedEventPlan: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return [];
+  }
+}
+
+/**
+ * Render a minimal Markdown setup report from session state. Exported so
+ * tests can lock down the formatting without going through the filesystem.
+ */
+export function buildFallbackReport(ctx: FallbackReportContext): string {
+  const events = readPersistedEventPlan(ctx.installDir);
+  const lines: string[] = [];
+
+  lines.push('<wizard-report>');
+  lines.push('# Amplitude post-wizard report');
+  lines.push('');
+  lines.push(
+    "_This report was generated automatically by the Amplitude wizard. The agent didn't produce one this run, so the wizard wrote a minimal recap from what it knows._",
+  );
+  lines.push('');
+
+  lines.push('## Integration summary');
+  lines.push('');
+  const summaryStart = lines.length;
+  if (ctx.integration) lines.push(`- **Framework**: ${ctx.integration}`);
+  if (ctx.workspaceName) lines.push(`- **Project**: ${ctx.workspaceName}`);
+  if (ctx.envName) lines.push(`- **Environment**: ${ctx.envName}`);
+  if (lines.length === summaryStart) {
+    lines.push('- _Detected framework not available._');
+  }
+  lines.push('');
+
+  if (events.length > 0) {
+    lines.push('## Instrumented events');
+    lines.push('');
+    lines.push('| Event | Description |');
+    lines.push('| --- | --- |');
+    for (const e of events) {
+      const name = e.name.replace(/\|/g, '\\|');
+      const desc = (e.description || '').replace(/\|/g, '\\|');
+      lines.push(`| \`${name}\` | ${desc} |`);
+    }
+    lines.push('');
+  } else {
+    lines.push('## Instrumented events');
+    lines.push('');
+    lines.push(
+      '_No event plan was persisted. If this is unexpected, re-run the wizard or check `.amplitude-events.json` in your project root._',
+    );
+    lines.push('');
+  }
+
+  lines.push('## Analytics dashboard');
+  lines.push('');
+  if (ctx.dashboardUrl) {
+    lines.push(`Open your dashboard: ${ctx.dashboardUrl}`);
+  } else {
+    lines.push(
+      "_The wizard didn't capture a dashboard URL. You can build one from your events at https://app.amplitude.com._",
+    );
+  }
+  lines.push('');
+
+  lines.push('## Next steps');
+  lines.push('');
+  lines.push(
+    '- Trigger the instrumented user flows in your app and confirm events appear in Amplitude.',
+  );
+  lines.push(
+    '- Set the Amplitude API key in your production environment (deploy platform settings or CI secrets).',
+  );
+  lines.push(
+    '- Re-run `npx @amplitude/wizard` if you want a richer end-of-run report — the agent writes a more detailed version when it reaches the conclude phase.',
+  );
+  lines.push('');
+  lines.push('</wizard-report>');
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+/**
+ * Write `<installDir>/amplitude-setup-report.md` if and only if no report
+ * already exists at that path. Safety net for runs where the agent skipped
+ * the conclude-phase report (model variance, ran out of turns, mid-run
+ * cancel before conclude, etc.). The agent's report is always preferred
+ * when it exists — this function never overwrites it.
+ *
+ * Returns:
+ *   - 'agent-wrote'    — file already existed; we left it alone.
+ *   - 'fallback-wrote' — agent didn't write one; we wrote a stub.
+ *   - 'failed'         — write threw (permissions, disk full, etc.).
+ *
+ * Silent on errors; never throws — the wizard's success path must not be
+ * blocked by a failed report write.
+ */
+export function writeFallbackReportIfMissing(
+  ctx: FallbackReportContext,
+): 'agent-wrote' | 'fallback-wrote' | 'failed' {
+  const reportPath = path.join(ctx.installDir, 'amplitude-setup-report.md');
+  try {
+    if (fs.existsSync(reportPath)) {
+      logToFile(
+        `writeFallbackReportIfMissing: agent already wrote ${reportPath}`,
+      );
+      return 'agent-wrote';
+    }
+    const content = buildFallbackReport(ctx);
+    fs.writeFileSync(reportPath, content, 'utf8');
+    logToFile(
+      `writeFallbackReportIfMissing: wrote stub report to ${reportPath}`,
+    );
+    return 'fallback-wrote';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`writeFallbackReportIfMissing: ${msg}`);
+    return 'failed';
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Server factory
 // ---------------------------------------------------------------------------
 
@@ -1113,7 +1284,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
 
   // -- Assemble server ------------------------------------------------------
 
-  const rawServer = createSdkMcpServer({
+  return createSdkMcpServer({
     name: SERVER_NAME,
     version: '1.0.0',
     tools: [
@@ -1128,12 +1299,6 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       reportStatus,
     ],
   });
-
-  // Wrap with Sentry auto-instrumentation so every wizard-tools call gets a
-  // span in the active trace. No-op when telemetry is disabled — returns
-  // the raw server unchanged. The agent SDK types `createSdkMcpServer` as
-  // returning `unknown`, so we narrow to `object` here for the wrapper.
-  return wrapMcpServerWithSentry(rawServer as object);
 }
 
 /** Tool names exposed by the wizard-tools server, for use in allowedTools */

@@ -63,6 +63,17 @@ CRITICAL — identify wiring.
 
   `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 
+  `After every successful run, you MUST create an \`amplitude-setup-report.md\` file at the project root summarizing what the wizard did. This is a hard requirement — do not skip it, even if you ran out of turns or hit a partial failure earlier in the run. The report is the user-facing recap of the integration; the wizard's outro screen reads from it directly, and without it the user is left with no record of what was changed.
+
+The integration skill you loaded contains a \`basic-integration-1.3-conclude.md\` reference with the canonical format — load and follow it. At minimum the report MUST include:
+  - Integration summary (SDK installed, framework, init location)
+  - Events instrumented (table with event name, description, file path)
+  - Dashboard link (the URL returned by the Amplitude MCP when you created the dashboard)
+  - Environment variable setup notes (what was set, what the user needs to configure for prod)
+  - Next steps the user should take
+
+If you cannot locate the conclude reference, write the report yourself from session knowledge — a slightly thinner report is far better than no report. Wrap the body in \`<wizard-report>...</wizard-report>\` tags so the wizard knows you wrote it intentionally.`,
+
   `Prefer the report_status tool (wizard-tools MCP) for progress updates and fatal error signals. Call report_status with kind="status" for in-progress updates (e.g. "installing SDK", "drafting event plan") — these appear in the wizard's spinner. Call report_status with kind="error" for fatal conditions that halt the run (codes: MCP_MISSING, RESOURCE_MISSING). Legacy [STATUS] / [ERROR-MCP-MISSING] / [ERROR-RESOURCE-MISSING] text markers from older bundled skills are still recognized for backwards compat, but new code should use report_status.`,
 
   ...(DEMO_MODE

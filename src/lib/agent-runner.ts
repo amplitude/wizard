@@ -152,9 +152,11 @@ export async function runAgentWizard(
   // before anything is installed. Idempotent — safe to call on every run.
   // Without this, `git status` after a run is full of wizard scaffolding
   // and `git add .` sweeps it into the user's commits.
-  const { ensureWizardArtifactsIgnored, cleanupWizardArtifacts } = await import(
-    './wizard-tools.js'
-  );
+  const {
+    ensureWizardArtifactsIgnored,
+    cleanupWizardArtifacts,
+    writeFallbackReportIfMissing,
+  } = await import('./wizard-tools.js');
   ensureWizardArtifactsIgnored(session.installDir);
 
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
@@ -187,6 +189,21 @@ export async function runAgentWizard(
   //   - wizardAbort path    → calls process.exit(); this line is never
   //     reached, integration skills + events file stay on disk.
   if (success) {
+    // Safety net: if the agent didn't write `amplitude-setup-report.md`
+    // (model variance, ran out of turns before conclude, hit an error
+    // mid-skill, etc.) the wizard writes a minimal stub so the outro
+    // screen always has something to surface. The fallback never
+    // overwrites an agent-authored report — see
+    // writeFallbackReportIfMissing. Runs BEFORE cleanup so the events
+    // file is still readable.
+    writeFallbackReportIfMissing({
+      installDir: session.installDir,
+      integration: session.integration,
+      dashboardUrl: session.checklistDashboardUrl,
+      workspaceName: session.selectedWorkspaceName,
+      envName: session.selectedEnvName,
+    });
+
     cleanupWizardArtifacts(session.installDir, { onSuccess: true });
   }
 }
