@@ -1,5 +1,46 @@
 # CLI Flows
 
+## Back navigation
+
+Pressing **Esc** on a decision-point screen steps the user back to the
+previous decision so they can change their answer. Implemented declaratively
+via `FlowEntry.revert` callbacks in `src/ui/tui/flows.ts` — each entry that
+supports back-nav describes how to un-complete itself, and the router walks
+backwards to find the most recent revertible entry.
+
+Entries without a `revert` act as a **back-stop wall**:
+
+- **Run** — the agent has executed; backing past it would re-run instrumentation.
+- **Intro** — first screen; nothing to back to.
+
+Entries whose `revert` returns `false` are transparent — the router walks
+through them. Setup uses this to walk past when there are no user-answered
+questions to pop; CreateProject uses this so back-nav from DataSetup lands
+on Auth (not the create-project form).
+
+Per-screen Esc behavior:
+
+| Screen                | Esc action                                                    |
+| --------------------- | ------------------------------------------------------------- |
+| Auth                  | Back → RegionSelect (re-shows region picker, drops creds)     |
+| DataSetup             | Back → Auth (clears org/workspace selection)                  |
+| ActivationOptions     | Back → DataSetup (re-runs activation check)                   |
+| Setup                 | Pops one answered question; if none, walks back further       |
+| Slack                 | Back → DataIngestionCheck or Mcp                              |
+| DataIngestionCheck    | Back → Mcp (`q` is the "I'll come back later" exit)           |
+| CreateProject         | Cancel (existing) — also functions as back to Auth            |
+| FeatureOptIn          | Skip (confirms with no features selected — Esc=skip is the    |
+|                       | one screen that breaks the convention; hint bar makes it      |
+|                       | explicit)                                                     |
+| Intro                 | Cancel wizard (existing)                                      |
+| Outro                 | Close report dialog (existing)                                |
+| RegionSelect / Mcp    | No-op (no revertible step before them)                        |
+
+The `[Esc] Back` hint appears in `KeyHintBar` only when back is actually
+available, so it never lies about what the keystroke will do.
+
+---
+
 ## Slash commands
 
 The CLI keeps a persistent prompt open at all times (like Claude). Slash

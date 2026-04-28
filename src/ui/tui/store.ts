@@ -1057,9 +1057,174 @@ export class WizardStore {
     }
   }
 
-  setFrameworkContext(key: string, value: unknown): void {
+  setFrameworkContext(key: string, value: unknown, autoDetected = false): void {
     const ctx = { ...this.$session.get().frameworkContext, [key]: value };
     this.$session.setKey('frameworkContext', ctx);
+    if (!autoDetected) {
+      // Only track user-answered keys so back-nav can distinguish them
+      // from auto-detected entries. popLastFrameworkContextAnswer returns
+      // false when no user answers remain, letting the router walk back
+      // past Setup transparently.
+      const order = this.$session.get().frameworkContextAnswerOrder;
+      const next = order.filter((k) => k !== key).concat(key);
+      this.$session.setKey('frameworkContextAnswerOrder', next);
+    }
+    this.emitChange();
+  }
+
+  /**
+   * Pop the most recently-answered framework setup question from
+   * `frameworkContext`. Used by SetupScreen and by back-navigation past
+   * FeatureOptIn. Returns `true` if an answer was popped.
+   */
+  popLastFrameworkContextAnswer(): boolean {
+    const session = this.$session.get();
+    const order = session.frameworkContextAnswerOrder;
+    if (order.length === 0) return false;
+    const lastKey = order[order.length - 1];
+    const { [lastKey]: _removed, ...rest } = session.frameworkContext;
+    void _removed;
+    this.$session.setKey('frameworkContext', rest);
+    this.$session.setKey('frameworkContextAnswerOrder', order.slice(0, -1));
+    // Setup is a pre-Run flow entry; if the user's stepping back into Setup
+    // from a post-run state (e.g. via /restart or repeat-run paths) we must
+    // not leave the router short-circuited past Run.
+    this.clearPostRunStateForBackNav();
+    this.emitChange();
+    return true;
+  }
+
+  // ── Back-navigation reverts ────────────────────────────────────
+  // Each helper here un-completes one flow entry. They're invoked via
+  // FlowEntry.revert callbacks from flows.ts during goBack().
+
+  /**
+   * Clear post-Run state so a back-nav into pre-Run territory doesn't
+   * leave the router short-circuited past the agent run / outro.
+   *
+   * Called by every reset helper that lands the user on a screen *before*
+   * the Run entry. Without this, after a back-nav the router would see
+   * `runPhase === Completed` and skip Run (and any post-run flow entries
+   * with completed isComplete predicates), routing the user straight to
+   * stale post-run state.
+   *
+   * `outroData` is also cleared because the OutroKind.Cancel branch in
+   * router.resolve() jumps directly to Outro regardless of pipeline order.
+   *
+   * No-op when there's nothing to clear, so calling it is safe whether or
+   * not the run actually started.
+   */
+  private clearPostRunStateForBackNav(): void {
+    this.$session.setKey('runPhase', RunPhase.Idle);
+    this.$session.setKey('runStartedAt', null);
+    this.$session.setKey('outroData', null);
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+    this.$session.setKey('dataIngestionConfirmed', false);
+    this.$session.setKey('optInFeaturesComplete', false);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('additionalFeatureCurrent', null);
+    this.$session.setKey('additionalFeatureCompleted', []);
+  }
+
+  /**
+   * Revert past the Auth step back to RegionSelect. Region affects the
+   * OAuth host, so we drop pending tokens, the cached org list, and any
+   * resolved credentials so the next pass actually re-authenticates.
+   */
+  resetAuthForRegionChange(): void {
+    this.$session.setKey('region', null);
+    this.$session.setKey('regionForced', true);
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('pendingAuthAccessToken', null);
+    this.$session.setKey('pendingAuthIdToken', null);
+    this.$session.setKey('pendingOrgs', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedWorkspaceId', null);
+    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
+    this.emitChange();
+  }
+
+  /**
+   * Revert past the Auth step back into the org/workspace picker. Keeps
+   * credentials so we don't force a fresh OAuth round-trip — only the
+   * picked identity is cleared.
+   */
+  clearOrgAndWorkspaceSelection(): void {
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedWorkspaceId', null);
+    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', {
+      from: 'data-setup',
+      to: 'auth',
+    });
+    this.emitChange();
+  }
+
+  /** Re-run the activation check on the next visit to DataSetup. */
+  resetActivationCheck(): void {
+    this.$session.setKey('projectHasData', null);
+    this.$session.setKey('activationLevel', 'none');
+    this.$session.setKey('activationOptionsComplete', false);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { to: 'data-setup' });
+    this.emitChange();
+  }
+
+  /** Re-show the activation-options picker. */
+  resetActivationOptions(): void {
+    this.$session.setKey('activationOptionsComplete', false);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { to: 'activation-options' });
+    this.emitChange();
+  }
+
+  /** Re-show the feature opt-in picklist. */
+  resetFeatureOptIn(): void {
+    // Note: clearPostRunStateForBackNav also clears optInFeaturesComplete,
+    // but we keep the explicit set above for clarity since this method's
+    // primary purpose is reverting that flag.
+    this.$session.setKey('optInFeaturesComplete', false);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { to: 'feature-opt-in' });
+    this.emitChange();
+  }
+
+  /** Re-show the MCP install picker. */
+  resetMcp(): void {
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    analytics.wizardCapture('back navigation', { to: 'mcp' });
+    this.emitChange();
+  }
+
+  /** Re-enter the wait-for-events screen. */
+  resetDataIngestion(): void {
+    this.$session.setKey('dataIngestionConfirmed', false);
+    analytics.wizardCapture('back navigation', { to: 'data-ingestion' });
+    this.emitChange();
+  }
+
+  /** Re-show the Slack setup prompt. */
+  resetSlack(): void {
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+    analytics.wizardCapture('back navigation', { to: 'slack' });
     this.emitChange();
   }
 
@@ -1078,6 +1243,33 @@ export class WizardStore {
     return this.router.lastNavDirection;
   }
 
+  /** Whether the user can step back from the current screen. */
+  canGoBack(): boolean {
+    return this.router.canGoBack(this.session);
+  }
+
+  /**
+   * Step back to the previous decision. Returns true if a revert fired.
+   * No-ops (returns false) when the active screen is a back-stop, has no
+   * prior revertible step, or an overlay is currently active.
+   */
+  goBack(): boolean {
+    // Suppress direction/transition in emitChange during reverts so the
+    // single _detectTransition below fires with the correct 'pop' direction.
+    this._reverting = true;
+    const ok = this.router.goBack(this.session, this);
+    this._reverting = false;
+    if (!ok) return false;
+    // router already flipped direction to 'pop'. Bump version + run the
+    // transition hooks so React + analytics observe the move.
+    this.$version.set(this.$version.get() + 1);
+    this._detectTransition();
+    return true;
+  }
+
+  /** True while a revert callback is executing inside goBack(). */
+  private _reverting = false;
+
   // ── Change notification ─────────────────────────────────────────
 
   getVersion(): number {
@@ -1089,9 +1281,13 @@ export class WizardStore {
    * The router re-resolves the active screen on next render.
    */
   emitChange(): void {
-    this.router._setDirection('push');
+    if (!this._reverting) {
+      this.router._setDirection('push');
+    }
     this.$version.set(this.$version.get() + 1);
-    this._detectTransition();
+    if (!this._reverting) {
+      this._detectTransition();
+    }
   }
 
   // ── Overlay navigation ──────────────────────────────────────────
@@ -1180,20 +1376,41 @@ export class WizardStore {
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
-    const incoming = todos.map((t) => ({
-      label: t.content,
-      activeForm: t.activeForm,
-      status: (t.status as TaskStatus) || TaskStatus.Pending,
-      done: (t.status as TaskStatus) === TaskStatus.Completed,
-    }));
+    // Index the previous task list by label so we can preserve
+    // already-completed work across re-plans. Common scenario: an SDK
+    // retry (HTTP 400 / 429) causes the agent to re-emit its TodoWrite
+    // with stale state — tasks that were already ✓ get demoted back to
+    // ◐ or ○. The user sees their progress visibly un-check. We force
+    // monotonic progress: once a task with a given label is completed,
+    // it stays completed even if a later TodoWrite says otherwise.
+    const previousByLabel = new Map(this.$tasks.get().map((t) => [t.label, t]));
 
-    const incomingLabels = new Set(incoming.map((t) => t.label));
+    const incoming = todos.map((t) => {
+      const prev = previousByLabel.get(t.content);
+      let status = (t.status as TaskStatus) || TaskStatus.Pending;
+      let done = status === TaskStatus.Completed;
+      if (prev?.done && !done) {
+        status = TaskStatus.Completed;
+        done = true;
+      }
+      return {
+        label: t.content,
+        activeForm: t.activeForm,
+        status,
+        done,
+      };
+    });
 
-    const retained = this.$tasks
-      .get()
-      .filter((t) => t.done && !incomingLabels.has(t.label));
-
-    this.$tasks.set([...retained, ...incoming]);
+    // Trust the agent's TodoWrite list as authoritative for *which* tasks
+    // exist. We previously retained "orphaned" completed tasks (done but
+    // missing from the new list) on the theory that Claude Code might
+    // compact away history — in practice the agent keeps completed items
+    // and *renames* in-progress ones, and the retention logic surfaced
+    // zombie labels like "Set up env" alongside its renamed successor
+    // "Set up env and install SDK". Trusting the incoming list eliminates
+    // the duplicate; the monotonic guard above protects against the
+    // retry-induced regression case.
+    this.$tasks.set(incoming);
     this.emitChange();
   }
 

@@ -964,7 +964,14 @@ describe('WizardStore', () => {
       });
     });
 
-    it('retains completed tasks not in the incoming list', () => {
+    it('treats incoming todos as the authoritative list (drops orphans)', () => {
+      // Regression: we used to retain `done` tasks the agent stopped
+      // mentioning, on the theory that Claude Code might compact away
+      // history. In practice the agent keeps completed items and *renames*
+      // in-progress ones — so retention surfaced zombie labels (e.g.
+      // "Set up env" alongside its renamed successor "Set up env and
+      // install SDK"). Trusting the incoming list eliminates the
+      // duplicate.
       const store = createStore();
       store.setTasks([
         { label: 'Old done task', status: TaskStatus.Completed, done: true },
@@ -973,13 +980,11 @@ describe('WizardStore', () => {
 
       store.syncTodos([{ content: 'New task', status: 'pending' }]);
 
-      // Old done task is retained, old pending task is dropped
-      expect(store.tasks).toHaveLength(2);
-      expect(store.tasks[0].label).toBe('Old done task');
-      expect(store.tasks[1].label).toBe('New task');
+      expect(store.tasks).toHaveLength(1);
+      expect(store.tasks[0].label).toBe('New task');
     });
 
-    it('does not duplicate completed tasks that appear in both', () => {
+    it('does not duplicate tasks that appear in both old and incoming lists', () => {
       const store = createStore();
       store.setTasks([
         { label: 'Shared task', status: TaskStatus.Completed, done: true },
@@ -987,10 +992,55 @@ describe('WizardStore', () => {
 
       store.syncTodos([{ content: 'Shared task', status: 'completed' }]);
 
-      // Should not have duplicates — incomingLabels includes "Shared task",
-      // so the retained filter excludes it
       expect(store.tasks).toHaveLength(1);
       expect(store.tasks[0].label).toBe('Shared task');
+    });
+
+    it('forces monotonic progress — completed tasks cannot regress', () => {
+      // Regression scenario observed in production: an HTTP 400 SDK retry
+      // causes the agent to re-emit its TodoWrite list with stale state,
+      // demoting tasks that were already completed back to in_progress.
+      // From the user's perspective their progress visibly un-checks.
+      // Once a task hits "completed", subsequent syncs cannot drop it
+      // back to in_progress / pending.
+      const store = createStore();
+      store.setTasks([
+        { label: 'Done', status: TaskStatus.Completed, done: true },
+        { label: 'Active', status: TaskStatus.InProgress, done: false },
+      ]);
+
+      store.syncTodos([
+        { content: 'Done', status: 'in_progress' }, // retry-induced regression
+        { content: 'Active', status: 'in_progress' }, // legitimately still active
+      ]);
+
+      const done = store.tasks.find((t) => t.label === 'Done');
+      expect(done?.status).toBe(TaskStatus.Completed);
+      expect(done?.done).toBe(true);
+
+      const active = store.tasks.find((t) => t.label === 'Active');
+      expect(active?.status).toBe(TaskStatus.InProgress);
+      expect(active?.done).toBe(false);
+    });
+
+    it('still allows new tasks to enter as pending or in_progress', () => {
+      // Sanity: monotonic guard only protects already-completed labels.
+      // Genuinely new tasks should appear in whatever state the agent
+      // declares.
+      const store = createStore();
+      store.setTasks([
+        { label: 'A', status: TaskStatus.Completed, done: true },
+      ]);
+
+      store.syncTodos([
+        { content: 'A', status: 'completed' },
+        { content: 'B', status: 'in_progress' },
+        { content: 'C', status: 'pending' },
+      ]);
+
+      expect(store.tasks).toHaveLength(3);
+      expect(store.tasks[1].status).toBe(TaskStatus.InProgress);
+      expect(store.tasks[2].status).toBe(TaskStatus.Pending);
     });
 
     it('preserves activeForm from incoming todos', () => {
@@ -1221,7 +1271,7 @@ describe('WizardStore', () => {
       expect(store.statusMessages).toEqual(['']);
     });
 
-    it('syncTodos with empty array clears non-completed tasks', () => {
+    it('syncTodos with empty array clears all tasks', () => {
       const store = createStore();
       store.setTasks([
         { label: 'Pending', status: TaskStatus.Pending, done: false },
@@ -1230,10 +1280,8 @@ describe('WizardStore', () => {
 
       store.syncTodos([]);
 
-      // Only the completed task is retained
-      expect(store.tasks).toEqual([
-        { label: 'Done', status: TaskStatus.Completed, done: true },
-      ]);
+      // Authoritative semantics: an empty incoming list means no tasks.
+      expect(store.tasks).toEqual([]);
     });
 
     it('syncTodos with unknown status defaults to Pending', () => {
@@ -1434,6 +1482,115 @@ describe('WizardStore', () => {
         store.signalOutroDismissed();
         store.signalOutroDismissed();
       }).not.toThrow();
+    });
+  });
+
+  // ── Back-navigation reset helpers ────────────────────────────────
+  // Each pre-Run reset helper must clear post-Run state so the router
+  // doesn't short-circuit past the agent run / outro after a back-nav.
+  describe('back-navigation reset helpers', () => {
+    /** Seed a store as if the user had completed a full run. */
+    function seedPostRunState(store: WizardStore): void {
+      store.setRunPhase(RunPhase.Completed);
+      store.setMcpComplete(McpOutcome.Installed, ['Cursor']);
+      store.setOutroData({ kind: OutroKind.Success, message: 'Done' });
+      // Direct field writes via internal store for fields without setters
+      // to mirror end-of-run state shape.
+      const internal = store as unknown as {
+        $session: {
+          setKey: (k: string, v: unknown) => void;
+        };
+      };
+      internal.$session.setKey('slackComplete', true);
+      internal.$session.setKey('dataIngestionConfirmed', true);
+      internal.$session.setKey('optInFeaturesComplete', true);
+      internal.$session.setKey('additionalFeatureQueue', [
+        AdditionalFeature.SessionReplay,
+      ]);
+      internal.$session.setKey('additionalFeatureCompleted', [
+        AdditionalFeature.SessionReplay,
+      ]);
+    }
+
+    /** Assert post-run state has been wiped back to defaults. */
+    function expectPostRunCleared(store: WizardStore): void {
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+      expect(store.session.runStartedAt).toBeNull();
+      expect(store.session.outroData).toBeNull();
+      expect(store.session.mcpComplete).toBe(false);
+      expect(store.session.mcpOutcome).toBeNull();
+      expect(store.session.mcpInstalledClients).toEqual([]);
+      expect(store.session.slackComplete).toBe(false);
+      expect(store.session.slackOutcome).toBeNull();
+      expect(store.session.dataIngestionConfirmed).toBe(false);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.additionalFeatureCurrent).toBeNull();
+      expect(store.session.additionalFeatureCompleted).toEqual([]);
+    }
+
+    it('resetAuthForRegionChange clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetAuthForRegionChange();
+      expectPostRunCleared(store);
+      // Plus its own primary effects.
+      expect(store.session.region).toBeNull();
+      expect(store.session.regionForced).toBe(true);
+      expect(store.session.credentials).toBeNull();
+      expect(store.session.pendingOrgs).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+    });
+
+    it('clearOrgAndWorkspaceSelection clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.clearOrgAndWorkspaceSelection();
+      expectPostRunCleared(store);
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedWorkspaceId).toBeNull();
+    });
+
+    it('resetActivationCheck clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetActivationCheck();
+      expectPostRunCleared(store);
+      expect(store.session.projectHasData).toBeNull();
+      expect(store.session.activationLevel).toBe('none');
+      expect(store.session.activationOptionsComplete).toBe(false);
+    });
+
+    it('resetActivationOptions clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetActivationOptions();
+      expectPostRunCleared(store);
+      expect(store.session.activationOptionsComplete).toBe(false);
+    });
+
+    it('resetFeatureOptIn clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetFeatureOptIn();
+      expectPostRunCleared(store);
+    });
+
+    it('popLastFrameworkContextAnswer clears post-run state', () => {
+      const store = createStore();
+      store.setFrameworkContext('foo', 'bar');
+      seedPostRunState(store);
+      const popped = store.popLastFrameworkContextAnswer();
+      expect(popped).toBe(true);
+      expectPostRunCleared(store);
+      // The popped answer is gone.
+      expect(store.session.frameworkContext['foo']).toBeUndefined();
+    });
+
+    it('popLastFrameworkContextAnswer returns false (no-op) when nothing to pop', () => {
+      const store = createStore();
+      const popped = store.popLastFrameworkContextAnswer();
+      expect(popped).toBe(false);
     });
   });
 });

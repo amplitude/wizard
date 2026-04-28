@@ -14,6 +14,7 @@ import { Box, Text } from 'ink';
 import { useEffect } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
@@ -28,6 +29,9 @@ interface DataSetupScreenProps {
 
 export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
   useWizardStore(store);
+  // Esc → back to Auth's org/project picker. The activation API call is
+  // idempotent so backing out mid-flight is safe.
+  useEscapeBack(store);
 
   useEffect(() => {
     if (store.session.projectHasData !== null) return;

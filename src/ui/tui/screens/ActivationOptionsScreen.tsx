@@ -8,6 +8,7 @@
 import { Box, Text } from 'ink';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { OutroKind } from '../session-constants.js';
@@ -24,6 +25,7 @@ export const ActivationOptionsScreen = ({
   store,
 }: ActivationOptionsScreenProps) => {
   useWizardStore(store);
+  useEscapeBack(store);
 
   const { snippetConfigured } = store.session;
 

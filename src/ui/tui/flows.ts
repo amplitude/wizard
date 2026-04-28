@@ -10,6 +10,9 @@
  */
 
 import type { WizardSession } from '../../lib/wizard-session.js';
+// WizardStore is used by the FlowEntry.revert callback signature below
+// (PR 301 — Esc-based back navigation).
+import type { WizardStore } from './store.js';
 import { RunPhase } from './session-constants.js';
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
@@ -52,6 +55,17 @@ export interface FlowEntry {
   show?: (session: WizardSession) => boolean;
   /** If provided, screen is considered complete when this returns true. */
   isComplete?: (session: WizardSession) => boolean;
+  /**
+   * Back-navigation: undoes whatever made `isComplete` true so the router
+   * resolves back to this screen on the next render. Entries without a
+   * `revert` act as a wall — back-navigation is blocked past them
+   * (e.g. agent Run, which would be destructive to undo).
+   *
+   * Return `false` when the revert was a no-op (nothing meaningful to undo);
+   * the router will keep walking further back. `void` / `true` count as a
+   * successful revert.
+   */
+  revert?: (store: WizardStore) => boolean | void;
 }
 
 /**
@@ -82,6 +96,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.RegionSelect,
       show: (s) => s.region === null || s.regionForced,
       isComplete: (s) => s.region !== null && !s.regionForced,
+      // Back from Auth — re-show the region picker. Region affects OAuth
+      // host, so we also have to drop pending tokens / org list / credentials
+      // so the next pass actually re-authenticates against the new region.
+      revert: (store) => {
+        store.resetAuthForRegionChange();
+      },
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
@@ -105,6 +125,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         s.credentials !== null &&
         (s.selectedOrgName !== null || s.selectedOrgId !== null) &&
         (s.selectedWorkspaceName !== null || s.selectedWorkspaceId !== null),
+      // Back from DataSetup — drop the picked org/workspace/env so the
+      // Auth screen re-renders the picker. Credentials stay so we don't
+      // force a fresh OAuth round-trip.
+      revert: (store) => {
+        store.clearOrgAndWorkspaceSelection();
+      },
     },
     // 3b. Create-project interrupt. Shown when the user picks "Create new
     //     project…" from the Auth picker or runs /create-project. Sits
@@ -114,24 +140,44 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.CreateProject,
       show: (s) => s.runPhase !== RunPhase.Error && s.createProject.pending,
       isComplete: (s) => !s.createProject.pending,
+      // CreateProject is always "complete" for users who never entered it
+      // (`!pending` is true by default), so we mark it transparent for
+      // back-nav: revert returns false and the router walks past to the
+      // previous *meaningful* step (Auth). Re-entering the creation form
+      // mid-back is never useful — the user just wants to go further back.
+      revert: () => false,
     },
     // 4. Data check — is the project already ingesting events?
     {
       screen: Screen.DataSetup,
       isComplete: (s) => s.projectHasData !== null,
+      // Reset the activation result so the check re-runs after a back-nav.
+      revert: (store) => {
+        store.resetActivationCheck();
+      },
     },
     // 3a. Activation options (SDK installed but few events — partial activation)
     {
       screen: Screen.ActivationOptions,
       show: (s) => s.activationLevel === 'partial',
       isComplete: (s) => s.activationOptionsComplete,
+      revert: (store) => {
+        store.resetActivationOptions();
+      },
     },
     // 3b. Framework setup questions — skipped for full users (already have data)
     {
       screen: Screen.Setup,
       show: (s) => needsSetup(s) && s.activationLevel !== 'full',
       isComplete: (s) => !needsSetup(s),
+      // Pop the most recently-answered framework question. Returns false
+      // when there's nothing user-answered to pop (e.g. every question was
+      // auto-detected) so the router keeps walking back.
+      revert: (store) => store.popLastFrameworkContextAnswer(),
     },
+    // (PR 313 removed the FeatureOptIn screen — SR + G&S + autocapture
+    //  are auto-enabled inline now, so there's no longer a separate
+    //  picklist to back-navigate through here.)
     // 3c. Agent run — skipped for full users (already instrumented)
     //
     //  (No FeatureOptIn step here: SR + G&S + autocapture are
@@ -149,6 +195,9 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.Mcp,
       show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) => s.mcpComplete,
+      revert: (store) => {
+        store.resetMcp();
+      },
     },
     // 5. Wait for events — polls activation API until events are flowing.
     //    Passes immediately for full users (already have data).
@@ -158,12 +207,18 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       show: (s) =>
         s.runPhase !== RunPhase.Error && s.activationLevel !== 'full',
       isComplete: (s) => s.dataIngestionConfirmed,
+      revert: (store) => {
+        store.resetDataIngestion();
+      },
     },
     // 6. Slack integration setup (skipped on error)
     {
       screen: Screen.Slack,
       show: (s) => s.runPhase !== RunPhase.Error,
       isComplete: (s) => s.slackComplete,
+      revert: (store) => {
+        store.resetSlack();
+      },
     },
     { screen: Screen.Outro },
   ],

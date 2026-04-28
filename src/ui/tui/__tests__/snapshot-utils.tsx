@@ -43,6 +43,8 @@ import { render } from 'ink-testing-library';
 import type { ReactElement } from 'react';
 import { WizardStore } from '../store.js';
 import type { WizardSession } from '../store.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
+import { __getScreenHintsForTests } from '../hooks/useScreenHints.js';
 
 /**
  * Pin the wizard cache root to a deterministic path BEFORE any screen
@@ -107,6 +109,14 @@ export interface RenderedSnapshot {
   frame: string;
   /** The store that was rendered against — useful for follow-up assertions. */
   store: WizardStore;
+  /**
+   * Snapshot of the global screen-hints atom captured while the rendered
+   * tree was still mounted. The bar is rendered globally by ConsoleView,
+   * so per-screen snapshot tests don't see it directly — assert on this
+   * instead. Captured pre-unmount so useScreenHints' cleanup effect
+   * doesn't wipe the value before the test reads it.
+   */
+  hints: readonly KeyHint[];
 }
 
 /**
@@ -122,10 +132,13 @@ export function renderSnapshot(
 ): RenderedSnapshot {
   const { lastFrame, unmount } = render(element);
   const raw = lastFrame() ?? '';
+  // Capture before unmount — useScreenHints' cleanup resets the atom.
+  const hints = [...__getScreenHintsForTests()];
   unmount();
   return {
     frame: trimTrailingWs(stripAnsi(raw)),
     store,
+    hints,
   };
 }
 
