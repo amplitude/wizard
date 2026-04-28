@@ -177,6 +177,13 @@ Wrap the body in \`<wizard-report>...</wizard-report>\` tags so the wizard knows
 
   `Prefer the report_status tool (wizard-tools MCP) for progress updates and fatal error signals. Call report_status with kind="status" for in-progress updates (e.g. "installing SDK", "drafting event plan") — these appear in the wizard's spinner. Call report_status with kind="error" for fatal conditions that halt the run (codes: MCP_MISSING, RESOURCE_MISSING). Legacy [STATUS] / [ERROR-MCP-MISSING] / [ERROR-RESOURCE-MISSING] text markers from older bundled skills are still recognized for backwards compat, but new code should use report_status.`,
 
+  `Do NOT delete or "clean up" wizard-managed files. The following paths are owned by the wizard's lifecycle hooks and MUST be left in place during the agent run:
+    - \`.amplitude/\` (and everything under it: \`events.json\`, \`dashboard.json\`, \`product-map.json\`, etc.)
+    - \`.amplitude-events.json\` and \`.amplitude-dashboard.json\` at the project root (legacy paths the wizard still reads from for migration)
+    - \`amplitude-setup-report.md\` (the wizard archives the previous run's report itself)
+    - \`.claude/skills/\` (the wizard pre-stages and cleans these up post-run)
+  The wizard runs explicit cleanup hooks AFTER your run completes (see \`cleanupIntegrationSkills\`, \`cleanupWizardArtifacts\`, \`archiveSetupReportFile\` in \`src/lib/wizard-tools.ts\`). Running \`rm\` on any of these from inside the agent is unnecessary AND will be denied by the bash allowlist — \`rm\` is not on the allowlist regardless of path. If you find a stale wizard file you think shouldn't be there, leave it alone and note it in the setup report; the next wizard run handles migration. Same rule for \`mv\` / \`cp\` of these paths: don't.`,
+
   ...(DEMO_MODE
     ? [
         'DEMO MODE: This is a demo run. Limit the instrumentation plan to at most 5 events. Pick the 5 most impactful, representative events for the project. Be concise and fast — skip non-essential analysis.',
