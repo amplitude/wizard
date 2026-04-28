@@ -104,6 +104,17 @@ describe('AgentState', () => {
     expect(parsed.persistedAt).toBeGreaterThan(0);
   });
 
+  it('persists atomically — no leftover temp file after a successful write', () => {
+    state.recordModifiedFile('src/tools/foo.ts');
+    const path = state.persist();
+    expect(path).not.toBeNull();
+    // atomicWriteJSON writes to `${target}.${pid}.tmp` then renames.
+    // After success, only the target should exist — no orphan tmp file.
+    const tmpCandidate = `${snapshotPath}.${process.pid}.tmp`;
+    expect(existsSync(tmpCandidate)).toBe(false);
+    expect(existsSync(snapshotPath)).toBe(true);
+  });
+
   it('snapshotPath uses the attempt id', () => {
     expect(state.snapshotPath()).toBe(snapshotPath);
   });

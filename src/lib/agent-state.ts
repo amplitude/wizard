@@ -10,13 +10,14 @@
  * without a cyclic import through agent-interface.
  */
 
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { z } from 'zod';
 import { getRunId } from './observability';
 import { logToFile } from '../utils/debug';
+import { atomicWriteJSON } from '../utils/atomic-write';
 
 const SerializedAgentStateSchema = z.object({
   schemaVersion: z.literal('amplitude-wizard-agent-state/1'),
@@ -75,9 +76,7 @@ export class AgentState {
   persist(): string | null {
     const path = this.snapshotPath();
     try {
-      writeFileSync(path, JSON.stringify(this.snapshot(), null, 2), {
-        mode: 0o600,
-      });
+      atomicWriteJSON(path, this.snapshot(), 0o600);
       logToFile(`PreCompact: persisted agent state → ${path}`);
       return path;
     } catch (err) {
