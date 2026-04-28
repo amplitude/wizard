@@ -889,6 +889,44 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * One-shot signal that the OutroScreen has been dismissed by the user
+   * (keypress on cancel/error, picker action on success). Used by
+   * `wizardAbort` to wait for the Outro to render and be acknowledged
+   * before calling `process.exit` — without this, the process exits
+   * while Ink is still flushing the previous frame and the user never
+   * sees the OutroScreen at all on error paths.
+   *
+   * Resolves at most once. Subsequent calls to `signalOutroDismissed`
+   * are no-ops; subsequent awaiters get a fresh pending promise that
+   * will resolve on the next dismissal (in practice there's only ever
+   * one dismissal per process).
+   */
+  private _resolveOutroDismissed: (() => void) | null = null;
+  private _outroDismissedPromise: Promise<void> | null = null;
+
+  /** Returns a promise that resolves when the OutroScreen is dismissed. */
+  outroDismissed(): Promise<void> {
+    if (!this._outroDismissedPromise) {
+      this._outroDismissedPromise = new Promise<void>((resolve) => {
+        this._resolveOutroDismissed = resolve;
+      });
+    }
+    return this._outroDismissedPromise;
+  }
+
+  /** Mark the outro as dismissed. Idempotent. */
+  signalOutroDismissed(): void {
+    if (this._resolveOutroDismissed) {
+      this._resolveOutroDismissed();
+      this._resolveOutroDismissed = null;
+    } else if (!this._outroDismissedPromise) {
+      // Dismissal arrived before anyone awaited it — pre-resolve so the
+      // first awaiter gets a settled promise immediately.
+      this._outroDismissedPromise = Promise.resolve();
+    }
+  }
+
   setFrameworkContext(key: string, value: unknown): void {
     const ctx = { ...this.$session.get().frameworkContext, [key]: value };
     this.$session.setKey('frameworkContext', ctx);

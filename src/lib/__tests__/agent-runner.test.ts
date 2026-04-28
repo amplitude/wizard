@@ -11,8 +11,12 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { classifyApiErrorSubtype } from '../agent-runner.js';
+import {
+  agentArtifactsLookComplete,
+  classifyApiErrorSubtype,
+} from '../agent-runner.js';
 import { AgentErrorType } from '../agent-interface.js';
+import { buildSession } from '../wizard-session.js';
 
 describe('classifyApiErrorSubtype', () => {
   // Each subtype tag maps to a distinct user-facing message and
@@ -141,5 +145,30 @@ describe('classifyApiErrorSubtype', () => {
         }),
       ).toBe('other');
     });
+  });
+});
+
+describe('agentArtifactsLookComplete', () => {
+  it('returns true when checklistDashboardUrl is set', () => {
+    const session = buildSession({ installDir: '/tmp/x' });
+    session.checklistDashboardUrl =
+      'https://app.amplitude.com/analytics/d/abc123';
+    expect(agentArtifactsLookComplete(session)).toBe(true);
+  });
+
+  it('returns false when checklistDashboardUrl is null', () => {
+    const session = buildSession({ installDir: '/tmp/x' });
+    session.checklistDashboardUrl = null;
+    expect(agentArtifactsLookComplete(session)).toBe(false);
+  });
+
+  it('returns false when checklistDashboardUrl is an empty string', () => {
+    const session = buildSession({ installDir: '/tmp/x' });
+    // Empty string also indicates "no real dashboard URL captured" —
+    // the agent stores the URL returned from the MCP create call, and
+    // an empty string is a defensive fallback we should not treat as
+    // success. (Boolean('') === false handles this naturally.)
+    session.checklistDashboardUrl = '';
+    expect(agentArtifactsLookComplete(session)).toBe(false);
   });
 });

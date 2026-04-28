@@ -266,10 +266,15 @@ export class AgentUI implements WizardUI {
     emit('lifecycle', message, { data: { event: 'outro' } });
   }
 
-  cancel(message: string, options?: { docsUrl?: string }): void {
+  cancel(message: string, options?: { docsUrl?: string }): Promise<void> {
     emit('lifecycle', message, {
       data: { event: 'cancel', docsUrl: options?.docsUrl },
     });
+    // Agent / NDJSON mode has no TUI to render Outro, no human to
+    // dismiss anything. Resolve immediately so wizardAbort can proceed
+    // straight to its analytics shutdown + process.exit without an
+    // artificial wait.
+    return Promise.resolve();
   }
 
   /**

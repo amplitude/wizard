@@ -110,6 +110,107 @@ export function classifyApiErrorSubtype(input: {
 }
 
 /**
+ * Decide whether a late-stage API failure should be treated as a soft
+ * error (continue to MCP / outro) or a hard abort (wizardAbort).
+ *
+ * The agent stream can throw `API_ERROR` / `RATE_LIMIT` AFTER it has
+ * already done all the meaningful work — common shapes:
+ *   - dashboard MCP create succeeded, then a final flush hits a 429
+ *   - setup-report.md was written, then the stream closed mid-tear-down
+ *   - hook bridge fired its last event after the agent yielded
+ *
+ * In those cases the user's project is in a fully-set-up state. We
+ * shouldn't punish them with a network error code and skip the MCP /
+ * Slack / Outro screens — the wizard's job is done.
+ *
+ * Heuristic: the dashboard URL on the session is the most reliable
+ * "we got past the long pole" signal. The dashboard MCP call happens
+ * last in the agent's conclude phase, after events have been
+ * instrumented and the setup report has been drafted. If the URL is
+ * present, everything else is too.
+ */
+export function agentArtifactsLookComplete(session: WizardSession): boolean {
+  return Boolean(session.checklistDashboardUrl);
+}
+
+/**
+ * Hard-error abort for `API_ERROR` / `RATE_LIMIT` agent failures.
+ * Extracted from the runAgentWizardBody inline branch so the soft-error
+ * path can early-return without duplicating this logic.
+ */
+async function abortOnApiError(
+  errorType: AgentErrorType.API_ERROR | AgentErrorType.RATE_LIMIT,
+  rawMessage: string,
+  config: FrameworkConfig,
+): Promise<never> {
+  // Subtype within API_ERROR — these all share the "upstream dropped
+  // something" root cause but reach this branch by different paths:
+  //
+  //   terminated_400  — Vertex/Anthropic killed the request mid-flight.
+  //                     Slipped past the GATEWAY_DOWN guard because
+  //                     earlier attempts had succeeded. (Sentry #7442894144)
+  //   stream_closed   — Hook bridge race during prior-attempt teardown
+  //                     (issue #297). #298 drains the prior iterator
+  //                     and treats this as transient inside the inner
+  //                     retry loop, so seeing it surface here means
+  //                     every retry exhausted with the same bridge
+  //                     race — strong signal that the drain isn't
+  //                     fully effective and we need a deeper fix.
+  //   rate_limit      — Wizard exhausted retries against a 429 storm.
+  //   other           — Unclassified API error. Catch-all.
+  const errorSubtype = classifyApiErrorSubtype({
+    errorType,
+    message: rawMessage,
+  });
+
+  captureWizardError(
+    'Agent API',
+    rawMessage || 'Unknown API error',
+    'agent-runner',
+    {
+      integration: config.metadata.integration,
+      'error type': errorType,
+      'error subtype': errorSubtype,
+      'using direct key': !!process.env.ANTHROPIC_API_KEY,
+    },
+  );
+
+  let userMessage: string;
+  switch (errorSubtype) {
+    case 'stream_closed':
+      userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+      break;
+    case 'terminated_400':
+      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+      break;
+    case 'rate_limit':
+      userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
+        rawMessage || 'API Error: 429'
+      }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
+      break;
+    case 'other':
+      userMessage = `LLM gateway error\n\n${
+        rawMessage || 'Unknown error'
+      }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+      break;
+  }
+
+  await wizardAbort({
+    message: userMessage,
+    error: new WizardError(`API error: ${rawMessage || 'unknown'}`, {
+      integration: config.metadata.integration,
+      'error type': errorType,
+      'error subtype': errorSubtype,
+    }),
+    exitCode: ExitCode.NETWORK_ERROR,
+  });
+  // wizardAbort returns Promise<never>, but TypeScript can't always
+  // narrow that through an async function — explicit throw keeps
+  // downstream type checking happy.
+  throw new Error('unreachable');
+}
+
+/**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
  */
 function sessionToOptions(session: WizardSession): WizardOptions {
@@ -234,7 +335,10 @@ async function runAgentWizardBody(
       const packageDisplayName =
         versionCheckInfo.packageDisplayName ?? config.metadata.name;
       const version = versionCheckInfo.version ?? 'unknown';
-      getUI().cancel(
+      // cancel() is async post-#PR — await it so a TUI user actually sees
+      // the message before this function returns and the runner moves
+      // on to its non-success cleanup path.
+      await getUI().cancel(
         `The wizard requires ${packageDisplayName} ${minimumVersion} or later, but found version ${version}. Upgrade your ${packageDisplayName} version to use the wizard, or follow the manual setup guide.`,
         { docsUrl },
       );
@@ -607,76 +711,45 @@ async function runAgentWizardBody(
     agentResult.error === AgentErrorType.RATE_LIMIT ||
     agentResult.error === AgentErrorType.API_ERROR
   ) {
-    // Subtype within API_ERROR — these all share the "upstream dropped
-    // something" root cause but reach this branch by different paths:
-    //
-    //   terminated_400  — Vertex/Anthropic killed the request mid-flight.
-    //                     Slipped past the GATEWAY_DOWN guard because
-    //                     earlier attempts had succeeded. (Sentry #7442894144)
-    //   stream_closed   — Hook bridge race during prior-attempt teardown
-    //                     (issue #297). #298 drains the prior iterator
-    //                     and treats this as transient inside the inner
-    //                     retry loop, so seeing it surface here means
-    //                     every retry exhausted with the same bridge
-    //                     race — strong signal that the drain isn't
-    //                     fully effective and we need a deeper fix.
-    //   rate_limit      — Wizard exhausted retries against a 429 storm.
-    //   other           — Unclassified API error. Catch-all.
-    //
-    // Surfacing each subtype as its own Sentry tag lets us slice and
-    // alert separately, especially `stream_closed` which we expect to
-    // be near-zero post-#298.
     const rawMessage = agentResult.message ?? '';
-    const errorSubtype = classifyApiErrorSubtype({
-      errorType: agentResult.error,
-      message: rawMessage,
-    });
 
-    captureWizardError(
-      'Agent API',
-      rawMessage || 'Unknown API error',
-      'agent-runner',
-      {
+    // Soft-error path: if the agent's actual work artifacts exist on
+    // the session (dashboard URL set), the API failure was on a
+    // tail-end call (often the last token flush, an observability
+    // ping, or a hook closing the stream after the agent already
+    // wrote the setup report and created the dashboard). Hard-aborting
+    // here would skip MCP / Slack / Outro and exit with a network
+    // error code, even though the user's project is in a fully-set-up
+    // state. Continue past this branch so the user gets their
+    // dashboard link, the MCP install offer, and a normal Outro.
+    if (agentArtifactsLookComplete(session)) {
+      const errorSubtype = classifyApiErrorSubtype({
+        errorType: agentResult.error,
+        message: rawMessage,
+      });
+      logToFile(
+        `[agent-runner] Soft API error after work completed (${errorSubtype}): ${rawMessage}. Continuing to MCP / outro.`,
+      );
+      analytics.wizardCapture('agent soft error', {
         integration: config.metadata.integration,
         'error type': agentResult.error,
         'error subtype': errorSubtype,
-        'using direct key': !!process.env.ANTHROPIC_API_KEY,
-      },
-    );
-
-    let userMessage: string;
-    switch (errorSubtype) {
-      case 'stream_closed':
-        // Stream closed survived past the inner retry loop's defense in
-        // depth (#298). Frame it as a connection issue with the same
-        // upstream-gateway treatment as terminated_400 — same family of
-        // root cause, same workaround.
-        userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
-        break;
-      case 'terminated_400':
-        userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
-        break;
-      case 'rate_limit':
-        userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
-          rawMessage || 'API Error: 429'
-        }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
-        break;
-      case 'other':
-        userMessage = `LLM gateway error\n\n${
-          rawMessage || 'Unknown error'
-        }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
-        break;
+      });
+      // Surface a non-fatal warning in the status ticker so the user
+      // sees something happened on the way out, but don't abort.
+      getUI().pushStatus(
+        `Note: a late API call failed (${
+          rawMessage || agentResult.error
+        }) but your project's setup is complete — continuing.`,
+      );
+      // Fall through to the post-agent steps (env upload, MCP, Slack,
+      // DataIngestion, Outro). They don't depend on agentResult.error
+      // being null, just on getting past this if/else.
+    } else {
+      // Hard-error path: artifacts missing, so the agent didn't get
+      // far enough to leave the project in a usable state. Abort.
+      await abortOnApiError(agentResult.error, rawMessage, config);
     }
-
-    await wizardAbort({
-      message: userMessage,
-      error: new WizardError(`API error: ${rawMessage || 'unknown'}`, {
-        integration: config.metadata.integration,
-        'error type': agentResult.error,
-        'error subtype': errorSubtype,
-      }),
-      exitCode: ExitCode.NETWORK_ERROR,
-    });
   }
 
   // Build environment variables from OAuth credentials

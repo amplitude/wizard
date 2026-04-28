@@ -76,8 +76,17 @@ export async function wizardAbort(
     }),
   ]);
 
-  // 4. Display message to user
-  getUI().cancel(message);
+  // 4. Display message to user — awaits OutroScreen dismissal in TUI
+  //    mode so the user actually gets to see the failure (and use the
+  //    "open log" / "write bug report" hotkeys) before the process
+  //    dies. AgentUI / LoggingUI resolve immediately since they have
+  //    no TUI to render. Any UI that throws here is non-fatal — we
+  //    still want to exit with the requested code.
+  try {
+    await getUI().cancel(message);
+  } catch {
+    /* UI failure must not prevent exit */
+  }
 
   // 5. Exit (fires 'exit' event so TUI cleanup runs)
   //
