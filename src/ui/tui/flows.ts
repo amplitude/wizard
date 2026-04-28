@@ -18,7 +18,6 @@ import { RunPhase } from './session-constants.js';
 export enum Screen {
   Intro = 'intro',
   Setup = 'setup',
-  FeatureOptIn = 'feature-opt-in',
   Auth = 'auth',
   CreateProject = 'create-project',
   RegionSelect = 'region-select',
