@@ -10,6 +10,7 @@
 
 import path from 'path';
 import { logToFile } from '../utils/debug.js';
+import { getWizardAbortSignal } from '../utils/wizard-abort.js';
 import { WIZARD_USER_AGENT } from './constants.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { withWizardSpan, addBreadcrumb } from './observability/index.js';
@@ -315,7 +316,10 @@ export async function callAmplitudeMcp<T>(
     parseAgent,
     label = 'callAmplitudeMcp',
     agentTimeoutMs = AGENT_FALLBACK_TIMEOUT_MS,
-    abortSignal,
+    // Default to the wizard-wide abort signal so callers automatically
+    // pick up Ctrl+C / SIGINT cancellation. Pass `abortSignal: undefined`
+    // explicitly only in tests that need un-aborted isolation.
+    abortSignal = getWizardAbortSignal(),
   } = opts;
 
   return withWizardSpan(

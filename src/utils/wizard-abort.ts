@@ -106,6 +106,69 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
   return process.exit(exitCode);
 }
 
+// ── Wizard-wide AbortController ──────────────────────────────────────────
+//
+// Single AbortController shared across the run so any in-flight async work
+// (agent SDK query, MCP fetches, ingestion polls, OAuth server, etc.) can
+// be cancelled in one shot when the user hits Ctrl+C / SIGINT or when the
+// wizard tears down for any other reason.
+//
+// Why a module-level singleton: the wizard has many entry points (TUI,
+// agent mode, CI mode) and many places that need to consume the abort
+// signal — a session field would force every consumer to thread the
+// session through, and most of these consumers (agent-interface.ts,
+// mcp-with-fallback.ts) live below the session in the dependency graph
+// and can't import it. Keeping the controller here, alongside the existing
+// `wizardAbort()` / `registerCleanup()` API, makes the abort surface
+// discoverable in one place.
+//
+// Lifetime: created lazily on first access and reset by `resetWizardAbortController()`
+// (used by tests). In production each `npx @amplitude/wizard` invocation
+// is a fresh process, so the lazy-init shape is sufficient — there's no
+// per-run reset path because there's no second run.
+let _wizardAbortController: AbortController | null = null;
+
+/**
+ * Returns the wizard-wide AbortController, creating it on first access.
+ * Consumers should pass `getWizardAbortController().signal` into any
+ * abortable async API (fetch, agent SDK query, etc.) so a single abort
+ * call from the SIGINT / Ctrl+C handler unwinds every in-flight operation.
+ */
+export function getWizardAbortController(): AbortController {
+  if (!_wizardAbortController) {
+    _wizardAbortController = new AbortController();
+  }
+  return _wizardAbortController;
+}
+
+/**
+ * Convenience: returns the wizard-wide abort signal. Equivalent to
+ * `getWizardAbortController().signal` but reads more naturally at call sites
+ * that just need the signal (e.g. `fetch(url, { signal: getWizardAbortSignal() })`).
+ */
+export function getWizardAbortSignal(): AbortSignal {
+  return getWizardAbortController().signal;
+}
+
+/**
+ * Abort the wizard-wide controller. Idempotent — calling on an already-aborted
+ * controller is a no-op. Use from graceful-exit / SIGINT handlers to cancel
+ * every in-flight async operation in one shot.
+ */
+export function abortWizard(reason?: string): void {
+  const controller = getWizardAbortController();
+  if (controller.signal.aborted) return;
+  controller.abort(reason ?? 'wizard cancelled');
+}
+
+/**
+ * Reset the wizard-wide controller. Test-only — production runs are
+ * one-shot processes so there's no need to reset between runs.
+ */
+export function resetWizardAbortController(): void {
+  _wizardAbortController = null;
+}
+
 export async function wizardAbort(
   options?: WizardAbortOptions,
 ): Promise<never> {

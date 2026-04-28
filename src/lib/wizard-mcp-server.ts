@@ -249,6 +249,9 @@ export async function startAgentMcpServer(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     try {
+      // Awaiting server.close() lets in-flight tool calls finish their
+      // current write before the transport tears down, instead of being
+      // truncated mid-response when the kernel signal lands.
       await server.close();
     } catch {
       /* ignore close errors during shutdown */
@@ -256,8 +259,26 @@ export async function startAgentMcpServer(): Promise<void> {
     process.exit(exitCode);
   };
 
-  process.on('SIGINT', () => void shutdown(0));
-  process.on('SIGTERM', () => void shutdown(0));
+  // Use awaited async handlers so any rejection inside shutdown surfaces
+  // as a logged failure rather than an unhandled-promise warning. The
+  // prior `void shutdown(0)` form discarded errors silently and could
+  // race the close() call against process.exit().
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    void (async () => {
+      try {
+        await shutdown(0);
+      } catch (err) {
+        process.stderr.write(
+          `amplitude-wizard mcp serve: shutdown after ${signal} failed: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+        process.exit(1);
+      }
+    })();
+  };
+  process.on('SIGINT', () => handleSignal('SIGINT'));
+  process.on('SIGTERM', () => handleSignal('SIGTERM'));
 
   await server.connect(transport);
 

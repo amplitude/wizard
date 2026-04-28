@@ -43,7 +43,11 @@ import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
-import { wizardAbort, WizardError } from '../utils/wizard-abort';
+import {
+  wizardAbort,
+  WizardError,
+  getWizardAbortSignal,
+} from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
@@ -1105,8 +1109,18 @@ async function pollForDataIngestion(
   // never resolve and the poll loop would advance only once the surrounding
   // process tore down, leaving the request stuck in the background.
   const PER_POLL_TIMEOUT_MS = 25_000;
+  // Bail out of the poll loop the moment the wizard is cancelled
+  // (Ctrl+C / SIGINT → graceful-exit → abortWizard). Without this the
+  // 30s setTimeout below would block the 2s grace window for up to 28s,
+  // so the user would either see a hung exit or the kernel would
+  // SIGKILL the process before the poll resolved.
+  const wizardSignal = getWizardAbortSignal();
 
   while (Date.now() < deadline) {
+    if (wizardSignal.aborted) {
+      logToFile('[pollForDataIngestion] aborted via wizard signal');
+      return;
+    }
     pollCount++;
     logToFile(`[pollForDataIngestion] poll #${pollCount} appId=${appId}`);
 
@@ -1119,6 +1133,11 @@ async function pollForDataIngestion(
       PER_POLL_TIMEOUT_MS,
     );
     try {
+      // Pass the per-poll signal so the explicit per-poll timeout aborts
+      // the in-flight HTTP request. callAmplitudeMcp also defaults to the
+      // wizard signal when no explicit signal is provided; here we use the
+      // per-poll signal and rely on the loop-level wizardSignal checks
+      // (above and in the inter-poll wait below) to honor Ctrl+C.
       const result = await fetchHasAnyEventsMcp(
         accessToken,
         appId,
@@ -1154,12 +1173,33 @@ async function pollForDataIngestion(
       clearTimeout(pollTimer);
     }
 
-    // Wait before the next poll, but bail early if deadline passed.
+    // Wait before the next poll, but bail early if deadline passed
+    // OR if the wizard is cancelled. Race the timer with the abort
+    // signal so a Ctrl+C unblocks immediately instead of waiting up
+    // to POLL_INTERVAL_MS for the next iteration to see the flag.
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await new Promise<void>((resolve) =>
-      setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)),
-    );
+    if (wizardSignal.aborted) {
+      logToFile('[pollForDataIngestion] aborted via wizard signal');
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const waitMs = Math.min(POLL_INTERVAL_MS, remaining);
+      const timer = setTimeout(() => {
+        wizardSignal.removeEventListener('abort', onAbort);
+        resolve();
+      }, waitMs);
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      wizardSignal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  if (wizardSignal.aborted) {
+    logToFile('[pollForDataIngestion] aborted via wizard signal');
+    return;
   }
 
   logToFile('[pollForDataIngestion] timeout reached without detecting events');
