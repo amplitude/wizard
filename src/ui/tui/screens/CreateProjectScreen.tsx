@@ -45,6 +45,7 @@ import {
   ApiError,
 } from '../../../lib/api.js';
 import { getHostFromRegion } from '../../../utils/urls.js';
+import { toCredentialAppId } from '../../../lib/wizard-session.js';
 
 interface CreateProjectScreenProps {
   store: WizardStore;
@@ -132,7 +133,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         name,
         code: 'INVALID_REQUEST',
         message:
-          'No organization selected. Cancel and pick an organization first.',
+          "We couldn't carry your organization through to project creation. Press Esc and pick the organization again. (If this keeps happening, run with `--debug` and report it.)",
       });
       return;
     }
@@ -191,10 +192,10 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         idToken,
         projectApiKey: result.apiKey,
         host: getHostFromRegion(zone),
-        // The proxy returns `appId` as a string; credentials.appId is
-        // numeric. Attempt a coercion — fall back to 0 if the backend ever
-        // returns a non-numeric id.
-        appId: Number.parseInt(result.appId, 10) || 0,
+        // The proxy returns `appId` as a string; credentials.appId is the
+        // branded `AppId | 0` shape. `toCredentialAppId` validates and
+        // brands the value, falling back to `0` for non-numeric input.
+        appId: toCredentialAppId(result.appId),
       });
       store.setProjectHasData(false);
       store.setApiKeyNotice(null);
@@ -341,12 +342,31 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
           {phase.code === 'FORBIDDEN' && (
             <Box flexDirection="column">
               <Text color={Colors.body}>
-                You don't have permission to create projects in this org. Ask an
-                admin, or pick a different org with "Start over".
+                You don't have permission to create a project
+                {orgName ? (
+                  <>
+                    {' '}
+                    in <Text bold>{orgName}</Text>
+                  </>
+                ) : (
+                  ' in this org'
+                )}
+                . Ask an admin to create one for you, or open Amplitude in your
+                browser and create it yourself.
               </Text>
               <Box marginTop={1}>
-                <Text color={Colors.muted}>Press Esc to go back.</Text>
+                <TerminalLink
+                  url={OUTBOUND_URLS.projectsSettings(zone, orgId ?? undefined)}
+                >
+                  Open Amplitude (so an admin can create the project)
+                </TerminalLink>
               </Box>
+              <Box marginTop={1}>
+                <Text color={Colors.muted}>
+                  Press O to open Amplitude, Esc to go back to the picker.
+                </Text>
+              </Box>
+              <FallbackKeyHandler onOpen={handleOpenFallback} />
             </Box>
           )}
           {phase.code === 'INTERNAL' && (

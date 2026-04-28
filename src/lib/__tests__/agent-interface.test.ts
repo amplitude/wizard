@@ -12,23 +12,29 @@ import {
   createStopHook,
   createPreCompactHook,
   createPreToolUseHook,
+  createPostToolUseHook,
   wizardCanUseTool,
   buildWizardMetadata,
   isSkillInstallCommand,
   matchesAllowedPrefix,
   parseEventPlanContent,
+  pickFreshestExisting,
   MAX_BASH_SLEEP_SECONDS,
   isAuthErrorMessage,
   HOOK_BRIDGE_RACE_RE,
   partitionHookBridgeRace,
   AgentErrorType,
 } from '../agent-interface';
+import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
 import type { SpinnerHandle } from '../../ui';
 import {
   AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
 } from '../wizard-session';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 // Mock dependencies
 vi.mock('../../utils/analytics');
@@ -157,8 +163,8 @@ describe('runAgent', () => {
         },
       );
 
-      // Should return success (empty object), not throw
-      expect(result).toEqual({});
+      // Should return success (empty planned events list), not throw
+      expect(result).toEqual({ plannedEvents: [] });
       expect(mockSpinner.stop).toHaveBeenCalledWith('Test success');
     });
 
@@ -274,6 +280,12 @@ describe('runAgent', () => {
       );
 
       expect(result.error).toBe(AgentErrorType.MCP_MISSING);
+      // Preserve the marker line as `message` so the runner can plumb it
+      // into Sentry as `agent error detail`. Without this, Sentry only
+      // sees the generic "MCP_MISSING" tag and we can't tell whether the
+      // in-process or remote MCP failed.
+      expect(result.message).toContain('[ERROR-MCP-MISSING]');
+      expect(result.message).toContain('Could not load skill menu');
     });
 
     it('reports RESOURCE_MISSING when agent emits the [ERROR-RESOURCE-MISSING] legacy marker', async () => {
@@ -307,6 +319,10 @@ describe('runAgent', () => {
       );
 
       expect(result.error).toBe(AgentErrorType.RESOURCE_MISSING);
+      // Preserve the marker line as `message` — same rationale as the
+      // MCP_MISSING case above.
+      expect(result.message).toContain('[ERROR-RESOURCE-MISSING]');
+      expect(result.message).toContain('Could not find a suitable skill');
     });
 
     it('forwards [STATUS] legacy markers to the spinner', async () => {
@@ -539,7 +555,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Done');
     });
@@ -769,7 +785,7 @@ describe('runAgent', () => {
       await vi.advanceTimersByTimeAsync(3_000);
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(attempt2FirstMessageSeen).toBe(true);
 
@@ -845,7 +861,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(returnSpy).toHaveBeenCalledTimes(1);
       // Cleanup must happen during attempt #1 (before #2 starts).
@@ -893,7 +909,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
     });
   });
@@ -959,8 +975,8 @@ describe('runAgent', () => {
         },
       );
 
-      // Should return success (empty object), not error
-      expect(result).toEqual({});
+      // Should return success (empty planned events list), not error
+      expect(result).toEqual({ plannedEvents: [] });
       expect(mockSpinner.stop).toHaveBeenCalledWith('Test success');
 
       // ui.log.error should NOT have been called (errors suppressed for user)
@@ -1595,6 +1611,61 @@ describe('buildWizardMetadata', () => {
   });
 });
 
+describe('pickFreshestExisting', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pick-freshest-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns null when no candidates exist', () => {
+    const a = path.join(tmpDir, 'a');
+    const b = path.join(tmpDir, 'b');
+    expect(pickFreshestExisting(a, b)).toBeNull();
+  });
+
+  it('returns the only existing candidate', () => {
+    const a = path.join(tmpDir, 'a');
+    const b = path.join(tmpDir, 'b');
+    fs.writeFileSync(b, '');
+    expect(pickFreshestExisting(a, b)).toBe(b);
+  });
+
+  // Regression: bugbot caught the stale-canonical bug — the dashboard
+  // watcher always read the canonical path first, but during a run only
+  // the legacy path actually gets written (bundled context-hub skills
+  // write `.amplitude-dashboard.json`). If a migrated stale canonical
+  // existed from a prior run, the watcher returned its old URL and the
+  // agent's fresh write was never surfaced.
+  it('picks the freshest by mtime (legacy wins when written more recently)', () => {
+    const canonical = path.join(tmpDir, 'canonical');
+    const legacy = path.join(tmpDir, 'legacy');
+    fs.writeFileSync(canonical, 'stale');
+    // Backdate canonical so the test is deterministic regardless of
+    // filesystem timestamp resolution.
+    const oldTime = new Date(Date.now() - 60_000);
+    fs.utimesSync(canonical, oldTime, oldTime);
+    fs.writeFileSync(legacy, 'fresh');
+
+    expect(pickFreshestExisting(canonical, legacy)).toBe(legacy);
+  });
+
+  it('returns the canonical when it is the freshest', () => {
+    const canonical = path.join(tmpDir, 'canonical');
+    const legacy = path.join(tmpDir, 'legacy');
+    fs.writeFileSync(legacy, 'stale');
+    const oldTime = new Date(Date.now() - 60_000);
+    fs.utimesSync(legacy, oldTime, oldTime);
+    fs.writeFileSync(canonical, 'fresh');
+
+    expect(pickFreshestExisting(canonical, legacy)).toBe(canonical);
+  });
+});
+
 describe('parseEventPlanContent', () => {
   it('parses the canonical {name, description} shape', () => {
     const out = parseEventPlanContent(
@@ -2072,5 +2143,129 @@ describe('partitionHookBridgeRace', () => {
       suppressed: 0,
       passthrough: chunk,
     });
+  });
+});
+
+describe('createPostToolUseHook', () => {
+  const hookOpts = { signal: new AbortController().signal };
+  let state: AgentState;
+
+  beforeEach(() => {
+    state = new AgentState();
+    state.setAttemptId('postuse-test');
+  });
+
+  it('records modified file for Write', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Write', tool_input: { file_path: '/project/a.ts' } },
+      'tool-use-id',
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toContain('/project/a.ts');
+  });
+
+  it('records modified file for Edit / MultiEdit / NotebookEdit', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Edit', tool_input: { file_path: '/project/edit.ts' } },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      {
+        tool_name: 'MultiEdit',
+        tool_input: { file_path: '/project/multi.ts' },
+      },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      {
+        tool_name: 'NotebookEdit',
+        tool_input: { file_path: '/project/nb.ipynb' },
+      },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toEqual([
+      '/project/edit.ts',
+      '/project/multi.ts',
+      '/project/nb.ipynb',
+    ]);
+  });
+
+  it('falls back to `path` field when `file_path` is missing', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Write', tool_input: { path: '/project/p.ts' } },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toContain('/project/p.ts');
+  });
+
+  it('ignores non-write tools (Read / Bash / Grep)', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { tool_name: 'Read', tool_input: { file_path: '/project/r.ts' } },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      { tool_name: 'Bash', tool_input: { command: 'ls' } },
+      undefined,
+      hookOpts,
+    );
+    await hook(
+      { tool_name: 'Grep', tool_input: { pattern: 'foo' } },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toEqual([]);
+  });
+
+  it('returns {} (observer hook — never gates)', async () => {
+    const hook = createPostToolUseHook(state);
+    const out = await hook(
+      { tool_name: 'Write', tool_input: { file_path: '/x' } },
+      undefined,
+      hookOpts,
+    );
+    expect(out).toEqual({});
+  });
+
+  it('is resilient to missing tool_input', async () => {
+    const hook = createPostToolUseHook(state);
+    const out = await hook({ tool_name: 'Write' }, undefined, hookOpts);
+    expect(out).toEqual({});
+    expect(state.snapshot().modifiedFiles).toEqual([]);
+  });
+
+  it('swallows handler errors (a throw must not abort the run)', async () => {
+    // Simulate a state object whose recordModifiedFile throws.
+    const explodingState = {
+      recordModifiedFile() {
+        throw new Error('boom');
+      },
+    } as unknown as AgentState;
+    const hook = createPostToolUseHook(explodingState);
+    await expect(
+      hook(
+        { tool_name: 'Write', tool_input: { file_path: '/x' } },
+        undefined,
+        hookOpts,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it('reads camelCase toolName / toolInput shape too', async () => {
+    const hook = createPostToolUseHook(state);
+    await hook(
+      { toolName: 'Write', toolInput: { file_path: '/project/camel.ts' } },
+      undefined,
+      hookOpts,
+    );
+    expect(state.snapshot().modifiedFiles).toContain('/project/camel.ts');
   });
 });

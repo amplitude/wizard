@@ -2,6 +2,7 @@ import {
   wizardAbort,
   WizardError,
   registerCleanup,
+  registerPriorityCleanup,
   clearCleanup,
 } from '../utils/wizard-abort';
 import { analytics } from '../utils/analytics';
@@ -36,7 +37,12 @@ describe('wizardAbort', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls analytics.shutdown, getUI().cancel, and process.exit in order', async () => {
+  it('calls getUI().cancel before analytics.shutdown so wizardCapture events from outro hotkeys are flushed', async () => {
+    // Bug 1 from PR 331 review: shutdown used to run before cancel,
+    // which meant any analytics.wizardCapture call fired during the
+    // interactive Outro (press L for log, C for bug report) was queued
+    // after the final flush and silently dropped on process.exit.
+    // Lock the new order in: cancel first, then shutdown.
     const callOrder: string[] = [];
     mockAnalytics.shutdown.mockImplementation(async () => {
       callOrder.push('shutdown');
@@ -47,14 +53,17 @@ describe('wizardAbort', () => {
 
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(callOrder).toEqual(['shutdown', 'cancel']);
+    expect(callOrder).toEqual(['cancel', 'shutdown']);
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
   it('uses default message and exit code when called with no options', async () => {
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Wizard setup cancelled.');
+    expect(getUI().cancel).toHaveBeenCalledWith(
+      'Wizard setup cancelled.',
+      undefined,
+    );
     expect(mockAnalytics.shutdown).toHaveBeenCalledWith('cancelled');
     expect(process.exit).toHaveBeenCalledWith(1);
   });
@@ -64,8 +73,24 @@ describe('wizardAbort', () => {
       wizardAbort({ message: 'Custom failure', exitCode: 2 }),
     ).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Custom failure');
+    expect(getUI().cancel).toHaveBeenCalledWith('Custom failure', undefined);
     expect(process.exit).toHaveBeenCalledWith(2);
+  });
+
+  it('forwards cancelOptions.docsUrl into getUI().cancel', async () => {
+    // Used by the version-check cancel path in agent-runner: an
+    // unsupported version routes through wizardAbort and we want the
+    // "Manual setup guide" link to surface in the Outro.
+    await expect(
+      wizardAbort({
+        message: 'Unsupported version',
+        cancelOptions: { docsUrl: 'https://example.com/docs' },
+      }),
+    ).rejects.toThrow('process.exit called');
+
+    expect(getUI().cancel).toHaveBeenCalledWith('Unsupported version', {
+      docsUrl: 'https://example.com/docs',
+    });
   });
 
   it('captures error in analytics and shuts down as error when error is provided', async () => {
@@ -97,7 +122,7 @@ describe('wizardAbort', () => {
     });
   });
 
-  it('runs registered cleanup functions before analytics and display', async () => {
+  it('runs registered cleanup functions before display, with shutdown after cancel', async () => {
     const callOrder: string[] = [];
 
     registerCleanup(() => callOrder.push('cleanup1'));
@@ -111,7 +136,85 @@ describe('wizardAbort', () => {
 
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(callOrder).toEqual(['cleanup1', 'cleanup2', 'shutdown', 'cancel']);
+    expect(callOrder).toEqual(['cleanup1', 'cleanup2', 'cancel', 'shutdown']);
+  });
+
+  it('runs priority cleanups before regular cleanups (ordering invariant)', async () => {
+    const callOrder: string[] = [];
+
+    // Register the LATER cleanup first to prove insertion order doesn't
+    // matter — priority cleanups still run before any regular one.
+    registerCleanup(() => callOrder.push('regular1'));
+    registerCleanup(() => callOrder.push('regular2'));
+    registerPriorityCleanup(() => callOrder.push('priority1'));
+    registerPriorityCleanup(() => callOrder.push('priority2'));
+
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    // priority2 was registered last among priority cleanups, so it
+    // unshifts to the front. Both priority cleanups MUST run before any
+    // regular cleanup — that's the guarantee callers depend on.
+    expect(callOrder).toEqual([
+      'priority2',
+      'priority1',
+      'regular1',
+      'regular2',
+    ]);
+  });
+
+  it('regression: priority cleanup restores file before any regular cleanup writes a stub', async () => {
+    // Models the bug: this branch archives the user's prior setup
+    // report and registers a restore-on-failure. PR #327 added a
+    // fallback-stub writer that registers via `registerCleanup`. If
+    // the stub writer ran first (FIFO), it would write a fresh
+    // canonical report and the restore would see canonical-exists and
+    // bail — permanently burying the user's real report in
+    // `.previous.md`.
+    //
+    // The fix: register the restore via `registerPriorityCleanup` so
+    // it ALWAYS runs before any other cleanup that may write to the
+    // same canonical path. This test asserts that ordering invariant.
+    const canonical: { exists: boolean; content: string | null } = {
+      exists: false,
+      content: null,
+    };
+    const archive: { exists: boolean; content: string | null } = {
+      exists: true,
+      content: 'PRIOR USER REPORT',
+    };
+
+    // Simulate the restore: if canonical absent and archive present,
+    // move archive → canonical (and clear archive).
+    const restoreReportIfMissing = (): void => {
+      if (canonical.exists) return;
+      if (!archive.exists) return;
+      canonical.exists = true;
+      canonical.content = archive.content;
+      archive.exists = false;
+      archive.content = null;
+    };
+
+    // Simulate the (hypothetical PR #327) stub writer: writes a stub at
+    // canonical only if canonical is currently absent.
+    const writeFallbackStub = (): void => {
+      if (canonical.exists) return;
+      canonical.exists = true;
+      canonical.content = 'FALLBACK STUB';
+    };
+
+    // Register stub writer FIRST via the FIFO API (worst case for ordering)
+    // and the restore SECOND via the priority API. The priority API must
+    // win regardless.
+    registerCleanup(writeFallbackStub);
+    registerPriorityCleanup(restoreReportIfMissing);
+
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    // Restore ran first → user's prior report is back at canonical.
+    // Stub writer's no-op-on-exists guard then preserved that real
+    // content instead of overwriting with a stub.
+    expect(canonical.exists).toBe(true);
+    expect(canonical.content).toBe('PRIOR USER REPORT');
   });
 
   it('does not block exit when a cleanup function throws', async () => {
@@ -160,7 +263,7 @@ describe('abort() delegates to wizardAbort()', () => {
 
     await expect(abort('Test abort', 3)).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Test abort');
+    expect(getUI().cancel).toHaveBeenCalledWith('Test abort', undefined);
     expect(process.exit).toHaveBeenCalledWith(3);
   });
 
@@ -169,7 +272,10 @@ describe('abort() delegates to wizardAbort()', () => {
 
     await expect(abort()).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Wizard setup cancelled.');
+    expect(getUI().cancel).toHaveBeenCalledWith(
+      'Wizard setup cancelled.',
+      undefined,
+    );
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 });

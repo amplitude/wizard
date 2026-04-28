@@ -139,8 +139,10 @@ import {
   initSentry,
   setTerminalSink,
   getLogFilePath,
+  setProjectLogFile,
 } from './src/lib/observability';
 import type { LogLevel } from './src/lib/observability';
+import { runMigrationShim } from './src/utils/storage-migration';
 
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
 // prevents the TUI's ESM dynamic imports from resolving named exports.
@@ -176,14 +178,49 @@ const CLI_INVOCATION: string = (() => {
 })();
 
 /**
+ * Bootstrap per-project storage state once `installDir` is known. Idempotent:
+ *
+ *   1. Runs the one-shot migration shim FIRST — moves any pre-refactor paths
+ *      (e.g. `/tmp/amplitude-wizard.log`, `<installDir>/.amplitude-events.json`)
+ *      into the new layout. Drop after one release.
+ *   2. THEN switches the logger from `<cacheRoot>/bootstrap.log` to the
+ *      per-project file under `<cacheRoot>/runs/<hash>/log.txt`. Two
+ *      parallel wizard runs in different directories no longer share a log.
+ *
+ * Order matters: migration runs before the logger switches because
+ * `setProjectLogFile` writes a "continuing in <target>" marker to the
+ * bootstrap log. If that marker created `<cacheRoot>/bootstrap.log` first,
+ * the migration's "skip when destination exists" branch would discard the
+ * legacy `/tmp/amplitude-wizard.log` content instead of moving it across.
+ *
+ * Called from `buildSessionFromOptions` so every entry path picks it up
+ * automatically (TUI, agent, CI, sub-commands). Skipped when
+ * `AMPLITUDE_WIZARD_SKIP_BOOTSTRAP=1` (wizard-internal opt-out) because
+ * vitest module mocks don't always intercept the dynamic-import chain
+ * bin.ts uses, and CLI tests aren't exercising the storage migration
+ * anyway — there's a dedicated test suite for that. We deliberately do
+ * NOT gate on `NODE_ENV=test`: real users sometimes run the wizard
+ * inside a test harness (e.g. their app's CI), and they should still
+ * get migration + per-project log routing.
+ */
+function bootstrapInstallDir(installDir: string): void {
+  if (process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP === '1') return;
+  runMigrationShim(installDir);
+  setProjectLogFile(installDir);
+}
+
+/**
  * Build a WizardSession from CLI argv, avoiding the repeated 12-field literal.
+ * Also runs `bootstrapInstallDir` so every command path migrates legacy
+ * storage and switches the logger to the per-project location once
+ * `installDir` is known.
  */
 const buildSessionFromOptions = async (
   options: Record<string, unknown>,
   overrides?: { ci?: boolean },
 ) => {
   const { buildSession } = await import('./src/lib/wizard-session.js');
-  return buildSession({
+  const session = buildSession({
     debug: options.debug as boolean | undefined,
     verbose: options.verbose as boolean | undefined,
     forceInstall: options.forceInstall as boolean | undefined,
@@ -206,6 +243,8 @@ const buildSessionFromOptions = async (
     appId: options.appId as string | undefined,
     appName: options.appName as string | undefined,
   });
+  bootstrapInstallDir(session.installDir);
+  return session;
 };
 
 /**
@@ -306,6 +345,7 @@ const resolveNonInteractiveCredentials = async (
 
     const { resolveZone } = await import('./src/lib/zone-resolution.js');
     const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+    const { toCredentialAppId } = await import('./src/lib/wizard-session.js');
     // Pre-OAuth CLI path: session.region may be unset, fall back to disk tiers.
     const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
       readDisk: true,
@@ -347,7 +387,7 @@ const resolveNonInteractiveCredentials = async (
         idToken: session.pendingAuthIdToken,
         projectApiKey: created.apiKey,
         host: getHostFromRegion(zone),
-        appId: Number.parseInt(created.appId, 10) || 0,
+        appId: toCredentialAppId(created.appId),
       };
       session.projectHasData = false;
 
@@ -883,6 +923,15 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_PLAN_ID env-var passthrough',
       type: 'string',
     },
+    // AMPLITUDE_WIZARD_SKIP_BOOTSTRAP=1 disables the per-project storage
+    // bootstrap (migration shim + per-project log routing). Used by the
+    // CLI test harness; `.env('AMPLITUDE_WIZARD')` auto-maps it to
+    // `skipBootstrap` and `.strict()` rejects it without this shadow.
+    'skip-bootstrap': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_SKIP_BOOTSTRAP env-var passthrough',
+      type: 'boolean',
+    },
   })
   .command(
     ['$0'],
@@ -1330,6 +1379,103 @@ void yargs(hideBin(process.argv))
             // AuthScreen SUSI pickers (org → workspace → API key).
             // AuthScreen calls store.setCredentials() when done, advancing the
             // router past Auth → RegionSelect → DataSetup → to IntroScreen.
+            const waitForSessionState = (
+              predicate: () => boolean,
+            ): Promise<void> =>
+              new Promise<void>((resolve) => {
+                if (predicate()) {
+                  resolve();
+                  return;
+                }
+                const unsub = tui.store.subscribe(() => {
+                  if (predicate()) {
+                    unsub();
+                    resolve();
+                  }
+                });
+              });
+
+            // Run a single OAuth + fetchAmplitudeUser + setOAuthComplete
+            // cycle against the currently selected region. Shared between
+            // the initial auth task and the re-auth watcher that handles
+            // mid-session /region changes.
+            const runOAuthCycle = async (
+              forceFresh: boolean,
+            ): Promise<void> => {
+              const { performAmplitudeAuth } = await import(
+                './src/utils/oauth.js'
+              );
+              const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+              const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                './src/lib/constants.js'
+              );
+              const { storeToken } = await import(
+                './src/utils/ampli-settings.js'
+              );
+              const { resolveZone } = await import(
+                './src/lib/zone-resolution.js'
+              );
+
+              const zone = resolveZone(
+                tui.store.session,
+                DEFAULT_AMPLITUDE_ZONE,
+                { readDisk: false },
+              );
+
+              let auth = await performAmplitudeAuth({ zone, forceFresh });
+
+              // Update login URL (clears the "copy this URL" hint)
+              tui.store.setLoginUrl(null);
+
+              // Zone was already selected by the user before OAuth started.
+              const cloudRegion = zone;
+
+              let userInfo;
+              try {
+                userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+              } catch {
+                // Token may be expired — re-open the browser for a fresh login
+                tui.store.setLoginUrl(null);
+                auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+              }
+
+              // Persist to ~/.ampli.json
+              storeToken(
+                {
+                  id: userInfo.id,
+                  firstName: userInfo.firstName,
+                  lastName: userInfo.lastName,
+                  email: userInfo.email,
+                  zone: auth.zone,
+                },
+                {
+                  accessToken: auth.accessToken,
+                  idToken: auth.idToken,
+                  refreshToken: auth.refreshToken,
+                  expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+                },
+              );
+
+              // Populate user email for /whoami display. Use the store
+              // setter (not the closed-over `session` ref from line 1101) —
+              // every nanostores `setKey` replaces the top-level object, so
+              // by the time the re-auth watcher fires this cycle the local
+              // `session` ref is many generations stale and a direct mutation
+              // would silently land on a discarded object.
+              tui.store.setUserEmail(userInfo.email);
+              analytics.setDistinctId(userInfo.email);
+              analytics.identifyUser({ email: userInfo.email });
+
+              // Signal AuthScreen — triggers org/workspace/API key pickers
+              tui.store.setOAuthComplete({
+                accessToken: auth.accessToken,
+                idToken: auth.idToken,
+                cloudRegion,
+                orgs: userInfo.orgs,
+              });
+            };
+
             const authTask = (async () => {
               // Skip the full OAuth + SUSI flow when credentials were pre-populated
               // from ~/.ampli.json + the saved API key (returning user).
@@ -1355,24 +1501,11 @@ void yargs(hideBin(process.argv))
                 // Wait for the user to dismiss the welcome screen AND pick a
                 // region before opening the OAuth URL. This ensures the logo
                 // and intro are visible before the browser opens.
-                await new Promise<void>((resolve) => {
-                  if (
+                await waitForSessionState(
+                  () =>
                     tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
-                  ) {
-                    resolve();
-                    return;
-                  }
-                  const unsub = tui.store.subscribe(() => {
-                    if (
-                      tui.store.session.introConcluded &&
-                      tui.store.session.region !== null
-                    ) {
-                      unsub();
-                      resolve();
-                    }
-                  });
-                });
+                    tui.store.session.region !== null,
+                );
                 const { resolveZone } = await import(
                   './src/lib/zone-resolution.js'
                 );
@@ -1438,7 +1571,11 @@ void yargs(hideBin(process.argv))
                 }
 
                 if (auth === null) {
-                  auth = await performAmplitudeAuth({ zone, forceFresh });
+                  // Defer to the shared runOAuthCycle helper for the
+                  // common no-signup path. This keeps the initial-auth
+                  // flow and the /region re-auth watcher in lockstep.
+                  await runOAuthCycle(forceFresh);
+                  return;
                 }
 
                 // Update login URL (clears the "copy this URL" hint)
@@ -1531,6 +1668,103 @@ void yargs(hideBin(process.argv))
               }
             })();
 
+            // Fire-and-forget watcher that re-runs OAuth whenever a mid-session
+            // /region clears credentials. Without this the user would hang on
+            // AuthScreen's "Waiting for authentication..." spinner after
+            // switching regions. Never resolves — the process exit (via SIGINT
+            // or normal completion) tears it down.
+            //
+            // Deferred until authTask resolves so the watcher doesn't add a
+            // second subscribe during the initial-auth window.
+            void (async () => {
+              await authTask;
+              const { Overlay } = await import('./src/ui/tui/router.js');
+              // Tracks consecutive runOAuthCycle failures so we can back off
+              // and surface a hint instead of hot-looping (or going silent)
+              // when the new zone's OAuth keeps failing.
+              let consecutiveFailures = 0;
+              while (true) {
+                // Wait for credentials to be populated first — either by the
+                // initial authTask above or by AuthScreen's SUSI pickers.
+                await waitForSessionState(
+                  () => tui.store.session.credentials !== null,
+                );
+
+                // Then wait for them to be cleared AND the user to have
+                // picked a new region (so we don't fire while RegionSelect
+                // is still open). setRegionForced clears credentials; the
+                // subsequent setRegion clears regionForced.
+                //
+                // Skip when the Logout overlay is active or an outro is
+                // queued — /logout clears credentials immediately and
+                // process.exit()s 1.5s later; without this guard the
+                // watcher would race the exit and open a browser during the
+                // "Logged out" confirmation.
+                //
+                // The `loggingOut` session flag is set synchronously by
+                // showLogoutOverlay BEFORE any state mutation. Checking it
+                // closes the brief gate where credentials are null but
+                // `currentScreen` has not yet re-resolved to Overlay.Logout,
+                // which would otherwise let this watcher fall through and
+                // trigger an unwanted runOAuthCycle.
+                await waitForSessionState(
+                  () =>
+                    !tui.store.session.loggingOut &&
+                    tui.store.session.credentials === null &&
+                    tui.store.session.region !== null &&
+                    !tui.store.session.regionForced &&
+                    tui.store.session.introConcluded &&
+                    tui.store.currentScreen !== Overlay.Logout &&
+                    tui.store.session.outroData === null,
+                );
+
+                try {
+                  // forceFresh: false lets performAmplitudeAuth reuse a
+                  // stored per-zone token silently when the user has
+                  // previously signed into the target region. Only users
+                  // switching to a never-visited zone see the browser.
+                  await runOAuthCycle(false);
+                  consecutiveFailures = 0;
+                } catch (err) {
+                  consecutiveFailures += 1;
+                  if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                    console.error('Re-auth error:', err);
+                  }
+                  // runOAuthCycle threw before setOAuthComplete, so
+                  // credentials are still null and the inner waiters above
+                  // would resolve immediately on the next loop iteration —
+                  // hot-spinning the OAuth attempt. Surface a hint and back
+                  // off so the user sees something and a retry storm can't
+                  // chew CPU. The retry loop is intentionally bounded; users
+                  // can still recover via `/login` or by re-picking a region.
+                  tui.store.setCommandFeedback(
+                    consecutiveFailures === 1
+                      ? "Authentication didn't complete. Retrying — use /login to retry manually."
+                      : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
+                    consecutiveFailures >= 3 ? 8000 : 4000,
+                  );
+                  if (consecutiveFailures >= 3) {
+                    // After 3 strikes, stop auto-retrying so we don't burn
+                    // tokens or trigger rate limits. The user can resume via
+                    // /login or /region; both clear credentials and unblock
+                    // the watcher.
+                    await waitForSessionState(
+                      () =>
+                        tui.store.currentScreen === Overlay.Login ||
+                        tui.store.session.regionForced,
+                    );
+                    consecutiveFailures = 0;
+                    continue;
+                  }
+                  // Brief backoff before the next attempt so transient
+                  // network blips have time to recover.
+                  await new Promise<void>((r) =>
+                    setTimeout(r, 1500 * consecutiveFailures),
+                  );
+                }
+              }
+            })();
+
             // ── Framework detection ────────────────────────────────
             // Runs concurrently with auth while AuthScreen shows.
             // Each detector has its own per-framework timeout internally,
@@ -1596,6 +1830,16 @@ void yargs(hideBin(process.argv))
                 })) {
                   tui.store.addDiscoveredFeature(f);
                 }
+                // Auto-enable every discovered opt-in addon
+                // (Session Replay + Guides & Surveys for unified-SDK
+                // web; LLM when the feature flag is on). Matches the
+                // out-of-box experience of the data-setup npm snippet
+                // and avoids burying first-time users under a privacy /
+                // quota picker that most don't have context to answer.
+                // Per-option inline comments in the generated init
+                // code give users a clear, code-level opt-out surface
+                // for any specific feature they want to disable.
+                tui.store.autoEnableInlineAddons('auto-tui');
               };
               runDiscovery();
 
@@ -2383,6 +2627,202 @@ void yargs(hideBin(process.argv))
         });
         child.on('exit', (code) => process.exit(code ?? ExitCode.AGENT_FAILED));
       })();
+    },
+  )
+  .command(
+    'projects <command>',
+    "Inspect the authenticated user's Amplitude projects",
+    (yargs) => {
+      return yargs
+        .command(
+          'list',
+          'List accessible projects/environments (paginated, searchable)',
+          (yargs) => {
+            return yargs.options({
+              query: {
+                describe:
+                  'case-insensitive substring filter (matches org, workspace, env, app id)',
+                type: 'string',
+              },
+              limit: {
+                describe: 'page size (default 25, max 200)',
+                type: 'number',
+                default: 25,
+              },
+              offset: {
+                describe: 'page offset (default 0)',
+                type: 'number',
+                default: 0,
+              },
+            });
+          },
+          (argv) => {
+            void (async () => {
+              const { resolveMode } = await import('./src/lib/mode-config.js');
+              const { jsonOutput } = resolveMode({
+                json: argv.json as boolean | undefined,
+                human: argv.human as boolean | undefined,
+                agent: argv.agent as boolean | undefined,
+                requireExplicitWrites: true,
+                isTTY: Boolean(process.stdout.isTTY),
+              });
+              try {
+                const { runProjectsList } = await import(
+                  './src/lib/agent-ops.js'
+                );
+                const offset = (argv.offset as number | undefined) ?? 0;
+                const limit = (argv.limit as number | undefined) ?? 25;
+                const result = await runProjectsList({
+                  query: argv.query,
+                  limit,
+                  offset,
+                });
+
+                if (jsonOutput) {
+                  // Emit a `needs_input`-shaped envelope so outer agents can
+                  // render the same picker they would for the inline prompt.
+                  const hasMore = offset + result.returned < result.total;
+                  // Use `result.returned`, not the user-supplied `limit`, so
+                  // an over-the-cap value (e.g. `--limit 9999` clamped to
+                  // 200 internally) doesn't skip past unread items.
+                  const nextOffset = offset + result.returned;
+                  process.stdout.write(
+                    JSON.stringify({
+                      v: 1,
+                      '@timestamp': new Date().toISOString(),
+                      type: 'needs_input',
+                      message: result.warning
+                        ? result.warning
+                        : `${result.total} project${
+                            result.total === 1 ? '' : 's'
+                          } available${
+                            result.query ? ` matching "${result.query}"` : ''
+                          }.`,
+                      ...(result.warning && { level: 'warn' }),
+                      data: {
+                        event: 'needs_input',
+                        code: 'project_selection',
+                        ui: {
+                          component: 'searchable_select',
+                          priority: 'required',
+                          title: 'Select an Amplitude project',
+                          description:
+                            'Choose where events from this app should be sent.',
+                          searchPlaceholder:
+                            'Search projects, orgs, workspaces, environments…',
+                          emptyState:
+                            'No projects matched. Try a different query, or run `wizard login` if you expected results.',
+                        },
+                        choices: result.choices.map((c) => ({
+                          value: c.appId,
+                          label: c.label,
+                          description: c.description,
+                          hint: c.envName,
+                          metadata: {
+                            orgId: c.orgId,
+                            orgName: c.orgName,
+                            workspaceId: c.workspaceId,
+                            workspaceName: c.workspaceName,
+                            envName: c.envName,
+                            appId: c.appId,
+                            rank: c.rank,
+                          },
+                          resumeFlags: c.resumeFlags,
+                        })),
+                        recommended: result.choices[0]?.appId,
+                        recommendedReason: result.choices[0]
+                          ? `Highest-ranked environment in the first matching workspace (${result.choices[0].description}).`
+                          : undefined,
+                        responseSchema: {
+                          appId: 'string (required, from choices[].value)',
+                        },
+                        pagination: {
+                          total: result.total,
+                          returned: result.returned,
+                          ...(result.query && { query: result.query }),
+                          ...(hasMore && {
+                            nextCommand: [
+                              'npx',
+                              '@amplitude/wizard',
+                              'projects',
+                              'list',
+                              '--agent',
+                              '--offset',
+                              String(nextOffset),
+                              '--limit',
+                              String(limit),
+                              ...(result.query
+                                ? ['--query', result.query]
+                                : []),
+                            ],
+                          }),
+                        },
+                        allowManualEntry: true,
+                        manualEntry: {
+                          flag: '--app-id',
+                          placeholder: 'Enter Amplitude app ID (e.g. 769610)',
+                          pattern: '^\\d+$',
+                        },
+                      },
+                    }) + '\n',
+                  );
+                } else {
+                  const ui = getUI();
+                  if (result.warning) {
+                    ui.log.warn(result.warning);
+                  } else if (result.total === 0) {
+                    ui.note(
+                      `No projects matched${
+                        result.query ? ` "${result.query}"` : ''
+                      }.`,
+                    );
+                  } else {
+                    ui.log.info(
+                      `${result.total} project${result.total === 1 ? '' : 's'}${
+                        result.query ? ` matching "${result.query}"` : ''
+                      }:`,
+                    );
+                    for (const c of result.choices) {
+                      ui.log.info(`  ${chalk.bold(c.appId)}  ${c.label}`);
+                    }
+                    if (offset + result.returned < result.total) {
+                      ui.log.info(
+                        chalk.dim(
+                          `  … ${
+                            result.total - result.returned - offset
+                          } more — pass --offset and --limit to page.`,
+                        ),
+                      );
+                    }
+                  }
+                }
+                process.exit(
+                  result.warning ? ExitCode.AUTH_REQUIRED : ExitCode.SUCCESS,
+                );
+              } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                if (jsonOutput) {
+                  process.stdout.write(
+                    JSON.stringify({
+                      v: 1,
+                      '@timestamp': new Date().toISOString(),
+                      type: 'error',
+                      message: `projects list failed: ${message}`,
+                      data: { event: 'projects_list_failed' },
+                    }) + '\n',
+                  );
+                } else {
+                  getUI().log.error(`Projects list failed: ${message}`);
+                }
+                process.exit(ExitCode.GENERAL_ERROR);
+              }
+            })();
+          },
+        )
+        .demandCommand(1, 'You must specify a subcommand: `projects list`');
+    },
+    () => {
+      // Sub-command dispatcher; demandCommand handles the no-op case.
     },
   )
   .command(

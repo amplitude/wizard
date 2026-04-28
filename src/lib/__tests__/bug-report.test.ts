@@ -7,12 +7,20 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
-vi.mock('../observability/index.js', () => ({
-  getRunId: () => 'run-xyz',
-  getSessionId: () => 'sess-abc',
-  getLogFilePath: () => '/tmp/amplitude-wizard.log',
-}));
+vi.mock('../observability/index.js', async () => {
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  return {
+    getRunId: () => 'run-xyz',
+    getSessionId: () => 'sess-abc',
+    getLogFilePath: () => join(tmpdir(), 'amplitude-wizard.log'),
+  };
+});
+
+const MOCK_LOG_PATH = join(tmpdir(), 'amplitude-wizard.log');
 
 vi.mock('../observability/redact.js', () => ({
   // Passthrough mock — real redactor covered by its own tests. We're
@@ -35,7 +43,7 @@ describe('buildBugReportBody', () => {
     expect(body).toContain('Run ID: run-xyz');
     expect(body).toContain('Session ID: sess-abc');
     expect(body).toContain('Integration: nextjs');
-    expect(body).toContain('Log file: /tmp/amplitude-wizard.log');
+    expect(body).toContain(`Log file: ${MOCK_LOG_PATH}`);
     expect(body).toMatch(/Node version: v\d+\.\d+/);
   });
 

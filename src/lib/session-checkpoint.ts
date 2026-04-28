@@ -7,13 +7,16 @@
  */
 
 import { readFileSync, unlinkSync, existsSync } from 'fs';
-import { createHash } from 'crypto';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import {
+  ensureDir,
+  getCheckpointFile,
+  getRunDir,
+} from '../utils/storage-paths.js';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
+import { toWorkspaceId } from './wizard-session.js';
 import { Integration } from './constants.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -21,8 +24,7 @@ import { Integration } from './constants.js';
 /** Per-project checkpoint file using a hash of installDir to avoid cross-instance clobbering. */
 function checkpointPath(installDir: string): string {
   const dir = installDir || process.cwd();
-  const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
-  return join(tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`);
+  return getCheckpointFile(dir);
 }
 
 /** Checkpoints older than 24 hours are considered stale. */
@@ -42,7 +44,12 @@ const CheckpointSchema = z
     region: z.enum(['us', 'eu']).nullable(),
     selectedOrgId: z.string().nullable(),
     selectedOrgName: z.string().nullable(),
-    selectedWorkspaceId: z.string().nullable(),
+    // Coerce empty / whitespace-only ids to null so downstream
+    // `toWorkspaceId(...)` (which rejects `min(1)`) can't be fed a bad string.
+    selectedWorkspaceId: z
+      .string()
+      .nullable()
+      .transform((v) => (v && v.trim().length > 0 ? v : null)),
     selectedWorkspaceName: z.string().nullable(),
     selectedEnvName: z.string().nullable().optional(),
     selectedProjectName: z.string().nullable().optional(),
@@ -52,6 +59,7 @@ const CheckpointSchema = z
     detectedFrameworkLabel: z.string().nullable(),
     detectionComplete: z.boolean(),
     frameworkContext: z.record(z.string(), z.unknown()),
+    frameworkContextAnswerOrder: z.array(z.string()).optional(),
 
     // Intro
     introConcluded: z.boolean(),
@@ -88,10 +96,13 @@ export function saveCheckpoint(session: WizardSession): void {
     detectedFrameworkLabel: session.detectedFrameworkLabel,
     detectionComplete: session.detectionComplete,
     frameworkContext: session.frameworkContext,
+    frameworkContextAnswerOrder: session.frameworkContextAnswerOrder,
 
     introConcluded: session.introConcluded,
   };
 
+  // Ensure the per-project run dir exists; cache root may not have been created yet.
+  ensureDir(getRunDir(session.installDir));
   atomicWriteJSON(checkpointPath(session.installDir), checkpoint, 0o600);
 }
 
@@ -148,13 +159,16 @@ export async function loadCheckpoint(
     region: checkpoint.region,
     selectedOrgId: checkpoint.selectedOrgId,
     selectedOrgName: checkpoint.selectedOrgName,
-    selectedWorkspaceId: checkpoint.selectedWorkspaceId,
+    selectedWorkspaceId: checkpoint.selectedWorkspaceId
+      ? toWorkspaceId(checkpoint.selectedWorkspaceId)
+      : null,
     selectedWorkspaceName: checkpoint.selectedWorkspaceName,
     selectedEnvName: checkpoint.selectedEnvName,
     integration,
     detectedFrameworkLabel: derivedLabel,
     detectionComplete: checkpoint.detectionComplete,
     frameworkContext: checkpoint.frameworkContext,
+    frameworkContextAnswerOrder: checkpoint.frameworkContextAnswerOrder ?? [],
     introConcluded: checkpoint.introConcluded,
   };
 }

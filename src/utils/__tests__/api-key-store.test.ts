@@ -264,3 +264,59 @@ describe('readApiKey', () => {
     expect(readApiKey(tmpDir)).toBeNull();
   });
 });
+
+// ── F5 regression: .env.local is mode 0o600 on POSIX ──────────────────────────
+
+describe.skipIf(process.platform === 'win32')(
+  'persistApiKey — .env.local mode hardening',
+  () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-mode-test-'));
+      mockExecSync.mockReset();
+      // Force the .env.local fallback path on POSIX hosts. linux + a
+      // failing secret-tool is the simplest way to land in envWrite.
+      setPlatform('linux');
+      mockExecSync.mockImplementation(() => {
+        throw new Error('no secret-tool');
+      });
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+      setPlatform(originalPlatform);
+    });
+
+    it('creates a fresh .env.local at 0o600', () => {
+      persistApiKey('apikey1', tmpDir);
+      const stat = fs.statSync(path.join(tmpDir, '.env.local'));
+      expect(stat.mode & 0o777).toBe(0o600);
+    });
+
+    it('tightens an existing 0o644 .env.local to 0o600', () => {
+      const envPath = path.join(tmpDir, '.env.local');
+      fs.writeFileSync(envPath, 'OTHER_VAR=foo\n', { mode: 0o644 });
+      expect(fs.statSync(envPath).mode & 0o777).toBe(0o644);
+
+      persistApiKey('apikey2', tmpDir);
+
+      expect(fs.statSync(envPath).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(envPath, 'utf8')).toContain(
+        'AMPLITUDE_API_KEY=apikey2',
+      );
+    });
+
+    it('keeps mode at 0o600 after replacing an existing key', () => {
+      const envPath = path.join(tmpDir, '.env.local');
+      fs.writeFileSync(envPath, 'AMPLITUDE_API_KEY=oldkey\n', { mode: 0o644 });
+
+      persistApiKey('newkey', tmpDir);
+
+      expect(fs.statSync(envPath).mode & 0o777).toBe(0o600);
+      expect(fs.readFileSync(envPath, 'utf8')).toContain(
+        'AMPLITUDE_API_KEY=newkey',
+      );
+    });
+  },
+);
