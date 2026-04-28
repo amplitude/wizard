@@ -49,6 +49,7 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
   const [step, setStep] = useState<'email' | 'name' | 'existing_user'>('email');
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [inputKey, setInputKey] = useState(0);
 
   const handleEmailSubmit = (value: string) => {
     const trimmed = value.trim();
@@ -63,6 +64,7 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
     setEmail(trimmed);
     setError(null);
     setStep('name');
+    setInputKey((k) => k + 1); // Force input to clear
   };
 
   const handleNameSubmit = async (value: string) => {
@@ -76,7 +78,7 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
     setIsChecking(true);
 
     const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
-      readDisk: true,
+      readDisk: false,
     });
     try {
       const result = await performDirectSignup({
@@ -129,6 +131,7 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
         }
 
         replaceStoredUser(user, tokens);
+        store.markSignupTokensObtained();
       }
 
       setIsChecking(false);
@@ -201,14 +204,14 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
           </Text>
         ) : step === 'email' ? (
           <TextInput
-            key="email-input"
+            key={`email-${inputKey}`}
             defaultValue={email}
             placeholder="your.email@example.com"
             onSubmit={handleEmailSubmit}
           />
         ) : (
           <TextInput
-            key="name-input"
+            key={`name-${inputKey}`}
             defaultValue={session.signupFullName ?? ''}
             placeholder="First Last"
             onSubmit={(value) => {

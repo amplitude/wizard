@@ -649,6 +649,11 @@ export class WizardStore {
     this.emitChange();
   }
 
+  markSignupTokensObtained(): void {
+    this.$session.setKey('signupTokensObtained', true);
+    this.emitChange();
+  }
+
   acceptTermsOfService(): void {
     this.$session.setKey('tosAccepted', true);
     analytics.wizardCapture('terms of service accepted');
