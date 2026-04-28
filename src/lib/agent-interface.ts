@@ -2411,16 +2411,20 @@ export async function runAgent(
     // continue to surface errors correctly. The structured `report_status`
     // path above is preferred and runs first.
     if (outputText.includes('[ERROR-MCP-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: MCP_MISSING (legacy text marker)');
       spinner.stop('Agent could not access Amplitude MCP');
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.MCP_MISSING };
+      return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: RESOURCE_MISSING (legacy text marker)');
       spinner.stop('Agent could not access setup resource');
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.RESOURCE_MISSING };
+      return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
 
     // Check for API errors (rate limits, etc.)
@@ -2492,14 +2496,18 @@ export async function runAgent(
     // Backwards-compat fallback for bundled skills emitting legacy text
     // markers — see note in the non-throwing return path.
     if (outputText.includes('[ERROR-MCP-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): MCP_MISSING (legacy text marker)');
       spinner.stop('Agent could not access Amplitude MCP');
-      return { error: AgentErrorType.MCP_MISSING };
+      return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): RESOURCE_MISSING (legacy text marker)');
       spinner.stop('Agent could not access setup resource');
-      return { error: AgentErrorType.RESOURCE_MISSING };
+      return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
 
     // See note in the non-throwing return path above — surface

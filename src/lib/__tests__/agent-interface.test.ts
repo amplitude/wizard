@@ -276,6 +276,12 @@ describe('runAgent', () => {
       );
 
       expect(result.error).toBe(AgentErrorType.MCP_MISSING);
+      // Preserve the marker line as `message` so the runner can plumb it
+      // into Sentry as `agent error detail`. Without this, Sentry only
+      // sees the generic "MCP_MISSING" tag and we can't tell whether the
+      // in-process or remote MCP failed.
+      expect(result.message).toContain('[ERROR-MCP-MISSING]');
+      expect(result.message).toContain('Could not load skill menu');
     });
 
     it('reports RESOURCE_MISSING when agent emits the [ERROR-RESOURCE-MISSING] legacy marker', async () => {
@@ -309,6 +315,10 @@ describe('runAgent', () => {
       );
 
       expect(result.error).toBe(AgentErrorType.RESOURCE_MISSING);
+      // Preserve the marker line as `message` — same rationale as the
+      // MCP_MISSING case above.
+      expect(result.message).toContain('[ERROR-RESOURCE-MISSING]');
+      expect(result.message).toContain('Could not find a suitable skill');
     });
 
     it('forwards [STATUS] legacy markers to the spinner', async () => {
