@@ -107,6 +107,46 @@ describe('OutroScreen — error variants', () => {
     expect(frame).not.toContain('View setup report');
   });
 
+  it('renders the MCP_MISSING copy without leaking "MCP" jargon', () => {
+    // Mirrors what agent-runner.ts emits for AgentErrorType.MCP_MISSING.
+    // The wizard's user is installing Amplitude — they shouldn't have to
+    // learn what an MCP server is to read an error message.
+    const message = `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up Next.js manually:\nhttps://amplitude.com/docs/sdks/sdks/typescript-browser`;
+    const store = makeStoreForSnapshot({
+      outroData: {
+        kind: OutroKind.Error,
+        message,
+        docsUrl: 'https://amplitude.com/docs/get-started/quickstart',
+      },
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain("Couldn't reach Amplitude's setup service");
+    expect(frame).toContain('Try again in a moment');
+    expect(frame).toContain('set up Next.js manually');
+    // The whole point of the rewrite — internal jargon must not leak.
+    expect(frame).not.toMatch(/\bMCP\b/);
+    expect(frame).not.toContain('wizard MCP service');
+    expect(frame).not.toContain('in-process tooling server');
+  });
+
+  it('renders the RESOURCE_MISSING copy without leaking "setup resource" jargon', () => {
+    const message = `Couldn't load setup instructions for Vue — this may be a temporary service issue or a version mismatch.\n\nTry again in a moment, or set up Vue manually:\nhttps://amplitude.com/docs/sdks/sdks/typescript-browser`;
+    const store = makeStoreForSnapshot({
+      outroData: {
+        kind: OutroKind.Error,
+        message,
+        docsUrl: 'https://amplitude.com/docs/get-started/quickstart',
+      },
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain("Couldn't load setup instructions for Vue");
+    expect(frame).toContain('Try again in a moment');
+    expect(frame).not.toMatch(/\bMCP\b/);
+    // Old copy used the generic phrase "setup resource" which doesn't
+    // mean anything to a user trying to install Amplitude.
+    expect(frame).not.toContain('the setup resource');
+  });
+
   it('shows event count + env name in success summary when events were planned', () => {
     const store = makeStoreForSnapshot({
       outroData: { kind: OutroKind.Success, changes: ['x'] },

@@ -724,11 +724,13 @@ async function runAgentWizardBody(
     // The MCP_MISSING signal can come from EITHER the in-process
     // `wizard-tools` MCP (skill loading, env vars) OR the remote
     // `amplitude-wizard` MCP (mcp.amplitude.com — event plans, dashboards).
-    // Surface the agent-reported detail so the user can include it in
-    // a bug report and Sentry can disambiguate which server failed.
-    const detail = agentResult.message ?? 'unspecified';
+    // The agent-reported detail is preserved on the WizardError payload for
+    // Sentry / `agent error detail` analytics so we can disambiguate which
+    // server failed. The user-facing copy is intentionally jargon-free —
+    // someone running `npx @amplitude/wizard` came to install Amplitude,
+    // not to learn what an MCP server is.
     await wizardAbort({
-      message: `Could not access an Amplitude wizard MCP service\n\nThis could be the in-process tooling server (used for skill loading and env var management) or the remote Amplitude MCP server.\n\nDetail: ${detail}\n\nPossible causes: missing skills bundle in the install, network connectivity, expired auth, or a transient outage.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
+      message: `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`,
       error: new WizardError('Agent could not access Amplitude MCP server', {
         integration: config.metadata.integration,
         'error type': AgentErrorType.MCP_MISSING,
@@ -740,7 +742,7 @@ async function runAgentWizardBody(
 
   if (agentResult.error === AgentErrorType.RESOURCE_MISSING) {
     await wizardAbort({
-      message: `Could not access the setup resource\n\nThe wizard could not access the setup resource. This may indicate a version mismatch or a temporary service issue.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
+      message: `Couldn't load setup instructions for ${config.metadata.name} — this may be a temporary service issue or a version mismatch.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`,
       error: new WizardError('Agent could not access setup resource', {
         integration: config.metadata.integration,
         'error type': AgentErrorType.RESOURCE_MISSING,

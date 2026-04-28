@@ -2434,13 +2434,13 @@ export async function runAgent(
       const { code, detail } = reportedError;
       if (code === 'MCP_MISSING') {
         logToFile('Agent error: MCP_MISSING');
-        spinner.stop(detail || 'Agent could not access Amplitude MCP');
+        spinner.stop(detail || "Couldn't reach Amplitude's setup service");
         _activeStatusReporter = undefined;
         return { error: AgentErrorType.MCP_MISSING, message: detail };
       }
       if (code === 'RESOURCE_MISSING') {
         logToFile('Agent error: RESOURCE_MISSING');
-        spinner.stop(detail || 'Agent could not access setup resource');
+        spinner.stop(detail || "Couldn't load setup instructions");
         _activeStatusReporter = undefined;
         return { error: AgentErrorType.RESOURCE_MISSING, message: detail };
       }
@@ -2459,7 +2459,7 @@ export async function runAgent(
       const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: MCP_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access Amplitude MCP');
+      spinner.stop("Couldn't reach Amplitude's setup service");
       _activeStatusReporter = undefined;
       return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
@@ -2467,7 +2467,7 @@ export async function runAgent(
       const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: RESOURCE_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access setup resource');
+      spinner.stop("Couldn't load setup instructions");
       _activeStatusReporter = undefined;
       return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
@@ -2544,14 +2544,14 @@ export async function runAgent(
       const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): MCP_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access Amplitude MCP');
+      spinner.stop("Couldn't reach Amplitude's setup service");
       return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
       const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): RESOURCE_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access setup resource');
+      spinner.stop("Couldn't load setup instructions");
       return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
 
