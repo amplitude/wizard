@@ -14,6 +14,7 @@ import { join } from 'path';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
+import { toWorkspaceId } from './wizard-session.js';
 import { Integration } from './constants.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -42,7 +43,12 @@ const CheckpointSchema = z
     region: z.enum(['us', 'eu']).nullable(),
     selectedOrgId: z.string().nullable(),
     selectedOrgName: z.string().nullable(),
-    selectedWorkspaceId: z.string().nullable(),
+    // Coerce empty / whitespace-only ids to null so downstream
+    // `toWorkspaceId(...)` (which rejects `min(1)`) can't be fed a bad string.
+    selectedWorkspaceId: z
+      .string()
+      .nullable()
+      .transform((v) => (v && v.trim().length > 0 ? v : null)),
     selectedWorkspaceName: z.string().nullable(),
     selectedEnvName: z.string().nullable().optional(),
     selectedProjectName: z.string().nullable().optional(),
@@ -148,7 +154,9 @@ export async function loadCheckpoint(
     region: checkpoint.region,
     selectedOrgId: checkpoint.selectedOrgId,
     selectedOrgName: checkpoint.selectedOrgName,
-    selectedWorkspaceId: checkpoint.selectedWorkspaceId,
+    selectedWorkspaceId: checkpoint.selectedWorkspaceId
+      ? toWorkspaceId(checkpoint.selectedWorkspaceId)
+      : null,
     selectedWorkspaceName: checkpoint.selectedWorkspaceName,
     selectedEnvName: checkpoint.selectedEnvName,
     integration,

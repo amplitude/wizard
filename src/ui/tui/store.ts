@@ -19,6 +19,7 @@ import {
   type CloudRegion,
   type RetryState,
   buildSession,
+  toWorkspaceId,
 } from '../../lib/wizard-session.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
 import { resolveZone } from '../../lib/zone-resolution.js';
@@ -580,11 +581,21 @@ export class WizardStore {
     appId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
-      this.$session.setKey('selectedOrgId', fields.orgId);
+      // Mirror setOrgAndWorkspace: collapse '' -> null so isAuthenticated
+      // doesn't treat an empty org id as a real one.
+      this.$session.setKey('selectedOrgId', fields.orgId || null);
     if (fields.orgName !== undefined)
       this.$session.setKey('selectedOrgName', fields.orgName);
     if (fields.workspaceId !== undefined)
-      this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
+      // Mirror setOrgAndWorkspace: collapse empty strings to null instead of
+      // throwing in WorkspaceIdSchema's `min(1)` check. No current caller
+      // passes an empty string (CreateProjectScreen omits workspaceId,
+      // DataIngestionCheckScreen reads from API responses), but keeping the
+      // guard consistent across both write paths prevents future regressions.
+      this.$session.setKey(
+        'selectedWorkspaceId',
+        fields.workspaceId ? toWorkspaceId(fields.workspaceId) : null,
+      );
     if (fields.workspaceName !== undefined)
       this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
     if (fields.appId !== undefined)
@@ -749,9 +760,18 @@ export class WizardStore {
   ): void {
     const { persist = true } = options;
 
-    this.$session.setKey('selectedOrgId', org.id);
+    // Callers (e.g. AuthScreen "Start Over", stale-org clear, create-project
+    // fallback) pass `{ id: '', name: '' }` to reset session state.
+    // - `selectedOrgId` is `string | null`, so collapse `''` -> `null` to keep
+    //   `isAuthenticated` honest (an empty org id is not a real org).
+    // - `selectedWorkspaceId` is branded; an empty string fails
+    //   `WorkspaceIdSchema`'s `min(1)` check, so likewise collapse to null.
+    this.$session.setKey('selectedOrgId', org.id || null);
     this.$session.setKey('selectedOrgName', org.name);
-    this.$session.setKey('selectedWorkspaceId', workspace.id);
+    this.$session.setKey(
+      'selectedWorkspaceId',
+      workspace.id ? toWorkspaceId(workspace.id) : null,
+    );
     this.$session.setKey('selectedWorkspaceName', workspace.name);
 
     // Extract the Amplitude app ID from the lowest-rank environment.

@@ -8,6 +8,7 @@
  */
 
 import type { WizardSession } from './wizard-session';
+import { toCredentialAppId, toWorkspaceId } from './wizard-session';
 import { DEFAULT_AMPLITUDE_ZONE } from './constants';
 import { resolveZone } from './zone-resolution';
 import { extractAppId } from './api';
@@ -205,7 +206,7 @@ export async function resolveCredentials(
                 sortedEnvs[0];
               session.selectedOrgId = org.id;
               session.selectedOrgName = org.name;
-              session.selectedWorkspaceId = ws.id;
+              session.selectedWorkspaceId = toWorkspaceId(ws.id);
               session.selectedWorkspaceName = ws.name;
               if (matchedEnv) {
                 session.selectedEnvName = matchedEnv.name;
@@ -216,7 +217,7 @@ export async function resolveCredentials(
                 if (appId) {
                   session.selectedAppId = appId;
                   if (session.credentials) {
-                    session.credentials.appId = Number(appId) || 0;
+                    session.credentials.appId = toCredentialAppId(appId);
                   }
                 }
               }
@@ -312,7 +313,7 @@ export async function resolveCredentials(
                   const apiKey = matchedEnv.app.apiKey;
                   session.selectedOrgId = org.id;
                   session.selectedOrgName = org.name;
-                  session.selectedWorkspaceId = ws.id;
+                  session.selectedWorkspaceId = toWorkspaceId(ws.id);
                   session.selectedWorkspaceName = ws.name;
                   session.selectedEnvName = matchedEnv.name;
                   session.selectedAppId = matchedEnv.app.id;
@@ -328,7 +329,7 @@ export async function resolveCredentials(
                     idToken: storedToken.idToken,
                     projectApiKey: apiKey,
                     host: getHostFromRegion(zone),
-                    appId: Number(matchedEnv.app.id) || 0,
+                    appId: toCredentialAppId(matchedEnv.app.id),
                   };
                   session.activationLevel = 'none';
                   session.projectHasData = false;
@@ -370,7 +371,7 @@ export async function resolveCredentials(
               if (ws?.environments?.some((e) => e.app?.apiKey === apiKey)) {
                 session.selectedOrgId = org.id;
                 session.selectedOrgName = org.name;
-                session.selectedWorkspaceId = ws.id;
+                session.selectedWorkspaceId = toWorkspaceId(ws.id);
                 session.selectedWorkspaceName = ws.name;
                 break;
               }
@@ -388,7 +389,7 @@ export async function resolveCredentials(
               idToken: storedToken.idToken,
               projectApiKey: apiKey,
               host: getHostFromRegion(zone),
-              appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
+              appId: toCredentialAppId(selectedAppId),
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
@@ -429,9 +430,7 @@ export async function resolveCredentials(
               idToken: storedToken.idToken,
               projectApiKey,
               host: getHostFromRegion(zone),
-              appId: session.selectedAppId
-                ? Number(session.selectedAppId) || 0
-                : 0,
+              appId: toCredentialAppId(session.selectedAppId),
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
@@ -460,7 +459,9 @@ export async function resolveCredentials(
     projectConfig.ok &&
     projectConfig.config.WorkspaceId
   ) {
-    session.selectedWorkspaceId = projectConfig.config.WorkspaceId;
+    session.selectedWorkspaceId = toWorkspaceId(
+      projectConfig.config.WorkspaceId,
+    );
   }
 
   // Safety check: in TUI mode, clear credentials if no org/workspace ID
@@ -527,7 +528,7 @@ export async function resolveEnvironmentSelection(
 
   session.selectedOrgId = org.id;
   session.selectedOrgName = org.name;
-  session.selectedWorkspaceId = ws.id;
+  session.selectedWorkspaceId = toWorkspaceId(ws.id);
   session.selectedWorkspaceName = ws.name;
   session.selectedEnvName = env.name;
 
@@ -544,7 +545,7 @@ export async function resolveEnvironmentSelection(
     idToken: session.pendingAuthIdToken ?? undefined,
     projectApiKey: apiKey,
     host: getHostFromRegion(zone),
-    appId: appId ? Number(appId) || 0 : 0,
+    appId: toCredentialAppId(appId),
   };
   session.activationLevel = 'none';
   session.projectHasData = false;

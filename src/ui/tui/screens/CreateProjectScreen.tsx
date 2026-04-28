@@ -45,6 +45,7 @@ import {
   ApiError,
 } from '../../../lib/api.js';
 import { getHostFromRegion } from '../../../utils/urls.js';
+import { toCredentialAppId } from '../../../lib/wizard-session.js';
 
 interface CreateProjectScreenProps {
   store: WizardStore;
@@ -191,10 +192,10 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         idToken,
         projectApiKey: result.apiKey,
         host: getHostFromRegion(zone),
-        // The proxy returns `appId` as a string; credentials.appId is
-        // numeric. Attempt a coercion — fall back to 0 if the backend ever
-        // returns a non-numeric id.
-        appId: Number.parseInt(result.appId, 10) || 0,
+        // The proxy returns `appId` as a string; credentials.appId is the
+        // branded `AppId | 0` shape. `toCredentialAppId` validates and
+        // brands the value, falling back to `0` for non-numeric input.
+        appId: toCredentialAppId(result.appId),
       });
       store.setProjectHasData(false);
       store.setApiKeyNotice(null);

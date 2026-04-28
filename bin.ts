@@ -306,6 +306,7 @@ const resolveNonInteractiveCredentials = async (
 
     const { resolveZone } = await import('./src/lib/zone-resolution.js');
     const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+    const { toCredentialAppId } = await import('./src/lib/wizard-session.js');
     // Pre-OAuth CLI path: session.region may be unset, fall back to disk tiers.
     const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
       readDisk: true,
@@ -347,7 +348,7 @@ const resolveNonInteractiveCredentials = async (
         idToken: session.pendingAuthIdToken,
         projectApiKey: created.apiKey,
         host: getHostFromRegion(zone),
-        appId: Number.parseInt(created.appId, 10) || 0,
+        appId: toCredentialAppId(created.appId),
       };
       session.projectHasData = false;
 

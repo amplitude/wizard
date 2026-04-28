@@ -23,6 +23,7 @@ import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
 import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
+import { type AppId, toCredentialAppId } from '../lib/wizard-session';
 import { storeToken } from './ampli-settings';
 import { detectRegionFromToken } from './urls';
 import { fulfillsVersionRange } from './semver';
@@ -33,7 +34,8 @@ interface ProjectData {
   accessToken: string;
   host: string;
   distinctId: string;
-  appId: number;
+  /** Branded `AppId` once known; `0` when the env hasn't been picked yet. */
+  appId: AppId | 0;
   cloudRegion: CloudRegion;
 }
 
@@ -401,7 +403,8 @@ export async function getOrAskForProjectData(
   host: string;
   projectApiKey: string;
   accessToken: string;
-  appId: number;
+  /** Branded `AppId` once known; `0` when the env hasn't been picked yet. */
+  appId: AppId | 0;
   cloudRegion: CloudRegion;
 }> {
   // If an API key is provided (via --api-key flag, any mode), bypass OAuth entirely.
@@ -413,7 +416,7 @@ export async function getOrAskForProjectData(
       host: DEFAULT_HOST_URL,
       projectApiKey: _options.apiKey,
       accessToken: _options.apiKey,
-      appId: _options.appId ?? 0,
+      appId: toCredentialAppId(_options.appId),
       cloudRegion: 'us',
     };
   }
@@ -439,7 +442,7 @@ export async function getOrAskForProjectData(
           host: resolved.host,
           projectApiKey: resolved.projectApiKey,
           accessToken: resolved.accessToken,
-          appId: _options.appId ?? 0,
+          appId: toCredentialAppId(_options.appId),
           cloudRegion: resolved.cloudRegion,
         };
       }
@@ -672,7 +675,7 @@ async function askForWizardLogin(
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',
-    appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
+    appId: toCredentialAppId(selectedAppId),
     cloudRegion,
   };
 }
