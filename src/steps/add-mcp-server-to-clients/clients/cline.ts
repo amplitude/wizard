@@ -1,13 +1,16 @@
-import { z } from 'zod';
+/**
+ * Cline — DEPRECATED. Uninstall-only. Drop in next release.
+ *
+ * Existing users may have a stale `mcpServers.amplitude` entry in
+ * `cline_mcp_settings.json` from a previous wizard install. We keep the
+ * `removeServer` codepath alive so the wizard's uninstall flow can scrub it.
+ * The install path (`addServer`) is intentionally a no-op — Cline is no
+ * longer in `getSupportedClients()`.
+ */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
-import { DefaultMCPClientConfig, getNativeHTTPServerConfig } from '../defaults';
-
-export const ClineMCPConfig = DefaultMCPClientConfig;
-
-export type ClineMCPConfig = z.infer<typeof DefaultMCPClientConfig>;
+import { DefaultMCPClient } from '../MCPClient';
 
 // Cline is a VS Code extension; its MCP settings live inside VS Code's
 // globalStorage, keyed by the extension publisher + name.
@@ -36,14 +39,14 @@ export class ClineMCPClient extends DefaultMCPClient {
     return 'mcpServers';
   }
 
-  isClientSupported(): Promise<boolean> {
-    const userDir = getVSCodeUserDir();
-    if (!userDir) return Promise.resolve(false);
-    // Cline creates its globalStorage dir on first activation; its absence
-    // means the extension isn't installed (or never run).
-    return Promise.resolve(
-      fs.existsSync(path.join(userDir, 'globalStorage', CLINE_EXTENSION_ID)),
-    );
+  /** Uninstall-only: returns true only when a stale config file exists. */
+  async isClientSupported(): Promise<boolean> {
+    try {
+      const configPath = await this.getConfigPath();
+      return fs.existsSync(configPath);
+    } catch {
+      return false;
+    }
   }
 
   async getConfigPath(): Promise<string> {
@@ -62,25 +65,8 @@ export class ClineMCPClient extends DefaultMCPClient {
     );
   }
 
-  getServerConfig(
-    apiKey: string | undefined,
-    type: 'sse' | 'streamable-http',
-    selectedFeatures?: string[],
-    local?: boolean,
-  ): MCPServerConfig {
-    return getNativeHTTPServerConfig(apiKey, type, selectedFeatures, local);
-  }
-
-  async addServer(
-    apiKey?: string,
-    selectedFeatures?: string[],
-    local?: boolean,
-  ): Promise<{ success: boolean }> {
-    return this._addServerType(
-      apiKey,
-      'streamable-http',
-      selectedFeatures,
-      local,
-    );
+  /** Install path retired — the wizard no longer offers Cline as a target. */
+  addServer(): Promise<{ success: boolean }> {
+    return Promise.resolve({ success: false });
   }
 }

@@ -1,5 +1,4 @@
 import { DefaultMCPClient } from '../MCPClient';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClientConfig } from '../defaults';
@@ -16,21 +15,10 @@ export class ClaudeMCPClient extends DefaultMCPClient {
     super();
   }
 
-  isClientSupported(): Promise<boolean> {
-    // Claude Desktop's user-data dir is created on first launch.
-    if (process.platform === 'darwin') {
-      return Promise.resolve(
-        fs.existsSync(
-          path.join(os.homedir(), 'Library', 'Application Support', 'Claude'),
-        ),
-      );
-    }
-    if (process.platform === 'win32') {
-      const appData = process.env.APPDATA;
-      if (!appData) return Promise.resolve(false);
-      return Promise.resolve(fs.existsSync(path.join(appData, 'Claude')));
-    }
-    return Promise.resolve(false);
+  async isClientSupported(): Promise<boolean> {
+    return Promise.resolve(
+      process.platform === 'darwin' || process.platform === 'win32',
+    );
   }
 
   async getConfigPath(): Promise<string> {
