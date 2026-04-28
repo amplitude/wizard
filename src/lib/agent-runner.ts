@@ -1005,13 +1005,29 @@ async function pollForDataIngestion(
 
   const deadline = Date.now() + MAX_WAIT_MS;
   let pollCount = 0;
+  // Bound each individual MCP poll. Without this, a single hung fetch would
+  // never resolve and the poll loop would advance only once the surrounding
+  // process tore down, leaving the request stuck in the background.
+  const PER_POLL_TIMEOUT_MS = 25_000;
 
   while (Date.now() < deadline) {
     pollCount++;
     logToFile(`[pollForDataIngestion] poll #${pollCount} appId=${appId}`);
 
+    // Per-poll AbortController — wired through to fetchHasAnyEventsMcp so
+    // the in-flight HTTP request unwinds when the poll deadline fires
+    // (rather than running to completion in the background).
+    const pollController = new AbortController();
+    const pollTimer = setTimeout(
+      () => pollController.abort(),
+      PER_POLL_TIMEOUT_MS,
+    );
     try {
-      const result = await fetchHasAnyEventsMcp(accessToken, appId);
+      const result = await fetchHasAnyEventsMcp(
+        accessToken,
+        appId,
+        pollController.signal,
+      );
       if (result.hasEvents) {
         logToFile(
           `[pollForDataIngestion] events detected: ${result.activeEventNames.join(
@@ -1036,6 +1052,10 @@ async function pollForDataIngestion(
           err instanceof Error ? err.message : String(err)
         }`,
       );
+    } finally {
+      // Always clear the per-poll timer so a fast success/failure doesn't
+      // leak ~30 minutes' worth of stranded timers across the loop.
+      clearTimeout(pollTimer);
     }
 
     // Wait before the next poll, but bail early if deadline passed.
