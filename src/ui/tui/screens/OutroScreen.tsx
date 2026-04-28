@@ -10,7 +10,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -42,6 +42,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const [bugReportPathState, setBugReportPathState] = useState<string | null>(
     null,
   );
+  // Disk-state about the setup report — captured ONCE on mount so we
+  // don't sync-stat the filesystem on every re-render (the picker
+  // re-renders on each keypress, and Ink's reconciler can re-render on
+  // unrelated store events too). The report file is written by the
+  // agent before this screen mounts, so a one-shot read is sufficient.
+  const [reportExists, setReportExists] = useState(false);
 
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
   const isError = store.session.outroData?.kind === OutroKind.Error;
@@ -100,6 +106,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const reportPath = installDir.endsWith(path.sep)
     ? `${installDir}${REPORT_FILE}`
     : `${installDir}${path.sep}${REPORT_FILE}`;
+
+  // One-shot existence check — see `reportExists` declaration above for
+  // why this isn't done inline in render. Re-runs only when the install
+  // dir or report path changes, which is effectively never within a
+  // single mount of this screen.
+  useEffect(() => {
+    try {
+      setReportExists(fs.existsSync(reportPath));
+    } catch {
+      // Treat unreadable filesystem as "no report" rather than throwing
+      // — the worst outcome is hiding the picker option, never a crash.
+      setReportExists(false);
+    }
+  }, [reportPath]);
 
   // ── Report sub-view ──────────────────────────────────────────────────
 
@@ -192,8 +212,10 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           {/* Single-line review note — only when a fresh report was actually
               written this run. Without the existence check, a stale report
               from a previous run (different workspace) would be advertised
-              as if it described this run. */}
-          {fs.existsSync(reportPath) && (
+              as if it described this run. The check is captured once on
+              mount (see `reportExists` declaration) rather than re-stat'd
+              on every render. */}
+          {reportExists && (
             <Box marginTop={1}>
               <Text color={Colors.muted}>
                 Review changes in{' '}
@@ -295,7 +317,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                     ? 'Recommended next step'
                     : 'amplitude.com',
                 },
-                ...(fs.existsSync(reportPath)
+                ...(reportExists
                   ? [{ label: 'View setup report', value: 'report' }]
                   : []),
                 { label: 'Exit', value: 'exit' },
