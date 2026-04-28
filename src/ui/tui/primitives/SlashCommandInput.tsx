@@ -42,7 +42,9 @@ export const SlashCommandInput = ({
     return () => clearInterval(id);
   }, [isActive]);
 
-  const isSlashMode = value.startsWith('/');
+  const firstWord = value.split(' ')[0] ?? '';
+  const isSlashMode =
+    firstWord.startsWith('/') && commands.some((c) => c.cmd.startsWith(firstWord));
   const query = value.slice(1).toLowerCase();
   const filtered = isSlashMode
     ? commands
