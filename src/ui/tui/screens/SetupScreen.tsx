@@ -31,10 +31,17 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [resolving, setResolving] = useState(true);
 
+  // Re-run detection whenever the user-answer order shrinks (i.e. an
+  // answer was popped via back-nav). Without this, popping a question
+  // that originally had an auto-detected value wouldn't re-detect on
+  // re-entry — the user would be re-prompted even when detection still
+  // succeeds.
+  const answerOrderLength = store.session.frameworkContextAnswerOrder.length;
+
   // Esc steps back: first pop the most recent user-answered question (so
   // back works between Setup questions), then if nothing's left to pop,
   // delegate to the router so we walk past Setup entirely.
-  const hasUserAnswers = store.session.frameworkContextAnswerOrder.length > 0;
+  const hasUserAnswers = answerOrderLength > 0;
   const canBackOutOfSetup = store.canGoBack();
   const backAvailable = !resolving && (hasUserAnswers || canBackOutOfSetup);
   useScreenInput(
@@ -54,17 +61,24 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
   );
   useScreenHints(hints);
 
-  // On mount, run auto-detection for all questions
+  // Run auto-detection on mount AND whenever the answer order shrinks
+  // (popLastFrameworkContextAnswer fired). Detection skips keys already
+  // in frameworkContext, so questions the user just answered aren't
+  // re-detected — only the ones missing after a pop get a fresh attempt.
   useEffect(() => {
+    let cancelled = false;
+    setResolving(true);
     void (async () => {
       for (const q of questions) {
-        // Skip if already resolved (e.g. by CLI arg)
+        // Skip if already resolved (e.g. by CLI arg, prior detection, or
+        // a still-present user answer that wasn't popped).
         if (q.key in store.session.frameworkContext) continue;
 
         try {
           const detected = await q.detect({
             installDir: store.session.installDir,
           });
+          if (cancelled) return;
           if (detected !== null) {
             store.setFrameworkContext(q.key, detected, true);
           }
@@ -72,12 +86,15 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
           // Detection failed — will ask the user
         }
       }
-      setResolving(false);
+      if (!cancelled) setResolving(false);
 
       // If all resolved, the router's isComplete predicate will
       // resolve past this screen on the next render cycle.
     })();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [answerOrderLength]);
 
   if (resolving) {
     return (
