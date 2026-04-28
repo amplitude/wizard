@@ -10,9 +10,13 @@
  * user-facing copy) depend on.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   agentArtifactsLookComplete,
+  agentEventsInstrumented,
   classifyApiErrorSubtype,
 } from '../agent-runner.js';
 import { AgentErrorType } from '../agent-interface.js';
@@ -170,5 +174,74 @@ describe('agentArtifactsLookComplete', () => {
     // success. (Boolean('') === false handles this naturally.)
     session.checklistDashboardUrl = '';
     expect(agentArtifactsLookComplete(session)).toBe(false);
+  });
+});
+
+describe('agentEventsInstrumented', () => {
+  // The signal here is "the agent persisted an event plan to
+  // .amplitude-events.json with non-empty content." That's the
+  // marker for "agent reached the post-confirm phase" — distinct
+  // from agentArtifactsLookComplete, which requires the dashboard
+  // URL too. The MCP_MISSING soft-error path uses this helper to
+  // detect "instrumentation done, dashboard step failed" — the
+  // exact shape of the bug Cassie hit.
+
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runner-'));
+  });
+  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  it('returns true when .amplitude-events.json exists with events', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.amplitude-events.json'),
+      JSON.stringify([{ name: 'User Signed Up', description: 'after signup' }]),
+    );
+    const session = buildSession({ installDir: tmpDir });
+    expect(agentEventsInstrumented(session)).toBe(true);
+  });
+
+  it('returns false when the events file is missing', () => {
+    const session = buildSession({ installDir: tmpDir });
+    expect(agentEventsInstrumented(session)).toBe(false);
+  });
+
+  it('returns false when the events file is an empty array', () => {
+    // Empty array means "no plan was persisted" — confirm_event_plan
+    // requires min(1) so this is a defensive case (manually-truncated
+    // file, partial write, etc.). Treat as "didn't finish" since the
+    // user has no instrumented events.
+    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
+    const session = buildSession({ installDir: tmpDir });
+    expect(agentEventsInstrumented(session)).toBe(false);
+  });
+
+  it('returns false when the events file is malformed JSON', () => {
+    // Defensive: a corrupted file shouldn't cause a soft-error
+    // misclassification. We'd rather hard-abort the run than show a
+    // false-positive "everything succeeded" outro on top of a broken
+    // event plan.
+    fs.writeFileSync(
+      path.join(tmpDir, '.amplitude-events.json'),
+      '{ this is not json',
+    );
+    const session = buildSession({ installDir: tmpDir });
+    expect(agentEventsInstrumented(session)).toBe(false);
+  });
+
+  it('returns false when the events file is not an array', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.amplitude-events.json'),
+      JSON.stringify({ accidentally: 'an object' }),
+    );
+    const session = buildSession({ installDir: tmpDir });
+    expect(agentEventsInstrumented(session)).toBe(false);
+  });
+
+  it('handles installDir that does not exist gracefully', () => {
+    const session = buildSession({
+      installDir: '/dev/null/does-not-exist',
+    });
+    expect(agentEventsInstrumented(session)).toBe(false);
   });
 });
