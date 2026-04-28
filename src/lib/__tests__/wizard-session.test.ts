@@ -184,6 +184,21 @@ describe('isAuthenticated', () => {
       expect(s.credentials.host).toBe('https://app.amplitude.com');
     }
   });
+
+  it('un-narrows correctly: returns false after credentials are cleared', () => {
+    // Set up an authenticated session and confirm the guard narrows.
+    let s = emptySession({
+      credentials: VALID_CREDS,
+      selectedOrgId: 'org-1',
+    });
+    expect(isAuthenticated(s)).toBe(true);
+
+    // Simulate logout / token expiry: clear credentials. The guard must
+    // re-evaluate to false on the new session — callers that re-checked
+    // after a state change should not still see the narrowed type.
+    s = { ...s, credentials: null };
+    expect(isAuthenticated(s)).toBe(false);
+  });
 });
 
 describe('isConfigured', () => {
