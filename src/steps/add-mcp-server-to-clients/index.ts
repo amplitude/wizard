@@ -14,6 +14,7 @@ import { WindsurfMCPClient } from './clients/windsurf';
 import { GeminiCLIMCPClient } from './clients/gemini-cli';
 import { AmpMCPClient } from './clients/amp';
 import { OpenCodeMCPClient } from './clients/opencode';
+import { ClaudeCodePluginClient } from './clients/claude-code-plugin';
 import { ALL_FEATURE_VALUES } from './defaults';
 import { debug } from '../../utils/debug';
 
@@ -31,6 +32,7 @@ const getDeprecatedUninstallOnlyClients = (): MCPClient[] => [
   new GeminiCLIMCPClient(),
   new AmpMCPClient(),
   new OpenCodeMCPClient(),
+  new ClaudeCodePluginClient(),
 ];
 
 export const getSupportedClients = async (): Promise<MCPClient[]> => {
