@@ -335,17 +335,24 @@ async function runAgentWizardBody(
       const packageDisplayName =
         versionCheckInfo.packageDisplayName ?? config.metadata.name;
       const version = versionCheckInfo.version ?? 'unknown';
-      // cancel() is async post-#PR — await it so a TUI user actually sees
-      // the message before this function returns and the runner moves
-      // on to its non-success cleanup path.
-      await getUI().cancel(
-        `The wizard requires ${packageDisplayName} ${minimumVersion} or later, but found version ${version}. Upgrade your ${packageDisplayName} version to use the wizard, or follow the manual setup guide.`,
-        { docsUrl },
-      );
-      logToFile('[runAgentWizard] cancel displayed to user');
-      // Non-success early return — caller skips success-path cleanup so
-      // the integration skill (and any prior `.amplitude-events.json`)
-      // stays on disk for a clean re-run after the user upgrades.
+      // Route through wizardAbort so the TUI Outro is shown, awaited,
+      // *and* the process actually exits afterward. A previous version
+      // called getUI().cancel() then `return false`, which left the
+      // Ink event loop running indefinitely after the user dismissed
+      // the outro because nothing called process.exit on this path.
+      // wizardAbort handles cancel + analytics shutdown + exit as a
+      // single atomic sequence; cancelOptions.docsUrl forwards the
+      // manual-setup link into the Outro for recovery.
+      await wizardAbort({
+        message: `The wizard requires ${packageDisplayName} ${minimumVersion} or later, but found version ${version}. Upgrade your ${packageDisplayName} version to use the wizard, or follow the manual setup guide.`,
+        exitCode: ExitCode.GENERAL_ERROR,
+        cancelOptions: { docsUrl },
+      });
+      // Unreachable — wizardAbort returns Promise<never>. The earlier
+      // `return false` documented "skip success-path cleanup so the
+      // integration skill stays on disk for a clean re-run after the
+      // user upgrades" — that's still preserved because process.exit
+      // fires before any further work in this function runs.
       return false;
     }
   }

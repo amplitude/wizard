@@ -1,7 +1,14 @@
 /**
  * Single exit point for the wizard. Use instead of process.exit() directly.
  *
- * Sequence: cleanup -> error capture (optional) -> analytics shutdown -> outro -> process.exit
+ * Sequence: cleanup -> error capture (optional) -> outro (awaits dismissal in
+ * TUI) -> analytics shutdown -> process.exit
+ *
+ * Analytics shutdown intentionally runs AFTER the outro because the error
+ * Outro is interactive (press L to open log, C to write bug report) and each
+ * of those keypresses fires a `wizardCapture` event we want delivered. If we
+ * shut analytics down before cancel, those events queue after the final
+ * flush and silently drop on process.exit.
  *
  * WizardError is a data carrier passed to wizardAbort() for analytics context, never thrown.
  * The legacy abort() in setup-utils.ts delegates here.
@@ -27,6 +34,12 @@ interface WizardAbortOptions {
   message?: string;
   error?: Error | WizardError;
   exitCode?: number;
+  /**
+   * Forwarded to {@link WizardUI.cancel} — surfaces a "Manual setup guide"
+   * link in the Outro for cases like an unsupported framework version where
+   * we want to point the user at docs to recover.
+   */
+  cancelOptions?: { docsUrl?: string };
 }
 
 const cleanupFns: Array<() => void> = [];
@@ -46,6 +59,7 @@ export async function wizardAbort(
     message = 'Wizard setup cancelled.',
     error,
     exitCode = 1,
+    cancelOptions,
   } = options ?? {};
 
   // 1. Run registered cleanup functions
@@ -57,7 +71,10 @@ export async function wizardAbort(
     }
   }
 
-  // 2. Capture error in analytics + Sentry (if provided)
+  // 2. Capture error in analytics + Sentry (if provided). These are
+  //    enqueued / buffered; the actual flush happens in step 4 after
+  //    the outro, so any wizardCapture events from outro hotkeys are
+  //    flushed in the same batch and not dropped.
   if (error) {
     analytics.captureException(error, {
       ...((error instanceof WizardError && error.context) || {}),
@@ -68,25 +85,28 @@ export async function wizardAbort(
     });
   }
 
-  // 3. Shutdown analytics and flush Sentry
-  await Promise.all([
-    analytics.shutdown(error ? 'error' : 'cancelled'),
-    flushSentry().catch(() => {
-      /* Sentry flush failure is non-fatal */
-    }),
-  ]);
-
-  // 4. Display message to user — awaits OutroScreen dismissal in TUI
+  // 3. Display message to user — awaits OutroScreen dismissal in TUI
   //    mode so the user actually gets to see the failure (and use the
   //    "open log" / "write bug report" hotkeys) before the process
   //    dies. AgentUI / LoggingUI resolve immediately since they have
   //    no TUI to render. Any UI that throws here is non-fatal — we
   //    still want to exit with the requested code.
   try {
-    await getUI().cancel(message);
+    await getUI().cancel(message, cancelOptions);
   } catch {
     /* UI failure must not prevent exit */
   }
+
+  // 4. Shutdown analytics and flush Sentry. Runs AFTER cancel so that
+  //    wizardCapture events fired during outro interaction (e.g.
+  //    'error outro log opened', 'error outro bug report written')
+  //    are delivered before the process exits.
+  await Promise.all([
+    analytics.shutdown(error ? 'error' : 'cancelled'),
+    flushSentry().catch(() => {
+      /* Sentry flush failure is non-fatal */
+    }),
+  ]);
 
   // 5. Exit (fires 'exit' event so TUI cleanup runs)
   //

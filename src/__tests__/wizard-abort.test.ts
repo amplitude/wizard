@@ -36,7 +36,12 @@ describe('wizardAbort', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls analytics.shutdown, getUI().cancel, and process.exit in order', async () => {
+  it('calls getUI().cancel before analytics.shutdown so wizardCapture events from outro hotkeys are flushed', async () => {
+    // Bug 1 from PR 331 review: shutdown used to run before cancel,
+    // which meant any analytics.wizardCapture call fired during the
+    // interactive Outro (press L for log, C for bug report) was queued
+    // after the final flush and silently dropped on process.exit.
+    // Lock the new order in: cancel first, then shutdown.
     const callOrder: string[] = [];
     mockAnalytics.shutdown.mockImplementation(async () => {
       callOrder.push('shutdown');
@@ -47,14 +52,17 @@ describe('wizardAbort', () => {
 
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(callOrder).toEqual(['shutdown', 'cancel']);
+    expect(callOrder).toEqual(['cancel', 'shutdown']);
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 
   it('uses default message and exit code when called with no options', async () => {
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Wizard setup cancelled.');
+    expect(getUI().cancel).toHaveBeenCalledWith(
+      'Wizard setup cancelled.',
+      undefined,
+    );
     expect(mockAnalytics.shutdown).toHaveBeenCalledWith('cancelled');
     expect(process.exit).toHaveBeenCalledWith(1);
   });
@@ -64,8 +72,24 @@ describe('wizardAbort', () => {
       wizardAbort({ message: 'Custom failure', exitCode: 2 }),
     ).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Custom failure');
+    expect(getUI().cancel).toHaveBeenCalledWith('Custom failure', undefined);
     expect(process.exit).toHaveBeenCalledWith(2);
+  });
+
+  it('forwards cancelOptions.docsUrl into getUI().cancel', async () => {
+    // Used by the version-check cancel path in agent-runner: an
+    // unsupported version routes through wizardAbort and we want the
+    // "Manual setup guide" link to surface in the Outro.
+    await expect(
+      wizardAbort({
+        message: 'Unsupported version',
+        cancelOptions: { docsUrl: 'https://example.com/docs' },
+      }),
+    ).rejects.toThrow('process.exit called');
+
+    expect(getUI().cancel).toHaveBeenCalledWith('Unsupported version', {
+      docsUrl: 'https://example.com/docs',
+    });
   });
 
   it('captures error in analytics and shuts down as error when error is provided', async () => {
@@ -97,7 +121,7 @@ describe('wizardAbort', () => {
     });
   });
 
-  it('runs registered cleanup functions before analytics and display', async () => {
+  it('runs registered cleanup functions before display, with shutdown after cancel', async () => {
     const callOrder: string[] = [];
 
     registerCleanup(() => callOrder.push('cleanup1'));
@@ -111,7 +135,7 @@ describe('wizardAbort', () => {
 
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
-    expect(callOrder).toEqual(['cleanup1', 'cleanup2', 'shutdown', 'cancel']);
+    expect(callOrder).toEqual(['cleanup1', 'cleanup2', 'cancel', 'shutdown']);
   });
 
   it('does not block exit when a cleanup function throws', async () => {
@@ -160,7 +184,7 @@ describe('abort() delegates to wizardAbort()', () => {
 
     await expect(abort('Test abort', 3)).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Test abort');
+    expect(getUI().cancel).toHaveBeenCalledWith('Test abort', undefined);
     expect(process.exit).toHaveBeenCalledWith(3);
   });
 
@@ -169,7 +193,10 @@ describe('abort() delegates to wizardAbort()', () => {
 
     await expect(abort()).rejects.toThrow('process.exit called');
 
-    expect(getUI().cancel).toHaveBeenCalledWith('Wizard setup cancelled.');
+    expect(getUI().cancel).toHaveBeenCalledWith(
+      'Wizard setup cancelled.',
+      undefined,
+    );
     expect(process.exit).toHaveBeenCalledWith(1);
   });
 });
