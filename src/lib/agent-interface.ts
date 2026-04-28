@@ -1079,7 +1079,7 @@ export function wizardCanUseTool(
     );
     return {
       behavior: 'deny',
-      message: `Bash command not allowed. Shell operators like ; \` $ ( ) are not permitted.`,
+      message: `Bash command denied by wizard policy: shell operators ; \` $ ( ) are not permitted on this run, and no rephrasing will change that. DO NOT retry the same goal with a different command — see the retry-budget commandment. If you were verifying env vars, use the wizard-tools \`check_env_keys\` MCP tool. If you were inspecting a file, use the \`Read\` tool. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
     };
   }
 
@@ -1103,7 +1103,7 @@ export function wizardCanUseTool(
       );
       return {
         behavior: 'deny',
-        message: `Bash command not allowed. Only single pipe to tail/head is permitted.`,
+        message: `Bash command denied by wizard policy: only a single pipe to tail/head is permitted (no chained pipes). This is a fixed policy — DO NOT retry the same goal with a re-ordered or differently-piped command. Use one allowed package-manager subcommand at a time, or document the limitation in the setup report and move on.`,
       };
     }
 
@@ -1126,7 +1126,7 @@ export function wizardCanUseTool(
     );
     return {
       behavior: 'deny',
-      message: `Bash command not allowed. Pipes are only permitted with tail/head for output limiting.`,
+      message: `Bash command denied by wizard policy: pipes are only permitted as \`<allowed-command> | tail/head <args>\` for output limiting; \`&\` (background) and other pipe forms are not permitted. DO NOT retry with a re-piped variant. If you cannot accomplish the goal with allowed tools, document the limitation in the setup report and proceed.`,
     };
   }
 
@@ -1147,7 +1147,7 @@ export function wizardCanUseTool(
   );
   return {
     behavior: 'deny',
-    message: `Bash command not allowed. Only install, build, typecheck, lint, and formatting commands are permitted.`,
+    message: `Bash command denied by wizard policy: only package-manager subcommands (install / add / build / test / typecheck / lint / format / etc.) and Amplitude skill installs are permitted. DO NOT retry the same goal with a different shell command — \`node -e\`, \`node --eval\`, \`printenv\`, \`echo $VAR\`, \`cat .env\`, \`bash -c '...'\`, etc. will all be denied. To verify env vars, use the wizard-tools \`check_env_keys\` MCP tool (it reports key presence without exposing values). To inspect a file, use the \`Read\` tool. To inspect a directory, use \`Glob\`. To search code, use \`Grep\`. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
   };
 }
 
