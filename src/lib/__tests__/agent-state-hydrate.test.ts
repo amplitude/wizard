@@ -37,7 +37,8 @@ const ATTEMPT_ID = 'att-hydrate';
 let cacheRoot: string;
 let originalCacheOverride: string | undefined;
 
-const snapshotPath = () => join(cacheRoot, 'state', `${ATTEMPT_ID}.json`);
+const snapshotPath = () =>
+  join(cacheRoot, 'state', `${ATTEMPT_ID}-${process.pid}.json`);
 
 beforeEach(() => {
   cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-state-hydrate-'));

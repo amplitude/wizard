@@ -120,9 +120,21 @@ export function getPlanFile(planId: string): string {
   return join(getPlansDir(), `${planId}.json`);
 }
 
-/** Per-attempt agent recovery snapshot. */
-export function getStateFile(attemptId: string): string {
-  return join(getCacheRoot(), 'state', `${attemptId}.json`);
+/**
+ * Per-attempt agent recovery snapshot. Scoped by both `attemptId` AND the
+ * owning process's pid so a crashed-prior-run snapshot can't be silently
+ * picked up by a fresh process that happens to reuse the same attempt id.
+ *
+ * The pid suffix is the load-bearing piece: PreCompact persists state for
+ * the current run, and the post-compaction UserPromptSubmit hook reads it
+ * back inside the SAME process. A different process should never hydrate
+ * from another process's snapshot, even if attempt ids collide.
+ */
+export function getStateFile(
+  attemptId: string,
+  pid: number = process.pid,
+): string {
+  return join(getCacheRoot(), 'state', `${attemptId}-${pid}.json`);
 }
 
 /** Per-user npm registry latest-version cache. */

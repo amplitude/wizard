@@ -149,10 +149,23 @@ describe('storage-paths', () => {
       );
     });
 
-    it('stateFile is per-attempt under state/', () => {
+    it('stateFile is per-attempt + per-pid under state/', () => {
       expect(getStateFile('attempt-xyz')).toBe(
-        path.join(tmpRoot, 'state', 'attempt-xyz.json'),
+        path.join(tmpRoot, 'state', `attempt-xyz-${process.pid}.json`),
       );
+    });
+
+    it('stateFile accepts an explicit pid', () => {
+      expect(getStateFile('attempt-xyz', 99999)).toBe(
+        path.join(tmpRoot, 'state', 'attempt-xyz-99999.json'),
+      );
+    });
+
+    it('stateFile changes when pid changes — stale-snapshot isolation', () => {
+      // The whole point of pid scoping: two different processes with the
+      // same attempt id MUST NOT share a snapshot path, otherwise a crashed
+      // prior run's state could be hydrated into a fresh process.
+      expect(getStateFile('att', 1111)).not.toBe(getStateFile('att', 2222));
     });
 
     it('updateCheck file is at the cache root', () => {

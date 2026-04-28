@@ -246,7 +246,11 @@ describe('runMigrationShim', () => {
 
     runMigrationShim(installDir);
 
-    const canonical = join(cacheRoot, 'state', 'newdir-test.json');
+    const canonical = join(
+      cacheRoot,
+      'state',
+      `newdir-test-${process.pid}.json`,
+    );
     expect(existsSync(canonical)).toBe(true);
     expect(existsSync(legacy)).toBe(false);
   });

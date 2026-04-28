@@ -32,7 +32,7 @@ describe('AgentState', () => {
     cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-state-cache-'));
     originalOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
-    snapshotPath = join(cacheRoot, 'state', `${attemptId}.json`);
+    snapshotPath = join(cacheRoot, 'state', `${attemptId}-${process.pid}.json`);
     state = new AgentState();
     state.setAttemptId(attemptId);
   });
