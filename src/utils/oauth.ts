@@ -159,7 +159,7 @@ export async function startCallbackServer(): Promise<{
         res.end();
         return;
       }
-      const url = new URL(req.url, `http://localhost:${OAUTH_PORT}`);
+      const url = new URL(req.url, `http://127.0.0.1:${OAUTH_PORT}`);
       const code = url.searchParams.get('code');
       const error = url.searchParams.get('error');
       const stateParam = url.searchParams.get('state');
@@ -215,14 +215,31 @@ export async function startCallbackServer(): Promise<{
       }
     });
 
-    // Bind to loopback only — the OAuth callback should NEVER be reachable
-    // from other hosts on the network. Even though the redirect URI says
-    // `http://localhost:...`, listening on 0.0.0.0 would let an attacker on
-    // the same LAN race the user's browser to deliver a forged callback.
-    server.listen(OAUTH_PORT, '127.0.0.1', () =>
-      resolve({ server, waitForCallback }),
-    );
-    server.on('error', reject);
+    // Single-shot error handler for the listen() call. Detached after
+    // listen succeeds so later runtime errors don't reject this
+    // already-resolved promise.
+    const onListenError = (err: Error) => reject(err);
+    server.once('error', onListenError);
+
+    // Bind to 127.0.0.1 only — the OAuth callback should NEVER be
+    // reachable from other hosts on the network. Listening on 0.0.0.0
+    // would let an attacker on the same LAN race the user's browser to
+    // deliver a forged callback.
+    server.listen(OAUTH_PORT, '127.0.0.1', () => {
+      server.removeListener('error', onListenError);
+      resolve({ server, waitForCallback });
+    });
+  });
+}
+
+/** Closes an HTTP server, swallowing errors. Idempotent. */
+function closeServer(server: http.Server): Promise<void> {
+  return new Promise((resolve) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+    server.close(() => resolve());
   });
 }
 
@@ -265,6 +282,12 @@ export async function performAmplitudeAuth(options: {
   zone?: AmplitudeZone;
   /** Skip cached credentials and require fresh browser auth. */
   forceFresh?: boolean;
+  /**
+   * Optional abort signal — when triggered, closes the local callback server
+   * and rejects the auth promise with an AbortError. Lets SIGINT/cleanup
+   * paths reclaim the OAuth port without waiting for the 2-minute timeout.
+   */
+  signal?: AbortSignal;
 }): Promise<AmplitudeAuthResult> {
   return withWizardSpan(
     'auth.oauth.login',
@@ -280,6 +303,7 @@ export async function performAmplitudeAuth(options: {
 async function performAmplitudeAuthInner(options: {
   zone?: AmplitudeZone;
   forceFresh?: boolean;
+  signal?: AbortSignal;
 }): Promise<AmplitudeAuthResult> {
   const zone = options.zone ?? DEFAULT_AMPLITUDE_ZONE;
 
@@ -349,12 +373,34 @@ async function performAmplitudeAuthInner(options: {
   const spinner = getUI().spinner();
   spinner.start('Waiting for Amplitude authorization...');
 
+  // Abort wiring — when the wizard-wide signal fires (SIGINT, /exit, etc.)
+  // close the server immediately so the next run can reclaim the port.
+  let abortReject: ((err: Error) => void) | null = null;
+  const abortPromise = new Promise<never>((_, reject) => {
+    abortReject = reject;
+  });
+  const onAbort = () => {
+    if (abortReject) {
+      const err = new Error('Authorization aborted');
+      err.name = 'AbortError';
+      abortReject(err);
+    }
+  };
+  if (options.signal) {
+    if (options.signal.aborted) {
+      onAbort();
+    } else {
+      options.signal.addEventListener('abort', onAbort, { once: true });
+    }
+  }
+
   try {
     const code = await Promise.race([
       waitForCallback(state),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Authorization timed out')), 120_000),
       ),
+      abortPromise,
     ]);
 
     logToFile('[oauth] auth code received, exchanging for token');
@@ -375,7 +421,6 @@ async function performAmplitudeAuthInner(options: {
       id_token_prefix: tokenResponse.id_token?.slice(0, 20) + '…',
     });
 
-    server.close();
     getUI().setLoginUrl(null);
     spinner.stop('Authorization complete!');
 
@@ -387,7 +432,10 @@ async function performAmplitudeAuthInner(options: {
     };
 
     // ── 3. Persist to ~/.ampli.json (shared with ampli CLI) ──────────
-    // User details (name/email) are filled in after fetchAmplitudeUser()
+    // User details (name/email) are filled in after fetchAmplitudeUser().
+    // storeToken() uses atomicWriteJSON (temp + rename) — concurrent wizard
+    // runs cannot corrupt the file. Last-writer-wins for the access token
+    // is acceptable since all issued refresh tokens stay valid.
     const expiresAt = new Date(
       Date.now() + tokenResponse.expires_in * 1000,
     ).toISOString();
@@ -412,11 +460,12 @@ async function performAmplitudeAuthInner(options: {
     return result;
   } catch (e) {
     spinner.stop('Authorization failed.');
-    server.close();
     const error = e instanceof Error ? e : new Error('Unknown error');
     logToFile('[oauth] error during auth flow', error);
 
-    if (error.message.includes('timeout')) {
+    if (error.name === 'AbortError') {
+      // Wizard-level cancellation — caller already surfaces this; stay quiet.
+    } else if (error.message.includes('timeout')) {
       getUI().log.error('Authorization timed out. Please try again.');
     } else if (error.message.includes('access_denied')) {
       getUI().log.info(
@@ -435,6 +484,14 @@ async function performAmplitudeAuthInner(options: {
     analytics.captureException(error, { step: 'oauth_flow' });
     await abort();
     throw error;
+  } finally {
+    // Always release the port — timeout, success, error, or abort. Without
+    // this, a SIGINT during browser auth leaves the listener bound and the
+    // next wizard run hits EADDRINUSE.
+    if (options.signal) {
+      options.signal.removeEventListener('abort', onAbort);
+    }
+    await closeServer(server);
   }
 }
 
