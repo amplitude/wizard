@@ -8,6 +8,7 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
+import { wizardAbort } from '../../../utils/wizard-abort.js';
 
 interface OutageScreenProps {
   store: WizardStore;
@@ -48,7 +49,17 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
       <ConfirmationInput
         message="Continue anyway?"
         onConfirm={() => store.popOverlay()}
-        onCancel={() => process.exit(0)}
+        onCancel={() => {
+          // Outage detected and user chose to bail — route through
+          // wizardAbort so the cancel reason is captured to analytics
+          // and the user sees a proper exit message instead of a
+          // half-rendered overlay.
+          void wizardAbort({
+            message:
+              'Setup paused — services were degraded. Re-run the wizard once the status page clears.',
+            exitCode: 0,
+          });
+        }}
       />
     </Box>
   );

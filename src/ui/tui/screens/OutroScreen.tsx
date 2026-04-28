@@ -26,6 +26,7 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 
@@ -348,7 +349,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   /* fire-and-forget */
                 });
               } else {
-                process.exit(0);
+                // Route through wizardSuccessExit so the
+                // 'outro action' wizardCapture above (and any other
+                // analytics events queued during this session) flush
+                // before process.exit fires. A bare process.exit(0)
+                // here would drop the trailing telemetry.
+                void wizardSuccessExit(0);
               }
             }}
           />
