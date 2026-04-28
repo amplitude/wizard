@@ -179,8 +179,14 @@ describe('runMigrationShim', () => {
 
     runMigrationShim(installDir);
 
+    // Canonical wins. The legacy file is intentionally left in place
+    // for events.json / dashboard.json (preserveLegacy=true) so a
+    // concurrent wizard run that's currently writing the legacy path
+    // can't be clobbered mid-flight. The agent's next watcher tick
+    // picks the freshest file via mtime regardless.
     expect(readFileSync(canonical, 'utf8')).toBe('"canonical-wins"');
-    expect(existsSync(legacy)).toBe(false);
+    expect(existsSync(legacy)).toBe(true);
+    expect(readFileSync(legacy, 'utf8')).toBe('"legacy-loses"');
   });
 
   it('skips per-project migration when installDir is undefined', () => {

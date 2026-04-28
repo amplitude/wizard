@@ -109,8 +109,21 @@ function writeSentinel(): void {
 }
 
 /**
- * Move a single file `from → to`. No-op if `from` is missing. Skips when
- * `to` already exists (the new layout wins; old file is best-effort cleaned).
+ * Move a single file `from → to`. No-op if `from` is missing. Behavior
+ * when `to` already exists depends on `preserveLegacy`:
+ *
+ *   - `preserveLegacy=false` (default, tmpdir-scoped legacies like logs,
+ *     plans, agent state): the old file is unlinked once we've confirmed
+ *     the new one exists. Safe because nothing else writes those legacy
+ *     paths during a wizard run.
+ *
+ *   - `preserveLegacy=true` (per-project events.json, dashboard.json):
+ *     leave the legacy file untouched. The agent and bundled integration
+ *     skills still write the legacy dotfile during a run, so a
+ *     concurrent wizard observing `existsSync(to)` and unlinking the
+ *     legacy can clobber the in-flight write. The agent's next watcher
+ *     tick picks the freshest file via mtime regardless.
+ *
  * Silent on errors.
  *
  * Cross-filesystem safety: legacy paths often live in tmpfs (`$TMPDIR`,
@@ -122,16 +135,22 @@ function writeSentinel(): void {
  * destination at `to` — which would make a future run see `existsSync(to)`
  * and unlink the still-good source.
  */
-function moveFile(from: string, to: string): boolean {
+function moveFile(
+  from: string,
+  to: string,
+  options: { preserveLegacy?: boolean } = {},
+): boolean {
+  const { preserveLegacy = false } = options;
   try {
     if (!existsSync(from)) return false;
     if (existsSync(to)) {
-      // Both exist — assume the new file is authoritative and just delete
-      // the old one so it stops being read.
-      try {
-        unlinkSync(from);
-      } catch {
-        // Ignore
+      // Both exist — assume the new file is authoritative.
+      if (!preserveLegacy) {
+        try {
+          unlinkSync(from);
+        } catch {
+          // Ignore
+        }
       }
       return false;
     }
@@ -258,11 +277,18 @@ export function runMigrationShim(installDir?: string): void {
 
       // Events and dashboard: the new canonical location is under
       // `<installDir>/.amplitude/`. Make sure the dir exists, then move.
+      // `preserveLegacy: true` because the agent + bundled integration
+      // skills still write the legacy dotfile during a run; a concurrent
+      // wizard observing `existsSync(canonical)` must NOT unlink the
+      // legacy mid-write or it clobbers the agent's fresh content.
       ensureDir(getProjectMetaDir(installDir), 0o755);
-      moveFile(LEGACY_PATHS.events(installDir), getEventsFile(installDir));
+      moveFile(LEGACY_PATHS.events(installDir), getEventsFile(installDir), {
+        preserveLegacy: true,
+      });
       moveFile(
         LEGACY_PATHS.dashboard(installDir),
         getDashboardFile(installDir),
+        { preserveLegacy: true },
       );
     }
   } catch (err) {
