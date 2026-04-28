@@ -667,6 +667,16 @@ export class WizardStore {
     this.emitChange();
   }
 
+  switchToLogin(): void {
+    this.$session.setKey('signup', false);
+    this.$session.setKey('signupEmail', null);
+    this.$session.setKey('signupFullName', null);
+    analytics.wizardCapture('signup switched to login', {
+      reason: 'existing user',
+    });
+    this.emitChange();
+  }
+
   cancelWizard(reason: string): void {
     this.setOutroData({
       kind: 'cancel' as const,

@@ -59,6 +59,35 @@ Feature: Wizard flow
     Then I should be on the EmailCaptureScreen
     And the email field should be pre-filled with "test@example.com"
 
+  Scenario: Existing customer email detected during signup offers login option
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--signup"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter an email that belongs to an existing customer
+    Then I should see the "Account already exists" message
+    And I should be offered options to log in or use a different email
+
+  Scenario: Existing customer chooses to log in instead
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--signup"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter an email that belongs to an existing customer
+    And I choose to "Log in with existing account"
+    Then the signup flow should switch to regular auth
+    And I should go through the login flow
+
+  Scenario: Existing customer chooses to use a different email
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--signup"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter an email that belongs to an existing customer
+    And I choose to "Use a different email"
+    Then I should be back at email entry
+    And I can enter a new email address
+
   Scenario: After SUSI completes — wizard advances to Data Setup then Agent Run
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches

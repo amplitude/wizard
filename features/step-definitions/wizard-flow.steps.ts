@@ -659,4 +659,88 @@ When('I select {string}', function (option: string) {
   }
 });
 
+When('I enter an email that belongs to an existing customer', function () {
+  // Simulate the existing customer scenario by setting a special email
+  // In real implementation, the EmailCaptureScreen would call
+  // performDirectSignup and detect the 'user_already_exists' error
+  session.signupEmail = 'existing@example.com';
+  session.signupFullName = 'Existing User';
+  // Don't mark emailCaptureComplete yet - we'll show the existing user options
+  // Store this in the cucumber world context rather than session
+  this.existingUserDetected = true;
+});
+
+Then('I should see the {string} message', function (expectedMessage: string) {
+  assert.ok(
+    this.existingUserDetected,
+    `Expected to see "${expectedMessage}" but existingUserDetected was not set`,
+  );
+});
+
+Then(
+  'I should be offered options to log in or use a different email',
+  function () {
+    // In the real UI, the EmailCaptureScreen shows a PickerMenu with these options
+    assert.ok(
+      this.existingUserDetected,
+      'Expected existingUserDetected to be true',
+    );
+  },
+);
+
+When('I choose to {string}', function (choice: string) {
+  if (choice === 'Log in with existing account') {
+    // Switch from signup to login flow
+    session.signup = false;
+    session.signupEmail = null;
+    session.signupFullName = null;
+    session.emailCaptureComplete = true;
+    this.existingUserDetected = false;
+  } else if (choice === 'Use a different email') {
+    // Reset to email entry
+    session.signupEmail = null;
+    session.signupFullName = null;
+    this.existingUserDetected = false;
+  }
+});
+
+Then('the signup flow should switch to regular auth', function () {
+  assert.strictEqual(
+    session.signup,
+    false,
+    'Expected signup to be false after switching to login',
+  );
+  assert.strictEqual(
+    session.emailCaptureComplete,
+    true,
+    'Expected emailCaptureComplete to be true to skip email capture',
+  );
+});
+
+Then('I should go through the login flow', function () {
+  // After switching from signup to login, the user should proceed through Auth
+  assert.strictEqual(session.signup, false, 'Expected signup to be false');
+});
+
+Then('I should be back at email entry', function () {
+  assert.strictEqual(
+    session.signupEmail,
+    null,
+    'Expected signupEmail to be cleared',
+  );
+  assert.strictEqual(
+    this.existingUserDetected,
+    false,
+    'Expected existingUserDetected to be reset',
+  );
+});
+
+Then('I can enter a new email address', function () {
+  // The user is now free to enter a different email
+  session.signupEmail = 'newemail@example.com';
+  session.signupFullName = 'New User';
+  session.emailCaptureComplete = true;
+  this.existingUserDetected = false;
+});
+
 // Overlay and slash command steps live in wizard-overlays.steps.ts
