@@ -36,8 +36,8 @@
  *   ours on exit. Both paths register as a wizard cleanup so they fire on
  *   any termination (success, cancel, crash).
  *
- *   Result: zero user prompts, zero data-loss risk, the wizard works for
- *   every Claude Code user — including the ones who route through a
+ *   Result: zero user prompts, zero data-loss risk, and the wizard works
+ *   for every Claude Code user — including the ones who route through a
  *   custom gateway.
  */
 
