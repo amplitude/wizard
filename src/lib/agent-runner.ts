@@ -159,6 +159,39 @@ export async function runAgentWizard(
   } = await import('./wizard-tools.js');
   ensureWizardArtifactsIgnored(session.installDir);
 
+  // Helper bound to this run's session. The fallback never overwrites
+  // an agent-authored report (see writeFallbackReportIfMissing's
+  // existsSync check), so it's safe to invoke from any teardown path.
+  const tryWriteFallback = (): void => {
+    writeFallbackReportIfMissing({
+      installDir: session.installDir,
+      integration: session.integration,
+      dashboardUrl: session.checklistDashboardUrl,
+      workspaceName: session.selectedWorkspaceName,
+      envName: session.selectedEnvName,
+    });
+  };
+
+  // The original PR only wrote a fallback on success, but the
+  // failure modes the writer is meant to handle (cancel, error,
+  // out-of-turns) all exit via wizardAbort or non-throwing returns
+  // and never reach the success branch. Wire the writer into every
+  // teardown path so the outro always has something to surface:
+  //
+  //   - wizardAbort()   → registerCleanup runs the writer before
+  //                       process.exit (cancel / error / Ctrl+C)
+  //   - body returns false → try/finally below catches non-throwing
+  //                       early returns (e.g. version-check cancel)
+  //   - body throws     → same try/finally catches uncaught errors
+  //   - success         → explicit call retained as a belt-and-braces
+  //                       no-op for the rare case where the agent
+  //                       finishes without writing a report
+  //
+  // Re-firing on the success path is harmless because the writer
+  // bails when the canonical exists.
+  const { registerCleanup } = await import('../utils/wizard-abort.js');
+  registerCleanup(tryWriteFallback);
+
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
   // preserve the wizard's working artifacts (`.amplitude-events.json`,
   // installed integration skills) so a re-run can pick up where the user
@@ -173,12 +206,23 @@ export async function runAgentWizard(
   // user to re-confirm their entire instrumentation plan from scratch.
   // The gitignore made the cleanup redundant for its stated purpose
   // (preventing `git add .` pollution).
-  const success = await runAgentWizardBody(
-    config,
-    session,
-    getAdditionalFeatureQueue,
-    featureProgress,
-  );
+  let success = false;
+  try {
+    success = await runAgentWizardBody(
+      config,
+      session,
+      getAdditionalFeatureQueue,
+      featureProgress,
+    );
+  } finally {
+    // Catches the two failure paths that bypass wizardAbort:
+    //   - body returns false (non-throwing early return, e.g. version check)
+    //   - body throws        (uncaught exception propagates to caller)
+    // The success path also runs through here, but the agent will
+    // already have written its report by then, so the fallback's
+    // existsSync check makes this a safe no-op.
+    if (!success) tryWriteFallback();
+  }
   // Cleanup runs only when the body explicitly signals success. Other
   // exit paths preserve artifacts:
   //   - body returns false  → non-success early return (e.g. version
@@ -189,20 +233,10 @@ export async function runAgentWizard(
   //   - wizardAbort path    → calls process.exit(); this line is never
   //     reached, integration skills + events file stay on disk.
   if (success) {
-    // Safety net: if the agent didn't write `amplitude-setup-report.md`
-    // (model variance, ran out of turns before conclude, hit an error
-    // mid-skill, etc.) the wizard writes a minimal stub so the outro
-    // screen always has something to surface. The fallback never
-    // overwrites an agent-authored report — see
-    // writeFallbackReportIfMissing. Runs BEFORE cleanup so the events
-    // file is still readable.
-    writeFallbackReportIfMissing({
-      installDir: session.installDir,
-      integration: session.integration,
-      dashboardUrl: session.checklistDashboardUrl,
-      workspaceName: session.selectedWorkspaceName,
-      envName: session.selectedEnvName,
-    });
+    // Safety net for the rare case where the agent reaches a
+    // successful conclusion without writing the report. The fallback
+    // never overwrites an agent-authored report.
+    tryWriteFallback();
 
     cleanupWizardArtifacts(session.installDir, { onSuccess: true });
   }
