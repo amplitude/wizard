@@ -1513,10 +1513,13 @@ void yargs(hideBin(process.argv))
                 // Wait for the user to dismiss the welcome screen AND pick a
                 // region before opening the OAuth URL. This ensures the logo
                 // and intro are visible before the browser opens.
+                // When --signup is used, also wait for ToS acceptance.
                 await waitForSessionState(
                   () =>
                     tui.store.session.introConcluded &&
-                    tui.store.session.region !== null,
+                    tui.store.session.region !== null &&
+                    (!tui.store.session.signup ||
+                      tui.store.session.tosAccepted === true),
                 );
                 const { resolveZone } = await import(
                   './src/lib/zone-resolution.js'
