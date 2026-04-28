@@ -57,7 +57,7 @@ actions.
 | `/whoami`    | Show current user, org, and project                               |
 | `/mcp`       | Install or remove the Amplitude MCP server                        |
 | `/slack`     | Set up Amplitude Slack integration                                |
-| `/feedback`  | Send product feedback                                             |
+| `/feedback`  | Send product feedback (optionally with opt-in system diagnostics) |
 | `/test`      | Run a prompt-skill demo (confirm + choose)                        |
 | `/snake`     | Play Snake                                                        |
 | `/exit`      | Exit the wizard                                                   |
@@ -84,7 +84,10 @@ flowchart TD
     CMD --> WIZARD["wizard (default)"]
     CMD --> AGENT["wizard --agent<br/>(structured JSON output for automation)"]
 
-    FEEDBACK --> FEEDBACK_SEND["Send feedback via Node SDK"]
+    FEEDBACK --> FEEDBACK_CONSENT{"Include diagnostic info?<br/>(consent prompt)"}
+    FEEDBACK_CONSENT -->|yes| FEEDBACK_COLLECT["Collect diagnostics<br/>(system, codebase, session)"]
+    FEEDBACK_COLLECT --> FEEDBACK_SEND["Send feedback + diagnostics via Node SDK"]
+    FEEDBACK_CONSENT -->|no| FEEDBACK_SEND_BARE["Send feedback via Node SDK"]
 
     AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
     AGENT_UI --> AGENT_RUN["SDK installation agent run"]
