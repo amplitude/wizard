@@ -9,8 +9,29 @@ import { ClaudeCodeMCPClient } from './clients/claude-code';
 import { VisualStudioCodeClient } from './clients/visual-studio-code';
 import { ZedClient } from './clients/zed';
 import { CodexMCPClient } from './clients/codex';
+import { ClineMCPClient } from './clients/cline';
+import { WindsurfMCPClient } from './clients/windsurf';
+import { GeminiCLIMCPClient } from './clients/gemini-cli';
+import { AmpMCPClient } from './clients/amp';
+import { OpenCodeMCPClient } from './clients/opencode';
 import { ALL_FEATURE_VALUES } from './defaults';
 import { debug } from '../../utils/debug';
+
+/**
+ * Deprecated clients — uninstall-only. Drop in next release.
+ *
+ * These clients are no longer offered for install, but the wizard still
+ * needs to be able to scrub stale `mcpServers.amplitude` entries that
+ * previous wizard versions wrote to their settings files. Their
+ * `addServer` is a no-op; only `removeServer` does real work.
+ */
+const getDeprecatedUninstallOnlyClients = (): MCPClient[] => [
+  new ClineMCPClient(),
+  new WindsurfMCPClient(),
+  new GeminiCLIMCPClient(),
+  new AmpMCPClient(),
+  new OpenCodeMCPClient(),
+];
 
 export const getSupportedClients = async (): Promise<MCPClient[]> => {
   const allClients = [
@@ -128,7 +149,14 @@ export const removeMCPServerFromClientsStep = async ({
 export const getInstalledClients = async (
   local?: boolean,
 ): Promise<MCPClient[]> => {
-  const clients = await getSupportedClients();
+  // Include deprecated uninstall-only clients here so the uninstall flow
+  // can scrub stale config entries left over from previous wizard versions.
+  // These clients aren't returned by getSupportedClients() (no install path),
+  // but their isServerInstalled() probe still detects existing entries.
+  const clients = [
+    ...(await getSupportedClients()),
+    ...getDeprecatedUninstallOnlyClients(),
+  ];
   const installedClients: MCPClient[] = [];
 
   for (const client of clients) {
