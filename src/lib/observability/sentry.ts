@@ -481,3 +481,57 @@ export async function flushSentry(): Promise<void> {
     // Flush failure is non-fatal — don't block exit
   }
 }
+
+// ── MCP server instrumentation ──────────────────────────────────────
+
+/**
+ * Wrap an MCP server instance with Sentry's auto-instrumentation so every
+ * tool call gets a span. Safe to call when telemetry is disabled — returns
+ * the unwrapped server unchanged so the caller's typing stays stable.
+ *
+ * Use this on any MCP server constructed in the wizard:
+ *   - `@modelcontextprotocol/sdk` `new McpServer(...)`
+ *   - `@anthropic-ai/claude-agent-sdk` `createSdkMcpServer(...)`
+ *
+ * Sentry's `wrapMcpServerWithSentry` is idempotent — calling it twice on the
+ * same server is a no-op the second time. We add our own initialization
+ * guard so a Sentry-side throw doesn't take the wizard down.
+ */
+export function wrapMcpServerWithSentry<T extends object>(server: T): T {
+  if (!initialized) return server;
+  try {
+    return Sentry.wrapMcpServerWithSentry(server);
+  } catch {
+    // Sentry instrumentation failure is non-fatal — fall back to the raw server.
+    return server;
+  }
+}
+
+// ── Token measurements ──────────────────────────────────────────────
+
+/**
+ * Record a numeric measurement on the active Sentry root span (e.g., token
+ * counts on the agent run trace).
+ *
+ * Best-effort: when Sentry is not initialized or no active span context
+ * exists, the call is a silent no-op. Existing benchmark math is unaffected
+ * — measurements are an additive trace attribute, not a replacement.
+ *
+ * The unit follows OpenTelemetry conventions; common values for the wizard:
+ *   - `'token'` for input/output/cache_read/cache_creation token counts
+ *   - `'millisecond'` / `'second'` for durations
+ *   - `'byte'` for sizes
+ */
+export function setSpanMeasurement(
+  name: string,
+  value: number,
+  unit: string,
+): void {
+  if (!initialized) return;
+  if (!Number.isFinite(value)) return;
+  try {
+    Sentry.setMeasurement(name, value, unit);
+  } catch {
+    // Measurement failure is non-fatal
+  }
+}
