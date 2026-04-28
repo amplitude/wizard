@@ -28,6 +28,8 @@ import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
+import { createInnerLifecycleHooks } from './inner-lifecycle';
+import { classifyWriteOperation } from './agent-events';
 import {
   createWizardToolsServer,
   WIZARD_TOOL_NAMES,
@@ -607,6 +609,54 @@ export function createUserPromptSubmitHook(state: AgentState): HookCallback {
         additionalContext: note,
       },
     });
+  };
+}
+
+/**
+ * Factory: PostToolUse hook — records the file path of every successful
+ * write-tool call (Write / Edit / MultiEdit / NotebookEdit) into the
+ * provided AgentState. The recovery snapshot persisted by `createPreCompactHook`
+ * relies on this list so the post-compaction UserPromptSubmit hydration
+ * can tell the model which files it has already modified in the run.
+ *
+ * Wrapped in try/catch — a throwing hook would otherwise tank the run.
+ * No-op for non-write tools.
+ */
+export function createPostToolUseHook(state: AgentState): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    try {
+      const toolName =
+        typeof input.tool_name === 'string'
+          ? input.tool_name
+          : typeof input.toolName === 'string'
+          ? input.toolName
+          : '';
+      if (!classifyWriteOperation(toolName)) return Promise.resolve({});
+
+      const toolInput =
+        typeof input.tool_input !== 'undefined'
+          ? input.tool_input
+          : typeof input.toolInput !== 'undefined'
+          ? input.toolInput
+          : null;
+      const obj =
+        toolInput && typeof toolInput === 'object'
+          ? (toolInput as Record<string, unknown>)
+          : {};
+      const path =
+        typeof obj.file_path === 'string'
+          ? obj.file_path
+          : typeof obj.path === 'string'
+          ? obj.path
+          : null;
+      if (path) {
+        state.recordModifiedFile(path);
+        logToFile(`PostToolUse: recorded modified file ${path} (${toolName})`);
+      }
+    } catch (err) {
+      logToFile('PostToolUse handler threw:', err);
+    }
+    return Promise.resolve({});
   };
 }
 
@@ -1983,25 +2033,84 @@ export async function runAgent(
                 }
               }
             },
-            hooks: buildHooksConfig({
-              // PreToolUse fires for every tool regardless of permissionMode,
-              // so it's our authoritative gate for Bash safety. canUseTool
-              // alone is not invoked for Bash under
-              // `tools: { preset: 'claude_code' } + permissionMode: 'acceptEdits'`.
-              PreToolUse: createPreToolUseHook(),
-              Stop: createStopHook(
-                config?.additionalFeatureQueue ?? (() => []),
-                () => authErrorDetected,
-                {
-                  onFeatureStart: config?.onFeatureStart,
-                  onFeatureComplete: config?.onFeatureComplete,
-                },
-              ),
-              ...(config?.onPreCompact && {
-                PreCompact: createPreCompactHook(config.onPreCompact),
-              }),
-              UserPromptSubmit: createUserPromptSubmitHook(agentState),
-            }),
+            hooks: (() => {
+              // Inner-lifecycle hooks emit NDJSON to AgentUI for outer-agent
+              // orchestrators. SessionStart / PreToolUse / PostToolUse here
+              // are observers — they never deny or alter SDK behavior. We
+              // chain them with our authoritative gates below so the
+              // allowlist still runs for every tool call.
+              const inner = createInnerLifecycleHooks({ phase: 'wizard' });
+              const innerHooks = inner.hooks();
+              const gatedPreToolUse = createPreToolUseHook();
+              const recordPostToolUse = createPostToolUseHook(agentState);
+
+              // Compose: inner observer first (best-effort, never alters
+              // decision), then the authoritative gate. If the gate denies,
+              // the SDK respects the deny regardless of the observer's
+              // earlier resolved value.
+              const preToolUse: HookCallback = async (
+                input,
+                toolUseID,
+                hookOpts,
+              ) => {
+                try {
+                  await innerHooks.PreToolUse(input, toolUseID, hookOpts);
+                } catch (err) {
+                  logToFile('inner PreToolUse observer threw:', err);
+                }
+                return gatedPreToolUse(input, toolUseID, hookOpts);
+              };
+
+              const postToolUse: HookCallback = async (
+                input,
+                toolUseID,
+                hookOpts,
+              ) => {
+                try {
+                  await innerHooks.PostToolUse(input, toolUseID, hookOpts);
+                } catch (err) {
+                  logToFile('inner PostToolUse observer threw:', err);
+                }
+                return recordPostToolUse(input, toolUseID, hookOpts);
+              };
+
+              // PreCompact: record + persist AgentState for in-run recovery,
+              // then forward to the user-supplied handler (which saves the
+              // cross-run WizardSession checkpoint + emits analytics).
+              // Both fire even when `config?.onPreCompact` is absent so the
+              // recovery snapshot is always written.
+              const preCompactHandler = (input: {
+                trigger: 'manual' | 'auto';
+              }): void => {
+                try {
+                  agentState.recordCompaction();
+                  agentState.persist();
+                } catch (err) {
+                  logToFile('PreCompact: agentState persist failed', err);
+                }
+                config?.onPreCompact?.(input);
+              };
+
+              return buildHooksConfig({
+                SessionStart: innerHooks.SessionStart,
+                // PreToolUse fires for every tool regardless of permissionMode,
+                // so it's our authoritative gate for Bash safety. canUseTool
+                // alone is not invoked for Bash under
+                // `tools: { preset: 'claude_code' } + permissionMode: 'acceptEdits'`.
+                PreToolUse: preToolUse,
+                PostToolUse: postToolUse,
+                Stop: createStopHook(
+                  config?.additionalFeatureQueue ?? (() => []),
+                  () => authErrorDetected,
+                  {
+                    onFeatureStart: config?.onFeatureStart,
+                    onFeatureComplete: config?.onFeatureComplete,
+                  },
+                ),
+                PreCompact: createPreCompactHook(preCompactHandler),
+                UserPromptSubmit: createUserPromptSubmitHook(agentState),
+              });
+            })(),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
           },
