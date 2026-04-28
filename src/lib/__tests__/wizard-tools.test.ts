@@ -9,6 +9,7 @@ import {
   mergeEnvValues,
   persistEventPlan,
   cleanupIntegrationSkills,
+  cleanupAmplitudeEventsFile,
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
   buildFallbackReport,
@@ -393,9 +394,12 @@ describe('ensureWizardArtifactsIgnored', () => {
     // during runs, and a `git add .` mid-run would otherwise stage them.
     expect(content).toContain('.amplitude-events.json');
     expect(content).toContain('.amplitude-dashboard.json');
-    // User-facing setup report stays at the project root for
-    // discoverability after exit. Gitignored so it doesn't get committed.
-    expect(content).toContain('amplitude-setup-report.md');
+    // PR 316 design: the CURRENT user-facing setup report
+    // (`amplitude-setup-report.md`) is intentionally NOT gitignored —
+    // many users want to commit it as part of their analytics docs.
+    // Only the wizard-managed archive of the prior report is hidden.
+    expect(content).toContain('amplitude-setup-report.previous.md');
+    expect(content).not.toMatch(/^amplitude-setup-report\.md$/m);
   });
 
   it('is idempotent — running twice does not duplicate entries', () => {
