@@ -201,6 +201,11 @@ async function abortOnApiError(
       integration: config.metadata.integration,
       'error type': errorType,
       'error subtype': errorSubtype,
+      // Preserves the structured `report_status` detail / underlying
+      // agentResult.message that produced this branch — without it
+      // Sentry only sees the boilerplate `userMessage` copy, which
+      // doesn't disambiguate between subtypes for debugging.
+      'agent error detail': rawMessage || null,
     }),
     exitCode: ExitCode.NETWORK_ERROR,
   });
@@ -716,11 +721,18 @@ async function runAgentWizardBody(
   }
 
   if (agentResult.error === AgentErrorType.MCP_MISSING) {
+    // The MCP_MISSING signal can come from EITHER the in-process
+    // `wizard-tools` MCP (skill loading, env vars) OR the remote
+    // `amplitude-wizard` MCP (mcp.amplitude.com — event plans, dashboards).
+    // Surface the agent-reported detail so the user can include it in
+    // a bug report and Sentry can disambiguate which server failed.
+    const detail = agentResult.message ?? 'unspecified';
     await wizardAbort({
-      message: `Could not access the Amplitude MCP server\n\nThe wizard was unable to connect to the Amplitude MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
+      message: `Could not access an Amplitude wizard MCP service\n\nThis could be the in-process tooling server (used for skill loading and env var management) or the remote Amplitude MCP server.\n\nDetail: ${detail}\n\nPossible causes: missing skills bundle in the install, network connectivity, expired auth, or a transient outage.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
       error: new WizardError('Agent could not access Amplitude MCP server', {
         integration: config.metadata.integration,
         'error type': AgentErrorType.MCP_MISSING,
+        'agent error detail': agentResult.message ?? null,
       }),
       exitCode: ExitCode.AGENT_FAILED,
     });
@@ -732,6 +744,7 @@ async function runAgentWizardBody(
       error: new WizardError('Agent could not access setup resource', {
         integration: config.metadata.integration,
         'error type': AgentErrorType.RESOURCE_MISSING,
+        'agent error detail': agentResult.message ?? null,
       }),
       exitCode: ExitCode.AGENT_FAILED,
     });
@@ -759,6 +772,7 @@ async function runAgentWizardBody(
           integration: config.metadata.integration,
           'error type': agentResult.error,
           'using direct key': usingDirectKey,
+          'agent error detail': agentResult.message ?? null,
         },
       ),
       exitCode: ExitCode.NETWORK_ERROR,
