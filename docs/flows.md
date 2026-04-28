@@ -22,7 +22,9 @@ Per-screen Esc behavior:
 
 | Screen                | Esc action                                                    |
 | --------------------- | ------------------------------------------------------------- |
-| Auth                  | Back → RegionSelect (re-shows region picker, drops creds)     |
+| Auth                  | Back → ToS (if --signup), else RegionSelect                    |
+| ToS                   | Back → EmailCapture (clears ToS acceptance)                    |
+| EmailCapture          | Back → RegionSelect (clears captured email)                    |
 | DataSetup             | Back → Auth (clears org/workspace selection)                  |
 | ActivationOptions     | Back → DataSetup (re-runs activation check)                   |
 | Setup                 | Pops one answered question; if none, walks back further       |
@@ -128,7 +130,13 @@ flowchart TD
     INTRO --> REGION_SELECT
 
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
-    REGION_SELECT --> AUTH
+    REGION_SELECT --> SIGNUP_CHECK
+
+    SIGNUP_CHECK{--signup flag?}
+    SIGNUP_CHECK -->|no| AUTH
+    SIGNUP_CHECK -->|yes| EMAIL_CAPTURE["EmailCaptureScreen<br/>(collect user email · pre-filled from --signup-email flag)"]
+    EMAIL_CAPTURE --> TOS["ToSScreen<br/>(require explicit ToS acceptance)"]
+    TOS --> AUTH
 
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
         SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]
