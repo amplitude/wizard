@@ -25,7 +25,7 @@
  *   - `<installDir>/ampli.json` — ampli CLI tracking-plan config
  */
 
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -51,9 +51,25 @@ export function getCacheRoot(): string {
  * Stable 12-char hex identifier for an install directory. Matches the
  * convention previously inlined in `session-checkpoint.ts` so existing
  * checkpoints remain addressable after migration.
+ *
+ * Normalization (so symlink/trailing-slash/case variants of the same
+ * project hash to the same directory):
+ *   1. Resolve symlinks via `realpathSync`. Falls back to the raw input
+ *      if the path doesn't exist yet (ENOENT) or we can't read it
+ *      (EACCES) — those are best-effort, not blockers.
+ *   2. Strip trailing path separators so `/foo/bar` and `/foo/bar/`
+ *      hash identically.
  */
 export function projectHash(installDir: string): string {
-  return createHash('sha256').update(installDir).digest('hex').slice(0, 12);
+  let resolved = installDir;
+  try {
+    resolved = realpathSync(installDir);
+  } catch {
+    // ENOENT / EACCES / EPERM — fall back to the raw string so a
+    // not-yet-created install dir still hashes deterministically.
+  }
+  const normalized = resolved.replace(/[/\\]+$/, '');
+  return createHash('sha256').update(normalized).digest('hex').slice(0, 12);
 }
 
 // ── Per-project run dir (under cache root) ────────────────────────────

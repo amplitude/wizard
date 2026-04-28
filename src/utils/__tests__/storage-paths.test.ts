@@ -75,6 +75,34 @@ describe('storage-paths', () => {
     it('produces different digests for different inputs', () => {
       expect(projectHash('/foo')).not.toBe(projectHash('/bar'));
     });
+
+    it('normalizes trailing path separators', () => {
+      // `/foo/bar/` and `/foo/bar` should hash identically even though
+      // the path doesn't exist (realpathSync throws ENOENT and we fall
+      // back to the raw string + trailing-slash strip).
+      expect(projectHash('/non/existent/dir/')).toBe(
+        projectHash('/non/existent/dir'),
+      );
+      expect(projectHash('/non/existent/dir//')).toBe(
+        projectHash('/non/existent/dir'),
+      );
+    });
+
+    it('resolves symlinks so symlinked variants hash identically', () => {
+      const real = fs.mkdtempSync(path.join(os.tmpdir(), 'ph-real-'));
+      const link = path.join(os.tmpdir(), `ph-link-${Date.now()}`);
+      try {
+        fs.symlinkSync(real, link);
+        expect(projectHash(link)).toBe(projectHash(real));
+      } finally {
+        try {
+          fs.unlinkSync(link);
+        } catch {
+          // ignore
+        }
+        fs.rmSync(real, { recursive: true, force: true });
+      }
+    });
   });
 
   describe('per-project paths', () => {
