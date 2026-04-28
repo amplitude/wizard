@@ -24,11 +24,9 @@ import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import {
-  DEFAULT_AMPLITUDE_ZONE,
-  DEFAULT_HOST_URL,
-} from '../../../lib/constants.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { getHostFromRegion } from '../../../utils/urls.js';
 import { toCredentialAppId } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
 
@@ -269,11 +267,20 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             matchedAppId = match.app?.id ?? null;
           }
         }
+        // Pin host to the user's region. Without this, EU users with a
+        // cached API key (keychain or .env.local) got `host: api2.amplitude.com`
+        // — the US default — which then cascaded: the agent's LLM gateway
+        // resolution (`getLlmGatewayUrlFromHost(host)`) saw a US host and
+        // routed through `core.amplitude.com/wizard`, the skill-menu fetch
+        // 404'd against the EU bundle, and every downstream URL written
+        // into the setup report pointed at the wrong data center.
+        // readDisk: true — auth screen runs before the RegionSelect gate.
+        const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: local.key,
-          host: DEFAULT_HOST_URL,
+          host: getHostFromRegion(zone),
           appId: toCredentialAppId(matchedAppId),
         });
         store.setProjectHasData(false);
@@ -287,7 +294,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         const envAppId = selectedEnv.app.id ?? null;
         // readDisk: true — auth screen runs before the RegionSelect gate.
         const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
-        const { getHostFromRegion } = await import('../../../utils/urls.js');
         if (cancelled || store.session.credentials !== null) return;
 
         persistApiKey(apiKey, s.installDir);
@@ -314,7 +320,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
 
       const { getAPIKey } = await import('../../../utils/get-api-key.js');
-      const { getHostFromRegion } = await import('../../../utils/urls.js');
 
       const projectApiKey = await getAPIKey({
         installDir: s.installDir,
@@ -457,11 +462,18 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     // Env name stays null for manually-entered keys — we can't determine
     // which environment the key belongs to without an extra backend call.
     // The header will render org / workspace only, which is acceptable.
+    // Pin host to the user's region so the agent doesn't run against the
+    // US gateway when an EU user pastes their EU key (same root cause as
+    // the local-storage path above).
+    // readDisk: true — auth screen runs before the RegionSelect gate.
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: true,
+    });
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       idToken: session.pendingAuthIdToken ?? undefined,
       projectApiKey: trimmed,
-      host: DEFAULT_HOST_URL,
+      host: getHostFromRegion(zone),
       appId: 0,
     });
     // Fresh project: no existing event data — advance past DataSetup
