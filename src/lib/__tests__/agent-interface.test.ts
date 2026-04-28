@@ -157,8 +157,8 @@ describe('runAgent', () => {
         },
       );
 
-      // Should return success (empty object), not throw
-      expect(result).toEqual({});
+      // Should return success (empty planned events list), not throw
+      expect(result).toEqual({ plannedEvents: [] });
       expect(mockSpinner.stop).toHaveBeenCalledWith('Test success');
     });
 
@@ -539,7 +539,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Done');
     });
@@ -769,7 +769,7 @@ describe('runAgent', () => {
       await vi.advanceTimersByTimeAsync(3_000);
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(attempt2FirstMessageSeen).toBe(true);
 
@@ -845,7 +845,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
       expect(returnSpy).toHaveBeenCalledTimes(1);
       // Cleanup must happen during attempt #1 (before #2 starts).
@@ -893,7 +893,7 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      expect(result).toEqual({});
+      expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
     });
   });
@@ -959,8 +959,8 @@ describe('runAgent', () => {
         },
       );
 
-      // Should return success (empty object), not error
-      expect(result).toEqual({});
+      // Should return success (empty planned events list), not error
+      expect(result).toEqual({ plannedEvents: [] });
       expect(mockSpinner.stop).toHaveBeenCalledWith('Test success');
 
       // ui.log.error should NOT have been called (errors suppressed for user)

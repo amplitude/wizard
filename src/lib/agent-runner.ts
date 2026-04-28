@@ -788,6 +788,17 @@ async function runAgentWizardBody(
     );
   }
 
+  // Commit the instrumented event plan to the Amplitude tracking plan as
+  // planned events so the names show up in the Data tab immediately — even
+  // before any track() call fires in the user's app.
+  const plannedEventsSummary = await commitPlannedEventsStep(
+    agentResult.plannedEvents ?? [],
+    accessToken,
+    appId,
+    session,
+    cloudRegion,
+  );
+
   // MCP installation is handled by McpScreen — no prompt here
 
   // Data ingestion check — agent mode only (not CI).
@@ -809,6 +820,7 @@ async function runAgentWizardBody(
     uploadedEnvVars.length > 0
       ? `Uploaded environment variables to your hosting provider`
       : '',
+    plannedEventsSummary,
   ].filter(Boolean);
 
   session.outroData = {
@@ -1078,4 +1090,98 @@ Important: Use the detect_package_manager tool (from the wizard-tools MCP server
 
 
 `;
+}
+
+/**
+ * Push the agent's instrumented event plan into the Amplitude tracking plan as
+ * planned events. Returns an outro-ready summary string (empty if nothing was
+ * committed). Never throws — a failure here must not block the outro.
+ *
+ * Falls back to `session.selectedAppId` and finally a live fetchAmplitudeUser
+ * lookup when `session.credentials.appId` is 0 (the env picker couldn't match
+ * an app to the chosen API key).
+ */
+async function commitPlannedEventsStep(
+  plannedEvents: Array<{ name: string; description: string }>,
+  accessToken: string,
+  credentialsAppId: number | null | undefined,
+  session: WizardSession,
+  cloudRegion: string,
+): Promise<string> {
+  if (!plannedEvents || plannedEvents.length === 0) {
+    logToFile('[commitPlannedEventsStep] no planned events — skipping');
+    return '';
+  }
+
+  let appId: string | number | null | undefined = credentialsAppId;
+  if (!appId) appId = session.selectedAppId;
+  if (!appId) {
+    try {
+      const { fetchAmplitudeUser } = await import('./api.js');
+      const userInfo = await fetchAmplitudeUser(
+        accessToken,
+        cloudRegion as 'us' | 'eu',
+      );
+      const org = session.selectedOrgId
+        ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
+        : userInfo.orgs[0];
+      const ws =
+        org && session.selectedWorkspaceId
+          ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
+          : org?.workspaces[0];
+      appId =
+        ws?.environments
+          ?.slice()
+          .sort((a, b) => a.rank - b.rank)
+          .find((e) => e.app?.id)?.app?.id ?? null;
+      if (appId) session.selectedAppId = String(appId);
+    } catch (err) {
+      logToFile(
+        `[commitPlannedEventsStep] could not resolve appId: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (!appId) {
+    logToFile('[commitPlannedEventsStep] no appId — skipping');
+    return '';
+  }
+
+  try {
+    const { commitPlannedEvents } = await import('./planned-events.js');
+    logToFile(
+      `[commitPlannedEventsStep] committing ${plannedEvents.length} planned events to appId=${appId}`,
+    );
+    const result = await commitPlannedEvents({
+      accessToken,
+      appId: String(appId),
+      events: plannedEvents,
+    });
+
+    analytics.wizardCapture('planned events committed', {
+      attempted: result.attempted,
+      created: result.created,
+      described: result.described,
+      'error message': result.error ?? '',
+    });
+
+    logToFile(
+      `[commitPlannedEventsStep] result attempted=${result.attempted} created=${
+        result.created
+      } described=${result.described} error=${result.error ?? ''}`,
+    );
+
+    if (result.created === 0) return '';
+    const eventWord = result.created === 1 ? 'event' : 'events';
+    return `Added ${result.created} planned ${eventWord} to your tracking plan`;
+  } catch (err) {
+    logToFile(
+      `[commitPlannedEventsStep] unexpected error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return '';
+  }
 }
