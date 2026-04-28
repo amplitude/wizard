@@ -594,6 +594,8 @@ export type AgentRunConfig = {
   useLocalClaude?: boolean;
   /** When true, ANTHROPIC_API_KEY is passed through to the SDK instead of the gateway. */
   useDirectApiKey?: boolean;
+  /** When true, `applyScopedSettings` wrote `.claude/settings.local.json` and the SDK should load it. */
+  useLocalSettings?: boolean;
 };
 
 const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
@@ -1126,6 +1128,7 @@ export async function initializeAgent(
   try {
     const useDirectApiKey = !!process.env.ANTHROPIC_API_KEY;
     const useLocalClaude = !config.amplitudeBearerToken && !useDirectApiKey;
+    let useLocalSettings = false;
 
     if (useDirectApiKey) {
       // An inherited ANTHROPIC_AUTH_TOKEN from an outer agent session would
@@ -1186,6 +1189,7 @@ export async function initializeAgent(
       if (scoped) {
         registerCleanup(() => scoped.restore());
       }
+      useLocalSettings = !!scoped;
     }
 
     // Configure MCP servers
@@ -1229,6 +1233,7 @@ export async function initializeAgent(
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,
       useDirectApiKey,
+      useLocalSettings,
     };
 
     logToFile('Agent config:', {
@@ -1968,13 +1973,15 @@ export async function runAgent(
             // needs deliberation. See `commandments.ts` for the
             // instructions that obviate per-turn reasoning.
             // Load skills + agents + commands from the project's `.claude/`
-            // directory, AND the local-layer settings we wrote in
-            // `applyScopedSettings`. The SDK merges with `local` winning
-            // over `project`, so our wizard-managed env (gateway URL +
-            // bearer) overrides anything the user's checked-in
-            // `.claude/settings.json` declares. See `claude-settings-scope.ts`
-            // for the rationale and the precedence reference.
-            settingSources: ['project', 'local'],
+            // directory. When `applyScopedSettings` wrote a local-layer
+            // override (gateway mode), also load `'local'` so the wizard's
+            // env (gateway URL + bearer) wins over the user's checked-in
+            // `.claude/settings.json`. For direct-API-key users, where no
+            // local file was written, omit `'local'` to avoid picking up a
+            // pre-existing `settings.local.json`. See `claude-settings-scope.ts`.
+            settingSources: agentConfig.useLocalSettings
+              ? ['project', 'local']
+              : ['project'],
             // Explicitly enable required tools including Skill
             allowedTools,
             systemPrompt: {
