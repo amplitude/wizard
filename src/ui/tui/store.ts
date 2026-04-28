@@ -356,6 +356,14 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSignupFullName(fullName: string): void {
+    this.$session.setKey('signupFullName', fullName);
+    analytics.wizardCapture('signup full name captured', {
+      'has name': !!fullName,
+    });
+    this.emitChange();
+  }
+
   markEmailCaptureComplete(): void {
     this.$session.setKey('emailCaptureComplete', true);
     analytics.wizardCapture('email capture complete');

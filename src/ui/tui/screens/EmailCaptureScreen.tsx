@@ -29,9 +29,12 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
   useScreenHints(EMAIL_HINTS);
 
   const { session } = store;
+  const [email, setEmail] = useState(session.signupEmail ?? '');
+  const [fullName, setFullName] = useState(session.signupFullName ?? '');
+  const [step, setStep] = useState<'email' | 'name'>('email');
   const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (value: string) => {
+  const handleEmailSubmit = (value: string) => {
     const trimmed = value.trim();
     if (!trimmed) {
       setError('Email is required');
@@ -41,9 +44,22 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
       setError('Please enter a valid email address');
       return;
     }
+    setEmail(trimmed);
+    setError(null);
+    setStep('name');
+  };
 
-    // Update session with captured email
-    store.setSignupEmail(trimmed);
+  const handleNameSubmit = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      setError('Full name is required');
+      return;
+    }
+    setFullName(trimmed);
+
+    // Update session with captured email and full name
+    store.setSignupEmail(email);
+    store.setSignupFullName(trimmed);
     store.markEmailCaptureComplete();
   };
 
@@ -53,15 +69,27 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
         <Text bold color={Colors.heading}>
           Create your Amplitude account
         </Text>
-        <Text color={Colors.muted}>Enter your email to get started</Text>
+        <Text color={Colors.muted}>
+          {step === 'email'
+            ? 'Enter your email to get started'
+            : 'Enter your full name'}
+        </Text>
       </Box>
 
       <Box flexDirection="column" marginBottom={1}>
-        <TextInput
-          defaultValue={session.signupEmail ?? ''}
-          placeholder="your.email@example.com"
-          onSubmit={handleSubmit}
-        />
+        {step === 'email' ? (
+          <TextInput
+            defaultValue={email}
+            placeholder="your.email@example.com"
+            onSubmit={handleEmailSubmit}
+          />
+        ) : (
+          <TextInput
+            defaultValue={fullName}
+            placeholder="First Last"
+            onSubmit={handleNameSubmit}
+          />
+        )}
         {error && (
           <Box marginTop={1}>
             <Text color={Colors.error}>
@@ -73,11 +101,13 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
 
       <Box marginTop={1} flexDirection="column">
         <Text color={Colors.muted}>
-          {Icons.dot} We&apos;ll use this email to create your Amplitude account
+          {Icons.dot} We&apos;ll use this to create your Amplitude account
         </Text>
-        <Text color={Colors.muted}>
-          {Icons.dot} You&apos;ll need to accept our Terms of Service next
-        </Text>
+        {step === 'email' && (
+          <Text color={Colors.muted}>
+            {Icons.dot} You&apos;ll need to accept our Terms of Service after
+          </Text>
+        )}
       </Box>
     </Box>
   );
