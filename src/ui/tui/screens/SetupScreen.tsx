@@ -16,6 +16,7 @@ import type { KeyHint } from '../components/KeyHintBar.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { SetupQuestion } from '../../../lib/framework-config.js';
+import { OutroKind } from '../session-constants.js';
 
 interface SetupScreenProps {
   store: WizardStore;
@@ -39,11 +40,15 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
   const answerOrderLength = store.session.frameworkContextAnswerOrder.length;
 
   // Esc steps back: first pop the most recent user-answered question (so
-  // back works between Setup questions), then if nothing's left to pop,
-  // delegate to the router so we walk past Setup entirely.
+  // back works between Setup questions), then if there's still room in the
+  // wizard's history, delegate to the router so we walk past Setup
+  // entirely. Hard rule: this screen MUST never be a dead-end. When neither
+  // a question pop nor a router goBack is available (e.g. user landed
+  // directly on Setup with a confusing first question), Esc routes to the
+  // cancel outro so the user is never stranded mid-disambiguation.
   const hasUserAnswers = answerOrderLength > 0;
   const canBackOutOfSetup = store.canGoBack();
-  const backAvailable = !resolving && (hasUserAnswers || canBackOutOfSetup);
+  const escAvailable = !resolving;
   useScreenInput(
     (_input, key) => {
       if (!key.escape) return;
@@ -51,13 +56,33 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
         setCurrentIndex((i) => Math.max(0, i - 1));
         return;
       }
-      store.goBack();
+      if (canBackOutOfSetup) {
+        store.goBack();
+        return;
+      }
+      // Last-resort exit so the user isn't stuck on a question they don't
+      // understand. The cancel outro presents docs links + "resume later"
+      // copy — better than a frozen prompt with no escape.
+      store.setOutroData({
+        kind: OutroKind.Cancel,
+        message:
+          "Setup paused — we'll be here when you're ready. Run the wizard again to pick up where you left off.",
+      });
     },
-    { isActive: backAvailable },
+    { isActive: escAvailable },
   );
   const hints = useMemo<readonly KeyHint[]>(
-    () => (backAvailable ? [{ key: 'Esc', label: 'Back' } as KeyHint] : []),
-    [backAvailable],
+    () =>
+      escAvailable
+        ? [
+            {
+              key: 'Esc',
+              label:
+                hasUserAnswers || canBackOutOfSetup ? 'Back' : 'Exit setup',
+            } as KeyHint,
+          ]
+        : [],
+    [escAvailable, hasUserAnswers, canBackOutOfSetup],
   );
   useScreenHints(hints);
 
