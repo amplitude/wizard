@@ -43,7 +43,12 @@ const CheckpointSchema = z
     region: z.enum(['us', 'eu']).nullable(),
     selectedOrgId: z.string().nullable(),
     selectedOrgName: z.string().nullable(),
-    selectedWorkspaceId: z.string().nullable(),
+    // Coerce empty / whitespace-only ids to null so downstream
+    // `toWorkspaceId(...)` (which rejects `min(1)`) can't be fed a bad string.
+    selectedWorkspaceId: z
+      .string()
+      .nullable()
+      .transform((v) => (v && v.trim().length > 0 ? v : null)),
     selectedWorkspaceName: z.string().nullable(),
     selectedEnvName: z.string().nullable().optional(),
     selectedProjectName: z.string().nullable().optional(),
