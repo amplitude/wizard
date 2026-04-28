@@ -279,7 +279,7 @@ IntroScreen                   Shows detected framework, user confirms
 RegionSelectScreen            US or EU (skipped for returning users)
      │
      ▼
-AuthScreen (SUSI flow)        OAuth → org picker → workspace picker → API key
+AuthScreen (SUSI flow)        OAuth → org picker → project picker → API key
      │
      ▼
 DataSetupScreen               Checks activation level via API:
@@ -471,7 +471,7 @@ WizardSession
 ├─ OAuth / auth state
 │   pendingOrgs, pendingAuthIdToken, pendingAuthAccessToken,
 │   pendingAuthCloudRegion, selectedOrgId, selectedOrgName,
-│   selectedWorkspaceId, selectedWorkspaceName, selectedEnvName,
+│   selectedProjectId, selectedProjectName, selectedEnvName,
 │   apiKeyNotice
 │
 ├─ Credentials (set when auth completes)
@@ -701,8 +701,10 @@ The project API key is persisted per-project via:
 
 ### 3. Project config (`.ampli.json` in the project directory)
 
-Zone, org, workspace, and project selections written by the Amplitude CLI
-toolchain. Read by `src/lib/ampli-config.ts`.
+Zone, org, project, and environment selections written by the Amplitude CLI
+toolchain. Read by `src/lib/ampli-config.ts`. Stored key is `ProjectId`;
+legacy files with `WorkspaceId` are auto-migrated to `ProjectId` on read, and
+`writeAmpliConfig` only emits the new key.
 
 ### 4. Crash-recovery checkpoint (`src/lib/session-checkpoint.ts`)
 
@@ -711,7 +713,7 @@ A sanitized session snapshot (no credentials or tokens) saved to
 under the cache root so two parallel wizard runs in different directories
 can't clobber each other's checkpoint. On restart, if the checkpoint
 matches the current project directory and is less than 24 hours old, the
-wizard restores: region, org/workspace selection, framework detection
+wizard restores: region, org/project selection, framework detection
 results, and intro state. This lets users resume where they left off
 after a crash without re-doing setup. Checkpoints are deleted on
 successful completion via `clearCheckpoint()`.
@@ -767,7 +769,7 @@ OAuth PKCE flow
      └─ Auto-detect region from token claims
            │
            ▼
-     Org picker (if multiple) → Workspace picker (if multiple) → API key
+     Org picker (if multiple) → Project picker (if multiple) → API key
 ```
 
 **CI mode auth:** Pass `--api-key <key>` on the command line. The wizard uses this
@@ -860,7 +862,7 @@ method with its behavior in each mode:
    ├─ Check stored API key
    ├─ If single environment → auto-select
    ├─ If multiple → defer to AuthScreen picker
-   └─ Pre-populate org/workspace from ampli.json
+   └─ Pre-populate org/project from ampli.json
 
 4. Initialize feature flags (non-blocking)
 
@@ -1003,7 +1005,7 @@ npx @amplitude/wizard --ci --install-dir . --api-key <KEY> --project-id 12345
 |--------|------|-------------------|-------------------|-------------|
 | **IntroScreen** | `screens/IntroScreen.tsx` | `detectionComplete`, `frameworkConfig`, `detectedFrameworkLabel` | `introConcluded` (via `concludeIntro()`) | Shows detected framework, user confirms or picks manually. Three states: detecting (spinner), failed (auto-Generic), succeeded (menu) |
 | **RegionSelectScreen** | `screens/RegionSelectScreen.tsx` | `region`, `regionForced` | `region` (via `setRegion()`) | US/EU picker. Skipped for returning users |
-| **AuthScreen** | `screens/AuthScreen.tsx` | `pendingOrgs`, tokens, `selectedOrgId`, `selectedWorkspaceId`, `credentials` | Org/workspace selection, `credentials`, `region` | Multi-step SUSI flow with org → workspace → environment pickers |
+| **AuthScreen** | `screens/AuthScreen.tsx` | `pendingOrgs`, tokens, `selectedOrgId`, `selectedProjectId`, `credentials` | Org/project selection, `credentials`, `region` | Multi-step SUSI flow with org → project → environment pickers |
 | **DataSetupScreen** | `screens/DataSetupScreen.tsx` | `projectHasData` | `activationLevel`, `snippetConfigured` | Checks activation via API. Routes: none→setup, partial→options, full→skip |
 | **ActivationOptionsScreen** | `screens/ActivationOptionsScreen.tsx` | `snippetConfigured` | `outroData` | Help test locally, debug, docs, or exit |
 | **SetupScreen** | `screens/SetupScreen.tsx` | Framework questions | `frameworkContext[key]` | Auto-detects answers, shows picker for unresolved questions |

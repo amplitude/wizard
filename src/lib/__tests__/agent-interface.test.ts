@@ -1969,6 +1969,78 @@ describe('createPreToolUseHook', () => {
       });
     });
   });
+
+  describe('wizard-tools reason capture', () => {
+    // Every wizard-tools schema requires a `reason` parameter (BA-61). The
+    // PreToolUse hook surfaces it as a `wizard cli: tool invoked` analytics
+    // event so we get the agent's intent in our existing dashboards alongside
+    // Agent Analytics' built-in track_tool_call().
+
+    it('emits wizardCapture("tool invoked") for an mcp__wizard-tools__ call with reason', async () => {
+      const { analytics } = (await import(
+        '../../utils/analytics'
+      )) as unknown as { analytics: { wizardCapture: Mock } };
+      analytics.wizardCapture.mockClear();
+
+      await callHook('mcp__wizard-tools__detect_package_manager', {
+        reason: 'Determining the package manager before running install.',
+      });
+
+      expect(analytics.wizardCapture).toHaveBeenCalledWith('tool invoked', {
+        'tool name': 'detect_package_manager',
+        reason: 'Determining the package manager before running install.',
+      });
+    });
+
+    it('does not emit "tool invoked" when reason is missing', async () => {
+      const { analytics } = (await import(
+        '../../utils/analytics'
+      )) as unknown as { analytics: { wizardCapture: Mock } };
+      analytics.wizardCapture.mockClear();
+
+      await callHook('mcp__wizard-tools__detect_package_manager', {});
+
+      expect(analytics.wizardCapture).not.toHaveBeenCalled();
+    });
+
+    it('does not emit "tool invoked" when reason is empty', async () => {
+      const { analytics } = (await import(
+        '../../utils/analytics'
+      )) as unknown as { analytics: { wizardCapture: Mock } };
+      analytics.wizardCapture.mockClear();
+
+      await callHook('mcp__wizard-tools__confirm', {
+        reason: '',
+        message: 'proceed?',
+      });
+
+      expect(analytics.wizardCapture).not.toHaveBeenCalled();
+    });
+
+    it('does not emit "tool invoked" for non-wizard-tools MCP calls', async () => {
+      const { analytics } = (await import(
+        '../../utils/analytics'
+      )) as unknown as { analytics: { wizardCapture: Mock } };
+      analytics.wizardCapture.mockClear();
+
+      await callHook('mcp__amplitude-wizard__get_events', {
+        reason: 'unrelated tool, should not capture',
+      });
+
+      expect(analytics.wizardCapture).not.toHaveBeenCalled();
+    });
+
+    it('does not emit "tool invoked" for built-in tools like Bash', async () => {
+      const { analytics } = (await import(
+        '../../utils/analytics'
+      )) as unknown as { analytics: { wizardCapture: Mock } };
+      analytics.wizardCapture.mockClear();
+
+      await callHook('Bash', { command: 'pnpm install foo' });
+
+      expect(analytics.wizardCapture).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('isAuthErrorMessage', () => {

@@ -99,8 +99,8 @@ function makeUser(orgs: AmplitudeUserInfo['orgs']): AmplitudeUserInfo {
   };
 }
 
-const ORG_A = { id: 'org-a', name: 'Acme', workspaces: [] };
-const ORG_B = { id: 'org-b', name: 'Globex', workspaces: [] };
+const ORG_A = { id: 'org-a', name: 'Acme', projects: [] };
+const ORG_B = { id: 'org-b', name: 'Globex', projects: [] };
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 

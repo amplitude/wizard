@@ -84,7 +84,7 @@ export interface WizardUI {
    * Store OAuth/API credentials and (optionally) the resolved scope context
    * that goes with them. Scope fields are used for display + NDJSON emission;
    * they're optional because manually-entered API keys can't always be
-   * resolved to an org/workspace. Resolves past AuthScreen in TUI.
+   * resolved to an org/project. Resolves past AuthScreen in TUI.
    */
   setCredentials(credentials: {
     accessToken: string;
@@ -98,8 +98,8 @@ export interface WizardUI {
     appId: number;
     orgId?: string | null;
     orgName?: string | null;
-    workspaceId?: string | null;
-    workspaceName?: string | null;
+    projectId?: string | null;
+    projectName?: string | null;
     /** Amplitude environment name ("Production", "Development", etc.). */
     envName?: string | null;
   }): void;

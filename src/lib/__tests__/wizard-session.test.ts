@@ -202,11 +202,11 @@ describe('isAuthenticated', () => {
 });
 
 describe('isConfigured', () => {
-  it('returns false without a workspace id', () => {
+  it('returns false without a project id', () => {
     const s = emptySession({
       credentials: VALID_CREDS,
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: null,
+      selectedProjectId: null,
       region: 'us',
     });
     expect(isConfigured(s)).toBe(false);
@@ -216,17 +216,17 @@ describe('isConfigured', () => {
     const s = emptySession({
       credentials: VALID_CREDS,
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: toWorkspaceId('ws-1'),
+      selectedProjectId: 'ws-1',
       region: null,
     });
     expect(isConfigured(s)).toBe(false);
   });
 
-  it('returns true once auth + workspace + region are all set', () => {
+  it('returns true once auth + project + region are all set', () => {
     const s = emptySession({
       credentials: VALID_CREDS,
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: toWorkspaceId('ws-1'),
+      selectedProjectId: 'ws-1',
       region: 'us',
     });
     expect(isConfigured(s)).toBe(true);
@@ -238,7 +238,7 @@ describe('isRunning', () => {
     const s = emptySession({
       credentials: VALID_CREDS,
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: toWorkspaceId('ws-1'),
+      selectedProjectId: 'ws-1',
       region: 'us',
       runPhase: RunPhase.Idle,
     });
@@ -249,7 +249,7 @@ describe('isRunning', () => {
     const s = emptySession({
       credentials: VALID_CREDS,
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: toWorkspaceId('ws-1'),
+      selectedProjectId: 'ws-1',
       region: 'us',
       runPhase: RunPhase.Running,
       // integration values are framework strings; test uses a known one
@@ -263,7 +263,7 @@ describe('isRunning', () => {
     const s = emptySession({
       credentials: VALID_CREDS,
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: toWorkspaceId('ws-1'),
+      selectedProjectId: 'ws-1',
       region: 'us',
       runPhase: RunPhase.Running,
       integration: null,

@@ -338,6 +338,23 @@ export function createPreToolUseHook(): HookCallback {
     const toolInput =
       (input.tool_input as Record<string, unknown> | undefined) ?? {};
 
+    // Surface the agent's intent on every wizard-tools MCP call. The
+    // `reason` field is required by every wizard-tools schema (see
+    // wizard-tools.ts) — capturing it here gives us instant visibility in
+    // our existing dashboards alongside Agent Analytics' track_tool_call().
+    // Tools without `reason` (Bash, Read, Edit, plus other MCP servers)
+    // are skipped so we don't pollute the event with empty fields.
+    if (toolName.startsWith('mcp__wizard-tools__')) {
+      const reason = toolInput.reason;
+      if (typeof reason === 'string' && reason.length > 0) {
+        const shortName = toolName.slice('mcp__wizard-tools__'.length);
+        analytics.wizardCapture('tool invoked', {
+          'tool name': shortName,
+          reason,
+        });
+      }
+    }
+
     // Cap long sleeps before the canonical allowlist check, so the
     // diagnostic message is specific instead of "command not in allowlist".
     if (toolName === 'Bash') {

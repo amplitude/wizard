@@ -354,6 +354,18 @@ export interface WizardSession {
   projectHasData: boolean | null;
 
   /**
+   * Project selected during SUSI (written to ampli.json as ProjectId).
+   *
+   * NOTE: Amplitude's backend GraphQL schema still calls this concept a
+   * "workspace" (Org → Workspace → Environment → App in the Data API),
+   * but every user-facing surface — the website UI, docs, slash commands,
+   * and analytics properties — uses "project". These session fields and
+   * ampli.json use "project" to match.
+   */
+  selectedProjectId: string | null;
+  selectedProjectName: string | null;
+
+  /**
    * Activation level determined by the API check.
    * null  = not yet checked
    * 'none'    = 0 events, snippet not configured → Framework Detection
@@ -401,12 +413,12 @@ export interface WizardSession {
   /**
    * Orgs available after OAuth completes, before the user selects one.
    * null = OAuth not yet done (AuthScreen shows spinner)
-   * [...] = OAuth done, AuthScreen showing org/workspace/key selection
+   * [...] = OAuth done, AuthScreen showing org/project/key selection
    */
   pendingOrgs: Array<{
     id: string;
     name: string;
-    workspaces: Array<{
+    projects: Array<{
       id: string;
       name: string;
       environments?: Array<{
@@ -428,21 +440,12 @@ export interface WizardSession {
   selectedOrgName: string | null;
 
   /**
-   * Workspace selected during SUSI (written to ampli.json).
-   * Branded — construct via `toWorkspaceId()` from raw API/config input.
-   */
-  selectedWorkspaceId: WorkspaceId | null;
-  selectedWorkspaceName: string | null;
-
-  /**
    * Amplitude environment name (e.g. "Production", "Development", "Staging")
-   * for the selected workspace — displayed in the TitleBar.
+   * for the selected project — displayed in the TitleBar.
    *
-   * NOTE: Amplitude's data model is Org → Workspace → Environment → App;
-   * there is no separate "project" layer in the Data API. What Amplitude's
-   * UI calls a "Project ID" is actually an environment's `app.id` — so each
-   * environment has its own ID and its own API key. This field stores the
-   * env NAME, not a separate project name.
+   * The environment's `app.id` is what Amplitude's UI labels "Project ID"
+   * in some places — each environment has its own numeric app ID and its
+   * own API key. This field stores the env NAME, not an app ID.
    */
   selectedEnvName: string | null;
 
@@ -603,7 +606,7 @@ export interface WizardSession {
     /** True when the CreateProjectScreen should be shown. */
     pending: boolean;
     /** Which picker triggered it — used for analytics + cancel routing. */
-    source: 'workspace' | 'project' | 'slash' | 'cli-flag' | null;
+    source: 'project' | 'environment' | 'slash' | 'cli-flag' | null;
     /** Pre-filled name (e.g. from --project-name CLI flag). */
     suggestedName: string | null;
   };
@@ -629,11 +632,11 @@ export type AuthenticatedSession = WizardSession & {
 };
 
 /**
- * Session view once the user has chosen an org/workspace and a region.
+ * Session view once the user has chosen an org/project and a region.
  * This is the minimum needed to talk to the Amplitude Data API.
  */
 export type ConfiguredSession = AuthenticatedSession & {
-  selectedWorkspaceId: WorkspaceId;
+  selectedProjectId: string;
   region: AmplitudeZone;
 };
 
@@ -660,14 +663,14 @@ export function isAuthenticated(
 
 /**
  * True iff the session has everything needed to make scoped Data API calls:
- * credentials + org + workspace + region.
+ * credentials + org + project + region.
  */
 export function isConfigured(
   session: WizardSession,
 ): session is ConfiguredSession {
   return (
     isAuthenticated(session) &&
-    session.selectedWorkspaceId !== null &&
+    session.selectedProjectId !== null &&
     session.region !== null
   );
 }
@@ -781,8 +784,8 @@ export function buildSession(args: {
     pendingAuthAccessToken: null,
     selectedOrgId: null,
     selectedOrgName: null,
-    selectedWorkspaceId: null,
-    selectedWorkspaceName: null,
+    selectedProjectId: null,
+    selectedProjectName: null,
     selectedEnvName: null,
     selectedAppId: null,
     loginUrl: null,

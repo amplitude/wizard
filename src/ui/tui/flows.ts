@@ -106,10 +106,10 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
     //
-    //    Auth is complete when we have credentials AND the org + workspace
-    //    (what users call the "project") are resolved. Env name is bonus —
-    //    it can't always be determined (e.g., manual API key entry), and the
-    //    header renders 2 or 3 segments gracefully depending on what's known.
+    //    Auth is complete when we have credentials AND the org + project are
+    //    resolved. Env name is bonus — it can't always be determined (e.g.,
+    //    manual API key entry), and the header renders 2 or 3 segments
+    //    gracefully depending on what's known.
     //
     //    IDs count as a resolved identity too. If ampli.json has OrgId /
     //    WorkspaceId but fetchAmplitudeUser fails to hydrate the names (e.g.,
@@ -124,12 +124,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       isComplete: (s) =>
         s.credentials !== null &&
         (s.selectedOrgName !== null || s.selectedOrgId !== null) &&
-        (s.selectedWorkspaceName !== null || s.selectedWorkspaceId !== null),
-      // Back from DataSetup — drop the picked org/workspace/env so the
+        (s.selectedProjectName !== null || s.selectedProjectId !== null),
+      // Back from DataSetup — drop the picked org/project/env so the
       // Auth screen re-renders the picker. Credentials stay so we don't
       // force a fresh OAuth round-trip.
       revert: (store) => {
-        store.clearOrgAndWorkspaceSelection();
+        store.clearOrgAndProjectSelection();
       },
     },
     // 3b. Create-project interrupt. Shown when the user picks "Create new

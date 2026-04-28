@@ -362,7 +362,7 @@ export function isUsingTypeScript({
 /**
  * Best-effort credentials for `--ci` when `--api-key` / AMPLITUDE_WIZARD_API_KEY
  * is not set: project-local key (.env.local / keychain), then OAuth id token from
- * ~/.ampli.json plus org/workspace from ampli.json (same resolution as interactive bootstrap).
+ * ~/.ampli.json plus org/project from ampli.json (same resolution as interactive bootstrap).
  */
 export async function tryResolveCredentialsForCi(installDir: string): Promise<{
   host: string;
@@ -401,15 +401,15 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
     return null;
   }
 
-  const workspaceId = projectConfig.ok
-    ? projectConfig.config.WorkspaceId
+  const projectId = projectConfig.ok
+    ? projectConfig.config.ProjectId
     : undefined;
 
   const projectApiKey = await getAPIKey({
     installDir,
     idToken: storedToken.idToken,
     zone,
-    workspaceId,
+    projectId,
   });
 
   if (!projectApiKey) {
@@ -487,7 +487,7 @@ export async function getOrAskForProjectData(
 
       getUI().log.error(
         chalk.red(
-          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local / keychain), or ensure ~/.ampli.json has a valid OAuth session (and ampli.json includes WorkspaceId if needed).',
+          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local / keychain), or ensure ~/.ampli.json has a valid OAuth session (and ampli.json includes ProjectId if needed).',
         ),
       );
       await wizardAbort({
@@ -619,29 +619,29 @@ async function askForWizardLogin(
     analytics.wizardCapture('wizard link opened');
   }
 
-  // ── 4b. Workspace selection ───────────────────────────────────────
-  type Workspace = AmplitudeOrg['workspaces'][number];
-  let selectedWorkspace: Workspace | undefined;
+  // ── 4b. Project selection ─────────────────────────────────────────
+  type Project = AmplitudeOrg['projects'][number];
+  let selectedProject: Project | undefined;
   if (selectedOrg) {
-    if (selectedOrg.workspaces.length === 1) {
-      selectedWorkspace = selectedOrg.workspaces[0];
-    } else if (selectedOrg.workspaces.length > 1) {
+    if (selectedOrg.projects.length === 1) {
+      selectedProject = selectedOrg.projects[0];
+    } else if (selectedOrg.projects.length > 1) {
       const { select } = await import('@inquirer/prompts');
-      selectedWorkspace = await select<Workspace>({
-        message: `Select a workspace in ${selectedOrg.name}:`,
-        choices: selectedOrg.workspaces.map((ws) => ({
-          name: ws.name,
-          value: ws,
+      selectedProject = await select<Project>({
+        message: `Select a project in ${selectedOrg.name}:`,
+        choices: selectedOrg.projects.map((project) => ({
+          name: project.name,
+          value: project,
         })),
       });
     }
 
     // Write ~/.ampli.json so future runs recognise this project
-    if (opts.installDir && selectedWorkspace) {
+    if (opts.installDir && selectedProject) {
       const { writeAmpliConfig } = await import('../lib/ampli-config.js');
       writeAmpliConfig(opts.installDir, {
         OrgId: selectedOrg.id,
-        WorkspaceId: selectedWorkspace.id,
+        ProjectId: selectedProject.id,
         Zone: cloudRegion as import('../lib/constants.js').AmplitudeZone,
       });
     }
@@ -649,14 +649,14 @@ async function askForWizardLogin(
 
   // ── 5. Get the Amplitude project API key ─────────────────────────
   // The Data API returns apiKey on the Environment → App type, so we
-  // can grab it directly from the workspace data we already fetched.
+  // can grab it directly from the project data we already fetched.
   // Falls back to manual prompt if not found.
   let projectApiKey: string | undefined;
   let selectedAppId: string | null = null;
 
-  if (selectedWorkspace) {
+  if (selectedProject) {
     // Get environments that have an app with an API key, sorted by rank (lowest = primary)
-    const envsWithKey = (selectedWorkspace.environments ?? [])
+    const envsWithKey = (selectedProject.environments ?? [])
       .filter((env) => env.app?.apiKey)
       .sort((a, b) => a.rank - b.rank);
 

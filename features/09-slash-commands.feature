@@ -29,9 +29,9 @@ Feature: Slash commands
 
   Scenario: /whoami shows current session info
     Given the wizard is active
-    And my org is "acme" and my workspace is "prod" and my region is "us"
+    And my org is "acme" and my project is "prod" and my region is "us"
     When I enter the slash command "/whoami"
-    Then I should see my org, workspace, and region
+    Then I should see my org, project, and region
 
   @todo
   Scenario: /overview opens the project in the browser
