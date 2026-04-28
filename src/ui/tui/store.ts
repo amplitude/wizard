@@ -737,7 +737,9 @@ export class WizardStore {
    * users can comment out individually — a clearer opt-out surface
    * than a one-shot picker.
    */
-  autoEnableInlineAddons(): void {
+  autoEnableInlineAddons(
+    source: 'auto-tui' | 'auto-ci' | 'auto-agent' = 'auto-tui',
+  ): void {
     for (const feature of this.session.discoveredFeatures) {
       let additional: AdditionalFeature | null = null;
       if (feature === ('session_replay' as AdditionalFeature)) {
@@ -748,7 +750,7 @@ export class WizardStore {
         additional = AdditionalFeature.Engagement;
       }
       if (!additional) continue;
-      this.enableFeature(additional, 'auto-ci');
+      this.enableFeature(additional, source);
     }
     this.$session.setKey('optInFeaturesComplete', true);
     this.emitChange();
@@ -788,7 +790,7 @@ export class WizardStore {
    */
   enableFeature(
     feature: AdditionalFeature,
-    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
+    source: 'picklist' | 'auto-tui' | 'auto-ci' | 'auto-agent' = 'picklist',
   ): void {
     // Gate LLM analytics behind the wizard-llm-analytics feature flag
     if (feature === AdditionalFeature.LLM) {

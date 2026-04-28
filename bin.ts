@@ -1605,7 +1605,7 @@ void yargs(hideBin(process.argv))
                 // Per-option inline comments in the generated init
                 // code give users a clear, code-level opt-out surface
                 // for any specific feature they want to disable.
-                tui.store.autoEnableInlineAddons();
+                tui.store.autoEnableInlineAddons('auto-tui');
               };
               runDiscovery();
 
