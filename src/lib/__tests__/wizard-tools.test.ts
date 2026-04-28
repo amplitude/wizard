@@ -12,6 +12,8 @@ import {
   cleanupAmplitudeEventsFile,
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
+  buildFallbackReport,
+  writeFallbackReportIfMissing,
   WIZARD_GITIGNORE_PATTERNS,
 } from '../wizard-tools';
 
@@ -567,5 +569,169 @@ describe('cleanupWizardArtifacts', () => {
     expect(() =>
       cleanupWizardArtifacts(tmpDir, { onSuccess: true }),
     ).not.toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildFallbackReport
+// ---------------------------------------------------------------------------
+
+describe('buildFallbackReport', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('renders the wizard-report wrapper and the recap header', () => {
+    const md = buildFallbackReport({ installDir: tmpDir });
+    expect(md).toContain('<wizard-report>');
+    expect(md).toContain('</wizard-report>');
+    // Self-disclosing intro so the user knows this is the stub, not the
+    // agent's richer report — important for trust.
+    expect(md).toContain('generated automatically');
+  });
+
+  it('renders an events table when .amplitude-events.json is present', () => {
+    persistEventPlan(tmpDir, [
+      { name: 'User Signed Up', description: 'Fires after successful signup' },
+      { name: 'Checkout Started', description: 'Fires when cart is opened' },
+    ]);
+    const md = buildFallbackReport({ installDir: tmpDir });
+    expect(md).toContain('| Event | Description |');
+    expect(md).toContain('User Signed Up');
+    expect(md).toContain('Checkout Started');
+  });
+
+  it('shows a graceful placeholder when no events were persisted', () => {
+    const md = buildFallbackReport({ installDir: tmpDir });
+    // Critical: NEVER render an empty Markdown table — looks like a bug.
+    expect(md).not.toContain('| Event | Description |');
+    expect(md).toContain('No event plan was persisted');
+  });
+
+  it('escapes pipe characters inside event names and descriptions', () => {
+    persistEventPlan(tmpDir, [
+      {
+        name: 'Pipe | In Name',
+        description: 'Body with | pipe in description',
+      },
+    ]);
+    const md = buildFallbackReport({ installDir: tmpDir });
+    expect(md).toContain('Pipe \\| In Name');
+    expect(md).toContain('Body with \\| pipe in description');
+  });
+
+  it('renders the dashboard URL when present', () => {
+    const md = buildFallbackReport({
+      installDir: tmpDir,
+      dashboardUrl: 'https://app.amplitude.com/analytics/test/dashboard/abc123',
+    });
+    expect(md).toContain(
+      'https://app.amplitude.com/analytics/test/dashboard/abc123',
+    );
+  });
+
+  it('falls back to a generic Amplitude link when no dashboard URL is captured', () => {
+    const md = buildFallbackReport({ installDir: tmpDir });
+    expect(md).toContain('https://app.amplitude.com');
+    expect(md).toContain("didn't capture a dashboard URL");
+  });
+
+  it('mentions the framework / project / env when supplied', () => {
+    const md = buildFallbackReport({
+      installDir: tmpDir,
+      integration: 'nextjs',
+      workspaceName: 'Acme Production',
+      envName: 'production',
+    });
+    expect(md).toContain('nextjs');
+    expect(md).toContain('Acme Production');
+    expect(md).toContain('production');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// writeFallbackReportIfMissing
+// ---------------------------------------------------------------------------
+
+describe('writeFallbackReportIfMissing', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  const reportPathFor = (dir: string) =>
+    path.join(dir, 'amplitude-setup-report.md');
+
+  it('writes a stub when no report exists', () => {
+    const result = writeFallbackReportIfMissing({ installDir: tmpDir });
+    expect(result).toBe('fallback-wrote');
+    const written = fs.readFileSync(reportPathFor(tmpDir), 'utf8');
+    expect(written).toContain('<wizard-report>');
+  });
+
+  it('leaves an existing agent-authored report alone (never overwrites)', () => {
+    const agentReport = '<wizard-report>\n# AGENT WROTE THIS\n</wizard-report>';
+    fs.writeFileSync(reportPathFor(tmpDir), agentReport, 'utf8');
+
+    const result = writeFallbackReportIfMissing({ installDir: tmpDir });
+    expect(result).toBe('agent-wrote');
+
+    // Critical invariant: agent's report must not be clobbered.
+    const after = fs.readFileSync(reportPathFor(tmpDir), 'utf8');
+    expect(after).toBe(agentReport);
+  });
+
+  it('returns "failed" without throwing when the install dir is unwritable', () => {
+    const result = writeFallbackReportIfMissing({
+      installDir: '/dev/null/definitely-not-a-real-dir',
+    });
+    expect(result).toBe('failed');
+  });
+
+  it('renders dashboard link, framework, and events when context is full', () => {
+    persistEventPlan(tmpDir, [
+      { name: 'User Signed Up', description: 'After signup form submit' },
+    ]);
+
+    const result = writeFallbackReportIfMissing({
+      installDir: tmpDir,
+      integration: 'nextjs',
+      dashboardUrl: 'https://app.amplitude.com/analytics/x/dashboard/foo',
+      workspaceName: 'Acme',
+      envName: 'production',
+    });
+    expect(result).toBe('fallback-wrote');
+
+    const written = fs.readFileSync(reportPathFor(tmpDir), 'utf8');
+    expect(written).toContain('User Signed Up');
+    expect(written).toContain(
+      'https://app.amplitude.com/analytics/x/dashboard/foo',
+    );
+    expect(written).toContain('nextjs');
+    expect(written).toContain('Acme');
+  });
+
+  // Failure-path behavior: the agent-runner invokes this function from
+  // both the success branch and (post-fix) the cancel/error path. The
+  // function itself doesn't know which one called it — it just
+  // guarantees a stub when the canonical is empty. PR #316's
+  // archiveSetupReportFile step ensures the canonical is either
+  // fresh-this-run or absent, so existsSync alone is correct.
+  it('writes a stub on the cancel/error path when the canonical is empty', () => {
+    // Simulates the wizardAbort registerCleanup hook firing after a
+    // cancelled run: archive moved any prior report away at start, no
+    // fresh report was written, canonical is empty. The fallback
+    // writer must still produce a stub so the outro can surface it.
+    const result = writeFallbackReportIfMissing({
+      installDir: tmpDir,
+      integration: 'nextjs',
+    });
+    expect(result).toBe('fallback-wrote');
+    const written = fs.readFileSync(reportPathFor(tmpDir), 'utf8');
+    expect(written).toContain('<wizard-report>');
+    expect(written).toContain('nextjs');
   });
 });
