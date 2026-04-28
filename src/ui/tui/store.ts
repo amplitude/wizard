@@ -383,6 +383,22 @@ export class WizardStore {
     this.$session.setKey('dataIngestionConfirmed', false);
     this.$session.setKey('mcpComplete', false);
     this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+
+    // Framework-detection + feature-discovery state lived against the old
+    // zone's project. Clearing these BEFORE we touch outroData/runPhase keeps
+    // the router from transiently resolving to a post-detection screen
+    // (e.g. FeatureOptIn / Setup) while runPhase is still mid-tear-down.
+    this.$session.setKey('integration', null);
+    this.$session.setKey('frameworkConfig', null);
+    this.$session.setKey('frameworkContext', {});
+    this.$session.setKey('discoveredFeatures', []);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('additionalFeatureCurrent', null);
+    this.$session.setKey('additionalFeatureCompleted', []);
+    this.$session.setKey('optInFeaturesComplete', false);
 
     // If the wizard had already reached Outro (success, error, or cancel)
     // the outroData short-circuits router.resolve and would block the

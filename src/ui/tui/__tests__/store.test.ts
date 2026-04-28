@@ -19,7 +19,11 @@ import {
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { OutroKind, AdditionalFeature } from '../../../lib/wizard-session.js';
+import {
+  OutroKind,
+  AdditionalFeature,
+  SlackOutcome,
+} from '../../../lib/wizard-session.js';
 import { buildSession } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
@@ -394,6 +398,46 @@ describe('WizardStore', () => {
       expect(store.session.pendingAuthIdToken).toBeNull();
       expect(store.session.pendingAuthAccessToken).toBeNull();
       expect(store.session.apiKeyNotice).toBeNull();
+    });
+
+    it('setRegionForced clears framework + feature state so a new-zone run starts clean', () => {
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      // Simulate a run that progressed past framework detection and feature opt-in.
+      store.session.integration = Integration.NextJs;
+      store.session.frameworkConfig = {} as never;
+      store.session.frameworkContext = { router: 'app' };
+      store.session.discoveredFeatures = ['llm', 'session_replay'] as never;
+      store.session.additionalFeatureQueue = ['llm'] as never;
+      store.session.additionalFeatureCurrent = 'llm' as never;
+      store.session.additionalFeatureCompleted = ['session_replay'] as never;
+      store.session.optInFeaturesComplete = true;
+      store.session.mcpInstalledClients = ['cursor', 'claude'];
+      store.session.slackComplete = true;
+      store.session.slackOutcome = SlackOutcome.Joined;
+
+      store.setRegionForced();
+
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.discoveredFeatures).toEqual([]);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.additionalFeatureCurrent).toBeNull();
+      expect(store.session.additionalFeatureCompleted).toEqual([]);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.mcpInstalledClients).toEqual([]);
+      expect(store.session.slackComplete).toBe(false);
+      expect(store.session.slackOutcome).toBeNull();
+      // Lifecycle reset still happens.
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+      expect(store.session.outroData).toBeNull();
     });
 
     it('setRegionForced clears outroData and runPhase so /region works after setup completes', () => {
