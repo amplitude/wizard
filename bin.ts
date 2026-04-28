@@ -194,13 +194,17 @@ const CLI_INVOCATION: string = (() => {
  * legacy `/tmp/amplitude-wizard.log` content instead of moving it across.
  *
  * Called from `buildSessionFromOptions` so every entry path picks it up
- * automatically (TUI, agent, CI, sub-commands). Skipped under
- * `NODE_ENV=test` because vitest module mocks don't always intercept the
- * dynamic-import chain bin.ts uses, and CLI tests aren't exercising the
- * storage migration anyway — there's a dedicated test suite for that.
+ * automatically (TUI, agent, CI, sub-commands). Skipped when
+ * `AMPLITUDE_WIZARD_SKIP_BOOTSTRAP=1` (wizard-internal opt-out) because
+ * vitest module mocks don't always intercept the dynamic-import chain
+ * bin.ts uses, and CLI tests aren't exercising the storage migration
+ * anyway — there's a dedicated test suite for that. We deliberately do
+ * NOT gate on `NODE_ENV=test`: real users sometimes run the wizard
+ * inside a test harness (e.g. their app's CI), and they should still
+ * get migration + per-project log routing.
  */
 function bootstrapInstallDir(installDir: string): void {
-  if (process.env.NODE_ENV === 'test') return;
+  if (process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP === '1') return;
   runMigrationShim(installDir);
   setProjectLogFile(installDir);
 }
@@ -918,6 +922,15 @@ void yargs(hideBin(process.argv))
       hidden: true,
       describe: 'internal: AMPLITUDE_WIZARD_PLAN_ID env-var passthrough',
       type: 'string',
+    },
+    // AMPLITUDE_WIZARD_SKIP_BOOTSTRAP=1 disables the per-project storage
+    // bootstrap (migration shim + per-project log routing). Used by the
+    // CLI test harness; `.env('AMPLITUDE_WIZARD')` auto-maps it to
+    // `skipBootstrap` and `.strict()` rejects it without this shadow.
+    'skip-bootstrap': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_SKIP_BOOTSTRAP env-var passthrough',
+      type: 'boolean',
     },
   })
   .command(
