@@ -51,7 +51,17 @@ Browser-side / public-by-design Amplitude API keys (anything shipped to the user
 
   'Do not spawn subagents unless explicitly instructed to do so.',
 
-  'Use the TodoWrite tool to track your progress. Create the FULL todo list AT THE START describing every high-level area of work you expect to do during this run (SDK install, env vars, event plan, instrumentation, dashboard, setup report, etc.). Then only mark items as in_progress / completed — do NOT add new top-level todos mid-run except in genuinely unforeseen circumstances. The wizard renders this list as a "X / Y tasks complete" progress bar in the user-facing UI; growing the denominator from 5 to 8 to 12 over the course of the run looks like the wizard is broken and confusing. Plan once, execute, and only adjust the list when a real surprise forces it.',
+  `Use the TodoWrite tool to render the user-visible progress bar. The list MUST be EXACTLY these five todos, in this order, with these exact labels:
+
+  1. Detect your project setup
+  2. Install Amplitude
+  3. Plan and approve events to track
+  4. Wire up event tracking
+  5. Open your dashboard
+
+These are the ONLY allowed top-level todos. Do NOT add a sixth for the setup report, build verification, Content Security Policy edits, doc fetches, env var writes, or any other internal step — those are implementation details that roll into the appropriate parent step (e.g. CSP edits and env vars belong inside "Install Amplitude"; the setup report and dashboard creation belong inside "Open your dashboard"; build verification belongs inside "Wire up event tracking"). Engineering phases from the integration skill (1.0-begin, 1.1-edit, 1.2-revise, 1.3-conclude) are internal — they do not appear here.
+
+Mark each todo in_progress when you start the parent step and completed when its user-visible deliverable is on disk or live. Plan once at the start; never grow the list. The wizard renders this as a "X / 5 tasks complete" bar — a denominator that drifts from 5 → 8 → 12 mid-run looks like the wizard is broken. The denominator MUST stay 5 from the first frame to the last.`,
 
   `After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.
 
