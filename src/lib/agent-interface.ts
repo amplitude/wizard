@@ -2017,25 +2017,22 @@ export async function runAgent(
             // AMPLITUDE_WIZARD_MAX_TURNS env var overrides the default
             // (useful for evals + quick iteration). Invalid values fall back.
             maxTurns: resolvedMaxTurns,
-            // Extended thinking — give the model a small reasoning budget on
-            // every turn. The instrumentation-planning phase before
-            // confirm_event_plan is the most thinking-intensive moment, but
-            // file edits and event-name selection benefit too. budgetTokens
-            // is a per-turn ceiling, not a per-run total. display:
-            // 'summarized' keeps NDJSON logs / agent-mode output readable.
-            // Sonnet 4.6 doesn't support adaptive thinking — must use
-            // 'enabled' + explicit budget.
+            // Extended thinking — DISABLED.
             //
-            // Note: thinking blocks bloat the streaming envelope and have
-            // correlated with "API Error: 400 terminated" cascades when
-            // the gateway is unhealthy. The retry/jitter/GATEWAY_DOWN
-            // mitigations in this file are sized to ride out those blips
-            // without dropping thinking.
-            thinking: {
-              type: 'enabled',
-              budgetTokens: 3000,
-              display: 'summarized',
-            },
+            // Earlier we ran with `{ type: 'enabled', budgetTokens: 3000 }`
+            // on every turn, on the theory that the instrumentation-planning
+            // phase benefits from explicit reasoning. In practice each
+            // wizard step is a small, well-bounded action (read a file,
+            // write a file, call an MCP tool) and the commandments + skill
+            // references already pin down the sequence. Thinking blocks
+            // mostly added latency and bloat to the streaming envelope —
+            // they also correlated with "API Error: 400 terminated"
+            // cascades when the gateway was unhealthy.
+            //
+            // Disabled by default for snappier feel and lower variance.
+            // Re-enable per-step (not globally) if a future phase truly
+            // needs deliberation. See `commandments.ts` for the
+            // instructions that obviate per-turn reasoning.
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
