@@ -184,6 +184,25 @@ Wrap the body in \`<wizard-report>...</wizard-report>\` tags so the wizard knows
     - \`.claude/skills/\` (the wizard pre-stages and cleans these up post-run)
   The wizard runs explicit cleanup hooks AFTER your run completes (see \`cleanupIntegrationSkills\`, \`cleanupWizardArtifacts\`, \`archiveSetupReportFile\` in \`src/lib/wizard-tools.ts\`). Running \`rm\` on any of these from inside the agent is unnecessary AND will be denied by the bash allowlist — \`rm\` is not on the allowlist regardless of path. If you find a stale wizard file you think shouldn't be there, leave it alone and note it in the setup report; the next wizard run handles migration. Same rule for \`mv\` / \`cp\` of these paths: don't.`,
 
+  `Lint / format / build commands at the end of a setup run MUST be invoked directly on the files you edited or created — never as project-wide \`npm run\` / \`pnpm run\` / \`yarn\` scripts.
+
+  RIGHT (fast, scoped to your edits):
+    npx prettier --write <file1> <file2> <file3>
+    npx eslint --fix <file1> <file2>
+    npx tsc --noEmit -p tsconfig.json   # only if the project lacks any other TS check; still avoid for large monorepos
+
+  WRONG (project-wide, often hangs):
+    npm run build           # rebuilds the whole project
+    npm run lint            # lints the whole project
+    npm run typecheck       # checks every file
+    npm run format          # reformats every file
+    pnpm lint / yarn lint   # same problem
+    npx prettier --write .  # entire repo
+
+  Why: project-wide \`npm run\` scripts routinely take 5–10+ minutes on real codebases, exceed the bash tool timeout, and leave the wizard stuck on a "linting" spinner with no progress indicator while the user watches. The setup-report and dashboard creation steps after lint never get to run. Pass an explicit list of file paths instead. If a project has a custom lint command that ONLY accepts no-args (rare), skip it and note in the setup report that the user should run it themselves.
+
+  Time budget: lint+format+typecheck combined SHOULD complete in under 60 seconds. If you find yourself running a third or fourth attempt, or any single command exceeds 90 seconds, STOP — note the limitation in the setup report and proceed to the conclude phase. The user would rather see the dashboard URL than watch eslint think for 8 minutes.`,
+
   ...(DEMO_MODE
     ? [
         'DEMO MODE: This is a demo run. Limit the instrumentation plan to at most 5 events. Pick the 5 most impactful, representative events for the project. Be concise and fast — skip non-essential analysis.',
