@@ -50,6 +50,9 @@ const ALLOWED_DIRECT_READS = new Set<string>([
   // Intent persistence — checkpoint stores raw user intent, not the
   // resolved effective zone. Restore must round-trip intent exactly.
   'src/lib/session-checkpoint.ts',
+  // Consent-gated diagnostics report the user's selected region (intent),
+  // not the resolved effective zone, so support can see what was picked.
+  'src/lib/diagnostics-collector.ts',
   // AuthScreen: effect dep array only (body uses resolveZone). A follow-up
   // may replace this with a computed zone dep; for now it's benign because
   // resolveZone's other inputs are stable within a process lifetime.

@@ -152,6 +152,8 @@ vi.mock('../utils/analytics', () => ({
     getAnonymousId: vi.fn().mockReturnValue('mock-anonymous-id'),
     shutdown: vi.fn().mockResolvedValue(undefined),
     isFeatureFlagEnabled: vi.fn().mockReturnValue(true),
+    initFlags: vi.fn().mockResolvedValue(undefined),
+    refreshFlags: vi.fn().mockResolvedValue(undefined),
   },
   sessionProperties: vi.fn(() => ({})),
   sessionPropertiesCompact: vi.fn(() => ({})),

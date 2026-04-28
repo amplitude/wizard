@@ -26,7 +26,7 @@ const provisionedOrgs = [
   {
     id: 'org-1',
     name: 'Org',
-    workspaces: [
+    projects: [
       {
         id: 'ws-1',
         name: 'Default',
@@ -422,7 +422,7 @@ describe('performSignupOrAuth', () => {
             {
               id: 'org-1',
               name: 'Org',
-              workspaces: [{ id: 'ws-1', name: 'Default', environments: [] }],
+              projects: [{ id: 'ws-1', name: 'Default', environments: [] }],
             },
           ],
         })

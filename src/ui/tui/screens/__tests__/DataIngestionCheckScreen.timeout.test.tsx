@@ -14,6 +14,19 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from 'ink-testing-library';
 
+// refreshToken inside DataIngestionCheckScreen pulls these via dynamic
+// import; with fake timers the ESM resolver can stall waiting on the
+// real disk read inside getStoredUser/getStoredToken. Mock both so the
+// chain reaches the catalog-fallback branch we actually want to exercise.
+vi.mock('../../../../utils/ampli-settings.js', () => ({
+  getStoredUser: () => undefined,
+  getStoredToken: () => undefined,
+  storeToken: () => {},
+}));
+vi.mock('../../../../utils/oauth.js', () => ({
+  refreshAccessToken: () => Promise.resolve(null),
+}));
+
 vi.mock('../../../../lib/api.js', async (importActual) => {
   const actual = await importActual<typeof import('../../../../lib/api.js')>();
   return {
@@ -27,7 +40,7 @@ vi.mock('../../../../lib/api.js', async (importActual) => {
       .fn()
       .mockResolvedValue({ hasEvents: false, activeEventNames: [] }),
     // Catalog fetch never resolves — this is the hang we're guarding against.
-    fetchWorkspaceEventTypes: vi
+    fetchProjectEventTypes: vi
       .fn()
       .mockImplementation(() => new Promise(() => {})),
     // Lazy resolve path — return a stable user shape so we don't hit the
@@ -64,7 +77,7 @@ describe('DataIngestionCheckScreen catalog hang', () => {
       region: 'us',
       activationLevel: 'none',
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: 'ws-1' as unknown as never, // branded WorkspaceId
+      selectedProjectId: 'ws-1',
       selectedAppId: '12345',
       credentials: {
         accessToken: 'access',
@@ -81,7 +94,7 @@ describe('DataIngestionCheckScreen catalog hang', () => {
 
     // Drain microtasks so the chain
     //   checkIngestion → fetchProjectActivationStatus.reject
-    //   → withTimeout(fetchWorkspaceEventTypes, 15s)
+    //   → withTimeout(fetchProjectEventTypes, 15s)
     // is in flight, then advance 16s so the timeout rejects.
     for (let i = 0; i < 5; i++) {
       await Promise.resolve();

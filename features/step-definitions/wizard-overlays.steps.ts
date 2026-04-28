@@ -154,23 +154,23 @@ Then('the data check should re-run for the new region', function () {
 // ── /whoami ───────────────────────────────────────────────────────────────────
 
 Given(
-  'my org is {string} and my workspace is {string} and my region is {string}',
-  function (org: string, workspace: string, region: string) {
+  'my org is {string} and my project is {string} and my region is {string}',
+  function (org: string, project: string, region: string) {
     session(this).selectedOrgName = org;
-    session(this).selectedWorkspaceName = workspace;
+    session(this).selectedProjectName = project;
     session(this).region = region as 'us' | 'eu';
   },
 );
 
-Then('I should see my org, workspace, and region', function () {
+Then('I should see my org, project, and region', function () {
   const text = getWhoamiText(session(this));
   assert.ok(
     text.includes(session(this).selectedOrgName ?? ''),
     `Expected org in: ${text}`,
   );
   assert.ok(
-    text.includes(session(this).selectedWorkspaceName ?? ''),
-    `Expected workspace in: ${text}`,
+    text.includes(session(this).selectedProjectName ?? ''),
+    `Expected project in: ${text}`,
   );
   assert.ok(
     text.includes(session(this).region ?? ''),

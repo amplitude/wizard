@@ -27,6 +27,7 @@ describe('trackWizardFeedback', () => {
 
     expect(mockWizardCapture).toHaveBeenCalledWith('feedback submitted', {
       message: 'hello',
+      'diagnostics included': false,
     });
     // Uses flush() not shutdown() — avoids spurious "Session Ended" mid-session
     expect(mockFlush).toHaveBeenCalled();
@@ -37,5 +38,16 @@ describe('trackWizardFeedback', () => {
       'Feedback message cannot be empty',
     );
     expect(mockWizardCapture).not.toHaveBeenCalled();
+  });
+
+  it('attaches diagnostics payload when provided', async () => {
+    const diagnostics = { schema_version: 1, collected_at: 'now' } as never;
+    await trackWizardFeedback('hello', diagnostics);
+
+    expect(mockWizardCapture).toHaveBeenCalledWith('feedback submitted', {
+      message: 'hello',
+      'diagnostics included': true,
+      diagnostics,
+    });
   });
 });

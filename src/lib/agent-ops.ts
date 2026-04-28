@@ -432,7 +432,7 @@ export async function runProjectsList(
   // Flatten orgs/workspaces/environments to one choice per (env with apiKey).
   const allChoices: ProjectChoice[] = [];
   for (const org of userInfo.orgs) {
-    for (const ws of org.workspaces) {
+    for (const ws of org.projects) {
       const envs = (ws.environments ?? [])
         .filter((e) => e.app?.apiKey)
         .sort((a, b) => a.rank - b.rank);
