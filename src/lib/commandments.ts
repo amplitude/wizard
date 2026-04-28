@@ -63,7 +63,9 @@ Browser-side / public-by-design Amplitude API keys (anything shipped to the user
 
 These are the ONLY allowed top-level todos. Do NOT add a sixth for the setup report, build verification, Content Security Policy edits, doc fetches, env var writes, or any other internal step — those are implementation details that roll into the appropriate parent step (e.g. CSP edits and env vars belong inside "Install Amplitude"; the setup report and dashboard creation belong inside "Open your dashboard"; build verification belongs inside "Wire up event tracking"). Engineering phases from the integration skill (1.0-begin, 1.1-edit, 1.2-revise, 1.3-conclude) are internal — they do not appear here.
 
-Mark each todo in_progress when you start the parent step and completed when its user-visible deliverable is on disk or live. Plan once at the start; never grow the list. The wizard renders this as a "X / 5 tasks complete" bar — a denominator that drifts from 5 → 8 → 12 mid-run looks like the wizard is broken. The denominator MUST stay 5 from the first frame to the last.`,
+Mark each todo in_progress when you start the parent step and completed when its user-visible deliverable is on disk or live. Plan once at the start; never grow the list. The wizard renders this as a "X / 5 tasks complete" bar — a denominator that drifts from 5 → 8 → 12 mid-run looks like the wizard is broken. The denominator MUST stay 5 from the first frame to the last.
+
+CRITICAL — mark items completed AS SOON AS that specific work is done, not in a batch at the end of a phase. The user watches the "X done · Y to go" counter; if you finish "Detect your project setup" but don't mark it completed until five tool calls later when you've already started installing, the counter sits at 0 done for 30+ seconds while the user assumes the wizard hung and Ctrl+Cs. Mark "Detect your project setup" completed the instant project detection is done; mark "Install Amplitude" completed the instant the install command starts (you start it as a background task per the install commandment), even though it's still building; mark "Plan and approve events to track" completed the instant confirm_event_plan returns approved; mark "Wire up event tracking" completed the moment the last track() call is on disk. Never finish work and delay the TodoWrite update — update immediately after each step lands, even if it makes for more tool calls. The user-facing counter cadence matters more than the tool-call count.`,
 
   `After installing the SDK and adding initialization code, but BEFORE writing any track() calls, you MUST call the confirm_event_plan tool to present the proposed instrumentation plan to the user. Only proceed with instrumentation after the plan is approved. If the user provides feedback, revise the plan accordingly and call confirm_event_plan again. If the plan is skipped, do not instrument any events.
 
@@ -185,6 +187,25 @@ Wrap the body in \`<wizard-report>...</wizard-report>\` tags so the wizard knows
     - \`amplitude-setup-report.md\` (the wizard archives the previous run's report itself)
     - \`.claude/skills/\` (the wizard pre-stages and cleans these up post-run)
   The wizard runs explicit cleanup hooks AFTER your run completes (see \`cleanupIntegrationSkills\`, \`cleanupWizardArtifacts\`, \`archiveSetupReportFile\` in \`src/lib/wizard-tools.ts\`). Running \`rm\` on any of these from inside the agent is unnecessary AND will be denied by the bash allowlist — \`rm\` is not on the allowlist regardless of path. If you find a stale wizard file you think shouldn't be there, leave it alone and note it in the setup report; the next wizard run handles migration. Same rule for \`mv\` / \`cp\` of these paths: don't.`,
+
+  `Lint / format / build commands at the end of a setup run MUST be invoked directly on the files you edited or created — never as project-wide \`npm run\` / \`pnpm run\` / \`yarn\` scripts.
+
+  RIGHT (fast, scoped to your edits):
+    npx prettier --write <file1> <file2> <file3>
+    npx eslint --fix <file1> <file2>
+    npx tsc --noEmit -p tsconfig.json   # only if the project lacks any other TS check; still avoid for large monorepos
+
+  WRONG (project-wide, often hangs):
+    npm run build           # rebuilds the whole project
+    npm run lint            # lints the whole project
+    npm run typecheck       # checks every file
+    npm run format          # reformats every file
+    pnpm lint / yarn lint   # same problem
+    npx prettier --write .  # entire repo
+
+  Why: project-wide \`npm run\` scripts routinely take 5–10+ minutes on real codebases, exceed the bash tool timeout, and leave the wizard stuck on a "linting" spinner with no progress indicator while the user watches. The setup-report and dashboard creation steps after lint never get to run. Pass an explicit list of file paths instead. If a project has a custom lint command that ONLY accepts no-args (rare), skip it and note in the setup report that the user should run it themselves.
+
+  Time budget: lint+format+typecheck combined SHOULD complete in under 60 seconds. If you find yourself running a third or fourth attempt, or any single command exceeds 90 seconds, STOP — note the limitation in the setup report and proceed to the conclude phase. The user would rather see the dashboard URL than watch eslint think for 8 minutes.`,
 
   ...(DEMO_MODE
     ? [
