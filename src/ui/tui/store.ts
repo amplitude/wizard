@@ -418,6 +418,39 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Reset session fields cleared by IntroScreen's "Start fresh" branch
+   * after a checkpoint restore.
+   *
+   * Previously the screen did `store.session = { ...store.session, ... }`
+   * — direct top-level reassignment goes through the `set session()`
+   * setter, which calls `$session.set()` + `emitChange()`. That works
+   * for `useSyncExternalStore` subscribers (everyone reads via
+   * `$version`), BUT it bypasses the per-key change events that
+   * nanostores `map.setKey()` emits. Any future code that subscribes
+   * via `listenKeys(['integration'])` etc. would silently miss the
+   * reset. Routing the same reset through individual `setKey` calls is
+   * the idiomatic store pattern and keeps the contract uniform across
+   * actions — every other reset (`setRegionForced`, etc.) does it this
+   * way already.
+   */
+  resetForFreshStart(): void {
+    this.$session.setKey('_restoredFromCheckpoint', false);
+    this.$session.setKey('introConcluded', false);
+    this.$session.setKey('detectionComplete', false);
+    this.$session.setKey('detectedFrameworkLabel', null);
+    this.$session.setKey('integration', null);
+    this.$session.setKey('frameworkConfig', null);
+    this.$session.setKey('frameworkContext', {});
+    this.$session.setKey('region', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedWorkspaceId', null);
+    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.emitChange();
+  }
+
   private _retryResolve: (() => void) | null = null;
 
   setScreenError(error: Error): void {
