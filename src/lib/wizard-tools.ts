@@ -708,20 +708,6 @@ export interface FallbackReportContext {
   workspaceName?: string | null;
   /** Environment name (e.g. "production", "development"). */
   envName?: string | null;
-  /**
-   * Wizard run start timestamp (ms since epoch). Used to detect stale
-   * reports left over from a previous run — if a report exists on disk
-   * but its mtime is older than `runStartedAt`, the wizard treats it as
-   * stale and overwrites with a fresh stub.
-   *
-   * Without this, re-running the wizard against the same project would
-   * leave the user with a report describing the previous run while the
-   * outro screen advertises it as the current run's recap. When the
-   * value is undefined / null, the writer falls back to existsSync-only
-   * semantics (legacy behavior — used when the timestamp wasn't
-   * captured, e.g. very fast runs that never set runStartedAt).
-   */
-  runStartedAt?: number | null;
 }
 
 /**
@@ -835,27 +821,25 @@ export function buildFallbackReport(ctx: FallbackReportContext): string {
 }
 
 /**
- * Write `<installDir>/amplitude-setup-report.md` when no fresh report
- * already exists at that path. Safety net for runs where the agent
- * skipped the conclude-phase report (model variance, ran out of turns,
- * mid-run cancel before conclude, etc.).
+ * Write `<installDir>/amplitude-setup-report.md` when the canonical
+ * path is empty. Safety net for runs where the agent skipped the
+ * conclude-phase report (model variance, ran out of turns, mid-run
+ * cancel before conclude, etc.).
  *
- * The agent's report is always preferred when it exists. The function
- * also handles re-runs against the same project: if a report exists on
- * disk but predates `ctx.runStartedAt`, it's left over from a previous
- * run and gets overwritten with a fresh stub. Without this re-run
- * handling, the outro screen would advertise the OLD run's report as
- * if it described the new run, which is silently misleading.
+ * The companion `archiveSetupReportFile()` (run at the start of every
+ * run, in PR #316) moves any prior report to
+ * `amplitude-setup-report.previous.md`, so the canonical path is
+ * guaranteed to either be empty or freshly written by the current run
+ * when this function is called. There's no need for mtime / staleness
+ * logic — `existsSync` is authoritative.
  *
  * Returns:
- *   - 'agent-wrote'    — fresh report from this run already exists;
- *                        left untouched.
- *   - 'fallback-wrote' — wrote a stub (file was missing OR was stale
- *                        from a previous run).
+ *   - 'agent-wrote'    — agent wrote a fresh report this run; left untouched.
+ *   - 'fallback-wrote' — canonical was missing; wrote a stub.
  *   - 'failed'         — write threw (permissions, disk full, etc.).
  *
- * Silent on errors; never throws — the wizard's success path must not
- * be blocked by a failed report write.
+ * Silent on errors; never throws — the wizard's outcome must not be
+ * blocked by a failed report write.
  */
 export function writeFallbackReportIfMissing(
   ctx: FallbackReportContext,
@@ -863,34 +847,6 @@ export function writeFallbackReportIfMissing(
   const reportPath = path.join(ctx.installDir, 'amplitude-setup-report.md');
   try {
     if (fs.existsSync(reportPath)) {
-      // Re-run handling: a file from a previous run is staler than
-      // the current run's start time. mtime comparison is robust to
-      // wall-clock skew because we generate runStartedAt with the
-      // same clock that stamps file mtimes (local fs).
-      //
-      // The 1-second slop on the comparison protects against
-      // filesystems with low mtime resolution (some FAT-family
-      // filesystems round to 2-second boundaries; an unlucky run that
-      // starts and finishes within the same mtime tick could otherwise
-      // see its own freshly-written report as "stale"). Treating
-      // anything within 1s of run-start as "this run" is the
-      // conservative call.
-      const STALE_SLOP_MS = 1_000;
-      const mtimeMs = fs.statSync(reportPath).mtimeMs;
-      const runStart = ctx.runStartedAt;
-
-      if (runStart != null && mtimeMs < runStart - STALE_SLOP_MS) {
-        // File predates this run — overwrite with fresh stub.
-        const content = buildFallbackReport(ctx);
-        fs.writeFileSync(reportPath, content, 'utf8');
-        logToFile(
-          `writeFallbackReportIfMissing: replaced stale report (mtime=${new Date(
-            mtimeMs,
-          ).toISOString()}, run=${new Date(runStart).toISOString()}) at ${reportPath}`,
-        );
-        return 'fallback-wrote';
-      }
-
       logToFile(
         `writeFallbackReportIfMissing: agent already wrote ${reportPath}`,
       );

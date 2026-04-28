@@ -202,11 +202,6 @@ export async function runAgentWizard(
       dashboardUrl: session.checklistDashboardUrl,
       workspaceName: session.selectedWorkspaceName,
       envName: session.selectedEnvName,
-      // Run-start timestamp lets the writer detect stale reports left
-      // over from a previous run against this project. Without it,
-      // re-running the wizard would leave the user with the previous
-      // run's report while the outro pretends it describes this run.
-      runStartedAt: session.runStartedAt,
     });
 
     cleanupWizardArtifacts(session.installDir, { onSuccess: true });
