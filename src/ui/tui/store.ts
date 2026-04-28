@@ -25,7 +25,6 @@ import { resolveZone } from '../../lib/zone-resolution.js';
 import {
   AdditionalFeature,
   McpOutcome,
-  OPT_IN_DISCOVERED_FEATURES,
   SlackOutcome,
   RunPhase,
 } from './session-constants.js';
@@ -750,35 +749,6 @@ export class WizardStore {
       }
       if (!additional) continue;
       this.enableFeature(additional, 'auto-ci');
-    }
-    this.$session.setKey('optInFeaturesComplete', true);
-    this.emitChange();
-  }
-
-  /**
-   * Confirm the FeatureOptIn picklist. Enqueues each selected feature
-   * via enableFeature() and marks the screen complete so the flow advances.
-   *
-   * `source` distinguishes interactive picklist confirms from the
-   * non-interactive auto-enable paths (CI, agent mode) so funnels stay
-   * separable.
-   */
-  confirmFeatureOptIns(
-    selected: AdditionalFeature[],
-    source: 'picklist' | 'auto-ci' | 'auto-agent' = 'picklist',
-  ): void {
-    const offered = this.session.discoveredFeatures.filter(
-      (f): f is AdditionalFeature => OPT_IN_DISCOVERED_FEATURES.has(f),
-    );
-    const deselected = offered.filter((f) => !selected.includes(f));
-    analytics.wizardCapture('feature opt-in confirmed', {
-      offered,
-      selected,
-      deselected,
-      source,
-    });
-    for (const feature of selected) {
-      this.enableFeature(feature, source);
     }
     this.$session.setKey('optInFeaturesComplete', true);
     this.emitChange();

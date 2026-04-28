@@ -104,9 +104,11 @@ export async function runWizard(
     signup: session.signup ?? false,
   });
 
-  // Non-interactive modes (CI / agent) skip the FeatureOptIn picklist, so
-  // auto-enable every discovered opt-in feature here. The TUI flow handles
-  // its own discovery + picklist confirmation in bin.ts.
+  // Non-interactive modes (CI / agent) auto-enable every discovered
+  // opt-in feature here so the agent run gets the same SR + G&S + LLM
+  // coverage as an interactive TUI run (bin.ts handles the TUI side via
+  // store.autoEnableInlineAddons). Both paths converge on the same set
+  // of inline addons — there is no picker in either flow.
   if ((session.ci || session.agent) && !session.optInFeaturesComplete) {
     await initFeatureFlags().catch(() => {
       // Flag init failure is non-fatal — LLM gate just stays off

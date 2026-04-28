@@ -1,8 +1,9 @@
 /**
  * Deterministic feature discovery — finds opt-in Amplitude features that
- * apply to the current project. Used by both the TUI flow (to populate the
- * FeatureOptIn picklist) and non-interactive modes (CI, agent) where the
- * results are auto-enabled without user confirmation.
+ * apply to the current project. Used by both the interactive TUI (where
+ * the store auto-enables everything discovered via
+ * `autoEnableInlineAddons`) and non-interactive modes (CI, agent) which
+ * call `autoEnableOptInFeatures` here to do the same thing.
  */
 
 import { readFileSync } from 'fs';
@@ -80,14 +81,6 @@ export function discoverFeatures(opts: {
 /**
  * Map a DiscoveredFeature to its corresponding AdditionalFeature, or null
  * if the discovery is informational only (e.g. Stripe).
- *
- * NOTE: a structural copy of this mapping also lives in
- * src/ui/tui/screens/FeatureOptInScreen.tsx (`toAdditionalFeature`). The
- * TUI layer can't import from this module at runtime because of the tsx
- * ESM/CJS dual-loading bug documented in src/ui/tui/session-constants.ts
- * — wizard-session's `as const` + same-name-type exports fail to resolve
- * when the module is first loaded as CJS and then re-imported as ESM.
- * If you add a new DiscoveredFeature variant, update BOTH copies.
  */
 function discoveredToAdditional(
   feature: DiscoveredFeature,
@@ -146,34 +139,5 @@ export function autoEnableOptInFeatures(
     enableAdditionalFeature(session, additional, source);
   }
 
-  session.optInFeaturesComplete = true;
-}
-
-/**
- * Sync version used by the interactive TUI: takes the session's already-
- * populated `discoveredFeatures` (filled by `addDiscoveredFeature` calls
- * from bin.ts) and auto-enables every opt-in addon found there. No
- * picker, no opt-out — Session Replay, Guides & Surveys, and LLM (when
- * the feature flag is on) all flow into the additional feature queue
- * automatically. The agent receives inline-comment instructions via the
- * commandments so users can still tune individual options by editing
- * the generated init code.
- *
- * Why no opt-in picker:
- *   - The unified browser SDK ships with autocapture + SR + G&S in one
- *     package. There's no install cost to enabling them.
- *   - Quota concerns (autocapture / SR running up event volume) are
- *     surfaced via per-option inline comments in the generated code,
- *     where users can comment out lines they don't want — a clearer
- *     opt-out surface than a one-shot picker.
- *   - Matches the experience users get from data-setup's npm snippet,
- *     so wizard output and copy-paste docs converge.
- */
-export function autoEnableInlineAddons(session: WizardSession): void {
-  for (const feature of session.discoveredFeatures) {
-    const additional = discoveredToAdditional(feature);
-    if (!additional) continue;
-    enableAdditionalFeature(session, additional, 'auto-inline');
-  }
   session.optInFeaturesComplete = true;
 }

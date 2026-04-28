@@ -430,7 +430,15 @@ export interface WizardSession {
   /** Features the stop hook has finished processing, in order. */
   additionalFeatureCompleted: AdditionalFeature[];
 
-  /** True once the user has confirmed (or skipped) the FeatureOptIn picklist. */
+  /**
+   * True once feature-opt-in resolution has run for this session. The
+   * wizard auto-enables every discovered opt-in addon (Session Replay,
+   * Guides & Surveys, LLM-when-flag-on) at discovery time rather than
+   * showing a picker — this flag is flipped to true alongside that
+   * auto-enable so any flow predicate that gates on
+   * `optInFeaturesComplete` (and was originally written for the old
+   * picker world) still resolves correctly.
+   */
   optInFeaturesComplete: boolean;
 
   // Resolved framework config (set after integration is known)
