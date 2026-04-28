@@ -9,7 +9,27 @@ import { DEMO_MODE } from './constants.js';
 const WIZARD_COMMANDMENTS = [
   'Never hallucinate an Amplitude API key, host, or any other secret. Always use the real values that have been configured for this project (for example via environment variables).',
 
-  'Never write API keys, access tokens, or other secrets directly into source code. Always reference environment variables instead, and rely on the wizard-tools MCP server (check_env_keys / set_env_values) to create or update .env files.',
+  `Server-side / private secrets — service-role tokens, OAuth client secrets, server-side Amplitude write keys for backend SDKs (\`@amplitude/analytics-node\`, \`amplitude-analytics\` Python, etc.) — MUST be stored in environment variables and read from \`process.env\` / \`os.getenv\` / equivalent. Use the wizard-tools MCP server (\`check_env_keys\` / \`set_env_values\`) to create or update \`.env\` / \`.env.local\` files. Never write these values into source code.
+
+Browser-side / public-by-design Amplitude API keys (anything shipped to the user's browser via \`@amplitude/unified\`, \`@amplitude/analytics-browser\`, or any client-side SDK) follow a DIFFERENT rule: the value will be visible in the production bundle anyway — Amplitude's security model treats browser keys as public and enforces tenant isolation server-side. So:
+
+  1. **PREFER env vars ONLY when the project's framework already has a built-in, well-known convention** that surfaces \`.env\` values to client code WITHOUT requiring you to modify any build config. Allowed conventions (must match exactly):
+     - Vite: \`import.meta.env.VITE_AMPLITUDE_API_KEY\` (key in \`.env\` / \`.env.local\` prefixed \`VITE_\`)
+     - Next.js: \`process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY\` (prefix \`NEXT_PUBLIC_\`)
+     - Create React App / react-scripts: \`process.env.REACT_APP_AMPLITUDE_API_KEY\` (prefix \`REACT_APP_\`)
+     - Astro: \`import.meta.env.PUBLIC_AMPLITUDE_API_KEY\` (prefix \`PUBLIC_\`)
+     - Nuxt 3+: \`useRuntimeConfig().public.amplitudeApiKey\` via \`runtimeConfig.public\` in \`nuxt.config.ts\`
+     - SvelteKit: \`PUBLIC_AMPLITUDE_API_KEY\` from \`$env/static/public\`
+     - Expo: \`Constants.expoConfig?.extra?.amplitudeApiKey\` from \`app.config.js\` extras
+     - Angular: \`environment.amplitudeApiKey\` from \`src/environments/environment.ts\` (NOT \`process.env\`)
+     - React Native (bare): \`react-native-config\` reading \`AMPLITUDE_API_KEY\` from \`.env\` (only if \`react-native-config\` is ALREADY installed)
+     Verify the project actually uses the matching framework (look at \`package.json\` deps, config files) before applying its convention.
+
+  2. **Otherwise, INLINE the API key directly in the SDK init call** (e.g. \`amplitude.init('abc123', { autocapture: true })\`). This is the correct fallback for: plain webpack with no env loader, custom Rollup setups, vanilla HTML+JS, unfamiliar build tools, or any case where you can't find the project on the allowed-conventions list above. Browser Amplitude keys are public; inlining is safe.
+
+  3. **NEVER modify build configs to bridge env vars into client code.** Off-limits files: \`webpack.config.js\` / \`webpack.*.js\`, \`rollup.config.*\`, \`vite.config.*\` (beyond what the framework's convention already does), \`next.config.*\` (beyond \`env\` / \`runtimeConfig\` declarations), \`babel.config.*\`, \`craco.config.*\`, \`vue.config.*\`, custom build scripts. Adding \`webpack.DefinePlugin\`, configuring \`process.env\` aliases, or wiring a \`.env\` loader into the bundle counts as modifying build config and is forbidden — even if it would technically work. (Combine with the no-third-party-installs rule: you also can't install \`dotenv-webpack\` etc. to bridge the gap.)
+
+  4. **When in doubt, INLINE.** A working integration with a hardcoded public Amplitude key beats a broken integration with half-wired env-var plumbing. The user can swap to env vars later. Document the choice in the setup report ("Inlined the Amplitude API key in \`src/amplitude.js\`. To swap to env vars later, …") so the user knows what was done and how to change it.`,
 
   'Always use the detect_package_manager tool from the wizard-tools MCP server to determine the package manager. Do not guess based on lockfiles or hard-code npm, yarn, pnpm, bun, pip, etc.',
 
