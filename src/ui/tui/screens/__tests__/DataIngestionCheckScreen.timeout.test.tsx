@@ -14,6 +14,19 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from 'ink-testing-library';
 
+// refreshToken inside DataIngestionCheckScreen pulls these via dynamic
+// import; with fake timers the ESM resolver can stall waiting on the
+// real disk read inside getStoredUser/getStoredToken. Mock both so the
+// chain reaches the catalog-fallback branch we actually want to exercise.
+vi.mock('../../../../utils/ampli-settings.js', () => ({
+  getStoredUser: () => undefined,
+  getStoredToken: () => undefined,
+  storeToken: () => {},
+}));
+vi.mock('../../../../utils/oauth.js', () => ({
+  refreshAccessToken: () => Promise.resolve(null),
+}));
+
 vi.mock('../../../../lib/api.js', async (importActual) => {
   const actual = await importActual<typeof import('../../../../lib/api.js')>();
   return {
