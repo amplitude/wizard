@@ -722,9 +722,16 @@ export function persistEventPlan(
       );
       return false;
     }
-    // Canonical location — preserved across runs, gitignored as `.amplitude/`.
+    // Write order matters for the mtime tiebreaker in
+    // `pickFreshestExisting(canonical, legacy)` (see agent-interface.ts).
+    // On filesystems with 1-second mtime granularity (older HFS+, ext4
+    // without nanosec inode timestamps) both writes land in the same
+    // second and both files share an mtime; the watcher walks the
+    // candidates in order and the strict `>` compare keeps the FIRST
+    // arg as the winner on tie. On modern filesystems with sub-second
+    // precision the LAST write wins outright. We want canonical to
+    // win in both cases, so write legacy FIRST and canonical LAST.
     ensureDir(getProjectMetaDir(workingDirectory), 0o755);
-    atomicWriteJSON(getEventsFile(workingDirectory), events);
     // Legacy mirror — bundled integration skills (owned by context-hub)
     // still instruct the agent to read this path. Once context-hub ships
     // an updated skill set pointing at `.amplitude/events.json` we can
@@ -734,6 +741,9 @@ export function persistEventPlan(
       '.amplitude-events.json',
     );
     atomicWriteJSON(legacyPlanPath, events);
+    // Canonical location — preserved across runs, gitignored as `.amplitude/`.
+    // Written last so its mtime is freshest on every filesystem.
+    atomicWriteJSON(getEventsFile(workingDirectory), events);
     return true;
   } catch (err) {
     logToFile(
