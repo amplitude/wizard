@@ -4,6 +4,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+// Skip the per-project storage bootstrap (migration shim + project log
+// file routing) for the entire suite. vitest module mocks don't always
+// intercept the dynamic-import chain bin.ts uses, and CLI tests aren't
+// exercising storage migration anyway — there's a dedicated test suite
+// for that. This must be set BEFORE bin.ts is imported.
+process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP = '1';
+
 // ── Hoisted mock state ─────────────────────────────────────────────────────────
 // vi.hoisted() ensures these are available inside vi.mock() factory functions.
 
@@ -174,8 +181,16 @@ async function runCLI(args: string[]) {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-/** Poll until fn() returns true or timeout elapses. */
-async function waitFor(fn: () => boolean, timeout = 2000): Promise<void> {
+/**
+ * Poll until fn() returns true or timeout elapses.
+ *
+ * The default ceiling has to be generous because each cli test rebuilds
+ * the bin.ts module graph from scratch. Under parallel test execution
+ * with a cold module cache, a 2 s default produced flaky failures on CI
+ * (and a fresh local checkout). 8 s absorbs cold-cache penalties without
+ * masking real hangs.
+ */
+async function waitFor(fn: () => boolean, timeout = 8000): Promise<void> {
   const deadline = Date.now() + timeout;
   while (!fn()) {
     if (Date.now() > deadline) throw new Error('waitFor timed out');
@@ -216,7 +231,13 @@ function simulateRegionSelect(region: 'us' | 'eu') {
 
 // ── CI mode validation ─────────────────────────────────────────────────────────
 
-describe('CI mode validation', () => {
+// Each test runs `bin.ts` end-to-end via dynamic import, which transitively
+// loads the TUI, framework registry, and observability stack. Under
+// parallel test execution with a cold module cache, the first cli test to
+// run can blow past the default 5s timeout. The 20s ceiling absorbs that
+// without penalizing the steady-state case (each test still completes in
+// under 1s).
+describe('CI mode validation', { timeout: 20_000 }, () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
 

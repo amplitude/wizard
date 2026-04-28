@@ -26,9 +26,11 @@ import {
 } from '../../../lib/console-query.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { getLogFile } from '../../../utils/storage-paths.js';
 import {
   COMMANDS,
   getWhoamiText,
+  getDiagnosticsText,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
@@ -186,10 +188,34 @@ function executeCommand(raw: string, store: WizardStore): string | void {
           );
         })
         .catch(() => {
+          // Surface the actual per-project log path. Two parallel runs land
+          // their logs in different directories — pointing at /tmp here
+          // would send users to the wrong (or shared) file.
           store.setCommandFeedback(
-            'Diagnostics unavailable. See /tmp/amplitude-wizard.log.',
+            `Diagnostics unavailable. See ${getLogFile(
+              store.session.installDir,
+            )}.`,
           );
         });
+      break;
+    }
+    case '/diagnostics': {
+      // Print the wizard's storage layout for the current project so users
+      // can attach the right log to a bug report. The full text goes to
+      // stderr (one paste's worth), and the console gets a one-line summary
+      // pointing at the run dir.
+      const text = getDiagnosticsText(store.session.installDir);
+      try {
+        process.stderr.write('\n' + text + '\n\n');
+      } catch {
+        // broken pipe — non-fatal
+      }
+      store.setCommandFeedback(
+        `Storage paths printed to stderr. Logs: ${getLogFile(
+          store.session.installDir,
+        )}`,
+        30_000,
+      );
       break;
     }
     case '/exit':

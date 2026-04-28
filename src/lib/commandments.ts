@@ -63,8 +63,8 @@ CRITICAL — confirm_event_plan format:
   The only exception to Title Case is when Phase 1 of the full-repo-instrumentation skill confirms an existing codebase convention (5+ existing tracking calls, ≥80% consistent, intentionally codified). One or two stray strings do NOT qualify.
   Names longer than 50 characters will be automatically truncated.
 
-CRITICAL — do NOT manually write .amplitude-events.json.
-  The confirm_event_plan tool persists the approved plan to that file for you, in the canonical [{name, description}] shape the wizard UI expects. Writing the file yourself with a different shape (event_name, eventName, file_path, etc.) will cause the names in the manifest to drift from the names in the actual track() calls.
+CRITICAL — do NOT manually write .amplitude/events.json (or the legacy .amplitude-events.json).
+  The confirm_event_plan tool persists the approved plan to .amplitude/events.json for you, in the canonical [{name, description}] shape the wizard UI expects. Writing the file yourself with a different shape (event_name, eventName, file_path, etc.) will cause the names in the manifest to drift from the names in the actual track() calls.
 
 CRITICAL — full-repo instrumentation event count.
   When running the full-repo-instrumentation skill (initial instrumentation across an entire codebase, not a small targeted change), the approved plan MUST contain 10–30 events at critical/high/medium priority, sized to the repo:

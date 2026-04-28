@@ -45,6 +45,21 @@ import { WizardStore } from '../store.js';
 import type { WizardSession } from '../store.js';
 
 /**
+ * Pin the wizard cache root to a deterministic path BEFORE any screen
+ * imports `getLogFilePath()` / `getCacheRoot()`. Without this, OutroScreen's
+ * error view renders `<homedir>/.amplitude/wizard/bootstrap.log` — host-
+ * specific (`/Users/<name>/...` on macOS, `/home/runner/...` on CI), which
+ * would make every snapshot diff between dev and CI.
+ *
+ * The literal value below is what gets baked into the OutroScreen error
+ * snapshot. Don't change it casually — it requires updating the matching
+ * snapshot file.
+ */
+if (!process.env.AMPLITUDE_WIZARD_CACHE_DIR) {
+  process.env.AMPLITUDE_WIZARD_CACHE_DIR = '/tmp/wizard-snapshot-cache';
+}
+
+/**
  * Per-test-file scratch dir for `installDir`. Some screens (notably
  * AuthScreen's auto-resolve effect) call store mutators that write
  * ampli.json under `session.installDir`. Default `WizardSession.installDir`

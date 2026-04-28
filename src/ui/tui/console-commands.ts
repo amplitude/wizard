@@ -6,6 +6,17 @@
  */
 
 import type { WizardSession } from '../../lib/wizard-session.js';
+import {
+  getBenchmarkFile,
+  getCacheRoot,
+  getCheckpointFile,
+  getDashboardFile,
+  getEventsFile,
+  getLogFile,
+  getProjectMetaDir,
+  getRunDir,
+  getStructuredLogFile,
+} from '../../utils/storage-paths.js';
 
 export const COMMANDS = [
   { cmd: '/region', desc: 'Switch data-center region (US or EU)' },
@@ -24,6 +35,10 @@ export const COMMANDS = [
   },
   { cmd: '/clear', desc: 'Clear the Q&A conversation history' },
   { cmd: '/debug', desc: 'Print a diagnostic snapshot (safe to share)' },
+  {
+    cmd: '/diagnostics',
+    desc: 'Show wizard storage paths (log file, cache, project meta dir)',
+  },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
@@ -108,6 +123,37 @@ export function getWhoamiText(
   }
 
   return parts.join('  ');
+}
+
+/**
+ * Build the human-readable text for the `/diagnostics` slash command.
+ *
+ * Shows where every wizard-managed file lives for the current project so a
+ * user filing a bug report knows exactly which log to attach. Pure (no I/O)
+ * so it can be unit-tested without filesystem mocks.
+ */
+export function getDiagnosticsText(installDir: string): string {
+  const lines: string[] = [
+    'Wizard storage paths:',
+    '',
+    'Per-project (this run):',
+    `  log:        ${getLogFile(installDir)}`,
+    `  log (json): ${getStructuredLogFile(installDir)}`,
+    `  benchmark:  ${getBenchmarkFile(installDir)}`,
+    `  checkpoint: ${getCheckpointFile(installDir)}`,
+    `  run dir:    ${getRunDir(installDir)}`,
+    '',
+    'Project metadata (in your project root):',
+    `  events:     ${getEventsFile(installDir)}`,
+    `  dashboard:  ${getDashboardFile(installDir)}`,
+    `  meta dir:   ${getProjectMetaDir(installDir)}`,
+    '',
+    `Cache root:   ${getCacheRoot()}`,
+    '',
+    'Tip: tar up the run dir to share with support:',
+    `  tar -czf wizard-logs.tar.gz ${getRunDir(installDir)}`,
+  ];
+  return lines.join('\n');
 }
 
 /**

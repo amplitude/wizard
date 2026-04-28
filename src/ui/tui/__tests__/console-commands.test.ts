@@ -1,9 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
   getWhoamiText,
+  getDiagnosticsText,
+  COMMANDS,
 } from '../console-commands.js';
+import { CACHE_ROOT_OVERRIDE_ENV } from '../../../utils/storage-paths.js';
 
 describe('parseCreateProjectSlashInput', () => {
   it('returns the trimmed name after /create-project', () => {
@@ -149,5 +152,54 @@ describe('getWhoamiText', () => {
     });
     expect(result).toContain('ada@example.com');
     expect(result).toContain('(authenticating…)');
+  });
+});
+
+describe('COMMANDS registry', () => {
+  it('exposes /diagnostics so the help UI surfaces it', () => {
+    const cmds = COMMANDS.map((c) => c.cmd);
+    expect(cmds).toContain('/diagnostics');
+  });
+});
+
+describe('getDiagnosticsText', () => {
+  let originalCacheOverride: string | undefined;
+
+  beforeEach(() => {
+    originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = '/tmp/wizard-diag-test';
+  });
+
+  afterEach(() => {
+    if (originalCacheOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
+  });
+
+  it('lists every storage path the user might need for a bug report', () => {
+    const text = getDiagnosticsText('/Users/test/project-a');
+    expect(text).toContain('log:');
+    expect(text).toContain('log (json):');
+    expect(text).toContain('benchmark:');
+    expect(text).toContain('checkpoint:');
+    expect(text).toContain('events:');
+    expect(text).toContain('dashboard:');
+    expect(text).toContain('Cache root:');
+    expect(text).toContain('/tmp/wizard-diag-test');
+  });
+
+  it('uses per-project paths derived from installDir', () => {
+    const a = getDiagnosticsText('/Users/test/project-a');
+    const b = getDiagnosticsText('/Users/test/project-b');
+    // Two different projects should have different log paths — that's the
+    // whole point of the new layout (vs. the previous shared /tmp file).
+    expect(a).not.toBe(b);
+  });
+
+  it('includes a tar command pointing at the run dir for support bundles', () => {
+    const text = getDiagnosticsText('/p');
+    expect(text).toContain('tar -czf wizard-logs.tar.gz');
   });
 });

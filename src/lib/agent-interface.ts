@@ -26,12 +26,18 @@ import { registerCleanup } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
+import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
+import {
+  startDualPathWatcher,
+  type DualPathWatcherHandle,
+} from './dual-path-watcher';
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
 import { classifyWriteOperation } from './agent-events';
 import {
   createWizardToolsServer,
+  persistDashboard,
   WIZARD_TOOL_NAMES,
   type StatusReport,
   type StatusReporter,
@@ -857,6 +863,31 @@ import { parseEventPlanContent } from './event-plan-parser.js';
 export { parseEventPlanContent };
 
 /**
+ * Pick the most recently modified existing file from a list of candidates.
+ *
+ * Used by the event-plan and dashboard watchers when both canonical
+ * (`<installDir>/.amplitude/...`) and legacy (`<installDir>/.amplitude-*`)
+ * paths might exist simultaneously — for example, when the migration
+ * shim moved an old run's canonical file into place but the agent later
+ * writes the legacy path during the current run. Returns null if none
+ * exist. Exported for testing.
+ */
+export function pickFreshestExisting(...paths: string[]): string | null {
+  let best: { path: string; mtimeMs: number } | null = null;
+  for (const p of paths) {
+    try {
+      const stat = fs.statSync(p);
+      if (best === null || stat.mtimeMs > best.mtimeMs) {
+        best = { path: p, mtimeMs: stat.mtimeMs };
+      }
+    } catch {
+      // File doesn't exist or is unreadable; skip.
+    }
+  }
+  return best?.path ?? null;
+}
+
+/**
  * Check if command is a Amplitude skill installation from MCP.
  * We control the MCP server, so we only need to verify:
  * 1. It installs to .claude/skills/
@@ -1631,13 +1662,13 @@ export async function runAgent(
     }
   }, 10_000);
 
-  // Event plan file watcher — cleaned up in finally block
-  let eventPlanWatcher: fs.FSWatcher | undefined;
-  let eventPlanInterval: ReturnType<typeof setInterval> | undefined;
-
-  // Dashboard file watcher — cleaned up in finally block
-  let dashboardWatcher: fs.FSWatcher | undefined;
-  let dashboardInterval: ReturnType<typeof setInterval> | undefined;
+  // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
+  // and their legacy `.amplitude-events.json` / `.amplitude-dashboard.json`
+  // mirrors (still written by bundled context-hub integration skills).
+  // The handle's `dispose()` closes EVERY watcher it created, so cleanup
+  // can't miss a handle when both paths exist simultaneously.
+  let eventPlanHandle: DualPathWatcherHandle | undefined;
+  let dashboardHandle: DualPathWatcherHandle | undefined;
 
   try {
     // Tools needed for the wizard:
@@ -1659,49 +1690,57 @@ export async function runAgent(
       ...WIZARD_TOOL_NAMES,
     ];
 
-    // Watch for .amplitude-events.json and feed into the store (set up once, before retries)
-    const eventPlanPath = path.join(
+    // Watch for the event plan and feed it into the store.
+    //
+    // Canonical location: `.amplitude/events.json` (preserved across runs).
+    // Legacy fallback: `.amplitude-events.json` — older integration skills
+    // (owned by context-hub) still instruct the agent to write the legacy
+    // path during the conclude phase. Watching both keeps backwards compat
+    // until context-hub ships an updated skill set.
+    const eventPlanPath = getEventsFile(agentConfig.workingDirectory);
+    const legacyEventPlanPath = path.join(
       agentConfig.workingDirectory,
       '.amplitude-events.json',
     );
     const readEventPlan = () => {
+      // Read whichever file was modified most recently. mtime-based
+      // selection handles the dashboard flow race (no code writes
+      // canonical during a run, so a stale canonical from a prior run
+      // would shadow the agent's fresh write to legacy) AND the
+      // events.json case where `persistEventPlan` writes both paths
+      // atomically.
+      const winner = pickFreshestExisting(eventPlanPath, legacyEventPlanPath);
+      if (!winner) return;
       try {
-        const content = fs.readFileSync(eventPlanPath, 'utf-8');
-        const events = parseEventPlanContent(content);
+        const events = parseEventPlanContent(fs.readFileSync(winner, 'utf-8'));
         if (events) {
           const named = events.filter((e) => e.name.trim().length > 0);
+          // Memoize the latest successful parse so downstream code can
+          // surface it even if a later read fails (e.g. mid-write).
           lastParsedEventPlan = named;
           getUI().setEventPlan(named);
         }
       } catch {
-        // File doesn't exist yet
+        // Race: file vanished between stat and read. Next watcher
+        // event will retry.
       }
     };
+    eventPlanHandle = startDualPathWatcher({
+      canonicalPath: eventPlanPath,
+      legacyPath: legacyEventPlanPath,
+      onChange: readEventPlan,
+    });
 
-    try {
-      eventPlanWatcher = fs.watch(eventPlanPath, () => readEventPlan());
-      readEventPlan();
-    } catch {
-      // File doesn't exist yet — poll until it appears
-      eventPlanInterval = setInterval(() => {
-        try {
-          fs.accessSync(eventPlanPath);
-          readEventPlan();
-          clearInterval(eventPlanInterval);
-          eventPlanInterval = undefined;
-          eventPlanWatcher = fs.watch(eventPlanPath, () => readEventPlan());
-        } catch {
-          // Still waiting
-        }
-      }, 1000);
-    }
-
-    // Watch for .amplitude-dashboard.json written by the agent after dashboard creation.
-    // Parses the dashboard URL and forwards it to the UI so ChecklistScreen can
-    // surface a direct link without requiring any further user action.
-    // workingDirectory is the CLI install dir (process.cwd() or --install-dir),
-    // not untrusted network input. The filename is a hardcoded constant.
-    const dashboardFilePath = path.join(
+    // Watch for the dashboard URL handoff from the agent's conclude step.
+    //
+    // Canonical location: `.amplitude/dashboard.json`. Legacy fallback:
+    // `.amplitude-dashboard.json` — bundled integration skills currently
+    // tell the agent to write the legacy path; the wizard reads from both
+    // until context-hub ships an updated skill set. workingDirectory is
+    // the CLI install dir (process.cwd() or --install-dir), not untrusted
+    // network input.
+    const dashboardFilePath = getDashboardFile(agentConfig.workingDirectory); // nosemgrep
+    const legacyDashboardFilePath = path.join(
       agentConfig.workingDirectory,
       '.amplitude-dashboard.json',
     ); // nosemgrep
@@ -1709,36 +1748,42 @@ export async function runAgent(
       dashboardUrl: z.string().url(),
     });
     const readDashboardFile = () => {
+      // Same mtime-based selection as `readEventPlan`. Critical here
+      // because nothing writes the canonical dashboard path during a
+      // run — only the agent writes legacy, so a migrated stale
+      // canonical from a prior run would otherwise shadow the agent's
+      // fresh URL.
+      const winner = pickFreshestExisting(
+        dashboardFilePath,
+        legacyDashboardFilePath,
+      );
+      if (!winner) return;
       try {
-        const content = fs.readFileSync(dashboardFilePath, 'utf-8');
-        const result = dashboardFileSchema.safeParse(JSON.parse(content));
+        const content = fs.readFileSync(winner, 'utf-8');
+        const parsed: unknown = JSON.parse(content);
+        const result = dashboardFileSchema.safeParse(parsed);
         if (result.success) {
           getUI().setDashboardUrl(result.data.dashboardUrl);
+          // Mirror to canonical `.amplitude/dashboard.json` so the
+          // dashboard URL has a stable location. The agent (via bundled
+          // skills) only writes the legacy path; both files are
+          // gitignored and preserved across runs.
+          if (winner === legacyDashboardFilePath) {
+            persistDashboard(
+              agentConfig.workingDirectory,
+              parsed as Record<string, unknown>,
+            );
+          }
         }
       } catch {
-        // File doesn't exist or isn't valid JSON yet
+        // File vanished or invalid JSON; next watcher event retries.
       }
     };
-
-    try {
-      dashboardWatcher = fs.watch(dashboardFilePath, () => readDashboardFile());
-      readDashboardFile();
-    } catch {
-      // File doesn't exist yet — poll until it appears
-      dashboardInterval = setInterval(() => {
-        try {
-          fs.accessSync(dashboardFilePath);
-          readDashboardFile();
-          clearInterval(dashboardInterval);
-          dashboardInterval = undefined;
-          dashboardWatcher = fs.watch(dashboardFilePath, () =>
-            readDashboardFile(),
-          );
-        } catch {
-          // Still waiting
-        }
-      }, 1000);
-    }
+    dashboardHandle = startDualPathWatcher({
+      canonicalPath: dashboardFilePath,
+      legacyPath: legacyDashboardFilePath,
+      onChange: readDashboardFile,
+    });
 
     // Retry loop: if the agent stalls (no message for the configured timeout), abort
     // and re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES.
@@ -2541,10 +2586,12 @@ export async function runAgent(
     throw error;
   } finally {
     clearInterval(heartbeatInterval);
-    eventPlanWatcher?.close();
-    if (eventPlanInterval) clearInterval(eventPlanInterval);
-    dashboardWatcher?.close();
-    if (dashboardInterval) clearInterval(dashboardInterval);
+    // `dispose()` closes EVERY watcher the helper created plus any
+    // pending poll-fallback timer — there's no path where one of the
+    // two file handles can leak when both canonical and legacy paths
+    // exist (the bug that was previously inline here).
+    eventPlanHandle?.dispose();
+    dashboardHandle?.dispose();
     clearRetryBanner();
     _activeStatusReporter = undefined;
   }
