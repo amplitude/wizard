@@ -27,7 +27,7 @@ import { createUserPromptSubmitHook } from '../agent-interface';
 
 const ATTEMPT_ID = 'att-hydrate';
 const snapshotPath = () =>
-  join(tmpdir(), `amplitude-wizard-state-${ATTEMPT_ID}.json`);
+  join(tmpdir(), `amplitude-wizard-state-${ATTEMPT_ID}-${process.pid}.json`);
 
 function seedSnapshot(overrides: Partial<SerializedAgentState> = {}): void {
   const snap: SerializedAgentState = {

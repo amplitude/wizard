@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,14 +18,19 @@ vi.mock('../../utils/debug', () => ({
   logToFile: vi.fn(),
 }));
 
-import { AgentState, type SerializedAgentState } from '../agent-state';
+import {
+  AgentState,
+  consumeSnapshot,
+  loadSnapshot,
+  type SerializedAgentState,
+} from '../agent-state';
 
 describe('AgentState', () => {
   let state: AgentState;
   const attemptId = 'att-xyz';
   const snapshotPath = join(
     tmpdir(),
-    `amplitude-wizard-state-${attemptId}.json`,
+    `amplitude-wizard-state-${attemptId}-${process.pid}.json`,
   );
 
   beforeEach(() => {
@@ -117,6 +122,40 @@ describe('AgentState', () => {
 
   it('snapshotPath uses the attempt id', () => {
     expect(state.snapshotPath()).toBe(snapshotPath);
+  });
+
+  it('snapshotPath includes the process pid to scope per-run', () => {
+    expect(state.snapshotPath()).toContain(`-${process.pid}.json`);
+  });
+
+  it('does NOT load a stale snapshot left by a different pid', () => {
+    // Simulate a crashed prior wizard run that left a snapshot using a
+    // different pid suffix. The current process must not pick it up via
+    // its own snapshotPath()/consumeSnapshot pair.
+    const stalePid = process.pid + 1;
+    const stalePath = join(
+      tmpdir(),
+      `amplitude-wizard-state-${attemptId}-${stalePid}.json`,
+    );
+    const staleSnap: SerializedAgentState = {
+      schemaVersion: 'amplitude-wizard-agent-state/1',
+      runId: 'run-stale',
+      attemptId,
+      modifiedFiles: ['/leaked/from/prior/run.ts'],
+      lastStatus: null,
+      compactionCount: 0,
+      persistedAt: 1,
+    };
+    writeFileSync(stalePath, JSON.stringify(staleSnap));
+    try {
+      // The stale file is NOT at our pid-scoped path → loadSnapshot returns null.
+      expect(loadSnapshot(state.snapshotPath())).toBeNull();
+      expect(consumeSnapshot(state.snapshotPath())).toBeNull();
+      // And the stale file is left alone — we only operate on our own path.
+      expect(existsSync(stalePath)).toBe(true);
+    } finally {
+      if (existsSync(stalePath)) rmSync(stalePath);
+    }
   });
 
   it('reset clears files, status, and compaction count', () => {

@@ -91,7 +91,12 @@ export class AgentState {
 
   snapshotPath(): string {
     const id = this.attemptId ?? 'unknown';
-    return join(tmpdir(), `amplitude-wizard-state-${id}.json`);
+    // Scope the path to the current process so a crashed prior wizard run
+    // can't leave a stale snapshot for the next run to pick up via
+    // consumeSnapshot. pid is stable across same-process retries (the wizard
+    // doesn't fork between attempts), so an in-process retry still finds the
+    // file it just wrote.
+    return join(tmpdir(), `amplitude-wizard-state-${id}-${process.pid}.json`);
   }
 
   reset(): void {
