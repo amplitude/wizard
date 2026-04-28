@@ -81,8 +81,12 @@ export function discoverFeatures(opts: {
 /**
  * Map a DiscoveredFeature to its corresponding AdditionalFeature, or null
  * if the discovery is informational only (e.g. Stripe).
+ *
+ * Exported so callers (like `WizardStore.autoEnableInlineAddons`) get a
+ * single typed mapping instead of doing string-literal `as` casts that
+ * silently break if either enum's underlying values ever drift.
  */
-function discoveredToAdditional(
+export function discoveredToAdditional(
   feature: DiscoveredFeature,
 ): AdditionalFeature | null {
   if (feature === DiscoveredFeature.SessionReplay)

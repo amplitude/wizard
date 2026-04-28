@@ -36,6 +36,7 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
+import { discoveredToAdditional } from '../../lib/feature-discovery.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -740,15 +741,14 @@ export class WizardStore {
   autoEnableInlineAddons(
     source: 'auto-tui' | 'auto-ci' | 'auto-agent' = 'auto-tui',
   ): void {
+    // Use the typed `discoveredToAdditional` helper instead of comparing
+    // enum values via string-literal `as` casts. The cast comparison
+    // happened to work only because `DiscoveredFeature` and
+    // `AdditionalFeature` shared the same underlying string values; if
+    // either enum's value ever drifted the comparison would silently
+    // fall through and we'd auto-enable nothing without a build error.
     for (const feature of this.session.discoveredFeatures) {
-      let additional: AdditionalFeature | null = null;
-      if (feature === ('session_replay' as AdditionalFeature)) {
-        additional = AdditionalFeature.SessionReplay;
-      } else if (feature === ('llm' as AdditionalFeature)) {
-        additional = AdditionalFeature.LLM;
-      } else if (feature === ('engagement' as AdditionalFeature)) {
-        additional = AdditionalFeature.Engagement;
-      }
+      const additional = discoveredToAdditional(feature);
       if (!additional) continue;
       this.enableFeature(additional, source);
     }
