@@ -47,8 +47,11 @@ export interface WatchFileWhenAvailableOptions {
    */
   watch?: (target: string, listener: () => void) => fs.FSWatcher | undefined;
   accessSync?: (target: string) => void;
-  setIntervalFn?: (handler: () => void, ms: number) => unknown;
-  clearIntervalFn?: (handle: unknown) => void;
+  setIntervalFn?: (
+    handler: () => void,
+    ms: number,
+  ) => ReturnType<typeof setInterval>;
+  clearIntervalFn?: (handle: ReturnType<typeof setInterval>) => void;
 }
 
 export interface WatchFileWhenAvailableHandle {
@@ -68,7 +71,7 @@ export function watchFileWhenAvailable(
   const pollMs = opts.pollMs ?? 1000;
 
   let watcher: fs.FSWatcher | undefined;
-  let pollHandle: unknown;
+  let pollHandle: ReturnType<typeof setInterval> | null = null;
   let disposed = false;
 
   /** Attach the real watcher. Idempotent + race-safe. */
@@ -105,8 +108,8 @@ export function watchFileWhenAvailable(
       // File exists. Clear the poll BEFORE attaching so we never have
       // both a live interval AND a live watcher.
       const handle = pollHandle;
-      pollHandle = undefined;
-      if (handle !== undefined) clearIntervalFn(handle);
+      pollHandle = null;
+      if (handle !== null) clearIntervalFn(handle);
       if (attach()) opts.onChange();
     }, pollMs);
   }
@@ -120,8 +123,8 @@ export function watchFileWhenAvailable(
       // clear the interval first so a mid-flight poll tick that already
       // ran the `disposed` check above won't reach the attach path.
       const ph = pollHandle;
-      pollHandle = undefined;
-      if (ph !== undefined) clearIntervalFn(ph);
+      pollHandle = null;
+      if (ph !== null) clearIntervalFn(ph);
       const w = watcher;
       watcher = undefined;
       if (w) {
