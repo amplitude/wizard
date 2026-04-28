@@ -1484,4 +1484,113 @@ describe('WizardStore', () => {
       }).not.toThrow();
     });
   });
+
+  // ── Back-navigation reset helpers ────────────────────────────────
+  // Each pre-Run reset helper must clear post-Run state so the router
+  // doesn't short-circuit past the agent run / outro after a back-nav.
+  describe('back-navigation reset helpers', () => {
+    /** Seed a store as if the user had completed a full run. */
+    function seedPostRunState(store: WizardStore): void {
+      store.setRunPhase(RunPhase.Completed);
+      store.setMcpComplete(McpOutcome.Installed, ['Cursor']);
+      store.setOutroData({ kind: OutroKind.Success, message: 'Done' });
+      // Direct field writes via internal store for fields without setters
+      // to mirror end-of-run state shape.
+      const internal = store as unknown as {
+        $session: {
+          setKey: (k: string, v: unknown) => void;
+        };
+      };
+      internal.$session.setKey('slackComplete', true);
+      internal.$session.setKey('dataIngestionConfirmed', true);
+      internal.$session.setKey('optInFeaturesComplete', true);
+      internal.$session.setKey('additionalFeatureQueue', [
+        AdditionalFeature.SessionReplay,
+      ]);
+      internal.$session.setKey('additionalFeatureCompleted', [
+        AdditionalFeature.SessionReplay,
+      ]);
+    }
+
+    /** Assert post-run state has been wiped back to defaults. */
+    function expectPostRunCleared(store: WizardStore): void {
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+      expect(store.session.runStartedAt).toBeNull();
+      expect(store.session.outroData).toBeNull();
+      expect(store.session.mcpComplete).toBe(false);
+      expect(store.session.mcpOutcome).toBeNull();
+      expect(store.session.mcpInstalledClients).toEqual([]);
+      expect(store.session.slackComplete).toBe(false);
+      expect(store.session.slackOutcome).toBeNull();
+      expect(store.session.dataIngestionConfirmed).toBe(false);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.additionalFeatureCurrent).toBeNull();
+      expect(store.session.additionalFeatureCompleted).toEqual([]);
+    }
+
+    it('resetAuthForRegionChange clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetAuthForRegionChange();
+      expectPostRunCleared(store);
+      // Plus its own primary effects.
+      expect(store.session.region).toBeNull();
+      expect(store.session.regionForced).toBe(true);
+      expect(store.session.credentials).toBeNull();
+      expect(store.session.pendingOrgs).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+    });
+
+    it('clearOrgAndWorkspaceSelection clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.clearOrgAndWorkspaceSelection();
+      expectPostRunCleared(store);
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedWorkspaceId).toBeNull();
+    });
+
+    it('resetActivationCheck clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetActivationCheck();
+      expectPostRunCleared(store);
+      expect(store.session.projectHasData).toBeNull();
+      expect(store.session.activationLevel).toBe('none');
+      expect(store.session.activationOptionsComplete).toBe(false);
+    });
+
+    it('resetActivationOptions clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetActivationOptions();
+      expectPostRunCleared(store);
+      expect(store.session.activationOptionsComplete).toBe(false);
+    });
+
+    it('resetFeatureOptIn clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetFeatureOptIn();
+      expectPostRunCleared(store);
+    });
+
+    it('popLastFrameworkContextAnswer clears post-run state', () => {
+      const store = createStore();
+      store.setFrameworkContext('foo', 'bar');
+      seedPostRunState(store);
+      const popped = store.popLastFrameworkContextAnswer();
+      expect(popped).toBe(true);
+      expectPostRunCleared(store);
+      // The popped answer is gone.
+      expect(store.session.frameworkContext['foo']).toBeUndefined();
+    });
+
+    it('popLastFrameworkContextAnswer returns false (no-op) when nothing to pop', () => {
+      const store = createStore();
+      const popped = store.popLastFrameworkContextAnswer();
+      expect(popped).toBe(false);
+    });
+  });
 });

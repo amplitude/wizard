@@ -1086,6 +1086,10 @@ export class WizardStore {
     void _removed;
     this.$session.setKey('frameworkContext', rest);
     this.$session.setKey('frameworkContextAnswerOrder', order.slice(0, -1));
+    // Setup is a pre-Run flow entry; if the user's stepping back into Setup
+    // from a post-run state (e.g. via /restart or repeat-run paths) we must
+    // not leave the router short-circuited past Run.
+    this.clearPostRunStateForBackNav();
     this.emitChange();
     return true;
   }
@@ -1093,6 +1097,38 @@ export class WizardStore {
   // ── Back-navigation reverts ────────────────────────────────────
   // Each helper here un-completes one flow entry. They're invoked via
   // FlowEntry.revert callbacks from flows.ts during goBack().
+
+  /**
+   * Clear post-Run state so a back-nav into pre-Run territory doesn't
+   * leave the router short-circuited past the agent run / outro.
+   *
+   * Called by every reset helper that lands the user on a screen *before*
+   * the Run entry. Without this, after a back-nav the router would see
+   * `runPhase === Completed` and skip Run (and any post-run flow entries
+   * with completed isComplete predicates), routing the user straight to
+   * stale post-run state.
+   *
+   * `outroData` is also cleared because the OutroKind.Cancel branch in
+   * router.resolve() jumps directly to Outro regardless of pipeline order.
+   *
+   * No-op when there's nothing to clear, so calling it is safe whether or
+   * not the run actually started.
+   */
+  private clearPostRunStateForBackNav(): void {
+    this.$session.setKey('runPhase', RunPhase.Idle);
+    this.$session.setKey('runStartedAt', null);
+    this.$session.setKey('outroData', null);
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+    this.$session.setKey('dataIngestionConfirmed', false);
+    this.$session.setKey('optInFeaturesComplete', false);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('additionalFeatureCurrent', null);
+    this.$session.setKey('additionalFeatureCompleted', []);
+  }
 
   /**
    * Revert past the Auth step back to RegionSelect. Region affects the
@@ -1113,6 +1149,7 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);
+    this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
     this.emitChange();
   }
@@ -1130,6 +1167,7 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);
+    this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', {
       from: 'data-setup',
       to: 'auth',
@@ -1142,6 +1180,7 @@ export class WizardStore {
     this.$session.setKey('projectHasData', null);
     this.$session.setKey('activationLevel', 'none');
     this.$session.setKey('activationOptionsComplete', false);
+    this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { to: 'data-setup' });
     this.emitChange();
   }
@@ -1149,13 +1188,18 @@ export class WizardStore {
   /** Re-show the activation-options picker. */
   resetActivationOptions(): void {
     this.$session.setKey('activationOptionsComplete', false);
+    this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { to: 'activation-options' });
     this.emitChange();
   }
 
   /** Re-show the feature opt-in picklist. */
   resetFeatureOptIn(): void {
+    // Note: clearPostRunStateForBackNav also clears optInFeaturesComplete,
+    // but we keep the explicit set above for clarity since this method's
+    // primary purpose is reverting that flag.
     this.$session.setKey('optInFeaturesComplete', false);
+    this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { to: 'feature-opt-in' });
     this.emitChange();
   }
