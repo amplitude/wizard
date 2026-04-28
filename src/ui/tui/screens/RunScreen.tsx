@@ -16,6 +16,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
+import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { WizardStore } from '../store.js';
 import {
@@ -212,6 +213,16 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     completedHighRef.current = completed;
   const completedDisplay = completedHighRef.current;
 
+  // Coaching tiers for "spinner spins forever". The progress signal is the
+  // task count — every time the agent reports a new task, the timer resets
+  // because forward motion means the user shouldn't be nagged. Tiers fire
+  // at 90s (calm reassurance) and 5min (escalated suggestion).
+  // RUN_COACHING_TIER_T1_S=90, RUN_COACHING_TIER_T2_S=300.
+  const { tier: coachingTier } = useTimedCoaching({
+    thresholds: [90, 300],
+    progressSignal: total,
+  });
+
   return (
     <Box flexDirection="row" flexGrow={1}>
       {/* Left: tasks and status (takes all remaining width) */}
@@ -253,6 +264,20 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 
         {/* Tasks — the hero */}
         <ProgressList items={progressItems} title="Tasks" />
+
+        {/* Coaching: surfaces calmly after 90s of no task-count progress.
+            The spinner stays — this is a *secondary* line that gives the
+            user something to do (open Logs, cancel) instead of staring
+            at a frozen indicator. Resets when a new task appears. */}
+        {coachingTier >= 1 && (
+          <Box marginTop={1}>
+            <Text color={Colors.muted}>
+              {coachingTier >= 2
+                ? "This is unusually slow. The Logs tab (Tab) may show what's stuck — or Ctrl+C to cancel."
+                : "Still working — switch to the Logs tab (Tab) to see what's happening, or Ctrl+C to cancel."}
+            </Text>
+          </Box>
+        )}
 
         {/* Inline event plan */}
         <InlineEventPlan store={store} />
