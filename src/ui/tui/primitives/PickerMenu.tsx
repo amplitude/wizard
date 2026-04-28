@@ -81,16 +81,6 @@ interface PickerMenuProps<T> {
   availableRows?: number;
   /** In multi mode, values to start selected. Ignored in single mode. */
   defaultSelected?: T[];
-  /**
-   * In multi mode, allow ENTER with zero options checked to confirm an
-   * empty selection (`onSelect([])`). When false (the default), an
-   * "ENTER with nothing checked" pressing-ENTER convenience auto-selects
-   * the focused option — useful when "I want at least one" is the
-   * intended UX, harmful when the picker represents privacy-sensitive
-   * opt-ins (Session Replay, Guides & Surveys) where the user must
-   * affirmatively check the box.
-   */
-  allowEmpty?: boolean;
   onSelect: (value: T | T[]) => void;
 }
 
@@ -102,7 +92,6 @@ export const PickerMenu = <T,>({
   columns = 1,
   availableRows,
   defaultSelected,
-  allowEmpty = false,
   onSelect,
 }: PickerMenuProps<T>) => {
   if (mode === 'multi') {
@@ -113,7 +102,6 @@ export const PickerMenu = <T,>({
         centered={centered}
         columns={columns}
         defaultSelected={defaultSelected}
-        allowEmpty={allowEmpty}
         onSelect={onSelect}
       />
     );
@@ -342,7 +330,6 @@ const MultiPickerMenu = <T,>({
   centered = false,
   columns = 1,
   defaultSelected,
-  allowEmpty = false,
   onSelect,
 }: {
   message?: string;
@@ -350,7 +337,6 @@ const MultiPickerMenu = <T,>({
   centered?: boolean;
   columns?: number;
   defaultSelected?: T[];
-  allowEmpty?: boolean;
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
