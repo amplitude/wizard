@@ -38,6 +38,8 @@ enum Phase {
   Prompt = 'prompt',
   Opening = 'opening',
   Waiting = 'waiting',
+  Verifying = 'verifying',
+  NotConnected = 'notConnected',
   Done = 'done',
 }
 
@@ -168,11 +170,52 @@ export const SlackScreen = ({
   };
 
   const handleDone = () => {
-    setPhase(Phase.Done);
-    timerRef.current = setTimeout(
-      () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
-      1500,
+    // Don't trust the user's "yes" — re-verify against the App API. The
+    // OAuth handshake can silently fail (closed tab, denied consent, popup
+    // blocker) and we'd otherwise celebrate a connection that doesn't
+    // exist.
+    const credentials = store.session.credentials;
+    const orgId = store.session.selectedOrgId;
+    const accessToken = credentials?.accessToken;
+
+    if (!accessToken || !orgId) {
+      // No way to verify — fall back to trusting the user. This matches
+      // the pre-existing behavior for unauthenticated/standalone runs.
+      setPhase(Phase.Done);
+      timerRef.current = setTimeout(
+        () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
+        1500,
+      );
+      return;
+    }
+
+    setPhase(Phase.Verifying);
+    void fetchSlackConnectionStatus(accessToken, region, orgId).then(
+      (isConnected) => {
+        logToFile(
+          `[SlackScreen] post-confirm slackConnectionStatus=${isConnected}`,
+        );
+        if (isConnected) {
+          setPhase(Phase.Done);
+          timerRef.current = setTimeout(
+            () =>
+              markDone(store, SlackOutcome.Configured, standalone, onComplete),
+            1500,
+          );
+        } else {
+          // Either confirmed false or status fetch errored — both mean we
+          // can't celebrate yet. Tell the user honestly and let them retry
+          // or skip.
+          setPhase(Phase.NotConnected);
+        }
+      },
     );
+  };
+
+  const handleRetry = () => {
+    // User wants another shot — re-open the auth URL and go back to
+    // Waiting so they can confirm again.
+    handleConnect();
   };
 
   return (
@@ -254,6 +297,32 @@ export const SlackScreen = ({
                 confirmLabel="Yes, connected"
                 cancelLabel="Skip for now"
                 onConfirm={handleDone}
+                onCancel={handleSkip}
+              />
+            </Box>
+          </Box>
+        )}
+
+        {phase === Phase.Verifying && (
+          <Box marginTop={1}>
+            <Text color={Colors.active}>
+              Checking your Slack connection{Icons.ellipsis}
+            </Text>
+          </Box>
+        )}
+
+        {phase === Phase.NotConnected && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={Colors.warning}>
+              We don&apos;t see the Slack connection yet. Make sure you finished
+              authorizing the {appName} app in your browser.
+            </Text>
+            <Box marginTop={1}>
+              <ConfirmationInput
+                message="Try again?"
+                confirmLabel="Retry"
+                cancelLabel="Skip anyway"
+                onConfirm={handleRetry}
                 onCancel={handleSkip}
               />
             </Box>
