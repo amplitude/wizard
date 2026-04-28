@@ -28,6 +28,7 @@ import {
   DEFAULT_AMPLITUDE_ZONE,
   DEFAULT_HOST_URL,
 } from '../../../lib/constants.js';
+import { wizardAbort } from '../../../utils/wizard-abort.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { toCredentialAppId } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
@@ -519,12 +520,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         return;
       }
       if (key.escape) {
-        // Cancel auth — gracefully exit. The OAuth callback server is
-        // owned by the outer oauth.ts; unwinding requires SIGINT-style
-        // exit. process.exit(0) matches the convention used elsewhere
-        // (OutageScreen onCancel) and produces a clean shutdown.
         analytics.wizardCapture('auth cancelled by user');
-        process.exit(0);
+        void wizardAbort({
+          message: 'Authentication cancelled.',
+          exitCode: 0,
+        });
       }
     },
     { isActive: showOauthFallbackHints },
