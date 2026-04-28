@@ -713,4 +713,84 @@ describe('writeFallbackReportIfMissing', () => {
     expect(written).toContain('nextjs');
     expect(written).toContain('Acme');
   });
+
+  // Re-run handling — without these checks, running the wizard twice
+  // against the same project would leave the user with the previous
+  // run's report while the outro pretends it describes the new run.
+  describe('re-run handling', () => {
+    it('overwrites a stale report from a previous run', () => {
+      // Stale report from "yesterday".
+      const stalePath = reportPathFor(tmpDir);
+      fs.writeFileSync(stalePath, '# old run from yesterday', 'utf8');
+      const oldMtime = Date.now() - 24 * 60 * 60 * 1000; // 1 day ago
+      fs.utimesSync(stalePath, oldMtime / 1000, oldMtime / 1000);
+
+      // New run starts NOW.
+      const result = writeFallbackReportIfMissing({
+        installDir: tmpDir,
+        runStartedAt: Date.now(),
+      });
+
+      // Stale predates run-start → fallback overwrites.
+      expect(result).toBe('fallback-wrote');
+      const after = fs.readFileSync(stalePath, 'utf8');
+      expect(after).not.toContain('old run from yesterday');
+      expect(after).toContain('<wizard-report>');
+    });
+
+    it('preserves a fresh agent-authored report from THIS run', () => {
+      const runStartedAt = Date.now();
+      // Agent writes its report DURING this run (mtime > runStartedAt).
+      const reportPath = reportPathFor(tmpDir);
+      const agentReport =
+        '<wizard-report>\n# AGENT WROTE THIS\n</wizard-report>';
+      fs.writeFileSync(reportPath, agentReport, 'utf8');
+
+      const result = writeFallbackReportIfMissing({
+        installDir: tmpDir,
+        runStartedAt,
+      });
+
+      expect(result).toBe('agent-wrote');
+      expect(fs.readFileSync(reportPath, 'utf8')).toBe(agentReport);
+    });
+
+    it('falls back to existsSync-only semantics when runStartedAt is null', () => {
+      // Defensive: if runStartedAt wasn't captured (e.g. setRunPhase
+      // didn't fire for some reason), the writer should NOT overwrite
+      // existing files just because mtime can't be compared.
+      const reportPath = reportPathFor(tmpDir);
+      const existing = '# existing report (run-start unknown)';
+      fs.writeFileSync(reportPath, existing, 'utf8');
+
+      const result = writeFallbackReportIfMissing({
+        installDir: tmpDir,
+        runStartedAt: null,
+      });
+
+      expect(result).toBe('agent-wrote');
+      expect(fs.readFileSync(reportPath, 'utf8')).toBe(existing);
+    });
+
+    it('does not flag a report written within the 1s mtime-resolution slop as stale', () => {
+      // Some filesystems round mtime to 1-2s. A report written
+      // immediately after runStartedAt could otherwise see itself as
+      // "stale" if mtime rounds down. This test pins the slop behavior.
+      const reportPath = reportPathFor(tmpDir);
+      const runStartedAt = Date.now();
+      const agentReport = '<wizard-report>\n# very fresh\n</wizard-report>';
+      fs.writeFileSync(reportPath, agentReport, 'utf8');
+      // Set mtime to runStartedAt - 500ms (within the 1s slop).
+      const slightlyOlder = (runStartedAt - 500) / 1000;
+      fs.utimesSync(reportPath, slightlyOlder, slightlyOlder);
+
+      const result = writeFallbackReportIfMissing({
+        installDir: tmpDir,
+        runStartedAt,
+      });
+
+      expect(result).toBe('agent-wrote');
+      expect(fs.readFileSync(reportPath, 'utf8')).toBe(agentReport);
+    });
+  });
 });
