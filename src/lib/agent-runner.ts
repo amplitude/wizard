@@ -34,6 +34,8 @@ import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
+import * as fsSync from 'fs';
+import path from 'path';
 import { saveCheckpoint } from './session-checkpoint.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { createObservabilityMiddleware } from './middleware/observability';
@@ -131,6 +133,45 @@ export function classifyApiErrorSubtype(input: {
  */
 export function agentArtifactsLookComplete(session: WizardSession): boolean {
   return Boolean(session.checklistDashboardUrl);
+}
+
+/**
+ * Heuristic: did the agent at least install the SDK and instrument
+ * events, even if it didn't reach the dashboard creation step?
+ *
+ * The wizard's `confirm_event_plan` MCP tool persists the approved
+ * event plan to `<installDir>/.amplitude-events.json` (see
+ * `persistEventPlan` in `wizard-tools.ts`). That file's presence with
+ * non-empty content is a hard signal that:
+ *
+ *   - The user approved an instrumentation plan
+ *   - The agent reached the post-confirmation phase
+ *   - Track call insertion was attempted (whether or not every callsite
+ *     landed cleanly — but typically by this point it has)
+ *
+ * Used as a complement to `agentArtifactsLookComplete` for failure modes
+ * where the dashboard URL is NOT set but the project is still in a
+ * usable instrumented state — most commonly: the Amplitude MCP server
+ * (mcp.amplitude.com) is unreachable at the END of the run, after the
+ * events were instrumented but before the dashboard could be created.
+ *
+ * Distinct from `agentArtifactsLookComplete` because that function's
+ * "complete" includes dashboard. This one's "instrumented" stops at the
+ * code-changes phase. Dashboard-failed-but-everything-else-worked is a
+ * meaningfully different state — the user has working analytics; the
+ * only loss is the auto-built dashboard. They can build one manually at
+ * app.amplitude.com.
+ */
+export function agentEventsInstrumented(session: WizardSession): boolean {
+  try {
+    const eventsPath = path.join(session.installDir, '.amplitude-events.json');
+    if (!fsSync.existsSync(eventsPath)) return false;
+    const raw = fsSync.readFileSync(eventsPath, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -664,26 +705,90 @@ async function runAgentWizardBody(
     });
   }
 
-  if (agentResult.error === AgentErrorType.MCP_MISSING) {
-    await wizardAbort({
-      message: `Could not access the Amplitude MCP server\n\nThe wizard was unable to connect to the Amplitude MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
-      error: new WizardError('Agent could not access Amplitude MCP server', {
-        integration: config.metadata.integration,
-        'error type': AgentErrorType.MCP_MISSING,
-      }),
-      exitCode: ExitCode.AGENT_FAILED,
-    });
-  }
+  if (
+    agentResult.error === AgentErrorType.MCP_MISSING ||
+    agentResult.error === AgentErrorType.RESOURCE_MISSING
+  ) {
+    // Soft-error path: if the agent has already instrumented events
+    // (or completed everything including the dashboard), an MCP /
+    // resource failure here is on a tail-end call — most commonly the
+    // dashboard creation step at the end of the conclude phase. The
+    // SDK is installed, events are instrumented, code is written.
+    // Hard-aborting would throw away all that work and show the user a
+    // "Setup cancelled" outro with no recap of what succeeded.
+    //
+    // Real-world example we just hit: ✓ Welcome ✓ Auth ✓ Setup ✓ Verify
+    // ● Done — every step green-checked, but the wizard surfaced
+    // "Setup cancelled" with `Detail: Amplitude MCP not connected —
+    // dashboard could not be created automatically. Visit
+    // app.amplitude.com to build it manually using the chart plan
+    // below.` The agent itself reported the failure as partial and
+    // suggested a recovery path; the wizard ignored that nuance.
+    const errorType = agentResult.error;
+    const detail = agentResult.message ?? null;
+    const dashboardComplete = agentArtifactsLookComplete(session);
+    const eventsInstrumented = agentEventsInstrumented(session);
 
-  if (agentResult.error === AgentErrorType.RESOURCE_MISSING) {
-    await wizardAbort({
-      message: `Could not access the setup resource\n\nThe wizard could not access the setup resource. This may indicate a version mismatch or a temporary service issue.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
-      error: new WizardError('Agent could not access setup resource', {
+    if (dashboardComplete || eventsInstrumented) {
+      logToFile(
+        `[agent-runner] Soft ${errorType} after agent did meaningful work (dashboard=${dashboardComplete}, events=${eventsInstrumented}): ${
+          detail ?? '(no detail)'
+        }. Continuing to MCP / outro.`,
+      );
+      analytics.wizardCapture('agent soft error', {
         integration: config.metadata.integration,
-        'error type': AgentErrorType.RESOURCE_MISSING,
-      }),
-      exitCode: ExitCode.AGENT_FAILED,
-    });
+        'error type': errorType,
+        'dashboard complete': dashboardComplete,
+        'events instrumented': eventsInstrumented,
+        'agent error detail': detail,
+      });
+      // Surface a plain-English warning so the user knows what's
+      // recoverable. Without this they'd see a normal success outro
+      // with no hint that the dashboard step actually failed.
+      const what = dashboardComplete
+        ? 'a late tooling call'
+        : 'the dashboard creation step';
+      getUI().pushStatus(
+        `Note: ${what} couldn't reach the Amplitude MCP server — your SDK + events are instrumented. ${
+          dashboardComplete
+            ? ''
+            : 'Build the dashboard manually at https://app.amplitude.com using the event names in your code. '
+        }Detail: ${detail || errorType}`,
+      );
+      // Fall through to env-var upload, MCP install, Slack, Outro —
+      // they don't depend on agentResult.error being null.
+    } else {
+      // Hard-error path: agent didn't get far enough to leave the
+      // project usable. Could be the in-process wizard-tools MCP
+      // (skill loading) failing right at startup. Abort.
+      const isMcp = errorType === AgentErrorType.MCP_MISSING;
+      await wizardAbort({
+        message: isMcp
+          ? `Could not access an Amplitude wizard MCP service\n\nThis could be the in-process tooling server (used for skill loading and env var management) or the remote Amplitude MCP server.${
+              detail ? `\n\nDetail: ${detail}` : ''
+            }\n\nPossible causes: missing skills bundle in the install, network connectivity, expired auth, or a transient outage.\n\nPlease try again, or set up ${
+              config.metadata.name
+            } manually by following our documentation:\n${
+              config.metadata.docsUrl
+            }`
+          : `Couldn't load setup instructions for ${config.metadata.name}${
+              detail ? `\n\nDetail: ${detail}` : ''
+            }\n\nThis may be a temporary service issue or a version mismatch.\n\nTry again in a moment, or set up ${
+              config.metadata.name
+            } manually:\n${config.metadata.docsUrl}`,
+        error: new WizardError(
+          isMcp
+            ? 'Agent could not access Amplitude MCP server'
+            : 'Agent could not access setup resource',
+          {
+            integration: config.metadata.integration,
+            'error type': errorType,
+            'agent error detail': detail,
+          },
+        ),
+        exitCode: ExitCode.AGENT_FAILED,
+      });
+    }
   }
 
   if (agentResult.error === AgentErrorType.GATEWAY_DOWN) {
