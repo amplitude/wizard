@@ -15,6 +15,8 @@ const WIZARD_COMMANDMENTS = [
 
   'When installing packages, start the installation as a background task and then continue with other work. Do not block waiting for installs to finish unless explicitly instructed.',
 
+  `NEVER install non-Amplitude packages on the user's behalf. The wizard's job is to add Amplitude to the project, not to install build tooling, environment-variable loaders, bundler plugins, polyfills, or any other third-party utility. Concrete examples that are OUT OF SCOPE: \`dotenv\`, \`dotenv-webpack\`, \`dotenv-cli\`, \`dotenv-rails\`, \`python-dotenv\`, \`webpack\`, \`vite\`, \`@types/*\`, polyfill libraries, env-injection plugins. The hard test before any \`npm install\` / \`pnpm add\` / \`yarn add\` / \`pip install\` / \`gem install\` / \`go get\` / etc. command: does the package name start with \`@amplitude/\`? If not, is it explicitly listed as a required peer dependency by the active integration skill (e.g. \`@react-native-async-storage/async-storage\` for the React Native SDK)? If neither is true, DO NOT install it. If env-var wiring or build configuration changes are required for the SDK to work, document the required change in the setup report and let the user decide — do not auto-install third-party glue. Sample EXAMPLE.md files under \`skills/integration/*/references/\` may show \`dotenv\` / \`python-dotenv\` / \`dotenv-rails\` in their illustrative code; those are reference snippets, not install instructions, and you must NOT install those packages unless the user's project already uses them.`,
+
   'NEVER use `sleep`, busy-wait loops, or polling Bash commands to wait for MCP servers, gateways, or other services to "recover". If an MCP tool returns an error, retry it AT MOST ONCE; if it still fails, report the failure to the user and proceed with the next step (or stop). Do not chain longer and longer sleeps trying to wait out an upstream issue — long Bash sleeps idle the API streaming connection and produce cascading "API Error: 400 terminated" failures. Bash sleeps over a few seconds will be denied by the wizard.',
 
   'Before writing to any file, you MUST read that exact file immediately beforehand using the Read tool, even if you have already read it earlier in the run. This avoids tool failures and stale edits.',
@@ -63,16 +65,16 @@ CRITICAL — identify wiring.
 
   `After all event and identity instrumentation is complete, you MUST create a dashboard via the Amplitude MCP. This is a hard requirement — do not skip it. Load the amplitude-chart-dashboard-plan skill (taxonomy category via wizard-tools) and follow it exactly. The dashboard is a first-class deliverable.`,
 
-  `After every successful run, you MUST create an \`amplitude-setup-report.md\` file at the project root summarizing what the wizard did. This is a hard requirement — do not skip it, even if you ran out of turns or hit a partial failure earlier in the run. The report is the user-facing recap of the integration; the wizard's outro screen reads from it directly, and without it the user is left with no record of what was changed.
+  `You MUST write \`amplitude-setup-report.md\` at the project root before the run ends. This is an absolute requirement — the wizard's outro screen reads from this file as the user-facing recap of the integration, and without it the user has no record of what changed. Write the report even if you ran out of turns, hit a partial failure earlier, or had to skip steps; a thinner report is far better than none.
 
-The integration skill you loaded contains a \`basic-integration-1.3-conclude.md\` reference with the canonical format — load and follow it. At minimum the report MUST include:
+The integration skill you loaded contains a \`basic-integration-1.3-conclude.md\` reference with the canonical format — load and follow it. If you cannot locate that reference (older skill, partial install, etc.), write the report yourself from session knowledge. At a minimum the report MUST include:
   - Integration summary (SDK installed, framework, init location)
   - Events instrumented (table with event name, description, file path)
   - Dashboard link (the URL returned by the Amplitude MCP when you created the dashboard)
   - Environment variable setup notes (what was set, what the user needs to configure for prod)
   - Next steps the user should take
 
-If you cannot locate the conclude reference, write the report yourself from session knowledge — a slightly thinner report is far better than no report. Wrap the body in \`<wizard-report>...</wizard-report>\` tags so the wizard knows you wrote it intentionally.`,
+Wrap the body in \`<wizard-report>...</wizard-report>\` tags so the wizard knows the report was authored intentionally and not a leftover from a previous run.`,
 
   `Prefer the report_status tool (wizard-tools MCP) for progress updates and fatal error signals. Call report_status with kind="status" for in-progress updates (e.g. "installing SDK", "drafting event plan") — these appear in the wizard's spinner. Call report_status with kind="error" for fatal conditions that halt the run (codes: MCP_MISSING, RESOURCE_MISSING). Legacy [STATUS] / [ERROR-MCP-MISSING] / [ERROR-RESOURCE-MISSING] text markers from older bundled skills are still recognized for backwards compat, but new code should use report_status.`,
 
