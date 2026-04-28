@@ -1,4 +1,5 @@
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
+import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClientConfig, getNativeHTTPServerConfig } from '../defaults';
@@ -16,9 +17,19 @@ export class CursorMCPClient extends DefaultMCPClient {
   }
 
   async isClientSupported(): Promise<boolean> {
-    return Promise.resolve(
-      process.platform === 'darwin' || process.platform === 'win32',
-    );
+    // Cursor ships on macOS, Windows, and Linux (AppImage). Per
+    // https://cursor.com/docs the global MCP config lives at
+    // `~/.cursor/mcp.json` on every platform, so we treat all three as
+    // supported. Cursor creates ~/.cursor/ on first launch; absence ==
+    // not installed.
+    if (
+      process.platform !== 'darwin' &&
+      process.platform !== 'win32' &&
+      process.platform !== 'linux'
+    ) {
+      return Promise.resolve(false);
+    }
+    return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.cursor')));
   }
 
   async getConfigPath(): Promise<string> {
