@@ -69,7 +69,16 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         setBugReportPathState(written);
         return;
       }
-      process.exit(0);
+      // Signal dismissal instead of process.exit(0) directly. The
+      // wizardAbort caller is awaiting this — when it resolves, abort
+      // proceeds to its analytics flush + process.exit with the real
+      // exit code (NETWORK / AGENT_FAILED / etc.). Calling process.exit
+      // here would: (1) force exitCode 0 on every error, hiding real
+      // failures from CI; (2) skip the analytics shutdown that
+      // wizardAbort runs after cancel; (3) race with the success path
+      // below which already routes through process.exit.
+      store.signalOutroDismissed();
+      return;
     }
     if (showReport && key.escape) setShowReport(false);
   });

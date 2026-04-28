@@ -1061,4 +1061,61 @@ describe('WizardStore', () => {
       expect(resolved).toBe(true);
     });
   });
+
+  // ── outroDismissed promise (graceful error outro) ────────────────
+
+  describe('outroDismissed / signalOutroDismissed', () => {
+    it('resolves when signalOutroDismissed is called', async () => {
+      const store = createStore();
+
+      let resolved = false;
+      void store.outroDismissed().then(() => {
+        resolved = true;
+      });
+
+      // Not yet resolved
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      store.signalOutroDismissed();
+      await store.outroDismissed();
+      expect(resolved).toBe(true);
+    });
+
+    it('returns the same promise for multiple awaiters before dismissal', () => {
+      const store = createStore();
+
+      const p1 = store.outroDismissed();
+      const p2 = store.outroDismissed();
+      expect(p1).toBe(p2);
+
+      store.signalOutroDismissed();
+      // Both awaiters resolve via the shared promise; nothing else to assert.
+    });
+
+    it('handles dismissal arriving before any awaiter (pre-resolved)', async () => {
+      const store = createStore();
+
+      // Dismissal fires first
+      store.signalOutroDismissed();
+
+      // Then someone awaits — should resolve immediately
+      let resolved = false;
+      await store.outroDismissed().then(() => {
+        resolved = true;
+      });
+      expect(resolved).toBe(true);
+    });
+
+    it('is idempotent — extra signalOutroDismissed calls are no-ops', () => {
+      const store = createStore();
+
+      // Multiple calls should not throw or break the promise mechanism
+      expect(() => {
+        store.signalOutroDismissed();
+        store.signalOutroDismissed();
+        store.signalOutroDismissed();
+      }).not.toThrow();
+    });
+  });
 });
