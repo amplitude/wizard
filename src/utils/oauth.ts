@@ -126,9 +126,10 @@ function generateState(): string {
 
 /**
  * Compares two strings using a constant-time comparison to mitigate timing
- * side-channels. Returns false immediately when lengths differ (not a leak —
- * length is also encoded by the on-the-wire query string, and we only ever
- * compare strings of fixed wizard-generated length).
+ * side-channels (PR 335 — security hardening). Returns false immediately
+ * when lengths differ (not a leak — length is also encoded by the
+ * on-the-wire query string, and we only ever compare strings of fixed
+ * wizard-generated length).
  */
 function safeEqualString(a: string, b: string): boolean {
   const aBuf = Buffer.from(a, 'utf8');
@@ -137,8 +138,58 @@ function safeEqualString(a: string, b: string): boolean {
   return crypto.timingSafeEqual(aBuf, bBuf);
 }
 
-export async function startCallbackServer(): Promise<{
+/**
+ * Error thrown when no port in the OAUTH_PORT range is available. Callers
+ * surface `userMessage` instead of the raw error.
+ */
+export class OAuthPortInUseError extends Error {
+  readonly userMessage: string;
+  readonly basePort: number;
+  constructor(basePort: number) {
+    const userMessage = `Couldn't open the local authorization server (port ${basePort} is in use). Close any other wizard runs on this machine and try again.`;
+    super(userMessage);
+    this.name = 'OAuthPortInUseError';
+    this.userMessage = userMessage;
+    this.basePort = basePort;
+  }
+}
+
+/**
+ * Maximum number of consecutive ports to try after OAUTH_PORT on EADDRINUSE.
+ *
+ * The Amplitude OAuth app only accepts redirect URIs whose port is in this
+ * allowlisted range, which is why we don't use port 0 (OS-assigned).
+ * Concurrent wizard runs each pick the next free port in the range.
+ */
+export const OAUTH_PORT_RETRY_LIMIT = 10;
+
+async function startCallbackServer(): Promise<{
   server: http.Server;
+  port: number;
+  waitForCallback: (expectedState: string) => Promise<string>;
+}> {
+  let lastErr: NodeJS.ErrnoException | undefined;
+  for (let offset = 0; offset <= OAUTH_PORT_RETRY_LIMIT; offset++) {
+    const candidate = OAUTH_PORT + offset;
+    try {
+      return await tryStartCallbackServer(candidate);
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err && err.code === 'EADDRINUSE') {
+        lastErr = err;
+        continue;
+      }
+      throw e;
+    }
+  }
+  // Exhausted retries — surface a typed error with helpful copy.
+  void lastErr;
+  throw new OAuthPortInUseError(OAUTH_PORT);
+}
+
+function tryStartCallbackServer(port: number): Promise<{
+  server: http.Server;
+  port: number;
   waitForCallback: (expectedState: string) => Promise<string>;
 }> {
   return new Promise((resolve, reject) => {
@@ -159,7 +210,7 @@ export async function startCallbackServer(): Promise<{
         res.end();
         return;
       }
-      const url = new URL(req.url, `http://127.0.0.1:${OAUTH_PORT}`);
+      const url = new URL(req.url, `http://127.0.0.1:${port}`);
       const code = url.searchParams.get('code');
       const error = url.searchParams.get('error');
       const stateParam = url.searchParams.get('state');
@@ -224,10 +275,11 @@ export async function startCallbackServer(): Promise<{
     // Bind to 127.0.0.1 only — the OAuth callback should NEVER be
     // reachable from other hosts on the network. Listening on 0.0.0.0
     // would let an attacker on the same LAN race the user's browser to
-    // deliver a forged callback.
-    server.listen(OAUTH_PORT, '127.0.0.1', () => {
+    // deliver a forged callback. (PR 339 made the port dynamic so
+    // concurrent wizard runs don't EADDRINUSE-collide.)
+    server.listen(port, '127.0.0.1', () => {
       server.removeListener('error', onListenError);
-      resolve({ server, waitForCallback });
+      resolve({ server, port, waitForCallback });
     });
   });
 }
@@ -247,6 +299,7 @@ async function exchangeCodeForToken(
   code: string,
   codeVerifier: string,
   zone: AmplitudeZone,
+  redirectPort: number,
 ): Promise<OAuthTokenResponse> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
   const response = await axios.post(
@@ -254,7 +307,7 @@ async function exchangeCodeForToken(
     new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+      redirect_uri: `http://localhost:${redirectPort}/callback`,
       client_id: oAuthClientId,
       code_verifier: codeVerifier,
     }).toString(),
@@ -348,19 +401,36 @@ async function performAmplitudeAuthInner(options: {
   const state = generateState();
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
 
+  // Bind the server first so we know which port to advertise as redirect_uri.
+  // Concurrent wizard runs step through the OAUTH_PORT range until one is free.
+  let serverHandle: {
+    server: http.Server;
+    port: number;
+    waitForCallback: (expectedState: string) => Promise<string>;
+  };
+  try {
+    serverHandle = await startCallbackServer();
+  } catch (e) {
+    if (e instanceof OAuthPortInUseError) {
+      getUI().log.error(
+        `${chalk.red('Authorization failed:')}\n\n${e.userMessage}`,
+      );
+      analytics.captureException(e, { step: 'oauth_port_in_use' });
+      await abort();
+      throw e;
+    }
+    throw e;
+  }
+  const { server, port, waitForCallback } = serverHandle;
+
   const authUrl = new URL(`${oAuthHost}/oauth2/auth`);
   authUrl.searchParams.set('client_id', oAuthClientId);
-  authUrl.searchParams.set(
-    'redirect_uri',
-    `http://localhost:${OAUTH_PORT}/callback`,
-  );
+  authUrl.searchParams.set('redirect_uri', `http://localhost:${port}/callback`);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('scope', 'openid offline');
   authUrl.searchParams.set('state', state);
-
-  const { server, waitForCallback } = await startCallbackServer();
 
   getUI().setLoginUrl(authUrl.toString());
 
@@ -409,7 +479,7 @@ async function performAmplitudeAuthInner(options: {
       'auth.oauth.exchange_code',
       'auth.oauth',
       { zone },
-      async () => exchangeCodeForToken(code, codeVerifier, zone),
+      async () => exchangeCodeForToken(code, codeVerifier, zone, port),
     );
     logToFile('[oauth] token exchange response', {
       token_type: tokenResponse.token_type,
