@@ -31,10 +31,10 @@ import {
   renameSync,
   rmdirSync,
   unlinkSync,
-  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { atomicWriteJSON } from './atomic-write';
 import { logToFile } from './debug';
 import {
   ensureDir,
@@ -93,11 +93,15 @@ function userScopedMigrationDone(): boolean {
 function writeSentinel(): void {
   try {
     ensureDir(getCacheRoot());
-    writeFileSync(
-      getSentinelPath(),
-      `migrated-at=${new Date().toISOString()}\n`,
-      { mode: 0o600 },
-    );
+    // Atomic write (temp-file + rename) so two concurrent first-run
+    // wizards don't observe a half-written sentinel and both re-do the
+    // expensive `readdirSync(tmpdir())` scan. Stored as JSON so the
+    // file is self-describing if a future migration needs to bump the
+    // version.
+    atomicWriteJSON(getSentinelPath(), {
+      version: 1,
+      migratedAt: Date.now(),
+    });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logToFile(`storage-migration: failed to write sentinel: ${msg}`);
