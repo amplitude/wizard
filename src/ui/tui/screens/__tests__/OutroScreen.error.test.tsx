@@ -18,6 +18,8 @@
 
 import React from 'react';
 import { describe, it, expect } from 'vitest';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { OutroScreen } from '../OutroScreen.js';
 import {
   makeStoreForSnapshot,
@@ -34,7 +36,10 @@ Workaround: re-run with a direct Anthropic API key to bypass the Amplitude gatew
 
 Or wait a few minutes and try again — gateway incidents typically resolve quickly.
 
-If this persists, please report it (with the log file at /tmp/amplitude-wizard.log) to: wizard@amplitude.com`;
+If this persists, please report it (with the log file at ${join(
+  tmpdir(),
+  'amplitude-wizard.log',
+)}) to: wizard@amplitude.com`;
 
 describe('OutroScreen — error variants', () => {
   it('renders the multi-line GATEWAY_DOWN message verbatim', () => {

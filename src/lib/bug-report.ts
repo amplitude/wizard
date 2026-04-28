@@ -1,7 +1,7 @@
 /**
  * Sanitized bug report for the error-outro recovery launchpad.
  *
- * Writes a short, shareable support report to `/tmp/amplitude-bug-report.txt`.
+ * Writes a short, shareable support report to `<tmpdir>/amplitude-bug-report.txt`.
  * Passes every string through the observability redactor so API keys,
  * tokens, and user-typed secrets are stripped before the user pastes the
  * report into a support channel.

@@ -66,7 +66,7 @@ export type WizardOptions = {
   /**
    * Whether to run in benchmark mode with per-phase token tracking.
    * When enabled, the wizard runs each workflow phase as a separate agent call
-   * and writes detailed usage data to /tmp/amplitude-wizard-benchmark.json.
+   * and writes detailed usage data to amplitude-wizard-benchmark.json in the OS temp dir.
    */
   benchmark: boolean;
 };
