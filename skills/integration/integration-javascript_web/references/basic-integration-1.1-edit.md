@@ -7,7 +7,7 @@ For each of the files and events noted in .amplitude-events.json, make edits to 
 
 For browser/frontend projects, use @amplitude/unified as the default SDK — it bundles Analytics, Session Replay, and Experiment in a single package. Only use @amplitude/analytics-browser if the project already has it installed.
 
-Use environment variables for Amplitude keys. Do not hardcode Amplitude keys.
+For the Amplitude API key, follow the wizard's env-vs-inline rule (browser keys are public-by-design): use a `.env` / `.env.local` value ONLY if the project's framework has a built-in env-var convention that requires no build-config changes (Vite `VITE_*`, Next.js `NEXT_PUBLIC_*`, Create React App `REACT_APP_*`, Astro `PUBLIC_*`, Nuxt `runtimeConfig.public`, SvelteKit `$env/static/public`, Expo `app.config.js` extras). Otherwise INLINE the key directly in the SDK init call. Do NOT modify `webpack.config.js`, `rollup.config.*`, `vite.config.*`, `babel.config.*`, or any other build config to wire env vars into client code. When in doubt, inline.
 
 Event names MUST use Title Case with spaces following the [Noun] + [Past-Tense Verb] pattern (e.g., "Button Clicked", "Sign Up Completed", "Cart Viewed"). Do NOT use snake_case or camelCase for event names. Property names should use snake_case (e.g., button_text, page_url).
 

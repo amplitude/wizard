@@ -1,5 +1,4 @@
 import z from 'zod';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
@@ -36,27 +35,12 @@ export class VisualStudioCodeClient extends DefaultMCPClient {
     return 'servers';
   }
 
-  isClientSupported(): Promise<boolean> {
-    // VS Code creates Code/User/ on first launch — absence == not installed.
-    const homeDir = os.homedir();
-    if (process.platform === 'darwin') {
-      return Promise.resolve(
-        fs.existsSync(
-          path.join(homeDir, 'Library', 'Application Support', 'Code'),
-        ),
-      );
-    }
-    if (process.platform === 'win32') {
-      const appData = process.env.APPDATA;
-      if (!appData) return Promise.resolve(false);
-      return Promise.resolve(fs.existsSync(path.join(appData, 'Code')));
-    }
-    if (process.platform === 'linux') {
-      return Promise.resolve(
-        fs.existsSync(path.join(homeDir, '.config', 'Code')),
-      );
-    }
-    return Promise.resolve(false);
+  async isClientSupported(): Promise<boolean> {
+    return Promise.resolve(
+      process.platform === 'darwin' ||
+        process.platform === 'win32' ||
+        process.platform === 'linux',
+    );
   }
 
   async getConfigPath(): Promise<string> {

@@ -18,6 +18,9 @@ import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useContentArea } from '../context/ContentAreaContext.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -26,6 +29,7 @@ import {
   DEFAULT_HOST_URL,
 } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { toCredentialAppId } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
 
 const CREATE_ACTION = '__create__' as const;
@@ -87,12 +91,22 @@ function useMeasuredRows(ref: RefObject<DOMElement | null>): number {
 
 export const AuthScreen = ({ store }: AuthScreenProps) => {
   useWizardStore(store);
+  // Esc → back to RegionSelect. Self-disables on the very first run
+  // (no region picked yet, canGoBack=false) so it doesn't hijack the
+  // OAuth-waiting phase.
+  useEscapeBack(store);
 
   const { session } = store;
   const contentArea = useContentArea();
 
   // Local step state — which org the user has selected in this render session
   const [selectedOrg, setSelectedOrg] = useState<OrgEntry | null>(null);
+  // When the user invokes the [M] manual fallback while the browser auth
+  // hasn't completed (typically because no browser opened — SSH, codespace),
+  // we surface a manual API-key input form. The router still resolves Auth
+  // when credentials land via setCredentials, so this flow piggybacks on
+  // the existing manual entry path (Step 5).
+  const [manualFallbackOpen, setManualFallbackOpen] = useState(false);
   // Track the selected project locally so we can access its environments
   const [selectedProject, setSelectedProject] = useState<
     OrgEntry['projects'][number] | null
@@ -259,7 +273,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: local.key,
           host: DEFAULT_HOST_URL,
-          appId: matchedAppId ? Number(matchedAppId) || 0 : 0,
+          appId: toCredentialAppId(matchedAppId),
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -284,7 +298,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: apiKey,
           host: getHostFromRegion(zone),
-          appId: envAppId ? Number(envAppId) || 0 : 0,
+          appId: toCredentialAppId(envAppId),
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -334,7 +348,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey,
           host: getHostFromRegion(zone),
-          appId: fetchedAppId ? Number(fetchedAppId) || 0 : 0,
+          appId: toCredentialAppId(fetchedAppId),
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -458,6 +472,63 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     });
   };
 
+  // ─── OAuth wait-state coaching ────────────────────────────────────────
+  // While step 1 is rendering (pendingOrgs === null), the user is waiting
+  // for the browser callback. On SSH / codespace / locked-down envs the
+  // browser may never open — without coaching the spinner ticks until the
+  // 120s OAuth timeout. After 60s we surface [R]/[M]/[Esc] actions inline
+  // so the user can self-rescue.
+  const oauthWaiting = pendingOrgs === null && !manualFallbackOpen;
+  const { tier: oauthCoachingTier } = useTimedCoaching({
+    thresholds: [60],
+    progressSignal: oauthWaiting ? 'waiting' : 'resolved',
+  });
+  const showOauthFallbackHints = oauthWaiting && oauthCoachingTier >= 1;
+
+  // [R] retry browser launch while waiting for OAuth callback. Re-invokes
+  // opn() against the cached login URL — useful when the user accidentally
+  // closed the browser tab or the first launch silently failed. The wait
+  // timer is implicitly reset because the action triggers a re-render
+  // cycle and the user sees activity.
+  const retryBrowser = async () => {
+    const url = session.loginUrl;
+    if (!url) return;
+    analytics.wizardCapture('auth retry browser launch');
+    try {
+      const opn = (await import('opn')).default;
+      void opn(url, { wait: false }).catch(() => {
+        // No browser — user already sees the URL on screen for paste.
+      });
+    } catch {
+      // import failed — nothing to do; the URL is still on screen.
+    }
+  };
+
+  useScreenInput(
+    (input, key) => {
+      if (!showOauthFallbackHints) return;
+      const ch = input.toLowerCase();
+      if (ch === 'r') {
+        void retryBrowser();
+        return;
+      }
+      if (ch === 'm') {
+        analytics.wizardCapture('auth manual fallback opened');
+        setManualFallbackOpen(true);
+        return;
+      }
+      if (key.escape) {
+        // Cancel auth — gracefully exit. The OAuth callback server is
+        // owned by the outer oauth.ts; unwinding requires SIGINT-style
+        // exit. process.exit(0) matches the convention used elsewhere
+        // (OutageScreen onCancel) and produces a clean shutdown.
+        analytics.wizardCapture('auth cancelled by user');
+        process.exit(0);
+      }
+    },
+    { isActive: showOauthFallbackHints },
+  );
+
   // Completed-step indicators shown above the active step
   const completedSteps: Array<{ label: string }> = [];
   if (session.detectedFrameworkLabel) {
@@ -491,7 +562,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       )}
 
       {/* Step 1: waiting for OAuth browser redirect */}
-      {pendingOrgs === null && (
+      {pendingOrgs === null && !manualFallbackOpen && (
         <Box flexDirection="column">
           <Box gap={1}>
             <BrailleSpinner color={Colors.accent} />
@@ -509,6 +580,72 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               </TerminalLink>
             </Box>
           )}
+          {/* Tier-1 coaching: at 60s the browser likely didn't open. Surface
+              actionable single-key fallbacks. The login URL above stays
+              visible so [M] and [R] both work without a flash of empty
+              chrome. */}
+          {showOauthFallbackHints && (
+            <Box marginTop={1} flexDirection="column">
+              <Text color={Colors.muted}>
+                Still waiting{Icons.ellipsis} If the browser didn't open, you
+                can:
+              </Text>
+              <Box marginTop={1} gap={2}>
+                <Box>
+                  <Text color={Colors.muted}>[</Text>
+                  <Text bold color={Colors.body}>
+                    R
+                  </Text>
+                  <Text color={Colors.muted}>] Retry browser launch</Text>
+                </Box>
+                <Box>
+                  <Text color={Colors.muted}>[</Text>
+                  <Text bold color={Colors.body}>
+                    M
+                  </Text>
+                  <Text color={Colors.muted}>] Enter API key manually</Text>
+                </Box>
+                <Box>
+                  <Text color={Colors.muted}>[</Text>
+                  <Text bold color={Colors.body}>
+                    Esc
+                  </Text>
+                  <Text color={Colors.muted}>] Cancel</Text>
+                </Box>
+              </Box>
+            </Box>
+          )}
+        </Box>
+      )}
+
+      {/* Manual fallback: user pressed [M] before OAuth resolved. Same
+          input UX as Step 5 but reachable without finishing OAuth. The
+          loginUrl stays visible so the user can still complete browser
+          auth if they change their mind. */}
+      {pendingOrgs === null && manualFallbackOpen && (
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="column">
+            <Text bold color={Colors.heading}>
+              Enter your project API key
+            </Text>
+            <Text color={Colors.muted}>
+              Amplitude {Icons.arrowRight} Settings {Icons.arrowRight} Projects{' '}
+              {Icons.arrowRight} [your project] {Icons.arrowRight} API Keys
+            </Text>
+            {session.loginUrl && (
+              <Box marginTop={1} flexDirection="column">
+                <Text color={Colors.muted}>Or finish browser sign-in at:</Text>
+                <TerminalLink url={session.loginUrl}>
+                  {session.loginUrl}
+                </TerminalLink>
+              </Box>
+            )}
+          </Box>
+          <TextInput
+            placeholder="Paste API key here..."
+            onSubmit={handleApiKeySubmit}
+          />
+          {apiKeyError && <Text color={Colors.error}>{apiKeyError}</Text>}
         </Box>
       )}
 

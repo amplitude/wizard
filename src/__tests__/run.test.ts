@@ -18,6 +18,7 @@ vi.mock('../lib/wizard-session', () => ({
     setupConfirmed: false,
     integration: null,
     frameworkContext: {},
+    frameworkContextAnswerOrder: [],
     typescript: false,
     credentials: null,
     serviceStatus: null,

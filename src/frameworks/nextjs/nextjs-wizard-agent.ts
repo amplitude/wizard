@@ -11,6 +11,7 @@ import {
 } from '../../utils/package-json';
 import { tryGetPackageJson } from '../../utils/setup-utils';
 import { getUI } from '../../ui';
+import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import {
   getNextJsRouter,
   getNextJsVersionBucket,
@@ -60,6 +61,12 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
         },
       ],
     },
+    getIntegrationSkillId: (context) => {
+      const router = context.router ?? NextJsRouter.APP_ROUTER;
+      return router === NextJsRouter.PAGES_ROUTER
+        ? 'integration-nextjs-pages-router'
+        : 'integration-nextjs-app-router';
+    },
   },
 
   detection: {
@@ -100,7 +107,19 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
         context.router === NextJsRouter.APP_ROUTER ? 'app' : 'pages';
       return [
         `Router: ${routerType}`,
-        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+        // Next.js apps almost always have BOTH a browser surface (pages,
+        // client components, layouts) AND a server surface (API routes,
+        // server actions, route handlers, getServerSideProps, middleware).
+        // We want analytics to fire correctly from both — the unified
+        // browser SDK on the client, and @amplitude/analytics-node on the
+        // server — so the agent must wire up both halves when the project
+        // has them. Skipping server-side instrumentation is the most
+        // common gap in Next.js setups.
+        BROWSER_UNIFIED_SDK_PROMPT_LINE,
+        `Next.js init point: place the initAll(...) call in a 'use client' boundary — root layout for App Router, _app.tsx for Pages Router — so the SDK loads in the browser bundle and not in the server bundle. Importing @amplitude/unified from a server module will break the build.`,
+        `Server SDK: @amplitude/analytics-node — install IN ADDITION to the browser SDK whenever the project has API routes (app/**/route.ts, pages/api/**), server actions, route handlers, middleware, or any other server-side surface that should emit events. Initialize once in a server-only module (e.g. lib/amplitude.server.ts) using the same API key, then import + call from server code. Do NOT import @amplitude/unified from server modules — it's browser-only and will break the build.`,
+        `Project may need BOTH SDKs side by side. The browser SDK identifies users in the browser; the node SDK should attach the same user identity (user_id / device_id forwarded from the request) so events from both surfaces stitch into the same Amplitude user. If the project has zero server-side analytics surfaces (purely static / client-rendered with no API routes), skip the node SDK entirely — don't install it speculatively.`,
+        `Reserved env var: NEXT_PUBLIC_AMPLITUDE_API_KEY (browser, exposed). Server-side code should read the same key from process.env — Next.js exposes any NEXT_PUBLIC_* var to both runtimes, so a single env var is fine for most projects.`,
       ];
     },
   },

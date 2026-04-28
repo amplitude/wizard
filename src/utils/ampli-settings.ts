@@ -69,6 +69,27 @@ function isUserKey(key: string): boolean {
   return key.startsWith('User-') || key.startsWith('User[');
 }
 
+/**
+ * True iff a given ~/.ampli.json key belongs to the requested zone.
+ *
+ * Key shapes:
+ *   - US (the default zone): `User-<userId>`
+ *   - Non-default zones:     `User[<zone>]-<userId>`
+ *
+ * Without this filter, `getStoredToken(undefined, 'eu')` would happily return
+ * a US session because `isUserKey('User-…')` is true regardless of zone.
+ * That made `/region` switches silently reuse the wrong-zone OAuth token,
+ * fall back to a fresh browser login at the wrong host, and leave the user
+ * staring at a US auth URL after picking EU.
+ */
+function isUserKeyForZone(key: string, zone: AmplitudeZone): boolean {
+  if (zone === DEFAULT_AMPLITUDE_ZONE) {
+    // US keys are unbracketed: `User-…` but never `User[…]-…`.
+    return key.startsWith('User-');
+  }
+  return key.startsWith(`User[${zone}]-`);
+}
+
 const StoredUserSchema = z.object({
   id: z.string(),
   firstName: z.string(),
@@ -140,9 +161,13 @@ export function getStoredToken(
     return findToken(userKey(userId, zone));
   }
 
-  // Try all stored users
+  // Try all stored users for the requested zone. Filtering by zone is what
+  // makes `/region` switches actually re-authenticate against the new data
+  // center: without it, a stored US token would be returned for an EU lookup
+  // (since both `User-…` and `User[eu]-…` pass the generic `isUserKey` test),
+  // and `performAmplitudeAuth` would skip the browser entirely.
   for (const key of Object.keys(config)) {
-    if (!isUserKey(key)) continue;
+    if (!isUserKeyForZone(key, zone)) continue;
     const token = findToken(key);
     if (token) return token;
   }
@@ -204,6 +229,88 @@ export function replaceStoredUser(
 /** Clears all stored credentials by writing an empty config. */
 export function clearStoredCredentials(configPath?: string): void {
   writeConfig({}, configPath);
+}
+
+// ── Wizard-scoped settings namespace ──────────────────────────────────
+//
+// `~/.ampli.json` is shared with the ampli CLI; reserved keys at the top
+// level are owned by ampli (User-*, etc.). Wizard-only settings live under
+// the `wizard` key so we never collide with ampli's schema.
+
+const WizardNamespaceSchema = z
+  .object({
+    lastUsedOrgId: z.string().optional(),
+    lastUsedWorkspaceId: z.string().optional(),
+    // Matches `selectedAppId` on the wizard session — both refer to the
+    // numeric Amplitude app/environment id. Keep the terminology in sync
+    // so a future caller doesn't reintroduce the retired `project` term.
+    lastUsedAppId: z.string().optional(),
+  })
+  .passthrough();
+
+type WizardNamespace = z.infer<typeof WizardNamespaceSchema>;
+
+function readWizardNamespace(configPath?: string): WizardNamespace {
+  const config = readConfig(configPath);
+  const parsed = WizardNamespaceSchema.safeParse(config['wizard'] ?? {});
+  return parsed.success ? parsed.data : {};
+}
+
+function writeWizardNamespace(
+  next: WizardNamespace,
+  configPath?: string,
+): void {
+  const config = readConfig(configPath);
+  config['wizard'] = next;
+  writeConfig(config, configPath);
+}
+
+/**
+ * Returns the last-used org/workspace/app selection triple. Each field is
+ * individually optional — a user who has never had a workspace picked can
+ * still have an orgId from an org-only run.
+ *
+ * Field naming matches the canonical session shape (`selectedAppId`,
+ * `selectedWorkspaceId`, `selectedOrgId`) so callers can spread directly
+ * into the picker pre-focus logic without re-keying.
+ */
+export function getLastUsedSelection(configPath?: string): {
+  orgId?: string;
+  workspaceId?: string;
+  appId?: string;
+} {
+  const ns = readWizardNamespace(configPath);
+  return {
+    orgId: ns.lastUsedOrgId,
+    workspaceId: ns.lastUsedWorkspaceId,
+    appId: ns.lastUsedAppId,
+  };
+}
+
+/**
+ * Persist the last-used selection triple. Pass undefined to clear a level
+ * (e.g. when the user selects a different org, the old workspace/app
+ * shouldn't pre-focus the picker anymore). Other wizard-scoped settings
+ * inside the `wizard` namespace are preserved.
+ */
+export function storeLastUsedSelection(
+  selection: {
+    orgId?: string;
+    workspaceId?: string;
+    appId?: string;
+  },
+  configPath?: string,
+): void {
+  const current = readWizardNamespace(configPath);
+  writeWizardNamespace(
+    {
+      ...current,
+      lastUsedOrgId: selection.orgId,
+      lastUsedWorkspaceId: selection.workspaceId,
+      lastUsedAppId: selection.appId,
+    },
+    configPath,
+  );
 }
 
 /**

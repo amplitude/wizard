@@ -17,9 +17,80 @@ import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 
+// ── Branded ID types ─────────────────────────────────────────────────────
+//
+// Why brand: prior bugs (see PR #62, "org data mapping") were caused by
+// silently passing a workspace id where an app id was expected, or the other
+// direction. The two are structurally `string` and `number` and TypeScript
+// could not catch the mismatch. Branding them with `z.brand` gives us
+// distinct nominal types without runtime cost — a raw `number` can no longer
+// be assigned to an `AppId` slot without going through the parser/helper.
+
+/**
+ * Numeric Amplitude app id (canonical across Amplitude services).
+ * Sourced from `App.id` in the Data API and `app_id` in the Python monorepo.
+ */
+export const AppIdSchema = z.number().int().positive().brand<'AppId'>();
+export type AppId = z.infer<typeof AppIdSchema>;
+
+/**
+ * UUID-shaped Amplitude workspace id. Sourced from `Workspace.id` in the
+ * Data API. Distinct from `selectedAppId` (string env app id) and the
+ * stringified app id used in some MCP tool calls.
+ */
+export const WorkspaceIdSchema = z.string().min(1).brand<'WorkspaceId'>();
+export type WorkspaceId = z.infer<typeof WorkspaceIdSchema>;
+
+/**
+ * Construct an AppId from a raw number. Throws on invalid input — use at
+ * trust boundaries (CLI parse, API response decoding, stored config).
+ */
+export function toAppId(value: number): AppId {
+  return AppIdSchema.parse(value);
+}
+
+/**
+ * Best-effort AppId construction. Returns undefined when the input cannot be
+ * coerced to a positive integer. Use when accepting user-supplied strings.
+ */
+export function tryToAppId(
+  value: string | number | null | undefined,
+): AppId | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const n = typeof value === 'number' ? value : Number(value);
+  const result = AppIdSchema.safeParse(n);
+  return result.success ? result.data : undefined;
+}
+
+/**
+ * Construct a WorkspaceId from a raw string. Throws on empty input — use at
+ * trust boundaries. Most call sites get workspace ids from API responses
+ * that have already been validated, so this just attaches the brand.
+ */
+export function toWorkspaceId(value: string): WorkspaceId {
+  return WorkspaceIdSchema.parse(value);
+}
+
+/**
+ * `credentials.appId` is `AppId | 0` — `0` is the "unknown" sentinel used
+ * when OAuth produced credentials but the user has not yet picked an env.
+ * This helper safely coerces raw input (string from CLI, number from API)
+ * into the credentials shape: a branded AppId on success, `0` otherwise.
+ *
+ * Use at the trust boundary where credentials are constructed. After that,
+ * the `AppId | 0` type prevents accidental cross-mixing with workspace ids
+ * or other unrelated numbers — the same protection PR #62 motivated for
+ * the top-level `WizardSession.appId`.
+ */
+export function toCredentialAppId(
+  value: string | number | null | undefined,
+): AppId | 0 {
+  return tryToAppId(value) ?? 0;
+}
+
 /**
  * Zod schema for CLI args passed to `buildSession()`.
- * Coerces `appId` from string to positive integer.
+ * Coerces `appId` from string to a branded positive integer.
  * All boolean flags default to false; `installDir` defaults to cwd.
  */
 export const CliArgsSchema = z.object({
@@ -28,8 +99,8 @@ export const CliArgsSchema = z.object({
     .optional()
     .transform((v) => {
       if (v === undefined || v === '') return undefined;
-      const n = Number(v);
-      return Number.isInteger(n) && n > 0 ? n : undefined;
+      const result = AppIdSchema.safeParse(Number(v));
+      return result.success ? result.data : undefined;
     }),
   installDir: z
     .string()
@@ -66,14 +137,16 @@ export const CredentialsSchema = z.object({
   idToken: z.string().optional(),
   projectApiKey: z.string().min(1, 'projectApiKey is required'),
   host: z.string().url('host must be a valid URL'),
-  /** Numeric Amplitude app ID (canonical). */
-  appId: z.number(),
+  /**
+   * Numeric Amplitude app ID. Branded `AppId` on success or the literal
+   * `0` sentinel when the env hasn't been picked yet. Construct via
+   * `toCredentialAppId(value)` at the trust boundary.
+   */
+  appId: z.union([AppIdSchema, z.literal(0)]),
 });
 
-function parseAppIdArg(value: string | undefined): number | undefined {
-  if (value === undefined || value === '') return undefined;
-  const n = Number(value);
-  return Number.isInteger(n) && n > 0 ? n : undefined;
+function parseAppIdArg(value: string | undefined): AppId | undefined {
+  return tryToAppId(value);
 }
 
 export type CloudRegion = 'us' | 'eu';
@@ -239,13 +312,21 @@ export interface WizardSession {
   /**
    * Numeric Amplitude app ID from --app-id (or --project-id alias).
    * Matches `app.id` in the Data API and `app_id` in the Python monorepo.
+   * Branded — construct via `toAppId()` / `tryToAppId()` from raw input.
    */
-  appId?: number;
+  appId?: AppId;
 
   // From detection + screens
   setupConfirmed: boolean;
   integration: Integration | null;
   frameworkContext: Record<string, unknown>;
+  /**
+   * Order in which keys were written into `frameworkContext`. Tracks
+   * answer history so back-navigation can pop the most recent setup
+   * answer. Maintained by `WizardStore.setFrameworkContext` and
+   * `popLastFrameworkContextAnswer`.
+   */
+  frameworkContextAnswerOrder: string[];
   typescript: boolean;
 
   /** Human-readable label for the detected framework variant (e.g., "Django with Wagtail CMS") */
@@ -391,8 +472,15 @@ export interface WizardSession {
     idToken?: string;
     projectApiKey: string;
     host: string;
-    /** Numeric Amplitude app ID (canonical); 0 when unknown. */
-    appId: number;
+    /**
+     * Numeric Amplitude app ID (canonical). Branded `AppId` once an env is
+     * known; `0` is the "unknown" sentinel set when OAuth produced
+     * credentials but no env has been picked yet. Construct via
+     * `toCredentialAppId(value)` at the trust boundary so raw `Number(x)`
+     * conversions can't sneak past the brand. PR #62 ("org data mapping")
+     * was the original motivation for branding the related top-level fields.
+     */
+    appId: AppId | 0;
   } | null;
 
   // Lifecycle
@@ -413,6 +501,16 @@ export interface WizardSession {
 
   /** True once the user has clicked Continue on the IntroScreen. */
   introConcluded: boolean;
+
+  /**
+   * True from the moment the user invokes `/logout` until the logout flow
+   * completes (or is cancelled). Used by the bin.ts re-auth watcher to skip
+   * the auto-OAuth retry that would otherwise fire during the brief window
+   * where credentials are null but the Logout overlay has not yet been
+   * fully resolved as `currentScreen`. Without this flag the watcher could
+   * race the logout flow and re-open the browser unexpectedly.
+   */
+  loggingOut: boolean;
 
   // Screen completion
   mcpComplete: boolean;
@@ -436,7 +534,15 @@ export interface WizardSession {
   /** Features the stop hook has finished processing, in order. */
   additionalFeatureCompleted: AdditionalFeature[];
 
-  /** True once the user has confirmed (or skipped) the FeatureOptIn picklist. */
+  /**
+   * True once feature-opt-in resolution has run for this session. The
+   * wizard auto-enables every discovered opt-in addon (Session Replay,
+   * Guides & Surveys, LLM-when-flag-on) at discovery time rather than
+   * showing a picker — this flag is flipped to true alongside that
+   * auto-enable so any flow predicate that gates on
+   * `optInFeaturesComplete` (and was originally written for the old
+   * picker world) still resolves correctly.
+   */
   optInFeaturesComplete: boolean;
 
   // Resolved framework config (set after integration is known)
@@ -507,6 +613,82 @@ export interface WizardSession {
   };
 }
 
+// ── Phase-narrowed session views ─────────────────────────────────────────
+//
+// `WizardSession` is a flat shape with ~40 optional fields. Many fields are
+// only meaningful in a specific phase (credentials in authenticated, app id
+// in configured, integration in running). The guards below let callers
+// adopt a discriminated-union view incrementally — pass a session through a
+// guard once and the narrowed body can rely on the phase-relevant fields
+// being non-null without defensive checks scattered across consumers.
+
+/**
+ * Session view after OAuth completes: credentials and an org are set.
+ * Fields outside the auth subset remain optional/nullable as in
+ * `WizardSession`.
+ */
+export type AuthenticatedSession = WizardSession & {
+  credentials: NonNullable<WizardSession['credentials']>;
+  selectedOrgId: string;
+};
+
+/**
+ * Session view once the user has chosen an org/project and a region.
+ * This is the minimum needed to talk to the Amplitude Data API.
+ */
+export type ConfiguredSession = AuthenticatedSession & {
+  selectedProjectId: string;
+  region: AmplitudeZone;
+};
+
+/**
+ * Session view while the agent is actively running. Adds an integration
+ * and a non-null run start timestamp to the configured baseline.
+ */
+export type RunningSession = ConfiguredSession & {
+  runPhase: typeof RunPhase.Running;
+  integration: Integration;
+  runStartedAt: number;
+};
+
+/**
+ * True iff OAuth has produced credentials and an org id is recorded.
+ * Callers that only need credentials can use this and stop sprinkling
+ * `if (!session.credentials)` early-returns.
+ */
+export function isAuthenticated(
+  session: WizardSession,
+): session is AuthenticatedSession {
+  return session.credentials !== null && session.selectedOrgId !== null;
+}
+
+/**
+ * True iff the session has everything needed to make scoped Data API calls:
+ * credentials + org + project + region.
+ */
+export function isConfigured(
+  session: WizardSession,
+): session is ConfiguredSession {
+  return (
+    isAuthenticated(session) &&
+    session.selectedProjectId !== null &&
+    session.region !== null
+  );
+}
+
+/**
+ * True iff the agent run is currently in flight. Used by retry/error paths
+ * that should only act on a live run.
+ */
+export function isRunning(session: WizardSession): session is RunningSession {
+  return (
+    session.runPhase === RunPhase.Running &&
+    isConfigured(session) &&
+    session.integration !== null &&
+    session.runStartedAt !== null
+  );
+}
+
 /**
  * Build a WizardSession from CLI args, pre-populating whatever is known.
  */
@@ -572,6 +754,7 @@ export function buildSession(args: {
     setupConfirmed: false,
     integration: (validated.integration as Integration) ?? null,
     frameworkContext: {},
+    frameworkContextAnswerOrder: [],
     typescript: false,
     detectedFrameworkLabel: null,
     detectionComplete: false,
@@ -591,6 +774,7 @@ export function buildSession(args: {
     llmOptIn: false,
     sessionReplayOptIn: false,
     engagementOptIn: false,
+    loggingOut: false,
     mcpComplete: false,
     mcpOutcome: null,
     mcpInstalledClients: [],

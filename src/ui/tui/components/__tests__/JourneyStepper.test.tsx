@@ -130,12 +130,13 @@ describe('JourneyStepper', () => {
     expect(completedIdx).toBe(-1);
   });
 
-  it('keeps the active cursor on Setup while on the feature opt-in screen', () => {
-    // Regression guard: FeatureOptIn previously wasn't mapped into any
-    // STEP_SCREENS group, which made getCompletedScreens walk past the end
-    // of the flat screen list and mark every step ✓ — and then "snap back"
-    // to ● Setup when the user advanced to Run. Both bugs share one fix:
-    // FeatureOptIn must live inside STEP_SCREENS.Setup.
+  it('keeps the active cursor on Setup throughout the agent run phase', () => {
+    // Regression guard: every screen between DataSetup and DataIngestionCheck
+    // must be mapped into STEP_SCREENS.Setup. If a screen is mid-flow but
+    // not mapped anywhere, getCompletedScreens walks past the end of the
+    // flat screen list and marks every step as completed, then snaps back
+    // to active Setup when the user advances. The fix is keeping the
+    // Setup group exhaustive: ActivationOptions, Setup, Run, Mcp.
     const store = makeStore({
       introConcluded: true,
       region: 'us',
@@ -146,7 +147,7 @@ describe('JourneyStepper', () => {
       projectHasData: false,
       activationLevel: 'none',
       discoveredFeatures: ['session_replay'],
-      optInFeaturesComplete: false,
+      optInFeaturesComplete: true,
     });
     const out = frameOf(<JourneyStepper store={store} width={120} />);
     expect(out).toContain('Setup ←');

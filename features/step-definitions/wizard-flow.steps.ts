@@ -190,6 +190,27 @@ When('I continue past the intro', function () {
   session.introConcluded = true;
 });
 
+When('I pick "Change region" on the intro', function () {
+  // Mirror IntroScreen's "Change region" branch: setRegionForced then
+  // concludeIntro. setRegionForced clears credentials/org/workspace so
+  // the flow treats this as a hard re-auth.
+  const s = session;
+  s.regionForced = true;
+  s.credentials = null;
+  s.pendingOrgs = null;
+  s.pendingAuthIdToken = null;
+  s.pendingAuthAccessToken = null;
+  s.userEmail = null;
+  s.selectedOrgId = null;
+  s.selectedOrgName = null;
+  s.selectedWorkspaceId = null;
+  s.selectedWorkspaceName = null;
+  s.selectedEnvName = null;
+  s.selectedAppId = null;
+  s.projectHasData = null;
+  s.introConcluded = true;
+});
+
 // ── Then ──────────────────────────────────────────────────────────────────────
 
 Then('I should go through the SUSI flow', function () {

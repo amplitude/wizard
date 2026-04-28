@@ -8,7 +8,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -31,6 +31,35 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Refreshing);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Tracks the auto-dismiss timer so unmount clears it. Without this
+  // ref + cleanup, navigating away from the overlay (Esc back-nav,
+  // outer screen swap, ScreenErrorBoundary retry) leaves a dangling
+  // setTimeout that fires `onComplete` against an unmounted overlay
+  // 1.5–2.5s later — popping the wrong overlay and producing visible
+  // navigation glitches.
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (dismissTimerRef.current !== null) {
+        clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  /** Schedule onComplete; refuses to schedule on an unmounted screen. */
+  const scheduleDismiss = (ms: number): void => {
+    if (!mountedRef.current) return;
+    if (dismissTimerRef.current !== null) clearTimeout(dismissTimerRef.current);
+    dismissTimerRef.current = setTimeout(() => {
+      dismissTimerRef.current = null;
+      if (mountedRef.current) onComplete();
+    }, ms);
+  };
+
   useEffect(() => {
     void (async () => {
       try {
@@ -42,6 +71,8 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
           import('../../../utils/oauth.js'),
         ]);
 
+        if (!mountedRef.current) return;
+
         const user = getStoredUser();
         // readDisk: true — login runs before the RegionSelect gate; disk
         // tiers are the authoritative source for intent here.
@@ -51,12 +82,15 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         const stored = getStoredToken(user?.id, zone);
 
         if (!stored) {
+          if (!mountedRef.current) return;
           setPhase(Phase.NoToken);
-          setTimeout(onComplete, 2500);
+          scheduleDismiss(2500);
           return;
         }
 
         const result = await refreshAccessToken(stored.refreshToken, zone);
+
+        if (!mountedRef.current) return;
 
         // Persist updated tokens to ~/.ampli.json
         if (user) {
@@ -72,16 +106,17 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         store.updateAccessToken(result.accessToken);
 
         setPhase(Phase.Success);
-        setTimeout(onComplete, 1500);
+        scheduleDismiss(1500);
       } catch (err) {
         // Clear the stale token so the next wizard run forces fresh browser auth
         const { clearStoredCredentials } = await import(
           '../../../utils/ampli-settings.js'
         );
         clearStoredCredentials();
+        if (!mountedRef.current) return;
         setErrorMsg(err instanceof Error ? err.message : 'Unknown error');
         setPhase(Phase.Error);
-        setTimeout(onComplete, 2500);
+        scheduleDismiss(2500);
       }
     })();
   }, []);

@@ -16,6 +16,8 @@ export {
   setTerminalSink,
   configureLogFile,
   getLogFilePath,
+  getStructuredLogFilePath,
+  setProjectLogFile,
 } from './logger';
 export type { WizardLogger, LogLevel } from './logger';
 
@@ -40,5 +42,7 @@ export {
   flushSentry,
   startWizardSpan,
   withWizardSpan,
+  wrapMcpServerWithSentry,
+  setSpanMeasurement,
 } from './sentry';
 export type { SentryConfig, WizardSpan } from './sentry';

@@ -11,6 +11,7 @@ import type { WizardOptions } from '../utils/types';
 import { analytics, captureWizardError } from '../utils/analytics';
 import {
   AMPLITUDE_PROPERTY_HEADER_PREFIX,
+  DEFAULT_AMPLITUDE_ZONE,
   WIZARD_VARIANT_FLAG_KEY,
   WIZARD_VARIANTS,
   WIZARD_USER_AGENT,
@@ -21,14 +22,22 @@ import {
   TRAILING_FEATURES,
   type RetryState,
 } from './wizard-session';
-import { registerCleanup } from '../utils/wizard-abort';
+import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
-import { getStoredToken } from '../utils/ampli-settings';
+import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
+import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
+import {
+  startDualPathWatcher,
+  type DualPathWatcherHandle,
+} from './dual-path-watcher';
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
+import { createInnerLifecycleHooks } from './inner-lifecycle';
+import { classifyWriteOperation } from './agent-events';
 import {
   createWizardToolsServer,
+  persistDashboard,
   WIZARD_TOOL_NAMES,
   type StatusReport,
   type StatusReporter,
@@ -303,6 +312,97 @@ export const MAX_BASH_SLEEP_SECONDS = 5;
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
 
 /**
+ * Substrings that indicate the LLM gateway rejected a request because the
+ * caller's OAuth token is invalid or expired. Three patterns observed in
+ * production Sentry traces (WIZARD-CLI-A, WIZARD-CLI-7, WIZARD-CLI-F):
+ *
+ *   - `authentication_failed`  — older OAuth fault code
+ *   - `authentication_error`   — current Anthropic gateway error.type
+ *                                (`{"error":{"type":"authentication_error",...}}`)
+ *   - `Invalid or expired token` — Anthropic 401 message body
+ *
+ * Match any of these → route to the friendly auth-recovery path in
+ * agent-runner instead of the generic "report to wizard@amplitude.com"
+ * API-error path. Substring (not regex) so JSON-stringified message
+ * bodies match without escaping concerns.
+ */
+const AUTH_ERROR_PATTERNS = [
+  'authentication_failed',
+  'authentication_error',
+  'Invalid or expired token',
+] as const;
+
+/**
+ * Returns true if `serialized` (typically a JSON-stringified SDK result
+ * message) contains any known auth-error pattern. Exported for unit tests.
+ */
+export function isAuthErrorMessage(serialized: string): boolean {
+  return AUTH_ERROR_PATTERNS.some((p) => serialized.includes(p));
+}
+
+/**
+ * Matches the SDK's known-benign hook-bridge-race stderr line. The
+ * claude-code subprocess emits this when an aborted/teardown-pending
+ * `query()` still has in-flight tool calls — each call invokes the
+ * registered hook (PreToolUse / Stop / UserPromptSubmit / PreCompact,
+ * indexed in registration order) over a now-closed IPC bridge.
+ *
+ * Already retried-and-recovered upstream (see `drainPriorResponse`
+ * + the `'Stream closed'` arm of the transient-error retry list in
+ * `runAgent`). The stderr handler filters lines matching this pattern
+ * and logs a one-line suppression count at attempt boundary; everything
+ * else (genuine subprocess crashes, MCP server stderr, etc.) still
+ * flows through.
+ *
+ * Anchored with `^...$` so a chunk containing both a race line AND a
+ * genuine error keeps the genuine error — the partition helper splits
+ * chunks line-by-line before testing.
+ *
+ * Exported for unit tests. See issue #297.
+ */
+export const HOOK_BRIDGE_RACE_RE =
+  /^Error in hook callback hook_\d+: Error: Stream closed$/;
+
+/**
+ * Splits a raw stderr chunk into the count of suppressed
+ * hook-bridge-race lines and the remaining text that should still be
+ * logged.
+ *
+ * Why partition instead of `regex.test(data) → return`: the SDK's
+ * stderr callback receives raw byte chunks from the subprocess pipe.
+ * Multiple stderr writes can be batched into a single chunk, so a
+ * chunk-level match would drop genuine errors riding alongside the
+ * race-line noise. We split on `\n`, suppress only matching lines,
+ * and reconstruct the rest preserving the original chunk's trailing
+ * newline behavior.
+ *
+ * Exported for unit tests.
+ */
+export function partitionHookBridgeRace(data: string): {
+  suppressed: number;
+  passthrough: string;
+} {
+  if (data.length === 0) return { suppressed: 0, passthrough: '' };
+  const hadTrailingNewline = data.endsWith('\n');
+  const lines = data.split('\n');
+  if (hadTrailingNewline) lines.pop(); // drop the empty trailing element
+  let suppressed = 0;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (HOOK_BRIDGE_RACE_RE.test(line)) {
+      suppressed++;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (kept.length === 0) return { suppressed, passthrough: '' };
+  return {
+    suppressed,
+    passthrough: kept.join('\n') + (hadTrailingNewline ? '\n' : ''),
+  };
+}
+
+/**
  * Build a PreToolUse hook that enforces wizard Bash safety.
  *
  * Why this exists: the Claude Agent SDK runs with
@@ -519,6 +619,54 @@ export function createUserPromptSubmitHook(state: AgentState): HookCallback {
 }
 
 /**
+ * Factory: PostToolUse hook — records the file path of every successful
+ * write-tool call (Write / Edit / MultiEdit / NotebookEdit) into the
+ * provided AgentState. The recovery snapshot persisted by `createPreCompactHook`
+ * relies on this list so the post-compaction UserPromptSubmit hydration
+ * can tell the model which files it has already modified in the run.
+ *
+ * Wrapped in try/catch — a throwing hook would otherwise tank the run.
+ * No-op for non-write tools.
+ */
+export function createPostToolUseHook(state: AgentState): HookCallback {
+  return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    try {
+      const toolName =
+        typeof input.tool_name === 'string'
+          ? input.tool_name
+          : typeof input.toolName === 'string'
+          ? input.toolName
+          : '';
+      if (!classifyWriteOperation(toolName)) return Promise.resolve({});
+
+      const toolInput =
+        typeof input.tool_input !== 'undefined'
+          ? input.tool_input
+          : typeof input.toolInput !== 'undefined'
+          ? input.toolInput
+          : null;
+      const obj =
+        toolInput && typeof toolInput === 'object'
+          ? (toolInput as Record<string, unknown>)
+          : {};
+      const path =
+        typeof obj.file_path === 'string'
+          ? obj.file_path
+          : typeof obj.path === 'string'
+          ? obj.path
+          : null;
+      if (path) {
+        state.recordModifiedFile(path);
+        logToFile(`PostToolUse: recorded modified file ${path} (${toolName})`);
+      }
+    } catch (err) {
+      logToFile('PostToolUse handler threw:', err);
+    }
+    return Promise.resolve({});
+  };
+}
+
+/**
  * Configuration object returned by initializeAgent / getAgent.
  */
 export type AgentRunConfig = {
@@ -713,6 +861,31 @@ const DANGEROUS_OPERATORS = /[;`$()]/;
 // pair landed by PR #293 — see PR #295 for the extraction rationale.)
 import { parseEventPlanContent } from './event-plan-parser.js';
 export { parseEventPlanContent };
+
+/**
+ * Pick the most recently modified existing file from a list of candidates.
+ *
+ * Used by the event-plan and dashboard watchers when both canonical
+ * (`<installDir>/.amplitude/...`) and legacy (`<installDir>/.amplitude-*`)
+ * paths might exist simultaneously — for example, when the migration
+ * shim moved an old run's canonical file into place but the agent later
+ * writes the legacy path during the current run. Returns null if none
+ * exist. Exported for testing.
+ */
+export function pickFreshestExisting(...paths: string[]): string | null {
+  let best: { path: string; mtimeMs: number } | null = null;
+  for (const p of paths) {
+    try {
+      const stat = fs.statSync(p);
+      if (best === null || stat.mtimeMs > best.mtimeMs) {
+        best = { path: p, mtimeMs: stat.mtimeMs };
+      }
+    } catch {
+      // File doesn't exist or is unreadable; skip.
+    }
+  }
+  return best?.path ?? null;
+}
 
 /**
  * Check if command is a Amplitude skill installation from MCP.
@@ -937,7 +1110,7 @@ export function wizardCanUseTool(
     );
     return {
       behavior: 'deny',
-      message: `Bash command not allowed. Shell operators like ; \` $ ( ) are not permitted.`,
+      message: `Bash command denied by wizard policy: shell operators ; \` $ ( ) are not permitted on this run, and no rephrasing will change that. DO NOT retry the same goal with a different command — see the retry-budget commandment. If you were verifying env vars, use the wizard-tools \`check_env_keys\` MCP tool. If you were inspecting a file, use the \`Read\` tool. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
     };
   }
 
@@ -961,7 +1134,7 @@ export function wizardCanUseTool(
       );
       return {
         behavior: 'deny',
-        message: `Bash command not allowed. Only single pipe to tail/head is permitted.`,
+        message: `Bash command denied by wizard policy: only a single pipe to tail/head is permitted (no chained pipes). This is a fixed policy — DO NOT retry the same goal with a re-ordered or differently-piped command. Use one allowed package-manager subcommand at a time, or document the limitation in the setup report and move on.`,
       };
     }
 
@@ -984,7 +1157,7 @@ export function wizardCanUseTool(
     );
     return {
       behavior: 'deny',
-      message: `Bash command not allowed. Pipes are only permitted with tail/head for output limiting.`,
+      message: `Bash command denied by wizard policy: pipes are only permitted as \`<allowed-command> | tail/head <args>\` for output limiting; \`&\` (background) and other pipe forms are not permitted. DO NOT retry with a re-piped variant. If you cannot accomplish the goal with allowed tools, document the limitation in the setup report and proceed.`,
     };
   }
 
@@ -1005,7 +1178,7 @@ export function wizardCanUseTool(
   );
   return {
     behavior: 'deny',
-    message: `Bash command not allowed. Only install, build, typecheck, lint, and formatting commands are permitted.`,
+    message: `Bash command denied by wizard policy: only package-manager subcommands (install / add / build / test / typecheck / lint / format / etc.) and Amplitude skill installs are permitted. DO NOT retry the same goal with a different shell command — \`node -e\`, \`node --eval\`, \`printenv\`, \`echo $VAR\`, \`cat .env\`, \`bash -c '...'\`, etc. will all be denied. To verify env vars, use the wizard-tools \`check_env_keys\` MCP tool (it reports key presence without exposing values). To inspect a file, use the \`Read\` tool. To inspect a directory, use \`Glob\`. To search code, use \`Grep\`. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
   };
 }
 
@@ -1155,8 +1328,16 @@ export async function initializeAgent(
 let _agentPromise: Promise<AgentRunConfig> | null = null;
 
 function buildDefaultAgentConfig(): AgentConfig {
-  const storedToken = getStoredToken()?.accessToken ?? '';
-  const host = getHostFromRegion('us');
+  // Resolve the user's active zone from ~/.ampli.json so EU users don't
+  // silently get routed to US hosts when no explicit config is threaded
+  // through. Fall back to the default zone if no stored user is found.
+  const storedUser = getStoredUser();
+  const zone =
+    storedUser && storedUser.id !== 'pending'
+      ? storedUser.zone
+      : DEFAULT_AMPLITUDE_ZONE;
+  const storedToken = getStoredToken(storedUser?.id, zone)?.accessToken ?? '';
+  const host = getHostFromRegion(zone);
   const mcpUrl = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
   return {
     workingDirectory: process.cwd(),
@@ -1347,7 +1528,11 @@ export async function runAgent(
     onMessage(message: SDKMessage): void;
     finalize(resultMessage: SDKMessage, totalDurationMs: number): unknown;
   },
-): Promise<{ error?: AgentErrorType; message?: string }> {
+): Promise<{
+  error?: AgentErrorType;
+  message?: string;
+  plannedEvents?: Array<{ name: string; description: string }>;
+}> {
   const {
     spinnerMessage = 'Customizing your Amplitude setup...',
     successMessage = 'Amplitude integration complete',
@@ -1357,13 +1542,31 @@ export async function runAgent(
   spinner.start(spinnerMessage);
 
   if (agentConfig.useLocalClaude) {
-    return runAgentLocally(
+    const result = await runAgentLocally(
       prompt,
       agentConfig.workingDirectory,
       spinner,
       successMessage,
       errorMessage,
     );
+    // Read .amplitude-events.json if the local agent wrote one
+    let plannedEvents: Array<{ name: string; description: string }> | undefined;
+    try {
+      const eventPlanPath = path.join(
+        agentConfig.workingDirectory,
+        '.amplitude-events.json',
+      );
+      const content = fs.readFileSync(eventPlanPath, 'utf-8');
+      const events = parseEventPlanContent(content);
+      if (events) {
+        const named = events.filter((e) => e.name.trim().length > 0);
+        plannedEvents = named;
+        getUI().setEventPlan(named);
+      }
+    } catch {
+      // File doesn't exist — no planned events
+    }
+    return { ...result, plannedEvents };
   }
 
   const { query } = await getSDKModule();
@@ -1394,10 +1597,19 @@ export async function runAgent(
   // See: https://github.com/anthropics/claude-agent-sdk-typescript/issues/41
   let signalDone: () => void = Function.prototype as () => void;
 
+  // Captured from the .amplitude-events.json watcher so the caller can commit
+  // the instrumented plan to the tracking plan even after the agent deletes
+  // the file during the conclude phase.
+  let lastParsedEventPlan: Array<{ name: string; description: string }> = [];
+
   // Helper to handle successful completion (used in normal path and race condition recovery)
   const completeWithSuccess = (
     suppressedError?: Error,
-  ): { error?: AgentErrorType; message?: string } => {
+  ): {
+    error?: AgentErrorType;
+    message?: string;
+    plannedEvents?: Array<{ name: string; description: string }>;
+  } => {
     const durationMs = Date.now() - startTime;
     const durationSeconds = Math.round(durationMs / 1000);
 
@@ -1439,7 +1651,7 @@ export async function runAgent(
       logToFile(`${AgentSignals.BENCHMARK} Middleware finalize error:`, e);
     }
     spinner.stop(successMessage);
-    return {};
+    return { plannedEvents: lastParsedEventPlan };
   };
 
   // Heartbeat interval — every 10s print the last 3 STATUS messages so the
@@ -1450,13 +1662,13 @@ export async function runAgent(
     }
   }, 10_000);
 
-  // Event plan file watcher — cleaned up in finally block
-  let eventPlanWatcher: fs.FSWatcher | undefined;
-  let eventPlanInterval: ReturnType<typeof setInterval> | undefined;
-
-  // Dashboard file watcher — cleaned up in finally block
-  let dashboardWatcher: fs.FSWatcher | undefined;
-  let dashboardInterval: ReturnType<typeof setInterval> | undefined;
+  // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
+  // and their legacy `.amplitude-events.json` / `.amplitude-dashboard.json`
+  // mirrors (still written by bundled context-hub integration skills).
+  // The handle's `dispose()` closes EVERY watcher it created, so cleanup
+  // can't miss a handle when both paths exist simultaneously.
+  let eventPlanHandle: DualPathWatcherHandle | undefined;
+  let dashboardHandle: DualPathWatcherHandle | undefined;
 
   try {
     // Tools needed for the wizard:
@@ -1478,47 +1690,57 @@ export async function runAgent(
       ...WIZARD_TOOL_NAMES,
     ];
 
-    // Watch for .amplitude-events.json and feed into the store (set up once, before retries)
-    const eventPlanPath = path.join(
+    // Watch for the event plan and feed it into the store.
+    //
+    // Canonical location: `.amplitude/events.json` (preserved across runs).
+    // Legacy fallback: `.amplitude-events.json` — older integration skills
+    // (owned by context-hub) still instruct the agent to write the legacy
+    // path during the conclude phase. Watching both keeps backwards compat
+    // until context-hub ships an updated skill set.
+    const eventPlanPath = getEventsFile(agentConfig.workingDirectory);
+    const legacyEventPlanPath = path.join(
       agentConfig.workingDirectory,
       '.amplitude-events.json',
     );
     const readEventPlan = () => {
+      // Read whichever file was modified most recently. mtime-based
+      // selection handles the dashboard flow race (no code writes
+      // canonical during a run, so a stale canonical from a prior run
+      // would shadow the agent's fresh write to legacy) AND the
+      // events.json case where `persistEventPlan` writes both paths
+      // atomically.
+      const winner = pickFreshestExisting(eventPlanPath, legacyEventPlanPath);
+      if (!winner) return;
       try {
-        const content = fs.readFileSync(eventPlanPath, 'utf-8');
-        const events = parseEventPlanContent(content);
+        const events = parseEventPlanContent(fs.readFileSync(winner, 'utf-8'));
         if (events) {
-          getUI().setEventPlan(events.filter((e) => e.name.trim().length > 0));
+          const named = events.filter((e) => e.name.trim().length > 0);
+          // Memoize the latest successful parse so downstream code can
+          // surface it even if a later read fails (e.g. mid-write).
+          lastParsedEventPlan = named;
+          getUI().setEventPlan(named);
         }
       } catch {
-        // File doesn't exist yet
+        // Race: file vanished between stat and read. Next watcher
+        // event will retry.
       }
     };
+    eventPlanHandle = startDualPathWatcher({
+      canonicalPath: eventPlanPath,
+      legacyPath: legacyEventPlanPath,
+      onChange: readEventPlan,
+    });
 
-    try {
-      eventPlanWatcher = fs.watch(eventPlanPath, () => readEventPlan());
-      readEventPlan();
-    } catch {
-      // File doesn't exist yet — poll until it appears
-      eventPlanInterval = setInterval(() => {
-        try {
-          fs.accessSync(eventPlanPath);
-          readEventPlan();
-          clearInterval(eventPlanInterval);
-          eventPlanInterval = undefined;
-          eventPlanWatcher = fs.watch(eventPlanPath, () => readEventPlan());
-        } catch {
-          // Still waiting
-        }
-      }, 1000);
-    }
-
-    // Watch for .amplitude-dashboard.json written by the agent after dashboard creation.
-    // Parses the dashboard URL and forwards it to the UI so ChecklistScreen can
-    // surface a direct link without requiring any further user action.
-    // workingDirectory is the CLI install dir (process.cwd() or --install-dir),
-    // not untrusted network input. The filename is a hardcoded constant.
-    const dashboardFilePath = path.join(
+    // Watch for the dashboard URL handoff from the agent's conclude step.
+    //
+    // Canonical location: `.amplitude/dashboard.json`. Legacy fallback:
+    // `.amplitude-dashboard.json` — bundled integration skills currently
+    // tell the agent to write the legacy path; the wizard reads from both
+    // until context-hub ships an updated skill set. workingDirectory is
+    // the CLI install dir (process.cwd() or --install-dir), not untrusted
+    // network input.
+    const dashboardFilePath = getDashboardFile(agentConfig.workingDirectory); // nosemgrep
+    const legacyDashboardFilePath = path.join(
       agentConfig.workingDirectory,
       '.amplitude-dashboard.json',
     ); // nosemgrep
@@ -1526,36 +1748,42 @@ export async function runAgent(
       dashboardUrl: z.string().url(),
     });
     const readDashboardFile = () => {
+      // Same mtime-based selection as `readEventPlan`. Critical here
+      // because nothing writes the canonical dashboard path during a
+      // run — only the agent writes legacy, so a migrated stale
+      // canonical from a prior run would otherwise shadow the agent's
+      // fresh URL.
+      const winner = pickFreshestExisting(
+        dashboardFilePath,
+        legacyDashboardFilePath,
+      );
+      if (!winner) return;
       try {
-        const content = fs.readFileSync(dashboardFilePath, 'utf-8');
-        const result = dashboardFileSchema.safeParse(JSON.parse(content));
+        const content = fs.readFileSync(winner, 'utf-8');
+        const parsed: unknown = JSON.parse(content);
+        const result = dashboardFileSchema.safeParse(parsed);
         if (result.success) {
           getUI().setDashboardUrl(result.data.dashboardUrl);
+          // Mirror to canonical `.amplitude/dashboard.json` so the
+          // dashboard URL has a stable location. The agent (via bundled
+          // skills) only writes the legacy path; both files are
+          // gitignored and preserved across runs.
+          if (winner === legacyDashboardFilePath) {
+            persistDashboard(
+              agentConfig.workingDirectory,
+              parsed as Record<string, unknown>,
+            );
+          }
         }
       } catch {
-        // File doesn't exist or isn't valid JSON yet
+        // File vanished or invalid JSON; next watcher event retries.
       }
     };
-
-    try {
-      dashboardWatcher = fs.watch(dashboardFilePath, () => readDashboardFile());
-      readDashboardFile();
-    } catch {
-      // File doesn't exist yet — poll until it appears
-      dashboardInterval = setInterval(() => {
-        try {
-          fs.accessSync(dashboardFilePath);
-          readDashboardFile();
-          clearInterval(dashboardInterval);
-          dashboardInterval = undefined;
-          dashboardWatcher = fs.watch(dashboardFilePath, () =>
-            readDashboardFile(),
-          );
-        } catch {
-          // Still waiting
-        }
-      }, 1000);
-    }
+    dashboardHandle = startDualPathWatcher({
+      canonicalPath: dashboardFilePath,
+      legacyPath: legacyDashboardFilePath,
+      onChange: readDashboardFile,
+    });
 
     // Retry loop: if the agent stalls (no message for the configured timeout), abort
     // and re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES.
@@ -1640,6 +1868,21 @@ export async function runAgent(
       }
     };
 
+    /**
+     * Emit a one-line summary if the stderr filter swallowed any
+     * hook-bridge-race lines during the just-finished attempt. Keeps
+     * the noise volume observable (regressions show up as a growing
+     * suppressed count) without flooding the per-line log.
+     */
+    const logSuppressedHookBridgeNoise = (count: number, attempt: number) => {
+      if (count === 0) return;
+      logToFile(
+        `Suppressed ${count} hook-bridge-race stderr line${
+          count === 1 ? '' : 's'
+        } from prior subprocess (attempt ${attempt + 1}; see issue #297)`,
+      );
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -1691,8 +1934,30 @@ export async function runAgent(
         await resultReceived;
       };
 
-      // AbortController lets us cancel a stalled query so we can retry
+      // Per-attempt counter for known-benign hook-bridge-race stderr lines
+      // (see HOOK_BRIDGE_RACE_RE). Logged once at attempt boundary so the
+      // noise volume stays visible without cluttering the per-line stream.
+      let hookBridgeRaceSuppressed = 0;
+
+      // AbortController lets us cancel a stalled query so we can retry.
+      // Chained to the wizard-wide abort signal so that a top-level cancel
+      // (Ctrl+C / SIGINT → graceful-exit → abortWizard()) tears down the
+      // in-flight SDK query and its subprocess instead of leaving them to
+      // be SIGKILL'd by the 2s grace window.
       const controller = new AbortController();
+      const wizardSignal = getWizardAbortSignal();
+      const onWizardAbort = (): void => {
+        if (!controller.signal.aborted) {
+          controller.abort(wizardSignal.reason ?? 'wizard cancelled');
+        }
+      };
+      if (wizardSignal.aborted) {
+        // Wizard was already aborted before this attempt started — abort
+        // immediately so the SDK call short-circuits.
+        onWizardAbort();
+      } else {
+        wizardSignal.addEventListener('abort', onWizardAbort, { once: true });
+      }
       let staleTimer: ReturnType<typeof setTimeout> | undefined;
       let receivedFirstMessage = false;
       let lastMessageType = 'none';
@@ -1752,25 +2017,22 @@ export async function runAgent(
             // AMPLITUDE_WIZARD_MAX_TURNS env var overrides the default
             // (useful for evals + quick iteration). Invalid values fall back.
             maxTurns: resolvedMaxTurns,
-            // Extended thinking — give the model a small reasoning budget on
-            // every turn. The instrumentation-planning phase before
-            // confirm_event_plan is the most thinking-intensive moment, but
-            // file edits and event-name selection benefit too. budgetTokens
-            // is a per-turn ceiling, not a per-run total. display:
-            // 'summarized' keeps NDJSON logs / agent-mode output readable.
-            // Sonnet 4.6 doesn't support adaptive thinking — must use
-            // 'enabled' + explicit budget.
+            // Extended thinking — DISABLED.
             //
-            // Note: thinking blocks bloat the streaming envelope and have
-            // correlated with "API Error: 400 terminated" cascades when
-            // the gateway is unhealthy. The retry/jitter/GATEWAY_DOWN
-            // mitigations in this file are sized to ride out those blips
-            // without dropping thinking.
-            thinking: {
-              type: 'enabled',
-              budgetTokens: 3000,
-              display: 'summarized',
-            },
+            // Earlier we ran with `{ type: 'enabled', budgetTokens: 3000 }`
+            // on every turn, on the theory that the instrumentation-planning
+            // phase benefits from explicit reasoning. In practice each
+            // wizard step is a small, well-bounded action (read a file,
+            // write a file, call an MCP tool) and the commandments + skill
+            // references already pin down the sequence. Thinking blocks
+            // mostly added latency and bloat to the streaming envelope —
+            // they also correlated with "API Error: 400 terminated"
+            // cascades when the gateway was unhealthy.
+            //
+            // Disabled by default for snappier feel and lower variance.
+            // Re-enable per-step (not globally) if a future phase truly
+            // needs deliberation. See `commandments.ts` for the
+            // instructions that obviate per-turn reasoning.
             // Load skills from project's .claude/skills/ directory
             settingSources: ['project'],
             // Explicitly enable required tools including Skill
@@ -1812,32 +2074,102 @@ export async function runAgent(
               return Promise.resolve(result);
             },
             tools: { type: 'preset', preset: 'claude_code' },
-            // Capture stderr from CLI subprocess for debugging
+            // Capture stderr from CLI subprocess for debugging.
+            //
+            // Known-benign hook-bridge-race lines (see HOOK_BRIDGE_RACE_RE)
+            // are partitioned out and counted; everything else passes
+            // through. Chunk-level matching would drop a genuine error
+            // riding alongside a race line in the same batched chunk —
+            // partitionHookBridgeRace splits before filtering so that
+            // can't happen. Summary count is logged at attempt boundary.
             stderr: (data: string) => {
-              logToFile('CLI stderr:', data);
-              if (options.debug) {
-                debug('CLI stderr:', data);
+              const { suppressed, passthrough } = partitionHookBridgeRace(data);
+              hookBridgeRaceSuppressed += suppressed;
+              if (passthrough.length > 0) {
+                logToFile('CLI stderr:', passthrough);
+                if (options.debug) {
+                  debug('CLI stderr:', passthrough);
+                }
               }
             },
-            hooks: buildHooksConfig({
-              // PreToolUse fires for every tool regardless of permissionMode,
-              // so it's our authoritative gate for Bash safety. canUseTool
-              // alone is not invoked for Bash under
-              // `tools: { preset: 'claude_code' } + permissionMode: 'acceptEdits'`.
-              PreToolUse: createPreToolUseHook(),
-              Stop: createStopHook(
-                config?.additionalFeatureQueue ?? (() => []),
-                () => authErrorDetected,
-                {
-                  onFeatureStart: config?.onFeatureStart,
-                  onFeatureComplete: config?.onFeatureComplete,
-                },
-              ),
-              ...(config?.onPreCompact && {
-                PreCompact: createPreCompactHook(config.onPreCompact),
-              }),
-              UserPromptSubmit: createUserPromptSubmitHook(agentState),
-            }),
+            hooks: (() => {
+              // Inner-lifecycle hooks emit NDJSON to AgentUI for outer-agent
+              // orchestrators. SessionStart / PreToolUse / PostToolUse here
+              // are observers — they never deny or alter SDK behavior. We
+              // chain them with our authoritative gates below so the
+              // allowlist still runs for every tool call.
+              const inner = createInnerLifecycleHooks({ phase: 'wizard' });
+              const innerHooks = inner.hooks();
+              const gatedPreToolUse = createPreToolUseHook();
+              const recordPostToolUse = createPostToolUseHook(agentState);
+
+              // Compose: inner observer first (best-effort, never alters
+              // decision), then the authoritative gate. If the gate denies,
+              // the SDK respects the deny regardless of the observer's
+              // earlier resolved value.
+              const preToolUse: HookCallback = async (
+                input,
+                toolUseID,
+                hookOpts,
+              ) => {
+                try {
+                  await innerHooks.PreToolUse(input, toolUseID, hookOpts);
+                } catch (err) {
+                  logToFile('inner PreToolUse observer threw:', err);
+                }
+                return gatedPreToolUse(input, toolUseID, hookOpts);
+              };
+
+              const postToolUse: HookCallback = async (
+                input,
+                toolUseID,
+                hookOpts,
+              ) => {
+                try {
+                  await innerHooks.PostToolUse(input, toolUseID, hookOpts);
+                } catch (err) {
+                  logToFile('inner PostToolUse observer threw:', err);
+                }
+                return recordPostToolUse(input, toolUseID, hookOpts);
+              };
+
+              // PreCompact: record + persist AgentState for in-run recovery,
+              // then forward to the user-supplied handler (which saves the
+              // cross-run WizardSession checkpoint + emits analytics).
+              // Both fire even when `config?.onPreCompact` is absent so the
+              // recovery snapshot is always written.
+              const preCompactHandler = (input: {
+                trigger: 'manual' | 'auto';
+              }): void => {
+                try {
+                  agentState.recordCompaction();
+                  agentState.persist();
+                } catch (err) {
+                  logToFile('PreCompact: agentState persist failed', err);
+                }
+                config?.onPreCompact?.(input);
+              };
+
+              return buildHooksConfig({
+                SessionStart: innerHooks.SessionStart,
+                // PreToolUse fires for every tool regardless of permissionMode,
+                // so it's our authoritative gate for Bash safety. canUseTool
+                // alone is not invoked for Bash under
+                // `tools: { preset: 'claude_code' } + permissionMode: 'acceptEdits'`.
+                PreToolUse: preToolUse,
+                PostToolUse: postToolUse,
+                Stop: createStopHook(
+                  config?.additionalFeatureQueue ?? (() => []),
+                  () => authErrorDetected,
+                  {
+                    onFeatureStart: config?.onFeatureStart,
+                    onFeatureComplete: config?.onFeatureComplete,
+                  },
+                ),
+                PreCompact: createPreCompactHook(preCompactHandler),
+                UserPromptSubmit: createUserPromptSubmitHook(agentState),
+              });
+            })(),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
           },
@@ -1897,14 +2229,24 @@ export async function runAgent(
             );
           }
 
-          // Detect authentication failures so the stop hook can skip reflection
+          // Detect authentication failures so the stop hook can skip
+          // reflection AND so agent-runner routes to the friendly
+          // "your session expired, run again to log in" path instead
+          // of the unhelpful "API Error 401, report to wizard@amplitude.com"
+          // path. Patterns observed in production Sentry traces:
+          //   - `authentication_failed`  — older OAuth fault code
+          //   - `authentication_error`   — current Anthropic gateway pattern
+          //                                ({"error":{"type":"authentication_error",...}})
+          //   - `Invalid or expired token` — Anthropic 401 message body
+          // Without these the agent run aborts as a generic API_ERROR and
+          // the user sees the wrong remediation. See WIZARD-CLI-A / -7 / -F.
           if (
             message.type === 'result' &&
             message.is_error &&
-            JSON.stringify(message).includes('authentication_failed')
+            isAuthErrorMessage(JSON.stringify(message))
           ) {
             authErrorDetected = true;
-            logToFile('Auth error detected: authentication_failed in result');
+            logToFile('Auth error detected in result message');
           }
 
           if (message.type === 'system' && message.subtype === 'init') {
@@ -1940,6 +2282,7 @@ export async function runAgent(
         // Check if the agent hit a transient API error (e.g. Vertex 400)
         // that warrants a retry rather than immediately giving up.
         clearTimeout(staleTimer);
+        wizardSignal.removeEventListener('abort', onWizardAbort);
         const partialOutput = collectedText.join('\n');
         const transientErrorMatchers = [
           { pattern: 'API Error: 400', label: 'api_400' },
@@ -1994,20 +2337,33 @@ export async function runAgent(
           signalDone();
           // Drain the prior iterator before the next attempt — see issue #297.
           await drainPriorResponse(response);
+          logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
           continue;
         }
 
         // Clean completion — exit the retry loop
         postStreamRetryActive = false;
         clearRetryBanner();
+        logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
         break;
       } catch (innerError) {
         clearTimeout(staleTimer);
+        wizardSignal.removeEventListener('abort', onWizardAbort);
         signalDone(); // unblock the prompt stream for this attempt
         // Always drain the prior iterator after an exception, regardless
         // of whether we'll retry. Cheap and defends against the hook
         // bridge race in issue #297.
         await drainPriorResponse(response);
+        logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
+
+        // Wizard-wide abort (Ctrl+C / SIGINT / graceful-exit) — bail out
+        // immediately without retrying. Falling through to the retry branch
+        // would re-enter the stale-timer / SDK loop and waste the 2s grace
+        // window the user is waiting on.
+        if (wizardSignal.aborted) {
+          logToFile('Agent loop exiting: wizard signal aborted');
+          throw innerError;
+        }
 
         // Stall-aborted or API error with retries remaining — try again
         if (controller.signal.aborted && attempt < MAX_RETRIES) {
@@ -2103,13 +2459,13 @@ export async function runAgent(
       const { code, detail } = reportedError;
       if (code === 'MCP_MISSING') {
         logToFile('Agent error: MCP_MISSING');
-        spinner.stop(detail || 'Agent could not access Amplitude MCP');
+        spinner.stop(detail || "Couldn't reach Amplitude's setup service");
         _activeStatusReporter = undefined;
         return { error: AgentErrorType.MCP_MISSING, message: detail };
       }
       if (code === 'RESOURCE_MISSING') {
         logToFile('Agent error: RESOURCE_MISSING');
-        spinner.stop(detail || 'Agent could not access setup resource');
+        spinner.stop(detail || "Couldn't load setup instructions");
         _activeStatusReporter = undefined;
         return { error: AgentErrorType.RESOURCE_MISSING, message: detail };
       }
@@ -2125,16 +2481,20 @@ export async function runAgent(
     // continue to surface errors correctly. The structured `report_status`
     // path above is preferred and runs first.
     if (outputText.includes('[ERROR-MCP-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: MCP_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access Amplitude MCP');
+      spinner.stop("Couldn't reach Amplitude's setup service");
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.MCP_MISSING };
+      return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: RESOURCE_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access setup resource');
+      spinner.stop("Couldn't load setup instructions");
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.RESOURCE_MISSING };
+      return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
 
     // Check for API errors (rate limits, etc.)
@@ -2206,14 +2566,18 @@ export async function runAgent(
     // Backwards-compat fallback for bundled skills emitting legacy text
     // markers — see note in the non-throwing return path.
     if (outputText.includes('[ERROR-MCP-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): MCP_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access Amplitude MCP');
-      return { error: AgentErrorType.MCP_MISSING };
+      spinner.stop("Couldn't reach Amplitude's setup service");
+      return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
+      const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
+      const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): RESOURCE_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access setup resource');
-      return { error: AgentErrorType.RESOURCE_MISSING };
+      spinner.stop("Couldn't load setup instructions");
+      return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
 
     // See note in the non-throwing return path above — surface
@@ -2247,10 +2611,12 @@ export async function runAgent(
     throw error;
   } finally {
     clearInterval(heartbeatInterval);
-    eventPlanWatcher?.close();
-    if (eventPlanInterval) clearInterval(eventPlanInterval);
-    dashboardWatcher?.close();
-    if (dashboardInterval) clearInterval(dashboardInterval);
+    // `dispose()` closes EVERY watcher the helper created plus any
+    // pending poll-fallback timer — there's no path where one of the
+    // two file handles can leak when both canonical and legacy paths
+    // exist (the bug that was previously inline here).
+    eventPlanHandle?.dispose();
+    dashboardHandle?.dispose();
     clearRetryBanner();
     _activeStatusReporter = undefined;
   }

@@ -798,6 +798,12 @@ export interface McpEventsResult {
 export async function fetchHasAnyEventsMcp(
   accessToken: string,
   appId: string,
+  /**
+   * Optional abort signal — propagated to the underlying MCP fetch so the
+   * caller can cancel an in-flight ingestion poll on shutdown / Ctrl+C
+   * instead of letting it run to completion in the background.
+   */
+  abortSignal?: AbortSignal,
 ): Promise<McpEventsResult> {
   const NONE: McpEventsResult = {
     hasEvents: false,
@@ -808,6 +814,7 @@ export async function fetchHasAnyEventsMcp(
 
   const result = await callAmplitudeMcp<McpEventsResult>({
     accessToken,
+    abortSignal,
     label: 'fetchHasAnyEventsMcp',
 
     direct: async (callTool) => {

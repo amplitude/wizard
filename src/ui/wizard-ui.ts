@@ -31,7 +31,21 @@ export interface WizardUI {
   // ── Lifecycle messages ────────────────────────────────────────────
   intro(message: string): void;
   outro(message: string): void;
-  cancel(message: string, options?: { docsUrl?: string }): void;
+  /**
+   * Cancel/abort UI. Sets the outro state so the user sees the failure
+   * before the process exits.
+   *
+   * Returns a promise that resolves when the user has had a chance to
+   * see the message:
+   *   - InkUI: resolves when the OutroScreen has rendered AND the user
+   *     dismisses it (keypress / picker action) — or after a safety
+   *     timeout if the TUI is unresponsive. Awaiting this is what lets
+   *     `wizardAbort` show the Outro on error paths instead of slamming
+   *     `process.exit` before Ink renders the next frame.
+   *   - AgentUI / LoggingUI: resolves immediately. There's no TUI to
+   *     render and no user to interact with the message.
+   */
+  cancel(message: string, options?: { docsUrl?: string }): Promise<void>;
 
   // ── Logging ───────────────────────────────────────────────────────
   log: {

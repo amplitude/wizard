@@ -23,17 +23,24 @@ import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
 import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
+import { type AppId, toCredentialAppId } from '../lib/wizard-session';
 import { storeToken } from './ampli-settings';
 import { detectRegionFromToken } from './urls';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
+import {
+  ensureDir,
+  getInstallationErrorLogFile,
+  getRunDir,
+} from './storage-paths';
 
 interface ProjectData {
   projectApiKey: string;
   accessToken: string;
   host: string;
   distinctId: string;
-  appId: number;
+  /** Branded `AppId` once known; `0` when the env hasn't been picked yet. */
+  appId: AppId | 0;
   cloudRegion: CloudRegion;
 }
 
@@ -157,26 +164,58 @@ export async function installPackage({
       )} with ${chalk.bold(pkgManager.label)}.`,
     );
 
+    // Captured by the exec callback below; read in the catch arm to surface
+    // the path in the user-facing error message. Typed as a wide union so
+    // TypeScript doesn't narrow it to the initializer once a static-analysis
+    // pass concludes the closure can't mutate it.
+    const installErrorState: { logPath: string | null } = { logPath: null };
     try {
+      // SECURITY: use execFile (no shell). The package name is wizard-derived
+      // (not user-supplied) but we still build the argv from a tokenised list
+      // so a future regression — e.g. a manifest field that ever lands in
+      // `installCommand` — can't introduce shell injection. installCommand is
+      // a multi-word string like "bun add" / "yarn add", so split on
+      // whitespace to derive [executable, ...subcommandArgs].
+      const [installExe, ...installArgs] = pkgManager.installCommand
+        .trim()
+        .split(/\s+/);
+      const flagArgs = pkgManager.flags ? pkgManager.flags.split(/\s+/) : [];
+      const forceArgs =
+        forceInstall && pkgManager.forceInstallFlag
+          ? pkgManager.forceInstallFlag.split(/\s+/)
+          : [];
+      const legacyArgs = legacyPeerDepsFlag
+        ? legacyPeerDepsFlag.split(/\s+/)
+        : [];
+
       await new Promise<void>((resolve, reject) => {
-        childProcess.exec(
-          `${pkgManager.installCommand} ${packageName} ${pkgManager.flags} ${
-            forceInstall ? pkgManager.forceInstallFlag : ''
-          } ${legacyPeerDepsFlag}`.trim(),
+        childProcess.execFile(
+          installExe,
+          [
+            ...installArgs,
+            packageName,
+            ...flagArgs,
+            ...forceArgs,
+            ...legacyArgs,
+          ],
           { cwd: installDir },
-          (err, stdout, stderr) => {
+          (err: Error | null, stdout, stderr) => {
             if (err) {
-              fs.writeFileSync(
-                join(
-                  process.cwd(),
-                  `amplitude-wizard-installation-error-${Date.now()}.log`,
-                ),
-                JSON.stringify({
-                  stdout,
-                  stderr,
-                }),
-                { encoding: 'utf8' },
-              );
+              // Land the error log under `~/.amplitude/wizard/runs/<hash>/`
+              // so it (a) doesn't litter the user's project root and (b)
+              // gets picked up by `/diagnostics --bundle`. Falls back to
+              // the installation dir if the cache root mkdir fails.
+              ensureDir(getRunDir(installDir));
+              const logPath = getInstallationErrorLogFile(installDir);
+              try {
+                fs.writeFileSync(logPath, JSON.stringify({ stdout, stderr }), {
+                  encoding: 'utf8',
+                });
+                installErrorState.logPath = logPath;
+              } catch {
+                // Best-effort — the underlying npm error is what really
+                // matters; logging is supplementary.
+              }
 
               reject(err);
             } else {
@@ -187,12 +226,13 @@ export async function installPackage({
       });
     } catch (e) {
       sdkInstallSpinner.stop('Installation failed.');
+      const logHint = installErrorState.logPath
+        ? `The wizard has saved the install error to:\n  ${installErrorState.logPath}\n\nIf you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${OUTBOUND_URLS.githubIssues}`
+        : `If you think this issue is caused by the Amplitude wizard, create an issue on GitHub:\n${OUTBOUND_URLS.githubIssues}`;
       getUI().log.error(
         `${chalk.red(
           'Encountered the following error during installation:',
-        )}\n\n${e}\n\n${chalk.dim(
-          `The wizard has created a \`amplitude-wizard-installation-error-*.log\` file. If you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${OUTBOUND_URLS.githubIssues}`,
-        )}`,
+        )}\n\n${e}\n\n${chalk.dim(logHint)}`,
       );
       await abort();
     }
@@ -401,7 +441,8 @@ export async function getOrAskForProjectData(
   host: string;
   projectApiKey: string;
   accessToken: string;
-  appId: number;
+  /** Branded `AppId` once known; `0` when the env hasn't been picked yet. */
+  appId: AppId | 0;
   cloudRegion: CloudRegion;
 }> {
   // If an API key is provided (via --api-key flag, any mode), bypass OAuth entirely.
@@ -413,7 +454,7 @@ export async function getOrAskForProjectData(
       host: DEFAULT_HOST_URL,
       projectApiKey: _options.apiKey,
       accessToken: _options.apiKey,
-      appId: _options.appId ?? 0,
+      appId: toCredentialAppId(_options.appId),
       cloudRegion: 'us',
     };
   }
@@ -439,7 +480,7 @@ export async function getOrAskForProjectData(
           host: resolved.host,
           projectApiKey: resolved.projectApiKey,
           accessToken: resolved.accessToken,
-          appId: _options.appId ?? 0,
+          appId: toCredentialAppId(_options.appId),
           cloudRegion: resolved.cloudRegion,
         };
       }
@@ -672,7 +713,7 @@ async function askForWizardLogin(
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',
-    appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
+    appId: toCredentialAppId(selectedAppId),
     cloudRegion,
   };
 }

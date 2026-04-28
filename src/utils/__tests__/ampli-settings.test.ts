@@ -207,6 +207,81 @@ describe('getStoredToken', () => {
     expect(token?.accessToken).toBe('eu-access');
   });
 
+  // Regression: /region switches were silently reusing the wrong-zone token.
+  // When a US session is cached, looking up the EU zone must NOT return it —
+  // otherwise performAmplitudeAuth skips the EU browser flow entirely and the
+  // user ends up authenticated against the wrong data center.
+  it('does not return a US-keyed token when looking up the EU zone', () => {
+    setupConfig({
+      'User-123': {
+        User: {
+          id: '123',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          email: 'ada@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'us-access',
+        OAuthIdToken: 'us-id',
+        OAuthRefreshToken: 'us-refresh',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+    expect(getStoredToken(undefined, 'eu')).toBeUndefined();
+  });
+
+  it('does not return an EU-keyed token when looking up the US zone', () => {
+    setupConfig({
+      'User[eu]-456': {
+        User: {
+          id: '456',
+          firstName: 'X',
+          lastName: 'Y',
+          email: 'x@y.com',
+          zone: 'eu',
+        },
+        OAuthAccessToken: 'eu-access',
+        OAuthIdToken: 'eu-id',
+        OAuthRefreshToken: 'eu-refresh',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+    expect(getStoredToken(undefined, 'us')).toBeUndefined();
+  });
+
+  it('returns the matching zone when both US and EU tokens are stored', () => {
+    setupConfig({
+      'User-123': {
+        User: {
+          id: '123',
+          firstName: 'Ada',
+          lastName: 'Lovelace',
+          email: 'ada@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'us-access',
+        OAuthIdToken: 'us-id',
+        OAuthRefreshToken: 'us-refresh',
+        OAuthExpiresAt: FUTURE,
+      },
+      'User[eu]-456': {
+        User: {
+          id: '456',
+          firstName: 'X',
+          lastName: 'Y',
+          email: 'x@y.com',
+          zone: 'eu',
+        },
+        OAuthAccessToken: 'eu-access',
+        OAuthIdToken: 'eu-id',
+        OAuthRefreshToken: 'eu-refresh',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+    expect(getStoredToken(undefined, 'us')?.accessToken).toBe('us-access');
+    expect(getStoredToken(undefined, 'eu')?.accessToken).toBe('eu-access');
+  });
+
   it('sanitizes dots in userId when looking up', () => {
     // userId with dots → stored as User-user-example-com
     setupConfig({

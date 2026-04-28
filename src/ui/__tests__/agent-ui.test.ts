@@ -506,4 +506,90 @@ describe('AgentUI.emitNeedsInput', () => {
       { value: 'svelte', label: 'svelte' },
     ]);
   });
+
+  it('promptChoice picks searchable_select widget for ≥10 options', () => {
+    const ui = new AgentUI();
+    const longList = Array.from({ length: 15 }, (_, i) => `option-${i}`);
+    void ui.promptChoice('Pick one of many', longList);
+
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({
+      component: 'searchable_select',
+      searchPlaceholder: 'Filter options…',
+    });
+  });
+
+  it('promptChoice picks plain select widget for <10 options', () => {
+    const ui = new AgentUI();
+    void ui.promptChoice('Pick one', ['a', 'b', 'c']);
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({ component: 'select' });
+  });
+
+  it('promptConfirm uses the confirmation widget', () => {
+    const ui = new AgentUI();
+    void ui.promptConfirm('Apply changes?');
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({
+      component: 'confirmation',
+      priority: 'required',
+      title: 'Apply changes?',
+    });
+  });
+
+  it('emitNeedsInput surfaces ui hints, recommendedReason, pagination, manualEntry', () => {
+    const ui = new AgentUI();
+    ui.emitNeedsInput({
+      code: 'project_selection',
+      message: 'Pick a project',
+      ui: {
+        component: 'searchable_select',
+        priority: 'required',
+        title: 'Select an Amplitude project',
+        description: 'Choose where events go.',
+        searchPlaceholder: 'Search…',
+        emptyState: 'No projects available.',
+      },
+      choices: [
+        {
+          value: '123',
+          label: 'Prod',
+          description: 'Org > WS > Prod',
+          metadata: { orgName: 'Org', envName: 'Prod' },
+          resumeFlags: ['--app-id', '123'],
+        },
+      ],
+      recommended: '123',
+      recommendedReason: 'Matches current ampli.json',
+      pagination: {
+        total: 100,
+        returned: 1,
+        nextCommand: ['npx', 'wizard', 'projects', 'list'],
+      },
+      allowManualEntry: true,
+      manualEntry: { flag: '--app-id', placeholder: 'Enter ID' },
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.type).toBe('needs_input');
+    expect(event.data).toMatchObject({
+      code: 'project_selection',
+      ui: {
+        component: 'searchable_select',
+        priority: 'required',
+        title: 'Select an Amplitude project',
+      },
+      recommended: '123',
+      recommendedReason: 'Matches current ampli.json',
+      allowManualEntry: true,
+    });
+    const data = event.data as Record<string, unknown>;
+    expect(data.pagination).toMatchObject({ total: 100, returned: 1 });
+    expect(data.manualEntry).toMatchObject({ flag: '--app-id' });
+    expect((data.choices as Array<Record<string, unknown>>)[0]).toMatchObject({
+      value: '123',
+      description: 'Org > WS > Prod',
+      resumeFlags: ['--app-id', '123'],
+    });
+  });
 });

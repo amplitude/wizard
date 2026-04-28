@@ -16,6 +16,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
+import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { WizardStore } from '../store.js';
 import {
@@ -38,13 +39,12 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import { getLogFile } from '../../../utils/storage-paths.js';
 
 const RUN_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '←→', label: 'Tabs' },
   { key: 'Ctrl+C', label: 'Cancel' },
 ]);
-
-const LOG_FILE = '/tmp/amplitude-wizard.log';
 
 /** File extensions used to detect "currently editing" from status messages. */
 const FILE_EXT_PATTERN =
@@ -194,7 +194,34 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const completed = progressItems.filter(
     (t) => t.status === 'completed',
   ).length;
+  const inProgress = progressItems.filter(
+    (t) => t.status === 'in_progress',
+  ).length;
+  const pending = progressItems.filter((t) => t.status === 'pending').length;
   const total = progressItems.length;
+
+  // High-water mark for the "done" counter. The agent can grow its
+  // TodoWrite list mid-run, which means the count we display would
+  // otherwise visibly regress: 5/5 done → 5/8 done as soon as 3 new
+  // tasks land. Pinning the displayed "done" count to its maximum
+  // observed value keeps the user-perceived progress monotonically
+  // forward; the "to go" side is always the live pending+inProgress
+  // count, so new tasks still surface clearly without rewriting the
+  // history of work the user already saw finish.
+  const completedHighRef = useRef(0);
+  if (completed > completedHighRef.current)
+    completedHighRef.current = completed;
+  const completedDisplay = completedHighRef.current;
+
+  // Coaching tiers for "spinner spins forever". The progress signal is the
+  // task count — every time the agent reports a new task, the timer resets
+  // because forward motion means the user shouldn't be nagged. Tiers fire
+  // at 90s (calm reassurance) and 5min (escalated suggestion).
+  // RUN_COACHING_TIER_T1_S=90, RUN_COACHING_TIER_T2_S=300.
+  const { tier: coachingTier } = useTimedCoaching({
+    thresholds: [90, 300],
+    progressSignal: total,
+  });
 
   return (
     <Box flexDirection="row" flexGrow={1}>
@@ -208,7 +235,16 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
             <Text color={Colors.body} bold>
               {total > 0
-                ? `${completed}/${total} tasks complete`
+                ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                  // mid-run, which makes the progress bar look like it's
+                  // going backwards (6 tasks → 9 tasks). Show absolute
+                  // counts instead so the user sees forward motion.
+                  // `completedDisplay` is a high-water mark, so the "done"
+                  // count never regresses if new tasks appear after the
+                  // user already saw earlier ones finish.
+                  pending + inProgress > 0
+                  ? `${completedDisplay} done · ${inProgress + pending} to go`
+                  : `${completedDisplay} tasks complete`
                 : 'Agent running'}
             </Text>
             <Text color={Colors.muted}>
@@ -228,6 +264,20 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 
         {/* Tasks — the hero */}
         <ProgressList items={progressItems} title="Tasks" />
+
+        {/* Coaching: surfaces calmly after 90s of no task-count progress.
+            The spinner stays — this is a *secondary* line that gives the
+            user something to do (open Logs, cancel) instead of staring
+            at a frozen indicator. Resets when a new task appears. */}
+        {coachingTier >= 1 && (
+          <Box marginTop={1}>
+            <Text color={Colors.muted}>
+              {coachingTier >= 2
+                ? "This is unusually slow. The Logs tab (Tab) may show what's stuck — or Ctrl+C to cancel."
+                : "Still working — switch to the Logs tab (Tab) to see what's happening, or Ctrl+C to cancel."}
+            </Text>
+          </Box>
+        )}
 
         {/* Inline event plan */}
         <InlineEventPlan store={store} />
@@ -275,7 +325,13 @@ export const RunScreen = ({ store }: RunScreenProps) => {
     {
       id: 'logs',
       label: 'Logs',
-      component: <LogViewer filePath={LOG_FILE} />,
+      // Per-project log file under ~/.amplitude/wizard/runs/<hash>/log.txt.
+      // Resolving from session.installDir keeps two parallel runs in
+      // separate logs (vs. the previous global /tmp/amplitude-wizard.log).
+      // PR 322 added getLogFilePath() with a runtime AMPLITUDE_WIZARD_LOG
+      // override; per-project pathing supersedes it. If a future PR wants
+      // both, getLogFile() can grow an env-override branch.
+      component: <LogViewer filePath={getLogFile(store.session.installDir)} />,
     },
     {
       id: 'snake',

@@ -168,7 +168,7 @@ OutroScreen in error/cancel states shows the error message and exits on any
 keystroke. No recovery guidance, no log file path, no link to docs.
 
 **Recommendation:**
-- Show the log file path: "Detailed logs: /tmp/amplitude-wizard.log"
+- Show the log file path (per-project, e.g. `~/.amplitude/wizard/runs/<hash>/log.txt` — invoke `/diagnostics` for the exact path)
 - Show the docs URL: "Manual setup: [docsUrl]"
 - Suggest retry: "Run `amplitude-wizard` again to retry"
 

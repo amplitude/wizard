@@ -709,11 +709,41 @@ legacy files with `WorkspaceId` are auto-migrated to `ProjectId` on read, and
 ### 4. Crash-recovery checkpoint (`src/lib/session-checkpoint.ts`)
 
 A sanitized session snapshot (no credentials or tokens) saved to
-`$TMPDIR/amplitude-wizard-checkpoint.json`. On restart, if the checkpoint matches
-the current project directory and is less than 24 hours old, the wizard restores:
-region, org/project selection, framework detection results, and intro state.
-This lets users resume where they left off after a crash without re-doing setup.
-Checkpoints are deleted on successful completion via `clearCheckpoint()`.
+`~/.amplitude/wizard/runs/<sha256(installDir)>/checkpoint.json`. Per-project
+under the cache root so two parallel wizard runs in different directories
+can't clobber each other's checkpoint. On restart, if the checkpoint
+matches the current project directory and is less than 24 hours old, the
+wizard restores: region, org/project selection, framework detection
+results, and intro state. This lets users resume where they left off
+after a crash without re-doing setup. Checkpoints are deleted on
+successful completion via `clearCheckpoint()`.
+
+### 5. Wizard storage layout (`src/utils/storage-paths.ts`)
+
+Single source of truth for every wizard-managed path. Two storage roots:
+
+- **Per-user cache root: `~/.amplitude/wizard/`** (override with
+  `AMPLITUDE_WIZARD_CACHE_DIR`)
+  - `runs/<sha256(installDir)>/log.txt` — per-project debug log
+  - `runs/<sha256(installDir)>/log.ndjson` — structured log mirror
+  - `runs/<sha256(installDir)>/benchmark.json` — benchmark middleware output
+  - `runs/<sha256(installDir)>/checkpoint.json` — crash-recovery snapshot
+  - `plans/<planId>.json` — plan/apply artifacts (24h TTL)
+  - `state/<attemptId>.json` — agent recovery state for compactions
+  - `update-check.json` — npm registry latest-version cache (24h TTL)
+- **Per-project metadata dir: `<installDir>/.amplitude/`**
+  - `events.json` — approved event plan (preserved across runs)
+  - `dashboard.json` — URL of the dashboard the agent created
+
+Both are gitignored (the project meta dir as a single `.amplitude/`
+line). The agent contract is unchanged: `confirm_event_plan` is the
+canonical writer for `events.json`. A legacy mirror at
+`<installDir>/.amplitude-events.json` is also written for backwards
+compatibility with bundled integration skills; both the canonical and
+legacy paths are gitignored and preserved across runs (the legacy
+mirror is dropped once context-hub ships a skill set that reads the
+canonical path). The `/diagnostics` slash command prints the full
+layout for the current project — useful when filing bug reports.
 
 ---
 

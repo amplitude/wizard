@@ -7,10 +7,12 @@
  */
 
 import { readFileSync, unlinkSync, existsSync } from 'fs';
-import { createHash } from 'crypto';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import {
+  ensureDir,
+  getCheckpointFile,
+  getRunDir,
+} from '../utils/storage-paths.js';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
@@ -21,8 +23,7 @@ import { Integration } from './constants.js';
 /** Per-project checkpoint file using a hash of installDir to avoid cross-instance clobbering. */
 function checkpointPath(installDir: string): string {
   const dir = installDir || process.cwd();
-  const hash = createHash('sha256').update(dir).digest('hex').slice(0, 12);
-  return join(tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`);
+  return getCheckpointFile(dir);
 }
 
 /** Checkpoints older than 24 hours are considered stale. */
@@ -48,7 +49,9 @@ const CheckpointSchema = z
     selectedEnvName: z.string().nullable().optional(),
     // Legacy fields kept for back-compat reads.
     // - selectedWorkspaceId/Name: renamed to selectedProjectId/Name when
-    //   the codebase adopted the website's "project" terminology.
+    //   the codebase adopted the website's "project" terminology. Empty /
+    //   whitespace-only ids from old checkpoints are coerced to null at
+    //   read time in loadCheckpoint().
     selectedWorkspaceId: z.string().nullable().optional(),
     selectedWorkspaceName: z.string().nullable().optional(),
 
@@ -57,6 +60,7 @@ const CheckpointSchema = z
     detectedFrameworkLabel: z.string().nullable(),
     detectionComplete: z.boolean(),
     frameworkContext: z.record(z.string(), z.unknown()),
+    frameworkContextAnswerOrder: z.array(z.string()).optional(),
 
     // Intro
     introConcluded: z.boolean(),
@@ -101,10 +105,13 @@ export function saveCheckpoint(session: WizardSession): void {
     detectedFrameworkLabel: session.detectedFrameworkLabel,
     detectionComplete: session.detectionComplete,
     frameworkContext: session.frameworkContext,
+    frameworkContextAnswerOrder: session.frameworkContextAnswerOrder,
 
     introConcluded: session.introConcluded,
   };
 
+  // Ensure the per-project run dir exists; cache root may not have been created yet.
+  ensureDir(getRunDir(session.installDir));
   atomicWriteJSON(checkpointPath(session.installDir), checkpoint, 0o600);
 }
 
@@ -161,13 +168,23 @@ export async function loadCheckpoint(
     region: checkpoint.region,
     selectedOrgId: checkpoint.selectedOrgId,
     selectedOrgName: checkpoint.selectedOrgName,
-    selectedProjectId: checkpoint.selectedProjectId,
-    selectedProjectName: checkpoint.selectedProjectName,
+    // The schema transform has already collapsed legacy
+    // `selectedWorkspaceId/Name` checkpoints into the post-rename
+    // `selectedProjectId/Name` fields. Coerce empty / whitespace-only IDs
+    // (which older checkpoints could carry) to null so callers can rely
+    // on truthy checks.
+    selectedProjectId:
+      checkpoint.selectedProjectId &&
+      checkpoint.selectedProjectId.trim().length > 0
+        ? checkpoint.selectedProjectId
+        : null,
+    selectedProjectName: checkpoint.selectedProjectName ?? null,
     selectedEnvName: checkpoint.selectedEnvName,
     integration,
     detectedFrameworkLabel: derivedLabel,
     detectionComplete: checkpoint.detectionComplete,
     frameworkContext: checkpoint.frameworkContext,
+    frameworkContextAnswerOrder: checkpoint.frameworkContextAnswerOrder ?? [],
     introConcluded: checkpoint.introConcluded,
   };
 }
