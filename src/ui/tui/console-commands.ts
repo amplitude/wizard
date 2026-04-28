@@ -83,6 +83,17 @@ const RUN_ACTIVE_BLOCK_MESSAGES: Record<string, string> = {
 };
 
 /**
+ * Returns true when the first whitespace-delimited token of `input` exactly
+ * matches a registered slash command. Used by ConsoleView.handleSubmit to
+ * distinguish real commands (/region) from slash-prefixed queries like
+ * "/lib/config.ts is broken" or partial prefixes like "/r".
+ */
+export function isKnownCommand(input: string): boolean {
+  const firstToken = input.trim().split(/\s+/)[0] ?? '';
+  return COMMANDS.some((c) => c.cmd === firstToken);
+}
+
+/**
  * Returns the user-facing message to surface when a `requiresIdle` command
  * is invoked during an active run, or `null` if the command is allowed to
  * proceed in the current `runPhase`.
