@@ -26,6 +26,12 @@ function seedRunScreenStore() {
   return store;
 }
 
+// RunScreen has a high-frequency spinner setInterval (~80ms ticks) on
+// top of the per-second coaching timer. Advancing fake timers across
+// 90–305s flushes many React renders; bump the per-test timeout
+// generously to absorb that on slower CI hardware.
+const SLOW_TEST_TIMEOUT_MS = 30_000;
+
 describe('RunScreen — timeout coaching', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -43,44 +49,56 @@ describe('RunScreen — timeout coaching', () => {
     expect(frame).not.toContain('unusually slow');
   });
 
-  it('shows the tier-1 coaching line after 90s of no task changes', async () => {
-    const store = seedRunScreenStore();
-    const { lastFrame } = render(<RunScreen store={store} />);
+  it(
+    'shows the tier-1 coaching line after 90s of no task changes',
+    async () => {
+      const store = seedRunScreenStore();
+      const { lastFrame } = render(<RunScreen store={store} />);
 
-    await vi.advanceTimersByTimeAsync(95_000);
-    const frame = lastFrame() ?? '';
-    expect(frame).toContain('Still working');
-    expect(frame).toContain('Logs tab');
-  });
+      await vi.advanceTimersByTimeAsync(95_000);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('Still working');
+      expect(frame).toContain('Logs tab');
+    },
+    SLOW_TEST_TIMEOUT_MS,
+  );
 
-  it('escalates to the tier-2 line past 5 minutes', async () => {
-    const store = seedRunScreenStore();
-    const { lastFrame } = render(<RunScreen store={store} />);
+  it(
+    'escalates to the tier-2 line past 5 minutes',
+    async () => {
+      const store = seedRunScreenStore();
+      const { lastFrame } = render(<RunScreen store={store} />);
 
-    await vi.advanceTimersByTimeAsync(305_000);
-    const frame = lastFrame() ?? '';
-    expect(frame).toContain('unusually slow');
-  });
+      await vi.advanceTimersByTimeAsync(305_000);
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('unusually slow');
+    },
+    SLOW_TEST_TIMEOUT_MS,
+  );
 
-  it('resets coaching when a new task is appended (forward progress)', async () => {
-    const store = seedRunScreenStore();
-    const { lastFrame, rerender } = render(<RunScreen store={store} />);
-    await vi.advanceTimersByTimeAsync(95_000);
-    expect(lastFrame() ?? '').toContain('Still working');
+  it(
+    'resets coaching when a new task is appended (forward progress)',
+    async () => {
+      const store = seedRunScreenStore();
+      const { lastFrame, rerender } = render(<RunScreen store={store} />);
+      await vi.advanceTimersByTimeAsync(95_000);
+      expect(lastFrame() ?? '').toContain('Still working');
 
-    // Agent reports a new task — that's forward motion. Reset the counter.
-    store.setTasks([
-      ...store.tasks,
-      {
-        label: 'Configure events',
-        activeForm: 'Configuring events...',
-        status: TaskStatus.Pending,
-        done: false,
-      },
-    ]);
-    rerender(<RunScreen store={store} />);
+      // Agent reports a new task — that's forward motion. Reset the counter.
+      store.setTasks([
+        ...store.tasks,
+        {
+          label: 'Configure events',
+          activeForm: 'Configuring events...',
+          status: TaskStatus.Pending,
+          done: false,
+        },
+      ]);
+      rerender(<RunScreen store={store} />);
 
-    await vi.advanceTimersByTimeAsync(2_000);
-    expect(lastFrame() ?? '').not.toContain('Still working');
-  });
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(lastFrame() ?? '').not.toContain('Still working');
+    },
+    SLOW_TEST_TIMEOUT_MS,
+  );
 });
