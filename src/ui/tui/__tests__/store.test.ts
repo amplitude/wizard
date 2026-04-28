@@ -440,6 +440,25 @@ describe('WizardStore', () => {
       expect(store.session.outroData).toBeNull();
     });
 
+    it('showLogoutOverlay sets loggingOut synchronously before pushing the overlay', () => {
+      const store = createStore();
+      expect(store.session.loggingOut).toBe(false);
+      store.showLogoutOverlay();
+      // The synchronous flag-set must happen before the overlay is pushed,
+      // so the bin.ts re-auth watcher can rely on it the moment /logout
+      // dispatches.
+      expect(store.session.loggingOut).toBe(true);
+      expect(store.currentScreen).toBe(Overlay.Logout);
+    });
+
+    it('hideLogoutOverlay clears loggingOut so a cancelled /logout does not block re-auth', () => {
+      const store = createStore();
+      store.showLogoutOverlay();
+      expect(store.session.loggingOut).toBe(true);
+      store.hideLogoutOverlay();
+      expect(store.session.loggingOut).toBe(false);
+    });
+
     it('setRegionForced clears outroData and runPhase so /region works after setup completes', () => {
       const store = createStore();
       store.session.region = 'us';

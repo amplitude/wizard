@@ -520,10 +520,19 @@ export class WizardStore {
   }
 
   showLogoutOverlay(): void {
+    // Set the loggingOut flag SYNCHRONOUSLY before pushing the overlay so the
+    // bin.ts re-auth watcher can't race the overlay push and observe a state
+    // where credentials are null but currentScreen is not yet Overlay.Logout
+    // (which would trigger an unwanted runOAuthCycle and pop the browser).
+    this.$session.setKey('loggingOut', true);
     this.pushOverlay(Overlay.Logout);
   }
 
   hideLogoutOverlay(): void {
+    // Clearing loggingOut here covers the cancel path (user dismissed the
+    // confirm prompt). On the confirm path, process.exit(0) tears the
+    // process down before this matters.
+    this.$session.setKey('loggingOut', false);
     this.popOverlay();
   }
 

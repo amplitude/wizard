@@ -1651,8 +1651,16 @@ void yargs(hideBin(process.argv))
                 // process.exit()s 1.5s later; without this guard the
                 // watcher would race the exit and open a browser during the
                 // "Logged out" confirmation.
+                //
+                // The `loggingOut` session flag is set synchronously by
+                // showLogoutOverlay BEFORE any state mutation. Checking it
+                // closes the brief gate where credentials are null but
+                // `currentScreen` has not yet re-resolved to Overlay.Logout,
+                // which would otherwise let this watcher fall through and
+                // trigger an unwanted runOAuthCycle.
                 await waitForSessionState(
                   () =>
+                    !tui.store.session.loggingOut &&
                     tui.store.session.credentials === null &&
                     tui.store.session.region !== null &&
                     !tui.store.session.regionForced &&

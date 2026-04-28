@@ -408,6 +408,16 @@ export interface WizardSession {
   /** True once the user has clicked Continue on the IntroScreen. */
   introConcluded: boolean;
 
+  /**
+   * True from the moment the user invokes `/logout` until the logout flow
+   * completes (or is cancelled). Used by the bin.ts re-auth watcher to skip
+   * the auto-OAuth retry that would otherwise fire during the brief window
+   * where credentials are null but the Logout overlay has not yet been
+   * fully resolved as `currentScreen`. Without this flag the watcher could
+   * race the logout flow and re-open the browser unexpectedly.
+   */
+  loggingOut: boolean;
+
   // Screen completion
   mcpComplete: boolean;
   mcpOutcome: McpOutcome | null;
@@ -585,6 +595,7 @@ export function buildSession(args: {
     llmOptIn: false,
     sessionReplayOptIn: false,
     engagementOptIn: false,
+    loggingOut: false,
     mcpComplete: false,
     mcpOutcome: null,
     mcpInstalledClients: [],
