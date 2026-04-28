@@ -16,9 +16,33 @@ import {
   readFileSync,
   writeFileSync,
   appendFileSync,
+  chmodSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
+
+// `.env.local` holds the project's Amplitude API key, which is treated as
+// a secret. We constrain it to 0o600 (owner read/write only) on every
+// write to defend against:
+//   - Pre-existing files created at 0o644 by earlier wizard runs / other
+//     tooling. `writeFileSync({ mode })` only applies on file CREATION,
+//     so we always follow up with chmodSync.
+//   - `appendFileSync({ mode })` ditto — only applies on creation.
+//
+// Windows note: `chmodSync` only honours the read-only bit on win32; mode
+// `0o600` collapses to "writable" there. The risk on Windows is mitigated
+// by the per-user profile directory's ACLs rather than POSIX modes.
+const ENV_FILE_MODE = 0o600;
+
+/** Tighten a file to {@link ENV_FILE_MODE} on POSIX. No-op on win32. */
+function tightenEnvMode(envPath: string): void {
+  try {
+    chmodSync(envPath, ENV_FILE_MODE);
+  } catch {
+    // chmod can legitimately fail on Windows or weird filesystems — never
+    // let a permissions tweak break the wizard.
+  }
+}
 
 const KEYCHAIN_SERVICE = 'amplitude-wizard';
 const ENV_KEY_NAME = 'AMPLITUDE_API_KEY';
@@ -123,18 +147,30 @@ function envWrite(installDir: string, key: string): void {
   if (existsSync(envPath)) {
     const contents = readFileSync(envPath, 'utf8');
     if (contents.includes(`${ENV_KEY_NAME}=`)) {
-      // Replace existing entry
+      // Replace existing entry. `mode` here only matters on the first
+      // write; existing files keep their pre-existing mode unless we
+      // chmod afterwards (which we do, below).
       writeFileSync(
         envPath,
         contents.replace(/^AMPLITUDE_API_KEY=.*$/m, `${ENV_KEY_NAME}=${key}`),
-        'utf8',
+        { encoding: 'utf8', mode: ENV_FILE_MODE },
       );
     } else {
-      appendFileSync(envPath, `\n${ENV_KEY_NAME}=${key}\n`, 'utf8');
+      appendFileSync(envPath, `\n${ENV_KEY_NAME}=${key}\n`, {
+        encoding: 'utf8',
+        mode: ENV_FILE_MODE,
+      });
     }
   } else {
-    writeFileSync(envPath, `${ENV_KEY_NAME}=${key}\n`, 'utf8');
+    writeFileSync(envPath, `${ENV_KEY_NAME}=${key}\n`, {
+      encoding: 'utf8',
+      mode: ENV_FILE_MODE,
+    });
   }
+
+  // Always re-assert 0o600 — see ENV_FILE_MODE comment for why this is
+  // needed on POSIX even when we already passed `mode` to the writers.
+  tightenEnvMode(envPath);
 
   // Ensure .gitignore covers .env.local
   ensureGitignored(installDir, '.env.local');
@@ -219,7 +255,8 @@ export function clearApiKey(installDir: string): void {
   const stripped = contents
     .replace(new RegExp(`^${ENV_KEY_NAME}=.*\\r?\\n?`, 'm'), '')
     .replace(/\n{3,}/g, '\n\n');
-  writeFileSync(envPath, stripped, 'utf8');
+  writeFileSync(envPath, stripped, { encoding: 'utf8', mode: ENV_FILE_MODE });
+  tightenEnvMode(envPath);
 }
 
 /**

@@ -21,11 +21,27 @@ import {
   findErrorEntryIndexes,
   sliceViewportText,
 } from '../utils/log-viewer.js';
+import { watchFileWhenAvailable } from '../utils/watchFileWhenAvailable.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + spacer + separator + input + tab bar chrome */
 const CHROME_ROWS = 8;
 const VIEWER_CHROME_ROWS = 4;
 const HORIZONTAL_STEP = 8;
+
+/**
+ * Placeholder shown when the log file can't be read. Used both for "doesn't
+ * exist yet" (early in a run, before the agent has flushed anything) and
+ * "transient read error" cases. The previous copy was a flat
+ * "(No log file found)" which gave users no path forward — they'd see it
+ * during normal run startup and assume the wizard was broken. New copy:
+ *  - explains the file is created lazily by the agent
+ *  - tells them what to do (wait, or check the path)
+ *  - shows the resolved path so a hardcoded-vs-configured mismatch is
+ *    immediately visible
+ *
+ * Keep it to 3 lines so the existing "line N/N" status copy stays sensible.
+ */
+const EMPTY_LOG_PLACEHOLDER = 'Waiting for the agent to start writing logs…';
 
 interface LogViewerProps {
   filePath: string;
@@ -114,7 +130,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
         const content = fs.readFileSync(filePath, 'utf-8');
         const allLines = content.split('\n');
         const safeLines =
-          allLines.length > 0 ? allLines : ['(No log file found)'];
+          allLines.length > 0 ? allLines : [EMPTY_LOG_PLACEHOLDER];
         const nextLastIndex = Math.max(safeLines.length - 1, 0);
         const nextViewportTop = clampViewportTop(
           viewportTopRef.current,
@@ -149,7 +165,17 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
           setHorizontalOffset((prev) => clamp(prev, 0, maxHorizontalOffset));
         }
       } catch {
-        setLines(['(No log file found)']);
+        // Show the resolved path right under the placeholder so a
+        // hardcoded-vs-configured mismatch (e.g. AMPLITUDE_WIZARD_LOG
+        // pointing at a different file than the viewer is reading from)
+        // is immediately visible to the user. Without the path, users
+        // see "no log file found" with no way to debug.
+        setLines([
+          EMPTY_LOG_PLACEHOLDER,
+          '',
+          `path: ${filePath}`,
+          '(file is created the first time the agent flushes a log line)',
+        ]);
         setSelectedLine(0);
         setViewportTop(0);
         setHorizontalOffset(0);
@@ -158,30 +184,16 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
 
     readTail();
 
-    let watcher: fs.FSWatcher | undefined;
-    try {
-      watcher = fs.watch(filePath, () => {
-        readTail();
-      });
-    } catch {
-      // File might not exist yet — retry when it appears
-      const interval = setInterval(() => {
-        try {
-          fs.accessSync(filePath);
-          readTail();
-          clearInterval(interval);
-          watcher = fs.watch(filePath, () => readTail());
-        } catch {
-          // Still waiting
-        }
-      }, 1000);
+    // Single-owner watcher that closes the swap race between the poll
+    // interval and the fs.watch handle. See `watchFileWhenAvailable`
+    // for the race details. Replaced two-variable closure cleanup
+    // (watcher + interval) with one `dispose()`.
+    const handle = watchFileWhenAvailable({
+      filePath,
+      onChange: readTail,
+    });
 
-      return () => clearInterval(interval);
-    }
-
-    return () => {
-      watcher?.close();
-    };
+    return () => handle.dispose();
   }, [filePath, viewportHeight, lineWidth]);
 
   useEffect(() => {
@@ -238,7 +250,25 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
     }
 
     if (input === '0') {
+      // Full reset back to a known-good state: follow mode, latest line,
+      // col 1. The previous behavior only zeroed horizontalOffset, which
+      // was a no-op in the very-common case where horizontalOffset was
+      // already 0 (e.g. "(No log file found)" / short logs / no panning
+      // done yet). Users hit `0` expecting it to do something — anything
+      // — and got silence. "Reset" should mean "get me back to the
+      // default view," and the default for a tail viewer is following
+      // the live tail at column 1.
+      setMode('follow');
       setHorizontalOffset(0);
+      const lastIndex = Math.max(lines.length - 1, 0);
+      setSelectedLine(lastIndex);
+      setViewportTop(
+        clampViewportTop(
+          lines.length - viewportHeight,
+          lines.length,
+          viewportHeight,
+        ),
+      );
       return;
     }
 
@@ -265,7 +295,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
   });
 
   const visibleRows = lines.slice(viewportTop, viewportTop + viewportHeight);
-  const selectedLineText = lines[selectedLine] ?? '(No log file found)';
+  const selectedLineText = lines[selectedLine] ?? EMPTY_LOG_PLACEHOLDER;
   const selectedErrorOrdinal =
     selectedMeta?.entryKind === 'error'
       ? errorIndexes.findIndex(
@@ -277,6 +307,13 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
     horizontalOffset,
     Math.max(10, cols - 14),
   );
+  const errorCount = errorIndexes.length;
+  const errorStatus =
+    errorCount === 0
+      ? 'no errors'
+      : selectedErrorOrdinal > 0
+      ? `error ${selectedErrorOrdinal} of ${errorCount}`
+      : `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`;
 
   return (
     <Box flexDirection="column" height={visibleLines} paddingX={1}>
@@ -286,12 +323,10 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
         </Text>
         <Text color={Colors.muted}>
           line {Math.min(selectedLine + 1, Math.max(lines.length, 1))}/
-          {Math.max(lines.length, 1)} · col {horizontalOffset + 1}
-          {errorIndexes.length > 0
-            ? ` · errors ${
-                selectedErrorOrdinal > 0 ? `${selectedErrorOrdinal}/` : ''
-              }${errorIndexes.length}`
-            : ' · no errors'}
+          {Math.max(lines.length, 1)} · col {horizontalOffset + 1} ·{' '}
+          <Text color={errorCount > 0 ? Colors.warning : Colors.muted}>
+            {errorStatus}
+          </Text>
         </Text>
       </Box>
 
@@ -342,8 +377,8 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
       </Text>
 
       <Text color={Colors.muted} wrap="truncate-end">
-        ↑↓/jk scroll · h/l pan · ←→ tabs · f follow · n/p errors · g/G
-        top/bottom · 0 reset
+        ↑↓/jk scroll · h/l pan · ←→ tabs · f follow ·{' '}
+        {errorCount > 0 ? 'n/p next/prev error · ' : ''}g/G top/bottom · 0 reset
       </Text>
 
       <Text color={Colors.subtle} wrap="truncate-end">

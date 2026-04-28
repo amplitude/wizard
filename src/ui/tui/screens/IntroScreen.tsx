@@ -114,7 +114,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // ── Resume-from-checkpoint prompt ─────────────────────────────────
   if (showResume) {
     const orgLabel =
-      session.selectedOrgName ?? session.selectedWorkspaceName ?? null;
+      session.selectedOrgName ?? session.selectedProjectName ?? null;
 
     return (
       <Box
@@ -166,24 +166,14 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 if (choice === 'resume') {
                   store.concludeIntro();
                 } else if (choice === 'fresh') {
-                  // Clear checkpoint and reset restored flag so normal flow takes over
+                  // Clear checkpoint and reset restored flag so normal
+                  // flow takes over. Route through the explicit store
+                  // action so all per-key listeners fire (the previous
+                  // direct `store.session = {...}` assignment worked for
+                  // version-based subscribers but silently bypassed
+                  // nanostores' per-key change events).
                   clearCheckpoint(store.session.installDir);
-                  store.session = {
-                    ...store.session,
-                    _restoredFromCheckpoint: false,
-                    introConcluded: false,
-                    detectionComplete: false,
-                    detectedFrameworkLabel: null,
-                    integration: null,
-                    frameworkConfig: null,
-                    frameworkContext: {},
-                    region: null,
-                    selectedOrgId: null,
-                    selectedOrgName: null,
-                    selectedWorkspaceId: null,
-                    selectedWorkspaceName: null,
-                    selectedEnvName: null,
-                  };
+                  store.resetForFreshStart();
                   setShowResume(false);
                 } else {
                   store.setOutroData({
@@ -293,6 +283,16 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
             </Box>
           )}
 
+          {session.region && (
+            <Text>
+              <Text color={Colors.body}>Region </Text>
+              <Text color={Colors.secondary}>
+                {session.region.toUpperCase()}
+              </Text>
+              <Text color={Colors.success}> {Icons.checkmark}</Text>
+            </Text>
+          )}
+
           {showContinue && (
             <Box marginTop={compact ? 0 : 1}>
               <PickerMenu
@@ -303,6 +303,15 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     value: 'framework',
                     ...(narrow ? {} : { hint: 'pick manually' }),
                   },
+                  ...(session.region
+                    ? [
+                        {
+                          label: 'Change region',
+                          value: 'region',
+                          ...(narrow ? {} : { hint: 'pick US or EU' }),
+                        },
+                      ]
+                    : []),
                   {
                     label: 'Cancel',
                     value: 'cancel',
@@ -323,6 +332,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     });
                   } else if (choice === 'framework') {
                     setPickingFramework(true);
+                  } else if (choice === 'region') {
+                    // Force RegionSelect to appear after Continue. Must
+                    // conclude the intro so the main flow advances past it
+                    // into the (now re-shown) RegionSelect screen.
+                    store.setRegionForced();
+                    store.concludeIntro();
                   } else {
                     store.concludeIntro();
                   }

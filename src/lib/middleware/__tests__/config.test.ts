@@ -3,6 +3,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadBenchmarkConfig, getDefaultConfig } from '../config.js';
+import {
+  CACHE_ROOT_OVERRIDE_ENV,
+  getBenchmarkFile,
+  getLogFile,
+} from '../../../utils/storage-paths.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,9 +43,14 @@ describe('getDefaultConfig', () => {
 
 describe('loadBenchmarkConfig', () => {
   let tmpDir: string;
+  let cacheRoot: string;
+  let originalCacheOverride: string | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-config-test-'));
+    cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-cache-'));
+    originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
     // Clean env overrides before each test
     delete process.env.AMPLITUDE_WIZARD_BENCHMARK_CONFIG;
     delete process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
@@ -49,17 +59,26 @@ describe('loadBenchmarkConfig', () => {
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(cacheRoot, { recursive: true, force: true });
     delete process.env.AMPLITUDE_WIZARD_BENCHMARK_CONFIG;
     delete process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
     delete process.env.AMPLITUDE_WIZARD_LOG_FILE;
+    if (originalCacheOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
   });
 
   // ── fallback to defaults ────────────────────────────────────────────────────
 
   it('returns defaults when no config file exists', () => {
     const config = loadBenchmarkConfig(tmpDir);
-    const defaults = getDefaultConfig();
-    expect(config).toEqual(defaults);
+    // Per-project defaults: paths are derived from installDir + cache root.
+    expect(config.output.benchmarkPath).toBe(getBenchmarkFile(tmpDir));
+    expect(config.output.logPath).toBe(getLogFile(tmpDir));
+    expect(config.output.benchmarkEnabled).toBe(true);
+    expect(config.output.logEnabled).toBe(true);
   });
 
   it('returns defaults when config file contains invalid JSON', () => {
@@ -69,16 +88,16 @@ describe('loadBenchmarkConfig', () => {
       'utf-8',
     );
     const config = loadBenchmarkConfig(tmpDir);
-    const defaults = getDefaultConfig();
-    expect(config).toEqual(defaults);
+    expect(config.output.benchmarkPath).toBe(getBenchmarkFile(tmpDir));
+    expect(config.output.logPath).toBe(getLogFile(tmpDir));
   });
 
   it('returns defaults when config file fails schema validation', () => {
     writeConfig(tmpDir, { plugins: 'not-an-object' });
     const config = loadBenchmarkConfig(tmpDir);
-    // Invalid schema → falls through to catch → defaults
-    const defaults = getDefaultConfig();
-    expect(config).toEqual(defaults);
+    // Invalid schema → falls through to catch → per-project defaults
+    expect(config.output.benchmarkPath).toBe(getBenchmarkFile(tmpDir));
+    expect(config.output.logPath).toBe(getLogFile(tmpDir));
   });
 
   // ── merging valid config ────────────────────────────────────────────────────

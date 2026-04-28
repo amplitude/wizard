@@ -13,8 +13,8 @@ const PROVISIONING_RETRY_DELAYS_MS = [500, 1000, 2000];
 
 function hasEnvWithApiKey(userInfo: AmplitudeUserInfo): boolean {
   return userInfo.orgs.some((org) =>
-    org.workspaces.some((ws) =>
-      (ws.environments ?? []).some((e) => e.app?.apiKey),
+    org.projects.some((proj) =>
+      (proj.environments ?? []).some((e) => e.app?.apiKey),
     ),
   );
 }

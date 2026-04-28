@@ -10,7 +10,8 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
@@ -25,6 +26,7 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 
@@ -41,6 +43,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const [bugReportPathState, setBugReportPathState] = useState<string | null>(
     null,
   );
+  // Disk-state about the setup report — captured ONCE on mount so we
+  // don't sync-stat the filesystem on every re-render (the picker
+  // re-renders on each keypress, and Ink's reconciler can re-render on
+  // unrelated store events too). The report file is written by the
+  // agent before this screen mounts, so a one-shot read is sufficient.
+  const [reportExists, setReportExists] = useState(false);
 
   const isSuccess = store.session.outroData?.kind === OutroKind.Success;
   const isError = store.session.outroData?.kind === OutroKind.Error;
@@ -69,7 +77,16 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         setBugReportPathState(written);
         return;
       }
-      process.exit(0);
+      // Signal dismissal instead of process.exit(0) directly. The
+      // wizardAbort caller is awaiting this — when it resolves, abort
+      // proceeds to its analytics flush + process.exit with the real
+      // exit code (NETWORK / AGENT_FAILED / etc.). Calling process.exit
+      // here would: (1) force exitCode 0 on every error, hiding real
+      // failures from CI; (2) skip the analytics shutdown that
+      // wizardAbort runs after cancel; (3) race with the success path
+      // below which already routes through process.exit.
+      store.signalOutroDismissed();
+      return;
     }
     if (showReport && key.escape) setShowReport(false);
   });
@@ -90,6 +107,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const reportPath = installDir.endsWith(path.sep)
     ? `${installDir}${REPORT_FILE}`
     : `${installDir}${path.sep}${REPORT_FILE}`;
+
+  // One-shot existence check — see `reportExists` declaration above for
+  // why this isn't done inline in render. Re-runs only when the install
+  // dir or report path changes, which is effectively never within a
+  // single mount of this screen.
+  useEffect(() => {
+    try {
+      setReportExists(fs.existsSync(reportPath));
+    } catch {
+      // Treat unreadable filesystem as "no report" rather than throwing
+      // — the worst outcome is hiding the picker option, never a crash.
+      setReportExists(false);
+    }
+  }, [reportPath]);
 
   // ── Report sub-view ──────────────────────────────────────────────────
 
@@ -154,27 +185,47 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Box>
           )}
 
-          {/* Dashboard link — shown when the agent created one */}
+          {/* Dashboard link — the hero of the outro. The wizard always creates
+              a dashboard during the conclude phase; surface it as a clickable
+              link with a clear "this is your next step" framing so users
+              don't bounce out of the terminal wondering "what now?". */}
           {store.session.checklistDashboardUrl && (
             <Box marginTop={1} flexDirection="column">
-              <Text color={Colors.success} bold>
-                📊 Dashboard ready:
+              <Text color={Colors.accent} bold>
+                {Icons.diamond} Your dashboard is ready
               </Text>
-              <Text color={Colors.muted}>
-                {store.session.checklistDashboardUrl}
-              </Text>
+              <Box marginLeft={2}>
+                <Text color={Colors.body}>
+                  <TerminalLink url={store.session.checklistDashboardUrl}>
+                    {store.session.checklistDashboardUrl}
+                  </TerminalLink>
+                </Text>
+              </Box>
+              <Box marginLeft={2}>
+                <Text color={Colors.muted}>
+                  Open it now to see your first charts populate as users hit the
+                  app.
+                </Text>
+              </Box>
             </Box>
           )}
 
-          {/* Single-line review note */}
-          <Box marginTop={1}>
-            <Text color={Colors.muted}>
-              Review changes in{' '}
-              <Text bold color={Colors.secondary}>
-                ./amplitude-setup-report.md
+          {/* Single-line review note — only when a fresh report was actually
+              written this run. Without the existence check, a stale report
+              from a previous run (different workspace) would be advertised
+              as if it described this run. The check is captured once on
+              mount (see `reportExists` declaration) rather than re-stat'd
+              on every render. */}
+          {reportExists && (
+            <Box marginTop={1}>
+              <Text color={Colors.muted}>
+                Review changes in{' '}
+                <Text bold color={Colors.secondary}>
+                  ./amplitude-setup-report.md
+                </Text>
               </Text>
-            </Text>
-          </Box>
+            </Box>
+          )}
         </Box>
       )}
 
@@ -234,6 +285,22 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.body}>{outroData.message}</Text>
             </Box>
           )}
+          {/* Resume-later note — closes the cancel outro on a forward-
+              looking beat instead of a dead stop. The wizard is checkpoint-
+              aware (session-checkpoint.ts) so re-running in the same dir
+              picks up region/org/framework selections automatically. */}
+          <Box marginTop={1} flexDirection="column">
+            <Text color={Colors.secondary} bold>
+              Resume later
+            </Text>
+            <Text color={Colors.body}>
+              Pick up where you left off — run{' '}
+              <Text bold color={Colors.heading}>
+                npx @amplitude/wizard
+              </Text>{' '}
+              in this directory anytime.
+            </Text>
+          </Box>
           {outroData.docsUrl && (
             <Box marginTop={1}>
               <Text color={Colors.secondary}>
@@ -251,17 +318,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       <Box marginTop={1}>
         {isSuccess ? (
           <PickerMenu
+            // Dashboard first — it's the most useful next step. Report comes
+            // second, and only when a fresh one exists on disk for this run.
+            // Without the existsSync gate, the option would point at a stale
+            // report from a previous run (e.g. against a different workspace).
             options={(() => {
               const dashboardUrl = store.session.checklistDashboardUrl;
               return [
-                { label: 'View setup report', value: 'report' },
                 {
                   label: dashboardUrl
                     ? 'Open your analytics dashboard'
                     : 'Open Amplitude',
                   value: 'dashboard',
-                  hint: dashboardUrl ? undefined : 'amplitude.com',
+                  hint: dashboardUrl
+                    ? 'Recommended next step'
+                    : 'amplitude.com',
                 },
+                ...(reportExists
+                  ? [{ label: 'View setup report', value: 'report' }]
+                  : []),
                 { label: 'Exit', value: 'exit' },
               ];
             })()}
@@ -290,7 +365,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   /* fire-and-forget */
                 });
               } else {
-                process.exit(0);
+                // Route through wizardSuccessExit so the
+                // 'outro action' wizardCapture above (and any other
+                // analytics events queued during this session) flush
+                // before process.exit fires. A bare process.exit(0)
+                // here would drop the trailing telemetry.
+                void wizardSuccessExit(0);
               }
             }}
           />

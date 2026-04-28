@@ -18,6 +18,14 @@ import { withWizardSpan, addBreadcrumb } from '../lib/observability/index.js';
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 /**
+ * Bound on the OAuth refresh-token HTTP exchange. The wizard blocks on this
+ * call before any other auth path runs, so an unbounded fetch on a hung
+ * connection would freeze the entire startup. 10s is generous for what is
+ * normally a sub-200ms request and matches the gateway-liveness probe.
+ */
+const REFRESH_REQUEST_TIMEOUT_MS = 10_000;
+
+/**
  * Attempts a silent OAuth token refresh if the access token is expired or
  * expiring within 5 minutes. Returns new token data on success, or null if
  * refresh is not needed, not possible, or fails.
@@ -85,11 +93,25 @@ async function tryRefreshTokenInner(
       client_id: oAuthClientId,
     });
 
-    const response = await fetch(`${oAuthHost}/oauth2/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString(),
-    });
+    // Bound the fetch with an AbortController + clearTimeout pair so a
+    // network stall doesn't block the wizard's startup path indefinitely.
+    // The timer is cleared on the win path inside `finally`.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(
+      () => controller.abort(),
+      REFRESH_REQUEST_TIMEOUT_MS,
+    );
+    let response: Response;
+    try {
+      response = await fetch(`${oAuthHost}/oauth2/token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: body.toString(),
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeoutId);
+    }
 
     if (!response.ok) {
       logToFile('[token-refresh] refresh request failed', {
@@ -132,13 +154,25 @@ async function tryRefreshTokenInner(
 
     return { accessToken, expiresAt, refreshToken: newRefreshToken };
   } catch (err) {
+    // Distinguish abort/timeout (controller aborted the fetch) from other
+    // failures so it's easy to triage stuck startups in the log file.
+    const isAbort =
+      err instanceof Error &&
+      (err.name === 'AbortError' ||
+        (err as Error & { code?: string }).code === 'ABORT_ERR');
     logToFile(
-      '[token-refresh] refresh failed',
+      isAbort
+        ? `[token-refresh] refresh timed out after ${REFRESH_REQUEST_TIMEOUT_MS}ms`
+        : '[token-refresh] refresh failed',
       err instanceof Error ? err.message : 'unknown error',
     );
-    addBreadcrumb('auth', 'Silent refresh threw', {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    addBreadcrumb(
+      'auth',
+      isAbort ? 'Silent refresh timed out' : 'Silent refresh threw',
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+    );
     return null;
   }
 }

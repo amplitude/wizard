@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__linear__*",
+      "mcp__github__*",
+      "Bash(git *)",
+      "Bash(pnpm *)"
+    ]
+  }
+}

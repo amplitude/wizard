@@ -104,9 +104,11 @@ export async function runWizard(
     signup: session.signup ?? false,
   });
 
-  // Non-interactive modes (CI / agent) skip the FeatureOptIn picklist, so
-  // auto-enable every discovered opt-in feature here. The TUI flow handles
-  // its own discovery + picklist confirmation in bin.ts.
+  // Non-interactive modes (CI / agent) auto-enable every discovered
+  // opt-in feature here so the agent run gets the same SR + G&S + LLM
+  // coverage as an interactive TUI run (bin.ts handles the TUI side via
+  // store.autoEnableInlineAddons). Both paths converge on the same set
+  // of inline addons — there is no picker in either flow.
   if ((session.ci || session.agent) && !session.optInFeaturesComplete) {
     await initFeatureFlags().catch(() => {
       // Flag init failure is non-fatal — LLM gate just stays off
@@ -192,6 +194,35 @@ export interface DetectionResult {
 }
 
 /**
+ * Race a promise against a timeout, returning the resolved value on the
+ * win path or the literal `'timeout'` sentinel if the deadline fires first.
+ *
+ * Unlike a bare `Promise.race([work(), setTimeout(resolve('timeout'), ms)])`,
+ * this clears the timer when `work()` wins so the timer callback never fires
+ * after detection completes. Across ~18 frameworks racing in parallel that
+ * leak adds up to ~18 stranded timers per detection cycle, each holding the
+ * resolved closure (and the framework's installDir reference) alive until
+ * `timeoutMs` elapses.
+ *
+ * Rejections from `work()` propagate to the caller — only timeouts surface
+ * as the sentinel value, matching the previous behavior.
+ */
+async function raceWithTimeoutSentinel<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+): Promise<T | 'timeout'> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+  try {
+    return await Promise.race([work, timeoutPromise]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
  * Run all framework detectors in parallel and return the full results array.
  * The winner is the first detected framework in Integration enum order
  * (preserving the existing priority behavior).
@@ -270,12 +301,7 @@ export async function detectAllFrameworks(
       };
 
       try {
-        const result = await Promise.race([
-          work(),
-          new Promise<'timeout'>((resolve) =>
-            setTimeout(() => resolve('timeout'), timeoutMs),
-          ),
-        ]);
+        const result = await raceWithTimeoutSentinel(work(), timeoutMs);
 
         if (result === 'timeout') {
           const durationMs = Math.round(performance.now() - start);

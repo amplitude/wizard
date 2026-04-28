@@ -17,12 +17,14 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
+import { withTimeout } from '../utils/with-timeout.js';
 import {
   extractAppId,
   fetchAmplitudeUser,
   fetchHasAnyEventsMcp,
   fetchProjectActivationStatus,
-  fetchWorkspaceEventTypes,
+  fetchProjectEventTypes,
 } from '../../../lib/api.js';
 import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
@@ -32,10 +34,17 @@ import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import { detectBoundPort } from '../../../utils/port-detection.js';
 import { makeLink } from '../utils/terminal-rendering.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
 const CELEBRATION_DELAY_MS = 3_000;
+
+// Stable identities so useScreenHints' effect doesn't re-fire every render.
+const SKIP_HINT: readonly KeyHint[] = Object.freeze([
+  { key: 'q', label: 'Skip for now' },
+]);
+const NO_HINTS: readonly KeyHint[] = Object.freeze([]);
 
 /**
  * Framework-specific hints. For web frameworks we probe `ports` in order with
@@ -211,8 +220,7 @@ export const DataIngestionCheckScreen = ({
       setApiUnavailable(true);
       return;
     }
-    const appId =
-      currentCredentials.appId || currentSession.selectedWorkspaceId;
+    const appId = currentCredentials.appId || currentSession.selectedProjectId;
     if (!appId) {
       setApiUnavailable(true);
       return;
@@ -235,7 +243,7 @@ export const DataIngestionCheckScreen = ({
 
     // Step 1: Query via MCP (Bearer auth, works for all users).
     // Uses _all event type so any custom track() calls are detected.
-    // Requires the numeric analytics project ID from workspace.environments[].app.id.
+    // Requires the numeric analytics project ID from project.environments[].app.id.
     //
     // selectedAppId may be null if the startup fire-and-forget fetchAmplitudeUser
     // failed (e.g. due to an expired token). Resolve lazily using the now-fresh token.
@@ -252,13 +260,13 @@ export const DataIngestionCheckScreen = ({
           ? userInfo.orgs.find((o) => o.id === currentSession.selectedOrgId) ??
             userInfo.orgs[0]
           : userInfo.orgs[0];
-        // Fall back to the first workspace if the stored ID doesn't match.
-        const ws =
-          org && currentSession.selectedWorkspaceId
-            ? org.workspaces.find(
-                (w) => w.id === currentSession.selectedWorkspaceId,
-              ) ?? org.workspaces[0]
-            : org?.workspaces[0];
+        // Fall back to the first project if the stored ID doesn't match.
+        const project =
+          org && currentSession.selectedProjectId
+            ? org.projects.find(
+                (p) => p.id === currentSession.selectedProjectId,
+              ) ?? org.projects[0]
+            : org?.projects[0];
 
         const restoredFields: Parameters<typeof store.restoreSessionIds>[0] =
           {};
@@ -267,13 +275,13 @@ export const DataIngestionCheckScreen = ({
           restoredFields.orgName = org.name;
           logToFile(`[DataIngestionCheck] lazily set orgId=${org.id}`);
         }
-        if (ws && !currentSession.selectedWorkspaceId) {
-          restoredFields.workspaceId = ws.id;
-          restoredFields.workspaceName = ws.name;
-          logToFile(`[DataIngestionCheck] lazily set workspaceId=${ws.id}`);
+        if (project && !currentSession.selectedProjectId) {
+          restoredFields.projectId = project.id;
+          restoredFields.projectName = project.name;
+          logToFile(`[DataIngestionCheck] lazily set projectId=${project.id}`);
         }
 
-        effectiveAppId = ws ? extractAppId(ws) : null;
+        effectiveAppId = project ? extractAppId(project) : null;
         if (effectiveAppId) {
           resolvedAppIdRef.current = effectiveAppId;
           restoredFields.appId = effectiveAppId;
@@ -361,12 +369,12 @@ export const DataIngestionCheckScreen = ({
 
       // Activation API only checks autocapture events. Fall back to the
       // event catalog which includes all event types.
-      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
-        const catalogEvents = await fetchWorkspaceEventTypes(
+      if (currentSession.selectedOrgId && currentSession.selectedProjectId) {
+        const catalogEvents = await fetchProjectEventTypes(
           dataApiToken,
           zone,
           currentSession.selectedOrgId,
-          currentSession.selectedWorkspaceId,
+          currentSession.selectedProjectId,
         );
         logToFile(
           `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
@@ -388,18 +396,33 @@ export const DataIngestionCheckScreen = ({
       }
       setApiUnavailable(true);
 
-      // Fetch cataloged event types as a proxy for "events arrived"
-      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
-        fetchWorkspaceEventTypes(
-          dataApiToken,
-          zone,
-          currentSession.selectedOrgId,
-          currentSession.selectedWorkspaceId,
+      // Fetch cataloged event types as a proxy for "events arrived". Wrap
+      // in a 15s timeout so a hanging data-api request can't leave the user
+      // staring at "Checking your event catalog…" forever — on timeout we
+      // treat the catalog as empty, which still unblocks the screen
+      // (Enter/q hints render the moment apiUnavailable=true).
+      if (currentSession.selectedOrgId && currentSession.selectedProjectId) {
+        withTimeout(
+          fetchProjectEventTypes(
+            dataApiToken,
+            zone,
+            currentSession.selectedOrgId,
+            currentSession.selectedProjectId,
+          ),
+          15_000,
+          'event catalog fetch',
         )
           .then((names) => {
             setEventTypes(names);
           })
-          .catch(() => {
+          .catch((catalogErr) => {
+            logToFile(
+              `[DataIngestionCheck] catalog fetch failed: ${
+                catalogErr instanceof Error
+                  ? catalogErr.message
+                  : String(catalogErr)
+              }`,
+            );
             setEventTypes([]);
           });
       } else {
@@ -464,6 +487,15 @@ export const DataIngestionCheckScreen = ({
     };
   }, [session.integration, session.installDir]);
 
+  // Esc → step back to MCP install. q → "I'll come back later" exit.
+  // Both are hidden during the celebration phase: at that point the user
+  // wants to advance forward, not rewind past a successful run, and an
+  // accidental Esc should not undo the agent's work.
+  useEscapeBack(store, {
+    enabled: !celebrating,
+    extraHints: celebrating ? NO_HINTS : SKIP_HINT,
+  });
+
   useScreenInput((_char, key) => {
     // During celebration, wait for Enter to advance
     if (celebrating) {
@@ -472,7 +504,10 @@ export const DataIngestionCheckScreen = ({
       }
       return;
     }
-    if (key.escape || _char === 'q') {
+    // q → "I'll come back later" exit. Esc is owned by useEscapeBack
+    // above (back-nav), keeping the Esc=back convention consistent across
+    // the wizard.
+    if (_char === 'q') {
       if (pollingRef.current !== null) clearInterval(pollingRef.current);
       store.setOutroData({
         kind: OutroKind.Cancel,
@@ -655,7 +690,7 @@ export const DataIngestionCheckScreen = ({
       {apiUnavailable && eventTypes !== null && eventTypes.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text color={Colors.secondary}>
-            Events cataloged in your workspace:
+            Events cataloged in your project:
           </Text>
           <Box flexDirection="column" marginTop={1} marginLeft={2}>
             {shown.map((name) => (

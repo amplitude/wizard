@@ -11,9 +11,16 @@
  */
 
 import { appendFileSync, statSync, renameSync } from 'fs';
+import { dirname, join } from 'path';
 import type { ExecutionMode } from '../mode-config';
 import { redact, redactString } from './redact';
 import { getRunId, getSessionId } from './correlation';
+import {
+  ensureDir,
+  getCacheRoot,
+  getLogFile as getProjectLogFile,
+  getStructuredLogFile as getProjectStructuredLogFile,
+} from '../../utils/storage-paths';
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -51,8 +58,44 @@ interface LogEntry {
 // ── State ───────────────────────────────────────────────────────────
 
 let config: LoggerConfig | null = null;
-let logFilePath = '/tmp/amplitude-wizard.log';
+/**
+ * Active log paths. Lazy-initialized to bootstrap fallbacks so the first
+ * write before `initLogger` lands in the cache root, not in `/tmp`. Once
+ * `bin.ts` resolves `installDir`, it should call {@link setProjectLogFile}
+ * to switch to the per-project locations.
+ *
+ * The two paths are tracked independently because the human-readable log
+ * (`log.txt`) and structured mirror (`log.ndjson`) have different file
+ * extensions — naïvely deriving one from the other (e.g. `path + 'l'`)
+ * would produce `log.txtl`, which diverges from the canonical
+ * `log.ndjson` referenced by `getStructuredLogFile`, the docs, and the
+ * `/diagnostics` slash command.
+ */
+let logFilePath: string | null = null;
+let structuredLogFilePath: string | null = null;
 let logFileEnabled = process.env.NODE_ENV !== 'test';
+
+/**
+ * Pre-installDir bootstrap log location. Used only for entries written
+ * before the wizard knows which project it's running in (early arg parsing,
+ * auth state). Switching to the per-project log via
+ * {@link setProjectLogFile} happens as soon as installDir is resolved.
+ */
+function bootstrapLogPath(): string {
+  return join(getCacheRoot(), 'bootstrap.log');
+}
+
+function bootstrapStructuredLogPath(): string {
+  return join(getCacheRoot(), 'bootstrap.ndjson');
+}
+
+function activeLogPath(): string {
+  return logFilePath ?? bootstrapLogPath();
+}
+
+function activeStructuredLogPath(): string {
+  return structuredLogFilePath ?? bootstrapStructuredLogPath();
+}
 
 const LOG_MAX_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -101,13 +144,31 @@ export function initLogger(
   },
 ): void {
   config = opts;
-  if (opts.logFile !== undefined) logFilePath = opts.logFile;
+  if (opts.logFile !== undefined) {
+    logFilePath = opts.logFile;
+    // Auto-derive the structured path if it hasn't already been set
+    // explicitly (e.g. by an earlier `configureLogFile` call). Keeps the
+    // two files alongside each other (`log.txt` + `log.ndjson`).
+    if (structuredLogFilePath === null) {
+      structuredLogFilePath = deriveStructuredPath(opts.logFile);
+    }
+  }
   if (opts.logFileEnabled !== undefined) logFileEnabled = opts.logFileEnabled;
 
   if (!logFileEnabled) return;
 
-  // Rotate if over limit (keep one backup). Rotate both .log and .logl files.
-  for (const path of [logFilePath, logFilePath + 'l']) {
+  const activePath = activeLogPath();
+  const activeStructuredPath = activeStructuredLogPath();
+  // Make sure the cache root (or per-project run dir) exists before any
+  // append. mkdir failures are silent; the appendFileSync below will
+  // surface a more useful error if the directory really can't be created.
+  ensureDir(dirname(activePath));
+
+  // Rotate if over limit (keep one backup). Rotate both human + structured
+  // logs. The two paths are tracked independently — `log.txt` and
+  // `log.ndjson` — so we explicitly iterate both rather than deriving one
+  // from the other with a string concatenation.
+  for (const path of [activePath, activeStructuredPath]) {
     try {
       const stats = statSync(path);
       if (stats.size > LOG_MAX_BYTES) {
@@ -138,10 +199,45 @@ export function initLogger(
   ].join('\n');
 
   try {
-    appendFileSync(logFilePath, header);
+    appendFileSync(activePath, header);
   } catch {
     // Non-critical — don't crash
   }
+}
+
+/**
+ * Switch the log file to the per-project location once `installDir` is known.
+ * Updates both the human-readable (`log.txt`) and structured (`log.ndjson`)
+ * paths atomically — they're tracked independently because the file
+ * extensions differ and naïve string-concat would produce a mismatched
+ * `.txtl` filename. Writes a marker line so the bootstrap → project
+ * transition is visible. Idempotent.
+ */
+export function setProjectLogFile(installDir: string): void {
+  if (!installDir) return;
+  const target = getProjectLogFile(installDir);
+  const targetStructured = getProjectStructuredLogFile(installDir);
+  if (logFilePath === target && structuredLogFilePath === targetStructured) {
+    return;
+  }
+  ensureDir(dirname(target));
+  // Leave a breadcrumb in the bootstrap log so debuggers can find the
+  // per-project log they should be reading instead.
+  if (logFileEnabled) {
+    try {
+      const marker = `[${new Date().toISOString()}] [logger] continuing in ${target}\n`;
+      appendFileSync(activeLogPath(), marker);
+    } catch {
+      // Non-critical
+    }
+  }
+  logFilePath = target;
+  structuredLogFilePath = targetStructured;
+  // The new dir was just ensured; reset the per-write cache so any
+  // pre-cache entries (e.g. for the bootstrap dir) don't keep us from
+  // re-checking an unexpected path later.
+  ensuredDirs.clear();
+  ensuredDirs.add(dirname(target));
 }
 
 /**
@@ -169,18 +265,51 @@ export function setSentrySink(
   sentrySink = sink;
 }
 
-/** Get the current log file path. */
+/** Get the current (active) log file path. */
 export function getLogFilePath(): string {
-  return logFilePath;
+  return activeLogPath();
 }
 
-/** Override log file path and enabled state (for tests / config). */
+/** Get the current structured (NDJSON) log file path. */
+export function getStructuredLogFilePath(): string {
+  return activeStructuredLogPath();
+}
+
+/**
+ * Override log file paths and enabled state (for tests / config).
+ *
+ * Both `path` (human-readable) and `structuredPath` (NDJSON) are tracked
+ * independently — the file extensions differ (`log.txt` vs `log.ndjson`)
+ * and naïve string-concat would produce a mismatched filename. If
+ * `structuredPath` is omitted, the structured log location is derived
+ * from `path` by swapping `.txt`/`.log` for `.ndjson`. In production
+ * code prefer {@link setProjectLogFile}, which routes through
+ * `storage-paths.ts`.
+ */
 export function configureLogFile(opts: {
   path?: string;
+  structuredPath?: string;
   enabled?: boolean;
 }): void {
-  if (opts.path !== undefined) logFilePath = opts.path;
+  if (opts.path !== undefined) {
+    logFilePath = opts.path;
+    structuredLogFilePath =
+      opts.structuredPath ?? deriveStructuredPath(opts.path);
+  } else if (opts.structuredPath !== undefined) {
+    structuredLogFilePath = opts.structuredPath;
+  }
   if (opts.enabled !== undefined) logFileEnabled = opts.enabled;
+}
+
+function deriveStructuredPath(humanPath: string): string {
+  for (const ext of ['.txt', '.log']) {
+    if (humanPath.endsWith(ext)) {
+      return humanPath.slice(0, -ext.length) + '.ndjson';
+    }
+  }
+  // Unknown extension — append `.ndjson` so the structured log still
+  // lands in a distinct file rather than overwriting the human log.
+  return humanPath + '.ndjson';
 }
 
 // ── File writer ─────────────────────────────────────────────────────
@@ -192,10 +321,30 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
   error: 'ERROR',
 };
 
+/**
+ * Caches every directory we've already mkdir'd so the per-write
+ * `ensureDir` call collapses to a Set lookup after the first log line
+ * for a given directory. `initLogger` and `setProjectLogFile` already
+ * pre-create the dir, but the cache is also the safety net for the
+ * tiny window before `initLogger` runs (where `bootstrapLogPath()`
+ * is the active target and may not exist yet).
+ *
+ * Cleared by `setProjectLogFile` so the new project log dir gets
+ * ensured exactly once on the path switch.
+ */
+const ensuredDirs = new Set<string>();
+
 function writeToFile(entry: LogEntry): void {
   if (!logFileEnabled) return;
   try {
     const redacted = redact(entry) as LogEntry;
+    const activePath = activeLogPath();
+    const activeStructuredPath = activeStructuredLogPath();
+    const dir = dirname(activePath);
+    if (!ensuredDirs.has(dir)) {
+      ensureDir(dir);
+      ensuredDirs.add(dir);
+    }
 
     // 1. Human-readable line to the main log file (displayed in TUI Logs tab).
     const ctxStr =
@@ -205,10 +354,13 @@ function writeToFile(entry: LogEntry): void {
     const line = `[${redacted['@timestamp']}] [${redacted.run_id}] [${
       redacted.namespace
     }] ${LEVEL_LABEL[redacted.level]} ${redacted.msg}${ctxStr}\n`;
-    appendFileSync(logFilePath, line);
+    appendFileSync(activePath, line);
 
-    // 2. Complete NDJSON to a companion .jsonl file (for programmatic analysis).
-    appendFileSync(logFilePath + 'l', JSON.stringify(redacted) + '\n');
+    // 2. Complete NDJSON to a companion file (for programmatic analysis).
+    // The structured path is tracked independently from the human path so
+    // it lands at `log.ndjson` next to `log.txt` (vs. the previous `+ 'l'`
+    // string-concat which produced `log.txtl`).
+    appendFileSync(activeStructuredPath, JSON.stringify(redacted) + '\n');
   } catch {
     // Silently ignore — logging must never crash the wizard
   }

@@ -38,7 +38,7 @@ function mockCredentials(): WizardSession['credentials'] {
 
 function ensureIdentityNames(s: WizardSession): void {
   s.selectedOrgName = s.selectedOrgName ?? 'Test Org';
-  s.selectedWorkspaceName = s.selectedWorkspaceName ?? 'Default';
+  s.selectedProjectName = s.selectedProjectName ?? 'Default';
   s.selectedEnvName = s.selectedEnvName ?? 'Default';
 }
 
@@ -188,6 +188,27 @@ Then('I should see the IntroScreen', function () {
 
 When('I continue past the intro', function () {
   session.introConcluded = true;
+});
+
+When('I pick "Change region" on the intro', function () {
+  // Mirror IntroScreen's "Change region" branch: setRegionForced then
+  // concludeIntro. setRegionForced clears credentials/org/workspace so
+  // the flow treats this as a hard re-auth.
+  const s = session;
+  s.regionForced = true;
+  s.credentials = null;
+  s.pendingOrgs = null;
+  s.pendingAuthIdToken = null;
+  s.pendingAuthAccessToken = null;
+  s.userEmail = null;
+  s.selectedOrgId = null;
+  s.selectedOrgName = null;
+  s.selectedWorkspaceId = null;
+  s.selectedWorkspaceName = null;
+  s.selectedEnvName = null;
+  s.selectedAppId = null;
+  s.projectHasData = null;
+  s.introConcluded = true;
 });
 
 // ── Then ──────────────────────────────────────────────────────────────────────

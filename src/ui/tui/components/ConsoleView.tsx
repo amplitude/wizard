@@ -26,19 +26,75 @@ import {
 } from '../../../lib/console-query.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { getLogFile } from '../../../utils/storage-paths.js';
 import {
   COMMANDS,
+  checkCommandBlockedByRun,
   getWhoamiText,
+  getDiagnosticsText,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
+import { collectDiagnostics } from '../../../lib/diagnostics-collector.js';
 import { KeyHintBar, type KeyHint } from './KeyHintBar.js';
 import { useScreenHintsValue } from '../hooks/useScreenHints.js';
 
+async function submitFeedbackWithConsent(
+  message: string,
+  store: WizardStore,
+): Promise<void> {
+  try {
+    const includeDiagnostics = await store.promptConfirm(
+      'Share diagnostics about your framework and OS to help us improve?',
+    );
+    analytics.wizardCapture('feedback diagnostics consent', {
+      consented: includeDiagnostics,
+    });
+    const diagnostics = includeDiagnostics
+      ? await collectDiagnostics({
+          session: store.session,
+          wizardVersion: store.version,
+          detectedFrameworks: store.session.detectionResults ?? undefined,
+        }).catch((err: unknown) => {
+          analytics.wizardCapture('feedback diagnostics failed', {
+            'error message': err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
+    await trackWizardFeedback(message, diagnostics);
+    store.setCommandFeedback(
+      diagnostics
+        ? 'Thanks — your feedback and diagnostics were sent.'
+        : 'Thanks — your feedback was sent.',
+    );
+  } catch (err: unknown) {
+    store.setCommandFeedback(
+      `Could not send feedback: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
+
+  // Guard: commands flagged `requiresIdle` would mutate session credentials,
+  // region, or org/project selection out from under an in-flight agent run.
+  // Surface a tailored message and bail before dispatching.
+  if (cmd) {
+    const blockedMessage = checkCommandBlockedByRun(
+      cmd,
+      store.session.runPhase,
+    );
+    if (blockedMessage) {
+      store.setCommandFeedback(blockedMessage, 6000);
+      return;
+    }
+  }
 
   switch (cmd) {
     case '/region':
@@ -69,9 +125,8 @@ function executeCommand(raw: string, store: WizardStore): string | void {
                   email: userInfo.email,
                   org_id: store.session.selectedOrgId ?? undefined,
                   org_name: store.session.selectedOrgName ?? undefined,
-                  workspace_id: store.session.selectedWorkspaceId ?? undefined,
-                  workspace_name:
-                    store.session.selectedWorkspaceName ?? undefined,
+                  project_id: store.session.selectedProjectId ?? undefined,
+                  project_name: store.session.selectedProjectName ?? undefined,
                   app_id: store.session.selectedAppId,
                   env_name: store.session.selectedEnvName,
                   region: zone,
@@ -100,17 +155,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         store.setCommandFeedback('Usage: /feedback <your message>');
         break;
       }
-      void trackWizardFeedback(message)
-        .then(() =>
-          store.setCommandFeedback('Thanks — your feedback was sent.'),
-        )
-        .catch((err: unknown) => {
-          store.setCommandFeedback(
-            `Could not send feedback: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        });
+      void submitFeedbackWithConsent(message, store);
       break;
     }
     case '/mcp':
@@ -186,10 +231,34 @@ function executeCommand(raw: string, store: WizardStore): string | void {
           );
         })
         .catch(() => {
+          // Surface the actual per-project log path. Two parallel runs land
+          // their logs in different directories — pointing at /tmp here
+          // would send users to the wrong (or shared) file.
           store.setCommandFeedback(
-            'Diagnostics unavailable. See /tmp/amplitude-wizard.log.',
+            `Diagnostics unavailable. See ${getLogFile(
+              store.session.installDir,
+            )}.`,
           );
         });
+      break;
+    }
+    case '/diagnostics': {
+      // Print the wizard's storage layout for the current project so users
+      // can attach the right log to a bug report. The full text goes to
+      // stderr (one paste's worth), and the console gets a one-line summary
+      // pointing at the run dir.
+      const text = getDiagnosticsText(store.session.installDir);
+      try {
+        process.stderr.write('\n' + text + '\n\n');
+      } catch {
+        // broken pipe — non-fatal
+      }
+      store.setCommandFeedback(
+        `Storage paths printed to stderr. Logs: ${getLogFile(
+          store.session.installDir,
+        )}`,
+        30_000,
+      );
       break;
     }
     case '/exit':
@@ -274,7 +343,21 @@ export const ConsoleView = ({
   const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
   const pendingPrompt = store.pendingPrompt;
 
-  // Watch for activation keys while the input is dormant
+  const showConsoleChrome = store.session.introConcluded;
+
+  // Watch for activation keys while the input is dormant.
+  //
+  // The event-plan feedback box has its own text-input handler below; if we
+  // also activated the slash console on `/` while the user is typing
+  // free-text feedback, every "/" mid-sentence would pop the command palette
+  // (e.g. "press / for help" or "use the doc/text together" would trigger
+  // it). Skip activation when the event-plan feedback prompt is the active
+  // text-entry surface so its own handler can take the keystroke verbatim.
+  const eventPlanFeedbackActive =
+    !!pendingPrompt &&
+    pendingPrompt.kind === 'event-plan' &&
+    planInputMode === 'feedback';
+
   useInput(
     (char, key) => {
       if (key.escape || char === 'q' || char === 'Q') {
@@ -306,6 +389,7 @@ export const ConsoleView = ({
         store.clearScreenError();
         return;
       }
+      if (!showConsoleChrome) return;
       if (char === '/') {
         activate('/');
       } else if (
@@ -316,7 +400,7 @@ export const ConsoleView = ({
         activate('');
       }
     },
-    { isActive: !inputActive },
+    { isActive: !inputActive && !eventPlanFeedbackActive },
   );
 
   const handleSubmit = (value: string) => {
@@ -606,37 +690,46 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Key hints + console input */}
-      <KeyHintBar
-        hints={effectiveHints as KeyHint[] | undefined}
-        width={innerWidth}
-        showAskHint={
-          store.session.credentials !== null && store.session.introConcluded
-        }
-      />
-      <Box paddingX={Layout.paddingX}>
-        <Text color={inputActive ? Colors.accent : Colors.muted}>
-          {Icons.prompt}{' '}
-        </Text>
-        {inputActive ? (
-          <SlashCommandInput
-            key={inputKey}
-            commands={COMMANDS}
-            isActive={inputActive}
-            initialValue={initialValue}
-            onSubmit={handleSubmit}
-            onDeactivate={deactivate}
+      {/* Key hints + console input — hidden on Intro to keep focus on the
+          framework picker. Render a fixed-height placeholder so the content
+          area doesn't jump when Continue transitions to the next screen. */}
+      {showConsoleChrome ? (
+        <>
+          <KeyHintBar
+            hints={effectiveHints as KeyHint[] | undefined}
+            width={innerWidth}
+            showAskHint={
+              store.session.credentials !== null && store.session.introConcluded
+            }
           />
-        ) : (
-          <Text color={Colors.disabled}>
-            {store.session.credentials !== null && store.session.introConcluded
-              ? visibleHistory.length > 0
-                ? 'Press / for commands · Tab to ask · Esc to hide answer'
-                : 'Press / for commands or Tab to ask a question'
-              : 'Press / for commands'}
-          </Text>
-        )}
-      </Box>
+          <Box paddingX={Layout.paddingX}>
+            <Text color={inputActive ? Colors.accent : Colors.muted}>
+              {Icons.prompt}{' '}
+            </Text>
+            {inputActive ? (
+              <SlashCommandInput
+                key={inputKey}
+                commands={COMMANDS}
+                isActive={inputActive}
+                initialValue={initialValue}
+                onSubmit={handleSubmit}
+                onDeactivate={deactivate}
+              />
+            ) : (
+              <Text color={Colors.disabled}>
+                {store.session.credentials !== null &&
+                store.session.introConcluded
+                  ? visibleHistory.length > 0
+                    ? 'Press / for commands · Tab to ask · Esc to hide answer'
+                    : 'Press / for commands or Tab to ask a question'
+                  : 'Press / for commands'}
+              </Text>
+            )}
+          </Box>
+        </>
+      ) : (
+        <Box height={2} />
+      )}
     </Box>
   );
 };

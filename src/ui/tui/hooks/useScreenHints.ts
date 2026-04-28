@@ -59,3 +59,8 @@ export function useScreenHintsValue(): readonly KeyHint[] {
 export function __resetScreenHintsForTests(): void {
   $screenHints.set(EMPTY_HINTS);
 }
+
+/** Test-only — read the currently-registered hints synchronously. */
+export function __getScreenHintsForTests(): readonly KeyHint[] {
+  return $screenHints.get();
+}

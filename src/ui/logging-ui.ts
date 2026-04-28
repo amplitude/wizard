@@ -20,12 +20,15 @@ export class LoggingUI implements WizardUI {
     console.log(`└  ${message}`);
   }
 
-  cancel(message: string, options?: { docsUrl?: string }): void {
+  cancel(message: string, options?: { docsUrl?: string }): Promise<void> {
     // Cancel implies failure/abort — direct to stderr so callers can detect it
     console.error(`■  ${message}`);
     if (options?.docsUrl) {
       console.error(`│  Manual setup guide: ${options.docsUrl}`);
     }
+    // No TUI in logging mode — stderr write completes synchronously,
+    // resolve immediately so wizardAbort isn't held up.
+    return Promise.resolve();
   }
 
   log = {
@@ -176,8 +179,8 @@ export class LoggingUI implements WizardUI {
     appId: number;
     orgId?: string | null;
     orgName?: string | null;
-    workspaceId?: string | null;
-    workspaceName?: string | null;
+    projectId?: string | null;
+    projectName?: string | null;
     envName?: string | null;
   }): void {
     // No-op in CI mode — credentials are handled directly

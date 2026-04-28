@@ -212,9 +212,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -240,21 +240,21 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       choices: Array<{
         orgId: string;
         orgName: string;
-        workspaceId: string;
-        workspaceName: string;
+        projectId: string;
+        projectName: string;
         appId: string | null;
         envName: string;
         label: string;
       }>;
     };
     expect(data.promptType).toBe('environment_selection');
-    expect(data.hierarchy).toEqual(['org', 'workspace', 'app', 'environment']);
+    expect(data.hierarchy).toEqual(['org', 'project', 'app', 'environment']);
     expect(data.choices).toHaveLength(2);
     expect(data.choices[0]).toMatchObject({
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100001',
       envName: 'Production',
       label: 'DevX / Sandbox / Production',
@@ -267,9 +267,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -292,9 +292,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -312,8 +312,8 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       resumeFlags: Array<{ label: string; flags: string[] }>;
     };
     expect(data.resumeFlags).toHaveLength(1);
-    // --project-id alone is sufficient — it's globally unique and resolves
-    // to one (org, workspace, env) tuple server-side. No --env / --org noise.
+    // --app-id alone is sufficient — it's globally unique and resolves
+    // to one (org, project, env) tuple server-side. No --env / --org noise.
     expect(data.resumeFlags[0].flags).toEqual(['--app-id', '100002']);
   });
 });
@@ -337,14 +337,6 @@ describe('parseEnvSelectionStdinLine', () => {
     expect(parsed).toEqual({ appId: '100002' });
   });
 
-  it('parses legacy { projectId } shape via zod', () => {
-    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine(
-      '{"projectId":"100001"}',
-    );
-    expect(rejectionMessage).toBeNull();
-    expect(parsed).toEqual({ projectId: '100001' });
-  });
-
   it('rejects non-string appId (wrong type) and returns a descriptive reason', () => {
     const { parsed, rejectionMessage } =
       parseEnvSelectionStdinLine('{"appId":12345}');
@@ -365,8 +357,8 @@ describe('resolveEnvSelectionFromStdin', () => {
     {
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100001',
       envName: 'Production',
       rank: 1,
@@ -375,8 +367,8 @@ describe('resolveEnvSelectionFromStdin', () => {
     {
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100002',
       envName: 'Development',
       rank: 2,
@@ -403,24 +395,11 @@ describe('resolveEnvSelectionFromStdin', () => {
       kind: 'selected',
       selection: {
         orgId: 'org-1',
-        workspaceId: 'ws-a',
+        projectId: 'proj-a',
         env: 'Development',
       },
       warnings: [],
     });
-  });
-
-  it('resolves legacy { projectId } alias AND surfaces a deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { projectId: '100001' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    if (outcome.kind === 'selected') {
-      expect(outcome.selection.env).toBe('Production');
-    }
-    expect(outcome.warnings.join('\n')).toMatch(/\{ projectId \}/);
-    expect(outcome.warnings.join('\n')).toMatch(/deprecated/);
   });
 
   it('returns kind=mismatch when a provided appId does not match any choice', () => {
@@ -430,28 +409,6 @@ describe('resolveEnvSelectionFromStdin', () => {
       expect(outcome.reason).toMatch(/999999/);
       expect(outcome.reason).toMatch(/did not match/);
     }
-  });
-
-  it('returns kind=mismatch when a legacy triple does not match any choice', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'ghost', workspaceId: 'none', env: 'Staging' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('mismatch');
-    if (outcome.kind === 'mismatch') {
-      expect(outcome.reason).toMatch(/ghost/);
-    }
-  });
-
-  it('accepts a matching legacy triple and emits the deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'org-1', workspaceId: 'ws-a', env: 'Production' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    expect(outcome.warnings.join('\n')).toMatch(
-      /\{ orgId, workspaceId, env \}/,
-    );
   });
 });
 
@@ -548,5 +505,91 @@ describe('AgentUI.emitNeedsInput', () => {
       { value: 'vue', label: 'vue' },
       { value: 'svelte', label: 'svelte' },
     ]);
+  });
+
+  it('promptChoice picks searchable_select widget for ≥10 options', () => {
+    const ui = new AgentUI();
+    const longList = Array.from({ length: 15 }, (_, i) => `option-${i}`);
+    void ui.promptChoice('Pick one of many', longList);
+
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({
+      component: 'searchable_select',
+      searchPlaceholder: 'Filter options…',
+    });
+  });
+
+  it('promptChoice picks plain select widget for <10 options', () => {
+    const ui = new AgentUI();
+    void ui.promptChoice('Pick one', ['a', 'b', 'c']);
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({ component: 'select' });
+  });
+
+  it('promptConfirm uses the confirmation widget', () => {
+    const ui = new AgentUI();
+    void ui.promptConfirm('Apply changes?');
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({
+      component: 'confirmation',
+      priority: 'required',
+      title: 'Apply changes?',
+    });
+  });
+
+  it('emitNeedsInput surfaces ui hints, recommendedReason, pagination, manualEntry', () => {
+    const ui = new AgentUI();
+    ui.emitNeedsInput({
+      code: 'project_selection',
+      message: 'Pick a project',
+      ui: {
+        component: 'searchable_select',
+        priority: 'required',
+        title: 'Select an Amplitude project',
+        description: 'Choose where events go.',
+        searchPlaceholder: 'Search…',
+        emptyState: 'No projects available.',
+      },
+      choices: [
+        {
+          value: '123',
+          label: 'Prod',
+          description: 'Org > WS > Prod',
+          metadata: { orgName: 'Org', envName: 'Prod' },
+          resumeFlags: ['--app-id', '123'],
+        },
+      ],
+      recommended: '123',
+      recommendedReason: 'Matches current ampli.json',
+      pagination: {
+        total: 100,
+        returned: 1,
+        nextCommand: ['npx', 'wizard', 'projects', 'list'],
+      },
+      allowManualEntry: true,
+      manualEntry: { flag: '--app-id', placeholder: 'Enter ID' },
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.type).toBe('needs_input');
+    expect(event.data).toMatchObject({
+      code: 'project_selection',
+      ui: {
+        component: 'searchable_select',
+        priority: 'required',
+        title: 'Select an Amplitude project',
+      },
+      recommended: '123',
+      recommendedReason: 'Matches current ampli.json',
+      allowManualEntry: true,
+    });
+    const data = event.data as Record<string, unknown>;
+    expect(data.pagination).toMatchObject({ total: 100, returned: 1 });
+    expect(data.manualEntry).toMatchObject({ flag: '--app-id' });
+    expect((data.choices as Array<Record<string, unknown>>)[0]).toMatchObject({
+      value: '123',
+      description: 'Org > WS > Prod',
+      resumeFlags: ['--app-id', '123'],
+    });
   });
 });

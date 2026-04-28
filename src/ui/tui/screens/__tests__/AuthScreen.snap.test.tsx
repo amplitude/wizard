@@ -1,12 +1,12 @@
 /**
  * AuthScreen — snapshots for the SUSI flow's branching states.
  *
- * The screen has five logical phases (oauth-wait → org → workspace →
- * project → key entry). Each branch is gated on session.pendingOrgs +
+ * The screen has five logical phases (oauth-wait → org → project →
+ * environment → key entry). Each branch is gated on session.pendingOrgs +
  * counts. Snapshotting the rendered text catches regressions in:
  *
  *   - The "Waiting for authentication" copy + login URL fallback
- *   - The org / workspace / project picker headings
+ *   - The org / project / environment picker headings
  *   - The "Create new project…" + "Start over" picker actions
  *   - The manual API key entry path with apiKeyNotice surfaced
  *
@@ -43,8 +43,8 @@ describe('AuthScreen snapshots', () => {
       introConcluded: true,
       region: 'us',
       pendingOrgs: [
-        { id: 'org-1', name: 'Acme Corp', workspaces: [] },
-        { id: 'org-2', name: 'Globex', workspaces: [] },
+        { id: 'org-1', name: 'Acme Corp', projects: [] },
+        { id: 'org-2', name: 'Globex', projects: [] },
       ],
     });
     const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
@@ -53,7 +53,7 @@ describe('AuthScreen snapshots', () => {
     expect(frame).toContain('Globex');
   });
 
-  it('renders the workspace picker with Create + Start over actions when multi-org', () => {
+  it('renders the project picker with Create + Start over actions when multi-org', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
@@ -62,25 +62,25 @@ describe('AuthScreen snapshots', () => {
         {
           id: 'org-1',
           name: 'Acme Corp',
-          workspaces: [
+          projects: [
             { id: 'ws-1', name: 'Production' },
             { id: 'ws-2', name: 'Staging' },
           ],
         },
-        { id: 'org-2', name: 'Globex', workspaces: [] },
+        { id: 'org-2', name: 'Globex', projects: [] },
       ],
       selectedOrgId: 'org-1',
       selectedOrgName: 'Acme Corp',
     });
     const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
-    expect(frame).toContain('Select a workspace');
+    expect(frame).toContain('Select a project');
     expect(frame).toContain('Production');
     expect(frame).toContain('Staging');
     expect(frame).toContain('Create new project');
     expect(frame).toContain('Start over');
   });
 
-  it('omits Start over from the workspace picker when only one org is available', () => {
+  it('omits Start over from the project picker when only one org is available', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
@@ -88,26 +88,26 @@ describe('AuthScreen snapshots', () => {
         {
           id: 'org-1',
           name: 'Solo Org',
-          workspaces: [
-            { id: 'ws-1', name: 'Workspace A' },
-            { id: 'ws-2', name: 'Workspace B' },
+          projects: [
+            { id: 'ws-1', name: 'Project A' },
+            { id: 'ws-2', name: 'Project B' },
           ],
         },
       ],
     });
     const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
-    // Auto-selected single org → workspace picker is shown without Start over
-    expect(frame).toContain('Select a workspace');
-    expect(frame).toContain('Workspace A');
+    // Auto-selected single org → project picker is shown without Start over
+    expect(frame).toContain('Select a project');
+    expect(frame).toContain('Project A');
     expect(frame).toContain('Create new project');
     expect(frame).not.toContain('Start over');
   });
 
-  it('renders the project (environment) picker when the workspace has multiple env keys', () => {
+  it('renders the environment picker when the project has multiple env keys', () => {
     // No installDir / ID prepopulation needed: the snapshot util points
     // installDir at a tmp dir, and the auto-resolve effect skips the
     // ampli.json write when session IDs already match the resolved
-    // org/workspace. Either way no stray ampli.json appears at the
+    // org/project. Either way no stray ampli.json appears at the
     // repo root during tests.
     const store = makeStoreForSnapshot({
       introConcluded: true,
@@ -116,10 +116,10 @@ describe('AuthScreen snapshots', () => {
         {
           id: 'org-1',
           name: 'Acme',
-          workspaces: [
+          projects: [
             {
               id: 'ws-1',
-              name: 'Solo Workspace',
+              name: 'Solo Project',
               environments: [
                 {
                   rank: 1,
@@ -138,7 +138,7 @@ describe('AuthScreen snapshots', () => {
       ],
     });
     const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
-    expect(frame).toContain('Select a project');
+    expect(frame).toContain('Select an environment');
     expect(frame).toContain('Development');
     expect(frame).toContain('Production');
   });
@@ -150,8 +150,8 @@ describe('AuthScreen snapshots', () => {
       region: 'us',
       detectedFrameworkLabel: 'Next.js',
       pendingOrgs: [
-        { id: 'org-1', name: 'Acme', workspaces: [] },
-        { id: 'org-2', name: 'Globex', workspaces: [] },
+        { id: 'org-1', name: 'Acme', projects: [] },
+        { id: 'org-2', name: 'Globex', projects: [] },
       ],
     });
     const { frame } = renderSnapshot(<AuthScreen store={store} />, store);

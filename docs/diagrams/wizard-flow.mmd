@@ -6,7 +6,7 @@ flowchart TD
     REGION_SELECT --> AUTH
 
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
-        SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
+        SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]
     end
 
     AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]

@@ -11,12 +11,12 @@
  */
 
 import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 
 import { z } from 'zod';
 import { getRunId } from './observability';
 import { logToFile } from '../utils/debug';
+import { ensureDir, getStateFile } from '../utils/storage-paths';
 
 const SerializedAgentStateSchema = z.object({
   schemaVersion: z.literal('amplitude-wizard-agent-state/1'),
@@ -71,10 +71,13 @@ export class AgentState {
     };
   }
 
-  /** Persist the current state to the tmpdir path for this attempt. */
+  /** Persist the current state to the cache-root path for this attempt. */
   persist(): string | null {
     const path = this.snapshotPath();
     try {
+      // Make sure `<cacheRoot>/state/` exists; the cache root may not have
+      // been created yet on a cold run.
+      ensureDir(dirname(path));
       writeFileSync(path, JSON.stringify(this.snapshot(), null, 2), {
         mode: 0o600,
       });
@@ -92,7 +95,7 @@ export class AgentState {
 
   snapshotPath(): string {
     const id = this.attemptId ?? 'unknown';
-    return join(tmpdir(), `amplitude-wizard-state-${id}.json`);
+    return getStateFile(id);
   }
 
   reset(): void {

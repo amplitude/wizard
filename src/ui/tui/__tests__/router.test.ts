@@ -35,7 +35,7 @@ function sessionAtRun(): WizardSession {
     region: 'us',
     credentials: CREDS,
     selectedOrgName: 'Acme',
-    selectedWorkspaceName: 'Amplitude',
+    selectedProjectName: 'Amplitude',
     selectedEnvName: 'Production',
     projectHasData: false,
   });
@@ -72,20 +72,20 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('advances from Auth to DataSetup when credentials + org + workspace are set', () => {
+    it('advances from Auth to DataSetup when credentials + org + project are set', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
         credentials: CREDS,
         selectedOrgName: 'Acme',
-        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Amplitude',
         selectedEnvName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
     });
 
-    it('stays on Auth when credentials set but workspace name AND id are missing', () => {
+    it('stays on Auth when credentials set but project name AND id are missing', () => {
       const router = new WizardRouter();
       // With neither name nor ID resolved, the identity isn't known at all —
       // user must complete selection.
@@ -95,8 +95,8 @@ describe('WizardRouter', () => {
         credentials: CREDS,
         selectedOrgName: 'Acme',
         selectedOrgId: 'org-1',
-        selectedWorkspaceName: null,
-        selectedWorkspaceId: null,
+        selectedProjectName: null,
+        selectedProjectId: null,
         selectedEnvName: 'Production',
       });
       expect(router.resolve(session)).toBe(Screen.Auth);
@@ -113,8 +113,8 @@ describe('WizardRouter', () => {
         credentials: CREDS,
         selectedOrgName: null,
         selectedOrgId: 'org-1',
-        selectedWorkspaceName: null,
-        selectedWorkspaceId: 'ws-1',
+        selectedProjectName: null,
+        selectedProjectId: 'ws-1',
         selectedEnvName: null,
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
@@ -123,13 +123,13 @@ describe('WizardRouter', () => {
     it('advances from Auth to DataSetup when env name is missing (env is optional)', () => {
       const router = new WizardRouter();
       // Manual API key entry can't resolve the env. As long as org and
-      // workspace are known, Auth is considered complete.
+      // project are known, Auth is considered complete.
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
         credentials: CREDS,
         selectedOrgName: 'Acme',
-        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Amplitude',
         selectedEnvName: null,
       });
       expect(router.resolve(session)).toBe(Screen.DataSetup);
@@ -221,7 +221,7 @@ describe('WizardRouter', () => {
         region: 'us',
         createProject: {
           pending: true,
-          source: 'workspace',
+          source: 'project',
           suggestedName: null,
         },
       });
@@ -249,7 +249,7 @@ describe('WizardRouter', () => {
         region: 'us',
         credentials: CREDS,
         selectedOrgName: 'Acme',
-        selectedWorkspaceName: 'Amplitude',
+        selectedProjectName: 'Amplitude',
         selectedEnvName: 'Production',
         createProject: {
           pending: false,
@@ -713,6 +713,208 @@ describe('WizardRouter', () => {
       };
       // DataIngestionCheck show: activationLevel !== 'full' -> false -> skipped
       expect(router.resolve(session)).toBe(Screen.Slack);
+    });
+  });
+
+  // ── Back navigation ────────────────────────────────────────────────
+
+  /**
+   * Build a stub store whose mutations write into a single session reference.
+   * Mirrors only the methods invoked by FlowEntry.revert callbacks so we
+   * exercise the real revert wiring end-to-end without spinning up the
+   * full WizardStore (which would pull in nanostores + analytics).
+   */
+  function makeStubStore(initial: WizardSession) {
+    const ref: { session: WizardSession } = { session: initial };
+    const mutate = (patch: Partial<WizardSession>) => {
+      ref.session = { ...ref.session, ...patch };
+    };
+    const stub = {
+      get session() {
+        return ref.session;
+      },
+      resetAuthForRegionChange: () =>
+        mutate({
+          region: null,
+          regionForced: true,
+          credentials: null,
+          pendingAuthAccessToken: null,
+          pendingAuthIdToken: null,
+          pendingOrgs: null,
+          selectedOrgId: null,
+          selectedOrgName: null,
+          selectedProjectId: null,
+          selectedProjectName: null,
+          selectedAppId: null,
+          selectedEnvName: null,
+          projectHasData: null,
+        }),
+      clearOrgAndProjectSelection: () =>
+        mutate({
+          selectedOrgId: null,
+          selectedOrgName: null,
+          selectedProjectId: null,
+          selectedProjectName: null,
+          selectedAppId: null,
+          selectedEnvName: null,
+          projectHasData: null,
+        }),
+      resetActivationCheck: () =>
+        mutate({
+          projectHasData: null,
+          activationLevel: 'none' as const,
+          activationOptionsComplete: false,
+        }),
+      resetActivationOptions: () =>
+        mutate({ activationOptionsComplete: false }),
+      resetFeatureOptIn: () => mutate({ optInFeaturesComplete: false }),
+      resetMcp: () =>
+        mutate({
+          mcpComplete: false,
+          mcpOutcome: null,
+          mcpInstalledClients: [],
+        }),
+      resetDataIngestion: () => mutate({ dataIngestionConfirmed: false }),
+      resetSlack: () => mutate({ slackComplete: false, slackOutcome: null }),
+      cancelCreateProject: () =>
+        mutate({
+          createProject: { pending: false, source: null, suggestedName: null },
+        }),
+      popLastFrameworkContextAnswer: () => {
+        const order = ref.session.frameworkContextAnswerOrder;
+        if (order.length === 0) return false;
+        const last = order[order.length - 1];
+        const { [last]: _omit, ...rest } = ref.session.frameworkContext;
+        void _omit;
+        mutate({
+          frameworkContext: rest,
+          frameworkContextAnswerOrder: order.slice(0, -1),
+        });
+        return true;
+      },
+    };
+    // Cast: the real WizardStore has many more methods, but goBack only
+    // reaches the ones above through FlowEntry.revert callbacks.
+    return { stub, ref };
+  }
+
+  describe('back navigation', () => {
+    it('reports canGoBack=false on the very first screen', () => {
+      const router = new WizardRouter();
+      expect(router.canGoBack(fresh())).toBe(false);
+    });
+
+    it('reports canGoBack=false on RegionSelect (Intro is non-revertible)', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({ introConcluded: true });
+      // Active = RegionSelect, walking back hits Intro which has no revert -> wall
+      expect(router.canGoBack(session)).toBe(false);
+    });
+
+    it('canGoBack from Auth -> reverts past RegionSelect', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+      expect(router.canGoBack(session)).toBe(true);
+
+      const { stub, ref } = makeStubStore(session);
+      const ok = router.goBack(ref.session, stub as never);
+      expect(ok).toBe(true);
+      expect(ref.session.region).toBeNull();
+      expect(ref.session.regionForced).toBe(true);
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.RegionSelect);
+    });
+
+    it('canGoBack from DataSetup -> reverts back into Auth picker', () => {
+      const router = new WizardRouter();
+      const session = sessionAtRun();
+      // sessionAtRun has projectHasData=false → router resolves to ActivationOptions or
+      // Run depending on activationLevel. Force projectHasData=null so we're on DataSetup.
+      const onDataSetup = { ...session, projectHasData: null };
+      expect(router.resolve(onDataSetup)).toBe(Screen.DataSetup);
+      const { stub, ref } = makeStubStore(onDataSetup);
+      expect(router.goBack(ref.session, stub as never)).toBe(true);
+      // Auth's isComplete requires selectedOrgName/Id + selectedProjectName/Id.
+      // After clearing selection, Auth becomes incomplete and the router lands there.
+      expect(ref.session.selectedOrgName).toBeNull();
+      expect(ref.session.selectedProjectName).toBeNull();
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.Auth);
+    });
+
+    it('Run acts as a back-stop wall — Mcp cannot back past Run', () => {
+      const router = new WizardRouter();
+      const session = {
+        ...sessionPostRun(),
+        // Pre-Run was incomplete, then Run completed. Mcp is now active.
+        mcpComplete: false,
+      };
+      expect(router.resolve(session)).toBe(Screen.Mcp);
+      expect(router.canGoBack(session)).toBe(false);
+      const { stub, ref } = makeStubStore(session);
+      expect(router.goBack(ref.session, stub as never)).toBe(false);
+    });
+
+    it('canGoBack from Slack -> reverts DataIngestionCheck', () => {
+      const router = new WizardRouter();
+      const session = {
+        ...sessionPostRun(),
+        mcpComplete: true,
+        dataIngestionConfirmed: true,
+        slackComplete: false,
+      };
+      expect(router.resolve(session)).toBe(Screen.Slack);
+      expect(router.canGoBack(session)).toBe(true);
+      const { stub, ref } = makeStubStore(session);
+      expect(router.goBack(ref.session, stub as never)).toBe(true);
+      expect(ref.session.dataIngestionConfirmed).toBe(false);
+      expect(new WizardRouter().resolve(ref.session)).toBe(
+        Screen.DataIngestionCheck,
+      );
+    });
+
+    it('Setup revert returns false when no user answers exist — keeps walking back', () => {
+      const router = new WizardRouter();
+      // Setup complete (no user-answered framework questions),
+      // ActivationOptions shown+complete. Back from Run should walk
+      // Setup (no-op revert) and land on ActivationOptions.
+      // (Pre-PR 313 this test asserted resolve == Screen.FeatureOptIn
+      //  before goBack; FeatureOptIn was removed when SR + G&S + autocapture
+      //  became inline-auto-enabled, so the back-walk no longer transits
+      //  through that screen — the underlying revert-walking behavior we
+      //  care about is preserved.)
+      const session = {
+        ...sessionAtRun(),
+        activationLevel: 'partial' as const,
+        activationOptionsComplete: true,
+      };
+
+      const { stub, ref } = makeStubStore(session);
+      const ok = router.goBack(ref.session, stub as never);
+      // Walks: Run (active) → Setup (no questions, complete, revert
+      // returns false) → ActivationOptions (complete + revert) → reverts.
+      expect(ok).toBe(true);
+      expect(ref.session.activationOptionsComplete).toBe(false);
+    });
+
+    it('canGoBack=false when an overlay is active', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({ introConcluded: true, region: 'us' });
+      expect(router.canGoBack(session)).toBe(true);
+      router.pushOverlay(Overlay.Mcp);
+      expect(router.canGoBack(session)).toBe(false);
+      const { stub, ref } = makeStubStore(session);
+      expect(router.goBack(ref.session, stub as never)).toBe(false);
+    });
+
+    it('successful goBack flips lastNavDirection to "pop"', () => {
+      const router = new WizardRouter();
+      const session = sessionWith({ introConcluded: true, region: 'us' });
+      const { stub, ref } = makeStubStore(session);
+      router.goBack(ref.session, stub as never);
+      expect(router.lastNavDirection).toBe('pop');
     });
   });
 });

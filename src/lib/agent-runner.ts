@@ -34,18 +34,23 @@ import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
+import * as fsSync from 'fs';
+import path from 'path';
 import { saveCheckpoint } from './session-checkpoint.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
+import { getLogFilePath } from './observability/index.js';
 import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
-import { wizardAbort, WizardError } from '../utils/wizard-abort';
+import {
+  wizardAbort,
+  WizardError,
+  getWizardAbortSignal,
+} from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
-/** Path the wizard writes its debug log to — referenced in user-facing error copy. */
-const LOG_FILE_PATH = '/tmp/amplitude-wizard.log';
 /** Single source of truth for the support address shown in error messages. */
 const SUPPORT_EMAIL = 'wizard@amplitude.com';
 
@@ -110,6 +115,151 @@ export function classifyApiErrorSubtype(input: {
 }
 
 /**
+ * Decide whether a late-stage API failure should be treated as a soft
+ * error (continue to MCP / outro) or a hard abort (wizardAbort).
+ *
+ * The agent stream can throw `API_ERROR` / `RATE_LIMIT` AFTER it has
+ * already done all the meaningful work — common shapes:
+ *   - dashboard MCP create succeeded, then a final flush hits a 429
+ *   - setup-report.md was written, then the stream closed mid-tear-down
+ *   - hook bridge fired its last event after the agent yielded
+ *
+ * In those cases the user's project is in a fully-set-up state. We
+ * shouldn't punish them with a network error code and skip the MCP /
+ * Slack / Outro screens — the wizard's job is done.
+ *
+ * Heuristic: the dashboard URL on the session is the most reliable
+ * "we got past the long pole" signal. The dashboard MCP call happens
+ * last in the agent's conclude phase, after events have been
+ * instrumented and the setup report has been drafted. If the URL is
+ * present, everything else is too.
+ */
+export function agentArtifactsLookComplete(session: WizardSession): boolean {
+  return Boolean(session.checklistDashboardUrl);
+}
+
+/**
+ * Heuristic: did the agent at least install the SDK and instrument
+ * events, even if it didn't reach the dashboard creation step?
+ *
+ * The wizard's `confirm_event_plan` MCP tool persists the approved
+ * event plan to `<installDir>/.amplitude-events.json` (see
+ * `persistEventPlan` in `wizard-tools.ts`). That file's presence with
+ * non-empty content is a hard signal that:
+ *
+ *   - The user approved an instrumentation plan
+ *   - The agent reached the post-confirmation phase
+ *   - Track call insertion was attempted (whether or not every callsite
+ *     landed cleanly — but typically by this point it has)
+ *
+ * Used as a complement to `agentArtifactsLookComplete` for failure modes
+ * where the dashboard URL is NOT set but the project is still in a
+ * usable instrumented state — most commonly: the Amplitude MCP server
+ * (mcp.amplitude.com) is unreachable at the END of the run, after the
+ * events were instrumented but before the dashboard could be created.
+ *
+ * Distinct from `agentArtifactsLookComplete` because that function's
+ * "complete" includes dashboard. This one's "instrumented" stops at the
+ * code-changes phase. Dashboard-failed-but-everything-else-worked is a
+ * meaningfully different state — the user has working analytics; the
+ * only loss is the auto-built dashboard. They can build one manually at
+ * app.amplitude.com.
+ */
+export function agentEventsInstrumented(session: WizardSession): boolean {
+  try {
+    const eventsPath = path.join(session.installDir, '.amplitude-events.json');
+    if (!fsSync.existsSync(eventsPath)) return false;
+    const raw = fsSync.readFileSync(eventsPath, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Hard-error abort for `API_ERROR` / `RATE_LIMIT` agent failures.
+ * Extracted from the runAgentWizardBody inline branch so the soft-error
+ * path can early-return without duplicating this logic.
+ */
+async function abortOnApiError(
+  errorType: AgentErrorType.API_ERROR | AgentErrorType.RATE_LIMIT,
+  rawMessage: string,
+  config: FrameworkConfig,
+): Promise<never> {
+  // Subtype within API_ERROR — these all share the "upstream dropped
+  // something" root cause but reach this branch by different paths:
+  //
+  //   terminated_400  — Vertex/Anthropic killed the request mid-flight.
+  //                     Slipped past the GATEWAY_DOWN guard because
+  //                     earlier attempts had succeeded. (Sentry #7442894144)
+  //   stream_closed   — Hook bridge race during prior-attempt teardown
+  //                     (issue #297). #298 drains the prior iterator
+  //                     and treats this as transient inside the inner
+  //                     retry loop, so seeing it surface here means
+  //                     every retry exhausted with the same bridge
+  //                     race — strong signal that the drain isn't
+  //                     fully effective and we need a deeper fix.
+  //   rate_limit      — Wizard exhausted retries against a 429 storm.
+  //   other           — Unclassified API error. Catch-all.
+  const errorSubtype = classifyApiErrorSubtype({
+    errorType,
+    message: rawMessage,
+  });
+
+  captureWizardError(
+    'Agent API',
+    rawMessage || 'Unknown API error',
+    'agent-runner',
+    {
+      integration: config.metadata.integration,
+      'error type': errorType,
+      'error subtype': errorSubtype,
+      'using direct key': !!process.env.ANTHROPIC_API_KEY,
+    },
+  );
+
+  let userMessage: string;
+  switch (errorSubtype) {
+    case 'stream_closed':
+      userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
+      break;
+    case 'terminated_400':
+      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
+      break;
+    case 'rate_limit':
+      userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
+        rawMessage || 'API Error: 429'
+      }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
+      break;
+    case 'other':
+      userMessage = `LLM gateway error\n\n${
+        rawMessage || 'Unknown error'
+      }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
+      break;
+  }
+
+  await wizardAbort({
+    message: userMessage,
+    error: new WizardError(`API error: ${rawMessage || 'unknown'}`, {
+      integration: config.metadata.integration,
+      'error type': errorType,
+      'error subtype': errorSubtype,
+      // Preserves the structured `report_status` detail / underlying
+      // agentResult.message that produced this branch — without it
+      // Sentry only sees the boilerplate `userMessage` copy, which
+      // doesn't disambiguate between subtypes for debugging.
+      'agent error detail': rawMessage || null,
+    }),
+    exitCode: ExitCode.NETWORK_ERROR,
+  });
+  // wizardAbort returns Promise<never>, but TypeScript can't always
+  // narrow that through an async function — explicit throw keeps
+  // downstream type checking happy.
+  throw new Error('unreachable');
+}
+
+/**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
  */
 function sessionToOptions(session: WizardSession): WizardOptions {
@@ -152,10 +302,69 @@ export async function runAgentWizard(
   // before anything is installed. Idempotent — safe to call on every run.
   // Without this, `git status` after a run is full of wizard scaffolding
   // and `git add .` sweeps it into the user's commits.
-  const { ensureWizardArtifactsIgnored, cleanupWizardArtifacts } = await import(
-    './wizard-tools.js'
-  );
+  const {
+    ensureWizardArtifactsIgnored,
+    cleanupWizardArtifacts,
+    writeFallbackReportIfMissing,
+    archiveSetupReportFile,
+    restoreSetupReportIfMissing,
+  } = await import('./wizard-tools.js');
   ensureWizardArtifactsIgnored(session.installDir);
+
+  // Move any prior `amplitude-setup-report.md` to
+  // `amplitude-setup-report.previous.md` BEFORE the run starts so the
+  // outro never advertises a stale report from a previous run (e.g.
+  // against a different workspace) as if it described THIS run. The
+  // fresh report still lands at the canonical filename when the agent
+  // reaches its conclude phase; if it never gets there (full activation,
+  // cancel, etc.) the canonical filename stays absent and the outro
+  // hides the "View setup report" option. We keep exactly one prior
+  // report — not a growing timestamped pile — because the project root
+  // shouldn't carry an audit trail. (PR 316.)
+  archiveSetupReportFile(session.installDir);
+
+  // Helper bound to this run's session. The fallback never overwrites
+  // an agent-authored report (see writeFallbackReportIfMissing's
+  // existsSync check), so it's safe to invoke from any teardown path.
+  const tryWriteFallback = (): void => {
+    writeFallbackReportIfMissing({
+      installDir: session.installDir,
+      integration: session.integration,
+      dashboardUrl: session.checklistDashboardUrl,
+      workspaceName: session.selectedProjectName,
+      envName: session.selectedEnvName,
+    });
+  };
+
+  // Wire BOTH report-recovery helpers into every teardown path:
+  //
+  //   1. restoreSetupReportIfMissing — if the run never reaches the
+  //      conclude phase, restore the archived prior report so the user
+  //      gets back what they had before this run touched anything.
+  //   2. writeFallbackReportIfMissing — if there was no prior report
+  //      AND the agent never wrote one, synthesize a minimal report so
+  //      the outro always has something to surface.
+  //
+  // ORDERING INVARIANT: restore MUST run before fallback. Both helpers
+  // existsSync-gate the canonical path, so if fallback fired first it
+  // would land a stub at canonical, restore would then see
+  // canonical-exists and bail, and the user's prior real report would
+  // stay permanently buried in `.previous.md`. Restore goes through
+  // `registerPriorityCleanup` (unshifts onto the cleanup queue) so it
+  // ALWAYS runs before any code that may write a fresh canonical
+  // report, regardless of registration order.
+  //
+  // Registered as cleanups so wizardAbort() triggers them before
+  // process.exit. The success-path re-fires below catch the two failure
+  // modes that bypass wizardAbort (non-throwing return false, raw
+  // throw).
+  const { registerCleanup, registerPriorityCleanup } = await import(
+    '../utils/wizard-abort.js'
+  );
+  registerPriorityCleanup(() =>
+    restoreSetupReportIfMissing(session.installDir),
+  );
+  registerCleanup(tryWriteFallback);
 
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
   // preserve the wizard's working artifacts (`.amplitude-events.json`,
@@ -171,12 +380,27 @@ export async function runAgentWizard(
   // user to re-confirm their entire instrumentation plan from scratch.
   // The gitignore made the cleanup redundant for its stated purpose
   // (preventing `git add .` pollution).
-  const success = await runAgentWizardBody(
-    config,
-    session,
-    getAdditionalFeatureQueue,
-    featureProgress,
-  );
+  let success = false;
+  try {
+    success = await runAgentWizardBody(
+      config,
+      session,
+      getAdditionalFeatureQueue,
+      featureProgress,
+    );
+  } finally {
+    // Cover the two failure paths that bypass wizardAbort's cleanup hook:
+    //   - body returns false  (non-throwing early return, e.g. version check)
+    //   - body throws         (uncaught exception propagates to caller)
+    // Run restore first (recovers the archived prior report), then
+    // fallback (synthesizes a minimal report only if neither agent nor
+    // restore produced one). Both helpers existsSync-gate the canonical
+    // path, so they're idempotent if wizardAbort already fired them.
+    if (!success) {
+      restoreSetupReportIfMissing(session.installDir);
+      tryWriteFallback();
+    }
+  }
   // Cleanup runs only when the body explicitly signals success. Other
   // exit paths preserve artifacts:
   //   - body returns false  → non-success early return (e.g. version
@@ -187,6 +411,11 @@ export async function runAgentWizard(
   //   - wizardAbort path    → calls process.exit(); this line is never
   //     reached, integration skills + events file stay on disk.
   if (success) {
+    // Safety net for the rare case where the agent reaches a
+    // successful conclusion without writing the report. The fallback
+    // never overwrites an agent-authored report.
+    tryWriteFallback();
+
     cleanupWizardArtifacts(session.installDir, { onSuccess: true });
   }
 }
@@ -234,14 +463,24 @@ async function runAgentWizardBody(
       const packageDisplayName =
         versionCheckInfo.packageDisplayName ?? config.metadata.name;
       const version = versionCheckInfo.version ?? 'unknown';
-      getUI().cancel(
-        `The wizard requires ${packageDisplayName} ${minimumVersion} or later, but found version ${version}. Upgrade your ${packageDisplayName} version to use the wizard, or follow the manual setup guide.`,
-        { docsUrl },
-      );
-      logToFile('[runAgentWizard] cancel displayed to user');
-      // Non-success early return — caller skips success-path cleanup so
-      // the integration skill (and any prior `.amplitude-events.json`)
-      // stays on disk for a clean re-run after the user upgrades.
+      // Route through wizardAbort so the TUI Outro is shown, awaited,
+      // *and* the process actually exits afterward. A previous version
+      // called getUI().cancel() then `return false`, which left the
+      // Ink event loop running indefinitely after the user dismissed
+      // the outro because nothing called process.exit on this path.
+      // wizardAbort handles cancel + analytics shutdown + exit as a
+      // single atomic sequence; cancelOptions.docsUrl forwards the
+      // manual-setup link into the Outro for recovery.
+      await wizardAbort({
+        message: `The wizard requires ${packageDisplayName} ${minimumVersion} or later, but found version ${version}. Upgrade your ${packageDisplayName} version to use the wizard, or follow the manual setup guide.`,
+        exitCode: ExitCode.GENERAL_ERROR,
+        cancelOptions: { docsUrl },
+      });
+      // Unreachable — wizardAbort returns Promise<never>. The earlier
+      // `return false` documented "skip success-path cleanup so the
+      // integration skill stays on disk for a clean re-run after the
+      // user upgrades" — that's still preserved because process.exit
+      // fires before any further work in this function runs.
       return false;
     }
   }
@@ -327,8 +566,8 @@ async function runAgentWizardBody(
       ...session.credentials,
       orgId: session.selectedOrgId,
       orgName: session.selectedOrgName,
-      workspaceId: session.selectedWorkspaceId,
-      workspaceName: session.selectedWorkspaceName,
+      projectId: session.selectedProjectId,
+      projectName: session.selectedProjectName,
       envName: session.selectedEnvName,
     });
     getUI().setRegion(authResult.cloudRegion);
@@ -354,11 +593,21 @@ async function runAgentWizardBody(
     const stored = getStoredToken(user?.id, user?.zone);
     if (stored?.accessToken) {
       accessToken = stored.accessToken;
-      // Silently refresh if the access token has expired but the refresh window is still valid
+      // Silently refresh if the access token has expired but the refresh window is still valid.
+      // CRITICAL: pass the user's zone — without it `refreshAccessToken` defaults
+      // to the US OAuth host (auth.amplitude.com) and EU users' refresh tokens
+      // get rejected. The catch below then logs "auth refresh failed" and the
+      // wizard proceeds with the (already-expired) access token; every
+      // subsequent fetchAmplitudeUser / Amplitude MCP call surfaces as
+      // "Authentication failed while trying to fetch Amplitude user data" —
+      // both during the agent run and afterwards in DataIngestionCheckScreen.
       if (user && new Date() > new Date(stored.expiresAt)) {
         const refreshStartedAt = Date.now();
         try {
-          const refreshed = await refreshAccessToken(stored.refreshToken);
+          const refreshed = await refreshAccessToken(
+            stored.refreshToken,
+            user.zone,
+          );
           storeToken(user, {
             accessToken: refreshed.accessToken,
             idToken: refreshed.idToken,
@@ -434,6 +683,7 @@ async function runAgentWizardBody(
         projectApiKey,
         host,
         appId,
+        cloudRegion,
       },
       frameworkContext,
       skipAmplitudeMcp,
@@ -553,26 +803,89 @@ async function runAgentWizardBody(
     });
   }
 
-  if (agentResult.error === AgentErrorType.MCP_MISSING) {
-    await wizardAbort({
-      message: `Could not access the Amplitude MCP server\n\nThe wizard was unable to connect to the Amplitude MCP server.\nThis could be due to a network issue or a configuration problem.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
-      error: new WizardError('Agent could not access Amplitude MCP server', {
-        integration: config.metadata.integration,
-        'error type': AgentErrorType.MCP_MISSING,
-      }),
-      exitCode: ExitCode.AGENT_FAILED,
-    });
-  }
+  if (
+    agentResult.error === AgentErrorType.MCP_MISSING ||
+    agentResult.error === AgentErrorType.RESOURCE_MISSING
+  ) {
+    // Soft-error path: if the agent has already instrumented events
+    // (or completed everything including the dashboard), an MCP /
+    // resource failure here is on a tail-end call — most commonly the
+    // dashboard creation step at the end of the conclude phase. The
+    // SDK is installed, events are instrumented, code is written.
+    // Hard-aborting would throw away all that work and show the user a
+    // "Setup cancelled" outro with no recap of what succeeded.
+    //
+    // Real-world example: ✓ Welcome ✓ Auth ✓ Setup ✓ Verify ● Done —
+    // every step green-checked, but the wizard surfaced
+    // "Setup cancelled" with the detail "Amplitude MCP not connected
+    // — dashboard could not be created automatically. Visit
+    // app.amplitude.com to build it manually using the chart plan
+    // below." The agent itself reported the failure as partial and
+    // suggested a recovery path; the wizard ignored that nuance.
+    //
+    // The MCP_MISSING signal can come from EITHER the in-process
+    // `wizard-tools` MCP (skill loading, env vars) OR the remote
+    // `amplitude-wizard` MCP (mcp.amplitude.com — event plans,
+    // dashboards). The agent-reported detail is preserved on the
+    // WizardError payload for Sentry / `agent error detail` analytics
+    // so we can disambiguate which server failed.
+    const errorType = agentResult.error;
+    const detail = agentResult.message ?? null;
+    const dashboardComplete = agentArtifactsLookComplete(session);
+    const eventsInstrumented = agentEventsInstrumented(session);
 
-  if (agentResult.error === AgentErrorType.RESOURCE_MISSING) {
-    await wizardAbort({
-      message: `Could not access the setup resource\n\nThe wizard could not access the setup resource. This may indicate a version mismatch or a temporary service issue.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
-      error: new WizardError('Agent could not access setup resource', {
+    if (dashboardComplete || eventsInstrumented) {
+      logToFile(
+        `[agent-runner] Soft ${errorType} after agent did meaningful work (dashboard=${dashboardComplete}, events=${eventsInstrumented}): ${
+          detail ?? '(no detail)'
+        }. Continuing to MCP / outro.`,
+      );
+      analytics.wizardCapture('agent soft error', {
         integration: config.metadata.integration,
-        'error type': AgentErrorType.RESOURCE_MISSING,
-      }),
-      exitCode: ExitCode.AGENT_FAILED,
-    });
+        'error type': errorType,
+        'dashboard complete': dashboardComplete,
+        'events instrumented': eventsInstrumented,
+        'agent error detail': detail,
+      });
+      // Surface a plain-English warning so the user knows what's
+      // recoverable. Without this they'd see a normal success outro
+      // with no hint that the dashboard step actually failed.
+      // Copy stays jargon-free — same standard as PR #336.
+      const what = dashboardComplete
+        ? 'a late tooling step'
+        : 'the dashboard creation step';
+      getUI().pushStatus(
+        `Note: ${what} couldn't reach Amplitude's setup service — your SDK + events are instrumented. ${
+          dashboardComplete
+            ? ''
+            : 'Build the dashboard manually at https://app.amplitude.com using the event names in your code. '
+        }Detail: ${detail || errorType}`,
+      );
+      // Fall through to env-var upload, MCP install, Slack, Outro —
+      // they don't depend on agentResult.error being null.
+    } else {
+      // Hard-error path: agent didn't get far enough to leave the
+      // project usable. Could be the in-process wizard-tools MCP
+      // (skill loading) failing right at startup. Abort with the
+      // jargon-free copy from PR #336.
+      const isMcp = errorType === AgentErrorType.MCP_MISSING;
+      await wizardAbort({
+        message: isMcp
+          ? `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`
+          : `Couldn't load setup instructions for ${config.metadata.name} — this may be a temporary service issue or a version mismatch.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`,
+        error: new WizardError(
+          isMcp
+            ? 'Agent could not access Amplitude MCP server'
+            : 'Agent could not access setup resource',
+          {
+            integration: config.metadata.integration,
+            'error type': errorType,
+            'agent error detail': detail,
+          },
+        ),
+        exitCode: ExitCode.AGENT_FAILED,
+      });
+    }
   }
 
   if (agentResult.error === AgentErrorType.GATEWAY_DOWN) {
@@ -590,13 +903,14 @@ async function runAgentWizardBody(
     await wizardAbort({
       message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
         agentResult.message || 'API Error: 400 terminated'
-      }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`,
+      }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
       error: new WizardError(
         `LLM gateway unavailable: ${agentResult.message ?? 'unknown'}`,
         {
           integration: config.metadata.integration,
           'error type': agentResult.error,
           'using direct key': usingDirectKey,
+          'agent error detail': agentResult.message ?? null,
         },
       ),
       exitCode: ExitCode.NETWORK_ERROR,
@@ -607,76 +921,45 @@ async function runAgentWizardBody(
     agentResult.error === AgentErrorType.RATE_LIMIT ||
     agentResult.error === AgentErrorType.API_ERROR
   ) {
-    // Subtype within API_ERROR — these all share the "upstream dropped
-    // something" root cause but reach this branch by different paths:
-    //
-    //   terminated_400  — Vertex/Anthropic killed the request mid-flight.
-    //                     Slipped past the GATEWAY_DOWN guard because
-    //                     earlier attempts had succeeded. (Sentry #7442894144)
-    //   stream_closed   — Hook bridge race during prior-attempt teardown
-    //                     (issue #297). #298 drains the prior iterator
-    //                     and treats this as transient inside the inner
-    //                     retry loop, so seeing it surface here means
-    //                     every retry exhausted with the same bridge
-    //                     race — strong signal that the drain isn't
-    //                     fully effective and we need a deeper fix.
-    //   rate_limit      — Wizard exhausted retries against a 429 storm.
-    //   other           — Unclassified API error. Catch-all.
-    //
-    // Surfacing each subtype as its own Sentry tag lets us slice and
-    // alert separately, especially `stream_closed` which we expect to
-    // be near-zero post-#298.
     const rawMessage = agentResult.message ?? '';
-    const errorSubtype = classifyApiErrorSubtype({
-      errorType: agentResult.error,
-      message: rawMessage,
-    });
 
-    captureWizardError(
-      'Agent API',
-      rawMessage || 'Unknown API error',
-      'agent-runner',
-      {
+    // Soft-error path: if the agent's actual work artifacts exist on
+    // the session (dashboard URL set), the API failure was on a
+    // tail-end call (often the last token flush, an observability
+    // ping, or a hook closing the stream after the agent already
+    // wrote the setup report and created the dashboard). Hard-aborting
+    // here would skip MCP / Slack / Outro and exit with a network
+    // error code, even though the user's project is in a fully-set-up
+    // state. Continue past this branch so the user gets their
+    // dashboard link, the MCP install offer, and a normal Outro.
+    if (agentArtifactsLookComplete(session)) {
+      const errorSubtype = classifyApiErrorSubtype({
+        errorType: agentResult.error,
+        message: rawMessage,
+      });
+      logToFile(
+        `[agent-runner] Soft API error after work completed (${errorSubtype}): ${rawMessage}. Continuing to MCP / outro.`,
+      );
+      analytics.wizardCapture('agent soft error', {
         integration: config.metadata.integration,
         'error type': agentResult.error,
         'error subtype': errorSubtype,
-        'using direct key': !!process.env.ANTHROPIC_API_KEY,
-      },
-    );
-
-    let userMessage: string;
-    switch (errorSubtype) {
-      case 'stream_closed':
-        // Stream closed survived past the inner retry loop's defense in
-        // depth (#298). Frame it as a connection issue with the same
-        // upstream-gateway treatment as terminated_400 — same family of
-        // root cause, same workaround.
-        userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
-        break;
-      case 'terminated_400':
-        userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
-        break;
-      case 'rate_limit':
-        userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
-          rawMessage || 'API Error: 429'
-        }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
-        break;
-      case 'other':
-        userMessage = `LLM gateway error\n\n${
-          rawMessage || 'Unknown error'
-        }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
-        break;
+      });
+      // Surface a non-fatal warning in the status ticker so the user
+      // sees something happened on the way out, but don't abort.
+      getUI().pushStatus(
+        `Note: a late API call failed (${
+          rawMessage || agentResult.error
+        }) but your project's setup is complete — continuing.`,
+      );
+      // Fall through to the post-agent steps (env upload, MCP, Slack,
+      // DataIngestion, Outro). They don't depend on agentResult.error
+      // being null, just on getting past this if/else.
+    } else {
+      // Hard-error path: artifacts missing, so the agent didn't get
+      // far enough to leave the project in a usable state. Abort.
+      await abortOnApiError(agentResult.error, rawMessage, config);
     }
-
-    await wizardAbort({
-      message: userMessage,
-      error: new WizardError(`API error: ${rawMessage || 'unknown'}`, {
-        integration: config.metadata.integration,
-        'error type': agentResult.error,
-        'error subtype': errorSubtype,
-      }),
-      exitCode: ExitCode.NETWORK_ERROR,
-    });
   }
 
   // Build environment variables from OAuth credentials
@@ -708,6 +991,17 @@ async function runAgentWizardBody(
     );
   }
 
+  // Commit the instrumented event plan to the Amplitude tracking plan as
+  // planned events so the names show up in the Data tab immediately — even
+  // before any track() call fires in the user's app.
+  const plannedEventsSummary = await commitPlannedEventsStep(
+    agentResult.plannedEvents ?? [],
+    accessToken,
+    appId,
+    session,
+    cloudRegion,
+  );
+
   // MCP installation is handled by McpScreen — no prompt here
 
   // Data ingestion check — agent mode only (not CI).
@@ -729,6 +1023,7 @@ async function runAgentWizardBody(
     uploadedEnvVars.length > 0
       ? `Uploaded environment variables to your hosting provider`
       : '',
+    plannedEventsSummary,
   ].filter(Boolean);
 
   session.outroData = {
@@ -792,12 +1087,12 @@ async function pollForDataIngestion(
       const org = session.selectedOrgId
         ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
         : userInfo.orgs[0];
-      const ws =
-        org && session.selectedWorkspaceId
-          ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
-          : org?.workspaces[0];
+      const project =
+        org && session.selectedProjectId
+          ? org.projects.find((p) => p.id === session.selectedProjectId)
+          : org?.projects[0];
       appId =
-        ws?.environments
+        project?.environments
           ?.slice()
           .sort((a, b) => a.rank - b.rank)
           .find((e) => e.app?.id)?.app?.id ?? null;
@@ -821,13 +1116,44 @@ async function pollForDataIngestion(
 
   const deadline = Date.now() + MAX_WAIT_MS;
   let pollCount = 0;
+  // Bound each individual MCP poll. Without this, a single hung fetch would
+  // never resolve and the poll loop would advance only once the surrounding
+  // process tore down, leaving the request stuck in the background.
+  const PER_POLL_TIMEOUT_MS = 25_000;
+  // Bail out of the poll loop the moment the wizard is cancelled
+  // (Ctrl+C / SIGINT → graceful-exit → abortWizard). Without this the
+  // 30s setTimeout below would block the 2s grace window for up to 28s,
+  // so the user would either see a hung exit or the kernel would
+  // SIGKILL the process before the poll resolved.
+  const wizardSignal = getWizardAbortSignal();
 
   while (Date.now() < deadline) {
+    if (wizardSignal.aborted) {
+      logToFile('[pollForDataIngestion] aborted via wizard signal');
+      return;
+    }
     pollCount++;
     logToFile(`[pollForDataIngestion] poll #${pollCount} appId=${appId}`);
 
+    // Per-poll AbortController — wired through to fetchHasAnyEventsMcp so
+    // the in-flight HTTP request unwinds when the poll deadline fires
+    // (rather than running to completion in the background).
+    const pollController = new AbortController();
+    const pollTimer = setTimeout(
+      () => pollController.abort(),
+      PER_POLL_TIMEOUT_MS,
+    );
     try {
-      const result = await fetchHasAnyEventsMcp(accessToken, appId);
+      // Pass the per-poll signal so the explicit per-poll timeout aborts
+      // the in-flight HTTP request. callAmplitudeMcp also defaults to the
+      // wizard signal when no explicit signal is provided; here we use the
+      // per-poll signal and rely on the loop-level wizardSignal checks
+      // (above and in the inter-poll wait below) to honor Ctrl+C.
+      const result = await fetchHasAnyEventsMcp(
+        accessToken,
+        appId,
+        pollController.signal,
+      );
       if (result.hasEvents) {
         logToFile(
           `[pollForDataIngestion] events detected: ${result.activeEventNames.join(
@@ -852,14 +1178,39 @@ async function pollForDataIngestion(
           err instanceof Error ? err.message : String(err)
         }`,
       );
+    } finally {
+      // Always clear the per-poll timer so a fast success/failure doesn't
+      // leak ~30 minutes' worth of stranded timers across the loop.
+      clearTimeout(pollTimer);
     }
 
-    // Wait before the next poll, but bail early if deadline passed.
+    // Wait before the next poll, but bail early if deadline passed
+    // OR if the wizard is cancelled. Race the timer with the abort
+    // signal so a Ctrl+C unblocks immediately instead of waiting up
+    // to POLL_INTERVAL_MS for the next iteration to see the flag.
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await new Promise<void>((resolve) =>
-      setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)),
-    );
+    if (wizardSignal.aborted) {
+      logToFile('[pollForDataIngestion] aborted via wizard signal');
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const waitMs = Math.min(POLL_INTERVAL_MS, remaining);
+      const timer = setTimeout(() => {
+        wizardSignal.removeEventListener('abort', onAbort);
+        resolve();
+      }, waitMs);
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      wizardSignal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  if (wizardSignal.aborted) {
+    logToFile('[pollForDataIngestion] aborted via wizard signal');
+    return;
   }
 
   logToFile('[pollForDataIngestion] timeout reached without detecting events');
@@ -915,6 +1266,7 @@ function buildIntegrationPrompt(
     projectApiKey: string;
     host: string;
     appId: number;
+    cloudRegion: 'us' | 'eu';
   },
   frameworkContext: Record<string, unknown>,
   skipAmplitudeMcp: boolean,
@@ -936,6 +1288,30 @@ function buildIntegrationPrompt(
     }
     return genericBuildPrompt({ ...context, frameworkContext });
   }
+
+  // Region-aware app URL — the dashboard / chart links the agent surfaces in
+  // the setup report MUST use the user's data-center hostname. Without this,
+  // EU users got dashboard URLs at `app.amplitude.com/...` (US) because the
+  // skill examples are written against US hosts and the agent had nothing
+  // telling it the run was EU.
+  const appHost =
+    context.cloudRegion === 'eu'
+      ? 'https://app.eu.amplitude.com'
+      : 'https://app.amplitude.com';
+
+  // The wizard's appId is 0 when the env picker couldn't match an app to the
+  // chosen API key (manual API-key entry, or backend_fetch returning a key
+  // that's not in the picker's environments). When that happens, the agent
+  // should look up the canonical project for the API key via the Amplitude
+  // MCP's `get_context` and use ITS `defaultAppId` — never browse the
+  // `appsByCategory` list and pick a different project. Pre-PR the agent
+  // routinely picked the wizard team's own dev project (802868) and created
+  // dashboards there; the user's setup report linked to a project they
+  // don't own.
+  const appIdGuidance =
+    context.appId === 0
+      ? `- Amplitude App ID: not set by the wizard (0). When you call the Amplitude MCP, get the appId from \`get_context().defaultAppId\` — that's the project tied to the API key above. NEVER pick a different appId from \`appsByCategory\` or any other listing in the get_context response. Every chart / dashboard you create MUST belong to that exact project. If \`defaultAppId\` is missing or null, halt with report_status kind="error", code="RESOURCE_MISSING", detail="Could not resolve project from API key" — do not guess.`
+      : `- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}. Every chart / dashboard you create MUST use this exact appId. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project.`;
 
   const additionalLines = config.prompts.getAdditionalContextLines
     ? config.prompts.getAdditionalContextLines(frameworkContext)
@@ -962,11 +1338,12 @@ function buildIntegrationPrompt(
   } project. The wizard has pre-staged the skills you'll need into \`.claude/skills/\` — load them with the Skill tool by ID instead of calling load_skill_menu / install_skill.
 
 Project context:
-- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}
+${appIdGuidance}
 - Framework: ${config.metadata.name} ${context.frameworkVersion}
 - TypeScript: ${context.typescript ? 'Yes' : 'No'}
 - Amplitude public token: ${context.projectApiKey}
 - Amplitude Host: ${context.host}
+- Data region: ${context.cloudRegion.toUpperCase()} — every Amplitude UI link you write into the setup report (dashboard URL, chart URLs, project settings) MUST use \`${appHost}\` as the host. Do NOT use \`https://app.amplitude.com\` for an EU run, or vice versa; mismatched hosts redirect to the wrong data center and the user sees an empty project.
 - Project type: ${config.prompts.projectTypeDetection}
 - Package installation: ${
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
@@ -998,4 +1375,98 @@ Important: Use the detect_package_manager tool (from the wizard-tools MCP server
 
 
 `;
+}
+
+/**
+ * Push the agent's instrumented event plan into the Amplitude tracking plan as
+ * planned events. Returns an outro-ready summary string (empty if nothing was
+ * committed). Never throws — a failure here must not block the outro.
+ *
+ * Falls back to `session.selectedAppId` and finally a live fetchAmplitudeUser
+ * lookup when `session.credentials.appId` is 0 (the env picker couldn't match
+ * an app to the chosen API key).
+ */
+async function commitPlannedEventsStep(
+  plannedEvents: Array<{ name: string; description: string }>,
+  accessToken: string,
+  credentialsAppId: number | null | undefined,
+  session: WizardSession,
+  cloudRegion: string,
+): Promise<string> {
+  if (!plannedEvents || plannedEvents.length === 0) {
+    logToFile('[commitPlannedEventsStep] no planned events — skipping');
+    return '';
+  }
+
+  let appId: string | number | null | undefined = credentialsAppId;
+  if (!appId) appId = session.selectedAppId;
+  if (!appId) {
+    try {
+      const { fetchAmplitudeUser } = await import('./api.js');
+      const userInfo = await fetchAmplitudeUser(
+        accessToken,
+        cloudRegion as 'us' | 'eu',
+      );
+      const org = session.selectedOrgId
+        ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
+        : userInfo.orgs[0];
+      const ws =
+        org && session.selectedProjectId
+          ? org.projects.find((w) => w.id === session.selectedProjectId)
+          : org?.projects[0];
+      appId =
+        ws?.environments
+          ?.slice()
+          .sort((a, b) => a.rank - b.rank)
+          .find((e) => e.app?.id)?.app?.id ?? null;
+      if (appId) session.selectedAppId = String(appId);
+    } catch (err) {
+      logToFile(
+        `[commitPlannedEventsStep] could not resolve appId: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
+
+  if (!appId) {
+    logToFile('[commitPlannedEventsStep] no appId — skipping');
+    return '';
+  }
+
+  try {
+    const { commitPlannedEvents } = await import('./planned-events.js');
+    logToFile(
+      `[commitPlannedEventsStep] committing ${plannedEvents.length} planned events to appId=${appId}`,
+    );
+    const result = await commitPlannedEvents({
+      accessToken,
+      appId: String(appId),
+      events: plannedEvents,
+    });
+
+    analytics.wizardCapture('planned events committed', {
+      attempted: result.attempted,
+      created: result.created,
+      described: result.described,
+      'error message': result.error ?? '',
+    });
+
+    logToFile(
+      `[commitPlannedEventsStep] result attempted=${result.attempted} created=${
+        result.created
+      } described=${result.described} error=${result.error ?? ''}`,
+    );
+
+    if (result.created === 0) return '';
+    const eventWord = result.created === 1 ? 'event' : 'events';
+    return `Added ${result.created} planned ${eventWord} to your tracking plan`;
+  } catch (err) {
+    logToFile(
+      `[commitPlannedEventsStep] unexpected error: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return '';
+  }
 }

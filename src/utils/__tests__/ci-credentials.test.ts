@@ -103,7 +103,7 @@ describe('tryResolveCredentialsForCi', () => {
     });
     vi.mocked(readAmpliConfig).mockReturnValue({
       ok: true,
-      config: { WorkspaceId: 'ws-1', Zone: 'us' },
+      config: { ProjectId: 'proj-1', Zone: 'us' },
     });
     vi.mocked(getAPIKey).mockResolvedValue('fetched-key');
 
@@ -115,7 +115,7 @@ describe('tryResolveCredentialsForCi', () => {
       installDir: '/tmp/proj',
       idToken: 'idtok',
       zone: 'us',
-      workspaceId: 'ws-1',
+      projectId: 'proj-1',
     });
   });
 

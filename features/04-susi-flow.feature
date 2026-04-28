@@ -1,17 +1,19 @@
 Feature: SUSI flow (Sign Up / Sign In)
   As a new or existing user
-  I want to authenticate via OAuth and select my org and workspace
+  I want to authenticate via OAuth and select my org and project
   So that the wizard can connect to the right Amplitude account
 
   # The SUSI flow runs inside AuthScreen. Authentication is OAuth-based —
   # bin.ts opens a browser and calls store.setOAuthComplete() when done.
-  # AuthScreen shows a spinner while waiting, then drives org/workspace/API key selection.
+  # AuthScreen shows a spinner while waiting, then drives org/project/API key selection.
+  # Note: user-facing terminology is "project". The backend GraphQL API still
+  # returns this layer as `workspaces`; it's mapped to `projects` at the TS boundary.
 
-  Scenario: OAuth completes — single org, single workspace, no saved API key
-    Given the OAuth flow has completed with one org and one workspace
+  Scenario: OAuth completes — single org, single project, no saved API key
+    Given the OAuth flow has completed with one org and one project
     And there is no saved API key for this project
     Then the org should be auto-selected
-    And the workspace should be auto-selected
+    And the project should be auto-selected
     And I should be prompted to enter my Amplitude API key
 
   Scenario: OAuth completes — multiple orgs, user selects one
@@ -20,28 +22,28 @@ Feature: SUSI flow (Sign Up / Sign In)
     When I select an org
     Then that org should be stored in my session
 
-  Scenario: OAuth completes — single org, multiple workspaces, user selects one
-    Given the OAuth flow has completed with one org and multiple workspaces
+  Scenario: OAuth completes — single org, multiple projects, user selects one
+    Given the OAuth flow has completed with one org and multiple projects
     Then the org should be auto-selected
-    And I should see a workspace picker
-    When I select a workspace
-    Then that workspace should be stored in my session
+    And I should see a project picker
+    When I select a project
+    Then that project should be stored in my session
 
-  Scenario: ampli.json is written after org and workspace are selected
-    Given the OAuth flow has completed with one org and one workspace
+  Scenario: ampli.json is written after org and project are selected
+    Given the OAuth flow has completed with one org and one project
     And there is no "ampli.json" in the project directory
-    When the org and workspace are selected
-    Then "ampli.json" should be written with OrgId, WorkspaceId, and Zone
+    When the org and project are selected
+    Then "ampli.json" should be written with OrgId, ProjectId, and Zone
 
   Scenario: API key is persisted after manual entry
-    Given the OAuth flow has completed and org and workspace are selected
+    Given the OAuth flow has completed and org and project are selected
     And there is no saved API key for this project
     When I enter a valid Amplitude API key
     Then the API key should be saved to the system keychain or .env.local
     And I should proceed without being asked for the key again
 
   Scenario: Saved API key skips the API key prompt
-    Given the OAuth flow has completed and org and workspace are selected
+    Given the OAuth flow has completed and org and project are selected
     And there is a saved API key for this project
     Then I should not be prompted to enter an API key
     And I should proceed automatically with the saved key

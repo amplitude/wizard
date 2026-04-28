@@ -1,5 +1,46 @@
 # CLI Flows
 
+## Back navigation
+
+Pressing **Esc** on a decision-point screen steps the user back to the
+previous decision so they can change their answer. Implemented declaratively
+via `FlowEntry.revert` callbacks in `src/ui/tui/flows.ts` — each entry that
+supports back-nav describes how to un-complete itself, and the router walks
+backwards to find the most recent revertible entry.
+
+Entries without a `revert` act as a **back-stop wall**:
+
+- **Run** — the agent has executed; backing past it would re-run instrumentation.
+- **Intro** — first screen; nothing to back to.
+
+Entries whose `revert` returns `false` are transparent — the router walks
+through them. Setup uses this to walk past when there are no user-answered
+questions to pop; CreateProject uses this so back-nav from DataSetup lands
+on Auth (not the create-project form).
+
+Per-screen Esc behavior:
+
+| Screen                | Esc action                                                    |
+| --------------------- | ------------------------------------------------------------- |
+| Auth                  | Back → RegionSelect (re-shows region picker, drops creds)     |
+| DataSetup             | Back → Auth (clears org/workspace selection)                  |
+| ActivationOptions     | Back → DataSetup (re-runs activation check)                   |
+| Setup                 | Pops one answered question; if none, walks back further       |
+| Slack                 | Back → DataIngestionCheck or Mcp                              |
+| DataIngestionCheck    | Back → Mcp (`q` is the "I'll come back later" exit)           |
+| CreateProject         | Cancel (existing) — also functions as back to Auth            |
+| FeatureOptIn          | Skip (confirms with no features selected — Esc=skip is the    |
+|                       | one screen that breaks the convention; hint bar makes it      |
+|                       | explicit)                                                     |
+| Intro                 | Cancel wizard (existing)                                      |
+| Outro                 | Close report dialog (existing)                                |
+| RegionSelect / Mcp    | No-op (no revertible step before them)                        |
+
+The `[Esc] Back` hint appears in `KeyHintBar` only when back is actually
+available, so it never lies about what the keystroke will do.
+
+---
+
 ## Slash commands
 
 The CLI keeps a persistent prompt open at all times (like Claude). Slash
@@ -16,7 +57,7 @@ actions.
 | `/whoami`    | Show current user, org, and project                               |
 | `/mcp`       | Install or remove the Amplitude MCP server                        |
 | `/slack`     | Set up Amplitude Slack integration                                |
-| `/feedback`  | Send product feedback                                             |
+| `/feedback`  | Send product feedback (optionally with opt-in system diagnostics) |
 | `/test`      | Run a prompt-skill demo (confirm + choose)                        |
 | `/snake`     | Play Snake                                                        |
 | `/exit`      | Exit the wizard                                                   |
@@ -43,7 +84,10 @@ flowchart TD
     CMD --> WIZARD["wizard (default)"]
     CMD --> AGENT["wizard --agent<br/>(structured JSON output for automation)"]
 
-    FEEDBACK --> FEEDBACK_SEND["Send feedback via Node SDK"]
+    FEEDBACK --> FEEDBACK_CONSENT{"Include diagnostic info?<br/>(consent prompt)"}
+    FEEDBACK_CONSENT -->|yes| FEEDBACK_COLLECT["Collect diagnostics<br/>(system, codebase, session)"]
+    FEEDBACK_COLLECT --> FEEDBACK_SEND["Send feedback + diagnostics via Node SDK"]
+    FEEDBACK_CONSENT -->|no| FEEDBACK_SEND_BARE["Send feedback via Node SDK"]
 
     AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
     AGENT_UI --> AGENT_RUN["SDK installation agent run"]
@@ -87,7 +131,7 @@ flowchart TD
     REGION_SELECT --> AUTH
 
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
-        SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
+        SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]
     end
 
     AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — sets activationLevel: none / partial / full)"]
@@ -170,6 +214,13 @@ flowchart TD
 The SUSI flow runs inside `AuthScreen`. Authentication happens via Amplitude
 OAuth (browser redirect). No email is entered in the wizard itself.
 
+> **Terminology.** User-facing copy says "project" (matching the Amplitude
+> website). The backend GraphQL API still uses `workspaces` as the field name,
+> so adapter code maps `workspaces` → `projects` at the TS boundary
+> (`AmplitudeOrg.projects`). Environment selection is a separate, distinct step
+> from project selection — the env picker reads "Select an environment", not
+> "Select a project".
+
 ```mermaid
 ---
 title: SUSI flow
@@ -179,14 +230,14 @@ flowchart TD
     OAUTH_WAIT --> OAUTH_DONE["OAuth completes — region auto-detected from token"]
 
     OAUTH_DONE --> ORG_COUNT{How many orgs?}
-    ORG_COUNT -->|1| WORKSPACE_COUNT
-    ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> WORKSPACE_COUNT
+    ORG_COUNT -->|1| PROJECT_COUNT
+    ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> PROJECT_COUNT
 
-    WORKSPACE_COUNT{How many workspaces?}
-    WORKSPACE_COUNT -->|1| WRITE_AMPLI
-    WORKSPACE_COUNT -->|many| WS_PICKER["Picker: select workspace"] --> WRITE_AMPLI
+    PROJECT_COUNT{How many projects?}
+    PROJECT_COUNT -->|1| WRITE_AMPLI
+    PROJECT_COUNT -->|many| WS_PICKER["Picker: select project"] --> WRITE_AMPLI
 
-    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
+    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, ProjectId, Zone)<br/>(legacy files with WorkspaceId are auto-migrated on read)"]
 
     WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>keychain or .env.local}
     KEY_CHECK -->|yes| AUTO_KEY["Auto-advance — no prompt"]

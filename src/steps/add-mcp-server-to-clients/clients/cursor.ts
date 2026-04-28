@@ -16,11 +16,19 @@ export class CursorMCPClient extends DefaultMCPClient {
     super();
   }
 
-  isClientSupported(): Promise<boolean> {
-    if (process.platform !== 'darwin' && process.platform !== 'win32') {
+  async isClientSupported(): Promise<boolean> {
+    // Cursor ships on macOS, Windows, and Linux (AppImage). Per
+    // https://cursor.com/docs the global MCP config lives at
+    // `~/.cursor/mcp.json` on every platform, so we treat all three as
+    // supported. Cursor creates ~/.cursor/ on first launch; absence ==
+    // not installed.
+    if (
+      process.platform !== 'darwin' &&
+      process.platform !== 'win32' &&
+      process.platform !== 'linux'
+    ) {
       return Promise.resolve(false);
     }
-    // Cursor creates ~/.cursor/ on first launch; absence == not installed.
     return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.cursor')));
   }
 

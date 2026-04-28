@@ -2,7 +2,7 @@ import { Given, When, Then } from '@cucumber/cucumber';
 import assert from 'node:assert';
 import { Overlay, type WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen } from '../../src/ui/tui/flows.js';
-import type { WizardSession } from '../../src/lib/wizard-session.js';
+import { RunPhase, type WizardSession } from '../../src/lib/wizard-session.js';
 import {
   getWhoamiText,
   parseFeedbackSlashInput,
@@ -63,9 +63,35 @@ Then(
 
 When('I enter the slash command {string}', function (command: string) {
   if (command === '/region') {
-    session(this).regionForced = true;
-    // Reset data state so setup re-runs once the new region is confirmed
-    session(this).projectHasData = null;
+    // Mirror WizardStore.setRegionForced() — a mid-session region change
+    // is treated as a hard auth reset so the wizard doesn't keep running
+    // with credentials or org/workspace data from the old data center.
+    const s = session(this);
+    s.regionForced = true;
+    s.credentials = null;
+    s.pendingOrgs = null;
+    s.pendingAuthIdToken = null;
+    s.pendingAuthAccessToken = null;
+    s.apiKeyNotice = null;
+    s.userEmail = null;
+    s.selectedOrgId = null;
+    s.selectedOrgName = null;
+    s.selectedWorkspaceId = null;
+    s.selectedWorkspaceName = null;
+    s.selectedEnvName = null;
+    s.selectedAppId = null;
+    s.projectHasData = null;
+    s.activationLevel = null;
+    s.activationOptionsComplete = false;
+    s.dataIngestionConfirmed = false;
+    s.mcpComplete = false;
+    s.mcpOutcome = null;
+    // If the wizard had reached Outro, outroData would short-circuit
+    // router.resolve and block the re-auth flow. A region switch is a
+    // hard reset — clear outroData and reset runPhase so the user lands
+    // back on RegionSelect → Auth → ... for the new zone.
+    s.outroData = null;
+    s.runPhase = RunPhase.Idle;
   }
   if (command === '/logout') {
     session(this).credentials = null;
@@ -128,23 +154,23 @@ Then('the data check should re-run for the new region', function () {
 // ── /whoami ───────────────────────────────────────────────────────────────────
 
 Given(
-  'my org is {string} and my workspace is {string} and my region is {string}',
-  function (org: string, workspace: string, region: string) {
+  'my org is {string} and my project is {string} and my region is {string}',
+  function (org: string, project: string, region: string) {
     session(this).selectedOrgName = org;
-    session(this).selectedWorkspaceName = workspace;
+    session(this).selectedProjectName = project;
     session(this).region = region as 'us' | 'eu';
   },
 );
 
-Then('I should see my org, workspace, and region', function () {
+Then('I should see my org, project, and region', function () {
   const text = getWhoamiText(session(this));
   assert.ok(
     text.includes(session(this).selectedOrgName ?? ''),
     `Expected org in: ${text}`,
   );
   assert.ok(
-    text.includes(session(this).selectedWorkspaceName ?? ''),
-    `Expected workspace in: ${text}`,
+    text.includes(session(this).selectedProjectName ?? ''),
+    `Expected project in: ${text}`,
   );
   assert.ok(
     text.includes(session(this).region ?? ''),

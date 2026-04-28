@@ -27,13 +27,7 @@ const WIZARD_STEPS: Array<{ screen: Screen; label: string }> = [
 const STEP_SCREENS: Record<string, Screen[]> = {
   Welcome: [Screen.Intro],
   Auth: [Screen.RegionSelect, Screen.Auth, Screen.DataSetup],
-  Setup: [
-    Screen.ActivationOptions,
-    Screen.Setup,
-    Screen.FeatureOptIn,
-    Screen.Run,
-    Screen.Mcp,
-  ],
+  Setup: [Screen.ActivationOptions, Screen.Setup, Screen.Run, Screen.Mcp],
   Verify: [Screen.DataIngestionCheck],
   Done: [Screen.Outro, Screen.Slack],
 };
