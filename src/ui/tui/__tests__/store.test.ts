@@ -502,6 +502,36 @@ describe('WizardStore', () => {
       expect(result.config.SourceId).toBe('src-1'); // unrelated fields preserved
     });
 
+    it('setRegion surfaces a feedback notice when ampli.json write fails', async () => {
+      const store = createStore();
+      writeAmpliConfig(store.session.installDir, {
+        OrgId: 'org-1',
+        WorkspaceId: 'ws-1',
+        Zone: 'us',
+      });
+
+      // Skip on root — chmod doesn't enforce restrictions there.
+      const isRoot =
+        typeof process.getuid === 'function' && process.getuid() === 0;
+      if (isRoot) return;
+
+      // Make the ampli.json file read-only so writeFileSync inside
+      // writeAmpliConfig throws EACCES.
+      const cfgPath = path.join(store.session.installDir, 'ampli.json');
+      const originalMode = fs.statSync(cfgPath).mode;
+      fs.chmodSync(cfgPath, 0o444);
+
+      try {
+        store.setRegion('eu');
+        // Persistence runs in a microtask via dynamic import.
+        await new Promise((r) => setTimeout(r, 50));
+
+        expect(store.commandFeedback ?? '').toMatch(/persist to ampli\.json/i);
+      } finally {
+        fs.chmodSync(cfgPath, originalMode);
+      }
+    });
+
     it('setRegion does not create ampli.json when none exists', async () => {
       const store = createStore();
       store.setRegion('us');

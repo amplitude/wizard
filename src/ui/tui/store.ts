@@ -340,6 +340,14 @@ export class WizardStore {
         analytics.captureException(
           err instanceof Error ? err : new Error(String(err)),
         );
+        // Surface a non-blocking notice in the command bar so the user
+        // knows the region change wasn't persisted to ampli.json — the
+        // next wizard run won't auto-pick this zone. The session itself
+        // is fine; only on-disk persistence failed.
+        this.setCommandFeedback(
+          "Region updated for this session, but couldn't persist to ampli.json. Re-pick if it sticks to the old zone next run.",
+          6000,
+        );
       }
     })();
 
