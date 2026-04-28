@@ -26,6 +26,7 @@ import {
   DEFAULT_HOST_URL,
 } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { toCredentialAppId } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
 
 const CREATE_ACTION = '__create__' as const;
@@ -260,7 +261,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: local.key,
           host: DEFAULT_HOST_URL,
-          appId: matchedAppId ? Number(matchedAppId) || 0 : 0,
+          appId: toCredentialAppId(matchedAppId),
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -285,7 +286,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: apiKey,
           host: getHostFromRegion(zone),
-          appId: envAppId ? Number(envAppId) || 0 : 0,
+          appId: toCredentialAppId(envAppId),
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
@@ -335,7 +336,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey,
           host: getHostFromRegion(zone),
-          appId: fetchedAppId ? Number(fetchedAppId) || 0 : 0,
+          appId: toCredentialAppId(fetchedAppId),
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);

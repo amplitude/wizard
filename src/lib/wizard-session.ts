@@ -72,6 +72,23 @@ export function toWorkspaceId(value: string): WorkspaceId {
 }
 
 /**
+ * `credentials.appId` is `AppId | 0` — `0` is the "unknown" sentinel used
+ * when OAuth produced credentials but the user has not yet picked an env.
+ * This helper safely coerces raw input (string from CLI, number from API)
+ * into the credentials shape: a branded AppId on success, `0` otherwise.
+ *
+ * Use at the trust boundary where credentials are constructed. After that,
+ * the `AppId | 0` type prevents accidental cross-mixing with workspace ids
+ * or other unrelated numbers — the same protection PR #62 motivated for
+ * the top-level `WizardSession.appId`.
+ */
+export function toCredentialAppId(
+  value: string | number | null | undefined,
+): AppId | 0 {
+  return tryToAppId(value) ?? 0;
+}
+
+/**
  * Zod schema for CLI args passed to `buildSession()`.
  * Coerces `appId` from string to a branded positive integer.
  * All boolean flags default to false; `installDir` defaults to cwd.
@@ -120,8 +137,12 @@ export const CredentialsSchema = z.object({
   idToken: z.string().optional(),
   projectApiKey: z.string().min(1, 'projectApiKey is required'),
   host: z.string().url('host must be a valid URL'),
-  /** Numeric Amplitude app ID (canonical). Not branded — see WizardSession.credentials. */
-  appId: z.number(),
+  /**
+   * Numeric Amplitude app ID. Branded `AppId` on success or the literal
+   * `0` sentinel when the env hasn't been picked yet. Construct via
+   * `toCredentialAppId(value)` at the trust boundary.
+   */
+  appId: z.union([AppIdSchema, z.literal(0)]),
 });
 
 function parseAppIdArg(value: string | undefined): AppId | undefined {
@@ -442,14 +463,14 @@ export interface WizardSession {
     projectApiKey: string;
     host: string;
     /**
-     * Numeric Amplitude app ID (canonical); 0 when unknown.
-     * NOTE: not branded here because the credentials object is constructed
-     * across many callers (agent-runner, agent-ui, ink-ui, AuthScreen, …)
-     * and branding it cascades into out-of-scope files. The top-level
-     * `WizardSession.appId` and `selectedWorkspaceId` carry the brand
-     * instead, which is where the prior org-data-mapping bug originated.
+     * Numeric Amplitude app ID (canonical). Branded `AppId` once an env is
+     * known; `0` is the "unknown" sentinel set when OAuth produced
+     * credentials but no env has been picked yet. Construct via
+     * `toCredentialAppId(value)` at the trust boundary so raw `Number(x)`
+     * conversions can't sneak past the brand. PR #62 ("org data mapping")
+     * was the original motivation for branding the related top-level fields.
      */
-    appId: number;
+    appId: AppId | 0;
   } | null;
 
   // Lifecycle

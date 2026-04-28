@@ -13,6 +13,7 @@ import type {
 } from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
 import type { RetryState } from '../../lib/wizard-session.js';
+import { toCredentialAppId } from '../../lib/wizard-session.js';
 import { Overlay } from './router.js';
 import { RunPhase, OutroKind } from './session-constants.js';
 
@@ -64,7 +65,9 @@ export class InkUI implements WizardUI {
       accessToken: credentials.accessToken,
       projectApiKey: credentials.projectApiKey,
       host: credentials.host,
-      appId: credentials.appId,
+      // Re-validate at the trust boundary: the upstream NDJSON contract
+      // accepts a raw `number`, but the store type is `AppId | 0`.
+      appId: toCredentialAppId(credentials.appId),
     });
   }
 
