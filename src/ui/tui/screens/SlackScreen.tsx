@@ -24,6 +24,7 @@ import {
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { logToFile } from '../../../utils/debug.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import opn from 'opn';
 
 interface SlackScreenProps {
@@ -54,7 +55,10 @@ const markDone = (
   } else {
     store.setSlackComplete(outcome);
     if (standalone) {
-      process.exit(0);
+      // Standalone /slack slash-command run — flush analytics
+      // (the just-fired 'Slack Setup Complete' event) before the
+      // process exits.
+      void wizardSuccessExit(0);
     }
   }
 };
