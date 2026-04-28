@@ -17,6 +17,7 @@ import {
   getDashboardFile,
   getEventsFile,
   getProjectMetaDir,
+  skillDownloadPath,
 } from '../utils/storage-paths';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
@@ -82,7 +83,7 @@ export function downloadSkill(
   const { execFileSync } =
     require('child_process') as typeof import('child_process');
   const skillDir = path.join(installDir, '.claude', 'skills', skillEntry.id);
-  const tmpFile = `/tmp/amplitude-skill-${skillEntry.id}.zip`;
+  const tmpFile = skillDownloadPath(skillEntry.id);
 
   try {
     fs.mkdirSync(skillDir, { recursive: true });

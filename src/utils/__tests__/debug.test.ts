@@ -27,7 +27,7 @@ import {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
-const DEFAULT_LOG_PATH = '/tmp/amplitude-wizard.log';
+const DEFAULT_LOG_PATH = path.join(os.tmpdir(), 'amplitude-wizard.log');
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-test-'));
