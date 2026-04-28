@@ -82,23 +82,22 @@ describe('performGracefulExit', () => {
     );
   });
 
-  it('is idempotent — a second call is a no-op (no double-flush, no double-timer)', () => {
+  it('force-quits on second call instead of repeating cleanup', () => {
     const ctx = makeCtx();
     performGracefulExit(ctx);
     expect(_isGracefulExitInProgressForTests()).toBe(true);
 
-    // Second call simulates SIGINT firing after Ink's Ctrl+C path already
-    // started. Should not re-run any of the cleanup steps.
+    // Second call simulates the user pressing Ctrl+C again to force quit.
     performGracefulExit(ctx);
 
+    // Should not re-run any of the cleanup steps.
     expect(mockSaveCheckpoint).toHaveBeenCalledTimes(1);
     expect(mockFlush).toHaveBeenCalledTimes(1);
     expect(ctx.setCommandFeedback).toHaveBeenCalledTimes(1);
 
-    // Advance past the 2s window: only one process.exit call should fire,
-    // not two (one per setTimeout).
-    vi.advanceTimersByTime(2_000);
+    // The second call should have force-exited immediately with 130.
     expect(exitSpy).toHaveBeenCalledTimes(1);
+    expect(exitSpy).toHaveBeenCalledWith(130);
   });
 
   it('still exits when setCommandFeedback throws (UI mid-teardown)', () => {

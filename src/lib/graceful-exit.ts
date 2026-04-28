@@ -56,7 +56,11 @@ export function _isGracefulExitInProgressForTests(): boolean {
  * Ctrl+C path already started) is a no-op.
  */
 export function performGracefulExit(ctx: GracefulExitContext): void {
-  if (_exitInProgress) return;
+  if (_exitInProgress) {
+    // Second press → honour the "force quit" promise shown to the user.
+    process.exit(130);
+    return; // unreachable — safeguard when process.exit is mocked in tests
+  }
   _exitInProgress = true;
 
   try {
