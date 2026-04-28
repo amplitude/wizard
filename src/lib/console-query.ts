@@ -62,8 +62,8 @@ export function buildSessionContext(session: WizardSession): string {
     lines.push(`Framework: ${session.detectedFrameworkLabel}`);
   if (session.integration) lines.push(`Integration: ${session.integration}`);
   if (session.selectedOrgName) lines.push(`Org: ${session.selectedOrgName}`);
-  if (session.selectedWorkspaceName)
-    lines.push(`Workspace: ${session.selectedWorkspaceName}`);
+  if (session.selectedProjectName)
+    lines.push(`Project: ${session.selectedProjectName}`);
   // Amplitude's UI labels this "Project ID" — keep user-facing label familiar
   // even though the canonical code term is `appId`.
   if (session.credentials?.appId)

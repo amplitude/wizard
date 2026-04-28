@@ -44,9 +44,9 @@ describe('getAPIKey', () => {
         {
           id: 'org1',
           name: 'Acme',
-          workspaces: [
+          projects: [
             {
-              id: 'ws1',
+              id: 'proj1',
               name: 'Main',
               environments: [
                 {
@@ -78,9 +78,9 @@ describe('getAPIKey', () => {
         {
           id: 'org1',
           name: 'Acme',
-          workspaces: [
+          projects: [
             {
-              id: 'ws1',
+              id: 'proj1',
               name: 'Main',
               environments: [
                 {
@@ -104,7 +104,7 @@ describe('getAPIKey', () => {
     expect(result).toBe('prod-key');
   });
 
-  it('uses workspaceId to select the correct workspace', async () => {
+  it('uses projectId to select the correct project', async () => {
     mockReadApiKeyWithSource.mockReturnValue(null);
     mockFetchAmplitudeUser.mockResolvedValue({
       id: 'u1',
@@ -115,9 +115,9 @@ describe('getAPIKey', () => {
         {
           id: 'org1',
           name: 'Acme',
-          workspaces: [
+          projects: [
             {
-              id: 'ws-other',
+              id: 'proj-other',
               name: 'Other',
               environments: [
                 {
@@ -128,7 +128,7 @@ describe('getAPIKey', () => {
               ],
             },
             {
-              id: 'ws-target',
+              id: 'proj-target',
               name: 'Target',
               environments: [
                 {
@@ -145,7 +145,7 @@ describe('getAPIKey', () => {
 
     const result = await getAPIKey({
       ...BASE_PARAMS,
-      workspaceId: 'ws-target',
+      projectId: 'proj-target',
     });
     expect(result).toBe('target-key');
   });
@@ -169,9 +169,9 @@ describe('getAPIKey', () => {
         {
           id: 'org1',
           name: 'Acme',
-          workspaces: [
+          projects: [
             {
-              id: 'ws1',
+              id: 'proj1',
               name: 'Main',
               environments: [
                 {

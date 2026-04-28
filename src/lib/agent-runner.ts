@@ -331,7 +331,7 @@ export async function runAgentWizard(
       installDir: session.installDir,
       integration: session.integration,
       dashboardUrl: session.checklistDashboardUrl,
-      workspaceName: session.selectedWorkspaceName,
+      workspaceName: session.selectedProjectName,
       envName: session.selectedEnvName,
     });
   };
@@ -566,8 +566,8 @@ async function runAgentWizardBody(
       ...session.credentials,
       orgId: session.selectedOrgId,
       orgName: session.selectedOrgName,
-      workspaceId: session.selectedWorkspaceId,
-      workspaceName: session.selectedWorkspaceName,
+      projectId: session.selectedProjectId,
+      projectName: session.selectedProjectName,
       envName: session.selectedEnvName,
     });
     getUI().setRegion(authResult.cloudRegion);
@@ -1087,12 +1087,12 @@ async function pollForDataIngestion(
       const org = session.selectedOrgId
         ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
         : userInfo.orgs[0];
-      const ws =
-        org && session.selectedWorkspaceId
-          ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
-          : org?.workspaces[0];
+      const project =
+        org && session.selectedProjectId
+          ? org.projects.find((p) => p.id === session.selectedProjectId)
+          : org?.projects[0];
       appId =
-        ws?.environments
+        project?.environments
           ?.slice()
           .sort((a, b) => a.rank - b.rank)
           .find((e) => e.app?.id)?.app?.id ?? null;
@@ -1411,9 +1411,9 @@ async function commitPlannedEventsStep(
         ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
         : userInfo.orgs[0];
       const ws =
-        org && session.selectedWorkspaceId
-          ? org.workspaces.find((w) => w.id === session.selectedWorkspaceId)
-          : org?.workspaces[0];
+        org && session.selectedProjectId
+          ? org.projects.find((w) => w.id === session.selectedProjectId)
+          : org?.projects[0];
       appId =
         ws?.environments
           ?.slice()

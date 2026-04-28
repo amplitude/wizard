@@ -128,7 +128,7 @@ flowchart TD
     REGION_SELECT --> AUTH
 
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
-        SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
+        SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]
     end
 
     AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — sets activationLevel: none / partial / full)"]
@@ -211,6 +211,13 @@ flowchart TD
 The SUSI flow runs inside `AuthScreen`. Authentication happens via Amplitude
 OAuth (browser redirect). No email is entered in the wizard itself.
 
+> **Terminology.** User-facing copy says "project" (matching the Amplitude
+> website). The backend GraphQL API still uses `workspaces` as the field name,
+> so adapter code maps `workspaces` → `projects` at the TS boundary
+> (`AmplitudeOrg.projects`). Environment selection is a separate, distinct step
+> from project selection — the env picker reads "Select an environment", not
+> "Select a project".
+
 ```mermaid
 ---
 title: SUSI flow
@@ -220,14 +227,14 @@ flowchart TD
     OAUTH_WAIT --> OAUTH_DONE["OAuth completes — region auto-detected from token"]
 
     OAUTH_DONE --> ORG_COUNT{How many orgs?}
-    ORG_COUNT -->|1| WORKSPACE_COUNT
-    ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> WORKSPACE_COUNT
+    ORG_COUNT -->|1| PROJECT_COUNT
+    ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> PROJECT_COUNT
 
-    WORKSPACE_COUNT{How many workspaces?}
-    WORKSPACE_COUNT -->|1| WRITE_AMPLI
-    WORKSPACE_COUNT -->|many| WS_PICKER["Picker: select workspace"] --> WRITE_AMPLI
+    PROJECT_COUNT{How many projects?}
+    PROJECT_COUNT -->|1| WRITE_AMPLI
+    PROJECT_COUNT -->|many| WS_PICKER["Picker: select project"] --> WRITE_AMPLI
 
-    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
+    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, ProjectId, Zone)<br/>(legacy files with WorkspaceId are auto-migrated on read)"]
 
     WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>keychain or .env.local}
     KEY_CHECK -->|yes| AUTO_KEY["Auto-advance — no prompt"]
