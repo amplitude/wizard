@@ -308,6 +308,16 @@ export function installBundledSkill(
 }
 
 /**
+ * Filename of the single archived prior report kept in the install dir.
+ * Hoisted above WIZARD_GITIGNORE_PATTERNS so the array initializer can
+ * reference it — without this hoist, the temporal-dead-zone forces a
+ * duplicate string literal which silently drifts. Exported for tests
+ * and OutroScreen so the constant doesn't drift downstream either.
+ */
+export const PREVIOUS_SETUP_REPORT_FILENAME =
+  'amplitude-setup-report.previous.md';
+
+/**
  * Patterns the wizard writes into the user's project that should never be
  * committed to git. Kept as a const so `ensureWizardArtifactsIgnored` has a
  * single source of truth for what to add to the user's .gitignore.
@@ -333,12 +343,11 @@ export function installBundledSkill(
  *     here only to keep them out of `git add .`. Drop these entries
  *     once context-hub ships an updated skill set that reads/writes the
  *     canonical `.amplitude/` paths.
- *   - `amplitude-setup-report.md` — user-facing summary the OutroScreen
- *     points the user at after a successful run. Intentionally kept at
- *     the project root (so the path is short and discoverable) and
- *     intentionally NOT cleaned up — the user is meant to read it after
- *     the run and the next run overwrites it. Gitignored so it doesn't
- *     get committed by accident.
+ *   - `amplitude-setup-report.previous.md` — wizard-managed archive of the
+ *     prior run's setup report. The CURRENT report
+ *     (`amplitude-setup-report.md`) is intentionally NOT gitignored —
+ *     many users want to commit it as part of their analytics docs. Only
+ *     the archived prior copy is a wizard implementation detail. (PR 316.)
  *   - `.claude/skills/integration-...` — single-use SDK-setup workflows;
  *     removed at end of run. (Pattern is `integration-...slash` in gitignore.)
  *   - The instrumentation/taxonomy skills are kept on disk so users can
@@ -350,7 +359,11 @@ export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
   '.amplitude/',
   '.amplitude-events.json',
   '.amplitude-dashboard.json',
-  'amplitude-setup-report.md',
+  // Note: amplitude-setup-report.md (the CURRENT report) is intentionally
+  // NOT gitignored — many users want to commit it as part of their
+  // analytics docs. Only the wizard-managed archive of the PRIOR report
+  // is hidden from source control. (PR 316.)
+  PREVIOUS_SETUP_REPORT_FILENAME,
   '.claude/skills/integration-*/',
   '.claude/skills/add-analytics-instrumentation/',
   '.claude/skills/amplitude-chart-dashboard-plan/',
@@ -430,6 +443,73 @@ export function ensureWizardArtifactsIgnored(installDir: string): void {
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Archive `<installDir>/amplitude-setup-report.md` to a single sibling
+ * `amplitude-setup-report.previous.md` if present.
+ *
+ * Called at the START of a wizard run so the outro screen never advertises
+ * a stale report from a previous run (e.g. against a different workspace,
+ * or before the user re-authenticated) as if it described THIS run. The
+ * fresh report still lands at the canonical `amplitude-setup-report.md`
+ * path so existing tooling, CI, and gitignore rules don't need to change.
+ *
+ * UX choice: we keep exactly ONE prior report, not a timestamped history.
+ * Most users want "the latest report" and at most "the one before that"
+ * for comparison after a workspace switch. A growing pile of timestamped
+ * files (`amplitude-setup-report.2026-04-27T09-16-23.md`, ...) clutters
+ * the project root after a handful of runs and adds zero value over the
+ * previous-only approach for the typical workflow. If anyone needs a
+ * deeper audit trail, git history or CI logs are the right place — not
+ * the project root.
+ *
+ * Silent on I/O errors so a failed archive never blocks the wizard run.
+ */
+export function archiveSetupReportFile(installDir: string): void {
+  const target = path.join(installDir, 'amplitude-setup-report.md');
+  const archivePath = path.join(installDir, PREVIOUS_SETUP_REPORT_FILENAME);
+  try {
+    if (!fs.existsSync(target)) return;
+    // rename atomically replaces an existing destination on POSIX, so a
+    // run-N+2 cleanly overwrites whatever previous.md held from run-N+1.
+    // Each run preserves the immediately-prior report; older ones roll off.
+    fs.renameSync(target, archivePath);
+    logToFile(`archiveSetupReportFile: ${target} → ${archivePath}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`archiveSetupReportFile: ${msg}`);
+  }
+}
+
+/**
+ * Inverse of {@link archiveSetupReportFile}. Restores
+ * `amplitude-setup-report.previous.md` back to `amplitude-setup-report.md`
+ * if and only if the canonical path is currently absent.
+ *
+ * This protects against data loss on cancel / error paths: the wizard
+ * archives the prior report at run start, but if the run never reaches
+ * the conclude phase (Ctrl+C, agent crash, network error, etc.) nothing
+ * writes a fresh canonical report. Without this restore, the user is
+ * left with NO report at the canonical path — only the archive — which
+ * is functionally the same as deleting their previous report.
+ *
+ * Silent on I/O errors so a failed restore never blocks teardown.
+ */
+export function restoreSetupReportIfMissing(installDir: string): void {
+  const target = path.join(installDir, 'amplitude-setup-report.md');
+  const archivePath = path.join(installDir, PREVIOUS_SETUP_REPORT_FILENAME);
+  try {
+    // Only restore when the canonical slot is empty — never overwrite a
+    // fresh report that the agent did manage to write before failure.
+    if (fs.existsSync(target)) return;
+    if (!fs.existsSync(archivePath)) return;
+    fs.renameSync(archivePath, target);
+    logToFile(`restoreSetupReportIfMissing: ${archivePath} → ${target}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`restoreSetupReportIfMissing: ${msg}`);
+  }
 }
 
 /**

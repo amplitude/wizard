@@ -262,8 +262,22 @@ export async function runAgentWizard(
     ensureWizardArtifactsIgnored,
     cleanupWizardArtifacts,
     writeFallbackReportIfMissing,
+    archiveSetupReportFile,
+    restoreSetupReportIfMissing,
   } = await import('./wizard-tools.js');
   ensureWizardArtifactsIgnored(session.installDir);
+
+  // Move any prior `amplitude-setup-report.md` to
+  // `amplitude-setup-report.previous.md` BEFORE the run starts so the
+  // outro never advertises a stale report from a previous run (e.g.
+  // against a different workspace) as if it described THIS run. The
+  // fresh report still lands at the canonical filename when the agent
+  // reaches its conclude phase; if it never gets there (full activation,
+  // cancel, etc.) the canonical filename stays absent and the outro
+  // hides the "View setup report" option. We keep exactly one prior
+  // report — not a growing timestamped pile — because the project root
+  // shouldn't carry an audit trail. (PR 316.)
+  archiveSetupReportFile(session.installDir);
 
   // Helper bound to this run's session. The fallback never overwrites
   // an agent-authored report (see writeFallbackReportIfMissing's
@@ -278,24 +292,34 @@ export async function runAgentWizard(
     });
   };
 
-  // The original PR only wrote a fallback on success, but the
-  // failure modes the writer is meant to handle (cancel, error,
-  // out-of-turns) all exit via wizardAbort or non-throwing returns
-  // and never reach the success branch. Wire the writer into every
-  // teardown path so the outro always has something to surface:
+  // Wire BOTH report-recovery helpers into every teardown path:
   //
-  //   - wizardAbort()   → registerCleanup runs the writer before
-  //                       process.exit (cancel / error / Ctrl+C)
-  //   - body returns false → try/finally below catches non-throwing
-  //                       early returns (e.g. version-check cancel)
-  //   - body throws     → same try/finally catches uncaught errors
-  //   - success         → explicit call retained as a belt-and-braces
-  //                       no-op for the rare case where the agent
-  //                       finishes without writing a report
+  //   1. restoreSetupReportIfMissing — if the run never reaches the
+  //      conclude phase, restore the archived prior report so the user
+  //      gets back what they had before this run touched anything.
+  //   2. writeFallbackReportIfMissing — if there was no prior report
+  //      AND the agent never wrote one, synthesize a minimal report so
+  //      the outro always has something to surface.
   //
-  // Re-firing on the success path is harmless because the writer
-  // bails when the canonical exists.
-  const { registerCleanup } = await import('../utils/wizard-abort.js');
+  // ORDERING INVARIANT: restore MUST run before fallback. Both helpers
+  // existsSync-gate the canonical path, so if fallback fired first it
+  // would land a stub at canonical, restore would then see
+  // canonical-exists and bail, and the user's prior real report would
+  // stay permanently buried in `.previous.md`. Restore goes through
+  // `registerPriorityCleanup` (unshifts onto the cleanup queue) so it
+  // ALWAYS runs before any code that may write a fresh canonical
+  // report, regardless of registration order.
+  //
+  // Registered as cleanups so wizardAbort() triggers them before
+  // process.exit. The success-path re-fires below catch the two failure
+  // modes that bypass wizardAbort (non-throwing return false, raw
+  // throw).
+  const { registerCleanup, registerPriorityCleanup } = await import(
+    '../utils/wizard-abort.js'
+  );
+  registerPriorityCleanup(() =>
+    restoreSetupReportIfMissing(session.installDir),
+  );
   registerCleanup(tryWriteFallback);
 
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
@@ -321,13 +345,17 @@ export async function runAgentWizard(
       featureProgress,
     );
   } finally {
-    // Catches the two failure paths that bypass wizardAbort:
-    //   - body returns false (non-throwing early return, e.g. version check)
-    //   - body throws        (uncaught exception propagates to caller)
-    // The success path also runs through here, but the agent will
-    // already have written its report by then, so the fallback's
-    // existsSync check makes this a safe no-op.
-    if (!success) tryWriteFallback();
+    // Cover the two failure paths that bypass wizardAbort's cleanup hook:
+    //   - body returns false  (non-throwing early return, e.g. version check)
+    //   - body throws         (uncaught exception propagates to caller)
+    // Run restore first (recovers the archived prior report), then
+    // fallback (synthesizes a minimal report only if neither agent nor
+    // restore produced one). Both helpers existsSync-gate the canonical
+    // path, so they're idempotent if wizardAbort already fired them.
+    if (!success) {
+      restoreSetupReportIfMissing(session.installDir);
+      tryWriteFallback();
+    }
   }
   // Cleanup runs only when the body explicitly signals success. Other
   // exit paths preserve artifacts:

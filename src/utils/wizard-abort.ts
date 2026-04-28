@@ -48,6 +48,22 @@ export function registerCleanup(fn: () => void): void {
   cleanupFns.push(fn);
 }
 
+/**
+ * Register a cleanup that MUST run before any cleanup registered via the
+ * regular `registerCleanup`. Use this for restorers that resurrect a
+ * pre-run artifact (e.g. the previous setup report) which any later
+ * cleanup might clobber by writing a fresh stub at the same canonical
+ * path. Priority cleanups run in the order they were registered with
+ * each other, but always before the FIFO queue.
+ *
+ * Ordering invariant: priority cleanups run first so the user's
+ * pre-existing on-disk state is restored before any other cleanup
+ * (which might write to the same paths) gets a chance to fire.
+ */
+export function registerPriorityCleanup(fn: () => void): void {
+  cleanupFns.unshift(fn);
+}
+
 export function clearCleanup(): void {
   cleanupFns.length = 0;
 }

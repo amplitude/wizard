@@ -2,6 +2,7 @@ import {
   wizardAbort,
   WizardError,
   registerCleanup,
+  registerPriorityCleanup,
   clearCleanup,
 } from '../utils/wizard-abort';
 import { analytics } from '../utils/analytics';
@@ -136,6 +137,84 @@ describe('wizardAbort', () => {
     await expect(wizardAbort()).rejects.toThrow('process.exit called');
 
     expect(callOrder).toEqual(['cleanup1', 'cleanup2', 'cancel', 'shutdown']);
+  });
+
+  it('runs priority cleanups before regular cleanups (ordering invariant)', async () => {
+    const callOrder: string[] = [];
+
+    // Register the LATER cleanup first to prove insertion order doesn't
+    // matter — priority cleanups still run before any regular one.
+    registerCleanup(() => callOrder.push('regular1'));
+    registerCleanup(() => callOrder.push('regular2'));
+    registerPriorityCleanup(() => callOrder.push('priority1'));
+    registerPriorityCleanup(() => callOrder.push('priority2'));
+
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    // priority2 was registered last among priority cleanups, so it
+    // unshifts to the front. Both priority cleanups MUST run before any
+    // regular cleanup — that's the guarantee callers depend on.
+    expect(callOrder).toEqual([
+      'priority2',
+      'priority1',
+      'regular1',
+      'regular2',
+    ]);
+  });
+
+  it('regression: priority cleanup restores file before any regular cleanup writes a stub', async () => {
+    // Models the bug: this branch archives the user's prior setup
+    // report and registers a restore-on-failure. PR #327 added a
+    // fallback-stub writer that registers via `registerCleanup`. If
+    // the stub writer ran first (FIFO), it would write a fresh
+    // canonical report and the restore would see canonical-exists and
+    // bail — permanently burying the user's real report in
+    // `.previous.md`.
+    //
+    // The fix: register the restore via `registerPriorityCleanup` so
+    // it ALWAYS runs before any other cleanup that may write to the
+    // same canonical path. This test asserts that ordering invariant.
+    const canonical: { exists: boolean; content: string | null } = {
+      exists: false,
+      content: null,
+    };
+    const archive: { exists: boolean; content: string | null } = {
+      exists: true,
+      content: 'PRIOR USER REPORT',
+    };
+
+    // Simulate the restore: if canonical absent and archive present,
+    // move archive → canonical (and clear archive).
+    const restoreReportIfMissing = (): void => {
+      if (canonical.exists) return;
+      if (!archive.exists) return;
+      canonical.exists = true;
+      canonical.content = archive.content;
+      archive.exists = false;
+      archive.content = null;
+    };
+
+    // Simulate the (hypothetical PR #327) stub writer: writes a stub at
+    // canonical only if canonical is currently absent.
+    const writeFallbackStub = (): void => {
+      if (canonical.exists) return;
+      canonical.exists = true;
+      canonical.content = 'FALLBACK STUB';
+    };
+
+    // Register stub writer FIRST via the FIFO API (worst case for ordering)
+    // and the restore SECOND via the priority API. The priority API must
+    // win regardless.
+    registerCleanup(writeFallbackStub);
+    registerPriorityCleanup(restoreReportIfMissing);
+
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    // Restore ran first → user's prior report is back at canonical.
+    // Stub writer's no-op-on-exists guard then preserved that real
+    // content instead of overwriting with a stub.
+    expect(canonical.exists).toBe(true);
+    expect(canonical.content).toBe('PRIOR USER REPORT');
   });
 
   it('does not block exit when a cleanup function throws', async () => {
