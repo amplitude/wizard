@@ -6,6 +6,9 @@ exports[`OutroScreen snapshots > renders the cancel state 1`] = `
 
   Setup cancelled.
 
+  Resume later
+  Pick up where you left off — run npx @amplitude/wizard in this directory anytime.
+
   Manual setup: https://amplitude.com/docs/get-started/quickstart
 
   Press any key to exit
@@ -20,7 +23,7 @@ exports[`OutroScreen snapshots > renders the error state with a message and docs
 
   → Check your API key and network connection
   → Run the wizard again with --debug for more detail
-  → Full log: /tmp/wizard-snapshot-cache/bootstrap.log (press L to open)
+  → Full log: <tmp>/amplitude-wizard.log (press L to open)
   → Press C to write a sanitized bug report
   → Docs: https://amplitude.com/docs/get-started/quickstart
 

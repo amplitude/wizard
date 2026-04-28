@@ -626,6 +626,56 @@ describe('WizardStore', () => {
     });
   });
 
+  // ── resetForFreshStart (IntroScreen "Start fresh" branch) ───────
+
+  describe('resetForFreshStart', () => {
+    it('clears every field IntroScreen used to wipe via direct assignment', () => {
+      const store = createStore();
+      // Walk into a checkpoint-restored state with everything populated.
+      store.session._restoredFromCheckpoint = true;
+      store.session.introConcluded = true;
+      store.session.detectionComplete = true;
+      store.session.detectedFrameworkLabel = 'Next.js';
+      store.session.integration = Integration.nextjs;
+      store.session.frameworkConfig = { metadata: { name: 'Next.js' } } as any;
+      store.session.frameworkContext = { foo: 'bar' } as any;
+      store.session.region = 'us';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedWorkspaceId = 'ws-1';
+      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedEnvName = 'production';
+
+      store.resetForFreshStart();
+
+      expect(store.session._restoredFromCheckpoint).toBe(false);
+      expect(store.session.introConcluded).toBe(false);
+      expect(store.session.detectionComplete).toBe(false);
+      expect(store.session.detectedFrameworkLabel).toBeNull();
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.region).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedOrgName).toBeNull();
+      expect(store.session.selectedWorkspaceId).toBeNull();
+      expect(store.session.selectedWorkspaceName).toBeNull();
+      expect(store.session.selectedEnvName).toBeNull();
+    });
+
+    it('notifies subscribers (emits change)', () => {
+      const store = createStore();
+      const listener = vi.fn();
+      store.subscribe(listener);
+      const before = store.getVersion();
+
+      store.resetForFreshStart();
+
+      expect(listener).toHaveBeenCalled();
+      expect(store.getVersion()).toBeGreaterThan(before);
+    });
+  });
+
   // ── Setter analytics events ────────────────────────────────────
 
   describe('setter analytics events', () => {

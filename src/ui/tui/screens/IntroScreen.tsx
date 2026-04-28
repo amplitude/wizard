@@ -166,25 +166,14 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 if (choice === 'resume') {
                   store.concludeIntro();
                 } else if (choice === 'fresh') {
-                  // Clear checkpoint and reset restored flag so normal flow takes over
+                  // Clear checkpoint and reset restored flag so normal
+                  // flow takes over. Route through the explicit store
+                  // action so all per-key listeners fire (the previous
+                  // direct `store.session = {...}` assignment worked for
+                  // version-based subscribers but silently bypassed
+                  // nanostores' per-key change events).
                   clearCheckpoint(store.session.installDir);
-                  store.session = {
-                    ...store.session,
-                    _restoredFromCheckpoint: false,
-                    introConcluded: false,
-                    detectionComplete: false,
-                    detectedFrameworkLabel: null,
-                    integration: null,
-                    frameworkConfig: null,
-                    frameworkContext: {},
-                    frameworkContextAnswerOrder: [],
-                    region: null,
-                    selectedOrgId: null,
-                    selectedOrgName: null,
-                    selectedWorkspaceId: null,
-                    selectedWorkspaceName: null,
-                    selectedEnvName: null,
-                  };
+                  store.resetForFreshStart();
                   setShowResume(false);
                 } else {
                   store.setOutroData({

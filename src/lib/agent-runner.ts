@@ -34,18 +34,23 @@ import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
 
+import * as fsSync from 'fs';
+import path from 'path';
 import { saveCheckpoint } from './session-checkpoint.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
+import { getLogFilePath } from './observability/index.js';
 import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
-import { wizardAbort, WizardError } from '../utils/wizard-abort';
+import {
+  wizardAbort,
+  WizardError,
+  getWizardAbortSignal,
+} from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 
-/** Path the wizard writes its debug log to — referenced in user-facing error copy. */
-const LOG_FILE_PATH = '/tmp/amplitude-wizard.log';
 /** Single source of truth for the support address shown in error messages. */
 const SUPPORT_EMAIL = 'wizard@amplitude.com';
 
@@ -134,6 +139,45 @@ export function agentArtifactsLookComplete(session: WizardSession): boolean {
 }
 
 /**
+ * Heuristic: did the agent at least install the SDK and instrument
+ * events, even if it didn't reach the dashboard creation step?
+ *
+ * The wizard's `confirm_event_plan` MCP tool persists the approved
+ * event plan to `<installDir>/.amplitude-events.json` (see
+ * `persistEventPlan` in `wizard-tools.ts`). That file's presence with
+ * non-empty content is a hard signal that:
+ *
+ *   - The user approved an instrumentation plan
+ *   - The agent reached the post-confirmation phase
+ *   - Track call insertion was attempted (whether or not every callsite
+ *     landed cleanly — but typically by this point it has)
+ *
+ * Used as a complement to `agentArtifactsLookComplete` for failure modes
+ * where the dashboard URL is NOT set but the project is still in a
+ * usable instrumented state — most commonly: the Amplitude MCP server
+ * (mcp.amplitude.com) is unreachable at the END of the run, after the
+ * events were instrumented but before the dashboard could be created.
+ *
+ * Distinct from `agentArtifactsLookComplete` because that function's
+ * "complete" includes dashboard. This one's "instrumented" stops at the
+ * code-changes phase. Dashboard-failed-but-everything-else-worked is a
+ * meaningfully different state — the user has working analytics; the
+ * only loss is the auto-built dashboard. They can build one manually at
+ * app.amplitude.com.
+ */
+export function agentEventsInstrumented(session: WizardSession): boolean {
+  try {
+    const eventsPath = path.join(session.installDir, '.amplitude-events.json');
+    if (!fsSync.existsSync(eventsPath)) return false;
+    const raw = fsSync.readFileSync(eventsPath, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Hard-error abort for `API_ERROR` / `RATE_LIMIT` agent failures.
  * Extracted from the runAgentWizardBody inline branch so the soft-error
  * path can early-return without duplicating this logic.
@@ -178,10 +222,10 @@ async function abortOnApiError(
   let userMessage: string;
   switch (errorSubtype) {
     case 'stream_closed':
-      userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+      userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
       break;
     case 'terminated_400':
-      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
       break;
     case 'rate_limit':
       userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
@@ -191,7 +235,7 @@ async function abortOnApiError(
     case 'other':
       userMessage = `LLM gateway error\n\n${
         rawMessage || 'Unknown error'
-      }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`;
+      }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
       break;
   }
 
@@ -748,34 +792,89 @@ async function runAgentWizardBody(
     });
   }
 
-  if (agentResult.error === AgentErrorType.MCP_MISSING) {
+  if (
+    agentResult.error === AgentErrorType.MCP_MISSING ||
+    agentResult.error === AgentErrorType.RESOURCE_MISSING
+  ) {
+    // Soft-error path: if the agent has already instrumented events
+    // (or completed everything including the dashboard), an MCP /
+    // resource failure here is on a tail-end call — most commonly the
+    // dashboard creation step at the end of the conclude phase. The
+    // SDK is installed, events are instrumented, code is written.
+    // Hard-aborting would throw away all that work and show the user a
+    // "Setup cancelled" outro with no recap of what succeeded.
+    //
+    // Real-world example: ✓ Welcome ✓ Auth ✓ Setup ✓ Verify ● Done —
+    // every step green-checked, but the wizard surfaced
+    // "Setup cancelled" with the detail "Amplitude MCP not connected
+    // — dashboard could not be created automatically. Visit
+    // app.amplitude.com to build it manually using the chart plan
+    // below." The agent itself reported the failure as partial and
+    // suggested a recovery path; the wizard ignored that nuance.
+    //
     // The MCP_MISSING signal can come from EITHER the in-process
     // `wizard-tools` MCP (skill loading, env vars) OR the remote
-    // `amplitude-wizard` MCP (mcp.amplitude.com — event plans, dashboards).
-    // Surface the agent-reported detail so the user can include it in
-    // a bug report and Sentry can disambiguate which server failed.
-    const detail = agentResult.message ?? 'unspecified';
-    await wizardAbort({
-      message: `Could not access an Amplitude wizard MCP service\n\nThis could be the in-process tooling server (used for skill loading and env var management) or the remote Amplitude MCP server.\n\nDetail: ${detail}\n\nPossible causes: missing skills bundle in the install, network connectivity, expired auth, or a transient outage.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
-      error: new WizardError('Agent could not access Amplitude MCP server', {
-        integration: config.metadata.integration,
-        'error type': AgentErrorType.MCP_MISSING,
-        'agent error detail': agentResult.message ?? null,
-      }),
-      exitCode: ExitCode.AGENT_FAILED,
-    });
-  }
+    // `amplitude-wizard` MCP (mcp.amplitude.com — event plans,
+    // dashboards). The agent-reported detail is preserved on the
+    // WizardError payload for Sentry / `agent error detail` analytics
+    // so we can disambiguate which server failed.
+    const errorType = agentResult.error;
+    const detail = agentResult.message ?? null;
+    const dashboardComplete = agentArtifactsLookComplete(session);
+    const eventsInstrumented = agentEventsInstrumented(session);
 
-  if (agentResult.error === AgentErrorType.RESOURCE_MISSING) {
-    await wizardAbort({
-      message: `Could not access the setup resource\n\nThe wizard could not access the setup resource. This may indicate a version mismatch or a temporary service issue.\n\nPlease try again, or set up ${config.metadata.name} manually by following our documentation:\n${config.metadata.docsUrl}`,
-      error: new WizardError('Agent could not access setup resource', {
+    if (dashboardComplete || eventsInstrumented) {
+      logToFile(
+        `[agent-runner] Soft ${errorType} after agent did meaningful work (dashboard=${dashboardComplete}, events=${eventsInstrumented}): ${
+          detail ?? '(no detail)'
+        }. Continuing to MCP / outro.`,
+      );
+      analytics.wizardCapture('agent soft error', {
         integration: config.metadata.integration,
-        'error type': AgentErrorType.RESOURCE_MISSING,
-        'agent error detail': agentResult.message ?? null,
-      }),
-      exitCode: ExitCode.AGENT_FAILED,
-    });
+        'error type': errorType,
+        'dashboard complete': dashboardComplete,
+        'events instrumented': eventsInstrumented,
+        'agent error detail': detail,
+      });
+      // Surface a plain-English warning so the user knows what's
+      // recoverable. Without this they'd see a normal success outro
+      // with no hint that the dashboard step actually failed.
+      // Copy stays jargon-free — same standard as PR #336.
+      const what = dashboardComplete
+        ? 'a late tooling step'
+        : 'the dashboard creation step';
+      getUI().pushStatus(
+        `Note: ${what} couldn't reach Amplitude's setup service — your SDK + events are instrumented. ${
+          dashboardComplete
+            ? ''
+            : 'Build the dashboard manually at https://app.amplitude.com using the event names in your code. '
+        }Detail: ${detail || errorType}`,
+      );
+      // Fall through to env-var upload, MCP install, Slack, Outro —
+      // they don't depend on agentResult.error being null.
+    } else {
+      // Hard-error path: agent didn't get far enough to leave the
+      // project usable. Could be the in-process wizard-tools MCP
+      // (skill loading) failing right at startup. Abort with the
+      // jargon-free copy from PR #336.
+      const isMcp = errorType === AgentErrorType.MCP_MISSING;
+      await wizardAbort({
+        message: isMcp
+          ? `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`
+          : `Couldn't load setup instructions for ${config.metadata.name} — this may be a temporary service issue or a version mismatch.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`,
+        error: new WizardError(
+          isMcp
+            ? 'Agent could not access Amplitude MCP server'
+            : 'Agent could not access setup resource',
+          {
+            integration: config.metadata.integration,
+            'error type': errorType,
+            'agent error detail': detail,
+          },
+        ),
+        exitCode: ExitCode.AGENT_FAILED,
+      });
+    }
   }
 
   if (agentResult.error === AgentErrorType.GATEWAY_DOWN) {
@@ -793,7 +892,7 @@ async function runAgentWizardBody(
     await wizardAbort({
       message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
         agentResult.message || 'API Error: 400 terminated'
-      }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${LOG_FILE_PATH}) to: ${SUPPORT_EMAIL}`,
+      }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
       error: new WizardError(
         `LLM gateway unavailable: ${agentResult.message ?? 'unknown'}`,
         {
@@ -1006,13 +1105,44 @@ async function pollForDataIngestion(
 
   const deadline = Date.now() + MAX_WAIT_MS;
   let pollCount = 0;
+  // Bound each individual MCP poll. Without this, a single hung fetch would
+  // never resolve and the poll loop would advance only once the surrounding
+  // process tore down, leaving the request stuck in the background.
+  const PER_POLL_TIMEOUT_MS = 25_000;
+  // Bail out of the poll loop the moment the wizard is cancelled
+  // (Ctrl+C / SIGINT → graceful-exit → abortWizard). Without this the
+  // 30s setTimeout below would block the 2s grace window for up to 28s,
+  // so the user would either see a hung exit or the kernel would
+  // SIGKILL the process before the poll resolved.
+  const wizardSignal = getWizardAbortSignal();
 
   while (Date.now() < deadline) {
+    if (wizardSignal.aborted) {
+      logToFile('[pollForDataIngestion] aborted via wizard signal');
+      return;
+    }
     pollCount++;
     logToFile(`[pollForDataIngestion] poll #${pollCount} appId=${appId}`);
 
+    // Per-poll AbortController — wired through to fetchHasAnyEventsMcp so
+    // the in-flight HTTP request unwinds when the poll deadline fires
+    // (rather than running to completion in the background).
+    const pollController = new AbortController();
+    const pollTimer = setTimeout(
+      () => pollController.abort(),
+      PER_POLL_TIMEOUT_MS,
+    );
     try {
-      const result = await fetchHasAnyEventsMcp(accessToken, appId);
+      // Pass the per-poll signal so the explicit per-poll timeout aborts
+      // the in-flight HTTP request. callAmplitudeMcp also defaults to the
+      // wizard signal when no explicit signal is provided; here we use the
+      // per-poll signal and rely on the loop-level wizardSignal checks
+      // (above and in the inter-poll wait below) to honor Ctrl+C.
+      const result = await fetchHasAnyEventsMcp(
+        accessToken,
+        appId,
+        pollController.signal,
+      );
       if (result.hasEvents) {
         logToFile(
           `[pollForDataIngestion] events detected: ${result.activeEventNames.join(
@@ -1037,14 +1167,39 @@ async function pollForDataIngestion(
           err instanceof Error ? err.message : String(err)
         }`,
       );
+    } finally {
+      // Always clear the per-poll timer so a fast success/failure doesn't
+      // leak ~30 minutes' worth of stranded timers across the loop.
+      clearTimeout(pollTimer);
     }
 
-    // Wait before the next poll, but bail early if deadline passed.
+    // Wait before the next poll, but bail early if deadline passed
+    // OR if the wizard is cancelled. Race the timer with the abort
+    // signal so a Ctrl+C unblocks immediately instead of waiting up
+    // to POLL_INTERVAL_MS for the next iteration to see the flag.
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await new Promise<void>((resolve) =>
-      setTimeout(resolve, Math.min(POLL_INTERVAL_MS, remaining)),
-    );
+    if (wizardSignal.aborted) {
+      logToFile('[pollForDataIngestion] aborted via wizard signal');
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      const waitMs = Math.min(POLL_INTERVAL_MS, remaining);
+      const timer = setTimeout(() => {
+        wizardSignal.removeEventListener('abort', onAbort);
+        resolve();
+      }, waitMs);
+      const onAbort = (): void => {
+        clearTimeout(timer);
+        resolve();
+      };
+      wizardSignal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  if (wizardSignal.aborted) {
+    logToFile('[pollForDataIngestion] aborted via wizard signal');
+    return;
   }
 
   logToFile('[pollForDataIngestion] timeout reached without detecting events');

@@ -430,5 +430,33 @@ describe('callAmplitudeMcp', () => {
       releaseGenerator();
       await callPromise;
     });
+
+    it('defaults to the wizard-wide abort signal when none is provided', async () => {
+      const { resetWizardAbortController } = await import(
+        '../../utils/wizard-abort'
+      );
+      resetWizardAbortController();
+
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(makeFetchResponse(sseResult({ v: 1 })));
+
+      await callAmplitudeMcp({
+        accessToken: 'tok',
+        // intentionally no abortSignal — should default to wizard signal
+        direct: async (callTool) => {
+          const text = await callTool(1, 't', {});
+          return text ? JSON.parse(text) : null;
+        },
+        agentPrompt: 'p',
+        parseAgent: () => null,
+      });
+
+      const { getWizardAbortSignal } = await import('../../utils/wizard-abort');
+      const wizardSignal = getWizardAbortSignal();
+      // Every fetch call should have received the wizard signal.
+      for (const [, opts] of mockFetch.mock.calls) {
+        expect((opts as Record<string, unknown>).signal).toBe(wizardSignal);
+      }
+    });
   });
 });

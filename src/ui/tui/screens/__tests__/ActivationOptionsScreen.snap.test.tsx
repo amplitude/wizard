@@ -58,4 +58,24 @@ describe('ActivationOptionsScreen snapshots', () => {
     expect(frame).toContain('Take me to the docs');
     expect(frame).toContain("I'm done for now");
   });
+
+  // Regression: the "I'm blocked" option used to advance the user into the
+  // same agent run as "Help me test locally" — silently lying. The honest
+  // path is to write a sanitized support report and surface the log file,
+  // so the picker copy must reflect that.
+  it('promises a support-report flow on the "I\'m blocked" path', () => {
+    const store = makeStoreForSnapshot({
+      snippetConfigured: true,
+      activationLevel: 'partial',
+      projectHasData: false,
+    });
+    const { frame } = renderSnapshot(
+      <ActivationOptionsScreen store={store} />,
+      store,
+    );
+    expect(frame).toContain("I'm blocked");
+    // The hint must mention the actual side effect (a saved report) so the
+    // user knows what they're signing up for.
+    expect(frame.toLowerCase()).toContain('report');
+  });
 });

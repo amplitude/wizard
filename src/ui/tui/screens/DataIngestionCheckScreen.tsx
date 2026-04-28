@@ -18,6 +18,7 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useEscapeBack } from '../hooks/useEscapeBack.js';
+import { withTimeout } from '../utils/with-timeout.js';
 import {
   extractAppId,
   fetchAmplitudeUser,
@@ -396,18 +397,33 @@ export const DataIngestionCheckScreen = ({
       }
       setApiUnavailable(true);
 
-      // Fetch cataloged event types as a proxy for "events arrived"
+      // Fetch cataloged event types as a proxy for "events arrived". Wrap
+      // in a 15s timeout so a hanging data-api request can't leave the user
+      // staring at "Checking your event catalog…" forever — on timeout we
+      // treat the catalog as empty, which still unblocks the screen
+      // (Enter/q hints render the moment apiUnavailable=true).
       if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
-        fetchWorkspaceEventTypes(
-          dataApiToken,
-          zone,
-          currentSession.selectedOrgId,
-          currentSession.selectedWorkspaceId,
+        withTimeout(
+          fetchWorkspaceEventTypes(
+            dataApiToken,
+            zone,
+            currentSession.selectedOrgId,
+            currentSession.selectedWorkspaceId,
+          ),
+          15_000,
+          'event catalog fetch',
         )
           .then((names) => {
             setEventTypes(names);
           })
-          .catch(() => {
+          .catch((catalogErr) => {
+            logToFile(
+              `[DataIngestionCheck] catalog fetch failed: ${
+                catalogErr instanceof Error
+                  ? catalogErr.message
+                  : String(catalogErr)
+              }`,
+            );
             setEventTypes([]);
           });
       } else {

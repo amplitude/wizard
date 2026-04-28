@@ -170,13 +170,36 @@ export async function installPackage({
     // pass concludes the closure can't mutate it.
     const installErrorState: { logPath: string | null } = { logPath: null };
     try {
+      // SECURITY: use execFile (no shell). The package name is wizard-derived
+      // (not user-supplied) but we still build the argv from a tokenised list
+      // so a future regression — e.g. a manifest field that ever lands in
+      // `installCommand` — can't introduce shell injection. installCommand is
+      // a multi-word string like "bun add" / "yarn add", so split on
+      // whitespace to derive [executable, ...subcommandArgs].
+      const [installExe, ...installArgs] = pkgManager.installCommand
+        .trim()
+        .split(/\s+/);
+      const flagArgs = pkgManager.flags ? pkgManager.flags.split(/\s+/) : [];
+      const forceArgs =
+        forceInstall && pkgManager.forceInstallFlag
+          ? pkgManager.forceInstallFlag.split(/\s+/)
+          : [];
+      const legacyArgs = legacyPeerDepsFlag
+        ? legacyPeerDepsFlag.split(/\s+/)
+        : [];
+
       await new Promise<void>((resolve, reject) => {
-        childProcess.exec(
-          `${pkgManager.installCommand} ${packageName} ${pkgManager.flags} ${
-            forceInstall ? pkgManager.forceInstallFlag : ''
-          } ${legacyPeerDepsFlag}`.trim(),
+        childProcess.execFile(
+          installExe,
+          [
+            ...installArgs,
+            packageName,
+            ...flagArgs,
+            ...forceArgs,
+            ...legacyArgs,
+          ],
           { cwd: installDir },
-          (err, stdout, stderr) => {
+          (err: Error | null, stdout, stderr) => {
             if (err) {
               // Land the error log under `~/.amplitude/wizard/runs/<hash>/`
               // so it (a) doesn't litter the user's project root and (b)

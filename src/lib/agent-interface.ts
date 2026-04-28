@@ -22,7 +22,7 @@ import {
   TRAILING_FEATURES,
   type RetryState,
 } from './wizard-session';
-import { registerCleanup } from '../utils/wizard-abort';
+import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
@@ -1939,8 +1939,25 @@ export async function runAgent(
       // noise volume stays visible without cluttering the per-line stream.
       let hookBridgeRaceSuppressed = 0;
 
-      // AbortController lets us cancel a stalled query so we can retry
+      // AbortController lets us cancel a stalled query so we can retry.
+      // Chained to the wizard-wide abort signal so that a top-level cancel
+      // (Ctrl+C / SIGINT → graceful-exit → abortWizard()) tears down the
+      // in-flight SDK query and its subprocess instead of leaving them to
+      // be SIGKILL'd by the 2s grace window.
       const controller = new AbortController();
+      const wizardSignal = getWizardAbortSignal();
+      const onWizardAbort = (): void => {
+        if (!controller.signal.aborted) {
+          controller.abort(wizardSignal.reason ?? 'wizard cancelled');
+        }
+      };
+      if (wizardSignal.aborted) {
+        // Wizard was already aborted before this attempt started — abort
+        // immediately so the SDK call short-circuits.
+        onWizardAbort();
+      } else {
+        wizardSignal.addEventListener('abort', onWizardAbort, { once: true });
+      }
       let staleTimer: ReturnType<typeof setTimeout> | undefined;
       let receivedFirstMessage = false;
       let lastMessageType = 'none';
@@ -2268,6 +2285,7 @@ export async function runAgent(
         // Check if the agent hit a transient API error (e.g. Vertex 400)
         // that warrants a retry rather than immediately giving up.
         clearTimeout(staleTimer);
+        wizardSignal.removeEventListener('abort', onWizardAbort);
         const partialOutput = collectedText.join('\n');
         const transientErrorMatchers = [
           { pattern: 'API Error: 400', label: 'api_400' },
@@ -2333,12 +2351,22 @@ export async function runAgent(
         break;
       } catch (innerError) {
         clearTimeout(staleTimer);
+        wizardSignal.removeEventListener('abort', onWizardAbort);
         signalDone(); // unblock the prompt stream for this attempt
         // Always drain the prior iterator after an exception, regardless
         // of whether we'll retry. Cheap and defends against the hook
         // bridge race in issue #297.
         await drainPriorResponse(response);
         logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
+
+        // Wizard-wide abort (Ctrl+C / SIGINT / graceful-exit) — bail out
+        // immediately without retrying. Falling through to the retry branch
+        // would re-enter the stale-timer / SDK loop and waste the 2s grace
+        // window the user is waiting on.
+        if (wizardSignal.aborted) {
+          logToFile('Agent loop exiting: wizard signal aborted');
+          throw innerError;
+        }
 
         // Stall-aborted or API error with retries remaining — try again
         if (controller.signal.aborted && attempt < MAX_RETRIES) {
@@ -2434,13 +2462,13 @@ export async function runAgent(
       const { code, detail } = reportedError;
       if (code === 'MCP_MISSING') {
         logToFile('Agent error: MCP_MISSING');
-        spinner.stop(detail || 'Agent could not access Amplitude MCP');
+        spinner.stop(detail || "Couldn't reach Amplitude's setup service");
         _activeStatusReporter = undefined;
         return { error: AgentErrorType.MCP_MISSING, message: detail };
       }
       if (code === 'RESOURCE_MISSING') {
         logToFile('Agent error: RESOURCE_MISSING');
-        spinner.stop(detail || 'Agent could not access setup resource');
+        spinner.stop(detail || "Couldn't load setup instructions");
         _activeStatusReporter = undefined;
         return { error: AgentErrorType.RESOURCE_MISSING, message: detail };
       }
@@ -2459,7 +2487,7 @@ export async function runAgent(
       const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: MCP_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access Amplitude MCP');
+      spinner.stop("Couldn't reach Amplitude's setup service");
       _activeStatusReporter = undefined;
       return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
@@ -2467,7 +2495,7 @@ export async function runAgent(
       const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error: RESOURCE_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access setup resource');
+      spinner.stop("Couldn't load setup instructions");
       _activeStatusReporter = undefined;
       return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
@@ -2544,14 +2572,14 @@ export async function runAgent(
       const idx = outputText.indexOf('[ERROR-MCP-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): MCP_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access Amplitude MCP');
+      spinner.stop("Couldn't reach Amplitude's setup service");
       return { error: AgentErrorType.MCP_MISSING, message: markerLine };
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
       const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): RESOURCE_MISSING (legacy text marker)');
-      spinner.stop('Agent could not access setup resource');
+      spinner.stop("Couldn't load setup instructions");
       return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
     }
 
