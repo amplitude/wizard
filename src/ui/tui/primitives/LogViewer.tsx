@@ -21,6 +21,7 @@ import {
   findErrorEntryIndexes,
   sliceViewportText,
 } from '../utils/log-viewer.js';
+import { watchFileWhenAvailable } from '../utils/watchFileWhenAvailable.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + spacer + separator + input + tab bar chrome */
 const CHROME_ROWS = 8;
@@ -183,30 +184,16 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
 
     readTail();
 
-    let watcher: fs.FSWatcher | undefined;
-    try {
-      watcher = fs.watch(filePath, () => {
-        readTail();
-      });
-    } catch {
-      // File might not exist yet — retry when it appears
-      const interval = setInterval(() => {
-        try {
-          fs.accessSync(filePath);
-          readTail();
-          clearInterval(interval);
-          watcher = fs.watch(filePath, () => readTail());
-        } catch {
-          // Still waiting
-        }
-      }, 1000);
+    // Single-owner watcher that closes the swap race between the poll
+    // interval and the fs.watch handle. See `watchFileWhenAvailable`
+    // for the race details. Replaced two-variable closure cleanup
+    // (watcher + interval) with one `dispose()`.
+    const handle = watchFileWhenAvailable({
+      filePath,
+      onChange: readTail,
+    });
 
-      return () => clearInterval(interval);
-    }
-
-    return () => {
-      watcher?.close();
-    };
+    return () => handle.dispose();
   }, [filePath, viewportHeight, lineWidth]);
 
   useEffect(() => {

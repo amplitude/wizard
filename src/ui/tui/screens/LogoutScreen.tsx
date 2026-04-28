@@ -33,11 +33,22 @@ export const LogoutScreen = ({
 }: LogoutScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Confirm);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Hard mount-guard for the `process.exit(0)` schedule. Without this,
+  // any path that unmounts the LogoutScreen between confirm-click and
+  // the 1.5s timer firing (overlay swap, ScreenErrorBoundary retry,
+  // back-nav before timer drains) would still kill the whole CLI.
+  // Process termination must NEVER outlive its owning screen.
+  const mountedRef = useRef(true);
 
-  // Clear any pending timer on unmount
+  // Clear any pending timer on unmount + flip the mount flag so the
+  // exit callback short-circuits if it's already in the macrotask queue.
   useEffect(() => {
     return () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      mountedRef.current = false;
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, []);
 
@@ -50,8 +61,16 @@ export const LogoutScreen = ({
     clearAuthFieldsInAmpliConfig(installDir);
     onLoggedOut?.();
     setPhase(Phase.Done);
-    // Exit after a short delay so the user sees the confirmation
-    timerRef.current = setTimeout(() => process.exit(0), 1500);
+    // Exit after a short delay so the user sees the confirmation. The
+    // mount-guard on the inner callback is belt-and-braces with the
+    // unmount cleanup above — even if a queued macrotask sneaks past
+    // clearTimeout (e.g. unmount races the timer drain on an
+    // overloaded event loop), `mountedRef.current` will be false and
+    // we'll skip the process.exit.
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      if (mountedRef.current) process.exit(0);
+    }, 1500);
   };
 
   return (
