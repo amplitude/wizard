@@ -14,6 +14,7 @@ import {
   buildFallbackReport,
   writeFallbackReportIfMissing,
   archiveSetupReportFile,
+  restoreSetupReportIfMissing,
   PREVIOUS_SETUP_REPORT_FILENAME,
   WIZARD_GITIGNORE_PATTERNS,
 } from '../wizard-tools';
@@ -559,6 +560,72 @@ describe('archiveSetupReportFile', () => {
     fs.writeFileSync(path.join(tmpDir, 'amplitude-setup-report.md'), '#');
     archiveSetupReportFile(tmpDir);
     expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// restoreSetupReportIfMissing — pairs with archiveSetupReportFile so a
+// failed run doesn't bury the user's only report at .previous.md
+// ---------------------------------------------------------------------------
+
+describe('restoreSetupReportIfMissing', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('restores .previous.md to the canonical path when canonical is absent', () => {
+    const target = path.join(tmpDir, 'amplitude-setup-report.md');
+    const archive = path.join(tmpDir, PREVIOUS_SETUP_REPORT_FILENAME);
+    fs.writeFileSync(archive, '# prior run report\n', 'utf8');
+
+    restoreSetupReportIfMissing(tmpDir);
+
+    expect(fs.existsSync(target)).toBe(true);
+    expect(fs.existsSync(archive)).toBe(false);
+    expect(fs.readFileSync(target, 'utf8')).toBe('# prior run report\n');
+  });
+
+  it('does NOT overwrite a fresh canonical report (success-path safety)', () => {
+    const target = path.join(tmpDir, 'amplitude-setup-report.md');
+    const archive = path.join(tmpDir, PREVIOUS_SETUP_REPORT_FILENAME);
+    // Agent succeeded and wrote a fresh report this run.
+    fs.writeFileSync(target, '# fresh from this run\n', 'utf8');
+    // Archive from the prior run still on disk.
+    fs.writeFileSync(archive, '# stale prior run\n', 'utf8');
+
+    restoreSetupReportIfMissing(tmpDir);
+
+    // Critical: the fresh report must win; archive is preserved untouched.
+    expect(fs.readFileSync(target, 'utf8')).toBe('# fresh from this run\n');
+    expect(fs.readFileSync(archive, 'utf8')).toBe('# stale prior run\n');
+  });
+
+  it('is a no-op when neither the canonical nor the archive exists', () => {
+    expect(() => restoreSetupReportIfMissing(tmpDir)).not.toThrow();
+    expect(fs.readdirSync(tmpDir)).toHaveLength(0);
+  });
+
+  it('archive → restore round-trip preserves prior report on a failed run', () => {
+    // End-to-end protection against data loss: the user's prior run
+    // produced a report; this run archives it at start, then fails (so
+    // no fresh canonical is written). The restore puts the user back
+    // exactly where they were.
+    const target = path.join(tmpDir, 'amplitude-setup-report.md');
+    fs.writeFileSync(target, '# user report from prior run\n', 'utf8');
+
+    archiveSetupReportFile(tmpDir);
+    // ... run fails before agent writes a fresh report ...
+    restoreSetupReportIfMissing(tmpDir);
+
+    // Canonical content is exactly what the user had before this run.
+    expect(fs.readFileSync(target, 'utf8')).toBe(
+      '# user report from prior run\n',
+    );
+    expect(
+      fs.existsSync(path.join(tmpDir, PREVIOUS_SETUP_REPORT_FILENAME)),
+    ).toBe(false);
   });
 });
 

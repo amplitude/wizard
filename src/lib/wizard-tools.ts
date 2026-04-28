@@ -483,6 +483,36 @@ export function archiveSetupReportFile(installDir: string): void {
 }
 
 /**
+ * Inverse of {@link archiveSetupReportFile}. Restores
+ * `amplitude-setup-report.previous.md` back to `amplitude-setup-report.md`
+ * if and only if the canonical path is currently absent.
+ *
+ * This protects against data loss on cancel / error paths: the wizard
+ * archives the prior report at run start, but if the run never reaches
+ * the conclude phase (Ctrl+C, agent crash, network error, etc.) nothing
+ * writes a fresh canonical report. Without this restore, the user is
+ * left with NO report at the canonical path — only the archive — which
+ * is functionally the same as deleting their previous report.
+ *
+ * Silent on I/O errors so a failed restore never blocks teardown.
+ */
+export function restoreSetupReportIfMissing(installDir: string): void {
+  const target = path.join(installDir, 'amplitude-setup-report.md');
+  const archivePath = path.join(installDir, PREVIOUS_SETUP_REPORT_FILENAME);
+  try {
+    // Only restore when the canonical slot is empty — never overwrite a
+    // fresh report that the agent did manage to write before failure.
+    if (fs.existsSync(target)) return;
+    if (!fs.existsSync(archivePath)) return;
+    fs.renameSync(archivePath, target);
+    logToFile(`restoreSetupReportIfMissing: ${archivePath} → ${target}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`restoreSetupReportIfMissing: ${msg}`);
+  }
+}
+
+/**
  * Run wizard-artifact cleanup.
  *
  * Currently composes a single step:
