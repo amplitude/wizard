@@ -593,11 +593,21 @@ async function runAgentWizardBody(
     const stored = getStoredToken(user?.id, user?.zone);
     if (stored?.accessToken) {
       accessToken = stored.accessToken;
-      // Silently refresh if the access token has expired but the refresh window is still valid
+      // Silently refresh if the access token has expired but the refresh window is still valid.
+      // CRITICAL: pass the user's zone — without it `refreshAccessToken` defaults
+      // to the US OAuth host (auth.amplitude.com) and EU users' refresh tokens
+      // get rejected. The catch below then logs "auth refresh failed" and the
+      // wizard proceeds with the (already-expired) access token; every
+      // subsequent fetchAmplitudeUser / Amplitude MCP call surfaces as
+      // "Authentication failed while trying to fetch Amplitude user data" —
+      // both during the agent run and afterwards in DataIngestionCheckScreen.
       if (user && new Date() > new Date(stored.expiresAt)) {
         const refreshStartedAt = Date.now();
         try {
-          const refreshed = await refreshAccessToken(stored.refreshToken);
+          const refreshed = await refreshAccessToken(
+            stored.refreshToken,
+            user.zone,
+          );
           storeToken(user, {
             accessToken: refreshed.accessToken,
             idToken: refreshed.idToken,
@@ -673,6 +683,7 @@ async function runAgentWizardBody(
         projectApiKey,
         host,
         appId,
+        cloudRegion,
       },
       frameworkContext,
       skipAmplitudeMcp,
@@ -1255,6 +1266,7 @@ function buildIntegrationPrompt(
     projectApiKey: string;
     host: string;
     appId: number;
+    cloudRegion: 'us' | 'eu';
   },
   frameworkContext: Record<string, unknown>,
   skipAmplitudeMcp: boolean,
@@ -1276,6 +1288,30 @@ function buildIntegrationPrompt(
     }
     return genericBuildPrompt({ ...context, frameworkContext });
   }
+
+  // Region-aware app URL — the dashboard / chart links the agent surfaces in
+  // the setup report MUST use the user's data-center hostname. Without this,
+  // EU users got dashboard URLs at `app.amplitude.com/...` (US) because the
+  // skill examples are written against US hosts and the agent had nothing
+  // telling it the run was EU.
+  const appHost =
+    context.cloudRegion === 'eu'
+      ? 'https://app.eu.amplitude.com'
+      : 'https://app.amplitude.com';
+
+  // The wizard's appId is 0 when the env picker couldn't match an app to the
+  // chosen API key (manual API-key entry, or backend_fetch returning a key
+  // that's not in the picker's environments). When that happens, the agent
+  // should look up the canonical project for the API key via the Amplitude
+  // MCP's `get_context` and use ITS `defaultAppId` — never browse the
+  // `appsByCategory` list and pick a different project. Pre-PR the agent
+  // routinely picked the wizard team's own dev project (802868) and created
+  // dashboards there; the user's setup report linked to a project they
+  // don't own.
+  const appIdGuidance =
+    context.appId === 0
+      ? `- Amplitude App ID: not set by the wizard (0). When you call the Amplitude MCP, get the appId from \`get_context().defaultAppId\` — that's the project tied to the API key above. NEVER pick a different appId from \`appsByCategory\` or any other listing in the get_context response. Every chart / dashboard you create MUST belong to that exact project. If \`defaultAppId\` is missing or null, halt with report_status kind="error", code="RESOURCE_MISSING", detail="Could not resolve project from API key" — do not guess.`
+      : `- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}. Every chart / dashboard you create MUST use this exact appId. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project.`;
 
   const additionalLines = config.prompts.getAdditionalContextLines
     ? config.prompts.getAdditionalContextLines(frameworkContext)
@@ -1302,11 +1338,12 @@ function buildIntegrationPrompt(
   } project. The wizard has pre-staged the skills you'll need into \`.claude/skills/\` — load them with the Skill tool by ID instead of calling load_skill_menu / install_skill.
 
 Project context:
-- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}
+${appIdGuidance}
 - Framework: ${config.metadata.name} ${context.frameworkVersion}
 - TypeScript: ${context.typescript ? 'Yes' : 'No'}
 - Amplitude public token: ${context.projectApiKey}
 - Amplitude Host: ${context.host}
+- Data region: ${context.cloudRegion.toUpperCase()} — every Amplitude UI link you write into the setup report (dashboard URL, chart URLs, project settings) MUST use \`${appHost}\` as the host. Do NOT use \`https://app.amplitude.com\` for an EU run, or vice versa; mismatched hosts redirect to the wrong data center and the user sees an empty project.
 - Project type: ${config.prompts.projectTypeDetection}
 - Package installation: ${
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
