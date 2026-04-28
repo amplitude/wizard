@@ -185,7 +185,13 @@ export const __test__ = {
 function readEventsFromContent(content: string): EventsFile | null {
   const events = parseEventPlanContent(content);
   if (!events) return null;
-  const filtered = events.filter((e) => e.name.length > 0);
+  // Trim names AND drop whitespace-only entries. Other readers in the
+  // codebase use `.trim().length > 0` (e.g. agent-interface.ts); a plain
+  // `length > 0` here would let names like `" "` leak into the dashboard
+  // prompt and produce charts whose title is a single space.
+  const filtered = events
+    .filter((e) => e.name.trim().length > 0)
+    .map((e) => ({ ...e, name: e.name.trim() }));
   if (filtered.length === 0) return null;
   return { events: filtered };
 }

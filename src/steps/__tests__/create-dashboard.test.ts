@@ -77,6 +77,32 @@ describe('readEventsFromContent', () => {
     expect(readEventsFromContent('{not json')).toBeNull();
   });
 
+  it('filters out entries whose name is whitespace-only', () => {
+    const out = readEventsFromContent(
+      JSON.stringify([
+        { name: 'Real Event' },
+        { name: '   ' },
+        { name: '\t\n' },
+      ]),
+    );
+    expect(out?.events).toHaveLength(1);
+    expect(out?.events[0].name).toBe('Real Event');
+  });
+
+  it('returns null when every entry has a whitespace-only name', () => {
+    const out = readEventsFromContent(
+      JSON.stringify([{ name: ' ' }, { name: '   ' }]),
+    );
+    expect(out).toBeNull();
+  });
+
+  it('trims surrounding whitespace from event names', () => {
+    const out = readEventsFromContent(
+      JSON.stringify([{ name: '  Signup Completed  ' }]),
+    );
+    expect(out?.events[0].name).toBe('Signup Completed');
+  });
+
   it('accepts `eventDescriptionAndReasoning` as description alias', () => {
     const out = readEventsFromContent(
       JSON.stringify([
