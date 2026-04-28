@@ -21,6 +21,7 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 
 export type McpMode = 'install' | 'remove';
 
@@ -55,7 +56,12 @@ const markDone = (
   } else {
     store.setMcpComplete(outcome, clients);
     if (standalone) {
-      process.exit(0);
+      // Standalone /mcp slash-command run — route through
+      // wizardSuccessExit so the 'MCP Install Complete' /
+      // 'MCP No Clients Detected' analytics events fired moments
+      // earlier flush before the process tears down. A bare
+      // process.exit(0) here drops the trailing telemetry.
+      void wizardSuccessExit(0);
     }
   }
 };

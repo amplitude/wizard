@@ -9,6 +9,7 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors, Icons, Layout } from '../styles.js';
+import { wizardAbort } from '../../../utils/wizard-abort.js';
 
 interface SettingsOverrideScreenProps {
   store: WizardStore;
@@ -92,7 +93,23 @@ export const SettingsOverrideScreen = ({
               setFeedback('Could not back up the settings file.');
             }
           }}
-          onCancel={() => process.exit(1)}
+          onCancel={() => {
+            // User declined the backup-and-continue offer. Route
+            // through wizardAbort so the cancel reason is captured to
+            // analytics + Sentry instead of being a silent exit, and
+            // so the standard cancel outro renders.
+            //
+            // popOverlay() FIRST — without it, the router resolves to
+            // this overlay so OutroScreen never mounts and wizardAbort
+            // hangs on its 5-minute safety timeout. (Bugbot caught this
+            // on PR 343.)
+            store.popOverlay();
+            void wizardAbort({
+              message:
+                'Wizard cancelled — the .claude/settings.json overrides block the LLM gateway. Remove or scope them and re-run.',
+              exitCode: 1,
+            });
+          }}
         />
       </Box>
     </Box>

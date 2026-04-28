@@ -68,6 +68,44 @@ export function clearCleanup(): void {
   cleanupFns.length = 0;
 }
 
+/**
+ * Graceful end-of-run exit for screens that have ALREADY shown their
+ * own terminal UI (OutroScreen, McpScreen standalone, SlackScreen
+ * standalone, LogoutScreen) and just need to shut down analytics and
+ * exit.
+ *
+ * Sequence: cleanup -> analytics + Sentry flush -> process.exit.
+ * NO `cancel()` UI step — the calling screen's render is already on
+ * the terminal and we don't want to clobber it with a second outro.
+ *
+ * Why this exists: every screen that called `process.exit(0)`
+ * directly was firing a `wizardCapture('outro action', …)` (or
+ * similar) and then immediately tearing down the process — the
+ * analytics event got enqueued AFTER any prior flush and was
+ * silently dropped. Routing through this helper guarantees the
+ * trailing event makes it out.
+ *
+ * Use {@link wizardAbort} for FAILURE paths (it shows the error
+ * outro). Use this for SUCCESS / user-initiated graceful exits where
+ * the screen's own UI is the user-facing message.
+ */
+export async function wizardSuccessExit(exitCode = 0): Promise<never> {
+  for (const fn of cleanupFns) {
+    try {
+      fn();
+    } catch {
+      /* cleanup should not prevent exit */
+    }
+  }
+  await Promise.all([
+    analytics.shutdown('success'),
+    flushSentry().catch(() => {
+      /* Sentry flush failure is non-fatal */
+    }),
+  ]);
+  return process.exit(exitCode);
+}
+
 export async function wizardAbort(
   options?: WizardAbortOptions,
 ): Promise<never> {

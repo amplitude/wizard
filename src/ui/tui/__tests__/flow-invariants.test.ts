@@ -546,17 +546,25 @@ describe('WizardRouter overlay behavior', () => {
     expect(router.resolve(session)).toBe(Screen.Outro);
   });
 
-  it('overlay overrides cancel route while active', () => {
+  it('cancel route wins over overlays so wizardAbort never hangs', () => {
+    // Inverted from the prior "overlay overrides cancel" invariant.
+    // When wizardAbort sets outroData.kind=Cancel, OutroScreen MUST
+    // mount so its keypress handler can call signalOutroDismissed()
+    // — otherwise wizardAbort hangs on its safety timeout. The
+    // overlay-popping in OutageScreen / SettingsOverrideScreen is the
+    // primary fix; this router-level priority is defense in depth.
+    // (Bugbot caught the original hang on PR 343.)
     const session = buildSession({});
     const router = new WizardRouter(Flow.Wizard);
 
     session.outroData = { kind: OutroKind.Cancel, message: 'user cancelled' };
     router.pushOverlay(Overlay.Logout);
 
-    // Overlay wins over cancel
-    expect(router.resolve(session)).toBe(Overlay.Logout);
+    // Cancel beats the overlay so OutroScreen renders and dismissal
+    // can fire.
+    expect(router.resolve(session)).toBe(Screen.Outro);
 
-    // After pop, cancel kicks in
+    // Popping the overlay doesn't change anything — cancel still wins.
     router.popOverlay();
     expect(router.resolve(session)).toBe(Screen.Outro);
   });

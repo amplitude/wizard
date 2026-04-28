@@ -479,13 +479,18 @@ describe('WizardRouter', () => {
     });
 
     it('Cancel fast-path takes priority over overlays', () => {
+      // Cancel outroData beats an active overlay in resolve(). When
+      // wizardAbort sets outroData.kind=Cancel, the user MUST see the
+      // cancel message and dismiss it — without that priority an
+      // overlay (Outage, SettingsOverride) calling wizardAbort would
+      // keep itself rendered and OutroScreen would never mount,
+      // hanging wizardAbort on its safety timeout. (PR 343 / bugbot.)
       const router = new WizardRouter();
       router.pushOverlay(Overlay.Outage);
       const session = sessionWith({
         outroData: { kind: OutroKind.Cancel },
       });
-      // Overlay is checked first in resolve(), so this should return the overlay
-      expect(router.resolve(session)).toBe(Overlay.Outage);
+      expect(router.resolve(session)).toBe(Screen.Outro);
     });
 
     it('outroData.kind === Success does not trigger fast-path', () => {

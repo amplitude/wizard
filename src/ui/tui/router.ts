@@ -55,14 +55,19 @@ export class WizardRouter {
    * returns the first incomplete screen.
    */
   resolve(session: WizardSession): ScreenName {
-    if (this.overlays.length > 0) {
-      return this.overlays[this.overlays.length - 1];
-    }
-
-    // If the user cancelled before the run completed, jump directly to Outro.
-    // Success/Error are handled by the normal flow (MCP + Slack still need to show).
+    // Cancel outro beats overlays — when wizardAbort sets
+    // outroData.kind=Cancel, the user MUST see the cancel message and
+    // dismiss it. Without this priority, an active overlay (Outage,
+    // SettingsOverride) calling wizardAbort would keep itself rendered
+    // and OutroScreen would never mount, hanging wizardAbort on its
+    // 5-minute safety timeout. The overlay-popping in those screens is
+    // the primary fix; this ordering is defense in depth.
     if (session.outroData?.kind === OutroKind.Cancel) {
       return Screen.Outro;
+    }
+
+    if (this.overlays.length > 0) {
+      return this.overlays[this.overlays.length - 1];
     }
 
     for (const entry of this.flow) {

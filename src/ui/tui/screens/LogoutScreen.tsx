@@ -13,6 +13,7 @@ import { clearStoredCredentials } from '../../../utils/ampli-settings.js';
 import { clearApiKey } from '../../../utils/api-key-store.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { clearAuthFieldsInAmpliConfig } from '../../../lib/ampli-config.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 
 interface LogoutScreenProps {
   onComplete: () => void;
@@ -61,15 +62,19 @@ export const LogoutScreen = ({
     clearAuthFieldsInAmpliConfig(installDir);
     onLoggedOut?.();
     setPhase(Phase.Done);
-    // Exit after a short delay so the user sees the confirmation. The
-    // mount-guard on the inner callback is belt-and-braces with the
-    // unmount cleanup above — even if a queued macrotask sneaks past
-    // clearTimeout (e.g. unmount races the timer drain on an
-    // overloaded event loop), `mountedRef.current` will be false and
-    // we'll skip the process.exit.
+    // Exit after a short delay so the user sees the confirmation.
+    // Routes through wizardSuccessExit so any pending analytics events
+    // (logout-confirmed, session metrics) flush before the process
+    // tears down.
+    //
+    // The mount-guard on the inner callback is belt-and-braces with
+    // the unmount cleanup above (PR 338) — even if a queued macrotask
+    // sneaks past clearTimeout (e.g. unmount races the timer drain on
+    // an overloaded event loop), `mountedRef.current` will be false
+    // and we'll skip the exit.
     timerRef.current = setTimeout(() => {
       timerRef.current = null;
-      if (mountedRef.current) process.exit(0);
+      if (mountedRef.current) void wizardSuccessExit(0);
     }, 1500);
   };
 
