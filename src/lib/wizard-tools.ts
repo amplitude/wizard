@@ -9,6 +9,7 @@
 
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
@@ -17,12 +18,31 @@ import {
   getDashboardFile,
   getEventsFile,
   getProjectMetaDir,
-  skillDownloadPath,
 } from '../utils/storage-paths';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
 import { wrapMcpServerWithSentry } from './observability/index';
+
+// Allow-listed hosts for remote skill downloads. The wizard ships skills
+// from amplitude/context-hub via GitHub Releases; nothing else should ever
+// be a download source. Any host not on this list — including raw IPs and
+// HTTP URLs — is rejected before we touch the filesystem.
+const ALLOWED_SKILL_HOSTS = new Set<string>([
+  'github.com',
+  'objects.githubusercontent.com',
+  'codeload.github.com',
+]);
+
+export function isAllowedSkillUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'https:') return false;
+    return ALLOWED_SKILL_HOSTS.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -101,6 +121,22 @@ export async function fetchSkillMenu(
 /**
  * Download and extract a skill from a remote URL.
  * Installs to `<installDir>/.claude/skills/<id>/`.
+ *
+ * Hardened against three classes of local-attacker exploit:
+ *
+ * 1. **Symlink race** — the previous version wrote to a hardcoded path
+ *    `/tmp/amplitude-skill-<id>.zip`. A local user could pre-create that
+ *    path as a symlink to e.g. `~/.ampli.json`, and `curl -o` would follow
+ *    the link and overwrite the OAuth tokens. We now use `mkdtempSync` to
+ *    get a unique, mode-0700, unguessable temp directory.
+ * 2. **Untrusted host** — the previous version downloaded from any URL the
+ *    skill manifest contained. Skills are only ever published by
+ *    amplitude/context-hub via GitHub Releases, so we allowlist the
+ *    GitHub-owned hosts and reject anything else.
+ * 3. **Zip-slip** — `unzip -d skillDir` will follow `../../../etc/passwd`
+ *    entries straight out of the target dir. We extract into the scratch
+ *    tmp dir first, then walk the result and reject any entry whose
+ *    resolved real path escapes the scratch root.
  */
 export function downloadSkill(
   skillEntry: SkillEntry,
@@ -109,20 +145,95 @@ export function downloadSkill(
   const { execFileSync } =
     require('child_process') as typeof import('child_process');
   const skillDir = path.join(installDir, '.claude', 'skills', skillEntry.id);
-  const tmpFile = skillDownloadPath(skillEntry.id);
+
+  if (!isAllowedSkillUrl(skillEntry.downloadUrl)) {
+    const msg = `downloadSkill: refused untrusted URL: ${skillEntry.downloadUrl}`;
+    logToFile(msg);
+    return {
+      success: false,
+      error: 'Skill download URL is not from an allowed host',
+    };
+  }
+
+  // Unique unguessable scratch dir (mode 0700) — defeats /tmp symlink races.
+  // (Uses os.tmpdir() so this works on Windows too — PR 333.)
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amplitude-skill-'));
+  const tmpFile = path.join(tmpDir, 'skill.zip');
+  const extractDir = path.join(tmpDir, 'extract');
 
   try {
+    fs.mkdirSync(extractDir, { recursive: true });
+
+    execFileSync('curl', [
+      '-sSfL', // -f: fail on HTTP errors; -S: show errors; -L: follow redirects
+      '--proto',
+      '=https',
+      '--max-time',
+      '30',
+      skillEntry.downloadUrl,
+      '-o',
+      tmpFile,
+    ]);
+
+    // Extract into the scratch dir, NOT directly into the target. This way
+    // any zip-slip entry lands somewhere inside `extractDir` (or fails the
+    // realpath check below), never inside the user's project.
+    execFileSync('unzip', ['-o', tmpFile, '-d', extractDir], {
+      timeout: 30000,
+    });
+
+    // Defense-in-depth zip-slip check: walk every extracted entry and make
+    // sure its real path stays inside extractDir. `unzip` is supposed to
+    // refuse `../` paths since 6.0, but we don't trust that — version skew
+    // and symlink entries (which `unzip` happily creates by default) make
+    // it cheap to verify.
+    const extractRealRoot = fs.realpathSync(extractDir);
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        // Use lstat so we catch symlinks pointing outside without following
+        // them.
+        const stat = fs.lstatSync(full);
+        if (stat.isSymbolicLink()) {
+          // Resolve the link target relative to the link's own directory.
+          const resolved = path.resolve(dir, fs.readlinkSync(full));
+          if (
+            resolved !== extractRealRoot &&
+            !resolved.startsWith(extractRealRoot + path.sep)
+          ) {
+            throw new Error(
+              `Zip-slip detected: symlink ${full} -> ${resolved} escapes ${extractRealRoot}`,
+            );
+          }
+        } else {
+          const real = fs.realpathSync(full);
+          if (
+            real !== extractRealRoot &&
+            !real.startsWith(extractRealRoot + path.sep)
+          ) {
+            throw new Error(
+              `Zip-slip detected: ${full} resolves to ${real}, outside ${extractRealRoot}`,
+            );
+          }
+          if (entry.isDirectory()) walk(full);
+        }
+      }
+    };
+    walk(extractDir);
+
+    // Move into the final location only after we've validated the contents.
     fs.mkdirSync(skillDir, { recursive: true });
-    execFileSync('curl', ['-sL', skillEntry.downloadUrl, '-o', tmpFile], {
-      timeout: 30000,
-    });
-    execFileSync('unzip', ['-o', tmpFile, '-d', skillDir], {
-      timeout: 30000,
-    });
-    try {
-      fs.unlinkSync(tmpFile);
-    } catch {
-      /* ignore cleanup errors */
+    for (const entry of fs.readdirSync(extractDir)) {
+      const src = path.join(extractDir, entry);
+      const dest = path.join(skillDir, entry);
+      // Remove any pre-existing file at dest so renameSync succeeds across
+      // file types (matches old `unzip -o` overwrite semantics).
+      try {
+        fs.rmSync(dest, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+      fs.renameSync(src, dest);
     }
 
     logToFile(
@@ -133,6 +244,14 @@ export function downloadSkill(
     const msg = err instanceof Error ? err.message : String(err);
     logToFile(`downloadSkill: error: ${msg}`);
     return { success: false, error: msg };
+  } finally {
+    // Always clean up the scratch directory — never leave half-extracted
+    // attacker-controlled bytes lying around in /tmp.
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore cleanup errors */
+    }
   }
 }
 

@@ -124,19 +124,33 @@ function generateState(): string {
   return crypto.randomBytes(16).toString('hex');
 }
 
-async function startCallbackServer(): Promise<{
+/**
+ * Compares two strings using a constant-time comparison to mitigate timing
+ * side-channels. Returns false immediately when lengths differ (not a leak —
+ * length is also encoded by the on-the-wire query string, and we only ever
+ * compare strings of fixed wizard-generated length).
+ */
+function safeEqualString(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, 'utf8');
+  const bBuf = Buffer.from(b, 'utf8');
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+export async function startCallbackServer(): Promise<{
   server: http.Server;
   waitForCallback: (expectedState: string) => Promise<string>;
 }> {
   return new Promise((resolve, reject) => {
     let callbackResolve: (code: string) => void;
     let callbackReject: (error: Error) => void;
+    let expectedStateClosure: string | null = null;
 
     const waitForCallback = (expectedState: string) =>
       new Promise<string>((res, rej) => {
         callbackResolve = res;
         callbackReject = rej;
-        void expectedState; // validated below in handleRequest
+        expectedStateClosure = expectedState;
       });
 
     const server = http.createServer((req, res) => {
@@ -148,6 +162,7 @@ async function startCallbackServer(): Promise<{
       const url = new URL(req.url, `http://localhost:${OAUTH_PORT}`);
       const code = url.searchParams.get('code');
       const error = url.searchParams.get('error');
+      const stateParam = url.searchParams.get('state');
 
       if (error) {
         const cancelled = error === 'access_denied';
@@ -167,6 +182,25 @@ async function startCallbackServer(): Promise<{
         return;
       }
 
+      // CSRF defense: validate `state` against the value generated when the
+      // OAuth flow began. Mismatch (or missing) indicates a forged callback
+      // (e.g. a malicious site forcing the wizard to consume the attacker's
+      // auth code) — reject loudly without exchanging the code.
+      if (
+        !stateParam ||
+        !expectedStateClosure ||
+        !safeEqualString(stateParam, expectedStateClosure)
+      ) {
+        res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(
+          `<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Amplitude</title>${OAUTH_CALLBACK_STYLES}</head><body><div class="card"><div class="logo">${AMPLITUDE_WORDMARK_SVG}</div><div class="icon icon-error">✕</div><h1>Invalid request</h1><p>This sign-in link is invalid or has expired. Please try again from your terminal.</p></div></body></html>`,
+        );
+        callbackReject(
+          new Error('OAuth state mismatch — possible CSRF, callback rejected'),
+        );
+        return;
+      }
+
       if (code) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(
@@ -181,7 +215,13 @@ async function startCallbackServer(): Promise<{
       }
     });
 
-    server.listen(OAUTH_PORT, () => resolve({ server, waitForCallback }));
+    // Bind to loopback only — the OAuth callback should NEVER be reachable
+    // from other hosts on the network. Even though the redirect URI says
+    // `http://localhost:...`, listening on 0.0.0.0 would let an attacker on
+    // the same LAN race the user's browser to deliver a forged callback.
+    server.listen(OAUTH_PORT, '127.0.0.1', () =>
+      resolve({ server, waitForCallback }),
+    );
     server.on('error', reject);
   });
 }
