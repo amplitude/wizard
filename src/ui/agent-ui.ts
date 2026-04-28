@@ -679,17 +679,6 @@ export class AgentUI implements WizardUI {
     }
   }
 
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    backupAndFix();
-    emit('status', 'settings_override auto-fixed', {
-      data: { kind: 'settings_override', keys },
-    });
-    return Promise.resolve();
-  }
-
   // ── Prompts (auto-approve) ──────────────────────────────────────────
 
   promptConfirm(message: string): Promise<boolean> {

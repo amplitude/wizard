@@ -513,8 +513,8 @@ describe('WizardRouter overlay behavior', () => {
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
 
     // Push and pop overlay
-    router.pushOverlay(Overlay.SettingsOverride);
-    expect(router.resolve(session)).toBe(Overlay.SettingsOverride);
+    router.pushOverlay(Overlay.Outage);
+    expect(router.resolve(session)).toBe(Overlay.Outage);
 
     router.popOverlay();
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
@@ -793,7 +793,6 @@ describe('WizardRouter additional invariants', () => {
             fc.constantFrom('push' as const, 'pop' as const),
             fc.constantFrom(
               Overlay.Outage,
-              Overlay.SettingsOverride,
               Overlay.Snake,
               Overlay.Mcp,
               Overlay.Slack,

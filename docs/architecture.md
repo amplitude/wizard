@@ -158,7 +158,7 @@ detection, and post-agent steps are completely mode-agnostic.
 | **Rendering** | Ink (React for terminals) with full-screen layout, tabs, colors | Simple `console.log` with Unicode markers (`┌ │ ✔ ▲ ✖`) | NDJSON — one JSON object per line to stdout |
 | **State management** | `WizardStore` with nanostores — reactive atoms, subscriptions, re-renders | No reactive state; session mutations are no-ops | No reactive state; emits status/progress/result events |
 | **Screen routing** | `WizardRouter` walks declarative flow pipelines | No screens, no routing, no transitions | No screens, no routing |
-| **Overlays** | Stack-based interrupts (outage, settings override, snake game) | Warnings printed to console, then continue | Warnings emitted as JSON events |
+| **Overlays** | Stack-based interrupts (outage, snake game) | Warnings printed to console, then continue | Warnings emitted as JSON events |
 | **Slash commands** | `/region`, `/login`, `/logout`, `/whoami`, `/mcp`, `/slack`, `/feedback`, `/snake`, `/exit` — always available | None | None |
 | **Prompts** | Block the agent — user must respond (confirm, choose, approve event plan) | Auto-resolve: `promptConfirm` → `false`, `promptChoice` → `""`, `promptEventPlan` → `approved` | Auto-resolve: `promptConfirm` → `true`, `promptChoice` → first option, `promptEventPlan` → `approved` |
 | **Error retry** | User presses R to retry; `setRunError()` blocks until user decides | `setRunError()` returns `false` immediately (no retry) | `setRunError()` emits error event, returns `false` (no retry) |

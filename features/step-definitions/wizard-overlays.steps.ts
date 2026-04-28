@@ -32,33 +32,6 @@ Then('I should be able to continue anyway or exit', function () {
   assert.ok(!router(this).hasOverlay, 'Expected overlay to be dismissed');
 });
 
-Given('the settings file blocks the agent', function () {
-  session(this).settingsOverrideKeys = ['permissions.allow'];
-});
-
-When('the agent is about to start', function () {
-  // Simulate agent-runner.ts detecting blocking settings overrides and pushing the overlay
-  if (session(this).settingsOverrideKeys?.length) {
-    router(this).pushOverlay(Overlay.SettingsOverride);
-  }
-});
-
-Then('the SettingsOverrideScreen overlay should appear', function () {
-  assert.strictEqual(
-    router(this).resolve(session(this)),
-    Overlay.SettingsOverride,
-  );
-});
-
-Then(
-  'I should be able to back up and patch the settings to continue',
-  function () {
-    assert.ok(router(this).hasOverlay);
-    router(this).popOverlay();
-    assert.ok(!router(this).hasOverlay);
-  },
-);
-
 // ── Slash commands ────────────────────────────────────────────────────────────
 
 When('I enter the slash command {string}', function (command: string) {

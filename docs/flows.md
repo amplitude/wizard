@@ -174,8 +174,12 @@ flowchart TD
     SLACK_SCREEN --> OUTRO
 
     SUSI -. overlay .-> OUTAGE["OutageScreen"]
-    RUN -. overlay, before agent starts .-> SETTINGS_OVR["SettingsOverrideScreen"]
 ```
+
+> The `SettingsOverrideScreen` overlay was removed. The wizard now scopes
+> its gateway env to `.claude/settings.local.json` (machine-local,
+> gitignored) so the user's checked-in `.claude/settings.json` is never
+> touched. See `src/lib/claude-settings-scope.ts`.
 
 ---
 

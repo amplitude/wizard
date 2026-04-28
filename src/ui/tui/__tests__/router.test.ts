@@ -403,13 +403,13 @@ describe('WizardRouter', () => {
     it('multiple overlays stack correctly (LIFO)', () => {
       const router = new WizardRouter();
       router.pushOverlay(Overlay.Outage);
-      router.pushOverlay(Overlay.SettingsOverride);
+      router.pushOverlay(Overlay.Mcp);
       router.pushOverlay(Overlay.Snake);
 
       expect(router.resolve(fresh())).toBe(Overlay.Snake);
 
       router.popOverlay();
-      expect(router.resolve(fresh())).toBe(Overlay.SettingsOverride);
+      expect(router.resolve(fresh())).toBe(Overlay.Mcp);
 
       router.popOverlay();
       expect(router.resolve(fresh())).toBe(Overlay.Outage);

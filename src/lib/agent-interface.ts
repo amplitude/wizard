@@ -44,6 +44,7 @@ import {
 } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
 import { sanitizeNestedClaudeEnv } from './sanitize-claude-env';
+import { applyScopedSettings } from './claude-settings-scope';
 import type { PackageManagerDetector } from './package-manager-detection';
 
 import { z } from 'zod';
@@ -163,8 +164,6 @@ export enum AgentErrorType {
   GATEWAY_DOWN = 'WIZARD_GATEWAY_DOWN',
 }
 
-const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
-
 const DEFAULT_MAX_TURNS = 200;
 /**
  * Upper sanity bound on AMPLITUDE_WIZARD_MAX_TURNS. A real run almost never
@@ -192,90 +191,6 @@ export function resolveMaxTurns(
 // and clears it afterwards so the in-process wizard-tools `report_status` tool
 // can route structured events back into the per-run state bag.
 let _activeStatusReporter: StatusReporter | undefined;
-
-/**
- * Check if .claude/settings.json in the project directory contains env
- * overrides for blocking keys that block the Wizard from accessing the Amplitude LLM Gateway.
- * Returns the list of matched key names, or an empty array if none found.
- */
-export function checkClaudeSettingsOverrides(
-  workingDirectory: string,
-): string[] {
-  const candidates = [
-    path.join(workingDirectory, '.claude', 'settings.json'),
-    path.join(workingDirectory, '.claude', 'settings'),
-  ];
-
-  const claudeSettingsSchema = z.object({
-    env: z.record(z.string(), z.unknown()),
-  });
-
-  for (const filePath of candidates) {
-    try {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const result = claudeSettingsSchema.safeParse(JSON.parse(raw));
-      if (result.success) {
-        return BLOCKING_ENV_KEYS.filter((key) => key in result.data.env);
-      }
-    } catch {
-      // File doesn't exist or isn't valid JSON — skip
-    }
-  }
-
-  return [];
-}
-
-/**
- * Copy .claude/settings.json to .wizard-backup (overwriting if it exists),
- * then remove the original so the SDK doesn't load the blocking overrides.
- */
-export function backupAndFixClaudeSettings(workingDirectory: string): boolean {
-  for (const name of ['settings.json', 'settings']) {
-    const filePath = path.join(workingDirectory, '.claude', name);
-    const backupPath = `${filePath}.wizard-backup`;
-    analytics.wizardCapture('claude settings backed up');
-    try {
-      fs.copyFileSync(filePath, backupPath);
-      fs.unlinkSync(filePath);
-      registerCleanup(() => {
-        try {
-          restoreClaudeSettings(workingDirectory);
-        } catch (error) {
-          analytics.captureException(
-            error instanceof Error ? error : new Error(String(error)),
-          );
-        }
-      });
-      return true;
-    } catch {
-      // File doesn't exist — try next candidate
-    }
-  }
-  return false;
-}
-
-/**
- * Restore .claude/settings.json from .wizard-backup.
- * Copies (not moves) so the backup is preserved.
- */
-export function restoreClaudeSettings(workingDirectory: string): void {
-  for (const name of ['settings.json', 'settings']) {
-    const backup = path.join(
-      workingDirectory,
-      '.claude',
-      `${name}.wizard-backup`,
-    );
-    try {
-      fs.copyFileSync(backup, path.join(workingDirectory, '.claude', name));
-      analytics.wizardCapture('claude settings restored');
-      return;
-    } catch (error) {
-      analytics.captureException(
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    }
-  }
-}
 
 export type AgentConfig = {
   workingDirectory: string;
@@ -1252,6 +1167,25 @@ export async function initializeAgent(
         url: gatewayUrl,
         betaHeadersEnabledInEnv,
       });
+
+      // Project-layer `.claude/settings.json` (env block) wins over the
+      // env we pass to the SDK — that's how the SDK's settings precedence
+      // works. For users with a custom `ANTHROPIC_BASE_URL` (LiteLLM,
+      // corporate proxy, Claude Pro/Max OAuth, etc.) checked into their
+      // repo, that silently re-routes the wizard's traffic away from the
+      // Amplitude gateway and the run breaks.
+      //
+      // Fix: write our gateway env into the LOCAL settings layer
+      // (`.claude/settings.local.json`, machine-local + gitignored). Local
+      // beats project in the SDK precedence chain (see `_F6` in the
+      // bundled cli.js: `["localSettings", "projectSettings", "userSettings"]`),
+      // so the wizard's values win without ever modifying the user's
+      // checked-in config. We also register a cleanup that restores the
+      // file's pre-wizard state on every exit (success / cancel / crash).
+      const scoped = applyScopedSettings(config.workingDirectory);
+      if (scoped) {
+        registerCleanup(() => scoped.restore());
+      }
     }
 
     // Configure MCP servers
@@ -2033,8 +1967,14 @@ export async function runAgent(
             // Re-enable per-step (not globally) if a future phase truly
             // needs deliberation. See `commandments.ts` for the
             // instructions that obviate per-turn reasoning.
-            // Load skills from project's .claude/skills/ directory
-            settingSources: ['project'],
+            // Load skills + agents + commands from the project's `.claude/`
+            // directory, AND the local-layer settings we wrote in
+            // `applyScopedSettings`. The SDK merges with `local` winning
+            // over `project`, so our wizard-managed env (gateway URL +
+            // bearer) overrides anything the user's checked-in
+            // `.claude/settings.json` declares. See `claude-settings-scope.ts`
+            // for the rationale and the precedence reference.
+            settingSources: ['project', 'local'],
             // Explicitly enable required tools including Skill
             allowedTools,
             systemPrompt: {
