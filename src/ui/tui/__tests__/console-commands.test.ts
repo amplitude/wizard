@@ -4,8 +4,10 @@ import {
   parseCreateProjectSlashInput,
   getWhoamiText,
   getDiagnosticsText,
+  checkCommandBlockedByRun,
   COMMANDS,
 } from '../console-commands.js';
+import { RunPhase } from '../../../lib/wizard-session.js';
 import { CACHE_ROOT_OVERRIDE_ENV } from '../../../utils/storage-paths.js';
 
 describe('parseCreateProjectSlashInput', () => {
@@ -159,6 +161,107 @@ describe('COMMANDS registry', () => {
   it('exposes /diagnostics so the help UI surfaces it', () => {
     const cmds = COMMANDS.map((c) => c.cmd);
     expect(cmds).toContain('/diagnostics');
+  });
+
+  it('marks credential / region / org-mutating commands as requiresIdle', () => {
+    // These commands swap the agent's auth, region, or project context
+    // out from under it — they MUST be blocked while a run is active so
+    // mid-flight Amplitude API / MCP calls don't silently target the
+    // wrong project.
+    const requiresIdle = COMMANDS.filter((c) => c.requiresIdle).map(
+      (c) => c.cmd,
+    );
+    expect(requiresIdle).toEqual(
+      expect.arrayContaining([
+        '/region',
+        '/login',
+        '/logout',
+        '/create-project',
+      ]),
+    );
+  });
+
+  it('leaves read-only / overlay commands available during a run', () => {
+    // Surfacing /whoami, /mcp, /slack, /feedback, /debug, /diagnostics,
+    // /clear, /snake, /exit during a run is fine — they don't mutate the
+    // session state the agent depends on.
+    for (const cmd of [
+      '/whoami',
+      '/mcp',
+      '/slack',
+      '/feedback',
+      '/debug',
+      '/diagnostics',
+      '/clear',
+      '/snake',
+      '/exit',
+    ]) {
+      const def = COMMANDS.find((c) => c.cmd === cmd);
+      expect(def?.requiresIdle).toBeFalsy();
+    }
+  });
+});
+
+describe('checkCommandBlockedByRun', () => {
+  it('returns null for any command outside Running', () => {
+    for (const phase of [
+      RunPhase.Idle,
+      RunPhase.Completed,
+      RunPhase.Error,
+    ] as const) {
+      expect(checkCommandBlockedByRun('/region', phase)).toBeNull();
+      expect(checkCommandBlockedByRun('/login', phase)).toBeNull();
+      expect(checkCommandBlockedByRun('/logout', phase)).toBeNull();
+      expect(checkCommandBlockedByRun('/create-project', phase)).toBeNull();
+    }
+  });
+
+  it('returns a tailored message during Running for each requiresIdle command', () => {
+    expect(checkCommandBlockedByRun('/region', RunPhase.Running)).toContain(
+      'Region change is paused',
+    );
+    expect(checkCommandBlockedByRun('/login', RunPhase.Running)).toContain(
+      'Login is paused',
+    );
+    expect(checkCommandBlockedByRun('/logout', RunPhase.Running)).toContain(
+      'Logout is paused',
+    );
+    expect(
+      checkCommandBlockedByRun('/create-project', RunPhase.Running),
+    ).toContain('Creating a new project is paused');
+  });
+
+  it('every blocked-command message tells the user how to unblock', () => {
+    for (const cmd of ['/region', '/login', '/logout', '/create-project']) {
+      const msg = checkCommandBlockedByRun(cmd, RunPhase.Running);
+      expect(msg).not.toBeNull();
+      expect(msg).toContain('Ctrl+C');
+      expect(msg).toContain('try again');
+    }
+  });
+
+  it('returns null for non-requiresIdle commands even during Running', () => {
+    // /whoami, /mcp, /slack, /feedback, /clear, /debug, /diagnostics,
+    // /snake, /exit must remain dispatchable mid-run.
+    for (const cmd of [
+      '/whoami',
+      '/mcp',
+      '/slack',
+      '/feedback',
+      '/clear',
+      '/debug',
+      '/diagnostics',
+      '/snake',
+      '/exit',
+    ]) {
+      expect(checkCommandBlockedByRun(cmd, RunPhase.Running)).toBeNull();
+    }
+  });
+
+  it('returns null for unknown commands so /typo falls through to the default error', () => {
+    expect(
+      checkCommandBlockedByRun('/not-a-real-command', RunPhase.Running),
+    ).toBeNull();
   });
 });
 
