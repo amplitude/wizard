@@ -13,6 +13,7 @@ import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors } from '../styles.js';
 import { renderMarkdown } from '../utils/terminal-rendering.js';
+import { watchFileWhenAvailable } from '../utils/watchFileWhenAvailable.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + separator + tab bar chrome */
 const CHROME_ROWS = 10;
@@ -56,35 +57,16 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
 
     updateContent();
 
-    // Watch for the file to appear/update (agent may still be writing)
-    let watcher: fs.FSWatcher | undefined;
-    let interval: ReturnType<typeof setInterval> | undefined;
+    // Single-owner watcher that closes the swap race between the poll
+    // interval and the fs.watch handle. See `watchFileWhenAvailable`
+    // for the race details. Replaced two-variable closure cleanup
+    // (watcher + interval) with one `dispose()`.
+    const handle = watchFileWhenAvailable({
+      filePath,
+      onChange: updateContent,
+    });
 
-    const startWatch = () => {
-      try {
-        watcher = fs.watch(filePath, () => updateContent());
-      } catch {
-        // File not yet available — poll
-        interval = setInterval(() => {
-          try {
-            fs.accessSync(filePath);
-            updateContent();
-            clearInterval(interval);
-            interval = undefined;
-            startWatch();
-          } catch {
-            // still waiting
-          }
-        }, 1000);
-      }
-    };
-
-    startWatch();
-
-    return () => {
-      watcher?.close();
-      if (interval) clearInterval(interval);
-    };
+    return () => handle.dispose();
   }, [filePath]);
 
   const maxOffset = Math.max(0, lines.length - visibleLines);
