@@ -29,6 +29,7 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import { getLogFile } from '../../../utils/storage-paths.js';
 import {
   COMMANDS,
+  checkCommandBlockedByRun,
   getWhoamiText,
   getDiagnosticsText,
   parseFeedbackSlashInput,
@@ -41,6 +42,20 @@ import { useScreenHintsValue } from '../hooks/useScreenHints.js';
 
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
+
+  // Guard: commands flagged `requiresIdle` would mutate session credentials,
+  // region, or org/project selection out from under an in-flight agent run.
+  // Surface a tailored message and bail before dispatching.
+  if (cmd) {
+    const blockedMessage = checkCommandBlockedByRun(
+      cmd,
+      store.session.runPhase,
+    );
+    if (blockedMessage) {
+      store.setCommandFeedback(blockedMessage, 6000);
+      return;
+    }
+  }
 
   switch (cmd) {
     case '/region':
