@@ -410,13 +410,7 @@ const MultiPickerMenu = <T,>({
       const values = [...selected]
         .sort((a, b) => a - b)
         .map((i) => options[i].value);
-      // Convenience: when nothing is checked AND the caller didn't seed
-      // a default selection AND allowEmpty is false, ENTER auto-selects
-      // the focused option ("I just wanted that one"). Pickers that
-      // treat empty as a valid, intentional answer (e.g. privacy
-      // opt-ins where SR / G&S must be affirmatively checked) pass
-      // allowEmpty=true to suppress this fallback.
-      if (!allowEmpty && values.length === 0 && !defaultSelected?.length) {
+      if (values.length === 0 && !defaultSelected?.length) {
         const focusedOpt = options[focused];
         if (focusedOpt) onSelect([focusedOpt.value]);
       } else {
