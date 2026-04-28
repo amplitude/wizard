@@ -671,17 +671,14 @@ export const McpScreen = ({
                               </Text>
                               <Text color={Colors.muted}>
                                 Plugin docs:{' '}
-                                <TerminalLink url={OUTBOUND_URLS.claudePluginDocs}>
-                                  {OUTBOUND_URLS.claudePluginDocs}
-                                </TerminalLink>
+                                <TerminalLink
+                                  url={OUTBOUND_URLS.claudePluginDocs}
+                                />
                               </Text>
                             </>
                           )}
                         <Text color={Colors.muted}>
-                          MCP docs:{' '}
-                          <TerminalLink url={OUTBOUND_URLS.mcpDocs}>
-                            {OUTBOUND_URLS.mcpDocs}
-                          </TerminalLink>
+                          MCP docs: <TerminalLink url={OUTBOUND_URLS.mcpDocs} />
                         </Text>
                         {resultClients.some(
                           (n) => n !== CLAUDE_CODE_CLIENT_NAME,

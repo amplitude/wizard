@@ -250,6 +250,18 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Update the cached user email used by `/whoami`. Required because nanostores'
+   * map-based storage replaces the top-level session object on every `setKey`,
+   * so closed-over `session` references in long-lived callbacks (e.g. the
+   * re-auth watcher in bin.ts) become stale and direct mutation would land on
+   * a discarded object.
+   */
+  setUserEmail(email: string | null): void {
+    this.$session.setKey('userEmail', email);
+    this.emitChange();
+  }
+
   setApiKeyNotice(notice: string | null): void {
     this.$session.setKey('apiKeyNotice', notice);
     this.emitChange();
@@ -292,28 +304,116 @@ export class WizardStore {
     this.$session.setKey('regionForced', false);
     analytics.wizardCapture('region selected', { region });
 
-    // Persist region to project-level ampli.json so next run uses the right zone.
-    // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
-    // would create a partial config).
+    // Persist the chosen zone to project-level ampli.json so the next
+    // wizard run uses the right zone — even if the user exits before
+    // completing SUSI. When the user is switching regions via /region the
+    // prior OrgId/WorkspaceId are invalid in the new zone; drop them so
+    // resolveCredentials doesn't silently steer back to a stale workspace.
+    //
+    // Only updates an existing ampli.json; never creates one. Fresh
+    // projects have their zone persisted later by setOrgAndWorkspace()
+    // once the full SUSI flow completes.
     const session = this.$session.get();
-    if (session.selectedOrgId && session.selectedWorkspaceId) {
-      void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-        writeAmpliConfig(session.installDir, {
-          OrgId: session.selectedOrgId!,
-          WorkspaceId: session.selectedWorkspaceId!,
-          Zone: region as 'us' | 'eu',
-        });
-      });
-    }
+    const typedZone = region as 'us' | 'eu';
+    void (async () => {
+      try {
+        const { readAmpliConfig, writeAmpliConfig } = await import(
+          '../../lib/ampli-config.js'
+        );
+        const prior = readAmpliConfig(session.installDir);
+        if (!prior.ok) return; // no existing ampli.json — nothing to update
+        const next = { ...prior.config, Zone: typedZone };
+        if (session.selectedOrgId && session.selectedWorkspaceId) {
+          next.OrgId = session.selectedOrgId;
+          next.WorkspaceId = session.selectedWorkspaceId;
+        } else {
+          // Cleared by setRegionForced — IDs from the old zone are invalid.
+          delete next.OrgId;
+          delete next.WorkspaceId;
+        }
+        writeAmpliConfig(session.installDir, next);
+      } catch (err) {
+        // Non-fatal: ampli.json persistence is best-effort. On read-only
+        // filesystems or permission errors we'd leave the old Zone in place
+        // and users can still complete the current session.
+        analytics.captureException(
+          err instanceof Error ? err : new Error(String(err)),
+        );
+        // Surface a non-blocking notice in the command bar so the user
+        // knows the region change wasn't persisted to ampli.json — the
+        // next wizard run won't auto-pick this zone. The session itself
+        // is fine; only on-disk persistence failed.
+        this.setCommandFeedback(
+          "Region updated for this session, but couldn't persist to ampli.json. Re-pick if it sticks to the old zone next run.",
+          6000,
+        );
+      }
+    })();
 
     this.emitChange();
   }
 
-  /** Force the RegionSelect screen to re-appear (/region command). */
+  /**
+   * Force the RegionSelect screen to re-appear (/region command).
+   *
+   * A mid-session region change is equivalent to logging out and logging back
+   * in against the other data center: OAuth tokens are zone-scoped, and every
+   * org/workspace/environment the user has picked lives in the old region.
+   * Clear all of that so the Auth screen reappears once a new region is
+   * picked, forcing a fresh login. Stored tokens in ~/.ampli.json are kept
+   * per-zone and will be silently reused if the user already signed into the
+   * target region previously.
+   */
   setRegionForced(): void {
     this.$session.setKey('regionForced', true);
-    // Reset data check so it re-runs after region changes
+
+    // Credentials and OAuth intermediates (all zone-scoped)
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('pendingOrgs', null);
+    this.$session.setKey('pendingAuthIdToken', null);
+    this.$session.setKey('pendingAuthAccessToken', null);
+    this.$session.setKey('apiKeyNotice', null);
+
+    // User / org / workspace / project selection — all lived in the old zone
+    this.$session.setKey('userEmail', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedWorkspaceId', null);
+    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+
+    // Downstream flow state that depends on the old zone's data
     this.$session.setKey('projectHasData', null);
+    this.$session.setKey('activationLevel', null);
+    this.$session.setKey('activationOptionsComplete', false);
+    this.$session.setKey('dataIngestionConfirmed', false);
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+
+    // Framework-detection + feature-discovery state lived against the old
+    // zone's project. Clearing these BEFORE we touch outroData/runPhase keeps
+    // the router from transiently resolving to a post-detection screen
+    // (e.g. FeatureOptIn / Setup) while runPhase is still mid-tear-down.
+    this.$session.setKey('integration', null);
+    this.$session.setKey('frameworkConfig', null);
+    this.$session.setKey('frameworkContext', {});
+    this.$session.setKey('discoveredFeatures', []);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('additionalFeatureCurrent', null);
+    this.$session.setKey('additionalFeatureCompleted', []);
+    this.$session.setKey('optInFeaturesComplete', false);
+
+    // If the wizard had already reached Outro (success, error, or cancel)
+    // the outroData short-circuits router.resolve and would block the
+    // re-auth flow. A region switch is a hard reset — clear outroData so
+    // the user lands on RegionSelect → Auth → ... for the new zone.
+    this.$session.setKey('outroData', null);
+    this.$session.setKey('runPhase', RunPhase.Idle);
+
     this.emitChange();
   }
 
@@ -427,10 +527,19 @@ export class WizardStore {
   }
 
   showLogoutOverlay(): void {
+    // Set the loggingOut flag SYNCHRONOUSLY before pushing the overlay so the
+    // bin.ts re-auth watcher can't race the overlay push and observe a state
+    // where credentials are null but currentScreen is not yet Overlay.Logout
+    // (which would trigger an unwanted runOAuthCycle and pop the browser).
+    this.$session.setKey('loggingOut', true);
     this.pushOverlay(Overlay.Logout);
   }
 
   hideLogoutOverlay(): void {
+    // Clearing loggingOut here covers the cancel path (user dismissed the
+    // confirm prompt). On the confirm path, process.exit(0) tears the
+    // process down before this matters.
+    this.$session.setKey('loggingOut', false);
     this.popOverlay();
   }
 

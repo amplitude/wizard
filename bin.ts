@@ -1330,6 +1330,103 @@ void yargs(hideBin(process.argv))
             // AuthScreen SUSI pickers (org → workspace → API key).
             // AuthScreen calls store.setCredentials() when done, advancing the
             // router past Auth → RegionSelect → DataSetup → to IntroScreen.
+            const waitForSessionState = (
+              predicate: () => boolean,
+            ): Promise<void> =>
+              new Promise<void>((resolve) => {
+                if (predicate()) {
+                  resolve();
+                  return;
+                }
+                const unsub = tui.store.subscribe(() => {
+                  if (predicate()) {
+                    unsub();
+                    resolve();
+                  }
+                });
+              });
+
+            // Run a single OAuth + fetchAmplitudeUser + setOAuthComplete
+            // cycle against the currently selected region. Shared between
+            // the initial auth task and the re-auth watcher that handles
+            // mid-session /region changes.
+            const runOAuthCycle = async (
+              forceFresh: boolean,
+            ): Promise<void> => {
+              const { performAmplitudeAuth } = await import(
+                './src/utils/oauth.js'
+              );
+              const { fetchAmplitudeUser } = await import('./src/lib/api.js');
+              const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                './src/lib/constants.js'
+              );
+              const { storeToken } = await import(
+                './src/utils/ampli-settings.js'
+              );
+              const { resolveZone } = await import(
+                './src/lib/zone-resolution.js'
+              );
+
+              const zone = resolveZone(
+                tui.store.session,
+                DEFAULT_AMPLITUDE_ZONE,
+                { readDisk: false },
+              );
+
+              let auth = await performAmplitudeAuth({ zone, forceFresh });
+
+              // Update login URL (clears the "copy this URL" hint)
+              tui.store.setLoginUrl(null);
+
+              // Zone was already selected by the user before OAuth started.
+              const cloudRegion = zone;
+
+              let userInfo;
+              try {
+                userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+              } catch {
+                // Token may be expired — re-open the browser for a fresh login
+                tui.store.setLoginUrl(null);
+                auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+              }
+
+              // Persist to ~/.ampli.json
+              storeToken(
+                {
+                  id: userInfo.id,
+                  firstName: userInfo.firstName,
+                  lastName: userInfo.lastName,
+                  email: userInfo.email,
+                  zone: auth.zone,
+                },
+                {
+                  accessToken: auth.accessToken,
+                  idToken: auth.idToken,
+                  refreshToken: auth.refreshToken,
+                  expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+                },
+              );
+
+              // Populate user email for /whoami display. Use the store
+              // setter (not the closed-over `session` ref from line 1101) —
+              // every nanostores `setKey` replaces the top-level object, so
+              // by the time the re-auth watcher fires this cycle the local
+              // `session` ref is many generations stale and a direct mutation
+              // would silently land on a discarded object.
+              tui.store.setUserEmail(userInfo.email);
+              analytics.setDistinctId(userInfo.email);
+              analytics.identifyUser({ email: userInfo.email });
+
+              // Signal AuthScreen — triggers org/workspace/API key pickers
+              tui.store.setOAuthComplete({
+                accessToken: auth.accessToken,
+                idToken: auth.idToken,
+                cloudRegion,
+                orgs: userInfo.orgs,
+              });
+            };
+
             const authTask = (async () => {
               // Skip the full OAuth + SUSI flow when credentials were pre-populated
               // from ~/.ampli.json + the saved API key (returning user).
@@ -1355,24 +1452,11 @@ void yargs(hideBin(process.argv))
                 // Wait for the user to dismiss the welcome screen AND pick a
                 // region before opening the OAuth URL. This ensures the logo
                 // and intro are visible before the browser opens.
-                await new Promise<void>((resolve) => {
-                  if (
+                await waitForSessionState(
+                  () =>
                     tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
-                  ) {
-                    resolve();
-                    return;
-                  }
-                  const unsub = tui.store.subscribe(() => {
-                    if (
-                      tui.store.session.introConcluded &&
-                      tui.store.session.region !== null
-                    ) {
-                      unsub();
-                      resolve();
-                    }
-                  });
-                });
+                    tui.store.session.region !== null,
+                );
                 const { resolveZone } = await import(
                   './src/lib/zone-resolution.js'
                 );
@@ -1438,7 +1522,11 @@ void yargs(hideBin(process.argv))
                 }
 
                 if (auth === null) {
-                  auth = await performAmplitudeAuth({ zone, forceFresh });
+                  // Defer to the shared runOAuthCycle helper for the
+                  // common no-signup path. This keeps the initial-auth
+                  // flow and the /region re-auth watcher in lockstep.
+                  await runOAuthCycle(forceFresh);
+                  return;
                 }
 
                 // Update login URL (clears the "copy this URL" hint)
@@ -1526,6 +1614,103 @@ void yargs(hideBin(process.argv))
                     `OAuth setup error: ${
                       err instanceof Error ? err.message : String(err)
                     }`,
+                  );
+                }
+              }
+            })();
+
+            // Fire-and-forget watcher that re-runs OAuth whenever a mid-session
+            // /region clears credentials. Without this the user would hang on
+            // AuthScreen's "Waiting for authentication..." spinner after
+            // switching regions. Never resolves — the process exit (via SIGINT
+            // or normal completion) tears it down.
+            //
+            // Deferred until authTask resolves so the watcher doesn't add a
+            // second subscribe during the initial-auth window.
+            void (async () => {
+              await authTask;
+              const { Overlay } = await import('./src/ui/tui/router.js');
+              // Tracks consecutive runOAuthCycle failures so we can back off
+              // and surface a hint instead of hot-looping (or going silent)
+              // when the new zone's OAuth keeps failing.
+              let consecutiveFailures = 0;
+              while (true) {
+                // Wait for credentials to be populated first — either by the
+                // initial authTask above or by AuthScreen's SUSI pickers.
+                await waitForSessionState(
+                  () => tui.store.session.credentials !== null,
+                );
+
+                // Then wait for them to be cleared AND the user to have
+                // picked a new region (so we don't fire while RegionSelect
+                // is still open). setRegionForced clears credentials; the
+                // subsequent setRegion clears regionForced.
+                //
+                // Skip when the Logout overlay is active or an outro is
+                // queued — /logout clears credentials immediately and
+                // process.exit()s 1.5s later; without this guard the
+                // watcher would race the exit and open a browser during the
+                // "Logged out" confirmation.
+                //
+                // The `loggingOut` session flag is set synchronously by
+                // showLogoutOverlay BEFORE any state mutation. Checking it
+                // closes the brief gate where credentials are null but
+                // `currentScreen` has not yet re-resolved to Overlay.Logout,
+                // which would otherwise let this watcher fall through and
+                // trigger an unwanted runOAuthCycle.
+                await waitForSessionState(
+                  () =>
+                    !tui.store.session.loggingOut &&
+                    tui.store.session.credentials === null &&
+                    tui.store.session.region !== null &&
+                    !tui.store.session.regionForced &&
+                    tui.store.session.introConcluded &&
+                    tui.store.currentScreen !== Overlay.Logout &&
+                    tui.store.session.outroData === null,
+                );
+
+                try {
+                  // forceFresh: false lets performAmplitudeAuth reuse a
+                  // stored per-zone token silently when the user has
+                  // previously signed into the target region. Only users
+                  // switching to a never-visited zone see the browser.
+                  await runOAuthCycle(false);
+                  consecutiveFailures = 0;
+                } catch (err) {
+                  consecutiveFailures += 1;
+                  if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                    console.error('Re-auth error:', err);
+                  }
+                  // runOAuthCycle threw before setOAuthComplete, so
+                  // credentials are still null and the inner waiters above
+                  // would resolve immediately on the next loop iteration —
+                  // hot-spinning the OAuth attempt. Surface a hint and back
+                  // off so the user sees something and a retry storm can't
+                  // chew CPU. The retry loop is intentionally bounded; users
+                  // can still recover via `/login` or by re-picking a region.
+                  tui.store.setCommandFeedback(
+                    consecutiveFailures === 1
+                      ? "Authentication didn't complete. Retrying — use /login to retry manually."
+                      : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
+                    consecutiveFailures >= 3 ? 8000 : 4000,
+                  );
+                  if (consecutiveFailures >= 3) {
+                    // After 3 strikes, stop auto-retrying so we don't burn
+                    // tokens or trigger rate limits. The user can resume via
+                    // /login or /region; both clear credentials and unblock
+                    // the watcher.
+                    await waitForSessionState(
+                      () =>
+                        tui.store.currentScreen === Overlay.Login ||
+                        tui.store.session.regionForced,
+                    );
+                    consecutiveFailures = 0;
+                    continue;
+                  }
+                  // Brief backoff before the next attempt so transient
+                  // network blips have time to recover.
+                  await new Promise<void>((r) =>
+                    setTimeout(r, 1500 * consecutiveFailures),
                   );
                 }
               }

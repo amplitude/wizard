@@ -7,15 +7,35 @@ import {
   RunPhase,
   McpOutcome,
 } from '../store.js';
-import { vi, describe, it, expect, type Mock, beforeEach } from 'vitest';
-import { OutroKind, AdditionalFeature } from '../../../lib/wizard-session.js';
+import {
+  vi,
+  describe,
+  it,
+  expect,
+  type Mock,
+  beforeEach,
+  afterAll,
+} from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  OutroKind,
+  AdditionalFeature,
+  SlackOutcome,
+} from '../../../lib/wizard-session.js';
 import { buildSession } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
+import {
+  readAmpliConfig,
+  writeAmpliConfig,
+} from '../../../lib/ampli-config.js';
 
 vi.mock('../../../utils/analytics.js', () => ({
   analytics: {
     capture: vi.fn(),
+    captureException: vi.fn(),
     wizardCapture: vi.fn(),
     setTag: vi.fn(),
     setSessionProperty: vi.fn(),
@@ -28,8 +48,17 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+// Redirect fs-touching setters (setRegion, setOrgAndWorkspace) away from
+// the repo root so tests don't pollute the wizard's own ampli.json. Every
+// store gets a fresh isolated tmpdir; individual tests can override by
+// reassigning store.session.installDir.
+const createdDirs: string[] = [];
 function createStore(flow?: Flow): WizardStore {
-  return new WizardStore(flow);
+  const store = new WizardStore(flow);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-store-test-'));
+  createdDirs.push(dir);
+  store.session.installDir = dir;
+  return store;
 }
 
 const wizardCaptureMock = analytics.wizardCapture as Mock;
@@ -37,6 +66,14 @@ const wizardCaptureMock = analytics.wizardCapture as Mock;
 describe('WizardStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+  afterAll(() => {
+    // Clean up the per-store tmpdirs accumulated by createStore() so the
+    // suite doesn't leak directories into $TMPDIR across runs.
+    for (const dir of createdDirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    createdDirs.length = 0;
   });
   // ── Construction ─────────────────────────────────────────────────
 
@@ -46,7 +83,12 @@ describe('WizardStore', () => {
       expect(store.version).toBe('');
       expect(store.statusMessages).toEqual([]);
       expect(store.tasks).toEqual([]);
-      expect(store.session).toEqual(buildSession({}));
+      // installDir is overridden by the test helper — compare the rest.
+      const { installDir: storeInstallDir, ...rest } = store.session;
+      const { installDir: defaultInstallDir, ...defaults } = buildSession({});
+      expect(rest).toEqual(defaults);
+      expect(storeInstallDir).toMatch(/wizard-store-test-/);
+      expect(defaultInstallDir).toBeDefined();
     });
 
     it('defaults to Wizard flow', () => {
@@ -305,6 +347,224 @@ describe('WizardStore', () => {
       store.setFrameworkConfig(null, null);
 
       expect(cb).toHaveBeenCalledTimes(11);
+    });
+
+    it('setRegionForced clears all region-tied state so Auth re-runs', () => {
+      const store = createStore();
+      // Simulate an authenticated user mid-session in US.
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      store.session.userEmail = 'user@example.com';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedWorkspaceId = 'ws-1';
+      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedAppId = '769610';
+      store.session.selectedEnvName = 'Production';
+      store.session.projectHasData = true;
+      store.session.activationLevel = 'full';
+      store.session.activationOptionsComplete = true;
+      store.session.dataIngestionConfirmed = true;
+      store.session.mcpComplete = true;
+      store.session.mcpOutcome = McpOutcome.Installed;
+      store.session.pendingOrgs = [];
+      store.session.pendingAuthIdToken = 'idt';
+      store.session.pendingAuthAccessToken = 'at';
+      store.session.apiKeyNotice = 'stale';
+
+      store.setRegionForced();
+
+      expect(store.session.regionForced).toBe(true);
+      expect(store.session.credentials).toBeNull();
+      expect(store.session.userEmail).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedOrgName).toBeNull();
+      expect(store.session.selectedWorkspaceId).toBeNull();
+      expect(store.session.selectedWorkspaceName).toBeNull();
+      expect(store.session.selectedAppId).toBeNull();
+      expect(store.session.selectedEnvName).toBeNull();
+      expect(store.session.projectHasData).toBeNull();
+      expect(store.session.activationLevel).toBeNull();
+      expect(store.session.activationOptionsComplete).toBe(false);
+      expect(store.session.dataIngestionConfirmed).toBe(false);
+      expect(store.session.mcpComplete).toBe(false);
+      expect(store.session.mcpOutcome).toBeNull();
+      expect(store.session.pendingOrgs).toBeNull();
+      expect(store.session.pendingAuthIdToken).toBeNull();
+      expect(store.session.pendingAuthAccessToken).toBeNull();
+      expect(store.session.apiKeyNotice).toBeNull();
+    });
+
+    it('setRegionForced clears framework + feature state so a new-zone run starts clean', () => {
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      // Simulate a run that progressed past framework detection and feature opt-in.
+      store.session.integration = Integration.NextJs;
+      store.session.frameworkConfig = {} as never;
+      store.session.frameworkContext = { router: 'app' };
+      store.session.discoveredFeatures = ['llm', 'session_replay'] as never;
+      store.session.additionalFeatureQueue = ['llm'] as never;
+      store.session.additionalFeatureCurrent = 'llm' as never;
+      store.session.additionalFeatureCompleted = ['session_replay'] as never;
+      store.session.optInFeaturesComplete = true;
+      store.session.mcpInstalledClients = ['cursor', 'claude'];
+      store.session.slackComplete = true;
+      store.session.slackOutcome = SlackOutcome.Joined;
+
+      store.setRegionForced();
+
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.discoveredFeatures).toEqual([]);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.additionalFeatureCurrent).toBeNull();
+      expect(store.session.additionalFeatureCompleted).toEqual([]);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.mcpInstalledClients).toEqual([]);
+      expect(store.session.slackComplete).toBe(false);
+      expect(store.session.slackOutcome).toBeNull();
+      // Lifecycle reset still happens.
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+      expect(store.session.outroData).toBeNull();
+    });
+
+    it('showLogoutOverlay sets loggingOut synchronously before pushing the overlay', () => {
+      const store = createStore();
+      expect(store.session.loggingOut).toBe(false);
+      store.showLogoutOverlay();
+      // The synchronous flag-set must happen before the overlay is pushed,
+      // so the bin.ts re-auth watcher can rely on it the moment /logout
+      // dispatches.
+      expect(store.session.loggingOut).toBe(true);
+      expect(store.currentScreen).toBe(Overlay.Logout);
+    });
+
+    it('hideLogoutOverlay clears loggingOut so a cancelled /logout does not block re-auth', () => {
+      const store = createStore();
+      store.showLogoutOverlay();
+      expect(store.session.loggingOut).toBe(true);
+      store.hideLogoutOverlay();
+      expect(store.session.loggingOut).toBe(false);
+    });
+
+    it('setRegionForced clears outroData and runPhase so /region works after setup completes', () => {
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      store.session.outroData = { kind: OutroKind.Success, message: 'Done' };
+      store.setRunPhase(RunPhase.Completed);
+
+      store.setRegionForced();
+
+      expect(store.session.outroData).toBeNull();
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+    });
+
+    it('setRegion persists new zone to existing ampli.json even when org/workspace are cleared', async () => {
+      const store = createStore();
+      // Seed ampli.json in the store's tmpdir as if from a prior SUSI
+      writeAmpliConfig(store.session.installDir, {
+        OrgId: 'org-old',
+        WorkspaceId: 'ws-old',
+        Zone: 'us',
+        SourceId: 'src-1',
+      });
+
+      store.setRegionForced();
+      expect(store.session.selectedOrgId).toBeNull();
+
+      store.setRegion('eu');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const result = readAmpliConfig(store.session.installDir);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.config.Zone).toBe('eu');
+      expect(result.config.OrgId).toBeUndefined();
+      expect(result.config.WorkspaceId).toBeUndefined();
+      expect(result.config.SourceId).toBe('src-1'); // unrelated fields preserved
+    });
+
+    it('setRegion surfaces a feedback notice when ampli.json write fails', async () => {
+      const store = createStore();
+      writeAmpliConfig(store.session.installDir, {
+        OrgId: 'org-1',
+        WorkspaceId: 'ws-1',
+        Zone: 'us',
+      });
+
+      // Skip on root — chmod doesn't enforce restrictions there.
+      const isRoot =
+        typeof process.getuid === 'function' && process.getuid() === 0;
+      if (isRoot) return;
+
+      // Make the ampli.json file read-only so writeFileSync inside
+      // writeAmpliConfig throws EACCES.
+      const cfgPath = path.join(store.session.installDir, 'ampli.json');
+      const originalMode = fs.statSync(cfgPath).mode;
+      fs.chmodSync(cfgPath, 0o444);
+
+      try {
+        store.setRegion('eu');
+        // Persistence runs in a microtask via dynamic import.
+        await new Promise((r) => setTimeout(r, 50));
+
+        expect(store.commandFeedback ?? '').toMatch(/persist to ampli\.json/i);
+      } finally {
+        fs.chmodSync(cfgPath, originalMode);
+      }
+    });
+
+    it('setRegion does not create ampli.json when none exists', async () => {
+      const store = createStore();
+      store.setRegion('us');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(
+        fs.existsSync(path.join(store.session.installDir, 'ampli.json')),
+      ).toBe(false);
+    });
+
+    it('/region mid-session routes back through RegionSelect then Auth', () => {
+      const store = createStore();
+      // Walk into a post-auth state.
+      store.concludeIntro();
+      store.setRegion('us');
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 1,
+      });
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedWorkspaceId = 'ws-1';
+      store.session.selectedAppId = 'app-1';
+      store.setProjectHasData(false);
+      expect(store.currentScreen).toBe(Screen.Run);
+
+      store.setRegionForced();
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
+
+      store.setRegion('eu');
+      expect(store.currentScreen).toBe(Screen.Auth);
     });
   });
 
