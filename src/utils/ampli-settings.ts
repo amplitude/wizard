@@ -69,6 +69,27 @@ function isUserKey(key: string): boolean {
   return key.startsWith('User-') || key.startsWith('User[');
 }
 
+/**
+ * True iff a given ~/.ampli.json key belongs to the requested zone.
+ *
+ * Key shapes:
+ *   - US (the default zone): `User-<userId>`
+ *   - Non-default zones:     `User[<zone>]-<userId>`
+ *
+ * Without this filter, `getStoredToken(undefined, 'eu')` would happily return
+ * a US session because `isUserKey('User-…')` is true regardless of zone.
+ * That made `/region` switches silently reuse the wrong-zone OAuth token,
+ * fall back to a fresh browser login at the wrong host, and leave the user
+ * staring at a US auth URL after picking EU.
+ */
+function isUserKeyForZone(key: string, zone: AmplitudeZone): boolean {
+  if (zone === DEFAULT_AMPLITUDE_ZONE) {
+    // US keys are unbracketed: `User-…` but never `User[…]-…`.
+    return key.startsWith('User-');
+  }
+  return key.startsWith(`User[${zone}]-`);
+}
+
 const StoredUserSchema = z.object({
   id: z.string(),
   firstName: z.string(),
@@ -140,9 +161,13 @@ export function getStoredToken(
     return findToken(userKey(userId, zone));
   }
 
-  // Try all stored users
+  // Try all stored users for the requested zone. Filtering by zone is what
+  // makes `/region` switches actually re-authenticate against the new data
+  // center: without it, a stored US token would be returned for an EU lookup
+  // (since both `User-…` and `User[eu]-…` pass the generic `isUserKey` test),
+  // and `performAmplitudeAuth` would skip the browser entirely.
   for (const key of Object.keys(config)) {
-    if (!isUserKey(key)) continue;
+    if (!isUserKeyForZone(key, zone)) continue;
     const token = findToken(key);
     if (token) return token;
   }

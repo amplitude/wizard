@@ -50,17 +50,58 @@ describe('SettingsOverrideScreen backup-failed branch (anti-dead-end)', () => {
       const { lastFrame, stdin, unmount } = render(
         <SettingsOverrideScreen store={store} />,
       );
-      // Wait for autoFocus to settle on the Confirm option, then press
-      // Enter so ConfirmationInput's onConfirm fires the failing backup.
-      await new Promise((r) => setTimeout(r, 30));
-      stdin.write('\r'); // Enter
-      await new Promise((r) => setTimeout(r, 30));
 
       // eslint-disable-next-line no-control-regex
       const csi = /\x1b\[[0-9;]*[A-Za-z]/g;
       // eslint-disable-next-line no-control-regex
       const osc = /\x1b\][^\x07]*\x07/g;
-      const frame = (lastFrame() ?? '').replace(csi, '').replace(osc, '');
+      const readFrame = () =>
+        (lastFrame() ?? '').replace(csi, '').replace(osc, '');
+
+      // Poll for a substring instead of using fixed sleeps — Node 20 imports
+      // and renders this tree more slowly than Node 22/24, and 30 ms isn't
+      // enough for ConfirmationInput to mount + register useInput. Waiting
+      // for actual visible state makes the test deterministic across versions.
+      const waitFor = async (
+        predicate: () => boolean,
+        ms = 2000,
+      ): Promise<void> => {
+        const start = Date.now();
+        while (!predicate()) {
+          if (Date.now() - start > ms) {
+            throw new Error(
+              `Timed out after ${ms}ms. Last frame:\n${readFrame()}`,
+            );
+          }
+          await new Promise((r) => setTimeout(r, 10));
+        }
+      };
+
+      // Wait for the initial render (Confirm prompt visible) before sending
+      // Enter — otherwise the keystroke can land before useInput is wired up.
+      await waitFor(() => readFrame().includes('Backup & continue'));
+
+      // Retry the Enter keystroke until the state actually flips. On Node 20
+      // there's a race between ink's handleReadable subscription and our
+      // first stdin.write — the first \r can land before Ink is listening,
+      // so a single keystroke isn't reliable. Sending \r every poll until
+      // we see the failure-state markers makes the test deterministic
+      // across Node versions without arbitrary fixed sleeps.
+      const isInFailedState = () =>
+        readFrame().includes('/tmp/snapshot-project/.claude/settings.json') &&
+        !readFrame().includes('Backup & continue');
+      const start = Date.now();
+      while (!isInFailedState()) {
+        if (Date.now() - start > 2000) {
+          throw new Error(
+            `Timed out waiting for failure state. Last frame:\n${readFrame()}`,
+          );
+        }
+        stdin.write('\r'); // Enter
+        await new Promise((r) => setTimeout(r, 20));
+      }
+
+      const frame = readFrame();
 
       // The failure-state copy must include:
       // - the absolute file path (so the user knows what to edit)
