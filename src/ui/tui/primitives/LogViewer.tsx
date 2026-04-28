@@ -124,13 +124,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
   };
 
   useEffect(() => {
-    // Distinct messages for "file hasn't been created yet" (transient,
-    // expected at the start of a run) vs "real read error" (rare). The
-    // user-visible "(No log file found)" used to fire even during the
-    // normal first-second window before agent-runner opens the log,
-    // which read like a hard error and required tabbing away+back to
-    // shake loose.
-    const readTail = (): boolean => {
+    const readTail = () => {
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
         const allLines = content.split('\n');
@@ -169,7 +163,6 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
           );
           setHorizontalOffset((prev) => clamp(prev, 0, maxHorizontalOffset));
         }
-        return true;
       } catch {
         // Show the resolved path right under the placeholder so a
         // hardcoded-vs-configured mismatch (e.g. AMPLITUDE_WIZARD_LOG
@@ -185,44 +178,34 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
         setSelectedLine(0);
         setViewportTop(0);
         setHorizontalOffset(0);
-        return false;
       }
     };
 
-    const ready = readTail();
+    readTail();
 
     let watcher: fs.FSWatcher | undefined;
-    let interval: NodeJS.Timeout | undefined;
-
-    if (ready) {
-      try {
-        watcher = fs.watch(filePath, () => readTail());
-      } catch {
-        // Race: file vanished between readTail and watch. Fall through to
-        // polling below.
-      }
-    }
-
-    if (!watcher) {
-      // Tight poll until the file appears — 250 ms keeps the "Waiting…"
-      // window short without burning CPU. Only stop polling once we've
-      // *also* successfully attached an fs.watch, otherwise a transient
-      // appear-then-vanish would strand us with no further updates.
-      interval = setInterval(() => {
-        if (!readTail()) return;
+    try {
+      watcher = fs.watch(filePath, () => {
+        readTail();
+      });
+    } catch {
+      // File might not exist yet — retry when it appears
+      const interval = setInterval(() => {
         try {
-          watcher = fs.watch(filePath, () => readTail());
+          fs.accessSync(filePath);
+          readTail();
           clearInterval(interval);
-          interval = undefined;
+          watcher = fs.watch(filePath, () => readTail());
         } catch {
-          // File vanished again — keep polling on next interval cycle
+          // Still waiting
         }
-      }, 250);
+      }, 1000);
+
+      return () => clearInterval(interval);
     }
 
     return () => {
       watcher?.close();
-      if (interval) clearInterval(interval);
     };
   }, [filePath, viewportHeight, lineWidth]);
 

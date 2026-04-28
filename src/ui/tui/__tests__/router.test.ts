@@ -877,21 +877,23 @@ describe('WizardRouter', () => {
 
     it('Setup revert returns false when no user answers exist — keeps walking back', () => {
       const router = new WizardRouter();
-      // FeatureOptIn complete=true, Setup complete (no questions), ActivationOptions
-      // shown+complete. Back from Run-via-FeatureOptIn should walk Setup (no-op
-      // revert) and land on ActivationOptions.
+      // Setup complete (no user-answered framework questions),
+      // ActivationOptions shown+complete. Back from Run should walk
+      // Setup (no-op revert) and land on ActivationOptions.
+      // (Pre-PR 313 this test asserted resolve == Screen.FeatureOptIn
+      //  before goBack; FeatureOptIn was removed when SR + G&S + autocapture
+      //  became inline-auto-enabled, so the back-walk no longer transits
+      //  through that screen — the underlying revert-walking behavior we
+      //  care about is preserved.)
       const session = {
         ...sessionAtRun(),
         activationLevel: 'partial' as const,
         activationOptionsComplete: true,
-        optInFeaturesComplete: false,
-        discoveredFeatures: ['llm' as never],
       };
-      expect(router.resolve(session)).toBe(Screen.FeatureOptIn);
 
       const { stub, ref } = makeStubStore(session);
       const ok = router.goBack(ref.session, stub as never);
-      // Walks: FeatureOptIn (active) → Setup (no questions, complete, revert
+      // Walks: Run (active) → Setup (no questions, complete, revert
       // returns false) → ActivationOptions (complete + revert) → reverts.
       expect(ok).toBe(true);
       expect(ref.session.activationOptionsComplete).toBe(false);
