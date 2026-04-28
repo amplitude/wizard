@@ -117,10 +117,10 @@ function writeSentinel(): void {
  * `/tmp`) while the new cache root is under `$HOME`. On Linux these are
  * commonly two different filesystems, and `renameSync` throws `EXDEV`
  * across mounts. We try `renameSync` first (atomic, fastest) and fall
- * back to `copyFileSync + unlinkSync` on `EXDEV`. The fallback isn't
- * atomic, but the migration shim is best-effort and any partial state
- * (e.g. file copied but not unlinked) is recoverable on the next run
- * because `existsSync(to)` makes the move idempotent.
+ * back to `copyFileSync + renameSync` on `EXDEV`. The fallback uses a
+ * `<to>.tmp` staging file so a kill mid-copy never leaves a truncated
+ * destination at `to` — which would make a future run see `existsSync(to)`
+ * and unlink the still-good source.
  */
 function moveFile(from: string, to: string): boolean {
   try {
@@ -144,17 +144,30 @@ function moveFile(from: string, to: string): boolean {
     } catch (err) {
       // On Linux, /tmp is often tmpfs while $HOME lives on a different
       // filesystem; renameSync throws EXDEV across mounts. Fall back to
-      // copy + unlink for cross-device moves. Re-throw any other error.
+      // copy-to-tmp + rename for cross-device moves so the destination
+      // only appears once it's whole. Re-throw any other error.
       if (
         err instanceof Error &&
         (err as NodeJS.ErrnoException).code === 'EXDEV'
       ) {
-        copyFileSync(from, to);
+        const stagingPath = `${to}.tmp`;
+        try {
+          copyFileSync(from, stagingPath);
+          renameSync(stagingPath, to);
+        } catch (copyErr) {
+          // Clean up the staging file so a partial copy doesn't linger.
+          try {
+            unlinkSync(stagingPath);
+          } catch {
+            // Ignore — staging may not exist if copyFileSync failed early.
+          }
+          throw copyErr;
+        }
         try {
           unlinkSync(from);
         } catch {
-          // Source still exists but destination is in place; the next
-          // migration run will see `existsSync(to)` and clean it up.
+          // Destination is in place; the next migration run will see
+          // `existsSync(to)` and clean up the source.
         }
       } else {
         throw err;

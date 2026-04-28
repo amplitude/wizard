@@ -20,19 +20,38 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 // Mock fs BEFORE importing the migration module so renameSync is wrapped.
-// The wrapper throws EXDEV on the first call only — subsequent operations
-// (copyFileSync, unlinkSync, etc.) pass through to the real fs.
-const originalRenameSync = fsActual.renameSync;
-const renameSpy = vi.fn(originalRenameSync);
+// The wrapper routes every renameSync call through `renameSpy`. Tests
+// override `renameSpy` to throw EXDEV / EPERM. The fallback inside
+// `moveFile` performs a second renameSync (to commit the staging copy);
+// tests that want that staging rename to succeed call
+// `realRenameSync(...)` from inside their mock implementation to bypass
+// the wrapper.
+//
+// `vi.hoisted` keeps both the spy and the real-fn ref accessible to the
+// mock factory (which gets hoisted to the top of the file by vi.mock)
+// without TDZ issues.
+const { renameSpy, realRenameRef } = vi.hoisted(() => ({
+  renameSpy: vi.fn(),
+  realRenameRef: { current: null as null | typeof fsActual.renameSync },
+}));
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+  realRenameRef.current = actual.renameSync;
+  renameSpy.mockImplementation(actual.renameSync);
   return {
     ...actual,
     renameSync: (...args: unknown[]) =>
       (renameSpy as unknown as (...args: unknown[]) => unknown)(...args),
   };
 });
+
+function realRenameSync(src: string, dest: string): void {
+  if (!realRenameRef.current) {
+    throw new Error('realRenameSync called before fs mock initialized');
+  }
+  realRenameRef.current(src, dest);
+}
 
 import { runMigrationShim } from '../storage-migration.js';
 import {
@@ -53,7 +72,7 @@ describe('runMigrationShim — EXDEV cross-device fallback', () => {
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
     renameSpy.mockReset();
     // Default: the real renameSync. Individual tests override with EXDEV.
-    renameSpy.mockImplementation(originalRenameSync);
+    renameSpy.mockImplementation(realRenameSync);
   });
 
   afterEach(() => {
@@ -72,16 +91,29 @@ describe('runMigrationShim — EXDEV cross-device fallback', () => {
     const legacy = LEGACY_PATHS.state(attemptId);
     writeFileSync(legacy, '{"some":"state"}');
 
-    // Mock renameSync to throw EXDEV on every call. The migration's
-    // catch block should detect EXDEV specifically and copy+unlink
-    // instead of giving up.
-    renameSpy.mockImplementation(() => {
+    // Simulate cross-filesystem semantics: only the original
+    // `from → to` rename throws EXDEV. The fallback inside `moveFile`
+    // copies `from → <to>.tmp` (same FS as <to>) and renames
+    // `<to>.tmp → to` (same FS), which on a real cross-FS box would
+    // succeed. Honor that here so the test exercises the staging
+    // path the way it actually runs in production.
+    renameSpy.mockImplementation(((src: unknown, dest: unknown): void => {
+      const srcStr = typeof src === 'string' ? src : String(src);
+      const destStr = typeof dest === 'string' ? dest : String(dest);
+      // The fallback inside `moveFile` stages the copy at `<to>.tmp`
+      // and renames it into place. That second rename is same-FS
+      // and would succeed on a real cross-device system, so let it
+      // through here. Anything else is a fresh `from → to` request
+      // that we want to simulate as cross-device.
+      if (srcStr.endsWith('.tmp')) {
+        return realRenameSync(srcStr, destStr);
+      }
       const err = new Error(
         'EXDEV: cross-device link not permitted',
       ) as NodeJS.ErrnoException;
       err.code = 'EXDEV';
       throw err;
-    });
+    }) as unknown as typeof fsActual.renameSync);
 
     runMigrationShim(installDir);
 
