@@ -129,7 +129,9 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
       if (knownSurfaces) {
         const browser = context.hasBrowserSurface
           ? 'YES — install the unified browser SDK (@amplitude/unified) and wire it up in the client init point. Do NOT skip the browser SDK even if the project also has API routes.'
-          : 'NO browser-rendered pages detected — only install @amplitude/analytics-node.';
+          : context.hasServerSurface
+          ? 'NO browser-rendered pages detected — only install @amplitude/analytics-node.'
+          : 'NO browser-rendered pages detected yet — install the unified browser SDK (@amplitude/unified) as the default since Next.js projects almost always add pages. Skip @amplitude/analytics-node unless the project also has server surfaces.';
         const server = context.hasServerSurface
           ? 'YES — install @amplitude/analytics-node in addition to the browser SDK and wire up server-side tracking for API routes, route handlers, server actions, and middleware.'
           : 'NO server surfaces detected — skip @amplitude/analytics-node entirely.';
