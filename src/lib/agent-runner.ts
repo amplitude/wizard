@@ -301,17 +301,25 @@ export async function runAgentWizard(
   //      AND the agent never wrote one, synthesize a minimal report so
   //      the outro always has something to surface.
   //
-  // Both helpers existsSync-gate the canonical path, so order is fine:
-  // restore first (puts the archive back); fallback runs last and
-  // no-ops when restore succeeded. Together they make the outro's
-  // "View setup report" option robust across every exit path.
+  // ORDERING INVARIANT: restore MUST run before fallback. Both helpers
+  // existsSync-gate the canonical path, so if fallback fired first it
+  // would land a stub at canonical, restore would then see
+  // canonical-exists and bail, and the user's prior real report would
+  // stay permanently buried in `.previous.md`. Restore goes through
+  // `registerPriorityCleanup` (unshifts onto the cleanup queue) so it
+  // ALWAYS runs before any code that may write a fresh canonical
+  // report, regardless of registration order.
   //
   // Registered as cleanups so wizardAbort() triggers them before
   // process.exit. The success-path re-fires below catch the two failure
   // modes that bypass wizardAbort (non-throwing return false, raw
   // throw).
-  const { registerCleanup } = await import('../utils/wizard-abort.js');
-  registerCleanup(() => restoreSetupReportIfMissing(session.installDir));
+  const { registerCleanup, registerPriorityCleanup } = await import(
+    '../utils/wizard-abort.js'
+  );
+  registerPriorityCleanup(() =>
+    restoreSetupReportIfMissing(session.installDir),
+  );
   registerCleanup(tryWriteFallback);
 
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
