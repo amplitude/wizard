@@ -589,6 +589,20 @@ export interface WizardSession {
   _restoredFromCheckpoint: boolean;
 
   /**
+   * Terms of Service acceptance state for --signup flow.
+   * null = not yet shown/needed (default)
+   * false = shown but not yet accepted
+   * true = accepted by user
+   */
+  tosAccepted: boolean | null;
+
+  /**
+   * True once the email capture step is complete in the --signup flow.
+   * Email is required before showing ToS.
+   */
+  emailCaptureComplete: boolean;
+
+  /**
    * Create-project flow state.
    *
    * `pending` = the user has chosen "Create new project…" from the Auth
@@ -810,6 +824,9 @@ export function buildSession(args: {
 
     userEmail: null,
     _restoredFromCheckpoint: false,
+
+    tosAccepted: null,
+    emailCaptureComplete: false,
 
     createProject: {
       pending: false,

@@ -13,6 +13,8 @@ import { SetupScreen } from './screens/SetupScreen.js';
 import { AuthScreen } from './screens/AuthScreen.js';
 import { CreateProjectScreen } from './screens/CreateProjectScreen.js';
 import { RegionSelectScreen } from './screens/RegionSelectScreen.js';
+import { EmailCaptureScreen } from './screens/EmailCaptureScreen.js';
+import { ToSScreen } from './screens/ToSScreen.js';
 import { DataSetupScreen } from './screens/DataSetupScreen.js';
 import { ActivationOptionsScreen } from './screens/ActivationOptionsScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
@@ -83,6 +85,8 @@ export function createScreens(
     [Screen.Auth]: <AuthScreen store={store} />,
     [Screen.CreateProject]: <CreateProjectScreen store={store} />,
     [Screen.RegionSelect]: <RegionSelectScreen store={store} />,
+    [Screen.EmailCapture]: <EmailCaptureScreen store={store} />,
+    [Screen.ToS]: <ToSScreen store={store} />,
     [Screen.DataSetup]: <DataSetupScreen store={store} />,
     [Screen.ActivationOptions]: <ActivationOptionsScreen store={store} />,
     [Screen.Options]: null,

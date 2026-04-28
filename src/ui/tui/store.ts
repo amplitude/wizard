@@ -350,6 +350,44 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSignupEmail(email: string): void {
+    this.$session.setKey('signupEmail', email);
+    analytics.wizardCapture('signup email captured', { 'has email': !!email });
+    this.emitChange();
+  }
+
+  markEmailCaptureComplete(): void {
+    this.$session.setKey('emailCaptureComplete', true);
+    analytics.wizardCapture('email capture complete');
+    this.emitChange();
+  }
+
+  acceptTermsOfService(): void {
+    this.$session.setKey('tosAccepted', true);
+    analytics.wizardCapture('terms of service accepted');
+    this.emitChange();
+  }
+
+  resetEmailCapture(): void {
+    this.$session.setKey('emailCaptureComplete', false);
+    analytics.wizardCapture('back navigation', { to: 'email-capture' });
+    this.emitChange();
+  }
+
+  resetToS(): void {
+    this.$session.setKey('tosAccepted', null);
+    analytics.wizardCapture('back navigation', { to: 'tos' });
+    this.emitChange();
+  }
+
+  cancelWizard(reason: string): void {
+    this.setOutroData({
+      kind: 'cancel' as const,
+      message: reason,
+    });
+    this.emitChange();
+  }
+
   /**
    * Force the RegionSelect screen to re-appear (/region command).
    *
