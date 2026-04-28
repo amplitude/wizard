@@ -9,7 +9,6 @@ import {
   mergeEnvValues,
   persistEventPlan,
   cleanupIntegrationSkills,
-  cleanupAmplitudeEventsFile,
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
   buildFallbackReport,
@@ -473,39 +472,6 @@ describe('ensureWizardArtifactsIgnored', () => {
     // Simulate a failure by passing a path under a non-existent dir
     const bogus = path.join(tmpDir, 'does-not-exist', 'nested');
     expect(() => ensureWizardArtifactsIgnored(bogus)).not.toThrow();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// cleanupAmplitudeEventsFile
-// ---------------------------------------------------------------------------
-
-describe('cleanupAmplitudeEventsFile', () => {
-  let tmpDir: string;
-  beforeEach(() => {
-    tmpDir = makeTmpDir();
-  });
-  afterEach(() => cleanup(tmpDir));
-
-  it('removes .amplitude-events.json when present', () => {
-    const target = path.join(tmpDir, '.amplitude-events.json');
-    fs.writeFileSync(target, '[]', 'utf8');
-    cleanupAmplitudeEventsFile(tmpDir);
-    expect(fs.existsSync(target)).toBe(false);
-  });
-
-  it('is a no-op when the file does not exist', () => {
-    expect(() => cleanupAmplitudeEventsFile(tmpDir)).not.toThrow();
-  });
-
-  it('does not touch other files in the install dir', () => {
-    fs.writeFileSync(path.join(tmpDir, 'package.json'), '{}');
-    fs.writeFileSync(path.join(tmpDir, '.amplitude-events.json'), '[]');
-    cleanupAmplitudeEventsFile(tmpDir);
-    expect(fs.existsSync(path.join(tmpDir, 'package.json'))).toBe(true);
-    expect(fs.existsSync(path.join(tmpDir, '.amplitude-events.json'))).toBe(
-      false,
-    );
   });
 });
 
