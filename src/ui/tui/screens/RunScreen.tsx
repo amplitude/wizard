@@ -199,6 +199,19 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const pending = progressItems.filter((t) => t.status === 'pending').length;
   const total = progressItems.length;
 
+  // High-water mark for the "done" counter. The agent can grow its
+  // TodoWrite list mid-run, which means the count we display would
+  // otherwise visibly regress: 5/5 done → 5/8 done as soon as 3 new
+  // tasks land. Pinning the displayed "done" count to its maximum
+  // observed value keeps the user-perceived progress monotonically
+  // forward; the "to go" side is always the live pending+inProgress
+  // count, so new tasks still surface clearly without rewriting the
+  // history of work the user already saw finish.
+  const completedHighRef = useRef(0);
+  if (completed > completedHighRef.current)
+    completedHighRef.current = completed;
+  const completedDisplay = completedHighRef.current;
+
   return (
     <Box flexDirection="row" flexGrow={1}>
       {/* Left: tasks and status (takes all remaining width) */}
@@ -215,9 +228,12 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
                   // mid-run, which makes the progress bar look like it's
                   // going backwards (6 tasks → 9 tasks). Show absolute
                   // counts instead so the user sees forward motion.
+                  // `completedDisplay` is a high-water mark, so the "done"
+                  // count never regresses if new tasks appear after the
+                  // user already saw earlier ones finish.
                   pending + inProgress > 0
-                  ? `${completed} done · ${inProgress + pending} to go`
-                  : `${completed} tasks complete`
+                  ? `${completedDisplay} done · ${inProgress + pending} to go`
+                  : `${completedDisplay} tasks complete`
                 : 'Agent running'}
             </Text>
             <Text color={Colors.muted}>
