@@ -163,7 +163,10 @@ export class OAuthPortInUseError extends Error {
  */
 export const OAUTH_PORT_RETRY_LIMIT = 10;
 
-async function startCallbackServer(): Promise<{
+// Re-exported (was non-export after PR 339's refactor wrapped this with
+// the port-retry loop) so the state-validation unit tests from PR 335
+// can drive it directly without going through the `__testing` shim.
+export async function startCallbackServer(): Promise<{
   server: http.Server;
   port: number;
   waitForCallback: (expectedState: string) => Promise<string>;
@@ -283,6 +286,16 @@ function tryStartCallbackServer(port: number): Promise<{
     });
   });
 }
+
+/** Exported for tests only. */
+export const __testing = {
+  /** Bind to a single concrete port — exposed so tests can simulate EADDRINUSE
+   *  without going through the OAUTH_PORT-anchored retry loop. */
+  tryStartCallbackServer: (port: number) => tryStartCallbackServer(port),
+  /** Run the retry loop. */
+  startCallbackServer: () => startCallbackServer(),
+  closeServer: (server: http.Server) => closeServer(server),
+};
 
 /** Closes an HTTP server, swallowing errors. Idempotent. */
 function closeServer(server: http.Server): Promise<void> {
