@@ -39,6 +39,18 @@ interface OutroScreenProps {
 export const OutroScreen = ({ store }: OutroScreenProps) => {
   useWizardStore(store);
 
+  // Defensive: if the slash console was active when the wizard transitioned
+  // to the outro (e.g. user typed `/feedback`, then an MCP call errored
+  // before the input deactivated), `commandMode` stays true and
+  // `useScreenInput` remains gated off — meaning every keypress on the
+  // outro is silently swallowed by the dormant text input and "Press any
+  // key to exit" appears broken. Force-deactivate on mount so the outro
+  // always owns input. Safe to clobber: the run is over, so any in-flight
+  // slash-prompt input is meaningless past this point.
+  useEffect(() => {
+    store.setCommandMode(false);
+  }, [store]);
+
   const [showReport, setShowReport] = useState(false);
   const [bugReportPathState, setBugReportPathState] = useState<string | null>(
     null,
