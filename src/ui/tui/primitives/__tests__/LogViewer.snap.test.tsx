@@ -49,8 +49,26 @@ describe('LogViewer snapshots', () => {
   ): Promise<string> {
     return (async () => {
       const view = render(<LogViewer filePath={filePath} height={10} />);
-      const waitForFrame = () =>
-        new Promise<void>((resolve) => setTimeout(resolve, 0));
+      // A single `setTimeout(0)` is not enough to reliably let ink
+      // consume a stdin write + propagate the resulting React state
+      // updates to refs (modeRef / selectedLineRef) before the next
+      // keypress is delivered. On Node 20 in particular the macrotask
+      // ordering between `stream.write` -> `data` event and the
+      // queued `setTimeout(0)` resolution is non-deterministic, so the
+      // test would intermittently see the second keypress run against
+      // stale state (e.g. errorIndexes still empty -> `n` no-ops).
+      //
+      // Two `setImmediate` ticks cover both halves of the round-trip:
+      // ink processes the stdin data event, React re-renders, and the
+      // ref-syncing `useEffect`s fire before we send the next char.
+      const waitForFrame = async () => {
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      };
+      // Two frames on mount: first lets the file-read `useEffect` run
+      // and call setLines; second lets the resulting re-render commit
+      // and update modeRef/selectedLineRef before any input is sent.
+      await waitForFrame();
       await waitForFrame();
       await interact?.(view.stdin, waitForFrame);
       await waitForFrame();
