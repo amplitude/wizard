@@ -81,15 +81,15 @@ const NESTED_MANIFESTS = [
  * Files that indicate this is a JS/TS monorepo root. Pointing the wizard
  * at the monorepo root almost always means the user *meant* a specific
  * workspace inside it.
+ *
+ * Note: `pnpm-workspace.yaml` / `.yml` are NOT listed here because
+ * `readPnpmWorkspaces` already checks both and returns non-null when
+ * either exists — its result feeds the `isMonorepo` disjunction
+ * directly. Adding them here would duplicate the existence check on
+ * every `analyzeWorkspace` call. Same goes for `package.json`
+ * `workspaces`, which `readPackageWorkspaces` covers.
  */
-const MONOREPO_MARKERS = [
-  'pnpm-workspace.yaml',
-  'pnpm-workspace.yml',
-  'lerna.json',
-  'nx.json',
-  'turbo.json',
-  'rush.json',
-];
+const MONOREPO_MARKERS = ['lerna.json', 'nx.json', 'turbo.json', 'rush.json'];
 
 export interface WorkspaceAnalysis {
   /** Absolute path to the directory analyzed */
