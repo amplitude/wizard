@@ -112,6 +112,39 @@ describe('OutroScreen — error variants', () => {
     expect(frame).not.toContain('View setup report');
   });
 
+  // ── Regression: "Press any key to exit" doesn't work ────────────────────
+  //
+  // If the user opened the slash console (e.g. `/feedback`) and the wizard
+  // transitioned to the OutroScreen before the input deactivated,
+  // `commandMode` stayed true. `useScreenInput` is gated on `!commandMode`,
+  // so the outro's "any-key dismisses" handler was inactive — every keypress
+  // was silently consumed by the dormant text input and the outro appeared
+  // unresponsive. Force-deactivate on mount so the outro always owns input.
+  it('forces commandMode off on mount (cancel path)', () => {
+    const store = makeStoreForSnapshot({
+      outroData: { kind: OutroKind.Cancel, message: 'Setup cancelled.' },
+    });
+    // Simulate a user with the slash console still active when the wizard
+    // routes to outro.
+    store.setCommandMode(true);
+    expect(store.commandMode).toBe(true);
+
+    renderSnapshot(<OutroScreen store={store} />, store);
+
+    expect(store.commandMode).toBe(false);
+  });
+
+  it('forces commandMode off on mount (error path)', () => {
+    const store = makeStoreForSnapshot({
+      outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+    });
+    store.setCommandMode(true);
+
+    renderSnapshot(<OutroScreen store={store} />, store);
+
+    expect(store.commandMode).toBe(false);
+  });
+
   it('renders the MCP_MISSING copy without leaking "MCP" jargon', () => {
     // Mirrors what agent-runner.ts emits for AgentErrorType.MCP_MISSING.
     // The wizard's user is installing Amplitude — they shouldn't have to

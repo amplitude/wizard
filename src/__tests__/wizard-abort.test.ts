@@ -239,6 +239,63 @@ describe('wizardAbort', () => {
 
     expect(mockAnalytics.shutdown).toHaveBeenCalledWith('cancelled');
   });
+
+  // ── Hard exit deadline ────────────────────────────────────────────────
+  //
+  // Regression test for the "Press any key to exit doesn't work" bug.
+  //
+  // `analytics.shutdown` (Amplitude SDK flush) has no internal timeout —
+  // when the network is dead (often the same condition that triggered
+  // the abort), it awaits a promise that never resolves. Without a hard
+  // deadline in `wizardAbort`, the user pressed a key on the OutroScreen,
+  // dismissal fired, but `process.exit` never ran and the wizard sat
+  // silent until Ctrl+C. Lock in the deadline so a wedged shutdown can
+  // never block exit again.
+  describe('exit deadline', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('exits even when analytics.shutdown never resolves', async () => {
+      // Simulate the dead-network condition: shutdown returns a promise
+      // that hangs forever. Pre-fix, this would block process.exit.
+      mockAnalytics.shutdown.mockImplementation(
+        () => new Promise<void>(() => {}),
+      );
+
+      const aborted = wizardAbort();
+      // Catch the synthesized 'process.exit called' rejection so the
+      // dangling promise doesn't crash the test.
+      const aborted$ = aborted.catch(() => undefined);
+
+      // Drain microtasks + advance past the 3s deadline. process.exit
+      // must be called within that window.
+      await vi.advanceTimersByTimeAsync(3500);
+      await aborted$;
+
+      expect(process.exit).toHaveBeenCalledWith(1);
+    });
+
+    it('exits promptly (before the deadline) when shutdown resolves quickly', async () => {
+      // Sanity: the fast path should NOT wait the full 3s. shutdown
+      // resolves immediately, so process.exit should fire on the next
+      // microtask without needing the timer to advance.
+      mockAnalytics.shutdown.mockResolvedValue(undefined);
+
+      const aborted = wizardAbort();
+      const aborted$ = aborted.catch(() => undefined);
+
+      // Drain microtasks only — no timer advance.
+      await vi.advanceTimersByTimeAsync(0);
+      await aborted$;
+
+      expect(process.exit).toHaveBeenCalledWith(1);
+    });
+  });
 });
 
 describe('abort() delegates to wizardAbort()', () => {
