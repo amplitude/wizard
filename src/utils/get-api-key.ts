@@ -7,9 +7,10 @@ import type { AmplitudeZone } from '../lib/constants.js';
  * Resolve the Amplitude project API key for a given install directory.
  *
  * Resolution order:
- *   1. Local storage — keychain / .env.local / AMPLITUDE_API_KEY env var
+ *   1. Local storage — per-user `~/.amplitude/wizard/credentials.json`,
+ *      then project-local `.env.local` (see `api-key-store.ts`).
  *   2. Amplitude backend — fetches org/project data with the provided
- *      OAuth id_token and picks the lowest-ranked environment's API key
+ *      OAuth id_token and picks the lowest-ranked environment's API key.
  *
  * Returns null only if both sources come up empty.
  */

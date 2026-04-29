@@ -114,7 +114,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentEntry | null>(null);
   const [apiKeyError, setApiKeyError] = useState('');
   const [savedKeySource, setSavedKeySource] = useState<
-    'keychain' | 'env' | null
+    'cache' | 'env' | null
   >(null);
   const [pickerNotice, setPickerNotice] = useState<string | null>(null);
   const completedStepsRef = useRef<DOMElement>(null);
@@ -812,8 +812,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           {savedKeySource && (
             <Text color={Colors.success}>
               {Icons.checkmark}{' '}
-              {savedKeySource === 'keychain'
-                ? 'API key saved to system keychain'
+              {savedKeySource === 'cache'
+                ? 'API key saved'
                 : 'API key saved to .env.local'}
             </Text>
           )}

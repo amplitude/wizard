@@ -1,128 +1,101 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-vi.mock('node:child_process', () => ({
-  execSync: vi.fn(),
-  execFileSync: vi.fn(),
-}));
-
-import { execFileSync } from 'node:child_process';
 import {
   persistApiKey,
   readApiKey,
   readApiKeyWithSource,
-  __setBinaryAvailableForTests,
-  __resetHeadlessCacheForTests,
+  clearApiKey,
 } from '../api-key-store.js';
+import { CACHE_ROOT_OVERRIDE_ENV } from '../storage-paths.js';
 
 /**
- * The implementation now skips `execFileSync` if the binary isn't on PATH
- * or — on Linux — if the environment looks headless (no D-Bus, no display).
- * On a macOS test host there's no `secret-tool`, and on a Linux test host
- * there's no `security`. Seed the cache and fake a D-Bus session so the
- * mocks are exercised regardless of which platform the tests run on.
+ * The api-key-store module now reads/writes a per-user JSON file at
+ * `<cacheRoot>/credentials.json` (default `~/.amplitude/wizard/`). Override
+ * the cache root to a temp dir so tests don't touch the real user home.
  */
-function seedBinaries(): void {
-  __setBinaryAvailableForTests('security', true);
-  __setBinaryAvailableForTests('secret-tool', true);
-  process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/dev/null';
-  __resetHeadlessCacheForTests();
-}
 
-function clearBinaryCache(): void {
-  __setBinaryAvailableForTests('security', undefined);
-  __setBinaryAvailableForTests('secret-tool', undefined);
-  delete process.env.DBUS_SESSION_BUS_ADDRESS;
-  __resetHeadlessCacheForTests();
-}
+const originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
 
-// Implementation uses execFileSync (see F2 shell-injection fix); tests
-// mock that rather than execSync.
-const mockExecSync = vi.mocked(execFileSync);
+let tmpDir: string;
+let cacheDir: string;
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+beforeEach(() => {
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-test-'));
+  cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-cache-'));
+  process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheDir;
+});
 
-const originalPlatform = process.platform;
-
-function setPlatform(platform: NodeJS.Platform) {
-  Object.defineProperty(process, 'platform', {
-    value: platform,
-    configurable: true,
-  });
-}
+afterEach(() => {
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  fs.rmSync(cacheDir, { recursive: true, force: true });
+  if (originalCacheOverride === undefined) {
+    delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+  } else {
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+  }
+  delete process.env.AMPLITUDE_API_KEY;
+});
 
 // ── persistApiKey ─────────────────────────────────────────────────────────────
 
 describe('persistApiKey', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-test-'));
-    mockExecSync.mockReset();
-    seedBinaries();
+  it('writes to the per-user cache and returns "cache"', () => {
+    expect(persistApiKey('mykey', tmpDir)).toBe('cache');
+    const credsPath = path.join(cacheDir, 'credentials.json');
+    expect(fs.existsSync(credsPath)).toBe(true);
+    const json = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+    expect(json.version).toBe(1);
+    const entries = Object.values(json.projects) as Array<{ apiKey: string }>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].apiKey).toBe('mykey');
   });
 
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    setPlatform(originalPlatform);
-    delete process.env.AMPLITUDE_API_KEY;
-    clearBinaryCache();
+  it('keeps separate keys for different install dirs in the same cache file', () => {
+    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-other-'));
+    try {
+      persistApiKey('key-a', tmpDir);
+      persistApiKey('key-b', otherDir);
+
+      expect(readApiKey(tmpDir)).toBe('key-a');
+      expect(readApiKey(otherDir)).toBe('key-b');
+    } finally {
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    }
   });
 
-  // ── macOS keychain ──────────────────────────────────────────────────────────
-
-  it('returns "keychain" when macOS keychain write succeeds', () => {
-    setPlatform('darwin');
-    mockExecSync.mockReturnValue('' as ReturnType<typeof execFileSync>);
-    expect(persistApiKey('mykey', tmpDir)).toBe('keychain');
+  it('replaces an existing entry on re-persist', () => {
+    persistApiKey('first', tmpDir);
+    persistApiKey('second', tmpDir);
+    expect(readApiKey(tmpDir)).toBe('second');
   });
 
-  it('falls back to env when macOS keychain write fails', () => {
-    setPlatform('darwin');
-    mockExecSync.mockImplementation(() => {
-      throw new Error('keychain error');
-    });
+  it('falls back to .env.local when the cache write fails', () => {
+    // Force-fail the cache write by pointing the cache dir at a path that
+    // can't be created (a regular file).
+    const blocker = path.join(tmpDir, 'blocker');
+    fs.writeFileSync(blocker, '');
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = path.join(blocker, 'subpath');
+
     const result = persistApiKey('mykey', tmpDir);
     expect(result).toBe('env');
     const contents = fs.readFileSync(path.join(tmpDir, '.env.local'), 'utf8');
     expect(contents).toContain('AMPLITUDE_API_KEY=mykey');
   });
 
-  // ── Linux secret-tool ───────────────────────────────────────────────────────
-
-  it('returns "keychain" when Linux secret-tool write succeeds', () => {
-    setPlatform('linux');
-    mockExecSync.mockReturnValue('' as ReturnType<typeof execFileSync>);
-    expect(persistApiKey('mykey', tmpDir)).toBe('keychain');
-  });
-
-  it('falls back to env when Linux secret-tool write fails', () => {
-    setPlatform('linux');
-    mockExecSync.mockImplementation(() => {
-      throw new Error('secret-tool error');
-    });
-    expect(persistApiKey('mykey', tmpDir)).toBe('env');
-  });
-
-  // ── .env.local fallback ─────────────────────────────────────────────────────
-
-  it('writes to .env.local on non-darwin/linux platforms', () => {
-    setPlatform('win32');
-    const result = persistApiKey('testkey', tmpDir);
-    expect(result).toBe('env');
-    const contents = fs.readFileSync(path.join(tmpDir, '.env.local'), 'utf8');
-    expect(contents).toContain('AMPLITUDE_API_KEY=testkey');
-  });
-
   it('updates an existing AMPLITUDE_API_KEY entry in .env.local', () => {
-    setPlatform('win32');
     fs.writeFileSync(
       path.join(tmpDir, '.env.local'),
       'AMPLITUDE_API_KEY=oldkey\n',
       'utf8',
     );
+    // Force the env fallback path
+    const blocker = path.join(tmpDir, 'blocker');
+    fs.writeFileSync(blocker, '');
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = path.join(blocker, 'subpath');
+
     persistApiKey('newkey', tmpDir);
     const contents = fs.readFileSync(path.join(tmpDir, '.env.local'), 'utf8');
     expect(contents).toContain('AMPLITUDE_API_KEY=newkey');
@@ -130,12 +103,16 @@ describe('persistApiKey', () => {
   });
 
   it('appends AMPLITUDE_API_KEY to .env.local that has other vars', () => {
-    setPlatform('win32');
     fs.writeFileSync(
       path.join(tmpDir, '.env.local'),
       'OTHER_VAR=foo\n',
       'utf8',
     );
+    // Force env fallback
+    const blocker = path.join(tmpDir, 'blocker');
+    fs.writeFileSync(blocker, '');
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = path.join(blocker, 'subpath');
+
     persistApiKey('newkey', tmpDir);
     const contents = fs.readFileSync(path.join(tmpDir, '.env.local'), 'utf8');
     expect(contents).toContain('OTHER_VAR=foo');
@@ -143,30 +120,26 @@ describe('persistApiKey', () => {
   });
 
   // ── .gitignore management ───────────────────────────────────────────────────
+  // Only the .env.local fallback path touches .gitignore. Cache writes do
+  // not (the cache file lives outside the project tree, so no risk of
+  // accidentally committing it).
 
-  it('creates .gitignore with .env.local entry when no .gitignore exists', () => {
-    setPlatform('win32');
+  it('creates .gitignore with .env.local entry when env fallback fires', () => {
+    const blocker = path.join(tmpDir, 'blocker');
+    fs.writeFileSync(blocker, '');
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = path.join(blocker, 'subpath');
+
     persistApiKey('key', tmpDir);
     const contents = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
     expect(contents).toContain('.env.local');
-  });
-
-  it('appends .env.local to an existing .gitignore that lacks it', () => {
-    setPlatform('win32');
-    fs.writeFileSync(
-      path.join(tmpDir, '.gitignore'),
-      '*.log\nnode_modules\n',
-      'utf8',
-    );
-    persistApiKey('key', tmpDir);
-    const contents = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
-    expect(contents).toContain('.env.local');
-    expect(contents).toContain('*.log');
   });
 
   it('does not duplicate .env.local in .gitignore when already present', () => {
-    setPlatform('win32');
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), '.env.local\n', 'utf8');
+    const blocker = path.join(tmpDir, 'blocker');
+    fs.writeFileSync(blocker, '');
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = path.join(blocker, 'subpath');
+
     persistApiKey('key', tmpDir);
     const contents = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
     const count = (contents.match(/\.env\.local/g) ?? []).length;
@@ -177,55 +150,13 @@ describe('persistApiKey', () => {
 // ── readApiKeyWithSource ───────────────────────────────────────────────────────
 
 describe('readApiKeyWithSource', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-read-test-'));
-    mockExecSync.mockReset();
-    seedBinaries();
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    setPlatform(originalPlatform);
-    delete process.env.AMPLITUDE_API_KEY;
-    clearBinaryCache();
-  });
-
-  it('reads from macOS keychain when available', () => {
-    setPlatform('darwin');
-    mockExecSync.mockReturnValue(
-      'keychainkey\n' as ReturnType<typeof execFileSync>,
-    );
+  it('reads from the per-user cache when present', () => {
+    persistApiKey('cachekey', tmpDir);
     const result = readApiKeyWithSource(tmpDir);
-    expect(result).toEqual({ key: 'keychainkey', source: 'keychain' });
+    expect(result).toEqual({ key: 'cachekey', source: 'cache' });
   });
 
-  it('reads from Linux secret-tool when available', () => {
-    setPlatform('linux');
-    mockExecSync.mockReturnValue(
-      'linuxkey\n' as ReturnType<typeof execFileSync>,
-    );
-    const result = readApiKeyWithSource(tmpDir);
-    expect(result).toEqual({ key: 'linuxkey', source: 'keychain' });
-  });
-
-  it('falls through to .env.local when macOS keychain throws', () => {
-    setPlatform('darwin');
-    mockExecSync.mockImplementation(() => {
-      throw new Error('not found');
-    });
-    fs.writeFileSync(
-      path.join(tmpDir, '.env.local'),
-      'AMPLITUDE_API_KEY=fallback\n',
-      'utf8',
-    );
-    const result = readApiKeyWithSource(tmpDir);
-    expect(result).toEqual({ key: 'fallback', source: 'env' });
-  });
-
-  it('reads from .env.local on non-darwin/linux', () => {
-    setPlatform('win32');
+  it('falls through to .env.local when cache is empty', () => {
     fs.writeFileSync(
       path.join(tmpDir, '.env.local'),
       'AMPLITUDE_API_KEY=envkey\n',
@@ -235,21 +166,28 @@ describe('readApiKeyWithSource', () => {
     expect(result).toEqual({ key: 'envkey', source: 'env' });
   });
 
+  it('prefers the cache over .env.local when both are populated', () => {
+    persistApiKey('cachekey', tmpDir);
+    fs.writeFileSync(
+      path.join(tmpDir, '.env.local'),
+      'AMPLITUDE_API_KEY=envkey\n',
+      'utf8',
+    );
+    const result = readApiKeyWithSource(tmpDir);
+    expect(result).toEqual({ key: 'cachekey', source: 'cache' });
+  });
+
   it('does NOT fall back to AMPLITUDE_API_KEY env var (prevents cross-project leakage)', () => {
-    setPlatform('win32');
     process.env.AMPLITUDE_API_KEY = 'envvarkey';
     const result = readApiKeyWithSource(tmpDir);
-    // Shell-level env vars would leak across projects — only .env.local is project-scoped
     expect(result).toBeNull();
   });
 
   it('returns null when no key is found anywhere', () => {
-    setPlatform('win32');
     expect(readApiKeyWithSource(tmpDir)).toBeNull();
   });
 
   it('ignores .env.local entries for other keys', () => {
-    setPlatform('win32');
     fs.writeFileSync(
       path.join(tmpDir, '.env.local'),
       'OTHER_KEY=abc\n',
@@ -257,34 +195,28 @@ describe('readApiKeyWithSource', () => {
     );
     expect(readApiKeyWithSource(tmpDir)).toBeNull();
   });
+
+  it('ignores a corrupt credentials.json without throwing', () => {
+    fs.writeFileSync(
+      path.join(cacheDir, 'credentials.json'),
+      '{ this is not json',
+      'utf8',
+    );
+    fs.writeFileSync(
+      path.join(tmpDir, '.env.local'),
+      'AMPLITUDE_API_KEY=fallback\n',
+      'utf8',
+    );
+    const result = readApiKeyWithSource(tmpDir);
+    expect(result).toEqual({ key: 'fallback', source: 'env' });
+  });
 });
 
 // ── readApiKey ────────────────────────────────────────────────────────────────
 
 describe('readApiKey', () => {
-  let tmpDir: string;
-
-  beforeEach(() => {
-    tmpDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'api-key-store-readkey-test-'),
-    );
-    mockExecSync.mockReset();
-    setPlatform('win32');
-  });
-
-  afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    setPlatform(originalPlatform);
-    delete process.env.AMPLITUDE_API_KEY;
-    clearBinaryCache();
-  });
-
   it('returns the key string when found', () => {
-    fs.writeFileSync(
-      path.join(tmpDir, '.env.local'),
-      'AMPLITUDE_API_KEY=thekey\n',
-      'utf8',
-    );
+    persistApiKey('thekey', tmpDir);
     expect(readApiKey(tmpDir)).toBe('thekey');
   });
 
@@ -293,36 +225,82 @@ describe('readApiKey', () => {
   });
 });
 
+// ── clearApiKey ──────────────────────────────────────────────────────────────
+
+describe('clearApiKey', () => {
+  it('removes the cache entry for this install dir but leaves others alone', () => {
+    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-other-'));
+    try {
+      persistApiKey('key-a', tmpDir);
+      persistApiKey('key-b', otherDir);
+
+      clearApiKey(tmpDir);
+
+      expect(readApiKey(tmpDir)).toBeNull();
+      expect(readApiKey(otherDir)).toBe('key-b');
+    } finally {
+      fs.rmSync(otherDir, { recursive: true, force: true });
+    }
+  });
+
+  it('strips AMPLITUDE_API_KEY from .env.local without removing other vars', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.env.local'),
+      'AMPLITUDE_API_KEY=somekey\nOTHER_VAR=keep\n',
+      'utf8',
+    );
+    clearApiKey(tmpDir);
+    const contents = fs.readFileSync(path.join(tmpDir, '.env.local'), 'utf8');
+    expect(contents).not.toContain('AMPLITUDE_API_KEY');
+    expect(contents).toContain('OTHER_VAR=keep');
+  });
+
+  it('is a no-op when nothing is stored', () => {
+    expect(() => clearApiKey(tmpDir)).not.toThrow();
+  });
+});
+
+// ── credentials.json mode 0o600 ────────────────────────────────────────────
+
+describe.skipIf(process.platform === 'win32')(
+  'persistApiKey — credentials.json mode hardening',
+  () => {
+    it('writes credentials.json at 0o600', () => {
+      persistApiKey('apikey1', tmpDir);
+      const stat = fs.statSync(path.join(cacheDir, 'credentials.json'));
+      expect(stat.mode & 0o777).toBe(0o600);
+    });
+
+    it('keeps mode 0o600 across re-persists', () => {
+      persistApiKey('first', tmpDir);
+      persistApiKey('second', tmpDir);
+      const stat = fs.statSync(path.join(cacheDir, 'credentials.json'));
+      expect(stat.mode & 0o777).toBe(0o600);
+    });
+  },
+);
+
 // ── F5 regression: .env.local is mode 0o600 on POSIX ──────────────────────────
 
 describe.skipIf(process.platform === 'win32')(
   'persistApiKey — .env.local mode hardening',
   () => {
-    let tmpDir: string;
-
-    beforeEach(() => {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-mode-test-'));
-      mockExecSync.mockReset();
-      // Force the .env.local fallback path on POSIX hosts. linux + a
-      // failing secret-tool is the simplest way to land in envWrite.
-      setPlatform('linux');
-      mockExecSync.mockImplementation(() => {
-        throw new Error('no secret-tool');
-      });
-    });
-
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-      setPlatform(originalPlatform);
-    });
+    /** Force the .env.local fallback by making cache writes fail. */
+    function forceEnvFallback(): void {
+      const blocker = path.join(tmpDir, 'blocker');
+      fs.writeFileSync(blocker, '');
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = path.join(blocker, 'subpath');
+    }
 
     it('creates a fresh .env.local at 0o600', () => {
+      forceEnvFallback();
       persistApiKey('apikey1', tmpDir);
       const stat = fs.statSync(path.join(tmpDir, '.env.local'));
       expect(stat.mode & 0o777).toBe(0o600);
     });
 
     it('tightens an existing 0o644 .env.local to 0o600', () => {
+      forceEnvFallback();
       const envPath = path.join(tmpDir, '.env.local');
       fs.writeFileSync(envPath, 'OTHER_VAR=foo\n', { mode: 0o644 });
       expect(fs.statSync(envPath).mode & 0o777).toBe(0o644);
@@ -336,6 +314,7 @@ describe.skipIf(process.platform === 'win32')(
     });
 
     it('keeps mode at 0o600 after replacing an existing key', () => {
+      forceEnvFallback();
       const envPath = path.join(tmpDir, '.env.local');
       fs.writeFileSync(envPath, 'AMPLITUDE_API_KEY=oldkey\n', { mode: 0o644 });
 

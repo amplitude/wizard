@@ -347,7 +347,7 @@ export class AgentUI implements WizardUI {
     orgId: string;
   }): void {
     // SECURITY: apiKey intentionally omitted from NDJSON. The orchestrator
-    // can read it from the project-local .env.local / keychain if needed.
+    // can read it from .env.local / the per-user credentials cache if needed.
     emit('result', `project_created: ${data.name}`, {
       data: {
         event: 'project_create_success',
