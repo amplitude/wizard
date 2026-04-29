@@ -2503,7 +2503,13 @@ export async function runAgent(
       }
       // Unknown structured error code — log it, let the regex-driven API-error
       // path below still run (API errors aren't reported via report_status).
-      logToFile(`Unhandled structured error code: ${code}`);
+      // `String()` coerce: control-flow narrowing reduces `code` to `never`
+      // here in the type system, but `StatusReport.code` is typed `string` at
+      // the source, so emitters can legitimately produce future codes the
+      // narrowing doesn't know about. Coerce to string to satisfy
+      // `@typescript-eslint/restrict-template-expressions` while preserving
+      // the defensive log.
+      logToFile(`Unhandled structured error code: ${String(code)}`);
     }
 
     // Backwards-compat: bundled skills (skills/integration/**) still emit
