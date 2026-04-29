@@ -57,19 +57,29 @@ import { runMigrationShim } from '../storage-migration.js';
 import {
   CACHE_ROOT_OVERRIDE_ENV,
   getStateFile,
+  LEGACY_TMPDIR_OVERRIDE_ENV,
   LEGACY_PATHS,
 } from '../storage-paths.js';
 
 describe('runMigrationShim — EXDEV cross-device fallback', () => {
   let cacheRoot: string;
   let installDir: string;
+  let legacyTmp: string;
   let originalCacheOverride: string | undefined;
+  let originalLegacyOverride: string | undefined;
 
   beforeEach(() => {
     cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-migrate-exdev-'));
     installDir = mkdtempSync(join(tmpdir(), 'wiz-migrate-exdev-proj-'));
+    // Isolate the legacy-tmpdir scan to a per-test directory so a parallel
+    // test file's migration shim can't migrate (and unlink) our fixture
+    // before this test asserts on it. Without this the EPERM assertion
+    // flaked under `pnpm test`'s parallel pool.
+    legacyTmp = mkdtempSync(join(tmpdir(), 'wiz-migrate-exdev-legacy-'));
     originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    originalLegacyOverride = process.env[LEGACY_TMPDIR_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
+    process.env[LEGACY_TMPDIR_OVERRIDE_ENV] = legacyTmp;
     renameSpy.mockReset();
     // Default: the real renameSync. Individual tests override with EXDEV.
     renameSpy.mockImplementation(realRenameSync);
@@ -78,10 +88,16 @@ describe('runMigrationShim — EXDEV cross-device fallback', () => {
   afterEach(() => {
     rmSync(cacheRoot, { recursive: true, force: true });
     rmSync(installDir, { recursive: true, force: true });
+    rmSync(legacyTmp, { recursive: true, force: true });
     if (originalCacheOverride === undefined) {
       delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     } else {
       process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
+    if (originalLegacyOverride === undefined) {
+      delete process.env[LEGACY_TMPDIR_OVERRIDE_ENV];
+    } else {
+      process.env[LEGACY_TMPDIR_OVERRIDE_ENV] = originalLegacyOverride;
     }
   });
 

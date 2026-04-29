@@ -52,9 +52,11 @@ describe('SettingsOverrideScreen backup-failed branch (anti-dead-end)', () => {
       );
       // Wait for autoFocus to settle on the Confirm option, then press
       // Enter so ConfirmationInput's onConfirm fires the failing backup.
-      await new Promise((r) => setTimeout(r, 30));
+      // 200ms (vs. 30ms): under the parallel-pool the React commit cycle
+      // can stretch past 30ms and lastFrame() reads a pre-render frame.
+      await new Promise((r) => setTimeout(r, 200));
       stdin.write('\r'); // Enter
-      await new Promise((r) => setTimeout(r, 30));
+      await new Promise((r) => setTimeout(r, 200));
 
       // eslint-disable-next-line no-control-regex
       const csi = /\x1b\[[0-9;]*[A-Za-z]/g;

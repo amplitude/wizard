@@ -74,7 +74,7 @@ describe('SetupScreen Esc-as-escape-hatch', () => {
       ) {
         break;
       }
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 150));
     }
 
     expect(store.session.frameworkContextAnswerOrder).toHaveLength(0);
@@ -86,7 +86,7 @@ describe('SetupScreen Esc-as-escape-hatch', () => {
     stdin.write('\x1b');
     for (let i = 0; i < 25; i++) {
       if (store.session.outroData !== null) break;
-      await new Promise((r) => setTimeout(r, 20));
+      await new Promise((r) => setTimeout(r, 150));
     }
 
     expect(store.session.outroData).not.toBeNull();

@@ -36,6 +36,26 @@ import { createHash } from 'node:crypto';
 export const CACHE_ROOT_OVERRIDE_ENV = 'AMPLITUDE_WIZARD_CACHE_DIR';
 
 /**
+ * Env var that overrides the directory the migration shim treats as the
+ * source of legacy `tmpdir()`-scoped files (per-attempt agent state, plans,
+ * checkpoints, update-check cache). Primarily for tests, where two parallel
+ * test files would otherwise share the OS tmpdir and have one test's
+ * `runMigrationShim` scan migrate the other test's legacy fixtures —
+ * surfacing as flaky "expected legacy file to still exist" assertions.
+ *
+ * Production callers leave this unset; the legacy paths fall through to
+ * `tmpdir()` which is what the pre-migration code wrote to.
+ */
+export const LEGACY_TMPDIR_OVERRIDE_ENV = 'AMPLITUDE_WIZARD_LEGACY_TMPDIR';
+
+/** Resolve the legacy tmpdir: env override wins, else OS tmpdir. */
+export function getLegacyTmpdir(): string {
+  const override = process.env[LEGACY_TMPDIR_OVERRIDE_ENV];
+  if (override && override.length > 0) return override;
+  return tmpdir();
+}
+
+/**
  * Per-user cache root. Defaults to `~/.amplitude/wizard/`. Honors
  * `AMPLITUDE_WIZARD_CACHE_DIR` for test isolation and power users.
  */
@@ -212,15 +232,15 @@ export const LEGACY_PATHS = {
   benchmark: '/tmp/amplitude-wizard-benchmark.json',
   /** Per-project checkpoint, tmpdir-scoped. */
   checkpoint: (hash: string): string =>
-    join(tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`),
+    join(getLegacyTmpdir(), `amplitude-wizard-checkpoint-${hash}.json`),
   /** Per-attempt agent state, tmpdir-scoped. */
   state: (attemptId: string): string =>
-    join(tmpdir(), `amplitude-wizard-state-${attemptId}.json`),
+    join(getLegacyTmpdir(), `amplitude-wizard-state-${attemptId}.json`),
   /** Plans dir, tmpdir-scoped. */
-  plansDir: (): string => join(tmpdir(), 'amplitude-wizard-plans'),
+  plansDir: (): string => join(getLegacyTmpdir(), 'amplitude-wizard-plans'),
   /** Update-check cache, tmpdir-scoped. */
   updateCheck: (): string =>
-    join(tmpdir(), 'amplitude-wizard-update-check.json'),
+    join(getLegacyTmpdir(), 'amplitude-wizard-update-check.json'),
   /** Per-project events file, dotfile in install dir. */
   events: (installDir: string): string =>
     join(installDir, '.amplitude-events.json'),

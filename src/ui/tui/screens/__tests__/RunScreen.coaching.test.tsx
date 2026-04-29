@@ -28,9 +28,15 @@ function seedRunScreenStore() {
 
 // RunScreen has a high-frequency spinner setInterval (~80ms ticks) on
 // top of the per-second coaching timer. Advancing fake timers across
-// 90–305s flushes many React renders; bump the per-test timeout
-// generously to absorb that on slower CI hardware.
-const SLOW_TEST_TIMEOUT_MS = 30_000;
+// 90–305s flushes ~1200–3800 React renders; the per-test timeout has
+// to absorb both slow CI hardware AND parallel-suite contention (the
+// full vitest run with this file alongside DataIngestionCheckScreen's
+// timer test can push wall-clock well past 30s under load). 90s is
+// the empirical headroom that holds across:
+//   - solo runs (~6s)
+//   - full `pnpm test` parallel runs (peaked at 30–35s)
+//   - pre-commit hook runs (a 2nd full suite landing on a hot machine)
+const SLOW_TEST_TIMEOUT_MS = 90_000;
 
 describe('RunScreen — timeout coaching', () => {
   beforeEach(() => {

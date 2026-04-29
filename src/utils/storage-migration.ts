@@ -32,7 +32,6 @@ import {
   rmdirSync,
   unlinkSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { atomicWriteJSON } from './atomic-write';
 import { logToFile } from './debug';
@@ -43,6 +42,7 @@ import {
   getBenchmarkFile,
   getDashboardFile,
   getEventsFile,
+  getLegacyTmpdir,
   getPlansDir,
   getProjectMetaDir,
   getStateFile,
@@ -298,9 +298,15 @@ export function runMigrationShim(installDir?: string): void {
 }
 
 function migrateStateFiles(): void {
+  // Routes through `getLegacyTmpdir()` so tests can isolate the scan via
+  // AMPLITUDE_WIZARD_LEGACY_TMPDIR — without that, two parallel test files
+  // sharing the OS tmpdir would race each other's migration scans and the
+  // first one to finish would migrate the OTHER test's fixture before the
+  // other test could assert on it.
+  const root = getLegacyTmpdir();
   let entries: string[];
   try {
-    entries = readdirSync(tmpdir());
+    entries = readdirSync(root);
   } catch {
     return;
   }
@@ -308,7 +314,7 @@ function migrateStateFiles(): void {
   for (const name of entries) {
     if (!name.startsWith(prefix) || !name.endsWith('.json')) continue;
     const attemptId = name.slice(prefix.length, -'.json'.length);
-    moveFile(join(tmpdir(), name), getStateFile(attemptId));
+    moveFile(join(root, name), getStateFile(attemptId));
   }
 }
 

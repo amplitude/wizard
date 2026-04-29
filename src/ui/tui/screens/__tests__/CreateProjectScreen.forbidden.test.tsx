@@ -68,7 +68,7 @@ describe('CreateProjectScreen FORBIDDEN', () => {
       <CreateProjectScreen store={store} />,
     );
     // Wait for the rejected promise to resolve through React state.
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 200));
 
     // eslint-disable-next-line no-control-regex
     const csi = /\x1b\[[0-9;]*[A-Za-z]/g;

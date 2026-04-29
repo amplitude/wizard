@@ -20,6 +20,7 @@ import {
   getProjectMetaDir,
   getStateFile,
   getUpdateCheckFile,
+  LEGACY_TMPDIR_OVERRIDE_ENV,
   LEGACY_PATHS,
   projectHash,
 } from '../storage-paths.js';
@@ -27,22 +28,35 @@ import {
 describe('runMigrationShim', () => {
   let cacheRoot: string;
   let installDir: string;
+  let legacyTmp: string;
   let originalCacheOverride: string | undefined;
+  let originalLegacyOverride: string | undefined;
 
   beforeEach(() => {
     cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-migrate-cache-'));
     installDir = mkdtempSync(join(tmpdir(), 'wiz-migrate-project-'));
+    // Per-test legacy tmpdir so parallel test files can't see each other's
+    // fixture files via `readdirSync(tmpdir())`.
+    legacyTmp = mkdtempSync(join(tmpdir(), 'wiz-migrate-legacy-'));
     originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    originalLegacyOverride = process.env[LEGACY_TMPDIR_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
+    process.env[LEGACY_TMPDIR_OVERRIDE_ENV] = legacyTmp;
   });
 
   afterEach(() => {
     rmSync(cacheRoot, { recursive: true, force: true });
     rmSync(installDir, { recursive: true, force: true });
+    rmSync(legacyTmp, { recursive: true, force: true });
     if (originalCacheOverride === undefined) {
       delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     } else {
       process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
+    if (originalLegacyOverride === undefined) {
+      delete process.env[LEGACY_TMPDIR_OVERRIDE_ENV];
+    } else {
+      process.env[LEGACY_TMPDIR_OVERRIDE_ENV] = originalLegacyOverride;
     }
   });
 
@@ -241,7 +255,9 @@ describe('runMigrationShim', () => {
     // parent (`state/`) doesn't exist on a fresh cache root. If the
     // migration's parent-dir helper got confused, `renameSync` would
     // fail with ENOENT and the file would stay in tmpdir.
-    const legacy = join(tmpdir(), 'amplitude-wizard-state-newdir-test.json');
+    // Write into the per-test legacy tmpdir (not the OS tmpdir) so a
+    // parallel test file's migration scan can't see it.
+    const legacy = join(legacyTmp, 'amplitude-wizard-state-newdir-test.json');
     writeFileSync(legacy, '{}');
 
     runMigrationShim(installDir);

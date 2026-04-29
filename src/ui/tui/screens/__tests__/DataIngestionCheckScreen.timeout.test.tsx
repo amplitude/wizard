@@ -51,61 +51,70 @@ describe('DataIngestionCheckScreen catalog hang', () => {
     vi.useRealTimers();
   });
 
-  it('falls through to setEventTypes([]) when the catalog fetch hangs past 15s', async () => {
-    const { DataIngestionCheckScreen } = await import(
-      '../DataIngestionCheckScreen.js'
-    );
-    const { makeStoreForSnapshot } = await import(
-      '../../__tests__/snapshot-utils.js'
-    );
+  // 30s timeout (vs vitest's 5s default): this test uses
+  // `shouldAdvanceTime: true` which auto-advances the real clock alongside
+  // fake timers, so under parallel-suite contention the 16s `advanceTimersByTimeAsync`
+  // can take 5–10s of real time before all queued microtasks drain. Solo it
+  // runs in ~1.3s; the headroom is for full-suite contention.
+  it(
+    'falls through to setEventTypes([]) when the catalog fetch hangs past 15s',
+    { timeout: 30_000 },
+    async () => {
+      const { DataIngestionCheckScreen } = await import(
+        '../DataIngestionCheckScreen.js'
+      );
+      const { makeStoreForSnapshot } = await import(
+        '../../__tests__/snapshot-utils.js'
+      );
 
-    const store = makeStoreForSnapshot({
-      introConcluded: true,
-      region: 'us',
-      activationLevel: 'none',
-      selectedOrgId: 'org-1',
-      selectedWorkspaceId: 'ws-1' as unknown as never, // branded WorkspaceId
-      selectedAppId: '12345',
-      credentials: {
-        accessToken: 'access',
-        idToken: 'id',
-        projectApiKey: 'key',
-        host: 'https://api2.amplitude.com',
-        appId: 12345 as unknown as never,
-      } as unknown as never,
-    });
+      const store = makeStoreForSnapshot({
+        introConcluded: true,
+        region: 'us',
+        activationLevel: 'none',
+        selectedOrgId: 'org-1',
+        selectedWorkspaceId: 'ws-1' as unknown as never, // branded WorkspaceId
+        selectedAppId: '12345',
+        credentials: {
+          accessToken: 'access',
+          idToken: 'id',
+          projectApiKey: 'key',
+          host: 'https://api2.amplitude.com',
+          appId: 12345 as unknown as never,
+        } as unknown as never,
+      });
 
-    const { lastFrame, unmount } = render(
-      <DataIngestionCheckScreen store={store} />,
-    );
+      const { lastFrame, unmount } = render(
+        <DataIngestionCheckScreen store={store} />,
+      );
 
-    // Drain microtasks so the chain
-    //   checkIngestion → fetchProjectActivationStatus.reject
-    //   → withTimeout(fetchWorkspaceEventTypes, 15s)
-    // is in flight, then advance 16s so the timeout rejects.
-    for (let i = 0; i < 5; i++) {
-      await Promise.resolve();
-    }
-    await vi.advanceTimersByTimeAsync(16_000);
-    // One more microtask drain so the catch handler sets eventTypes=[]
-    // and React flushes the re-render.
-    for (let i = 0; i < 5; i++) {
-      await Promise.resolve();
-    }
+      // Drain microtasks so the chain
+      //   checkIngestion → fetchProjectActivationStatus.reject
+      //   → withTimeout(fetchWorkspaceEventTypes, 15s)
+      // is in flight, then advance 16s so the timeout rejects.
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
+      await vi.advanceTimersByTimeAsync(16_000);
+      // One more microtask drain so the catch handler sets eventTypes=[]
+      // and React flushes the re-render.
+      for (let i = 0; i < 5; i++) {
+        await Promise.resolve();
+      }
 
-    // eslint-disable-next-line no-control-regex
-    const csi = /\x1b\[[0-9;]*[A-Za-z]/g;
-    // eslint-disable-next-line no-control-regex
-    const osc = /\x1b\][^\x07]*\x07/g;
-    const frame = (lastFrame() ?? '').replace(csi, '').replace(osc, '');
+      // eslint-disable-next-line no-control-regex
+      const csi = /\x1b\[[0-9;]*[A-Za-z]/g;
+      // eslint-disable-next-line no-control-regex
+      const osc = /\x1b\][^\x07]*\x07/g;
+      const frame = (lastFrame() ?? '').replace(csi, '').replace(osc, '');
 
-    // The "Checking your event catalog…" spinner is gone — eventTypes
-    // resolved to [] via the timeout fallback.
-    expect(frame).not.toMatch(/Checking your event catalog/);
-    // Both recovery actions are visible.
-    expect(frame).toMatch(/\[Enter\]/);
-    expect(frame).toMatch(/\[q\]/);
+      // The "Checking your event catalog…" spinner is gone — eventTypes
+      // resolved to [] via the timeout fallback.
+      expect(frame).not.toMatch(/Checking your event catalog/);
+      // Both recovery actions are visible.
+      expect(frame).toMatch(/\[Enter\]/);
+      expect(frame).toMatch(/\[q\]/);
 
-    unmount();
-  });
+      unmount();
+    },
+  );
 });

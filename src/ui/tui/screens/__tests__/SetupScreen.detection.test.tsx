@@ -57,7 +57,7 @@ describe('SetupScreen re-detection on pop', () => {
     const { unmount } = render(<SetupScreen store={store} />);
 
     // Wait a tick so the initial useEffect's promise chain completes.
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 150));
     expect(detect).toHaveBeenCalledTimes(1);
     expect(store.session.frameworkContext['router']).toBe('django');
 
@@ -66,14 +66,14 @@ describe('SetupScreen re-detection on pop', () => {
     // autoDetected=false adds the key to the order list.
     store.setFrameworkContext('router', 'wagtail');
     expect(store.session.frameworkContextAnswerOrder).toContain('router');
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 150));
 
     // Now back-nav: pop the answer. This triggers re-detection because
     // the SetupScreen's detect-effect depends on
     // frameworkContextAnswerOrder.length.
     store.popLastFrameworkContextAnswer();
     expect(store.session.frameworkContext['router']).toBeUndefined();
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 150));
 
     // detect() ran again because the deps changed and 'router' was
     // missing from frameworkContext on the re-fire.
@@ -93,13 +93,13 @@ describe('SetupScreen re-detection on pop', () => {
 
     const { unmount } = render(<SetupScreen store={store} />);
 
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 150));
     expect(detect).toHaveBeenCalledTimes(1);
 
     // Add a *different* user answer so the order length changes without
     // popping the auto-detected key.
     store.setFrameworkContext('router', 'wagtail');
-    await new Promise((r) => setTimeout(r, 30));
+    await new Promise((r) => setTimeout(r, 150));
 
     // Detection effect fires on length-change, but skips because router
     // is already in frameworkContext (the user answer is present).
