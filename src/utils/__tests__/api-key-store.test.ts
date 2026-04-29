@@ -13,7 +13,30 @@ import {
   persistApiKey,
   readApiKey,
   readApiKeyWithSource,
+  __setBinaryAvailableForTests,
+  __resetHeadlessCacheForTests,
 } from '../api-key-store.js';
+
+/**
+ * The implementation now skips `execFileSync` if the binary isn't on PATH
+ * or — on Linux — if the environment looks headless (no D-Bus, no display).
+ * On a macOS test host there's no `secret-tool`, and on a Linux test host
+ * there's no `security`. Seed the cache and fake a D-Bus session so the
+ * mocks are exercised regardless of which platform the tests run on.
+ */
+function seedBinaries(): void {
+  __setBinaryAvailableForTests('security', true);
+  __setBinaryAvailableForTests('secret-tool', true);
+  process.env.DBUS_SESSION_BUS_ADDRESS = 'unix:path=/dev/null';
+  __resetHeadlessCacheForTests();
+}
+
+function clearBinaryCache(): void {
+  __setBinaryAvailableForTests('security', undefined);
+  __setBinaryAvailableForTests('secret-tool', undefined);
+  delete process.env.DBUS_SESSION_BUS_ADDRESS;
+  __resetHeadlessCacheForTests();
+}
 
 // Implementation uses execFileSync (see F2 shell-injection fix); tests
 // mock that rather than execSync.
@@ -38,12 +61,14 @@ describe('persistApiKey', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-test-'));
     mockExecSync.mockReset();
+    seedBinaries();
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     setPlatform(originalPlatform);
     delete process.env.AMPLITUDE_API_KEY;
+    clearBinaryCache();
   });
 
   // ── macOS keychain ──────────────────────────────────────────────────────────
@@ -157,12 +182,14 @@ describe('readApiKeyWithSource', () => {
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-read-test-'));
     mockExecSync.mockReset();
+    seedBinaries();
   });
 
   afterEach(() => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     setPlatform(originalPlatform);
     delete process.env.AMPLITUDE_API_KEY;
+    clearBinaryCache();
   });
 
   it('reads from macOS keychain when available', () => {
@@ -249,6 +276,7 @@ describe('readApiKey', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
     setPlatform(originalPlatform);
     delete process.env.AMPLITUDE_API_KEY;
+    clearBinaryCache();
   });
 
   it('returns the key string when found', () => {
