@@ -144,14 +144,26 @@ export async function resolveCredentials(
             ...(refreshResult.refreshToken
               ? { refreshToken: refreshResult.refreshToken }
               : {}),
+            // Persist rotated id_token if the server issued one. Ory returns
+            // a fresh id_token on every refresh when the original auth had
+            // `openid` scope. The wizard's API client authenticates with
+            // the id_token, so missing this caused refreshed-access-token
+            // sessions to die at the next `fetchAmplitudeUser` call.
+            ...(refreshResult.idToken
+              ? { idToken: refreshResult.idToken }
+              : {}),
           });
         }
         storedToken.accessToken = refreshResult.accessToken;
         if (refreshResult.refreshToken) {
           storedToken.refreshToken = refreshResult.refreshToken;
         }
+        if (refreshResult.idToken) {
+          storedToken.idToken = refreshResult.idToken;
+        }
         logToFile(
           '[credential-resolution] silently refreshed expired access token',
+          { rotatedIdToken: !!refreshResult.idToken },
         );
       }
 
