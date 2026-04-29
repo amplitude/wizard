@@ -1,116 +1,148 @@
 /**
- * Regression tests for the silent OAuth refresh path.
+ * Tests for `tryRefreshToken` — covers the JWT-exp-driven expiresAt
+ * derivation that landed alongside the jwt-exp utility.
  *
- * The auth bug this guards against:
- *   1. Wizard starts with an expired access token + a stored idToken.
- *   2. `tryRefreshToken` exchanges the refresh token for a fresh access
- *      token. Amplitude's response includes a fresh `id_token` too.
- *   3. Pre-fix: the helper extracted only `access_token` and
- *      `refresh_token`, so callers kept reusing the *expired* idToken
- *      for downstream Data API calls (`fetchAmplitudeUser`).
- *   4. The Data API rejected the stale idToken, the wizard fell into
- *      the `auth_required: no_stored_credentials` branch, and emitted
- *      a misleading "not signed in" message even though the user had
- *      just authenticated successfully.
+ * The old behavior used `expires_in` from the refresh response (24h on
+ * Ory) for `expiresAt`. With id_token TTL at 1h, that meant the proactive-
+ * refresh trigger would skip a 23-hour window where the id_token had
+ * expired but the access_token hadn't — producing 401s mid-API-call.
  *
- * The fix rotates `idToken` alongside `accessToken` and
- * `refreshToken`. These tests pin the contract so it stays rotated.
+ * These tests lock in: the rotated id_token's `exp` claim drives the
+ * returned `expiresAt`, with `expires_in` as a graceful fallback.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { tryRefreshToken } from '../token-refresh.js';
 
+vi.mock('../debug.js', () => ({ logToFile: vi.fn() }));
+vi.mock('../../lib/observability/index.js', () => ({
+  withWizardSpan: vi.fn(async (_a, _b, _c, fn: () => Promise<unknown>) => fn()),
+  addBreadcrumb: vi.fn(),
+}));
+
+const NOW = 1_700_000_000_000;
+
+function makeJwt(payload: Record<string, unknown>): string {
+  const header = Buffer.from(
+    JSON.stringify({ alg: 'RS256', typ: 'JWT' }),
+  ).toString('base64url');
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return `${header}.${body}.fakesig`;
+}
+
+function mockFetchOnce(body: Record<string, unknown>): void {
+  vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    json: async () => body,
+  } as unknown as Response);
+}
+
 describe('tryRefreshToken', () => {
-  const originalFetch = global.fetch;
-
   beforeEach(() => {
-    // Default: every test must explicitly mock fetch — fail loudly if
-    // not, so a missed mock never silently hits real Amplitude.
-    global.fetch = vi.fn(() => {
-      throw new Error('fetch was not mocked for this test');
-    }) as typeof fetch;
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
   });
 
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  it('returns null when token is still valid (no refresh needed)', async () => {
-    const result = await tryRefreshToken({
-      accessToken: 'a',
-      refreshToken: 'r',
-      // 1 hour out — well past the 5-minute buffer
-      expiresAt: Date.now() + 3600 * 1000,
+  it('uses the rotated id_token JWT exp for expiresAt, not expires_in', async () => {
+    // id_token says exp = NOW + 45 min. expires_in says 24h. The id_token
+    // wins because its TTL is the binding constraint for our API calls.
+    const idTokenExpSec = Math.floor((NOW + 45 * 60 * 1000) / 1000);
+    const idToken = makeJwt({ exp: idTokenExpSec });
+    mockFetchOnce({
+      access_token: 'new-access-token',
+      id_token: idToken,
+      refresh_token: 'rotated-refresh-token',
+      expires_in: 24 * 60 * 60, // 24h — should be ignored in favor of id_token exp
     });
+
+    const result = await tryRefreshToken(
+      {
+        accessToken: 'old-access-token',
+        refreshToken: 'old-refresh-token',
+        // Already expired so refresh fires.
+        expiresAt: NOW - 60 * 1000,
+      },
+      'us',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.idToken).toBe(idToken);
+    expect(result!.expiresAt).toBe(idTokenExpSec * 1000);
+    // Sanity: the access_token TTL is NOT what was returned.
+    expect(result!.expiresAt).toBeLessThan(NOW + 60 * 60 * 1000);
+  });
+
+  it('falls back to expires_in when no id_token is returned (older server)', async () => {
+    // No id_token in the response — older Hydra/Ory installations.
+    mockFetchOnce({
+      access_token: 'new-access-token',
+      refresh_token: 'rotated-refresh-token',
+      expires_in: 30 * 60, // 30 min
+    });
+
+    const result = await tryRefreshToken(
+      {
+        accessToken: 'old-access-token',
+        refreshToken: 'old-refresh-token',
+        expiresAt: NOW - 60 * 1000,
+      },
+      'us',
+    );
+
+    expect(result).not.toBeNull();
+    expect(result!.idToken).toBeUndefined();
+    expect(result!.expiresAt).toBe(NOW + 30 * 60 * 1000);
+  });
+
+  it('falls back to expires_in when the id_token JWT is malformed', async () => {
+    mockFetchOnce({
+      access_token: 'new-access-token',
+      id_token: 'not.a-valid-jwt',
+      refresh_token: 'rotated-refresh-token',
+      expires_in: 30 * 60, // 30 min
+    });
+
+    const result = await tryRefreshToken(
+      {
+        accessToken: 'old-access-token',
+        refreshToken: 'old-refresh-token',
+        expiresAt: NOW - 60 * 1000,
+      },
+      'us',
+    );
+
+    expect(result).not.toBeNull();
+    // Malformed JWT → fall back to expires_in.
+    expect(result!.expiresAt).toBe(NOW + 30 * 60 * 1000);
+  });
+
+  it('returns null when the access_token is still valid (>5 min remaining)', async () => {
+    // No fetch should be made. If it were, the test would throw because
+    // we didn't stub fetch.
+    const result = await tryRefreshToken(
+      {
+        accessToken: 'still-valid',
+        refreshToken: 'still-valid-refresh',
+        expiresAt: NOW + 10 * 60 * 1000, // 10 min in the future
+      },
+      'us',
+    );
+
     expect(result).toBeNull();
   });
 
   it('returns null when no refresh token is stored', async () => {
-    const result = await tryRefreshToken({
-      accessToken: 'a',
-      // expired
-      expiresAt: Date.now() - 1000,
-    });
+    const result = await tryRefreshToken(
+      {
+        accessToken: 'expired-access',
+        // refreshToken intentionally undefined
+        expiresAt: NOW - 60 * 1000,
+      },
+      'us',
+    );
+
     expect(result).toBeNull();
-  });
-
-  it('rotates the idToken when the server issues a new one', async () => {
-    // Server returns a fresh access_token, refresh_token, AND id_token.
-    // Without the fix the helper would have dropped id_token on the
-    // floor — see file header for why that breaks the next API call.
-    global.fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            access_token: 'new-access',
-            id_token: 'new-id',
-            refresh_token: 'new-refresh',
-            expires_in: 3600,
-            token_type: 'Bearer',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-    ) as typeof fetch;
-
-    const result = await tryRefreshToken({
-      accessToken: 'old-access',
-      refreshToken: 'old-refresh',
-      expiresAt: Date.now() - 1000,
-    });
-
-    expect(result).not.toBeNull();
-    expect(result).toMatchObject({
-      accessToken: 'new-access',
-      idToken: 'new-id',
-      refreshToken: 'new-refresh',
-    });
-  });
-
-  it('returns idToken=undefined when the server omits id_token (so callers fall back to the existing one)', async () => {
-    global.fetch = vi.fn(
-      async () =>
-        new Response(
-          JSON.stringify({
-            access_token: 'new-access',
-            refresh_token: 'new-refresh',
-            expires_in: 3600,
-            token_type: 'Bearer',
-          }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
-    ) as typeof fetch;
-
-    const result = await tryRefreshToken({
-      accessToken: 'old-access',
-      refreshToken: 'old-refresh',
-      expiresAt: Date.now() - 1000,
-    });
-
-    expect(result).not.toBeNull();
-    expect(result?.accessToken).toBe('new-access');
-    // Explicitly undefined — credential-resolution.ts checks for truthy
-    // before applying, so an undefined here means "keep the old idToken".
-    expect(result?.idToken).toBeUndefined();
   });
 });

@@ -533,23 +533,56 @@ const resolveNonInteractiveCredentials = async (
         readDisk: true,
       });
       const stored = getStoredToken(undefined, zone);
-      const hasStoredToken = !!stored;
 
-      const reason: 'no_stored_credentials' | 'token_expired' = hasStoredToken
-        ? 'token_expired'
-        : 'no_stored_credentials';
+      // Three-way reason classification, ordered most→least specific:
+      //
+      //   1. No stored token at all → user has never logged in.
+      //      `no_stored_credentials` — orchestrators tell the user to run
+      //      `wizard login`.
+      //
+      //   2. Stored token whose `expiresAt` is in the past → id_token
+      //      legitimately expired. `token_expired` — same remediation
+      //      (refresh via login), but the orchestrator now knows credentials
+      //      *were* present and the failure is age-related, not setup-related.
+      //
+      //   3. Stored token whose `expiresAt` is still in the future → silent
+      //      refresh failed for a non-token reason (network blip, server-
+      //      side refresh_token revoke, transient 5xx, etc). `refresh_failed`
+      //      — the user should retry rather than re-login. Telling them
+      //      to run `wizard login` for a network blip is actively misleading.
+      //
+      // expiresAt is sourced from the id_token's `exp` claim post the
+      // jwt-exp.ts cleanup, so this check accurately reflects id_token
+      // freshness rather than whatever client-side stamp was guessed at
+      // login time.
+      let reason: 'no_stored_credentials' | 'token_expired' | 'refresh_failed';
+      if (!stored) {
+        reason = 'no_stored_credentials';
+      } else {
+        const expiresAtMs = new Date(stored.expiresAt).getTime();
+        reason =
+          Number.isFinite(expiresAtMs) && expiresAtMs > Date.now()
+            ? 'refresh_failed'
+            : 'token_expired';
+      }
 
       const loginCommand = [...CLI_INVOCATION.split(' '), 'login'];
       const resumeCommand = [...CLI_INVOCATION.split(' '), '--agent'];
-      const instruction = hasStoredToken
-        ? 'Your stored Amplitude credentials could not be used (the OIDC ' +
-          'id_token may have expired or the user account no longer has ' +
-          'access). Ask the user to run ' +
-          `\`${loginCommand.join(' ')}\` to refresh, then re-run ` +
-          `\`${resumeCommand.join(' ')}\` to resume.`
-        : 'Not signed in to Amplitude. Ask the user to run ' +
-          `\`${loginCommand.join(' ')}\` in a terminal to authenticate, ` +
-          `then re-run \`${resumeCommand.join(' ')}\` to resume.`;
+      const instruction =
+        reason === 'no_stored_credentials'
+          ? 'Not signed in to Amplitude. Ask the user to run ' +
+            `\`${loginCommand.join(' ')}\` in a terminal to authenticate, ` +
+            `then re-run \`${resumeCommand.join(' ')}\` to resume.`
+          : reason === 'token_expired'
+          ? 'Your stored Amplitude credentials have expired. Ask the user ' +
+            `to run \`${loginCommand.join(' ')}\` to refresh, then re-run ` +
+            `\`${resumeCommand.join(' ')}\` to resume.`
+          : // refresh_failed
+            'Stored Amplitude credentials are still within their TTL but ' +
+            'the wizard could not contact the auth server (network issue, ' +
+            'transient 5xx, or revoked refresh token). Retry the same ' +
+            `command; if it persists, run \`${loginCommand.join(' ')}\` ` +
+            'to refresh.';
 
       agentUI.emitAuthRequired({
         reason,
@@ -2019,6 +2052,20 @@ void yargs(hideBin(process.argv))
 
           const auth = await performAmplitudeAuth({ zone });
           const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
+          // Source `expiresAt` from the id_token's actual `exp` claim.
+          // The wizard authenticates with the id_token (not the access
+          // token) for every API call, so the stored field needs to
+          // reflect the id_token's TTL — otherwise tryRefreshToken's
+          // proactive trigger can be off by hours and id-token-401s
+          // surface as misleading auth_required errors. Falls back
+          // gracefully if the JWT is somehow undecodable. See
+          // `src/utils/jwt-exp.ts` for the architecture rationale.
+          const { resolveStoredExpiryMs } = await import(
+            './src/utils/jwt-exp.js'
+          );
+          const expiresAt = new Date(
+            resolveStoredExpiryMs({ idToken: auth.idToken }),
+          ).toISOString();
           storeToken(
             {
               id: user.id,
@@ -2031,7 +2078,7 @@ void yargs(hideBin(process.argv))
               accessToken: auth.accessToken,
               idToken: auth.idToken,
               refreshToken: auth.refreshToken,
-              expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+              expiresAt,
             },
           );
           getUI().log.success(
