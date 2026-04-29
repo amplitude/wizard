@@ -273,8 +273,19 @@ const resolveNonInteractiveCredentials = async (
   // key from the Amplitude API.
   if (session.apiKey) {
     const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
+    // Normally `accessToken` and `projectApiKey` are the same value (the
+    // project API key — embeddable in client bundles, also accepted by
+    // the Amplitude wizard-proxy). For CI / smoke-test scenarios that
+    // need to authenticate against the wizard-proxy with a real OAuth
+    // bearer (e.g. a Hydra service-account token) while still embedding
+    // the project API key into generated SDK init code, set
+    // `AMPLITUDE_WIZARD_PROXY_BEARER` to the OAuth bearer. The bearer is
+    // used only for outbound auth headers; `session.apiKey` continues to
+    // flow into generated `amplitude.init('<projectApiKey>')` calls.
+    const proxyBearer =
+      process.env.AMPLITUDE_WIZARD_PROXY_BEARER?.trim() || session.apiKey;
     session.credentials = {
-      accessToken: session.apiKey,
+      accessToken: proxyBearer,
       projectApiKey: session.apiKey,
       host: DEFAULT_HOST_URL,
       appId: session.appId ?? 0,
@@ -877,6 +888,17 @@ void yargs(hideBin(process.argv))
       type: 'string',
       hidden: !IS_WIZARD_DEV,
     },
+    // Internal: shadow flag so yargs `.env('AMPLITUDE_WIZARD')` doesn't
+    // reject AMPLITUDE_WIZARD_PROXY_BEARER under `.strict()`. The actual
+    // value is read directly from process.env in resolveCredentials —
+    // we just need to declare the camelCased flag so strict mode allows
+    // the auto-mapped `--proxy-bearer` argv key. Never documented; never
+    // passed via CLI.
+    'proxy-bearer': {
+      describe: 'internal: AMPLITUDE_WIZARD_PROXY_BEARER env-var passthrough',
+      type: 'string',
+      hidden: true,
+    },
     'app-id': {
       // Canonical term across amplitude/amplitude (Python `app_id`) and
       // amplitude/javascript (TS `appId`). Numeric, e.g. 769610. The only
@@ -1248,8 +1270,13 @@ void yargs(hideBin(process.argv))
               const { DEFAULT_HOST_URL } = await import(
                 './src/lib/constants.js'
               );
+              // See AMPLITUDE_WIZARD_PROXY_BEARER comment in the agent/ci
+              // branch above — same separation applies here.
+              const proxyBearer =
+                process.env.AMPLITUDE_WIZARD_PROXY_BEARER?.trim() ||
+                session.apiKey;
               session.credentials = {
-                accessToken: session.apiKey,
+                accessToken: proxyBearer,
                 projectApiKey: session.apiKey,
                 host: DEFAULT_HOST_URL,
                 appId: session.appId ?? 0,
