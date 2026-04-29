@@ -407,14 +407,14 @@ export const DataIngestionCheckScreen = ({
         integration &&
         BACKEND_SDK_INTEGRATIONS.has(integration) &&
         currentSession.selectedOrgId &&
-        currentSession.selectedWorkspaceId
+        currentSession.selectedProjectId
       ) {
         try {
-          const names = await fetchWorkspaceEventTypes(
+          const names = await fetchProjectEventTypes(
             dataApiToken,
             zone,
             currentSession.selectedOrgId,
-            currentSession.selectedWorkspaceId,
+            currentSession.selectedProjectId,
           );
           if (names.length > 0) {
             logToFile(
