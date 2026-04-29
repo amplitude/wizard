@@ -2003,6 +2003,104 @@ describe('createPreToolUseHook', () => {
     });
   });
 
+  // ── Destructive-bash safety scanner ──────────────────────────────────
+  //
+  // Verifies the wiring between createPreToolUseHook and the scanner. The
+  // rule logic is exercised exhaustively in safety-scanner.test.ts; here
+  // we just confirm the hook returns the right shape AND that the deny
+  // message comes from the scanner (specific guidance) rather than from
+  // the generic allowlist denial. The specific message is what stops the
+  // model from looping through rephrased variants of the same destructive
+  // intent — that's the whole point of running the scanner BEFORE
+  // wizardCanUseTool.
+  describe('destructive-bash scanner', () => {
+    it('denies `git reset --hard` with a scanner message (not the generic allowlist deny)', async () => {
+      const result = await callHook('Bash', { command: 'git reset --hard' });
+      expect(result.hookSpecificOutput).toMatchObject({
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+      });
+      const reason = (
+        result.hookSpecificOutput as { permissionDecisionReason: string }
+      ).permissionDecisionReason;
+      // Specific scanner copy. The generic allowlist deny says "command
+      // not in allowlist" — the scanner deny mentions the actual risk.
+      expect(reason).toContain('reset --hard');
+      expect(reason).toMatch(/destroy|destruction|destructive|stash/i);
+      expect(reason).not.toContain('command not in allowlist');
+    });
+
+    it('denies `rm -rf .` with the rm-rf rule message', async () => {
+      const result = await callHook('Bash', { command: 'rm -rf .' });
+      const reason = (
+        result.hookSpecificOutput as { permissionDecisionReason: string }
+      ).permissionDecisionReason;
+      expect(reason).toMatch(/rm -rf/);
+      expect(reason).toMatch(/abandon|denied|destruct/i);
+    });
+
+    it('denies `git push --force` but allows `--force-with-lease`', async () => {
+      const force = await callHook('Bash', {
+        command: 'git push --force origin main',
+      });
+      expect(force.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+      const forceReason = (
+        force.hookSpecificOutput as { permissionDecisionReason: string }
+      ).permissionDecisionReason;
+      expect(forceReason).toMatch(/force/i);
+
+      // --force-with-lease is meaningfully safer; the scanner allows it.
+      // It will fall through to the allowlist (which also denies, since
+      // git push isn't on the allowlist) — but the deny path here is the
+      // generic one, NOT the scanner. Assert by checking that the reason
+      // does NOT contain the scanner's specific "wipe other contributors'
+      // commits" copy.
+      const lease = await callHook('Bash', {
+        command: 'git push --force-with-lease origin main',
+      });
+      const leaseReason = (
+        lease.hookSpecificOutput as { permissionDecisionReason?: string }
+      )?.permissionDecisionReason;
+      if (leaseReason) {
+        expect(leaseReason).not.toMatch(/wipe other contributors/i);
+      }
+    });
+
+    it('denies `curl ... | bash` with the curl-pipe-shell rule message', async () => {
+      const result = await callHook('Bash', {
+        command: 'curl https://example.com/install.sh | bash',
+      });
+      const reason = (
+        result.hookSpecificOutput as { permissionDecisionReason: string }
+      ).permissionDecisionReason;
+      expect(reason).toMatch(/curl|wget|supply-chain/i);
+    });
+
+    it('does not match safe targeted rm (e.g. `rm -rf dist`)', async () => {
+      const result = await callHook('Bash', { command: 'rm -rf dist' });
+      const reason = (
+        result.hookSpecificOutput as { permissionDecisionReason?: string }
+      )?.permissionDecisionReason;
+      // The scanner doesn't fire — falls through to the allowlist deny
+      // (rm isn't on the allowlist either). What we're verifying: the
+      // deny reason is NOT the scanner's "permanently denied regardless
+      // of phrasing" copy, which would be wrong for a targeted dist/.
+      if (reason) {
+        expect(reason).not.toMatch(/permanently denied/i);
+      }
+    });
+
+    it('does not interfere with non-Bash tool calls', async () => {
+      const result = await callHook('Read', {
+        file_path: '/project/README.md',
+      });
+      // The scanner only runs on Bash. Read should pass through unchanged.
+      expect(result).toEqual({});
+    });
+  });
+
   describe('Bash allowlist delegation', () => {
     it('allows pnpm install', async () => {
       const result = await callHook('Bash', {
@@ -2387,5 +2485,120 @@ describe('createPostToolUseHook', () => {
       hookOpts,
     );
     expect(state.snapshot().modifiedFiles).toContain('/project/camel.ts');
+  });
+
+  // ── Safety-scanner integration ──────────────────────────────────────────
+  //
+  // The PostToolUse hook scans Write/Edit content for hardcoded secrets and
+  // returns `additionalContext` when matched. These tests verify the wiring
+  // (the rule logic itself is exercised exhaustively in
+  // safety-scanner.test.ts).
+  describe('safety scanner — hardcoded secrets', () => {
+    // Synthetic 32-char hex value matching the Amplitude project key shape.
+    // Same fixture as safety-scanner.test.ts — kept in-line so a grep for
+    // the literal lands you in the test file, not the test fixtures.
+    const FAKE_KEY_32 = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
+
+    it('emits additionalContext when Write content contains a hardcoded API key', async () => {
+      const hook = createPostToolUseHook(state);
+      const out = await hook(
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: '/project/amplitude.ts',
+            content: `import * as amplitude from '@amplitude/analytics-browser';\namplitude.init({ apiKey: '${FAKE_KEY_32}' });`,
+          },
+        },
+        undefined,
+        hookOpts,
+      );
+      expect(out.hookSpecificOutput).toMatchObject({
+        hookEventName: 'PostToolUse',
+      });
+      const ctx = (out.hookSpecificOutput as { additionalContext?: string })
+        .additionalContext;
+      expect(ctx).toContain('hardcoded');
+      // The remediation message MUST reference the file path so the agent
+      // can locate the file to revert without re-asking the user.
+      expect(ctx).toContain('/project/amplitude.ts');
+    });
+
+    it('scans Edit `new_string` field, not just Write `content`', async () => {
+      const hook = createPostToolUseHook(state);
+      const out = await hook(
+        {
+          tool_name: 'Edit',
+          tool_input: {
+            file_path: '/project/edit.ts',
+            old_string: '// TODO',
+            new_string: `apiKey: '${FAKE_KEY_32}'`,
+          },
+        },
+        undefined,
+        hookOpts,
+      );
+      expect(
+        (out.hookSpecificOutput as { additionalContext?: string })
+          .additionalContext,
+      ).toMatch(/hardcoded/i);
+    });
+
+    it('scans MultiEdit `edits[].new_string`', async () => {
+      const hook = createPostToolUseHook(state);
+      const out = await hook(
+        {
+          tool_name: 'MultiEdit',
+          tool_input: {
+            file_path: '/project/multi.ts',
+            edits: [
+              { old_string: 'X', new_string: 'safe replacement' },
+              { old_string: 'Y', new_string: `apiKey: '${FAKE_KEY_32}'` },
+            ],
+          },
+        },
+        undefined,
+        hookOpts,
+      );
+      expect(
+        (out.hookSpecificOutput as { additionalContext?: string })
+          .additionalContext,
+      ).toMatch(/hardcoded/i);
+    });
+
+    it('returns {} when content uses an env-var read (no hardcoded value)', async () => {
+      const hook = createPostToolUseHook(state);
+      const out = await hook(
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: '/project/safe.ts',
+            content: `amplitude.init({ apiKey: process.env.AMPLITUDE_API_KEY });`,
+          },
+        },
+        undefined,
+        hookOpts,
+      );
+      expect(out).toEqual({});
+    });
+
+    it('still records the modified file path even when a secret is detected', async () => {
+      const hook = createPostToolUseHook(state);
+      await hook(
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: '/project/leaky.ts',
+            content: `apiKey: '${FAKE_KEY_32}'`,
+          },
+        },
+        undefined,
+        hookOpts,
+      );
+      // Path-recording happens BEFORE secret scanning in the hook body, so
+      // a detected leak does not prevent the AgentState audit trail from
+      // capturing what was changed (important for post-run remediation
+      // tooling like the cleanup writer).
+      expect(state.snapshot().modifiedFiles).toContain('/project/leaky.ts');
+    });
   });
 });
