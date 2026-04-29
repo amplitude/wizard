@@ -1323,6 +1323,41 @@ export class WizardStore {
   }
 
   /**
+   * Confirm the silently-resolved org/project on a returning run.
+   * Clears `requiresAccountConfirmation` so the Auth flow gate advances.
+   */
+  confirmAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    analytics.wizardCapture('account confirmed', {
+      'from screen': 'auth',
+      'org id': this.session.selectedOrgId,
+      'project id': this.session.selectedProjectId,
+    });
+    this.emitChange();
+  }
+
+  /**
+   * Reject the silently-resolved org/project on a returning run and drop
+   * back to the SUSI picker. Drops the cached selection AND credentials
+   * so AuthScreen re-runs the OAuth-to-picker pipeline; the cached idToken
+   * is still used (no fresh browser round-trip required) but the user can
+   * pick a different org / project / environment this time.
+   */
+  rejectStoredAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    analytics.wizardCapture('account rejected', { 'from screen': 'auth' });
+    this.emitChange();
+  }
+
+  /**
    * Revert past the Auth step back into the org/workspace picker. Keeps
    * credentials so we don't force a fresh OAuth round-trip — only the
    * picked identity is cleared.

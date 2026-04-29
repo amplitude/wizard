@@ -13,11 +13,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { z } from 'zod';
 import {
+  AMPLITUDE_ZONE_SETTINGS,
   type AmplitudeZone,
   DEFAULT_AMPLITUDE_ZONE,
 } from '../lib/constants.js';
 import { createLogger } from '../lib/observability/logger.js';
 import { atomicWriteJSON } from './atomic-write.js';
+import { decodeJwtIssAud } from './jwt-exp.js';
 
 const log = createLogger('ampli-settings');
 
@@ -149,6 +151,68 @@ export function getStoredToken(
       expiresAt.getTime() + 364 * 24 * 60 * 60 * 1000,
     );
     if (new Date() > refreshExpiry) return undefined;
+
+    // Drop tokens that were minted against a different OAuth client/issuer
+    // than this wizard build is configured to use. Catches the "upgraded
+    // from an old wizard version" case where the refresh-window check would
+    // otherwise return a token whose audience/issuer no longer matches the
+    // current AMPLITUDE_ZONE_SETTINGS — leading to silent 401s mid-run.
+    //
+    // Only enforced when the token actually carries `iss`/`aud` claims and
+    // the expected values are known. Tokens without claims (or where decode
+    // fails) fall through to the pre-existing behavior — never strictly
+    // worse than before.
+    const expected = AMPLITUDE_ZONE_SETTINGS[zone];
+    const claims = decodeJwtIssAud(entry.OAuthIdToken);
+    if (claims && expected) {
+      // Compare only the host portion of `iss` against `oAuthHost`. Ory
+      // mints tokens with `iss = "<oAuthHost>/"` (trailing slash); we strip
+      // it for a robust prefix-style check that survives minor path tweaks.
+      const expectedHost = (() => {
+        try {
+          return new URL(expected.oAuthHost).host;
+        } catch {
+          return null;
+        }
+      })();
+      const issHost = claims.iss
+        ? (() => {
+            try {
+              return new URL(claims.iss).host;
+            } catch {
+              return null;
+            }
+          })()
+        : null;
+      if (
+        expectedHost &&
+        issHost &&
+        issHost !== expectedHost &&
+        // Allow legacy tokens that omit `iss` entirely — only reject explicit
+        // mismatches.
+        true
+      ) {
+        log.debug('getStoredToken: dropping token with mismatched issuer', {
+          key,
+          expectedHost,
+          issHost,
+        });
+        return undefined;
+      }
+      if (
+        claims.aud &&
+        claims.aud.length > 0 &&
+        !claims.aud.includes(expected.oAuthClientId)
+      ) {
+        log.debug('getStoredToken: dropping token with mismatched audience', {
+          key,
+          expectedClientId: expected.oAuthClientId,
+          aud: claims.aud,
+        });
+        return undefined;
+      }
+    }
+
     return {
       accessToken: entry.OAuthAccessToken,
       idToken: entry.OAuthIdToken,

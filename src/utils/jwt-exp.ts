@@ -135,6 +135,51 @@ export function decodeJwtExpiryMs(
 }
 
 /**
+ * Decode the `iss` (issuer) and `aud` (audience) claims from a JWT.
+ *
+ * Used by `getStoredToken` to drop tokens that were issued by a different
+ * OAuth client than the one this wizard build is configured to use. This
+ * catches the "user upgraded from an old wizard version" case where the
+ * stored token still passes the expiry check but was minted against a
+ * client_id that's no longer in the running build's `AMPLITUDE_ZONE_SETTINGS`.
+ *
+ * Returns `null` for unparseable tokens so callers can fall back to the
+ * pre-existing behavior (treat the token as opaquely usable). Never throws.
+ */
+export function decodeJwtIssAud(
+  token: string | undefined | null,
+): { iss: string | null; aud: string[] | null } | null {
+  if (typeof token !== 'string' || token.length === 0) return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return null;
+
+  let payload: unknown;
+  try {
+    const json = Buffer.from(parts[1], 'base64url').toString('utf8');
+    payload = JSON.parse(json);
+  } catch {
+    return null;
+  }
+  if (typeof payload !== 'object' || payload === null) return null;
+
+  const obj = payload as { iss?: unknown; aud?: unknown };
+  const iss = typeof obj.iss === 'string' ? obj.iss : null;
+
+  // RFC 7519 §4.1.3: `aud` may be a single string OR an array of strings.
+  let aud: string[] | null = null;
+  if (typeof obj.aud === 'string') {
+    aud = [obj.aud];
+  } else if (
+    Array.isArray(obj.aud) &&
+    obj.aud.every((a) => typeof a === 'string')
+  ) {
+    aud = obj.aud;
+  }
+
+  return { iss, aud };
+}
+
+/**
  * Convenience helper for the common write-time pattern: prefer the
  * id_token's `exp`, fall back to a server-supplied `expires_in`
  * (seconds), fall back to a 1-hour conservative default.

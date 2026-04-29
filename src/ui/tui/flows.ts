@@ -130,7 +130,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       isComplete: (s) =>
         s.credentials !== null &&
         (s.selectedOrgName !== null || s.selectedOrgId !== null) &&
-        (s.selectedProjectName !== null || s.selectedProjectId !== null),
+        (s.selectedProjectName !== null || s.selectedProjectId !== null) &&
+        // Returning-user account confirmation. Blocks the gate until the
+        // user explicitly confirms (or changes) the org/project that was
+        // resolved silently from disk. Set in bin.ts when resolveCredentials
+        // populates the session without going through the SUSI picker.
+        !s.requiresAccountConfirmation,
       // Back from DataSetup — drop the picked org/project/env so the
       // Auth screen re-renders the picker. Credentials stay so we don't
       // force a fresh OAuth round-trip.

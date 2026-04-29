@@ -254,9 +254,34 @@ export async function resolveCredentials(
         }
       } else {
         // Fetch user data to check how many environments are available.
+        // Bound the call with a timeout — a stale idToken from an older wizard
+        // version can cause the API to hang or take many seconds to respond,
+        // and the AuthScreen has nothing to show until this resolves. Treat
+        // a timeout as a fetch failure so the caller drops to AuthScreen and
+        // forces a fresh OAuth round-trip via the bin-level probe.
         const { fetchAmplitudeUser } = await import('./api.js');
+        const RESOLVE_PROBE_MS = 8_000;
+        const probeUser = async () => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            return await Promise.race([
+              fetchAmplitudeUser(storedToken.idToken, zone),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                  const err = new Error(
+                    `fetchAmplitudeUser timed out after ${RESOLVE_PROBE_MS}ms`,
+                  );
+                  err.name = 'TimeoutError';
+                  reject(err);
+                }, RESOLVE_PROBE_MS);
+              }),
+            ]);
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
+          }
+        };
         try {
-          const userInfo = await fetchAmplitudeUser(storedToken.idToken, zone);
+          const userInfo = await probeUser();
           analytics.setDistinctId(userInfo.email);
           analytics.identifyUser({ email: userInfo.email });
           const projectId = session.selectedProjectId ?? undefined;
