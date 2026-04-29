@@ -1,5 +1,64 @@
 # Changelog
 
+## [1.8.0](https://github.com/amplitude/wizard/compare/wizard-v1.7.0...wizard-v1.8.0) (2026-04-29)
+
+
+### Features
+
+* [BA-35] persist install UUID as Amplitude device_id ([#218](https://github.com/amplitude/wizard/issues/218)) ([64d69f6](https://github.com/amplitude/wizard/commit/64d69f6cb78404f455b44a8efcea98b7e5e9e0fb))
+* [BA-61] add reason to wizard-tools calls + wizard_feedback tool ([#324](https://github.com/amplitude/wizard/issues/324)) ([25ce525](https://github.com/amplitude/wizard/commit/25ce525126182d2e2e5df624c5b2048faa27f580))
+* **agent:** typed UI-hint protocol on needs_input + projects list command ([#299](https://github.com/amplitude/wizard/issues/299)) ([8fc25a9](https://github.com/amplitude/wizard/commit/8fc25a9cc03e5f21be57318f6a0b34f461f26c14))
+* **agent:** wire AgentState persistence + inner-lifecycle hooks (Bet 2 slice 11) ([#288](https://github.com/amplitude/wizard/issues/288)) ([a86d6bb](https://github.com/amplitude/wizard/commit/a86d6bb924843357d010d55fb3a43d912f485893))
+* **analytics:** per-run x-amp-wizard-session-id for Agent Analytics ([#357](https://github.com/amplitude/wizard/issues/357)) ([a204e5f](https://github.com/amplitude/wizard/commit/a204e5f72c991edb2bda124d387e45d6ada05eff))
+* auto-enable autocapture + SR + G&S for unified browser SDK projects ([#313](https://github.com/amplitude/wizard/issues/313)) ([5bb1264](https://github.com/amplitude/wizard/commit/5bb126438ab771fefdac30021761e307e93be368))
+* commit instrumented events to tracking plan as planned ([#167](https://github.com/amplitude/wizard/issues/167)) ([9dad02f](https://github.com/amplitude/wizard/commit/9dad02f03258f44b163e02eb042b843d71e7b307))
+* consent-gated diagnostics on /feedback (MCP-163) ([#192](https://github.com/amplitude/wizard/issues/192)) ([a9e60c3](https://github.com/amplitude/wizard/commit/a9e60c3da530c09a044bcbd1f5efee7b34ce59c8))
+* guarantee amplitude-setup-report.md on every successful run ([#327](https://github.com/amplitude/wizard/issues/327)) ([fd12ae7](https://github.com/amplitude/wizard/commit/fd12ae7e2958abe771736d6bf2aacb63809694f5))
+* hide command bar on intro and make /region fully swap API host ([#156](https://github.com/amplitude/wizard/issues/156)) ([8ba23d5](https://github.com/amplitude/wizard/commit/8ba23d5db7549272e8282ad42a0eb0bd863cf91c))
+* **observability:** instrument MCP servers + token measurements via Sentry ([#292](https://github.com/amplitude/wizard/issues/292)) ([b4f748d](https://github.com/amplitude/wizard/commit/b4f748d5a0801a3a7b7584d20c18aaf12e93486f))
+* outro polish, setup-report archive, stable task counter ([#316](https://github.com/amplitude/wizard/issues/316)) ([10bf016](https://github.com/amplitude/wizard/commit/10bf016b3baf3e9bb3de8ee9979473f7ccdd379d))
+* pre-stage skills + Title-Case event names + instrumentation gates ([#320](https://github.com/amplitude/wizard/issues/320)) ([107a429](https://github.com/amplitude/wizard/commit/107a429843e28153a82bada73228df9448ecfcdc))
+* **tui:** add Esc-based back navigation through wizard decisions ([#301](https://github.com/amplitude/wizard/issues/301)) ([1f9e218](https://github.com/amplitude/wizard/commit/1f9e21810a4514f80002c5c9883359d45b87e915))
+* **tui:** coach users when long-running screens take longer than expected ([#342](https://github.com/amplitude/wizard/issues/342)) ([e1cc2a9](https://github.com/amplitude/wizard/commit/e1cc2a951c9b391b07b9088fd8677779f55b16a9))
+* **tui:** error-outro recovery actions + last-used persistence ([#303](https://github.com/amplitude/wizard/issues/303)) ([f53b057](https://github.com/amplitude/wizard/commit/f53b057e69886e30e4776fdb17dfa2acb0e5596d))
+
+
+### Bug Fixes
+
+* **agent:** detect Anthropic gateway 401 patterns as auth errors ([#318](https://github.com/amplitude/wizard/issues/318)) ([09d8dfb](https://github.com/amplitude/wizard/commit/09d8dfb7417636b265954f8cd8e2ed7cc78aa902))
+* **async:** bound fetch() callsites with timeouts and clear stranded Promise.race timers ([#334](https://github.com/amplitude/wizard/issues/334)) ([fe5b7a0](https://github.com/amplitude/wizard/commit/fe5b7a0dd932b00383915a2ce677659c943bb6d7))
+* **async:** wire SIGINT to AbortController across agent + MCP and make graceful-exit idempotent ([#341](https://github.com/amplitude/wizard/issues/341)) ([4d6f5f4](https://github.com/amplitude/wizard/commit/4d6f5f45205a7c8b3ee39087c75d49d3e73f07cc))
+* **auth:** clean up OAuth callback server on timeout/abort and pick a dynamic port for concurrent runs ([#339](https://github.com/amplitude/wizard/issues/339)) ([debbbbf](https://github.com/amplitude/wizard/commit/debbbbfe1ebb4341c4ff647337f3e4424b18bd14))
+* **auth:** scope getStoredToken lookup to the requested zone ([#345](https://github.com/amplitude/wizard/issues/345)) ([98a1583](https://github.com/amplitude/wizard/commit/98a15835602ca76dac8d6816f1fe47707636ade6))
+* **claude-settings:** scope wizard env to settings.local.json instead of nuking the user's settings ([#349](https://github.com/amplitude/wizard/issues/349)) ([cccd175](https://github.com/amplitude/wizard/commit/cccd1759e3cc284c94d7ec847eef7ff7aaa4f4a1))
+* **commandments:** break agent's bash-deny retry loop + forbid runtime env verify ([#330](https://github.com/amplitude/wizard/issues/330)) ([d5ef159](https://github.com/amplitude/wizard/commit/d5ef15943bc610e2d06caee49d9037f82ef5d77b))
+* **commandments:** forbid installing non-Amplitude packages ([#328](https://github.com/amplitude/wizard/issues/328)) ([4834eae](https://github.com/amplitude/wizard/commit/4834eaed1220229f32ccc84a6e0445019bba525a))
+* **commandments:** inline browser API key unless framework has a clean env convention ([#329](https://github.com/amplitude/wizard/issues/329)) ([e3b8bf9](https://github.com/amplitude/wizard/commit/e3b8bf95a993685a1e866e8f4be8d40e808088e3))
+* **commandments:** plan TodoWrite tasks upfront, don't grow mid-run ([#315](https://github.com/amplitude/wizard/issues/315)) ([94401bf](https://github.com/amplitude/wizard/commit/94401bf85150ae9ceaf139fea96773af5ca3c563))
+* **cross-platform:** replace hardcoded /tmp paths with os.tmpdir() so wizard works on Windows ([#333](https://github.com/amplitude/wizard/issues/333)) ([40d9614](https://github.com/amplitude/wizard/commit/40d96141ec0bd674c4fa9a3dcce3f85a79930a36))
+* don't throw away the run when MCP fails late ([#344](https://github.com/amplitude/wizard/issues/344)) ([51fba52](https://github.com/amplitude/wizard/commit/51fba5271f9e9e1fddacb6a2b5e05c0005e9af5f))
+* **eu:** pass zone to in-run token refresh + pin agent to wizard's project + region ([#348](https://github.com/amplitude/wizard/issues/348)) ([b7370d4](https://github.com/amplitude/wizard/commit/b7370d430f2304d1a26bdc3d25ead68a9e82aa37))
+* gracefully handle late-stage API errors so users see the Outro ([#331](https://github.com/amplitude/wizard/issues/331)) ([6c5f0af](https://github.com/amplitude/wizard/commit/6c5f0af98a7fa9803501f9406421063225264302))
+* **mcp:** support Cursor on Linux ([#332](https://github.com/amplitude/wizard/issues/332)) ([22ff61b](https://github.com/amplitude/wizard/commit/22ff61b792a22b92ed1ad97deeaf611fafe05187))
+* Next.js surface detection, stale-activation guard, lint-phase scope ([#346](https://github.com/amplitude/wizard/issues/346)) ([85549b1](https://github.com/amplitude/wizard/commit/85549b1087f3fa78fe9ee421ac90116cf0eee10f))
+* **observability:** preserve report_status detail in wizardAbort context ([#326](https://github.com/amplitude/wizard/issues/326)) ([aeec14e](https://github.com/amplitude/wizard/commit/aeec14e9e39d8f216a13b9f8f9e744b45a394016))
+* **observability:** suppress hook-bridge-race stderr noise from CLI subprocess ([#317](https://github.com/amplitude/wizard/issues/317)) ([8bc31e3](https://github.com/amplitude/wizard/commit/8bc31e3efa2b9c3ca5dd9efb781d9d07fc78eb07))
+* **observability:** swallow EPIPE on stdout/stderr to prevent crashes ([#321](https://github.com/amplitude/wizard/issues/321)) ([50874a5](https://github.com/amplitude/wizard/commit/50874a54c192e608a0191dd76a6cb42267b39779))
+* **plan:** lock TodoWrite to 5 user-visible steps; disable thinking ([#347](https://github.com/amplitude/wizard/issues/347)) ([635eb73](https://github.com/amplitude/wizard/commit/635eb7340a12935f2bb197a07ffa65f14785935c))
+* recover from stale macOS keychain search-list entries ([#361](https://github.com/amplitude/wizard/issues/361)) ([60d5f58](https://github.com/amplitude/wizard/commit/60d5f585440cf0086ecbfecdacab1e7f9193c2a4))
+* route screen exits through wizardSuccessExit / wizardAbort ([#343](https://github.com/amplitude/wizard/issues/343)) ([760a1a9](https://github.com/amplitude/wizard/commit/760a1a9c1c715a7e933b27f26fc6c83dee06f94a))
+* **security:** harden OAuth, command exec, file modes, and skill download ([#335](https://github.com/amplitude/wizard/issues/335)) ([691879a](https://github.com/amplitude/wizard/commit/691879a9d22efcf87391d5d00cb9565a7072c5c1))
+* stop localhost:8010 leaking into user-facing setup output ([#312](https://github.com/amplitude/wizard/issues/312)) ([6dd1000](https://github.com/amplitude/wizard/commit/6dd10004856e581d10800581fed79a22773f67fa))
+* surface newly created dashboard URL in outro instead of Amplitude Home ([#325](https://github.com/amplitude/wizard/issues/325)) ([e7b28e1](https://github.com/amplitude/wizard/commit/e7b28e1adba0413294877e9d53dbe3ef65bf46c6))
+* **tui:** clarify error labels and keybinding hint in log viewer ([#311](https://github.com/amplitude/wizard/issues/311)) ([c57b415](https://github.com/amplitude/wizard/commit/c57b415fb4860ae1d8b9754649888373528e9ac1))
+* **tui:** close fs.watch swap race and leaked timers in screen cleanup ([#338](https://github.com/amplitude/wizard/issues/338)) ([c0425ac](https://github.com/amplitude/wizard/commit/c0425accb06dcdf864753ff2bd32ce76d2841a3b))
+* **tui:** confirm target directory before any agent run, with inline change + monorepo warnings ([#358](https://github.com/amplitude/wizard/issues/358)) ([ce4f795](https://github.com/amplitude/wizard/commit/ce4f79597c38fb802edd417c31de93ced08cb0cd))
+* **tui:** guard mid-run slash commands and rewrite MCP_MISSING copy without internal jargon ([#336](https://github.com/amplitude/wizard/issues/336)) ([e24c557](https://github.com/amplitude/wizard/commit/e24c557c3cd7c287108e64a0acce4a5660fb47d5))
+* **tui:** make ActivationOptions debug path honest and verify Slack connection on confirm ([#337](https://github.com/amplitude/wizard/issues/337)) ([ed78fa8](https://github.com/amplitude/wizard/commit/ed78fa85af32976efaac1ffceda3a8a0fa714188))
+* **tui:** resolve log path at render time + friendlier empty state ([#322](https://github.com/amplitude/wizard/issues/322)) ([d7eec77](https://github.com/amplitude/wizard/commit/d7eec779abf601bc0df06b4443345388d44f049d))
+* **tui:** slash menu mid-sentence + setup-report color leak ([#314](https://github.com/amplitude/wizard/issues/314)) ([96e7115](https://github.com/amplitude/wizard/commit/96e711595a50eb081fccab5b1627e54eee410d96))
+* **tui:** unblock dead-end screens with admin-handoff, manual-edit guidance, and Esc cancel ([#340](https://github.com/amplitude/wizard/issues/340)) ([4343aac](https://github.com/amplitude/wizard/commit/4343aacb327d757441b1e02448fb9984bf789eba))
+
 ## [1.7.0](https://github.com/amplitude/wizard/compare/wizard-v1.6.0...wizard-v1.7.0) (2026-04-26)
 
 
