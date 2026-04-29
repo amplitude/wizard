@@ -203,6 +203,43 @@ export function resolveMaxTurns(
 // can route structured events back into the per-run state bag.
 let _activeStatusReporter: StatusReporter | undefined;
 
+/**
+ * Map a `WizardMode` to the actual Claude model alias the SDK should use.
+ *
+ *   - `fast`     → `claude-haiku-4-5`  — quickest turn time, lowest cost,
+ *                                       weaker on long file edits
+ *   - `standard` → `claude-sonnet-4-6` — current default; best balance
+ *   - `thorough` → `claude-opus-4-7`   — most careful, slower, pricier
+ *
+ * The Amplitude LLM gateway expects the `anthropic/<alias>` prefix; the
+ * direct Anthropic API expects the bare alias. `bin.ts:validateModeFlag`
+ * already gates `thorough` on the presence of a direct `ANTHROPIC_API_KEY`
+ * because the gateway does not yet vend Opus (verified in
+ * `src/__tests__/proxy.test.ts:84-85`).
+ *
+ * Exported so unit tests can pin the mapping without standing up the
+ * full agent runtime.
+ */
+export function selectModel(
+  mode: import('../utils/types').WizardMode,
+  useDirectApiKey: boolean,
+): string {
+  let alias: string;
+  switch (mode) {
+    case 'fast':
+      alias = 'claude-haiku-4-5';
+      break;
+    case 'thorough':
+      alias = 'claude-opus-4-7';
+      break;
+    case 'standard':
+    default:
+      alias = 'claude-sonnet-4-6';
+      break;
+  }
+  return useDirectApiKey ? alias : `anthropic/${alias}`;
+}
+
 export type AgentConfig = {
   workingDirectory: string;
   amplitudeMcpUrl: string;
@@ -218,6 +255,13 @@ export type AgentConfig = {
   skipAmplitudeMcp?: boolean;
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
+  /**
+   * Agent model tier — `'fast'` (Haiku 4.5), `'standard'` (Sonnet 4.6,
+   * default), or `'thorough'` (Opus 4.7). Threaded from `WizardSession.mode`
+   * via `agent-runner.ts`. See `selectModel()` for the alias mapping.
+   * Undefined defaults to `'standard'`.
+   */
+  mode?: import('../utils/types').WizardMode;
   /**
    * UUID v4 that groups all `/v1/messages` calls in this wizard run into one
    * Agent Analytics session. Sourced from `WizardSession.agentSessionId`,
@@ -1408,10 +1452,12 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
-      // Gateway expects 'anthropic/claude-sonnet-4-6'; direct Anthropic API expects 'claude-sonnet-4-6'
-      model: useDirectApiKey
-        ? 'claude-sonnet-4-6'
-        : 'anthropic/claude-sonnet-4-6',
+      // Mode → model alias. Default 'standard' = current behavior
+      // (Sonnet 4.6). 'fast' uses Haiku 4.5; 'thorough' uses Opus 4.7
+      // (gated to direct-API runs by `bin.ts:validateModeFlag`).
+      // Gateway expects the `anthropic/<alias>` prefix; direct API expects
+      // the bare alias — `selectModel` handles both.
+      model: selectModel(config.mode ?? 'standard', useDirectApiKey),
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,

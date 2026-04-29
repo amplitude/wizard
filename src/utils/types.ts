@@ -1,3 +1,25 @@
+/**
+ * Agent model tier. Maps 1:1 to a Claude model alias inside
+ * `agent-interface.ts:selectModel()`:
+ *
+ *   - `fast`     → claude-haiku-4-5  (faster, cheaper, less code-savvy —
+ *                                    use for quick demos / CI smoke runs)
+ *   - `standard` → claude-sonnet-4-6 (the default — best speed/quality
+ *                                    tradeoff for the wizard's
+ *                                    file-edit-heavy workload)
+ *   - `thorough` → claude-opus-4-7   (slower, pricier, more careful —
+ *                                    requires a direct ANTHROPIC_API_KEY
+ *                                    until the Amplitude LLM gateway
+ *                                    starts vending Opus)
+ */
+export type WizardMode = 'fast' | 'standard' | 'thorough';
+
+export const WIZARD_MODES: readonly WizardMode[] = [
+  'fast',
+  'standard',
+  'thorough',
+] as const;
+
 export type AmplitudeProjectData = Record<string, unknown>;
 
 export type PreselectedProject = {
@@ -69,6 +91,14 @@ export type WizardOptions = {
    * and writes detailed usage data to amplitude-wizard-benchmark.json in the OS temp dir.
    */
   benchmark: boolean;
+
+  /**
+   * Agent model tier. See {@link WizardMode} for the model mapping.
+   * Optional — call sites that omit it (e.g. internal-default options
+   * passed to detection / diagnostics) inherit `'standard'` once the
+   * session schema's default kicks in.
+   */
+  mode?: WizardMode;
 };
 
 export interface Feature {

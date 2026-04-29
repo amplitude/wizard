@@ -26,6 +26,7 @@ import {
   HOOK_BRIDGE_RACE_RE,
   partitionHookBridgeRace,
   AgentErrorType,
+  selectModel,
 } from '../agent-interface';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -2600,5 +2601,48 @@ describe('createPostToolUseHook', () => {
       // tooling like the cleanup writer).
       expect(state.snapshot().modifiedFiles).toContain('/project/leaky.ts');
     });
+  });
+});
+
+/**
+ * `selectModel` is the single chokepoint that translates a user-facing
+ * `WizardMode` into the actual Claude model alias the SDK ships with the
+ * request. Three things must hold for every mode:
+ *
+ *   1. The bare alias is sent on direct-API runs (no `anthropic/` prefix).
+ *   2. The `anthropic/<alias>` prefix is sent on gateway runs (the
+ *      Amplitude LLM gateway expects this shape).
+ *   3. An undefined / unknown mode falls back to the safe default
+ *      (`standard` → Sonnet 4.6) — important because internal call sites
+ *      (detection, diagnostics) construct `WizardOptions` without `mode`,
+ *      and we don't want one of them silently routing through Haiku/Opus.
+ */
+describe('selectModel', () => {
+  it('maps fast → claude-haiku-4-5', () => {
+    expect(selectModel('fast', true)).toBe('claude-haiku-4-5');
+    expect(selectModel('fast', false)).toBe('anthropic/claude-haiku-4-5');
+  });
+
+  it('maps standard → claude-sonnet-4-6 (the default tier)', () => {
+    expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
+    expect(selectModel('standard', false)).toBe('anthropic/claude-sonnet-4-6');
+  });
+
+  it('maps thorough → claude-opus-4-7', () => {
+    expect(selectModel('thorough', true)).toBe('claude-opus-4-7');
+    expect(selectModel('thorough', false)).toBe('anthropic/claude-opus-4-7');
+  });
+
+  it('treats an unknown mode as standard (defensive default)', () => {
+    // `bin.ts` rejects unknown values via yargs `choices`, so this branch
+    // is only reachable from internal callers that bypass the CLI parser.
+    // Returning Sonnet 4.6 keeps a misconfigured caller on the safe path
+    // instead of silently routing them to Haiku or Opus.
+    expect(selectModel('bogus' as 'standard', true)).toBe(
+      'claude-sonnet-4-6',
+    );
+    expect(selectModel('bogus' as 'standard', false)).toBe(
+      'anthropic/claude-sonnet-4-6',
+    );
   });
 });

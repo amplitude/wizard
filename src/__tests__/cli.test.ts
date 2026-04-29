@@ -349,6 +349,92 @@ describe('CI mode validation', { timeout: 20_000 }, () => {
     expect(initialSession).toBeDefined();
     expect(initialSession?.installDir).toBe('/tmp/test-app');
   });
+
+  test('--mode flag threads through to the initial session (default: standard)', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    await runCLI([]);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    // Mode defaults to 'standard' even when the flag is omitted — that's
+    // the contract that keeps existing users on Sonnet 4.6 without any
+    // change in behavior.
+    expect(initialSession?.mode).toBe('standard');
+  });
+
+  test('--mode=fast threads through to the initial session', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    await runCLI(['--mode', 'fast']);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession?.mode).toBe('fast');
+  });
+
+  test('--mode=thorough errors out early when ANTHROPIC_API_KEY is unset (gateway does not vend Opus)', async () => {
+    // The validation sits in `bin.ts:validateModeFlag`. It runs before any
+    // session/auth/TUI setup, so the user gets immediate feedback instead
+    // of waiting for OAuth to finish only to silently fall back to Sonnet
+    // 4.5 via `fallbackModel`. We assert: process.exit(2) was called, the
+    // stderr message tells the user what to do, and the TUI never starts.
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    const originalKey = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    const stderrSpy = vi
+      .spyOn(process.stderr, 'write')
+      .mockImplementation(() => true);
+
+    try {
+      // `validateModeFlag` calls process.exit(2) and then throws so test
+      // execution doesn't carry on into auth / TUI bootstrap when exit is
+      // mocked. Catch that throw at runCLI and assert what we actually
+      // care about: stderr message, exit code, and TUI never started.
+      await runCLI(['--mode', 'thorough']).catch(() => {
+        /* expected — see comment above */
+      });
+      // Walk every stderr write and concatenate; the message spans
+      // multiple lines and may be batched as one or many writes.
+      const stderr = stderrSpy.mock.calls
+        .map((c) => String(c[0]))
+        .join('');
+      expect(stderr).toContain('--mode=thorough');
+      expect(stderr).toContain('ANTHROPIC_API_KEY');
+      expect(process.exit).toHaveBeenCalledWith(2);
+      expect(mockStartTUI).not.toHaveBeenCalled();
+    } finally {
+      stderrSpy.mockRestore();
+      if (originalKey !== undefined) process.env.ANTHROPIC_API_KEY = originalKey;
+    }
+  });
+
+  test('--mode=thorough is allowed when ANTHROPIC_API_KEY is set', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    const originalKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+
+    try {
+      await runCLI(['--mode', 'thorough']);
+      await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+      const initialSession = mockStartTUI.mock.calls[0][2];
+      expect(initialSession?.mode).toBe('thorough');
+      expect(process.exit).not.toHaveBeenCalledWith(2);
+    } finally {
+      if (originalKey === undefined) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY = originalKey;
+      }
+    }
+  });
 });
 
 // ── TUI auth task: region determines OAuth zone ────────────────────────────────
