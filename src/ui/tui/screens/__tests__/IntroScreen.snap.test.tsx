@@ -53,14 +53,21 @@ function fakeConfig(
 }
 
 describe('IntroScreen snapshots', () => {
-  it('renders the detecting state with spinner and "Detecting project framework" copy', () => {
+  it('renders the detecting state with target line + "Scanning …" spinner', () => {
     const store = makeStoreForSnapshot({
       detectionComplete: false,
       frameworkConfig: null,
+      // Pin a stable path so the snapshot doesn't include a per-run
+      // tmpdir like `/var/folders/.../wizard-snapshot-XXX`.
+      installDir: '/projects/my-app',
     });
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('Amplitude Wizard');
-    expect(frame).toContain('Detecting project framework');
+    // Target line is visible during detection — that's the whole point
+    // of moving it above the spinner. If a user pointed the wizard at
+    // the wrong directory, they need to spot it here.
+    expect(frame).toContain('Target');
+    expect(frame).toContain('Scanning');
     expect(frame).toMatchSnapshot();
   });
 

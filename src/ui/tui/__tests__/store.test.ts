@@ -1643,4 +1643,127 @@ describe('WizardStore', () => {
       expect(popped).toBe(false);
     });
   });
+
+  // ── Inline directory change ──────────────────────────────────────
+  //
+  // The IntroScreen "Change directory" flow runs through
+  // `store.changeInstallDir` + `store.setFrameworkRedetector`. These
+  // tests pin the store-side contract: state reset is correct, the
+  // re-detector is invoked, and a new call cancels the previous one.
+  describe('changeInstallDir', () => {
+    function seedDetectionState(store: WizardStore): void {
+      // Mimic the post-detection state the IntroScreen would observe
+      // before the user opted to change directories.
+      store.setFrameworkConfig(Integration.nextjs, {
+        metadata: {
+          integration: Integration.nextjs,
+          name: 'Next.js',
+        },
+      } as unknown as Parameters<typeof store.setFrameworkConfig>[1]);
+      store.setDetectedFramework('Next.js');
+      store.setFrameworkContext('appRouter', true);
+      store.setDetectionComplete();
+    }
+
+    it('resets detection state and updates installDir', () => {
+      const store = createStore();
+      seedDetectionState(store);
+      expect(store.session.detectionComplete).toBe(true);
+      expect(store.session.integration).toBe(Integration.nextjs);
+
+      store.changeInstallDir('/tmp/another-project');
+
+      expect(store.session.installDir).toBe('/tmp/another-project');
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.detectedFrameworkLabel).toBeNull();
+      expect(store.session.detectionComplete).toBe(false);
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.detectionResults).toEqual([]);
+      expect(store.session.discoveredFeatures).toEqual([]);
+    });
+
+    it('clears the checkpoint-restore flag — directory change invalidates resume', () => {
+      const store = createStore();
+      // Mimic a user who opted to "Resume where you left off" but then
+      // realized the wizard was pointed at the wrong tree.
+      store.session = { ...store.session, _restoredFromCheckpoint: true };
+
+      store.changeInstallDir('/tmp/different-tree');
+
+      expect(store.session._restoredFromCheckpoint).toBe(false);
+    });
+
+    it('invokes the registered redetector with the new directory', () => {
+      const store = createStore();
+      const redetect = vi.fn().mockResolvedValue(undefined);
+      store.setFrameworkRedetector(redetect);
+
+      store.changeInstallDir('/tmp/new-target');
+
+      expect(redetect).toHaveBeenCalledTimes(1);
+      const [path, signal] = redetect.mock.calls[0];
+      expect(path).toBe('/tmp/new-target');
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal.aborted).toBe(false);
+    });
+
+    it('aborts the previous detection when a second change fires', () => {
+      const store = createStore();
+      const redetect = vi.fn().mockResolvedValue(undefined);
+      store.setFrameworkRedetector(redetect);
+
+      store.changeInstallDir('/tmp/first');
+      const firstSignal = redetect.mock.calls[0][1] as AbortSignal;
+      expect(firstSignal.aborted).toBe(false);
+
+      store.changeInstallDir('/tmp/second');
+      // The first run's signal is now aborted — its detection should
+      // bail out rather than stomp on state for the new directory.
+      expect(firstSignal.aborted).toBe(true);
+
+      const secondSignal = redetect.mock.calls[1][1] as AbortSignal;
+      expect(secondSignal.aborted).toBe(false);
+    });
+
+    it('is a no-op for the redetector when none is registered', () => {
+      const store = createStore();
+      // No setFrameworkRedetector call — simulates classic-mode or test
+      // entry points where bin.ts hasn't wired up the helper.
+      expect(() => store.changeInstallDir('/tmp/foo')).not.toThrow();
+      expect(store.session.installDir).toBe('/tmp/foo');
+      expect(store.session.detectionComplete).toBe(false);
+    });
+
+    it('tolerates redetector rejections (errors are non-fatal)', async () => {
+      const store = createStore();
+      const failing = vi.fn().mockRejectedValue(new Error('boom'));
+      store.setFrameworkRedetector(failing);
+
+      // Should not throw synchronously.
+      expect(() => store.changeInstallDir('/tmp/will-fail')).not.toThrow();
+      // Give the rejected promise a tick to settle without bubbling.
+      await new Promise((r) => setImmediate(r));
+      expect(failing).toHaveBeenCalledTimes(1);
+    });
+
+    it('emits a telemetry event with whether a redetector was registered', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.changeInstallDir('/tmp/no-redetector');
+      const noRedetectorCall = wizardCapture.mock.calls.find(
+        (call) => call[0] === 'install dir changed',
+      );
+      expect(noRedetectorCall?.[1]['has redetector']).toBe(false);
+
+      store.setFrameworkRedetector(vi.fn().mockResolvedValue(undefined));
+      store.changeInstallDir('/tmp/with-redetector');
+      const withRedetectorCall = wizardCapture.mock.calls
+        .filter((call) => call[0] === 'install dir changed')
+        .pop();
+      expect(withRedetectorCall?.[1]['has redetector']).toBe(true);
+    });
+  });
 });
