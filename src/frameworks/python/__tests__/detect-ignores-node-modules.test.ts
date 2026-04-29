@@ -112,10 +112,22 @@ describe('python-family detect() ignores node_modules', () => {
   it('detection completes well under the old 6s+ regression', async () => {
     const start = performance.now();
     await Promise.all([
-      DJANGO_AGENT_CONFIG.detection.detect({ ...baseOptions, installDir: tmpDir }),
-      FLASK_AGENT_CONFIG.detection.detect({ ...baseOptions, installDir: tmpDir }),
-      FASTAPI_AGENT_CONFIG.detection.detect({ ...baseOptions, installDir: tmpDir }),
-      PYTHON_AGENT_CONFIG.detection.detect({ ...baseOptions, installDir: tmpDir }),
+      DJANGO_AGENT_CONFIG.detection.detect({
+        ...baseOptions,
+        installDir: tmpDir,
+      }),
+      FLASK_AGENT_CONFIG.detection.detect({
+        ...baseOptions,
+        installDir: tmpDir,
+      }),
+      FASTAPI_AGENT_CONFIG.detection.detect({
+        ...baseOptions,
+        installDir: tmpDir,
+      }),
+      PYTHON_AGENT_CONFIG.detection.detect({
+        ...baseOptions,
+        installDir: tmpDir,
+      }),
     ]);
     const durationMs = performance.now() - start;
     // Generous bound — pre-fix this would have been multi-second on a
