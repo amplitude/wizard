@@ -36,6 +36,7 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
+import { clearApiKey } from '../../utils/api-key-store.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -743,6 +744,11 @@ export class WizardStore {
     cloudRegion: CloudRegion | null;
     orgs: WizardSession['pendingOrgs'];
   }): void {
+    // Wipe any cached project API key for this install dir before the
+    // AuthScreen resolution runs. Without this, a stale key from a prior
+    // run in a different org silently wins over the freshly-fetched env
+    // key in `data.orgs`, and the agent inlines the wrong key.
+    clearApiKey(this.session.installDir);
     this.$session.setKey('pendingAuthAccessToken', data.accessToken);
     this.$session.setKey('pendingAuthIdToken', data.idToken);
     this.$session.setKey('pendingOrgs', data.orgs);

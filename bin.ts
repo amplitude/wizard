@@ -609,6 +609,11 @@ const runDirectSignupIfRequested = async (
     );
     return;
   }
+  // Wipe any cached project API key for this install dir — a stale key
+  // from a prior run in a different org would otherwise win over the
+  // freshly-resolved env key when the AuthScreen / credential resolver runs.
+  const { clearApiKey } = await import('./src/utils/api-key-store.js');
+  clearApiKey(session.installDir);
   getUI().log.info('Direct signup succeeded; using newly created account.');
   if (onSuccess) {
     try {
@@ -1186,26 +1191,47 @@ void yargs(hideBin(process.argv))
               // Pre-populate region + credentials from stored OAuth tokens.
               const { logToFile } = await import('./src/utils/debug.js');
 
-              // Check for crash-recovery checkpoint
+              // Check for crash-recovery checkpoint.
+              // Skip on --signup: the user explicitly asked for a new
+              // account, so any stale `selectedOrgId/ProjectId/AppId` from
+              // a prior run would silently route them to the wrong org via
+              // the orgs[0] fallback in the fire-and-forget hydrator below.
               const { loadCheckpoint } = await import(
                 './src/lib/session-checkpoint.js'
               );
-              const checkpoint = await loadCheckpoint(session.installDir);
-              if (checkpoint) {
-                Object.assign(session, checkpoint);
-                session.introConcluded = false;
-                session._restoredFromCheckpoint = true;
+              if (session.signup) {
                 logToFile(
-                  '[bin] restored session from crash-recovery checkpoint',
+                  '[bin] --signup: skipping checkpoint restore to avoid stale org selection',
                 );
+              } else {
+                const checkpoint = await loadCheckpoint(session.installDir);
+                if (checkpoint) {
+                  Object.assign(session, checkpoint);
+                  session.introConcluded = false;
+                  session._restoredFromCheckpoint = true;
+                  logToFile(
+                    '[bin] restored session from crash-recovery checkpoint',
+                  );
+                }
               }
 
               // Resolve credentials using shared logic (token refresh,
-              // env auto-select, pendingOrgs population)
-              const { resolveCredentials } = await import(
-                './src/lib/credential-resolution.js'
-              );
-              await resolveCredentials(session);
+              // env auto-select, pendingOrgs population).
+              // Skip on --signup: pre-populating from a cached
+              // ~/.ampli.json User-* entry would let the auth task
+              // (line ~1494) bail out early on `credentials !== null` and
+              // never reach performSignupOrAuth, silently routing the user
+              // to their existing account instead of creating a new one.
+              if (session.signup) {
+                logToFile(
+                  '[bin] --signup: skipping credential pre-population (forces fresh signup flow)',
+                );
+              } else {
+                const { resolveCredentials } = await import(
+                  './src/lib/credential-resolution.js'
+                );
+                await resolveCredentials(session);
+              }
 
               // Resolve org/project display names so /whoami shows them.
               // Also extracts the numeric analytics project ID for MCP event detection.
@@ -1269,20 +1295,43 @@ void yargs(hideBin(process.argv))
                         });
                       }
                       if (session.selectedOrgId) {
-                        // Fall back to the first org if the stored ID is stale
-                        // (e.g. session checkpoint from a different account).
+                        // Look up the requested org. The orgs[0] fallback
+                        // exists for session-checkpoint staleness (different
+                        // account on this machine), but it must be GATED on
+                        // the requested org actually being absent — and
+                        // suppressed entirely on --signup, where any
+                        // mismatch means "this is a different account, do
+                        // not silently substitute." Without this, a stale
+                        // checkpoint would route a brand-new signup to the
+                        // user's existing primary org. Mismatches clear the
+                        // selection so AuthScreen prompts the user.
+                        const exact = userInfo.orgs.find(
+                          (o) => o.id === session.selectedOrgId,
+                        );
                         const org =
-                          userInfo.orgs.find(
-                            (o) => o.id === session.selectedOrgId,
-                          ) ?? userInfo.orgs[0];
+                          exact ??
+                          (session.signup ? undefined : userInfo.orgs[0]);
                         logToFile(
                           `[bin] fire-and-forget: orgs=${userInfo.orgs
                             .map((o) => o.id)
                             .join(',')}, looking for ${
                             session.selectedOrgId
-                          }, using=${org?.id ?? 'none'}`,
+                          }, using=${org?.id ?? 'none'}${
+                            session.signup && !exact
+                              ? ' (signup: no fallback)'
+                              : ''
+                          }`,
                         );
-                        if (org) {
+                        if (!org) {
+                          // Either signup-mode miss or empty orgs list —
+                          // clear the stale selection so the picker fires.
+                          session.selectedOrgId = null;
+                          session.selectedOrgName = null;
+                          session.selectedProjectId = null;
+                          session.selectedProjectName = null;
+                          session.selectedAppId = null;
+                          changed = true;
+                        } else {
                           session.selectedOrgName = org.name;
                           changed = true;
                           // Fall back to the first project if the stored ID is stale.
@@ -1508,7 +1557,15 @@ void yargs(hideBin(process.argv))
                   './src/utils/ampli-settings.js'
                 );
 
-                const forceFresh = !ampliConfigExists(installDir);
+                // Force a fresh browser login when --signup is set so the
+                // OAuth fallback (used when direct signup fails or the
+                // server returns requires_redirect) doesn't silently reuse
+                // a cached `User-*` token from ~/.ampli.json. Without this,
+                // a user who has ever logged in to a different Amplitude
+                // account on this machine gets routed back to that
+                // account instead of creating a new one.
+                const forceFresh =
+                  tui.store.session.signup || !ampliConfigExists(installDir);
 
                 // Wait for the user to dismiss the welcome screen AND pick a
                 // region before opening the OAuth URL. This ensures the logo

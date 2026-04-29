@@ -596,6 +596,14 @@ runAgent(config, prompt, options, spinner, runConfig, middleware?)
 ├─ Error detection in output:
 │   AUTH_ERROR, MCP_MISSING, RESOURCE_MISSING, RATE_LIMIT, API_ERROR
 │
+├─ Auth-retry short-circuit:
+│   The Claude SDK retries 401s ~10× with exponential backoff (~3 min).
+│   A 401 won't recover within a run, so after AUTH_RETRY_LIMIT (=2)
+│   consecutive `api_retry` system messages with error_status 401 (or
+│   matching auth-error patterns), runAgent calls
+│   controller.abort('auth_failed') and returns AUTH_ERROR. The runner
+│   shows a friendly outro pointing to /signup as a manual fallback.
+│
 └─ Return { error?: AgentErrorType, message?: string }
 ```
 

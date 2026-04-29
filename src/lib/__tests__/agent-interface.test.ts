@@ -24,6 +24,7 @@ import {
   HOOK_BRIDGE_RACE_RE,
   partitionHookBridgeRace,
   AgentErrorType,
+  AUTH_RETRY_LIMIT,
 } from '../agent-interface';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -471,6 +472,112 @@ describe('runAgent', () => {
 
       expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
+    });
+
+    it('aborts early after AUTH_RETRY_LIMIT consecutive 401 api_retry messages', async () => {
+      // The Claude SDK retries 401s up to ~10 times with exponential backoff
+      // (~3 min total). A 401 won't recover within a run, so we short-circuit
+      // after AUTH_RETRY_LIMIT to surface AUTH_ERROR immediately.
+      let aborted = false;
+      function* authRetryStormGenerator() {
+        for (let i = 0; i < AUTH_RETRY_LIMIT; i++) {
+          yield {
+            type: 'system',
+            subtype: 'api_retry',
+            attempt: i,
+            error_status: 401,
+            error: 'authentication_failed',
+            retry_delay_ms: 1000,
+          };
+        }
+        // After the threshold, the generator should never deliver another
+        // useful message — controller.abort('auth_failed') will cause the
+        // SDK iterator to throw on next iteration in real life.
+        aborted = true;
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      }
+
+      mockQuery.mockReturnValue(authRetryStormGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
+      expect(aborted).toBe(true);
+      expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
+    });
+
+    it('treats api_retry with auth-error pattern (no error_status) as auth retry', async () => {
+      // Some SDK builds put the auth signal in the body without a numeric
+      // error_status — make sure we still detect it via pattern match.
+      function* authPatternGenerator() {
+        for (let i = 0; i < AUTH_RETRY_LIMIT; i++) {
+          yield {
+            type: 'system',
+            subtype: 'api_retry',
+            attempt: i,
+            error: 'authentication_error',
+            retry_delay_ms: 1000,
+          };
+        }
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      }
+
+      mockQuery.mockReturnValue(authPatternGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
+    });
+
+    it('does not abort early on non-auth api_retry messages (e.g. 503)', async () => {
+      // 5xx retries can recover within the same run — they must keep
+      // streaming through the SDK's retry policy and not trip the auth
+      // short-circuit.
+      function* gateway503Then200() {
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 0,
+          error_status: 503,
+          error: 'gateway_unavailable',
+          retry_delay_ms: 100,
+        };
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 1,
+          error_status: 503,
+          error: 'gateway_unavailable',
+          retry_delay_ms: 100,
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Done',
+        };
+      }
+
+      mockQuery.mockReturnValue(gateway503Then200());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBeUndefined();
     });
 
     it('should report AUTH_ERROR when amplitude-wizard MCP has needs-auth status', async () => {

@@ -31,6 +31,11 @@ export class LoggingUI implements WizardUI {
     return Promise.resolve();
   }
 
+  setOutroData(data: import('../lib/wizard-session.js').OutroData): void {
+    // No TUI to render — emit the message inline so CI logs capture it.
+    if (data.message) console.error(`■  ${data.message}`);
+  }
+
   log = {
     info(message: string): void {
       console.log(`│  ${message}`);

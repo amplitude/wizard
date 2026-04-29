@@ -785,14 +785,29 @@ async function runAgentWizardBody(
       'agent-runner',
       { integration: config.metadata.integration },
     );
-    const authMessage = `Authentication failed\n\nYour Amplitude session has expired. Please run the wizard again to log in.`;
-    session.credentials = null;
-    session.outroData = {
+    const signupUrl = `${OUTBOUND_URLS.overview[cloudRegion]}/signup`;
+    const authMessage =
+      `Authentication failed\n\n` +
+      `We couldn't authenticate your Amplitude session with our service. ` +
+      `This can happen if your account was just created and isn't fully provisioned yet.\n\n` +
+      `Try one of the following:\n` +
+      `  • Re-run the wizard in a minute and log in again\n` +
+      `  • Sign up manually at ${signupUrl}, then re-run the wizard`;
+    // Set outroData via the UI so the OutroScreen reliably re-renders before
+    // wizardAbort awaits user dismissal. Direct mutation of session.outroData
+    // doesn't notify nanostore subscribers and would make the outro miss the
+    // updated state — the user would not see the auth-failure confirmation
+    // before being routed back to login on the next run.
+    getUI().setOutroData({
       kind: OutroKind.Error,
       message: authMessage,
       promptLogin: true,
       canRestart: true,
-    };
+    });
+    // Also push a status so the failure is visibly announced even if the
+    // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).
+    getUI().pushStatus('Authentication failed — see details below.');
+    session.credentials = null;
     await wizardAbort({
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {

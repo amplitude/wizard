@@ -236,6 +236,12 @@ export class AgentUI implements WizardUI {
     return Promise.resolve();
   }
 
+  setOutroData(data: import('../lib/wizard-session.js').OutroData): void {
+    emit('lifecycle', data.message ?? '', {
+      data: { event: 'outro_data', kind: data.kind },
+    });
+  }
+
   /**
    * Emit a structured auth_required lifecycle event when the wizard is invoked
    * in --agent mode without valid credentials. Agent orchestrators (Claude

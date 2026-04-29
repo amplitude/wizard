@@ -30,7 +30,6 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
 
   const { session } = store;
   const [email, setEmail] = useState(session.signupEmail ?? '');
-  const [fullName, setFullName] = useState(session.signupFullName ?? '');
   const [step, setStep] = useState<'email' | 'name'>('email');
   const [error, setError] = useState<string | null>(null);
 
@@ -55,9 +54,7 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
       setError('Full name is required');
       return;
     }
-    setFullName(trimmed);
 
-    // Update session with captured email and full name
     store.setSignupEmail(email);
     store.setSignupFullName(trimmed);
     store.markEmailCaptureComplete();
@@ -79,13 +76,15 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
       <Box flexDirection="column" marginBottom={1}>
         {step === 'email' ? (
           <TextInput
+            key="email-input"
             defaultValue={email}
             placeholder="your.email@example.com"
             onSubmit={handleEmailSubmit}
           />
         ) : (
           <TextInput
-            defaultValue={fullName}
+            key="name-input"
+            defaultValue=""
             placeholder="First Last"
             onSubmit={handleNameSubmit}
           />
