@@ -1199,6 +1199,20 @@ export function writeFallbackReportIfMissing(
 const SERVER_NAME = 'wizard-tools';
 
 /**
+ * Description appended to every tool's `reason` parameter. Kept as a constant
+ * so all wizard-tools schemas describe `reason` identically — the agent reads
+ * the description verbatim to decide what to write here.
+ */
+const REASON_FIELD_DESCRIPTION =
+  'A short sentence (≤25 words) explaining WHY you are invoking this tool right now — what you are trying to accomplish at this step. Captured in Agent Analytics so the team can understand intent across runs.';
+
+/**
+ * Reusable Zod field for the `reason` parameter required on every wizard tool.
+ * Adding `.min(1)` so an empty string is rejected — analytics needs real text.
+ */
+const reasonField = z.string().min(1).describe(REASON_FIELD_DESCRIPTION);
+
+/**
  * Create the unified in-process MCP server with all wizard tools.
  * Must be called asynchronously because the SDK is an ESM module loaded via dynamic import.
  */
@@ -1233,8 +1247,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       keys: z
         .array(z.string())
         .describe('Environment variable key names to check'),
+      reason: reasonField,
     },
-    (args: { filePath: string; keys: string[] }) => {
+    (args: { filePath: string; keys: string[]; reason: string }) => {
       const resolved = resolveEnvPath(workingDirectory, args.filePath);
       logToFile(`check_env_keys: ${resolved}, keys: ${args.keys.join(', ')}`);
 
@@ -1267,8 +1282,13 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       values: z
         .record(z.string(), z.string())
         .describe('Key-value pairs to set'),
+      reason: reasonField,
     },
-    (args: { filePath: string; values: Record<string, string> }) => {
+    (args: {
+      filePath: string;
+      values: Record<string, string>;
+      reason: string;
+    }) => {
       const resolved = resolveEnvPath(workingDirectory, args.filePath);
       logToFile(
         `set_env_values: ${resolved}, keys: ${Object.keys(args.values).join(
@@ -1311,8 +1331,10 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   const detectPM = tool(
     'detect_package_manager',
     'Detect which package manager(s) the project uses. Returns the name, install command, and run command for each detected package manager. Call this before running any install commands.',
-    {},
-    async () => {
+    {
+      reason: reasonField,
+    },
+    async (_args: { reason: string }) => {
       logToFile(`detect_package_manager: scanning ${workingDirectory}`);
 
       const result = await detectPackageManager(workingDirectory);
@@ -1339,8 +1361,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     'Load available Amplitude skills for a category. Returns skill IDs and names. Call this first, then use install_skill with the chosen ID.',
     {
       category: z.enum(categoryNames).describe('Skill category'),
+      reason: reasonField,
     },
-    (args: { category: string }) => {
+    (args: { category: string; reason: string }) => {
       const skills = cachedSkillMenu[args.category];
       if (!skills || skills.length === 0) {
         return {
@@ -1377,8 +1400,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         .describe(
           'Skill ID from the skill menu (e.g., "integration-nextjs-app-router")',
         ),
+      reason: reasonField,
     },
-    (args: { skillId: string }) => {
+    (args: { skillId: string; reason: string }) => {
       if (!/^[a-z0-9][a-z0-9_-]*$/.test(args.skillId)) {
         return {
           content: [
@@ -1442,8 +1466,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       message: z
         .string()
         .describe('The confirmation question to show the user'),
+      reason: reasonField,
     },
-    async (args: { message: string }) => {
+    async (args: { message: string; reason: string }) => {
       logToFile(`confirm: ${args.message}`);
       const answer = await getUI().promptConfirm(args.message);
       return {
@@ -1463,8 +1488,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         .array(z.string())
         .min(2)
         .describe('The list of choices to present'),
+      reason: reasonField,
     },
-    async (args: { message: string; options: string[] }) => {
+    async (args: { message: string; options: string[]; reason: string }) => {
       logToFile(`choose: ${args.message}, options: ${args.options.join(', ')}`);
       const answer = await getUI().promptChoice(args.message, args.options);
       return {
@@ -1500,8 +1526,12 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         )
         .min(1)
         .describe('The list of events you plan to instrument'),
+      reason: reasonField,
     },
-    async (args: { events: Array<{ name: string; description: string }> }) => {
+    async (args: {
+      events: Array<{ name: string; description: string }>;
+      reason: string;
+    }) => {
       const { DEMO_MODE } = await import('./constants.js');
       // Light normalization — truncate overly long names but don't try to
       // extract names from descriptions.
@@ -1572,8 +1602,14 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         .min(1)
         .max(500)
         .describe('Short human-readable message, shown verbatim to the user.'),
+      reason: reasonField,
     },
-    (args: { kind: StatusKind; code: string; detail: string }) => {
+    (args: {
+      kind: StatusKind;
+      code: string;
+      detail: string;
+      reason: string;
+    }) => {
       const now = Date.now();
       const key = `${args.kind}:${args.code}`;
       const history = reportHistory.get(key) ?? [];
@@ -1615,6 +1651,80 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
   );
 
+  // -- wizard_feedback ------------------------------------------------------
+  // Structured agent-side feedback for blocked or stuck states. Distinct from
+  // the user-facing /feedback slash command (`trackWizardFeedback`); this one
+  // is invoked by the agent itself when it can't move forward, and emits a
+  // queryable event for Agent Analytics so we can find broken flows without
+  // grepping logs. Only used for in-run blockers — successful runs should not
+  // call this.
+  const wizardFeedback = tool(
+    'wizard_feedback',
+    'Report a structured blocker or warning when you (the agent) cannot move forward. Use this for unresolvable states, unexpected codebase shapes, missing prerequisites, or persistent tool failures — NOT for routine progress updates (use report_status for those). Surfaces as a queryable signal in Agent Analytics so the team can see where runs get stuck.',
+    {
+      goal: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('What you were trying to accomplish at this step.'),
+      steps_tried: z
+        .array(z.string().min(1).max(500))
+        .min(1)
+        .describe(
+          'The concrete steps or tool calls you attempted before reporting this blocker.',
+        ),
+      blocker: z
+        .string()
+        .min(1)
+        .max(1000)
+        .describe(
+          'What is preventing you from continuing — error message, missing file, ambiguous codebase shape, etc.',
+        ),
+      severity: z
+        .enum(['warn', 'error'])
+        .describe(
+          '"warn" if you can continue with a degraded result; "error" if the run cannot proceed.',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      goal: string;
+      steps_tried: string[];
+      blocker: string;
+      severity: 'warn' | 'error';
+      reason: string;
+    }) => {
+      logToFile(
+        `wizard_feedback (${args.severity}): goal="${args.goal}" blocker="${args.blocker}"`,
+      );
+      // Lazy-import to avoid a static dependency cycle: utils/analytics
+      // imports from lib/* indirectly through other shared modules, and we
+      // want this MCP server to remain importable from anywhere without
+      // pulling the analytics client into module init.
+      void (async () => {
+        try {
+          const { analytics } = await import('../utils/analytics.js');
+          analytics.wizardCapture('agent feedback submitted', {
+            goal: args.goal,
+            'steps tried': args.steps_tried,
+            blocker: args.blocker,
+            severity: args.severity,
+            reason: args.reason,
+          });
+        } catch (err) {
+          logToFile(
+            `wizard_feedback: analytics emit failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      })();
+      return {
+        content: [{ type: 'text' as const, text: 'feedback recorded' }],
+      };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   const rawServer = createSdkMcpServer({
@@ -1630,6 +1740,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       choose,
       confirmEventPlan,
       reportStatus,
+      wizardFeedback,
     ],
   });
 
@@ -1651,4 +1762,8 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
   `${SERVER_NAME}:report_status`,
+  `${SERVER_NAME}:wizard_feedback`,
 ];
+
+/** Stable server name — used by hooks to namespace `mcp__wizard-tools__*` tool calls. */
+export const WIZARD_TOOLS_SERVER_NAME = SERVER_NAME;

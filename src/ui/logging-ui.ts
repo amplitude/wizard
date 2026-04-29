@@ -146,23 +146,6 @@ export class LoggingUI implements WizardUI {
     );
   }
 
-  showSettingsOverride(
-    keys: string[],
-    _backupAndFix: () => boolean,
-  ): Promise<void> {
-    // Security warning — stderr
-    console.error(
-      `▲  Security warning: .claude/settings.json overrides detected`,
-    );
-    for (const key of keys) {
-      console.error(`│    • ${key}`);
-    }
-    console.error(
-      `│  These overrides prevent the Wizard from accessing the Amplitude LLM Gateway.`,
-    );
-    return Promise.resolve();
-  }
-
   startRun(): void {
     // No-op in CI mode
   }
@@ -179,8 +162,8 @@ export class LoggingUI implements WizardUI {
     appId: number;
     orgId?: string | null;
     orgName?: string | null;
-    workspaceId?: string | null;
-    workspaceName?: string | null;
+    projectId?: string | null;
+    projectName?: string | null;
     envName?: string | null;
   }): void {
     // No-op in CI mode — credentials are handled directly

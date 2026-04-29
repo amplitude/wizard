@@ -16,7 +16,6 @@ import {
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
-import { toWorkspaceId } from './wizard-session.js';
 import { Integration } from './constants.js';
 
 // ── Constants ──────────────────────────────────────────────────────────
@@ -40,19 +39,21 @@ const CheckpointSchema = z
     /** The project directory this checkpoint belongs to. */
     installDir: z.string(),
 
-    // Region + org/workspace/project selection
+    // Region + org/project/environment selection
     region: z.enum(['us', 'eu']).nullable(),
     selectedOrgId: z.string().nullable(),
     selectedOrgName: z.string().nullable(),
-    // Coerce empty / whitespace-only ids to null so downstream
-    // `toWorkspaceId(...)` (which rejects `min(1)`) can't be fed a bad string.
-    selectedWorkspaceId: z
-      .string()
-      .nullable()
-      .transform((v) => (v && v.trim().length > 0 ? v : null)),
-    selectedWorkspaceName: z.string().nullable(),
-    selectedEnvName: z.string().nullable().optional(),
+    // New (post-rename) fields.
+    selectedProjectId: z.string().nullable().optional(),
     selectedProjectName: z.string().nullable().optional(),
+    selectedEnvName: z.string().nullable().optional(),
+    // Legacy fields kept for back-compat reads.
+    // - selectedWorkspaceId/Name: renamed to selectedProjectId/Name when
+    //   the codebase adopted the website's "project" terminology. Empty /
+    //   whitespace-only ids from old checkpoints are coerced to null at
+    //   read time in loadCheckpoint().
+    selectedWorkspaceId: z.string().nullable().optional(),
+    selectedWorkspaceName: z.string().nullable().optional(),
 
     // Framework detection
     integration: z.string().nullable(),
@@ -65,9 +66,17 @@ const CheckpointSchema = z
     introConcluded: z.boolean(),
   })
   .transform((data) => {
-    const { selectedProjectName, ...rest } = data;
+    const {
+      selectedWorkspaceId,
+      selectedWorkspaceName,
+      selectedProjectId,
+      selectedProjectName,
+      ...rest
+    } = data;
     return {
       ...rest,
+      selectedProjectId: selectedProjectId ?? selectedWorkspaceId ?? null,
+      selectedProjectName: selectedProjectName ?? selectedWorkspaceName ?? null,
       selectedEnvName: rest.selectedEnvName ?? selectedProjectName ?? null,
     };
   });
@@ -88,8 +97,8 @@ export function saveCheckpoint(session: WizardSession): void {
     region: session.region,
     selectedOrgId: session.selectedOrgId,
     selectedOrgName: session.selectedOrgName,
-    selectedWorkspaceId: session.selectedWorkspaceId,
-    selectedWorkspaceName: session.selectedWorkspaceName,
+    selectedProjectId: session.selectedProjectId,
+    selectedProjectName: session.selectedProjectName,
     selectedEnvName: session.selectedEnvName,
 
     integration: session.integration,
@@ -159,10 +168,17 @@ export async function loadCheckpoint(
     region: checkpoint.region,
     selectedOrgId: checkpoint.selectedOrgId,
     selectedOrgName: checkpoint.selectedOrgName,
-    selectedWorkspaceId: checkpoint.selectedWorkspaceId
-      ? toWorkspaceId(checkpoint.selectedWorkspaceId)
-      : null,
-    selectedWorkspaceName: checkpoint.selectedWorkspaceName,
+    // The schema transform has already collapsed legacy
+    // `selectedWorkspaceId/Name` checkpoints into the post-rename
+    // `selectedProjectId/Name` fields. Coerce empty / whitespace-only IDs
+    // (which older checkpoints could carry) to null so callers can rely
+    // on truthy checks.
+    selectedProjectId:
+      checkpoint.selectedProjectId &&
+      checkpoint.selectedProjectId.trim().length > 0
+        ? checkpoint.selectedProjectId
+        : null,
+    selectedProjectName: checkpoint.selectedProjectName ?? null,
     selectedEnvName: checkpoint.selectedEnvName,
     integration,
     detectedFrameworkLabel: derivedLabel,

@@ -46,13 +46,13 @@ function mockCredentials() {
 
 /**
  * Apply a complete authenticated state to a session: credentials plus org
- * and workspace names (the two required by Auth.isComplete). Env name is
+ * and project names (the two required by Auth.isComplete). Env name is
  * set too — it's optional for Auth but realistic for a fully-resolved flow.
  */
 function applyAuthComplete(s: WizardSession) {
   s.credentials = mockCredentials();
   s.selectedOrgName = 'Acme';
-  s.selectedWorkspaceName = 'Amplitude';
+  s.selectedProjectName = 'Amplitude';
   s.selectedEnvName = 'Production';
 }
 
@@ -513,8 +513,8 @@ describe('WizardRouter overlay behavior', () => {
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
 
     // Push and pop overlay
-    router.pushOverlay(Overlay.SettingsOverride);
-    expect(router.resolve(session)).toBe(Overlay.SettingsOverride);
+    router.pushOverlay(Overlay.Outage);
+    expect(router.resolve(session)).toBe(Overlay.Outage);
 
     router.popOverlay();
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
@@ -793,7 +793,6 @@ describe('WizardRouter additional invariants', () => {
             fc.constantFrom('push' as const, 'pop' as const),
             fc.constantFrom(
               Overlay.Outage,
-              Overlay.SettingsOverride,
               Overlay.Snake,
               Overlay.Mcp,
               Overlay.Slack,

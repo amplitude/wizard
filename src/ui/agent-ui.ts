@@ -37,16 +37,9 @@ installPipeErrorHandlers();
  * to auto-select.
  *
  * Canonical shape: `{ appId }`.
- * Legacy shapes still accepted (with a deprecation warning):
- *   - `{ projectId }` (old name for appId)
- *   - `{ orgId, workspaceId, env }` (pre-appId triple)
  */
 const EnvSelectionStdinSchema = z.object({
   appId: z.string().optional(),
-  projectId: z.string().optional(),
-  orgId: z.string().optional(),
-  workspaceId: z.string().optional(),
-  env: z.string().optional(),
 });
 type EnvSelectionStdin = z.infer<typeof EnvSelectionStdinSchema>;
 
@@ -54,8 +47,8 @@ type EnvSelectionStdin = z.infer<typeof EnvSelectionStdinSchema>;
 export interface EnvSelectionChoice {
   orgId: string;
   orgName: string;
-  workspaceId: string;
-  workspaceName: string;
+  projectId: string;
+  projectName: string;
   appId: string | null;
   envName: string;
   rank: number;
@@ -65,7 +58,7 @@ export interface EnvSelectionChoice {
 /** Resolved selection returned from the env-selection prompt. */
 export interface EnvSelection {
   orgId: string;
-  workspaceId: string;
+  projectId: string;
   env: string;
 }
 
@@ -104,13 +97,8 @@ export function resolveEnvSelectionFromStdin(
   const warnings: string[] = [];
   if (!parsed) return { kind: 'auto', warnings };
 
-  const selectedAppId = parsed.appId ?? parsed.projectId;
+  const selectedAppId = parsed.appId;
   if (selectedAppId) {
-    if (parsed.projectId && !parsed.appId) {
-      warnings.push(
-        'Legacy { projectId } selection shape is deprecated — prefer { appId }.',
-      );
-    }
     const match = choices.find(
       (c) => String(c.appId) === String(selectedAppId),
     );
@@ -119,7 +107,7 @@ export function resolveEnvSelectionFromStdin(
         kind: 'selected',
         selection: {
           orgId: match.orgId,
-          workspaceId: match.workspaceId,
+          projectId: match.projectId,
           env: match.envName,
         },
         warnings,
@@ -128,35 +116,6 @@ export function resolveEnvSelectionFromStdin(
     return {
       kind: 'mismatch',
       reason: `Environment selection appId=${selectedAppId} did not match any of the ${choices.length} available environments.`,
-      warnings,
-    };
-  }
-
-  if (parsed.orgId && parsed.workspaceId && parsed.env) {
-    warnings.push(
-      'Legacy { orgId, workspaceId, env } selection shape is deprecated — prefer { appId }.',
-    );
-    const envLower = parsed.env.toLowerCase();
-    const match = choices.find(
-      (c) =>
-        c.orgId === parsed.orgId &&
-        c.workspaceId === parsed.workspaceId &&
-        c.envName.toLowerCase() === envLower,
-    );
-    if (!match) {
-      return {
-        kind: 'mismatch',
-        reason: `Environment selection { orgId: ${parsed.orgId}, workspaceId: ${parsed.workspaceId}, env: ${parsed.env} } did not match any of the ${choices.length} available environments.`,
-        warnings,
-      };
-    }
-    return {
-      kind: 'selected',
-      selection: {
-        orgId: parsed.orgId,
-        workspaceId: parsed.workspaceId,
-        env: parsed.env,
-      },
       warnings,
     };
   }
@@ -601,21 +560,22 @@ export class AgentUI implements WizardUI {
     appId: number;
     orgId?: string | null;
     orgName?: string | null;
-    workspaceId?: string | null;
-    workspaceName?: string | null;
+    projectId?: string | null;
+    projectName?: string | null;
     envName?: string | null;
   }): void {
     emit('session_state', 'credentials_set', {
       data: {
         field: 'credentials',
         host: credentials.host,
-        // appId is the canonical Amplitude app ID (Amplitude's UI labels this
-        // "Project ID"). envName is the env label (Production/Dev/etc).
+        // appId is the canonical Amplitude app ID. envName is the env label
+        // (Production/Dev/etc). Project is the Amplitude hierarchy level
+        // between org and app (formerly "workspace" in the GraphQL API).
         appId: credentials.appId,
         orgId: credentials.orgId ?? null,
         orgName: credentials.orgName ?? null,
-        workspaceId: credentials.workspaceId ?? null,
-        workspaceName: credentials.workspaceName ?? null,
+        projectId: credentials.projectId ?? null,
+        projectName: credentials.projectName ?? null,
         envName: credentials.envName ?? null,
       },
     });
@@ -677,17 +637,6 @@ export class AgentUI implements WizardUI {
     } else {
       emit('diagnostic', 'retry cleared', { data: { kind: 'retry_cleared' } });
     }
-  }
-
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    backupAndFix();
-    emit('status', 'settings_override auto-fixed', {
-      data: { kind: 'settings_override', keys },
-    });
-    return Promise.resolve();
   }
 
   // ── Prompts (auto-approve) ──────────────────────────────────────────
@@ -784,18 +733,16 @@ export class AgentUI implements WizardUI {
   /**
    * Prompt the agent caller to select an environment from pendingOrgs.
    *
-   * Emits an NDJSON `prompt` event with all available orgs/workspaces/environments,
+   * Emits an NDJSON `prompt` event with all available orgs/projects/environments,
    * then reads one JSON line from stdin with the selection.
    *
    * Expected stdin response:
    * ```json
-   * { "projectId": "769610" }
+   * { "appId": "769610" }
    * ```
    *
-   * `projectId` alone is sufficient — it's globally unique and resolves to
-   * exactly one (org, workspace, project, env) tuple. The legacy
-   * `{ orgId, workspaceId, env }` shape is still accepted for one release
-   * so existing orchestrators keep working.
+   * `appId` alone is sufficient — it's globally unique and resolves to
+   * exactly one (org, project, app, env) tuple.
    *
    * Falls back to auto-selecting the first environment if stdin is closed
    * or no response is received within 60 seconds.
@@ -804,7 +751,7 @@ export class AgentUI implements WizardUI {
     orgs: Array<{
       id: string;
       name: string;
-      workspaces: Array<{
+      projects: Array<{
         id: string;
         name: string;
         environments?: Array<{
@@ -814,16 +761,16 @@ export class AgentUI implements WizardUI {
         }> | null;
       }>;
     }>,
-  ): Promise<{ orgId: string; workspaceId: string; env: string }> {
-    // Build a sanitized, tree view of orgs -> workspaces -> environments.
+  ): Promise<{ orgId: string; projectId: string; env: string }> {
+    // Build a sanitized, tree view of orgs -> projects -> environments.
     // API keys are never emitted (they'd leak on stdout to the orchestrator).
     const sanitizedOrgs = orgs.map((org) => ({
       id: org.id,
       name: org.name,
-      workspaces: org.workspaces.map((ws) => ({
-        id: ws.id,
-        name: ws.name,
-        environments: (ws.environments ?? [])
+      projects: org.projects.map((proj) => ({
+        id: proj.id,
+        name: proj.name,
+        environments: (proj.environments ?? [])
           .filter((e) => e.app?.apiKey)
           .sort((a, b) => a.rank - b.rank)
           .map((e) => ({
@@ -837,22 +784,22 @@ export class AgentUI implements WizardUI {
 
     // Also emit a flat list of every selectable env so agents can pick
     // without traversing the tree. Each entry is unique by
-    // (orgId, workspaceId, envName) and carries the numeric appId
+    // (orgId, projectId, envName) and carries the numeric appId
     // that callers can pass as --app-id for unambiguous selection.
     const choices = orgs.flatMap((org) =>
-      org.workspaces.flatMap((ws) =>
-        (ws.environments ?? [])
+      org.projects.flatMap((proj) =>
+        (proj.environments ?? [])
           .filter((e) => e.app?.apiKey)
           .sort((a, b) => a.rank - b.rank)
           .map((e) => ({
             orgId: org.id,
             orgName: org.name,
-            workspaceId: ws.id,
-            workspaceName: ws.name,
+            projectId: proj.id,
+            projectName: proj.name,
             appId: e.app?.id ?? null,
             envName: e.name,
             rank: e.rank,
-            label: `${org.name} / ${ws.name} / ${e.name}`,
+            label: `${org.name} / ${proj.name} / ${e.name}`,
           })),
       ),
     );
@@ -867,7 +814,7 @@ export class AgentUI implements WizardUI {
           // agents don't see one shape in the manifest and a different
           // shape in the prompt. Each choice carries appId, the
           // unambiguous selector.
-          hierarchy: ['org', 'workspace', 'app', 'environment'],
+          hierarchy: ['org', 'project', 'app', 'environment'],
           choices,
           orgs: sanitizedOrgs,
           // Agents should reply on stdin with one JSON line matching this shape:
@@ -896,12 +843,12 @@ export class AgentUI implements WizardUI {
       hint: c.envName,
       // Show a "Org > Workspace > Env" breadcrumb in widgets that support
       // a description line (Linear / Cursor / Granola pickers all do).
-      description: `${c.orgName} > ${c.workspaceName} > ${c.envName}`,
+      description: `${c.orgName} > ${c.projectName} > ${c.envName}`,
       metadata: {
         orgId: c.orgId,
         orgName: c.orgName,
-        workspaceId: c.workspaceId,
-        workspaceName: c.workspaceName,
+        projectId: c.projectId,
+        projectName: c.projectName,
         envName: c.envName,
         appId: String(c.appId ?? ''),
         rank: c.rank,
@@ -966,7 +913,7 @@ export class AgentUI implements WizardUI {
     // Read one line from stdin. Parsing + matching is a pure helper so tests
     // can exercise it without stdin mocking. Outcomes:
     //   - no line / timeout / invalid JSON / empty object → auto-select
-    //   - specific appId or legacy triple that matches → return it
+    //   - specific appId that matches → return it
     //   - selector provided but doesn't match → throw, so the caller emits
     //     `auth_required: env_selection_failed` instead of silently picking
     //     the wrong environment (a data-integrity risk).
@@ -989,19 +936,19 @@ export class AgentUI implements WizardUI {
 
     // Fallback: auto-select the first environment
     for (const org of orgs) {
-      for (const ws of org.workspaces) {
-        const env = (ws.environments ?? [])
+      for (const proj of org.projects) {
+        const env = (proj.environments ?? [])
           .filter((e) => e.app?.apiKey)
           .sort((a, b) => a.rank - b.rank)[0];
         if (env) {
           emit(
             'log',
-            `Auto-selected environment: ${org.name} / ${ws.name} / ${env.name}`,
+            `Auto-selected environment: ${org.name} / ${proj.name} / ${env.name}`,
             {
               level: 'warn',
             },
           );
-          return { orgId: org.id, workspaceId: ws.id, env: env.name };
+          return { orgId: org.id, projectId: proj.id, env: env.name };
         }
       }
     }

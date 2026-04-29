@@ -38,7 +38,7 @@ function mockCredentials(): WizardSession['credentials'] {
 
 function ensureIdentityNames(s: WizardSession): void {
   s.selectedOrgName = s.selectedOrgName ?? 'Test Org';
-  s.selectedWorkspaceName = s.selectedWorkspaceName ?? 'Default';
+  s.selectedProjectName = s.selectedProjectName ?? 'Default';
   s.selectedEnvName = s.selectedEnvName ?? 'Default';
 }
 

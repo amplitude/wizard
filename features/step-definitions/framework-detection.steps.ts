@@ -69,7 +69,7 @@ function advancePastAuth(s: WizardSession): void {
     appId: 0,
   };
   s.selectedOrgName = 'Test Org';
-  s.selectedWorkspaceName = 'Default';
+  s.selectedProjectName = 'Default';
   s.selectedEnvName = 'Default';
   s.region = 'us';
   s.projectHasData = false;

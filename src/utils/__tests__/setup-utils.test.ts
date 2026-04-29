@@ -37,7 +37,6 @@ vi.mock('../../ui', () => ({
     syncTodos: vi.fn(),
     setLoginUrl: vi.fn(),
     showServiceStatus: vi.fn(),
-    showSettingsOverride: vi.fn(),
     startRun: vi.fn(),
     note: vi.fn(),
   }),

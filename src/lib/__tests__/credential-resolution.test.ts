@@ -104,7 +104,7 @@ describe('resolveCredentials — zone resolution', () => {
         {
           id: 'org-1',
           name: 'Test Org',
-          workspaces: [
+          projects: [
             {
               id: 'ws-1',
               name: 'Test WS',
@@ -146,7 +146,7 @@ describe('resolveCredentials — zone resolution', () => {
         {
           id: 'org-1',
           name: 'Test Org',
-          workspaces: [
+          projects: [
             {
               id: 'ws-1',
               name: 'Test WS',

@@ -444,6 +444,11 @@ async function performAmplitudeAuthInner(options: {
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('scope', 'openid offline');
   authUrl.searchParams.set('state', state);
+  // Forward the CLI install UUID so a future onenav change can stitch
+  // browser-side auth events to the CLI's Amplitude device_id. Hydra strips
+  // unknown params on its redirect to the login page today, so this is inert
+  // until the login page (or its server) opts in to reading it.
+  authUrl.searchParams.set('amp_device_id', analytics.getAnonymousId());
 
   getUI().setLoginUrl(authUrl.toString());
 

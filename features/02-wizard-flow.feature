@@ -151,20 +151,3 @@ Feature: Wizard flow
     Then the OutageScreen overlay should appear
     And I should be able to continue anyway or exit
 
-  Scenario: Settings override overlay appears
-    Given the wizard is active
-    And the settings file blocks the agent
-    When the agent is about to start
-    Then the SettingsOverrideScreen overlay should appear
-    And I should be able to back up and patch the settings to continue
-
-  Scenario: Two overlays stack and dismiss in order
-    Given the wizard is active
-    When an Anthropic service outage is detected
-    And the settings file blocks the agent
-    And the agent is about to start
-    Then the SettingsOverrideScreen overlay should appear
-    When the overlay is dismissed
-    Then the OutageScreen overlay should appear
-    When the overlay is dismissed
-    Then I should be on the RunScreen

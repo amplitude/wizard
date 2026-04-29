@@ -61,7 +61,7 @@ describe('getWhoamiText', () => {
   const base = {
     selectedOrgId: null as string | null,
     selectedOrgName: null as string | null,
-    selectedWorkspaceName: null as string | null,
+    selectedProjectName: null as string | null,
     selectedEnvName: null as string | null,
     region: null as string | null,
     credentials: null as {
@@ -82,7 +82,7 @@ describe('getWhoamiText', () => {
     const result = getWhoamiText({
       ...base,
       selectedOrgName: 'Amplitude Website (Portfolio)',
-      selectedWorkspaceName: 'Amplitude',
+      selectedProjectName: 'Amplitude',
       selectedEnvName: 'Production',
       region: 'us',
       credentials: {

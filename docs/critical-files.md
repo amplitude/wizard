@@ -71,9 +71,9 @@ Ranked by blast radius — what breaks and how many users are affected if this f
 
 ### 6. `src/ui/tui/screens/AuthScreen.tsx`
 
-**Why:** The credential gatekeeper. Until credentials are set, no downstream screen works. Has the most complex async logic in the codebase: 5-step resolution chain (OAuth wait → org pick → workspace pick → env pick → API key).
+**Why:** The credential gatekeeper. Until credentials are set, no downstream screen works. Has the most complex async logic in the codebase: 5-step resolution chain (OAuth wait → org pick → project pick → env pick → API key).
 
-**What breaks:** Authentication, org/workspace selection, API key resolution.
+**What breaks:** Authentication, org/project selection, API key resolution.
 
 ---
 
