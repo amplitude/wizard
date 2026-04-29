@@ -24,7 +24,7 @@ describe('getAPIKey', () => {
   it('returns the key from local storage without hitting the backend', async () => {
     mockReadApiKeyWithSource.mockReturnValue({
       key: 'local-api-key',
-      source: 'keychain',
+      source: 'cache',
     });
 
     const result = await getAPIKey(BASE_PARAMS);

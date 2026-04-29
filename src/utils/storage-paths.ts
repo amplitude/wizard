@@ -20,9 +20,16 @@
  *
  * Unchanged (governed by external contracts):
  *   - `~/.ampli.json` — OAuth tokens; ampli CLI compatibility
- *   - macOS Keychain / Linux `secret-tool` — API keys; OS-managed
  *   - `<installDir>/.env.local` — API key fallback
  *   - `<installDir>/ampli.json` — ampli CLI tracking-plan config
+ *
+ * Recently moved into the per-user cache root:
+ *   - `~/.amplitude/wizard/credentials.json` — Amplitude project API keys,
+ *     keyed by hashed install dir. Replaces the macOS Keychain / Linux
+ *     `secret-tool` storage that triggered an OS unlock prompt on every
+ *     launch (the wizard's project API key is a public ingestion key
+ *     embedded in client SDK bundles, so file-on-disk at `0o600` matches
+ *     its actual sensitivity — same precedent as `~/.ampli.json`).
  */
 
 import { mkdirSync, realpathSync } from 'node:fs';
@@ -140,6 +147,15 @@ export function getStateFile(
 /** Per-user npm registry latest-version cache. */
 export function getUpdateCheckFile(): string {
   return join(getCacheRoot(), 'update-check.json');
+}
+
+/**
+ * Per-user credentials file holding Amplitude project API keys, keyed by
+ * hashed install dir. Always written at mode `0o600`. Replaces the previous
+ * macOS Keychain / Linux `secret-tool` storage (which prompted on every read).
+ */
+export function getCredentialsFile(): string {
+  return join(getCacheRoot(), 'credentials.json');
 }
 
 /**

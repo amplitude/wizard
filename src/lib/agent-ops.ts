@@ -16,7 +16,10 @@ import {
   detectAmplitudeInProject,
   type AmplitudeDetectionResult,
 } from './detect-amplitude';
-import { readApiKeyWithSource } from '../utils/api-key-store';
+import {
+  readApiKeyWithSource,
+  type ApiKeySource,
+} from '../utils/api-key-store';
 import {
   getStoredUser,
   getStoredToken,
@@ -146,7 +149,7 @@ export interface StatusResult {
   amplitudeInstalled: AmplitudeDetectionResult;
   apiKey: {
     configured: boolean;
-    source: 'keychain' | 'env' | null;
+    source: ApiKeySource | null;
   };
   auth: {
     loggedIn: boolean;

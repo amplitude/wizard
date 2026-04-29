@@ -118,7 +118,7 @@ The wizard persists state across several layers, each with different scope and l
 | Layer | File / Location | Scope | Lifetime | Contents |
 |-------|----------------|-------|----------|----------|
 | **OAuth tokens** | `~/.ampli.json` | Per user | Until expiry (silent refresh via `token-refresh.ts`) | Access token, refresh token, expiry timestamp. Written with `atomicWriteJSON()`. |
-| **API key store** | macOS Keychain / Linux `secret-tool` (fallback `<project>/.env.local`) | Per project | Persistent, OS-managed | Amplitude project API key. Hashed install-dir is the keychain account. |
+| **API key store** | `~/.amplitude/wizard/credentials.json` (fallback `<project>/.env.local`) | Per project | Persistent | Amplitude project API key. Mode `0o600`, keyed by hashed install-dir. Replaces the previous keychain backend, which triggered an OS unlock prompt on every launch. |
 | **Per-project debug log** | `~/.amplitude/wizard/runs/<sha256(installDir)>/log.txt` (+ `log.ndjson`) | Per project | 5 MB rotation | Structured wizard logs. Two parallel runs in different directories no longer collide. |
 | **Session checkpoint** | `~/.amplitude/wizard/runs/<sha256(installDir)>/checkpoint.json` | Per install directory | 24 hours | Intro state, region, org/project selection, framework detection. Zod-validated on load. No credentials. |
 | **Plans + agent state** | `~/.amplitude/wizard/plans/<planId>.json`, `~/.amplitude/wizard/state/<attemptId>.json` | Per plan / per attempt | 24 h / per-run | `wizard plan` output and agent compaction-recovery snapshots. |
