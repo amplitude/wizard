@@ -69,7 +69,11 @@ const formatDuration = (ms: number): string => {
  * possible — skill installs sometimes touch tmp dirs).
  */
 const displayPath = (raw: string, installDir?: string): string => {
-  if (installDir && raw.startsWith(installDir)) {
+  if (
+    installDir &&
+    raw.startsWith(installDir) &&
+    (raw.length === installDir.length || raw[installDir.length] === '/')
+  ) {
     const rel = path.relative(installDir, raw);
     return rel === '' ? path.basename(raw) : rel;
   }

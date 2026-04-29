@@ -55,6 +55,23 @@ describe('FileWritesPanel', () => {
     expect(out).not.toContain('/proj/src/amplitude.ts');
   });
 
+  it('does not falsely match sibling dirs that share a prefix with installDir', () => {
+    // Regression: `/proj-backup/file.ts` must NOT be relativized against
+    // `/proj` — it lives in a different directory entirely. Without a
+    // directory-boundary check, startsWith('/proj') would match and the
+    // panel would render the misleading `-backup/file.ts`.
+    const { lastFrame } = render(
+      <FileWritesPanel
+        entries={[makeEntry({ path: '/proj-backup/file.ts' })]}
+        installDir="/proj"
+      />,
+    );
+    const out = stripAnsi(lastFrame() ?? '');
+    expect(out).not.toContain('-backup/file.ts');
+    // Outside-the-project paths fall back to the basename.
+    expect(out).toContain('file.ts');
+  });
+
   it('shows CREATE / MODIFY labels with the operation', () => {
     const entries: FileWriteEntry[] = [
       makeEntry({ path: '/proj/a.ts', operation: 'create' }),
