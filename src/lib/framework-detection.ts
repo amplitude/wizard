@@ -165,11 +165,24 @@ export async function runFrameworkDetection(
   // would scan the OLD package.json against the NEW integration —
   // potentially adding Stripe / LLM features from a project the user
   // already navigated away from.
+  //
+  // Dedup: discovery fires from TWO places — the inline call below
+  // and the integration-change subscriber. On a normal run both fire
+  // for the same (installDir, integration) pair, which is wasteful
+  // (and emits two `autoEnableInlineAddons` events). Track the last
+  // discovered fingerprint per store so the second call skips. We
+  // need the WeakMap, not a function-scope variable, because the
+  // subscriber from the first invocation outlives that closure and
+  // continues firing on subsequent re-detection runs (when bin.ts
+  // hands the same store off to a new directory).
   const runDiscovery = (): void => {
-    for (const f of discoverFeatures({
-      installDir: store.session.installDir,
-      integration: store.session.integration,
-    })) {
+    const installDir = store.session.installDir;
+    const integration = store.session.integration;
+    const fingerprint = `${installDir}::${integration ?? '__none__'}`;
+    if (lastDiscoveryFingerprint.get(store) === fingerprint) return;
+    lastDiscoveryFingerprint.set(store, fingerprint);
+
+    for (const f of discoverFeatures({ installDir, integration })) {
       store.addDiscoveredFeature(f);
     }
     // Auto-enable every discovered opt-in addon (Session Replay +
@@ -225,3 +238,17 @@ export async function runFrameworkDetection(
  * state.
  */
 const hasIntegrationWatcher = new WeakSet<DetectionTargetStore>();
+
+/**
+ * Per-store fingerprint of the last `(installDir, integration)` pair
+ * discovery ran against. Lets the dedup guard in `runDiscovery` skip
+ * a redundant scan when the inline call and the subscriber-fired call
+ * end up with the same pair on the same run.
+ *
+ * WeakMap (not function-scope variable) because the subscriber from
+ * the FIRST `runFrameworkDetection` call survives subsequent calls,
+ * so its closure-captured `runDiscovery` keeps firing on later
+ * directory changes — and needs a fingerprint that the NEXT run's
+ * inline call can also see.
+ */
+const lastDiscoveryFingerprint = new WeakMap<DetectionTargetStore, string>();

@@ -394,8 +394,19 @@ export class WizardStore {
     this.$session.setKey('detectedFrameworkLabel', null);
     this.$session.setKey('frameworkContext', {});
     this.$session.setKey('detectionResults', []);
-    this.$session.setKey('discoveredFeatures', []);
     this.$session.setKey('detectionComplete', false);
+    // Reset BOTH the discovered-features list AND every opt-in flag /
+    // queue derived from it. These are computed from the OLD project's
+    // package.json (Stripe, LLM SDK presence, etc.) and have zero
+    // meaning in the new tree — letting them carry over would cause
+    // the agent to set up irrelevant addons (e.g. LLM analytics for a
+    // Python AI repo we already navigated away from).
+    this.$session.setKey('discoveredFeatures', []);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('llmOptIn', false);
+    this.$session.setKey('sessionReplayOptIn', false);
+    this.$session.setKey('engagementOptIn', false);
+    this.$session.setKey('optInFeaturesComplete', false);
     // Checkpoint resume is invalid across directories — different tree
     // means different ampli.json, different events.json, different
     // framework. Treat the change as a "Start fresh".

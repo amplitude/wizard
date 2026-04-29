@@ -1766,6 +1766,41 @@ describe('WizardStore', () => {
       expect(initialController.signal.aborted).toBe(true);
     });
 
+    // Regression: bugbot Issue #4.
+    //
+    // `discoveredFeatures` reset alone wasn't enough — the opt-in
+    // flags derived from those features (llmOptIn, sessionReplayOptIn,
+    // engagementOptIn) and the `additionalFeatureQueue` /
+    // `optInFeaturesComplete` markers also need to clear. Otherwise a
+    // user who points the wizard at a Python AI repo (LLM analytics
+    // discovered, llmOptIn=true, additionalFeatureQueue=[LLM]) and
+    // then changes directory to a vanilla Next.js app would have the
+    // agent set up LLM analytics in a project that has no LLM SDK.
+    it('resets every opt-in flag derived from the old discovery, not just the list', () => {
+      const store = createStore();
+      // Mimic post-discovery state for the OLD project.
+      store.session = {
+        ...store.session,
+        llmOptIn: true,
+        sessionReplayOptIn: true,
+        engagementOptIn: true,
+        optInFeaturesComplete: true,
+        additionalFeatureQueue: [
+          AdditionalFeature.LLM,
+          AdditionalFeature.SessionReplay,
+        ],
+      };
+
+      store.changeInstallDir('/tmp/clean-tree');
+
+      expect(store.session.llmOptIn).toBe(false);
+      expect(store.session.sessionReplayOptIn).toBe(false);
+      expect(store.session.engagementOptIn).toBe(false);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.discoveredFeatures).toEqual([]);
+    });
+
     it('emits a telemetry event with whether a redetector was registered', () => {
       const store = createStore();
       const wizardCapture = analytics.wizardCapture as Mock;

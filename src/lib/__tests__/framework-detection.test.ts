@@ -200,5 +200,48 @@ describe('runFrameworkDetection', () => {
 
       expect(enableSpy).not.toHaveBeenCalled();
     });
+
+    // Regression: bugbot Issue #5.
+    //
+    // Discovery used to fire TWICE on a re-detection run: once from
+    // the integration-change subscriber that survived from the first
+    // run, and once from the inline `runDiscovery()` call. Idempotent
+    // (`addDiscoveredFeature` deduplicates) but wasteful — and worse,
+    // it emitted two `autoEnableInlineAddons` events per run, which
+    // analytics double-counted.
+    //
+    // The dedup guard uses a per-store WeakMap fingerprint of
+    // `installDir + integration`. Both call paths compute the same
+    // fingerprint, so the second one short-circuits.
+    it('does not double-fire discovery on re-detection after a directory change', async () => {
+      detectAllFrameworksMock.mockResolvedValueOnce([
+        { integration: Integration.nextjs, detected: true },
+      ]);
+
+      const store = new WizardStore();
+      // First run — pins the subscriber so the second run uses the
+      // surviving closure (the actual repro shape).
+      await runFrameworkDetection(store, '/tmp/dir-a');
+
+      const enableSpy = vi.spyOn(store, 'autoEnableInlineAddons');
+      enableSpy.mockClear();
+
+      // Mimic the directory swap (state reset done by changeInstallDir).
+      store.session.installDir = '/tmp/dir-b';
+      store.session.integration = null;
+      store.session.frameworkConfig = null;
+
+      // Now re-run detection. Without the dedup, this would fire
+      // discovery twice for (/tmp/dir-b, vue) — once via the
+      // surviving subscriber when setFrameworkConfig fires, once via
+      // the inline runDiscovery call.
+      detectAllFrameworksMock.mockResolvedValueOnce([
+        { integration: Integration.vue, detected: true },
+      ]);
+      await runFrameworkDetection(store, '/tmp/dir-b');
+
+      // Exactly one discovery fire for the (dir-b, vue) pair.
+      expect(enableSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });
