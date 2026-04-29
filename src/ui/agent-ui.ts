@@ -859,12 +859,46 @@ export class AgentUI implements WizardUI {
   promptEventPlan(
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision> {
+    // Pre-decision: emit a structured `needs_input` so the
+    // contract holds — every `decision_auto` MUST follow a
+    // `needs_input` for the same `code`. Bugbot flagged that the
+    // previous shape emitted `decision_auto` orphaned (after a
+    // `result` event, with no preceding needs_input), which
+    // contradicted the docstring on `EVENT_DATA_VERSIONS.decision_auto`.
+    // Choices are flat strings so orchestrators can `resumeFlags`
+    // their way into a different decision if a human is in the loop.
+    this.emitNeedsInput<'approved' | 'skipped' | 'revised'>({
+      code: 'event_plan',
+      message: `Approve ${events.length} proposed events?`,
+      ui: {
+        component: 'confirmation',
+        priority: 'required',
+        title: 'Approve instrumentation plan',
+        description: `${events.length} events proposed. Review the list and approve, skip, or send revision feedback.`,
+      },
+      choices: [
+        { value: 'approved', label: 'Approve and instrument' },
+        { value: 'skipped', label: 'Skip event tracking for this run' },
+        { value: 'revised', label: 'Send revision feedback' },
+      ],
+      recommended: 'approved',
+    });
+    // The full event list is carried on the legacy `result` emit
+    // below — orchestrators rendering the plan inline read it from
+    // there. We don't shadow the events on `needs_input.metadata`
+    // because that field is constrained to primitives.
+
+    // Back-compat: keep the legacy `result` emit so existing
+    // orchestrators that key off `event: event_plan` continue to
+    // work unchanged.
     emit('result', 'event_plan auto-approved', {
       data: { event: 'event_plan', events },
     });
-    // decision_auto companion — orchestrators subscribed to the
-    // event-plan flow know an approval was auto-applied vs awaiting
-    // a human review.
+
+    // Companion `decision_auto` for the needs_input above. Orchestrators
+    // subscribed to needs_input → decision_auto pairs can tell that
+    // the wizard auto-resolved this prompt rather than awaiting a
+    // human answer.
     emitDecisionAuto({
       code: 'event_plan',
       value: 'approved',

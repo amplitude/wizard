@@ -864,6 +864,199 @@ describe('AgentUI.emitAgentMetrics', () => {
   });
 });
 
+// ── Bugbot regressions on the agent-mode reliability PR ─────────────
+//
+// Two issues bugbot caught during review of the run_completed +
+// data_version + decision_auto changes. These tests pin the contracts
+// the wizard now upholds.
+
+describe('AgentUI.emitProjectCreateSuccess — registry key match', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Bugbot Issue 1 (Medium): the registry entry was `project_created`
+  // but the actual emitted discriminator is `project_create_success`.
+  // Result: `lookupDataVersion` never matched and the data_version
+  // stamp was silently omitted from project-create-success events.
+  it('stamps data_version=1 on project_create_success (registry key matches discriminator)', () => {
+    const ui = new AgentUI();
+    ui.emitProjectCreateSuccess({
+      orgId: 'org-1',
+      appId: 100001,
+      name: 'My Project',
+      url: 'https://app.amplitude.com/...',
+    });
+    const event = JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+    expect(event.type).toBe('result');
+    expect(event.data).toMatchObject({ event: 'project_create_success' });
+    // The whole point of the fix: data_version is now stamped.
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+});
+
+describe('AgentUI.promptEventPlan — needs_input + result + decision_auto contract', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Bugbot Issue 2 (Low): decision_auto was firing without a
+  // preceding needs_input, contradicting the registry docstring that
+  // says "Fires AFTER the corresponding `needs_input`." Fix: emit a
+  // structured needs_input first so the contract holds.
+  it('emits needs_input → result → decision_auto in that order', async () => {
+    const ui = new AgentUI();
+    await ui.promptEventPlan([
+      { name: 'Sign Up', description: 'User completed signup' },
+      { name: 'Purchase', description: 'User completed checkout' },
+    ]);
+
+    const events = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    expect(events.length).toBe(3);
+
+    // 1) needs_input — orchestrators surfacing this to a human key
+    //    off `code: 'event_plan'` and the choices array.
+    expect(events[0].type).toBe('needs_input');
+    expect(events[0].data).toMatchObject({
+      code: 'event_plan',
+      recommended: 'approved',
+    });
+
+    // 2) result — back-compat: existing orchestrators that key off
+    //    `event: event_plan` see the full events array here.
+    expect(events[1].type).toBe('result');
+    expect(events[1].data).toMatchObject({ event: 'event_plan' });
+
+    // 3) decision_auto — the contract pin. This MUST follow a
+    //    needs_input for the same `code`. An orphaned decision_auto
+    //    would confuse orchestrators tracking pair state.
+    expect(events[2].type).toBe('lifecycle');
+    expect(events[2].data).toMatchObject({
+      event: 'decision_auto',
+      code: 'event_plan',
+      value: 'approved',
+      reason: 'auto_approve',
+    });
+  });
+});
+
+// ── EVENT_DATA_VERSIONS registry vs actual discriminators ───────────
+//
+// Catches future drift between the registry keys and the strings
+// AgentUI actually emits. If a new event lands in the wizard but
+// doesn't get a registry entry (or gets one under the wrong name),
+// the data_version stamp is silently dropped — the same bug bugbot
+// caught on `project_created` vs `project_create_success`.
+
+describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Each documented event-emitter method on AgentUI fires an event
+  // whose `data.event` discriminator must be in the registry. This
+  // test exercises the public methods that carry a discriminator and
+  // asserts every resulting event is stamped with `data_version`.
+  it('every documented emit method stamps data_version', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'login',
+      loginCommand: ['x'],
+    });
+    ui.emitProjectCreateStart({ orgId: 'o', name: 'n' });
+    ui.emitProjectCreateSuccess({
+      orgId: 'o',
+      appId: 1,
+      name: 'n',
+      url: 'u',
+    });
+    ui.emitProjectCreateError({
+      orgId: 'o',
+      name: 'n',
+      code: 'X',
+      message: 'm',
+    });
+    ui.emitNestedAgent({
+      signal: 'claude_code_cli',
+      envVar: 'CLAUDECODE',
+      instruction: 'i',
+      bypassEnv: 'X',
+    });
+    ui.emitInnerAgentStarted({ model: 'm', phase: 'wizard' });
+    ui.emitToolCall({ tool: 'Edit', summary: 'e' });
+    ui.emitFileChangePlanned({ operation: 'create', path: 'p' });
+    ui.emitFileChangeApplied({ operation: 'create', path: 'p' });
+    ui.emitVerificationStarted({ phase: 'sdk_init' });
+    ui.emitVerificationResult({
+      phase: 'sdk_init',
+      passed: true,
+      details: 'd',
+    });
+    ui.startRun();
+    ui.setEventIngestionDetected(['Sign Up']);
+    ui.setDashboardUrl('https://example.com');
+
+    const events = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    // Filter to events that carry a discriminator — others (free-form
+    // log/status) intentionally lack data_version.
+    const versioned = events.filter(
+      (e) =>
+        typeof e.data === 'object' &&
+        e.data !== null &&
+        typeof (e.data as { event?: unknown }).event === 'string',
+    );
+    expect(versioned.length).toBeGreaterThan(0);
+    for (const e of versioned) {
+      expect(
+        (e as unknown as { data_version?: number }).data_version,
+        `Event ${
+          (e.data as { event: string }).event
+        } should have data_version stamped — registry key may be missing or misnamed`,
+      ).toBe(1);
+    }
+  });
+});
+
 describe('AgentUI.startRun + getRunStartedAtMs', () => {
   it('captures start timestamp on startRun() so duration can be computed', () => {
     const before = Date.now();

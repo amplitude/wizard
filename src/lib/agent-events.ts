@@ -78,9 +78,12 @@ export const EVENT_DATA_VERSIONS = {
   auth_required: 1,
   nested_agent: 1,
   inner_agent_started: 1,
-  // Project create
+  // Project create. Discriminators must match the actual `data.event`
+  // strings emitted by AgentUI — bugbot caught a previous mismatch
+  // (`project_created` vs the emitted `project_create_success`) that
+  // silently dropped the data_version stamp from those events.
   project_create_start: 1,
-  project_created: 1,
+  project_create_success: 1,
   project_create_error: 1,
   // Tool / file changes
   tool_call: 1,
