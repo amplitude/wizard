@@ -142,7 +142,28 @@ export function getAgentManifest(): AgentManifest {
       },
       {
         name: '--ci',
-        describe: 'Run non-interactively (alias: --yes, -y)',
+        describe: 'Run non-interactively (no prompts, no colors)',
+        type: 'boolean',
+        default: false,
+      },
+      {
+        name: '--yes',
+        describe:
+          'Skip all prompts and grant the inner agent write capability. Required for the `apply` subcommand. Distinct from --auto-approve, which only picks defaults on `needs_input`.',
+        type: 'boolean',
+        default: false,
+      },
+      {
+        name: '--auto-approve',
+        describe:
+          'Silently pick the recommended choice on `needs_input` prompts. Does NOT grant write capability — pair with --yes to allow file writes.',
+        type: 'boolean',
+        default: false,
+      },
+      {
+        name: '--force',
+        describe:
+          'Allow destructive writes (overwrite/delete existing files). Implies --yes.',
         type: 'boolean',
         default: false,
       },
@@ -197,6 +218,11 @@ export function getAgentManifest(): AgentManifest {
         describe:
           'Set to 1 to skip the nested-invocation diagnostic. The wizard sanitizes inherited outer-agent env vars either way, so nesting works by default.',
       },
+      {
+        name: 'AMPLITUDE_WIZARD_MAX_TURNS',
+        describe:
+          "Override the inner agent's per-run turn cap (default 200, sanity-bounded at 10000). Useful for unusually long-running setups.",
+      },
     ],
     exitCodes: [
       { code: 0, name: 'SUCCESS', describe: 'Completed successfully' },
@@ -250,6 +276,50 @@ export function getAgentManifest(): AgentManifest {
           {
             name: '--install-dir',
             describe: 'Project directory to inspect',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        command: 'plan',
+        describe:
+          'Plan an Amplitude setup without making any changes (emits a structured WizardPlan + planId; planId is valid for 24h, pass it to `apply` to execute)',
+        outputs: 'both',
+        flags: [
+          {
+            name: '--install-dir',
+            describe: 'Project directory to plan against',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        command: 'apply',
+        describe:
+          'Execute a previously generated plan. Requires --plan-id and --yes; pair with --force for destructive overwrites.',
+        outputs: 'both',
+        flags: [
+          {
+            name: '--plan-id',
+            describe: 'plan ID returned by `amplitude-wizard plan`',
+            type: 'string',
+          },
+          {
+            name: '--install-dir',
+            describe: 'Project directory the plan was generated against',
+            type: 'string',
+          },
+        ],
+      },
+      {
+        command: 'verify',
+        describe:
+          'Verify a project setup without running the agent (no-network check that SDK + API key + framework are all in place). Exits non-zero on failure.',
+        outputs: 'both',
+        flags: [
+          {
+            name: '--install-dir',
+            describe: 'Project directory to verify',
             type: 'string',
           },
         ],
