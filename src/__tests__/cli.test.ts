@@ -42,6 +42,10 @@ const {
     // can re-invoke detection. The CLI tests don't drive that path,
     // but the entry point still calls the setter.
     setFrameworkRedetector: vi.fn(),
+    // bin.ts registers the initial detection's AbortController so a
+    // directory swap mid-scan can cancel it. The CLI tests don't
+    // exercise the cancel path, but bin.ts still calls this method.
+    registerActiveDetection: vi.fn(),
     onEnterScreen: vi.fn(),
     completeSetup: vi.fn(),
     setAmplitudePreDetected: vi.fn(),

@@ -348,6 +348,23 @@ export class WizardStore {
   }
 
   /**
+   * Register an in-flight detection's AbortController so a subsequent
+   * `changeInstallDir` can cancel it. bin.ts calls this once at boot
+   * with the controller it created for the INITIAL detection — that
+   * way a user who picks "Change directory" while the first
+   * `Scanning…` spinner is still running cancels the initial run too,
+   * not just later re-runs.
+   *
+   * Without this hook the initial detection's terminal
+   * `setDetectionComplete()` could fire AFTER the directory swap has
+   * reset state, briefly flashing stale framework results from the
+   * old tree.
+   */
+  registerActiveDetection(controller: AbortController): void {
+    this._activeDetectionAbort = controller;
+  }
+
+  /**
    * Swap the install directory and re-run framework detection.
    *
    * `newInstallDir` MUST be a resolved, existing absolute path —

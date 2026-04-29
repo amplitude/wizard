@@ -1747,6 +1747,25 @@ describe('WizardStore', () => {
       expect(failing).toHaveBeenCalledTimes(1);
     });
 
+    // Regression: bugbot Issue #2.
+    //
+    // Before this fix, only the IntroScreen-driven re-detection calls
+    // registered an AbortController as the active detection. The
+    // INITIAL detection from bin.ts had no controller registered, so a
+    // `changeInstallDir` fired before the first scan completed would
+    // skip the abort path entirely. The original detection's
+    // `setDetectionComplete` could then fire AFTER the reset, briefly
+    // flashing stale framework results from the old tree.
+    it('aborts a controller registered via registerActiveDetection', () => {
+      const store = createStore();
+      const initialController = new AbortController();
+      store.registerActiveDetection(initialController);
+
+      expect(initialController.signal.aborted).toBe(false);
+      store.changeInstallDir('/tmp/swap-during-initial-scan');
+      expect(initialController.signal.aborted).toBe(true);
+    });
+
     it('emits a telemetry event with whether a redetector was registered', () => {
       const store = createStore();
       const wizardCapture = analytics.wizardCapture as Mock;

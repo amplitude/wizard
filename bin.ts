@@ -1781,7 +1781,19 @@ void yargs(hideBin(process.argv))
               runFrameworkDetection(tui.store, nextDir, { signal }),
             );
 
-            const detectionTask = runFrameworkDetection(tui.store, installDir);
+            // The INITIAL detection also needs to be cancellable. If
+            // the user picks "Change directory" before the first scan
+            // completes, `changeInstallDir` aborts whatever controller
+            // is registered as active — without this wiring it would
+            // miss the initial run, and the first detection's
+            // setDetectionComplete could fire after the reset and
+            // briefly flash stale results from the original tree.
+            const initialDetectionAbort = new AbortController();
+            tui.store.registerActiveDetection(initialDetectionAbort);
+
+            const detectionTask = runFrameworkDetection(tui.store, installDir, {
+              signal: initialDetectionAbort.signal,
+            });
 
             // Gate runWizard on the user reaching RunScreen — at that point
             // auth, data check, and any setup questions are all complete.

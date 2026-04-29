@@ -55,10 +55,16 @@ type ValidationResult =
  * Steps:
  *   1. Trim whitespace (a copy-pasted path with a trailing newline is
  *      a real failure mode).
- *   2. Expand a leading `~` to the user's home directory. We intentionally
- *      DON'T expand `$VAR` style env vars — that would surprise users who
- *      type a literal `$` in a directory name. They can type the full
- *      path or use a shell-resolved path on the command line.
+ *   2. Expand a leading `~` to the user's home directory. Both `~/foo`
+ *      and `~\foo` are accepted — the backslash form matters on
+ *      Windows because `shortenHomePath` produces paths separated by
+ *      `path.sep` (a backslash). Without that branch, the seeded
+ *      default value from `shortenHomePath(installDir)` would fail to
+ *      round-trip: pressing Enter without editing would resolve
+ *      `~\foo` against `cwd` as a relative path and the directory
+ *      lookup would fail. We intentionally DON'T expand `$VAR` style
+ *      env vars — that would surprise users who type a literal `$`
+ *      in a directory name.
  *   3. Resolve relative paths against `cwd` so `./foo` and `../foo` work
  *      from wherever the wizard was launched.
  *
@@ -66,13 +72,14 @@ type ValidationResult =
  */
 export function resolveUserPath(input: string): string {
   const trimmed = input.trim();
-  const expanded = trimmed.startsWith('~')
-    ? trimmed === '~'
-      ? homedir()
-      : trimmed.startsWith('~/')
-      ? homedir() + trimmed.slice(1)
-      : trimmed
-    : trimmed;
+  let expanded = trimmed;
+  if (trimmed === '~') {
+    expanded = homedir();
+  } else if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
+    // Slice past the `~` only — keep the separator so `path.resolve`
+    // gets a properly-formed argument on either platform.
+    expanded = homedir() + trimmed.slice(1);
+  }
   return isAbsolute(expanded) ? expanded : resolve(process.cwd(), expanded);
 }
 

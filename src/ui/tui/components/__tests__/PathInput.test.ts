@@ -51,6 +51,25 @@ describe('resolveUserPath', () => {
     expect(result).toContain('~someone');
   });
 
+  // Regression: bugbot Issue #3.
+  //
+  // `shortenHomePath` produces paths separated by `path.sep`, which is
+  // a backslash on Windows. The PathInput seeds its default value via
+  // `shortenHomePath(installDir)`, so on Windows the seeded value
+  // looks like `~\projects\my-app`. Before this fix, `resolveUserPath`
+  // only recognized `~/` (forward slash) — a Windows user pressing
+  // Enter without editing the default got "no directory" because the
+  // tilde never expanded.
+  it('expands a Windows-style ~\\ prefix the same as ~/', () => {
+    expect(resolveUserPath('~\\projects\\foo')).toBe(
+      // The home + backslash + rest. We don't normalize separators
+      // because Node's path APIs accept either on Windows and we want
+      // the underlying `path.resolve` (or `statSync`) to handle the
+      // platform-specific separator.
+      homedir() + '\\projects\\foo',
+    );
+  });
+
   it('resolves relative paths against cwd', () => {
     const result = resolveUserPath('./relative/path');
     expect(isAbsolute(result)).toBe(true);

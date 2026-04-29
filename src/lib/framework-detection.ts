@@ -155,9 +155,19 @@ export async function runFrameworkDetection(
 
   // Feature discovery — same helper that CI/agent uses, so the package
   // and integration lists never drift between modes.
+  //
+  // CRITICAL: read `installDir` and `integration` from `store.session`
+  // every call, NOT from the surrounding function parameter. The
+  // integration-change subscriber below is registered ONCE per store
+  // and outlives the closure that registered it. If we captured
+  // `installDir` from the parameter, then after a directory change
+  // (which keeps the same store + same subscriber) the subscriber
+  // would scan the OLD package.json against the NEW integration —
+  // potentially adding Stripe / LLM features from a project the user
+  // already navigated away from.
   const runDiscovery = (): void => {
     for (const f of discoverFeatures({
-      installDir,
+      installDir: store.session.installDir,
       integration: store.session.integration,
     })) {
       store.addDiscoveredFeature(f);
@@ -173,13 +183,24 @@ export async function runFrameworkDetection(
   // Re-run when integration changes (handles manual selection after
   // auto-detection fails). Only the FIRST call wires this subscription
   // — subsequent re-detection calls on a directory change inherit the
-  // listener that's already in place.
+  // listener that's already in place. The subscriber re-reads
+  // installDir from the store on every fire (see `runDiscovery`), so
+  // it stays correct even when bin.ts hands the same store off to a
+  // new directory.
   if (!hasIntegrationWatcher.has(store)) {
     let lastIntegration = store.session.integration;
     store.subscribe(() => {
       const integration = store.session.integration;
       if (integration === lastIntegration) return;
       lastIntegration = integration;
+      // Skip when the integration was just RESET (e.g., during
+      // `changeInstallDir`). Running discovery with a null integration
+      // is harmless but wasteful — and worse, fires synchronously
+      // mid-`emitChange` on the directory swap, which we want to
+      // avoid. The follow-on detection run will set the new
+      // integration shortly and the subscriber will fire again with
+      // useful work to do.
+      if (integration === null) return;
       runDiscovery();
     });
     hasIntegrationWatcher.add(store);
