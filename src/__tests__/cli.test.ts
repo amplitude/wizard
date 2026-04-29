@@ -45,6 +45,9 @@ const {
     setOutroData: vi.fn(),
     setRunPhase: vi.fn(),
     setUserEmail: vi.fn(),
+    // Per-cycle OAuth abort controller registration (region-change paths
+    // call abortInflightOAuth via the store to tear down in-flight OAuth).
+    setOAuthAbortController: vi.fn(),
   };
   return {
     mockStore,

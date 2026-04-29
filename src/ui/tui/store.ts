@@ -295,6 +295,37 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * AbortController for the in-flight OAuth flow, set by the caller running
+   * `performAmplitudeAuth`. Stored here (not on the session) because it's
+   * non-serializable in-flight state — never restored from a checkpoint and
+   * never persisted. Used by region-change paths to cancel the running OAuth
+   * BEFORE starting a new one against a different data center; without this
+   * the old EU OAuth call's `setLoginUrl` would linger in session state
+   * showing the user the wrong URL until the 120s OAuth timeout fired.
+   */
+  private _oauthAbortController: AbortController | null = null;
+
+  /** Register the AbortController for the in-flight OAuth flow. */
+  setOAuthAbortController(controller: AbortController | null): void {
+    this._oauthAbortController = controller;
+  }
+
+  /**
+   * Abort any in-flight OAuth flow. Idempotent — safe to call when no flow
+   * is running. Used by region-change paths to immediately tear down the
+   * old-region OAuth callback server + waitForCallback so the new-region
+   * OAuth can start cleanly.
+   */
+  abortInflightOAuth(reason = 'region changed'): void {
+    const controller = this._oauthAbortController;
+    if (!controller) return;
+    if (!controller.signal.aborted) {
+      controller.abort(reason);
+    }
+    this._oauthAbortController = null;
+  }
+
   setLoginUrl(url: string | null): void {
     this.$session.setKey('loginUrl', url);
     this.emitChange();
@@ -368,12 +399,22 @@ export class WizardStore {
   setRegionForced(): void {
     this.$session.setKey('regionForced', true);
 
+    // Cancel any in-flight OAuth against the OLD zone before we tear down
+    // its credentials. Without this, a /region invocation while the user is
+    // still on the OAuth waiting screen would leave the old-zone callback
+    // server bound and the old-zone login URL displayed in the TUI until
+    // the 120s OAuth timeout finally fired.
+    this.abortInflightOAuth('region forced via /region');
+
     // Credentials and OAuth intermediates (all zone-scoped)
     this.$session.setKey('credentials', null);
     this.$session.setKey('pendingOrgs', null);
     this.$session.setKey('pendingAuthIdToken', null);
     this.$session.setKey('pendingAuthAccessToken', null);
     this.$session.setKey('apiKeyNotice', null);
+    // Clear the displayed login URL so the next OAuth cycle's setLoginUrl
+    // is the only one the user ever sees.
+    this.$session.setKey('loginUrl', null);
 
     // User / org / workspace / project selection — all lived in the old zone
     this.$session.setKey('userEmail', null);
@@ -1169,6 +1210,13 @@ export class WizardStore {
    * resolved credentials so the next pass actually re-authenticates.
    */
   resetAuthForRegionChange(): void {
+    // Cancel any in-flight OAuth against the OLD zone. Without this, the
+    // user-reported flow "pick EU → Esc → pick US → still see EU login URL
+    // until the 120s timeout" sticks: the old performAmplitudeAuth holds
+    // the callback server, holds the EU URL in session.loginUrl, and the
+    // re-auth watcher won't fire until authTask resolves on timeout.
+    this.abortInflightOAuth('region changed via Esc back-nav');
+
     this.$session.setKey('region', null);
     this.$session.setKey('regionForced', true);
     this.$session.setKey('credentials', null);
@@ -1182,6 +1230,9 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);
+    // Clear the stale login URL so the RegionSelect screen doesn't carry
+    // the OLD zone's URL into the next pick.
+    this.$session.setKey('loginUrl', null);
     this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
     this.emitChange();

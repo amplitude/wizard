@@ -1422,7 +1422,28 @@ void yargs(hideBin(process.argv))
                 { readDisk: false },
               );
 
-              let auth = await performAmplitudeAuth({ zone, forceFresh });
+              // Per-cycle abort controller. Region-change paths in the
+              // store call abortInflightOAuth() to tear down the in-flight
+              // performAmplitudeAuth (close the callback server, reject
+              // waitForCallback) so the next cycle isn't shadowed by the
+              // OLD zone's pending OAuth call still holding the callback
+              // server and the displayed login URL.
+              const oauthController = new AbortController();
+              tui.store.setOAuthAbortController(oauthController);
+
+              let auth: Awaited<ReturnType<typeof performAmplitudeAuth>>;
+              try {
+                auth = await performAmplitudeAuth({
+                  zone,
+                  forceFresh,
+                  signal: oauthController.signal,
+                });
+              } finally {
+                // Clear the controller as soon as performAmplitudeAuth resolves
+                // (success, error, or abort) so a later region-change doesn't
+                // try to abort an already-finished call.
+                tui.store.setOAuthAbortController(null);
+              }
 
               // Update login URL (clears the "copy this URL" hint)
               tui.store.setLoginUrl(null);
@@ -1434,9 +1455,21 @@ void yargs(hideBin(process.argv))
               try {
                 userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
               } catch {
-                // Token may be expired — re-open the browser for a fresh login
+                // Token may be expired — re-open the browser for a fresh login.
+                // Same per-cycle abort wiring so a region-change DURING this
+                // retry tears it down too.
                 tui.store.setLoginUrl(null);
-                auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                const retryController = new AbortController();
+                tui.store.setOAuthAbortController(retryController);
+                try {
+                  auth = await performAmplitudeAuth({
+                    zone,
+                    forceFresh: true,
+                    signal: retryController.signal,
+                  });
+                } finally {
+                  tui.store.setOAuthAbortController(null);
+                }
                 userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
               }
 
@@ -1613,12 +1646,21 @@ void yargs(hideBin(process.argv))
                         zone,
                       });
                     }
-                    // Token may be expired — re-open the browser for a fresh login
+                    // Token may be expired — re-open the browser for a fresh login.
+                    // Wire the per-cycle AbortController so a region change
+                    // during this signup-recovery OAuth tears it down too.
                     tui.store.setLoginUrl(null);
-                    auth = await performAmplitudeAuth({
-                      zone,
-                      forceFresh: true,
-                    });
+                    const signupRetryController = new AbortController();
+                    tui.store.setOAuthAbortController(signupRetryController);
+                    try {
+                      auth = await performAmplitudeAuth({
+                        zone,
+                        forceFresh: true,
+                        signal: signupRetryController.signal,
+                      });
+                    } finally {
+                      tui.store.setOAuthAbortController(null);
+                    }
                     userInfo = await fetchAmplitudeUser(
                       auth.idToken,
                       cloudRegion,

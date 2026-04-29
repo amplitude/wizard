@@ -272,6 +272,46 @@ describe('WizardStore', () => {
       expect(store.session.loginUrl).toBeNull();
     });
 
+    // Regression for the "pick EU → Esc → pick US still shows EU URL" report.
+    // Without this guard, the in-flight performAmplitudeAuth keeps the old
+    // login URL in session state until the 120s OAuth timeout fires.
+    it('resetAuthForRegionChange aborts the in-flight OAuth controller and clears loginUrl', () => {
+      const store = createStore();
+      store.setLoginUrl('https://auth.eu.amplitude.com/oauth2/auth?...');
+      const controller = new AbortController();
+      store.setOAuthAbortController(controller);
+
+      store.resetAuthForRegionChange();
+
+      expect(controller.signal.aborted).toBe(true);
+      expect(store.session.loginUrl).toBeNull();
+    });
+
+    it('setRegionForced aborts the in-flight OAuth controller and clears loginUrl', () => {
+      const store = createStore();
+      store.setLoginUrl('https://auth.amplitude.com/oauth2/auth?...');
+      const controller = new AbortController();
+      store.setOAuthAbortController(controller);
+
+      store.setRegionForced();
+
+      expect(controller.signal.aborted).toBe(true);
+      expect(store.session.loginUrl).toBeNull();
+    });
+
+    it('abortInflightOAuth is idempotent and safe with no controller registered', () => {
+      const store = createStore();
+      // No controller registered — should be a silent no-op.
+      expect(() => store.abortInflightOAuth()).not.toThrow();
+
+      // Single abort, then a second call against the now-cleared slot.
+      const controller = new AbortController();
+      store.setOAuthAbortController(controller);
+      store.abortInflightOAuth();
+      expect(controller.signal.aborted).toBe(true);
+      expect(() => store.abortInflightOAuth()).not.toThrow();
+    });
+
     it('setServiceStatus sets status info', () => {
       const store = createStore();
       const status = {
