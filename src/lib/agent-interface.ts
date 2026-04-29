@@ -1416,12 +1416,63 @@ export async function runAgentLocally(
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
 
+    // Rate-limit how often raw stdout chunks become user-visible status
+    // updates. Each pushStatus mutates the store and triggers a full TUI
+    // re-render; under stream-json output that fires hundreds of times a
+    // second and stalls the UI. We keep the most recent line (so the
+    // status reflects "now") but only forward it to the UI on a fixed
+    // cadence. Logging stays per-line for full fidelity in the log file.
+    const PUSH_INTERVAL_MS = 150;
+    let pendingLine: string | null = null;
+    let pushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushPending = () => {
+      pushTimer = null;
+      if (pendingLine === null) return;
+      const line = pendingLine;
+      pendingLine = null;
+      spinner.message(line);
+      getUI().pushStatus(line);
+    };
+
+    /**
+     * Detect Anthropic stream-event protocol JSON. These lines
+     * (`{"type":"message_start",...}`, `{"type":"content_block_delta",...}`,
+     * etc.) leak into stdout when claude is invoked with a streaming output
+     * format. They're useful in the log file but pure garbage in the status
+     * pill — the user sees raw protocol noise and the long, unbounded JSON
+     * also pushes the progress counter past terminal width and folds the
+     * header layout (see RunScreen.tsx `truncateStatus`). Drop them from
+     * the user-facing status; they're already captured in the per-line log.
+     */
+    const STREAM_EVENT_TYPES = new Set([
+      'message_start',
+      'message_delta',
+      'message_stop',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop',
+      'ping',
+      'stream_event',
+    ]);
+    const looksLikeStreamEvent = (line: string): boolean => {
+      if (line.length < 9 || line[0] !== '{') return false;
+      try {
+        const obj = JSON.parse(line) as { type?: unknown };
+        return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
+      } catch {
+        return false;
+      }
+    };
+
     proc.stdout.on('data', (chunk: string) => {
       const lines = chunk.split('\n').filter((l) => l.trim());
       for (const line of lines) {
         logToFile('claude stdout:', line);
-        spinner.message(line.slice(0, 80));
-        getUI().pushStatus(line.slice(0, 80));
+        if (looksLikeStreamEvent(line)) continue;
+        pendingLine = line.slice(0, 80);
+        if (pushTimer === null) {
+          pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
+        }
       }
     });
 
@@ -1430,6 +1481,12 @@ export async function runAgentLocally(
     });
 
     proc.on('close', (code) => {
+      // Flush any pending status update so the very last line the user
+      // sees reflects what actually happened just before exit.
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        flushPending();
+      }
       if (code === 0) {
         spinner.stop(successMessage);
         resolve({});
@@ -1440,6 +1497,11 @@ export async function runAgentLocally(
     });
 
     proc.on('error', (err) => {
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        pushTimer = null;
+        pendingLine = null;
+      }
       spinner.stop(errorMessage);
       reject(err);
     });
