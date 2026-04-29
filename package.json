@@ -147,7 +147,11 @@
     "sync": "git fetch origin main && git rebase origin/main && git push --force-with-lease"
   },
   "lint-staged": {
-    "*.{js,ts,tsx,jsx}": "pnpm fix"
+    "*.ts": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{tsx,js,jsx}": "eslint --fix"
   },
   "author": "Amplitude",
   "license": "MIT",
