@@ -61,6 +61,8 @@ export const AGENT_EVENT_WIRE_VERSION = 1 as const;
  * the new shape.
  */
 export const EVENT_DATA_VERSIONS = {
+  // Prompt
+  needs_input: 1,
   // Lifecycle
   start_run: 1,
   /**
