@@ -203,5 +203,31 @@ describe('pipe-errors', () => {
 
       __setPipeAbortDispatcherForTests(null);
     });
+
+    // Bugbot regression (Medium): without `suppressPipeAbort`, a
+    // wizard already in `wizardSuccessExit` that emits `run_completed`
+    // and hits a closed pipe would schedule `setImmediate(() =>
+    // wizardAbort())`. The deferred abort fires during the success
+    // path's analytics-shutdown await and calls `process.exit(130)`
+    // before the success path reaches `process.exit(0)`. Result: a
+    // fully successful run exits with USER_CANCELLED (130) instead
+    // of 0, breaking CI watchers.
+    it('suppressPipeAbort short-circuits the deferred trigger entirely', async () => {
+      const dispatcher = vi.fn();
+      __setPipeAbortDispatcherForTests(dispatcher);
+
+      const { suppressPipeAbort } = await import('../pipe-errors');
+      // Mark "already exiting" as wizardSuccessExit / wizardAbort do.
+      suppressPipeAbort();
+
+      // Now hit EPIPE. With the suppression flag, no abort scheduled.
+      expect(safePipeWrite(stream, 'first')).toBe(false);
+      expect(safePipeWrite(stream, 'second')).toBe(false);
+
+      await new Promise((r) => setImmediate(r));
+      expect(dispatcher).not.toHaveBeenCalled();
+
+      __setPipeAbortDispatcherForTests(null);
+    });
   });
 });

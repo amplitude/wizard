@@ -671,12 +671,25 @@ describe('AgentUI — per-event data_version', () => {
 
   it('stamps data_version on tool_call', () => {
     const ui = new AgentUI();
+    // Bugbot regression: previous version of this test passed
+    // `toolName` (the wrong key) — vitest/esbuild skip type-checking
+    // at runtime, so the call ran with `data.tool === undefined` and
+    // produced a malformed event. The data_version assertion still
+    // passed (the discriminator is injected by the method, not the
+    // caller), which gave false confidence. Use the correct `tool`
+    // key here AND assert the wire shape includes it, so a future
+    // typo can't sneak through.
     ui.emitToolCall({
-      toolName: 'Edit',
+      tool: 'Edit',
       summary: 'edit src/foo.ts',
     });
     const event = eventsOfType('progress').at(-1)!;
     expect((event as unknown as { data_version: number }).data_version).toBe(1);
+    expect(event.data).toMatchObject({
+      event: 'tool_call',
+      tool: 'Edit',
+      summary: 'edit src/foo.ts',
+    });
   });
 
   it('does NOT stamp data_version on free-form log events', () => {

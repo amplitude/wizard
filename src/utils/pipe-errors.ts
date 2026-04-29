@@ -151,6 +151,28 @@ export const __resetPipeAbortTriggeredForTests = (): void => {
   _pipeAbortTriggered = false;
 };
 
+/**
+ * Mark the wizard as "already exiting" so any future EPIPE detected
+ * by `safePipeWrite` / the stream error listener short-circuits
+ * instead of scheduling a deferred `wizardAbort`.
+ *
+ * Why this exists: `wizardSuccessExit` and `wizardAbort` write to
+ * stdout (e.g. the `run_completed` NDJSON event) AFTER the consumer
+ * may have closed the pipe. Without this flag, that write hits EPIPE,
+ * `triggerPipeAbort` schedules `setImmediate(() => wizardAbort())`,
+ * and the deferred abort fires during the success path's own
+ * analytics-shutdown await — calling `process.exit(130)` before the
+ * success path reaches `process.exit(0)`. CI watchers see code 130
+ * (USER_CANCELLED) on a fully successful run.
+ *
+ * Calling this idempotent setter at the START of every exit funnel
+ * suppresses the race: we're already on the way out, the deferred
+ * abort would just stomp our exit code. Bugbot finding (Medium).
+ */
+export const suppressPipeAbort = (): void => {
+  _pipeAbortTriggered = true;
+};
+
 /** Test-only dispatcher injection. Pass `null` to restore the default. */
 export const __setPipeAbortDispatcherForTests = (
   dispatcher: AbortDispatcher | null,

@@ -124,8 +124,6 @@ export const EVENT_DATA_VERSIONS = {
   decision_auto: 1,
 } as const;
 
-export type EventDataKey = keyof typeof EVENT_DATA_VERSIONS;
-
 /** All NDJSON event-level types. */
 export type AgentEventType =
   | 'lifecycle'

@@ -19,6 +19,7 @@ import {
   flushSentry,
   captureError as sentryCaptureError,
 } from '../lib/observability';
+import { suppressPipeAbort } from './pipe-errors';
 
 export class WizardError extends Error {
   constructor(
@@ -127,6 +128,13 @@ export function clearCleanup(): void {
  * the screen's own UI is the user-facing message.
  */
 export async function wizardSuccessExit(exitCode = 0): Promise<never> {
+  // Suppress any future EPIPE-driven abort. We're already on the way
+  // out — if `emitRunCompleted` below (or any later write) hits a
+  // closed pipe, the default path would schedule a deferred
+  // `wizardAbort` that races our `process.exit(0)` and clobbers the
+  // exit code with 130 (USER_CANCELLED). Bugbot caught this race;
+  // marking the flag here neutralizes the deferred trigger.
+  suppressPipeAbort();
   for (const fn of cleanupFns) {
     try {
       fn();
@@ -256,6 +264,12 @@ export async function wizardAbort(
     exitCode = 1,
     cancelOptions,
   } = options ?? {};
+
+  // Suppress any future EPIPE-driven abort. We're already aborting —
+  // a deferred pipe-trigger firing mid-shutdown would clobber the
+  // caller's intended exit code with 130. Same fix as
+  // `wizardSuccessExit`. Bugbot finding (Medium).
+  suppressPipeAbort();
 
   // 1. Run registered cleanup functions
   for (const fn of cleanupFns) {
