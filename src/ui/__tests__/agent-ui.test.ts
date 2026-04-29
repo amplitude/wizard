@@ -1123,3 +1123,168 @@ describe('AgentUI.startRun + getRunStartedAtMs', () => {
     expect(ui.getRunStartedAtMs()).toBeNull();
   });
 });
+
+describe('AgentUI.emitSetupContext', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent =>
+    JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+
+  it('emits a lifecycle event with event: "setup_context" and the requested phase', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'plan',
+      amplitude: { region: 'us', orgId: 'org-1', orgName: 'Acme' },
+      sources: { region: 'saved', orgId: 'saved' },
+      requiresConfirmation: true,
+    });
+    const ev = lastEvent();
+    expect(ev.type).toBe('lifecycle');
+    expect(ev.data).toMatchObject({
+      event: 'setup_context',
+      phase: 'plan',
+      amplitude: { region: 'us', orgId: 'org-1', orgName: 'Acme' },
+      sources: { region: 'saved', orgId: 'saved' },
+      requiresConfirmation: true,
+    });
+  });
+
+  it('drops undefined / null / empty-string scope fields from the wire payload', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'apply_started',
+      amplitude: {
+        region: 'us',
+        orgId: 'org-1',
+        // Mix of empty / null / undefined that should be dropped:
+        orgName: '',
+        projectId: undefined,
+        appId: 'app-7',
+        envName: undefined,
+      },
+    });
+    const ev = lastEvent();
+    const amp = (ev.data as { amplitude: Record<string, unknown> }).amplitude;
+    expect(Object.keys(amp).sort()).toEqual(['appId', 'orgId', 'region']);
+  });
+
+  it('builds a human-readable summary in the message field when scope is rich', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'apply_started',
+      amplitude: {
+        orgName: 'Acme',
+        projectName: 'Marketing',
+        appName: 'TodoMVC',
+        appId: 'app-7',
+        envName: 'Production',
+      },
+    });
+    const ev = lastEvent();
+    expect(ev.message).toContain('Acme / Marketing / TodoMVC / Production');
+  });
+
+  it('omits the summary when no scope fields are present', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({ phase: 'whoami', amplitude: {} });
+    const ev = lastEvent();
+    expect(ev.message).toBe('setup_context (whoami)');
+  });
+});
+
+describe('AgentUI.emitSetupComplete', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent =>
+    JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+
+  it('emits a result event with event: "setup_complete" and level: "success"', () => {
+    const ui = new AgentUI();
+    ui.emitSetupComplete({
+      amplitude: {
+        appId: 'app-7',
+        appName: 'TodoMVC',
+        orgId: 'org-1',
+        envName: 'Production',
+        dashboardUrl: 'https://app.amplitude.com/analytics/acme/dashboard/abc',
+        dashboardId: 'abc',
+      },
+      files: { written: ['src/amplitude.js'], modified: ['src/index.js'] },
+      events: [{ name: 'Todo Created', description: 'User adds a todo.' }],
+      durationMs: 60_000,
+    });
+    const ev = lastEvent();
+    expect(ev.type).toBe('result');
+    expect(ev.level).toBe('success');
+    expect(ev.data).toMatchObject({
+      event: 'setup_complete',
+      amplitude: { appId: 'app-7', dashboardId: 'abc' },
+      files: { written: ['src/amplitude.js'], modified: ['src/index.js'] },
+      durationMs: 60_000,
+    });
+    expect(ev.message).toContain('app TodoMVC');
+  });
+
+  it('omits empty optional sub-objects from the wire payload', () => {
+    const ui = new AgentUI();
+    ui.emitSetupComplete({
+      amplitude: { appId: 'app-7' },
+    });
+    const ev = lastEvent();
+    expect(ev.data).not.toHaveProperty('files');
+    expect(ev.data).not.toHaveProperty('envVars');
+    expect(ev.data).not.toHaveProperty('events');
+    expect(ev.data).not.toHaveProperty('durationMs');
+  });
+});
+
+describe('truncateLogMessage (log-spillover guard)', () => {
+  it('passes short messages through unchanged', async () => {
+    const { truncateLogMessage, MAX_LOG_MESSAGE_LENGTH } = await import(
+      '../../lib/agent-events.js'
+    );
+    expect(truncateLogMessage('hello')).toBe('hello');
+    const exact = 'a'.repeat(MAX_LOG_MESSAGE_LENGTH);
+    expect(truncateLogMessage(exact)).toBe(exact);
+  });
+
+  it('truncates oversized messages and appends a [truncated …] suffix', async () => {
+    const { truncateLogMessage, MAX_LOG_MESSAGE_LENGTH } = await import(
+      '../../lib/agent-events.js'
+    );
+    const oversized = 'x'.repeat(MAX_LOG_MESSAGE_LENGTH + 5_000);
+    const out = truncateLogMessage(oversized);
+    expect(out.length).toBe(MAX_LOG_MESSAGE_LENGTH);
+    expect(out.endsWith('[truncated; see verbose log]')).toBe(true);
+  });
+});
