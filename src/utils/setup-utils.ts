@@ -22,6 +22,7 @@ import {
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
+import { resolveStoredExpiryMs } from './jwt-exp';
 import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
 import { type AppId, toCredentialAppId } from '../lib/wizard-session';
 import { storeToken } from './ampli-settings';
@@ -578,7 +579,11 @@ async function askForWizardLogin(
         accessToken: auth.accessToken,
         idToken: auth.idToken,
         refreshToken: auth.refreshToken,
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        // Stored `expiresAt` tracks id_token TTL (binding constraint
+        // for API calls) — see `src/utils/jwt-exp.ts`.
+        expiresAt: new Date(
+          resolveStoredExpiryMs({ idToken: auth.idToken }),
+        ).toISOString(),
       },
     );
 

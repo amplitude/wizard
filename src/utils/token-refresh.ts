@@ -152,12 +152,6 @@ async function tryRefreshTokenInner(
       return null;
     }
 
-    const expiresAt = now + expiresIn * 1000;
-
-    // Persist rotated refresh token if the server issued a new one
-    const newRefreshToken =
-      typeof data.refresh_token === 'string' ? data.refresh_token : undefined;
-
     // Pull the rotated id_token. Ory returns one on every refresh when the
     // original auth included `openid` scope (we always do). The id_token's
     // `exp` is shorter than the access token's, so without persisting it,
@@ -165,6 +159,22 @@ async function tryRefreshTokenInner(
     // but the still-stale id_token would 401 every API call that uses it.
     const newIdToken =
       typeof data.id_token === 'string' ? data.id_token : undefined;
+
+    // `expiresAt` controls when `tryRefreshToken` next fires. Source it
+    // from the rotated id_token's `exp` claim so the trigger aligns to
+    // the binding constraint (id_token TTL), not access_token TTL. Falls
+    // back to `expires_in` if the JWT isn't decodable. See
+    // `src/utils/jwt-exp.ts`.
+    const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
+    const expiresAt = resolveStoredExpiryMs({
+      idToken: newIdToken,
+      expiresInSeconds: expiresIn,
+      now,
+    });
+
+    // Persist rotated refresh token if the server issued a new one
+    const newRefreshToken =
+      typeof data.refresh_token === 'string' ? data.refresh_token : undefined;
 
     logToFile('[token-refresh] silent refresh succeeded', {
       expiresAt: new Date(expiresAt).toISOString(),

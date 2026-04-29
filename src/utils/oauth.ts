@@ -524,8 +524,18 @@ async function performAmplitudeAuthInner(options: {
     // storeToken() uses atomicWriteJSON (temp + rename) — concurrent wizard
     // runs cannot corrupt the file. Last-writer-wins for the access token
     // is acceptable since all issued refresh tokens stay valid.
+    //
+    // Stored `expiresAt` tracks the id_token's TTL (1h on Ory's default
+    // OIDC config), not the access_token's `expires_in` (24h). The
+    // wizard authenticates with the id_token, so `tryRefreshToken` must
+    // refresh on id_token expiry to avoid 401s mid-run. Falls back to
+    // `expires_in` if the JWT can't be decoded — never strictly worse.
+    const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
     const expiresAt = new Date(
-      Date.now() + tokenResponse.expires_in * 1000,
+      resolveStoredExpiryMs({
+        idToken: tokenResponse.id_token,
+        expiresInSeconds: tokenResponse.expires_in,
+      }),
     ).toISOString();
     const pendingUser: StoredUser = {
       id: 'pending',
@@ -607,11 +617,21 @@ export async function refreshAccessToken(
     { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
   );
   const parsed = OAuthTokenResponseSchema.parse(response.data);
+  // Source `expiresAt` from the rotated id_token's `exp` claim — the
+  // id_token's TTL is the binding constraint for our API calls. See
+  // `src/utils/jwt-exp.ts` for rationale. Falls back to `expires_in`
+  // when the JWT can't be decoded.
+  const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
   return {
     accessToken: parsed.access_token,
     idToken: parsed.id_token,
     refreshToken: parsed.refresh_token,
-    expiresAt: new Date(Date.now() + parsed.expires_in * 1000).toISOString(),
+    expiresAt: new Date(
+      resolveStoredExpiryMs({
+        idToken: parsed.id_token,
+        expiresInSeconds: parsed.expires_in,
+      }),
+    ).toISOString(),
   };
 }
 
