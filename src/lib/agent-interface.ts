@@ -207,6 +207,15 @@ export type AgentConfig = {
   skipAmplitudeMcp?: boolean;
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
+  /**
+   * UUID v4 that groups all `/v1/messages` calls in this wizard run into one
+   * Agent Analytics session. Sourced from `WizardSession.agentSessionId`,
+   * forwarded to the Amplitude LLM gateway as the `x-amp-wizard-session-id`
+   * header (via `ANTHROPIC_CUSTOM_HEADERS`). Without this, the proxy falls back
+   * to a per-token-hash session ID, which collapses every wizard run a user
+   * ever does into a single session.
+   */
+  agentSessionId?: string;
 };
 
 /**
@@ -611,6 +620,11 @@ export type AgentRunConfig = {
   useLocalClaude?: boolean;
   /** When true, ANTHROPIC_API_KEY is passed through to the SDK instead of the gateway. */
   useDirectApiKey?: boolean;
+  /**
+   * Per-wizard-run UUID forwarded to the gateway as `x-amp-wizard-session-id`.
+   * Groups all `/v1/messages` calls in this run into one Agent Analytics session.
+   */
+  agentSessionId?: string;
 };
 
 const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
@@ -647,11 +661,26 @@ export function buildWizardMetadata(
 }
 
 /**
- * Build env for the SDK subprocess: process.env plus ANTHROPIC_CUSTOM_HEADERS from wizard metadata/flags.
+ * Header forwarded to the Amplitude LLM gateway to group all `/v1/messages`
+ * calls from a single wizard run into one Agent Analytics session.
+ *
+ * The proxy (thunder/wizard-proxy) reads this header and uses it as the
+ * `agentSessionId`. Without it, the proxy falls back to a deterministic
+ * session ID derived from the auth token hash — which collapses every
+ * wizard run a user ever does into the same session.
  */
-function buildAgentEnv(
+export const WIZARD_SESSION_ID_HEADER = 'x-amp-wizard-session-id';
+
+/**
+ * Build env for the SDK subprocess: process.env plus ANTHROPIC_CUSTOM_HEADERS
+ * from wizard metadata, feature flags, and the per-run session ID.
+ *
+ * Exported for unit testing.
+ */
+export function buildAgentEnv(
   wizardMetadata: Record<string, string>,
   wizardFlags: Record<string, string>,
+  agentSessionId?: string,
 ): string {
   const headers = createCustomHeaders();
   for (const [key, value] of Object.entries(wizardMetadata)) {
@@ -665,6 +694,9 @@ function buildAgentEnv(
   for (const [flagKey, variant] of Object.entries(wizardFlags)) {
     if (!flagKey.toLowerCase().startsWith('wizard')) continue;
     headers.addFlag(flagKey, variant);
+  }
+  if (agentSessionId) {
+    headers.add(WIZARD_SESSION_ID_HEADER, agentSessionId);
   }
   const encoded = headers.encode();
   logToFile('ANTHROPIC_CUSTOM_HEADERS', encoded);
@@ -1246,6 +1278,7 @@ export async function initializeAgent(
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,
       useDirectApiKey,
+      agentSessionId: config.agentSessionId,
     };
 
     logToFile('Agent config:', {
@@ -2019,6 +2052,7 @@ export async function runAgent(
               ANTHROPIC_CUSTOM_HEADERS: buildAgentEnv(
                 agentConfig.wizardMetadata ?? {},
                 agentConfig.wizardFlags ?? {},
+                agentConfig.agentSessionId,
               ),
             },
             canUseTool: (toolName: string, input: unknown) => {

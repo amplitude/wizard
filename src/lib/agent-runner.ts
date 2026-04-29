@@ -728,6 +728,7 @@ async function runAgentWizardBody(
       wizardMetadata,
       skipAmplitudeMcp,
       skillsBaseUrl,
+      agentSessionId: session.agentSessionId,
     },
     sessionToOptions(session),
   );
