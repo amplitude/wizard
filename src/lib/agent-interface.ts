@@ -204,18 +204,13 @@ export function resolveMaxTurns(
 let _activeStatusReporter: StatusReporter | undefined;
 
 /**
- * Map a `WizardMode` to the actual Claude model alias the SDK should use.
- *
- *   - `fast`     → `claude-haiku-4-5`  — quickest turn time, lowest cost,
- *                                       weaker on long file edits
- *   - `standard` → `claude-sonnet-4-6` — current default; best balance
- *   - `thorough` → `claude-opus-4-7`   — most careful, slower, pricier
+ * Map a `WizardMode` to a Claude model alias. Internal — see
+ * `docs/internal/agent-mode-flag.md` for the full mapping and rationale.
  *
  * The Amplitude LLM gateway expects the `anthropic/<alias>` prefix; the
- * direct Anthropic API expects the bare alias. `bin.ts:validateModeFlag`
- * already gates `thorough` on the presence of a direct `ANTHROPIC_API_KEY`
- * because the gateway does not yet vend Opus (verified in
- * `src/__tests__/proxy.test.ts:84-85`).
+ * direct Anthropic API expects the bare alias. The wizard's `fallbackModel`
+ * is a different model on a different routing path, so a tier the gateway
+ * doesn't currently vend silently degrades rather than failing the run.
  *
  * Exported so unit tests can pin the mapping without standing up the
  * full agent runtime.
@@ -256,10 +251,9 @@ export type AgentConfig = {
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
   /**
-   * Agent model tier — `'fast'` (Haiku 4.5), `'standard'` (Sonnet 4.6,
-   * default), or `'thorough'` (Opus 4.7). Threaded from `WizardSession.mode`
-   * via `agent-runner.ts`. See `selectModel()` for the alias mapping.
-   * Undefined defaults to `'standard'`.
+   * Internal agent model tier — see `docs/internal/agent-mode-flag.md`.
+   * Threaded from `WizardSession.mode` via `agent-runner.ts`.
+   * Undefined defaults to `'standard'` (the wizard's default model).
    */
   mode?: import('../utils/types').WizardMode;
   /**
@@ -1452,9 +1446,8 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
-      // Mode → model alias. Default 'standard' = current behavior
-      // (Sonnet 4.6). 'fast' uses Haiku 4.5; 'thorough' uses Opus 4.7
-      // (gated to direct-API runs by `bin.ts:validateModeFlag`).
+      // Mode → model alias. Default 'standard' = current behavior;
+      // see `docs/internal/agent-mode-flag.md` for the full mapping.
       // Gateway expects the `anthropic/<alias>` prefix; direct API expects
       // the bare alias — `selectModel` handles both.
       model: selectModel(config.mode ?? 'standard', useDirectApiKey),

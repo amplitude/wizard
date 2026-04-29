@@ -2605,39 +2605,44 @@ describe('createPostToolUseHook', () => {
 });
 
 /**
- * `selectModel` is the single chokepoint that translates a user-facing
- * `WizardMode` into the actual Claude model alias the SDK ships with the
- * request. Three things must hold for every mode:
+ * `selectModel` is the single chokepoint that translates `WizardMode` into
+ * the actual model alias on the wire. Internal — see
+ * `docs/internal/agent-mode-flag.md` for the mapping. These tests pin
+ * three invariants:
  *
- *   1. The bare alias is sent on direct-API runs (no `anthropic/` prefix).
- *   2. The `anthropic/<alias>` prefix is sent on gateway runs (the
- *      Amplitude LLM gateway expects this shape).
- *   3. An undefined / unknown mode falls back to the safe default
- *      (`standard` → Sonnet 4.6) — important because internal call sites
- *      (detection, diagnostics) construct `WizardOptions` without `mode`,
- *      and we don't want one of them silently routing through Haiku/Opus.
+ *   1. Direct-API calls get the bare alias (no `anthropic/` prefix).
+ *   2. Gateway calls get the `anthropic/<alias>` prefix.
+ *   3. An unknown / undefined mode falls back to the production default
+ *      so a misconfigured caller can't silently route through a different
+ *      tier.
+ *
+ * The exact model strings are intentionally kept inside this file (and
+ * `selectModel`'s implementation) — not duplicated into test names or
+ * stderr messaging.
  */
 describe('selectModel', () => {
-  it('maps fast → claude-haiku-4-5', () => {
-    expect(selectModel('fast', true)).toBe('claude-haiku-4-5');
-    expect(selectModel('fast', false)).toBe('anthropic/claude-haiku-4-5');
-  });
-
-  it('maps standard → claude-sonnet-4-6 (the default tier)', () => {
+  it('returns the production-default alias for the default tier', () => {
     expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
     expect(selectModel('standard', false)).toBe('anthropic/claude-sonnet-4-6');
   });
 
-  it('maps thorough → claude-opus-4-7', () => {
+  it('returns the lower-cost alias for the cheap tier', () => {
+    expect(selectModel('fast', true)).toBe('claude-haiku-4-5');
+    expect(selectModel('fast', false)).toBe('anthropic/claude-haiku-4-5');
+  });
+
+  it('returns the higher-capability alias for the expensive tier', () => {
+    // Pinned so the wire format stays consistent. The wire alias is what
+    // the gateway / Anthropic will be asked to serve; nothing else.
     expect(selectModel('thorough', true)).toBe('claude-opus-4-7');
     expect(selectModel('thorough', false)).toBe('anthropic/claude-opus-4-7');
   });
 
-  it('treats an unknown mode as standard (defensive default)', () => {
+  it('treats an unknown mode as the production default (defensive)', () => {
     // `bin.ts` rejects unknown values via yargs `choices`, so this branch
     // is only reachable from internal callers that bypass the CLI parser.
-    // Returning Sonnet 4.6 keeps a misconfigured caller on the safe path
-    // instead of silently routing them to Haiku or Opus.
+    // Returning the production default keeps a misconfigured caller on
+    // the safe path instead of silently routing somewhere unexpected.
     expect(selectModel('bogus' as 'standard', true)).toBe(
       'claude-sonnet-4-6',
     );

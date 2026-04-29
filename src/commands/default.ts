@@ -13,58 +13,6 @@ import {
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
 
-/**
- * Validate `--mode` constraints before any auth / TUI work happens.
- *
- * Currently the only constraint is: `--mode=thorough` requires a direct
- * Anthropic API key. The Amplitude LLM gateway proxies a fixed model
- * allowlist (`claude-sonnet-4-6`, `claude-haiku-4-5`) and does NOT vend
- * Opus 4.7 — see `src/__tests__/proxy.test.ts:84-85`. Without this guard
- * a user passing `--mode=thorough` would silently see the SDK fall back
- * to `anthropic/claude-sonnet-4-5-20250514` (our `fallbackModel`), giving
- * them a Sonnet 4.5 run while thinking they got Opus 4.7.
- *
- * If/when the gateway starts vending Opus, drop this check.
- */
-function validateModeFlag(options: Record<string, unknown>): void {
-  if (options.mode !== 'thorough') return;
-  const hasDirectKey = Boolean(
-    process.env.ANTHROPIC_API_KEY || (options.apiKey as string | undefined),
-  );
-  // `--api-key` is an Amplitude personal API key (phx_…), NOT an Anthropic
-  // key — it routes through the gateway just like OAuth, so it doesn't
-  // unlock Opus. Only `ANTHROPIC_API_KEY` does.
-  if (!process.env.ANTHROPIC_API_KEY) {
-    process.stderr.write(
-      [
-        'Error: --mode=thorough requires a direct Anthropic API key.',
-        '',
-        'Opus 4.7 is not currently vended by the Amplitude LLM gateway, so',
-        'thorough mode only works when the wizard talks directly to Anthropic.',
-        '',
-        'Re-run with:',
-        '  ANTHROPIC_API_KEY=sk-ant-... npx @amplitude/wizard --mode=thorough',
-        '',
-        'Or pick another tier:',
-        '  --mode=standard  (default — Sonnet 4.6)',
-        '  --mode=fast      (Haiku 4.5)',
-        '',
-      ].join('\n'),
-    );
-    // Use ExitCode.INVALID_ARGS so agent-mode orchestrators classify this
-    // as user error rather than agent failure.
-    process.exit(2);
-    // `process.exit` halts the process in production. In tests, where it's
-    // mocked to a no-op, fall through to throw so execution doesn't carry
-    // on into auth / TUI bootstrap. The throw is unreachable on real runs.
-    throw new Error('process.exit called with code 2 (--mode=thorough)');
-  }
-  // Suppress the "param read but unused" lint when only ANTHROPIC_API_KEY
-  // satisfies the gate — the explicit `hasDirectKey` variable is kept as
-  // documentation of what we'd accept once the gateway adds Opus support.
-  void hasDirectKey;
-}
-
 export const defaultCommand: CommandModule = {
   command: ['$0'],
   describe: 'Run the Amplitude setup wizard',
@@ -119,12 +67,18 @@ export const defaultCommand: CommandModule = {
         describe: 'collect performance metrics during the run',
         type: 'boolean',
       },
+      // `--mode` is intentionally hidden. See `docs/internal/agent-mode-flag.md`
+      // for the full rationale and the model mapping. Briefly: this is an
+      // internal performance / capability knob — not advertised in --help,
+      // README, CLAUDE.md, or any agent-facing skill, and not for casual
+      // recommendation. The default ('standard') is the only tier most
+      // users should ever see.
       mode: {
         default: 'standard',
         choices: ['fast', 'standard', 'thorough'] as const,
-        describe:
-          'agent model tier — fast (haiku-4-5), standard (sonnet-4-6, default), thorough (opus-4-7, requires ANTHROPIC_API_KEY)',
+        describe: 'internal — see docs/internal/agent-mode-flag.md',
         type: 'string',
+        hidden: true,
       },
       agent: {
         default: false,
@@ -139,11 +93,6 @@ export const defaultCommand: CommandModule = {
     }),
   handler: (argv) => {
     const options = { ...argv };
-
-    // Validate `--mode` constraints before any auth / TUI / network work
-    // so a misconfigured run errors out in milliseconds instead of after
-    // the user has waited through OAuth.
-    validateModeFlag(options);
 
     // --env is redundant with --app-id (each Amplitude env has its own
     // app.id, so the numeric app-id already identifies the env). Keep the
