@@ -11,6 +11,7 @@
  */
 
 import * as path from 'path';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { EMAIL_REGEX } from './constants';
@@ -309,6 +310,16 @@ export interface WizardSession {
   apiKey?: string;
   menu: boolean;
   benchmark: boolean;
+
+  /**
+   * UUID v4 generated once per wizard run. Forwarded to the Amplitude LLM
+   * gateway as the `x-amp-wizard-session-id` header so every `/v1/messages`
+   * call across the wizard's discrete agent phases (taxonomy, integration,
+   * chart, dashboard) lands in a single Agent Analytics session. Without
+   * this, the proxy falls back to a per-OAuth-token deterministic ID, which
+   * collapses every wizard run a user has ever done into one session.
+   */
+  agentSessionId: string;
   /**
    * Numeric Amplitude app ID from --app-id (or --project-id alias).
    * Matches `app.id` in the Data API and `app_id` in the Python monorepo.
@@ -749,6 +760,11 @@ export function buildSession(args: {
     menu: validated.menu ?? false,
     benchmark: validated.benchmark ?? false,
     appId: parsed.success ? parsed.data.appId : parseAppIdArg(args.appId),
+
+    // Stable across the entire wizard run; forwarded to the LLM gateway as
+    // x-amp-wizard-session-id so every /v1/messages call shares one Agent
+    // Analytics session.
+    agentSessionId: randomUUID(),
 
     setupConfirmed: false,
     integration: (validated.integration as Integration) ?? null,

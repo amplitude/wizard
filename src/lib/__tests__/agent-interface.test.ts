@@ -14,8 +14,10 @@ import {
   createPreToolUseHook,
   createPostToolUseHook,
   wizardCanUseTool,
+  buildAgentEnv,
   buildWizardMetadata,
   isSkillInstallCommand,
+  WIZARD_SESSION_ID_HEADER,
   matchesAllowedPrefix,
   parseEventPlanContent,
   pickFreshestExisting,
@@ -1607,6 +1609,53 @@ describe('buildWizardMetadata', () => {
   it('ignores unrelated flags', () => {
     const result = buildWizardMetadata({ 'other-flag': 'value' });
     expect(result).toEqual({ VARIANT: 'base' });
+  });
+});
+
+describe('buildAgentEnv', () => {
+  const SESSION_ID = '550e8400-e29b-41d4-a716-446655440000';
+
+  it('emits the wizard session id header when one is provided', () => {
+    const encoded = buildAgentEnv({}, {}, SESSION_ID);
+
+    expect(encoded).toContain(`${WIZARD_SESSION_ID_HEADER}: ${SESSION_ID}`);
+  });
+
+  it('omits the wizard session id header when none is provided', () => {
+    const encoded = buildAgentEnv({}, {});
+
+    expect(encoded).not.toContain(WIZARD_SESSION_ID_HEADER);
+  });
+
+  it('uses the literal x-amp-wizard-session-id header name (no prefix mangling)', () => {
+    // Must match the header name the wizard-proxy reads — any prefix injection
+    // by createCustomHeaders would silently break Agent Analytics session
+    // grouping. Lock the wire format.
+    const encoded = buildAgentEnv({}, {}, SESSION_ID);
+
+    expect(encoded.split('\n')).toContain(
+      `x-amp-wizard-session-id: ${SESSION_ID}`,
+    );
+  });
+
+  it('keeps wizard metadata, flags, and session id together', () => {
+    const encoded = buildAgentEnv(
+      { VARIANT: 'base' },
+      { 'wizard-variant': 'base' },
+      SESSION_ID,
+    );
+
+    // Metadata: VARIANT becomes X-AMPLITUDE-PROPERTY-VARIANT
+    expect(encoded).toContain('X-AMPLITUDE-PROPERTY-VARIANT: base');
+    // Flag: wizard-variant becomes X-AMPLITUDE-FLAG-WIZARD-VARIANT
+    expect(encoded).toContain('X-AMPLITUDE-FLAG-WIZARD-VARIANT: base');
+    expect(encoded).toContain(`${WIZARD_SESSION_ID_HEADER}: ${SESSION_ID}`);
+  });
+
+  it('treats an empty session id as missing', () => {
+    const encoded = buildAgentEnv({}, {}, '');
+
+    expect(encoded).not.toContain(WIZARD_SESSION_ID_HEADER);
   });
 });
 

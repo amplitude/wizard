@@ -83,12 +83,26 @@ describe('WizardStore', () => {
       expect(store.version).toBe('');
       expect(store.statusMessages).toEqual([]);
       expect(store.tasks).toEqual([]);
-      // installDir is overridden by the test helper — compare the rest.
-      const { installDir: storeInstallDir, ...rest } = store.session;
-      const { installDir: defaultInstallDir, ...defaults } = buildSession({});
+      // installDir is overridden by the test helper, and agentSessionId is a
+      // freshly-generated UUID per call to buildSession — compare the rest.
+      const {
+        installDir: storeInstallDir,
+        agentSessionId: storeAgentSessionId,
+        ...rest
+      } = store.session;
+      const {
+        installDir: defaultInstallDir,
+        agentSessionId: defaultAgentSessionId,
+        ...defaults
+      } = buildSession({});
       expect(rest).toEqual(defaults);
       expect(storeInstallDir).toMatch(/wizard-store-test-/);
       expect(defaultInstallDir).toBeDefined();
+      // Both should be valid UUIDs but won't match (generated independently).
+      const UUID_RE =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      expect(storeAgentSessionId).toMatch(UUID_RE);
+      expect(defaultAgentSessionId).toMatch(UUID_RE);
     });
 
     it('defaults to Wizard flow', () => {

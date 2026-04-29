@@ -38,6 +38,19 @@ describe('buildSession', () => {
     expect(session.installDir).toBe('/tmp/foo');
   });
 
+  it('generates a unique UUID v4 agentSessionId per session', () => {
+    const a = buildSession({});
+    const b = buildSession({});
+
+    // RFC 4122 UUID v4 — 8-4-4-4-12 hex with version nibble = 4
+    const UUID_V4 =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+    expect(a.agentSessionId).toMatch(UUID_V4);
+    expect(b.agentSessionId).toMatch(UUID_V4);
+    expect(a.agentSessionId).not.toBe(b.agentSessionId);
+  });
+
   // ── parseAppIdArg (exercised via buildSession appId) ────────────────
 
   it('parses a valid positive integer string as appId', () => {
