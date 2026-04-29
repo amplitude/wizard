@@ -286,6 +286,38 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
     expect(writes[0]).not.toContain('super-secret-key');
   });
 
+  it('omits the redundant `orgs` tree from the legacy prompt event (avoids ~50% NDJSON bloat on portfolios with hundreds of envs)', async () => {
+    // Regression: the same (org, project, env) tuples appear once in
+    // `data.choices` (used by orchestrators) and previously a second time
+    // in `data.orgs` (a nested mirror). On a 322-environment portfolio
+    // the duplicate roughly halved the NDJSON envelope size for no
+    // benefit — orchestrators can rebuild the tree from `choices` if
+    // they need traversal. The companion `needs_input` event carries
+    // the structured data for newer integrations.
+    const ui = new AgentUI();
+    const event = await runPromptAndGetFirst(ui, [
+      {
+        id: 'org-1',
+        name: 'DevX',
+        projects: [
+          {
+            id: 'proj-a',
+            name: 'Sandbox',
+            environments: [
+              {
+                name: 'Production',
+                rank: 1,
+                app: { id: '100001', apiKey: 'k1' },
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    expect(event.data).not.toHaveProperty('orgs');
+  });
+
   it('surfaces resumeFlags with --app-id for unambiguous re-invocation', async () => {
     const ui = new AgentUI();
     const event = await runPromptAndGetFirst(ui, [

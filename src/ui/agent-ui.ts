@@ -969,30 +969,14 @@ export class AgentUI implements WizardUI {
       }>;
     }>,
   ): Promise<{ orgId: string; projectId: string; env: string }> {
-    // Build a sanitized, tree view of orgs -> projects -> environments.
-    // API keys are never emitted (they'd leak on stdout to the orchestrator).
-    const sanitizedOrgs = orgs.map((org) => ({
-      id: org.id,
-      name: org.name,
-      projects: org.projects.map((proj) => ({
-        id: proj.id,
-        name: proj.name,
-        environments: (proj.environments ?? [])
-          .filter((e) => e.app?.apiKey)
-          .sort((a, b) => a.rank - b.rank)
-          .map((e) => ({
-            name: e.name,
-            rank: e.rank,
-            appId: e.app?.id ?? null,
-            hasApiKey: Boolean(e.app?.apiKey),
-          })),
-      })),
-    }));
-
-    // Also emit a flat list of every selectable env so agents can pick
-    // without traversing the tree. Each entry is unique by
-    // (orgId, projectId, envName) and carries the numeric appId
-    // that callers can pass as --app-id for unambiguous selection.
+    // Emit a flat list of every selectable env so agents can pick without
+    // traversing a nested tree. Each entry is unique by (orgId, projectId,
+    // envName) and carries the numeric appId that callers can pass as
+    // --app-id for unambiguous selection. The previous `orgs` tree view
+    // was strictly redundant with this list and ~doubled the NDJSON
+    // payload size on portfolios with many environments — orchestrators
+    // can rebuild the tree from `choices` if needed (group by orgId, then
+    // projectId).
     const choices = orgs.flatMap((org) =>
       org.projects.flatMap((proj) =>
         (proj.environments ?? [])
@@ -1011,6 +995,10 @@ export class AgentUI implements WizardUI {
       ),
     );
 
+    // Legacy `prompt` event: kept for backward compatibility with
+    // orchestrators that key off `type === 'prompt'` and parse
+    // `data.choices` / `data.resumeFlags` directly. Newer orchestrators
+    // should consume the structured `needs_input` event emitted below.
     emit(
       'prompt',
       `Multiple Amplitude environments available — select one of ${choices.length}.`,
@@ -1023,7 +1011,6 @@ export class AgentUI implements WizardUI {
           // unambiguous selector.
           hierarchy: ['org', 'project', 'app', 'environment'],
           choices,
-          orgs: sanitizedOrgs,
           // Agents should reply on stdin with one JSON line matching this shape:
           responseSchema: {
             appId: 'string (required, from choices[].appId)',

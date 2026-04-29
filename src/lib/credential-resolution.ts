@@ -144,14 +144,26 @@ export async function resolveCredentials(
             ...(refreshResult.refreshToken
               ? { refreshToken: refreshResult.refreshToken }
               : {}),
+            // Persist rotated idToken — see token-refresh.ts for why this
+            // matters. The pre-refresh idToken has the same expiry as the
+            // pre-refresh access token, so reusing it for the
+            // fetchAmplitudeUser call below would 401 and tip us into the
+            // misleading `no_stored_credentials` branch.
+            ...(refreshResult.idToken
+              ? { idToken: refreshResult.idToken }
+              : {}),
           });
         }
         storedToken.accessToken = refreshResult.accessToken;
         if (refreshResult.refreshToken) {
           storedToken.refreshToken = refreshResult.refreshToken;
         }
+        if (refreshResult.idToken) {
+          storedToken.idToken = refreshResult.idToken;
+        }
         logToFile(
           '[credential-resolution] silently refreshed expired access token',
+          { rotatedIdToken: !!refreshResult.idToken },
         );
       }
 

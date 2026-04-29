@@ -39,6 +39,20 @@ export async function tryRefreshToken(
   zone: AmplitudeZone = DEFAULT_AMPLITUDE_ZONE,
 ): Promise<{
   accessToken: string;
+  /**
+   * Amplitude rotates the idToken on every refresh, but its lifetime is
+   * tied to the access token — once the access token expires, the
+   * accompanying idToken stops working too. Callers that subsequently
+   * use `idToken` to call Data API endpoints (`fetchAmplitudeUser`)
+   * MUST swap in this rotated value, otherwise the next API call fails
+   * with "Authentication failed" and credential resolution falls
+   * through to `auth_required: no_stored_credentials` even though the
+   * silent refresh just succeeded. May be `undefined` for unusual
+   * server responses (no `id_token` in payload) — in that case the
+   * caller keeps the existing idToken; downstream API calls will fail
+   * as before, but no worse than today.
+   */
+  idToken?: string;
   expiresAt: number;
   refreshToken?: string;
 } | null> {
@@ -81,6 +95,7 @@ async function tryRefreshTokenInner(
   now: number,
 ): Promise<{
   accessToken: string;
+  idToken?: string;
   expiresAt: number;
   refreshToken?: string;
 } | null> {
@@ -144,15 +159,32 @@ async function tryRefreshTokenInner(
     const newRefreshToken =
       typeof data.refresh_token === 'string' ? data.refresh_token : undefined;
 
+    // Persist rotated idToken too. Amplitude's OIDC refresh response
+    // includes a fresh `id_token` whose lifetime is bound to the new
+    // access token; without rotating it, downstream `fetchAmplitudeUser`
+    // calls reuse the expired idToken from before the refresh and fail
+    // with "Authentication failed", which the agent path then surfaces
+    // as `auth_required: no_stored_credentials` — an outright lie when
+    // we've literally just refreshed.
+    const newIdToken =
+      typeof data.id_token === 'string' ? data.id_token : undefined;
+
     logToFile('[token-refresh] silent refresh succeeded', {
       expiresAt: new Date(expiresAt).toISOString(),
       rotatedRefreshToken: !!newRefreshToken,
+      rotatedIdToken: !!newIdToken,
     });
     addBreadcrumb('auth', 'Silent refresh succeeded', {
       rotated_refresh_token: !!newRefreshToken,
+      rotated_id_token: !!newIdToken,
     });
 
-    return { accessToken, expiresAt, refreshToken: newRefreshToken };
+    return {
+      accessToken,
+      idToken: newIdToken,
+      expiresAt,
+      refreshToken: newRefreshToken,
+    };
   } catch (err) {
     // Distinguish abort/timeout (controller aborted the fetch) from other
     // failures so it's easy to triage stuck startups in the log file.
