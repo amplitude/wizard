@@ -229,29 +229,14 @@ async function runCreateDashboard(args: {
 
   const agentPrompt = buildAgentPrompt(events, session);
 
-  // Bound the ENTIRE call with an abort signal so a slow agent fallback cannot
-  // block the wizard indefinitely.
-  const controller = new AbortController();
-  const abortTimer = setTimeout(() => {
-    logToFile(
-      `[createDashboard] aborting — hit ${DASHBOARD_TIMEOUT_MS}ms ceiling`,
-    );
-    controller.abort();
-  }, DASHBOARD_TIMEOUT_MS);
-
-  try {
-    return await callAmplitudeMcp<DashboardResult>({
-      accessToken,
-      mcpUrl,
-      label: 'createDashboard',
-      agentTimeoutMs: DASHBOARD_TIMEOUT_MS,
-      abortSignal: controller.signal,
-      agentPrompt,
-      parseAgent: parseAgentOutput,
-    });
-  } finally {
-    clearTimeout(abortTimer);
-  }
+  return await callAmplitudeMcp<DashboardResult>({
+    accessToken,
+    mcpUrl,
+    label: 'createDashboard',
+    agentTimeoutMs: DASHBOARD_TIMEOUT_MS,
+    agentPrompt,
+    parseAgent: parseAgentOutput,
+  });
 }
 
 function buildAgentPrompt(events: EventsFile, session: WizardSession): string {
