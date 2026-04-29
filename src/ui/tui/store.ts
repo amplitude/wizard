@@ -393,6 +393,14 @@ export class WizardStore {
     this.$session.setKey('integration', null);
     this.$session.setKey('detectedFrameworkLabel', null);
     this.$session.setKey('frameworkContext', {});
+    // The answer-order array tracks which framework-setup question
+    // keys the user answered, in order, so back-navigation can pop the
+    // most recent one. Without this reset, stale keys from the OLD
+    // directory's gatherContext stay in the array and
+    // `popLastFrameworkContextAnswer` returns `true` for phantom pops
+    // (the keys it claims to remove no longer exist in
+    // `frameworkContext`), creating dead back-navigation steps.
+    this.$session.setKey('frameworkContextAnswerOrder', []);
     this.$session.setKey('detectionResults', []);
     this.$session.setKey('detectionComplete', false);
     // Reset BOTH the discovered-features list AND every opt-in flag /

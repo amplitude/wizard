@@ -1801,6 +1801,32 @@ describe('WizardStore', () => {
       expect(store.session.discoveredFeatures).toEqual([]);
     });
 
+    // Regression: bugbot Issue #8.
+    //
+    // `frameworkContext` was reset to `{}` but
+    // `frameworkContextAnswerOrder` (the per-key answer log used by
+    // back-navigation) wasn't. After a directory change, stale keys
+    // stayed in the answer-order array. `popLastFrameworkContextAnswer`
+    // would then "successfully" pop a key that no longer existed in
+    // `frameworkContext`, creating phantom back-nav steps that did
+    // nothing visible.
+    it('resets frameworkContextAnswerOrder so back-nav has nothing stale to pop', () => {
+      const store = createStore();
+      store.setFrameworkContext('appRouter', true);
+      store.setFrameworkContext('typescript', true);
+      expect(store.session.frameworkContextAnswerOrder.length).toBeGreaterThan(
+        0,
+      );
+
+      store.changeInstallDir('/tmp/new-tree');
+
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.frameworkContextAnswerOrder).toEqual([]);
+      // popLastFrameworkContextAnswer now correctly reports "nothing
+      // to pop" — no phantom back-nav steps.
+      expect(store.popLastFrameworkContextAnswer()).toBe(false);
+    });
+
     it('emits a telemetry event with whether a redetector was registered', () => {
       const store = createStore();
       const wizardCapture = analytics.wizardCapture as Mock;
