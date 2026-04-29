@@ -26,6 +26,36 @@ export const planCommand: CommandModule = {
         requireExplicitWrites: true,
         isTTY: Boolean(process.stdout.isTTY),
       });
+      // Refuse to plan from $HOME, the filesystem root, or a directory
+      // with no project marker. Without this guard, the wizard runs
+      // from `~/` would scan thousands of files and pollute the home
+      // dir with `.amplitude/`. `--force` bypasses for power users.
+      const { checkProjectGuard } = await import(
+        '../utils/project-marker.js'
+      );
+      const guard = checkProjectGuard(installDir);
+      if (!guard.ok && !argv.force) {
+        if (jsonOutput) {
+          process.stdout.write(
+            JSON.stringify({
+              v: 1,
+              '@timestamp': new Date().toISOString(),
+              type: 'error',
+              level: 'error',
+              message: `plan refused: ${guard.details}`,
+              data: {
+                event: 'plan_refused',
+                reason: guard.reason,
+                installDir,
+                hint: 'Pass --install-dir <abs-path> pointing at the project root, or --force to bypass.',
+              },
+            }) + '\n',
+          );
+        } else {
+          getUI().log.error(`Plan refused: ${guard.details}`);
+        }
+        process.exit(ExitCode.INVALID_ARGS);
+      }
       try {
         const { runPlan, getAuthStatus } = await import('../lib/agent-ops.js');
         const { plan, detected } = await runPlan(installDir);

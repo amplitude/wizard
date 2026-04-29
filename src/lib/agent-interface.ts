@@ -34,7 +34,7 @@ import {
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
-import { classifyWriteOperation } from './agent-events';
+import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
   createWizardToolsServer,
   persistDashboard,
@@ -1132,10 +1132,27 @@ export function wizardCanUseTool(
 ):
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
   | { behavior: 'deny'; message: string } {
-  // Block direct reads/writes of .env files — use wizard-tools MCP instead
-  if (toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') {
+  // Block direct reads/writes of .env files — use wizard-tools MCP instead.
+  // The full set of write tools is `Write`, `Edit`, `MultiEdit`, and
+  // `NotebookEdit` — see classifyWriteOperation in agent-events.ts. Older
+  // versions of this hook only matched `Write`/`Edit`, leaving MultiEdit
+  // as a bypass path. Cover all four tools here.
+  const isReadTool = toolName === 'Read';
+  const isWriteTool =
+    toolName === 'Write' ||
+    toolName === 'Edit' ||
+    toolName === 'MultiEdit' ||
+    toolName === 'NotebookEdit';
+  if (isReadTool || isWriteTool) {
     const filePath = typeof input.file_path === 'string' ? input.file_path : '';
-    const basename = path.basename(filePath);
+    // Normalize path separators BEFORE computing basename. On POSIX, Node's
+    // `path.basename` does not recognize `\` as a separator, so a Windows
+    // path like `C:\\project\\.amplitude\\events.json` would basename to
+    // the entire string and slip past our matchers. Normalizing to `/`
+    // first means `path.basename` is correct on both platforms regardless
+    // of which slash style the agent passed.
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const basename = path.basename(normalizedPath);
     if (basename.startsWith('.env')) {
       logToFile(`Denying ${toolName} on env file: ${filePath}`);
       return {
@@ -1143,7 +1160,7 @@ export function wizardCanUseTool(
         message: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
       };
     }
-    // Block direct Write/Edit of the wizard-managed event-plan and dashboard
+    // Block direct writes to the wizard-managed event-plan and dashboard
     // artifacts. These files are owned by `confirm_event_plan` and the
     // dashboard watcher — direct writes are the source of two recurring
     // bugs: (1) the file already exists from a prior run and Write errors
@@ -1155,7 +1172,7 @@ export function wizardCanUseTool(
     // to write `.amplitude-events.json` directly — denying here is
     // defense in depth that lands today, in advance of the upstream
     // skill refresh.
-    if (toolName === 'Write' || toolName === 'Edit') {
+    if (isWriteTool) {
       const lower = basename.toLowerCase();
       const isEventsFile =
         lower === '.amplitude-events.json' || lower === 'events.json';
@@ -1164,16 +1181,17 @@ export function wizardCanUseTool(
       // For the bare `events.json` / `dashboard.json` cases, only deny
       // when the path is inside `.amplitude/` (the wizard's metadata
       // dir). A user codebase might legitimately have an unrelated
-      // `events.json` somewhere else.
-      const insideMetaDir = filePath.includes(
-        `${path.sep}.amplitude${path.sep}`,
-      );
-      const isWizardArtifact =
-        (lower === '.amplitude-events.json' && true) ||
-        (lower === '.amplitude-dashboard.json' && true) ||
-        (lower === 'events.json' && insideMetaDir) ||
-        (lower === 'dashboard.json' && insideMetaDir);
-      if (isWizardArtifact) {
+      // `events.json` somewhere else. We use the already-normalized
+      // path (forward slashes) computed at the top of this branch so
+      // the substring check is consistent across POSIX and Windows.
+      const insideMetaDir = normalizedPath.includes('/.amplitude/');
+      const isLegacyDotfile =
+        lower === '.amplitude-events.json' ||
+        lower === '.amplitude-dashboard.json';
+      const isCanonicalInMetaDir =
+        (lower === 'events.json' || lower === 'dashboard.json') &&
+        insideMetaDir;
+      if (isLegacyDotfile || isCanonicalInMetaDir) {
         const which = isEventsFile ? 'event plan' : 'dashboard';
         const tool =
           which === 'event plan'
@@ -2906,10 +2924,20 @@ function handleSDKMessage(
         // Only show errors to user if we haven't already succeeded.
         // Post-success errors are SDK cleanup noise (telemetry failures, streaming
         // mode race conditions). Full message already logged above via JSON dump.
+        //
+        // Cap the user-visible message at 2KB at the SOURCE — Anthropic
+        // SDK exceptions sometimes include the entire failing SSE stream
+        // (40-50KB of model id, signature blobs, partial JSON deltas)
+        // serialized into a single string. Past sessions surfaced 50KB
+        // `log.message` strings that polluted orchestrator context.
+        // `truncateLogMessage` is the same helper the NDJSON emit layer
+        // uses; capping here keeps the on-disk verbose log bounded too.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       } else if (message.subtype === 'success') {
@@ -2920,11 +2948,16 @@ function handleSDKMessage(
       } else {
         logToFile('Agent result with error:', message.result);
         // Error result - only show to user if we haven't already succeeded.
-        // Full message already logged above via JSON dump.
+        // Full message already logged above via JSON dump. Cap each
+        // error string at 2KB at the source (same rationale as the
+        // `is_error` branch above): Anthropic SDK exceptions sometimes
+        // serialize the entire failing SSE stream into the error text.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       }

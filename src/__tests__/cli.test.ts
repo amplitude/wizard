@@ -727,52 +727,11 @@ describe('logout command', () => {
     );
   });
 
-  test('--clean removes wizard artifacts from the install dir', async () => {
-    // Build a fake project with the artifacts the wizard could have left
-    // behind from a prior run. Then run `logout --clean` and verify all
-    // four targets are gone (legacy dotfiles, .amplitude/ dir, setup
-    // report) while a non-wizard sibling file survives.
-    const projectDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'amp-wizard-clean-test-'),
-    );
-    fs.mkdirSync(path.join(projectDir, '.amplitude'), { recursive: true });
-    fs.writeFileSync(path.join(projectDir, '.amplitude', 'events.json'), '[]');
-    fs.writeFileSync(
-      path.join(projectDir, '.amplitude', 'dashboard.json'),
-      '{}',
-    );
-    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
-    fs.writeFileSync(path.join(projectDir, '.amplitude-dashboard.json'), '{}');
-    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
-    fs.writeFileSync(path.join(projectDir, 'unrelated.json'), 'keep');
-    mockGetStoredUser.mockReturnValue({ email: 'jane@example.com' });
-
-    await runCLI(['logout', '--clean', '--install-dir', projectDir]);
-    await waitFor(
-      () => (process.exit as unknown as Mock).mock.calls.length > 0,
-    );
-
-    expect(process.exit).toHaveBeenCalledWith(0);
-    // All wizard-managed targets gone:
-    expect(fs.existsSync(path.join(projectDir, '.amplitude'))).toBe(false);
-    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
-      false,
-    );
-    expect(
-      fs.existsSync(path.join(projectDir, '.amplitude-dashboard.json')),
-    ).toBe(false);
-    expect(
-      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
-    ).toBe(false);
-    // Unrelated files survive:
-    expect(fs.existsSync(path.join(projectDir, 'unrelated.json'))).toBe(true);
-
-    fs.rmSync(projectDir, { recursive: true, force: true });
-  });
-
-  test('default logout (no --clean) preserves wizard artifacts', async () => {
-    // Back-compat: a logout-during-debug should NOT nuke a user's setup
-    // report. Only `--clean` removes artifacts.
+  // logout deliberately does NOT touch project-scoped artifacts —
+  // `wizard reset` is the gesture for that. This test guards the
+  // separation: a debug-time logout should NEVER nuke the user's
+  // setup report.
+  test('logout preserves wizard artifacts (use `wizard reset` to remove them)', async () => {
     const projectDir = fs.mkdtempSync(
       path.join(os.tmpdir(), 'amp-wizard-keep-test-'),
     );

@@ -1102,6 +1102,129 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
   });
 });
 
+describe('AgentUI.promptEventPlan — pre-resolved decision short-circuits needs_input', () => {
+  // The wizard's `apply` command forwards the user's event-plan decision
+  // (--approve-events / --skip-events / --revise-events) to the spawned
+  // child as `AMPLITUDE_WIZARD_EVENT_PLAN_DECISION`. The child must NOT
+  // emit `needs_input` for that prompt — if it did, the outer skill
+  // (which STOPs on every needs_input by contract) would re-prompt the
+  // user for an answer they already gave, and the wizard would block
+  // forever on stdin. Locked in here so the launch-blocker regression
+  // can't come back.
+
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+  const originalDecisionEnv = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+  const originalFeedbackEnv = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+    if (originalDecisionEnv === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    } else {
+      process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = originalDecisionEnv;
+    }
+    if (originalFeedbackEnv === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+    } else {
+      process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK = originalFeedbackEnv;
+    }
+  });
+
+  const events = [{ name: 'Event A', description: 'fires' }];
+
+  const writtenEvents = (): NDJSONEvent[] =>
+    writes
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0)
+      .map((w) => JSON.parse(w) as NDJSONEvent);
+
+  it('approved env var: emits result(via flag), no needs_input, no decision_auto', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'approved';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    const wire = writtenEvents();
+    expect(wire.some((e) => e.type === 'needs_input')).toBe(false);
+    expect(
+      wire.some(
+        (e) =>
+          e.type === 'result' &&
+          (e.data as { event?: string } | undefined)?.event === 'event_plan' &&
+          (e.data as { decision?: string } | undefined)?.decision ===
+            'approved',
+      ),
+    ).toBe(true);
+    expect(
+      wire.some(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event === 'decision_auto',
+      ),
+    ).toBe(false);
+  });
+
+  it('skipped env var: returns skipped without emitting needs_input', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'skipped';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'skipped' });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(false);
+  });
+
+  it('revised env var: returns revised + feedback without emitting needs_input', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'revised';
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK =
+      'add a Cart Cleared event';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({
+      decision: 'revised',
+      feedback: 'add a Cart Cleared event',
+    });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(false);
+  });
+
+  it('no env var: emits needs_input + result + decision_auto (the auto-approve path)', async () => {
+    delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    const wire = writtenEvents();
+    expect(
+      wire.some(
+        (e) =>
+          e.type === 'needs_input' &&
+          (e.data as { code?: string } | undefined)?.code === 'event_plan',
+      ),
+    ).toBe(true);
+    expect(
+      wire.some(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event === 'decision_auto',
+      ),
+    ).toBe(true);
+  });
+
+  it('invalid env var value: falls through to auto-approve path (defensive)', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'bogus';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(true);
+  });
+});
+
 describe('AgentUI.startRun + getRunStartedAtMs', () => {
   it('captures start timestamp on startRun() so duration can be computed', () => {
     const before = Date.now();

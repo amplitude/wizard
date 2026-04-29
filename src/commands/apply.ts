@@ -74,6 +74,38 @@ export const applyCommand: CommandModule = {
         planInstallDir ??
         process.cwd();
 
+      // Refuse to apply from $HOME, the filesystem root, or a directory
+      // with no project marker. Mirrors the guard in `plan` — both
+      // commands can mutate `installDir`, so both must check. `--force`
+      // bypasses for power users running against unusual layouts.
+      const { checkProjectGuard } = await import(
+        '../utils/project-marker.js'
+      );
+      const guard = checkProjectGuard(installDir);
+      if (!guard.ok && !mode.allowDestructive) {
+        if (mode.jsonOutput) {
+          process.stdout.write(
+            JSON.stringify({
+              v: 1,
+              '@timestamp': new Date().toISOString(),
+              type: 'error',
+              level: 'error',
+              message: `apply refused: ${guard.details}`,
+              data: {
+                event: 'apply_refused',
+                reason: guard.reason,
+                planId,
+                installDir,
+                hint: 'Pass --install-dir <abs-path> pointing at the project root, or --force to bypass.',
+              },
+            }) + '\n',
+          );
+        } else {
+          getUI().log.error(`Apply refused: ${guard.details}`);
+        }
+        process.exit(ExitCode.INVALID_ARGS);
+      }
+
       const emitErr = (
         msg: string,
         code: ExitCode,
@@ -222,6 +254,49 @@ export const applyCommand: CommandModule = {
           // Best-effort — never block apply on context emission.
         }
       }
+      // Acquire the per-project apply lock. If another `wizard apply`
+      // is already running against this install dir, refuse cleanly
+      // with a `kill <pid>` hint instead of stomping its edits. The
+      // skill says "never spawn a second apply" but skill text isn't
+      // enforceable — this binary-side guard catches it regardless of
+      // which orchestrator drove the wizard. Real-world: a Claude
+      // Code transcript spawned `wizard --agent` 5 times in parallel
+      // because the agent didn't know the prior runs were active.
+      const { acquireApplyLock } = await import('../utils/apply-lock.js');
+      const lock = acquireApplyLock(installDir, planId);
+      if (!lock.ok) {
+        const msg =
+          `apply refused: another wizard apply is already running for ` +
+          `${installDir} (pid ${lock.holder.pid}, planId ${lock.holder.planId}, ` +
+          `started ${lock.holder.startedAt}). Wait for it to finish, or ` +
+          `kill the prior process and retry.`;
+        if (mode.jsonOutput) {
+          process.stdout.write(
+            JSON.stringify({
+              v: 1,
+              '@timestamp': new Date().toISOString(),
+              type: 'error',
+              level: 'error',
+              message: msg,
+              data: {
+                event: 'apply_refused',
+                reason: 'in_progress',
+                planId,
+                installDir,
+                holder: lock.holder,
+              },
+            }) + '\n',
+          );
+        } else {
+          getUI().log.error(msg);
+        }
+        process.exit(ExitCode.INVALID_ARGS);
+      }
+      // Release the lock on any exit path. Both `process.on('exit')`
+      // and the explicit `child.on('exit')` below cover the spawn-
+      // success and spawn-crash paths.
+      process.on('exit', () => lock.release());
+
       // Force agent mode for `apply` so the run is non-interactive.
       // The full run wiring (passing the plan into the agent prompt) is
       // a follow-up — for now, apply runs the standard wizard with

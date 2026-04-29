@@ -255,14 +255,18 @@ function emit(
 ): void {
   const { session_id, run_id } = getCorrelationIds();
   const data_version = lookupDataVersion(extra?.data, extra?.data_version);
-  // Truncate `log`-type messages so a misbehaving caller can't blow up
-  // orchestrator parsers with a multi-KB SSE-body dump. Other event
-  // types (lifecycle / status / progress / result / etc.) carry
-  // bounded human-readable summaries by construction; capping them
-  // would risk losing semantic content. The cap is generous (2KB) to
-  // preserve readable error context while preventing the worst-case
-  // 50KB+ inner-agent error payloads observed in agent transcripts.
-  const safeMessage = type === 'log' ? truncateLogMessage(message) : message;
+  // Truncate `log` and `error` messages so a misbehaving caller can't
+  // blow up orchestrator parsers with a multi-KB SSE-body dump. Both
+  // types can carry exception text from the inner Claude SDK (whose
+  // failure paths sometimes serialize the entire failing SSE stream
+  // into a single string). Other event types (lifecycle / status /
+  // progress / result / etc.) carry bounded human-readable summaries
+  // by construction; capping them would risk losing semantic content.
+  // The cap is generous (2KB) to preserve readable error context while
+  // preventing the worst-case 50KB+ inner-agent error payloads observed
+  // in agent transcripts.
+  const shouldTruncate = type === 'log' || type === 'error';
+  const safeMessage = shouldTruncate ? truncateLogMessage(message) : message;
   const event: NDJSONEvent = {
     v: 1,
     '@timestamp': new Date().toISOString(),
@@ -919,8 +923,45 @@ export class AgentUI implements WizardUI {
   promptEventPlan(
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision> {
-    // Pre-decision: emit a structured `needs_input` so the
-    // contract holds — every `decision_auto` MUST follow a
+    // Honor a pre-resolved decision injected by the parent `apply`
+    // process via env vars BEFORE we emit `needs_input`. The parent
+    // command (`bin.ts apply`) forwards `--approve-events` /
+    // `--skip-events` / `--revise-events` as
+    // `AMPLITUDE_WIZARD_EVENT_PLAN_DECISION` on the spawned child's
+    // env. If we emitted `needs_input` first, an outer skill watching
+    // the stream would (correctly) STOP and re-prompt the user — even
+    // though the user's answer was already passed in via the resume
+    // flag. The skill would re-prompt for an answer it already has,
+    // and the wizard would block forever on stdin. Short-circuit here
+    // so the contract is: "needs_input fires only when we actually
+    // need input; flag-driven decisions skip the prompt entirely."
+    const preResolved = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    const preFeedback = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK ?? '';
+    if (
+      preResolved === 'approved' ||
+      preResolved === 'skipped' ||
+      preResolved === 'revised'
+    ) {
+      // Back-compat: keep the legacy `result` emit so existing
+      // orchestrators that key off `event: event_plan` continue to
+      // work unchanged. Tag the message with the decision instead
+      // of "auto-approved" so a transcript is honest.
+      emit('result', `event_plan ${preResolved} (via flag)`, {
+        data: { event: 'event_plan', events, decision: preResolved },
+      });
+      // No `needs_input` and no `decision_auto` — the decision came
+      // from a user-driven flag, not the wizard's recommended pick.
+      // The contract that lets orchestrators distinguish
+      // "auto-resolved" from "user told me what to do" is the
+      // ABSENCE of `needs_input + decision_auto` for the same code.
+      if (preResolved === 'revised') {
+        return Promise.resolve({ decision: 'revised', feedback: preFeedback });
+      }
+      return Promise.resolve({ decision: preResolved });
+    }
+
+    // No pre-resolution — emit a structured `needs_input` so the
+    // contract holds: every `decision_auto` MUST follow a
     // `needs_input` for the same `code`. Bugbot flagged that the
     // previous shape emitted `decision_auto` orphaned (after a
     // `result` event, with no preceding needs_input), which
@@ -968,37 +1009,6 @@ export class AgentUI implements WizardUI {
       ],
       recommended: 'approved',
     });
-
-    // Honor a pre-resolved decision injected by the parent `apply`
-    // process via env vars. The skill drives the agent to surface
-    // the `event_plan` `needs_input` to the user, then re-invoke
-    // `apply` with `--approve-events` / `--skip-events` /
-    // `--revise-events <feedback>`. The parent forwards that
-    // decision here so the inner agent acts on the user's choice
-    // instead of silently auto-approving.
-    const preResolved = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
-    const preFeedback = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK ?? '';
-    if (
-      preResolved === 'approved' ||
-      preResolved === 'skipped' ||
-      preResolved === 'revised'
-    ) {
-      // Back-compat: keep the legacy `result` emit so existing
-      // orchestrators that key off `event: event_plan` continue to
-      // work unchanged. Tag the message with the decision instead
-      // of "auto-approved" so a transcript is honest.
-      emit('result', `event_plan ${preResolved} (via flag)`, {
-        data: { event: 'event_plan', events, decision: preResolved },
-      });
-      // No `decision_auto` companion — the decision came from a
-      // user-driven flag, not the wizard's recommended pick. This
-      // is the contract that lets orchestrators distinguish
-      // "auto-resolved" from "user told me what to do".
-      if (preResolved === 'revised') {
-        return Promise.resolve({ decision: 'revised', feedback: preFeedback });
-      }
-      return Promise.resolve({ decision: preResolved });
-    }
 
     // The full event list is carried on the legacy `result` emit
     // below — orchestrators rendering the plan inline read it from

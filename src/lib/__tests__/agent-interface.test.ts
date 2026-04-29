@@ -1346,6 +1346,45 @@ describe('wizardCanUseTool', () => {
       });
       expect(result.behavior).toBe('allow');
     });
+
+    // Coverage for the full write-tool set. Pre-fix the deny only matched
+    // `Write` and `Edit`, leaving MultiEdit / NotebookEdit as silent bypass
+    // paths (an agent could MultiEdit `.amplitude-events.json` and the
+    // hook would let it through). Lock these in so a future refactor of
+    // the conditional doesn't regress the bypass.
+    it('denies MultiEdit on .amplitude-events.json', () => {
+      const result = wizardCanUseTool('MultiEdit', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies NotebookEdit on .amplitude/events.json', () => {
+      const result = wizardCanUseTool('NotebookEdit', {
+        file_path: '/project/.amplitude/events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    // Windows-with-mixed-paths: Claude Code on Windows sometimes passes
+    // forward-slash paths even though `path.sep` is `\\`. The normalized
+    // matcher (`replace(/\\/g, '/')` + `'/.amplitude/'` substring check)
+    // should catch both styles. These tests guard the regression where
+    // the hook used `path.sep` literally and silently allowed Windows
+    // forward-slash paths through.
+    it('denies Write on Windows-style backslash path inside .amplitude/', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: 'C:\\project\\.amplitude\\events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on mixed-separator Windows path inside .amplitude/', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: 'C:\\project/.amplitude/events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
   });
 
   describe('Grep', () => {
