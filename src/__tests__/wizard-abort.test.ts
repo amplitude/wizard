@@ -14,6 +14,12 @@ vi.mock('../ui', () => ({
   getUI: vi.fn().mockReturnValue({
     outro: vi.fn(),
     cancel: vi.fn(),
+    // Optional terminal-event emitter — only AgentUI implements it for
+    // real, but the mock needs a no-op stub so wizardAbort can
+    // unconditionally call `getUI().emitRunCompleted?.(...)` without
+    // tripping on undefined. The tests below assert on .toHaveBeenCalledWith.
+    emitRunCompleted: vi.fn(),
+    getRunStartedAtMs: vi.fn().mockReturnValue(null),
   }),
 }));
 
@@ -334,5 +340,91 @@ describe('abort() delegates to wizardAbort()', () => {
       undefined,
     );
     expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  // ── Terminal `run_completed` emission ───────────────────────────
+  //
+  // wizardAbort and wizardSuccessExit are the singular exit funnels.
+  // Every non-error exit must emit a structured `run_completed` event
+  // before the process actually exits — orchestrators rely on its
+  // presence (vs absence) to distinguish a clean run from a crash.
+
+  it('emits run_completed with outcome=cancelled when no error provided', async () => {
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    expect(getUI().emitRunCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'cancelled',
+        exitCode: 1,
+        durationMs: 0,
+      }),
+    );
+  });
+
+  it('emits run_completed with outcome=error when an error is provided', async () => {
+    const err = new WizardError('something broke');
+    await expect(wizardAbort({ error: err, exitCode: 10 })).rejects.toThrow(
+      'process.exit called',
+    );
+
+    expect(getUI().emitRunCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'error',
+        exitCode: 10,
+      }),
+    );
+  });
+
+  it('redacts paths in the reason field of run_completed', async () => {
+    // The RunCompletedData docstring promises path/URL redaction so the
+    // event never leaks `/Users/<name>/...` or query-string secrets.
+    await expect(
+      wizardAbort({
+        message: 'Failed reading /Users/alice/secret-project/config',
+        exitCode: 1,
+      }),
+    ).rejects.toThrow('process.exit called');
+
+    const calls = (getUI().emitRunCompleted as ReturnType<typeof vi.fn>).mock
+      .calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const lastCall = calls[calls.length - 1][0] as { reason?: string };
+    expect(lastCall.reason).not.toContain('/Users/alice');
+    expect(lastCall.reason).toContain('[path redacted]');
+  });
+
+  it('run_completed fires BEFORE analytics.shutdown so it lands on stdout in time', async () => {
+    // Critical ordering: the NDJSON event has to be written before the
+    // process exit fires. Putting it after the analytics flush would
+    // be safer for analytics but risks the exit interrupting stdout.
+    const callOrder: string[] = [];
+    mockAnalytics.shutdown.mockImplementation(async () => {
+      callOrder.push('shutdown');
+    });
+    (getUI().emitRunCompleted as ReturnType<typeof vi.fn>).mockImplementation(
+      () => {
+        callOrder.push('emitRunCompleted');
+      },
+    );
+
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    const emitIdx = callOrder.indexOf('emitRunCompleted');
+    const shutdownIdx = callOrder.indexOf('shutdown');
+    expect(emitIdx).toBeGreaterThan(-1);
+    expect(shutdownIdx).toBeGreaterThan(-1);
+    expect(emitIdx).toBeLessThan(shutdownIdx);
+  });
+
+  it('does not throw if emitRunCompleted itself throws — exit must still happen', async () => {
+    (getUI().emitRunCompleted as ReturnType<typeof vi.fn>).mockImplementation(
+      () => {
+        throw new Error('emitter blew up');
+      },
+    );
+
+    // Exit still happens; the emitter throwing is swallowed.
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+    expect(process.exit).toHaveBeenCalled();
   });
 });

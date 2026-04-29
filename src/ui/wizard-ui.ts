@@ -171,4 +171,50 @@ export interface WizardUI {
    * ChecklistScreen so users can open the dashboard immediately.
    */
   setDashboardUrl(url: string): void;
+
+  // ── Terminal lifecycle ─────────────────────────────────────────
+  /**
+   * Emitted exactly once per run, immediately before the process exits
+   * via `wizardSuccessExit` / `wizardAbort`. Optional because the TUI
+   * (InkUI) and CI logger (LoggingUI) don't need a structured terminal
+   * event — their UI semantics already imply the run boundary. AgentUI
+   * implements this to emit a `run_completed` NDJSON event so
+   * orchestrators can distinguish "wizard finished cleanly" from
+   * "wizard crashed mid-stream and tore the pipe down". Absence of
+   * this event before stream EOF means crash; presence with
+   * `outcome: "success"` is the only signal of a clean run.
+   */
+  emitRunCompleted?(data: {
+    outcome: 'success' | 'error' | 'cancelled';
+    exitCode: number;
+    durationMs: number;
+    reason?: string;
+  }): void;
+
+  /**
+   * Aggregated agent-run metrics — emitted by the observability
+   * middleware once per run at finalize time with token usage, tool
+   * call counts, and duration. Optional; AgentUI emits a `progress`
+   * NDJSON event so orchestrators can bill / cap / monitor cost.
+   * InkUI / LoggingUI no-op.
+   *
+   * Token counts come straight from the Claude Agent SDK's terminal
+   * `result` message — they're cumulative across the entire run
+   * (including any retries the runner performed). `costUsd` is the
+   * SDK's own cost estimate; the wizard doesn't apply its own rate
+   * card so the number stays consistent with the gateway's billing
+   * source of truth.
+   */
+  emitAgentMetrics?(data: {
+    durationMs: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    costUsd?: number;
+    numTurns?: number;
+    totalToolCalls?: number;
+    totalMessages?: number;
+    isError?: boolean;
+  }): void;
 }

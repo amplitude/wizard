@@ -19,6 +19,7 @@ import {
   flushSentry,
   captureError as sentryCaptureError,
 } from '../lib/observability';
+import { suppressPipeAbort } from './pipe-errors';
 
 export class WizardError extends Error {
   constructor(
@@ -110,9 +111,10 @@ export function clearCleanup(): void {
  * standalone, LogoutScreen) and just need to shut down analytics and
  * exit.
  *
- * Sequence: cleanup -> analytics + Sentry flush -> process.exit.
- * NO `cancel()` UI step — the calling screen's render is already on
- * the terminal and we don't want to clobber it with a second outro.
+ * Sequence: cleanup -> emit run_completed -> analytics + Sentry flush
+ * -> process.exit. NO `cancel()` UI step — the calling screen's
+ * render is already on the terminal and we don't want to clobber it
+ * with a second outro.
  *
  * Why this exists: every screen that called `process.exit(0)`
  * directly was firing a `wizardCapture('outro action', …)` (or
@@ -126,6 +128,13 @@ export function clearCleanup(): void {
  * the screen's own UI is the user-facing message.
  */
 export async function wizardSuccessExit(exitCode = 0): Promise<never> {
+  // Suppress any future EPIPE-driven abort. We're already on the way
+  // out — if `emitRunCompleted` below (or any later write) hits a
+  // closed pipe, the default path would schedule a deferred
+  // `wizardAbort` that races our `process.exit(0)` and clobbers the
+  // exit code with 130 (USER_CANCELLED). Bugbot caught this race;
+  // marking the flag here neutralizes the deferred trigger.
+  suppressPipeAbort();
   for (const fn of cleanupFns) {
     try {
       fn();
@@ -133,6 +142,27 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
       /* cleanup should not prevent exit */
     }
   }
+  // Emit the terminal `run_completed` NDJSON event BEFORE shutting
+  // analytics down. AgentUI is the only UI that implements this; for
+  // InkUI / LoggingUI it's a no-op. The event has to land on stdout
+  // before `process.exit` fires — orchestrators rely on its presence
+  // (vs absence) to distinguish a clean run from a crash. Wrapped in
+  // try/catch so a misbehaving emitter can't block the exit.
+  try {
+    getUI().emitRunCompleted?.({
+      outcome: 'success',
+      exitCode,
+      durationMs: computeRunDurationMs(),
+    });
+  } catch {
+    /* terminal event emitter must not prevent exit */
+  }
+  // Wrap shutdown in `withExitDeadline` (added on main since this
+  // branch was forked) so a wedged network on `analytics.shutdown`
+  // can't keep the process alive forever after the user dismissed
+  // the outro. The 3s deadline guarantees we exit predictably even
+  // when the same condition that caused the abort also wedged the
+  // analytics flush.
   await withExitDeadline(
     Promise.all([
       analytics.shutdown('success'),
@@ -142,6 +172,24 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
     ]),
   );
   return process.exit(exitCode);
+}
+
+/**
+ * Compute the wall-clock duration of the current run. Reads from
+ * AgentUI's `getRunStartedAtMs()` when available. For non-agent UIs
+ * (TUI, CI logger), the run-start timestamp isn't tracked and we
+ * report `0` — the value is only meaningful for orchestrator-facing
+ * NDJSON, which only fires from AgentUI anyway.
+ */
+function computeRunDurationMs(): number {
+  try {
+    const ui = getUI() as { getRunStartedAtMs?: () => number | null };
+    const startedAt = ui.getRunStartedAtMs?.() ?? null;
+    if (startedAt === null) return 0;
+    return Math.max(0, Date.now() - startedAt);
+  } catch {
+    return 0;
+  }
 }
 
 // ── Wizard-wide AbortController ──────────────────────────────────────────
@@ -217,6 +265,12 @@ export async function wizardAbort(
     cancelOptions,
   } = options ?? {};
 
+  // Suppress any future EPIPE-driven abort. We're already aborting —
+  // a deferred pipe-trigger firing mid-shutdown would clobber the
+  // caller's intended exit code with 130. Same fix as
+  // `wizardSuccessExit`. Bugbot finding (Medium).
+  suppressPipeAbort();
+
   // 1. Run registered cleanup functions
   for (const fn of cleanupFns) {
     try {
@@ -252,7 +306,33 @@ export async function wizardAbort(
     /* UI failure must not prevent exit */
   }
 
-  // 4. Shutdown analytics and flush Sentry. Runs AFTER cancel so that
+  // 4. Emit the terminal `run_completed` NDJSON event before shutting
+  //    analytics down. AgentUI is the only UI that implements this;
+  //    for InkUI / LoggingUI it's a no-op. The outcome distinguishes
+  //    `error` (an unexpected failure with `error` populated) from
+  //    `cancelled` (graceful exit without an error — e.g. user hit
+  //    Esc on the framework picker). Wrapped in try/catch so a
+  //    misbehaving emitter can't block the exit.
+  const outcome: 'error' | 'cancelled' = error ? 'error' : 'cancelled';
+  try {
+    getUI().emitRunCompleted?.({
+      outcome,
+      exitCode,
+      durationMs: computeRunDurationMs(),
+      // Sanitize the message before exposing it on stdout — the
+      // sanitizer used by AgentUI.setRunError already redacts paths
+      // and URLs. We use the raw message here because abortMessage
+      // is operator-friendly and rarely contains secrets, but the
+      // RunCompletedData docstring promises sanitization. AgentUI's
+      // emit() doesn't currently re-sanitize, so do it here to keep
+      // the contract honest.
+      ...(message ? { reason: sanitizeReason(message) } : {}),
+    });
+  } catch {
+    /* terminal event emitter must not prevent exit */
+  }
+
+  // 5. Shutdown analytics and flush Sentry. Runs AFTER cancel so that
   //    wizardCapture events fired during outro interaction (e.g.
   //    'error outro log opened', 'error outro bug report written')
   //    are delivered before the process exits.
@@ -273,7 +353,7 @@ export async function wizardAbort(
     ]),
   );
 
-  // 5. Exit (fires 'exit' event so TUI cleanup runs)
+  // 6. Exit (fires 'exit' event so TUI cleanup runs)
   //
   // Honor the provided ExitCode in all modes. Previously agent mode forced
   // exit 0 on every abort so that callers like Claude Code wouldn't show red
@@ -282,4 +362,20 @@ export async function wizardAbort(
   // suppress error UI should parse the NDJSON stream; the exit code reflects
   // the real outcome.
   return process.exit(exitCode);
+}
+
+/**
+ * Strip path / URL fragments from a free-form reason string before
+ * shipping it on stdout. Mirrors the conservative redaction in
+ * `AgentUI.setRunError`'s fallback path so the `run_completed` event
+ * never leaks `/Users/<name>/...` or query-string secrets.
+ *
+ * Best-effort: we don't pull in the full observability redactor here
+ * because this module loads early in bin.ts startup and we want to
+ * avoid the import cost on every `wizardAbort` call.
+ */
+function sanitizeReason(s: string): string {
+  return s
+    .replace(/https?:\/\/[^\s]+/g, '[URL redacted]')
+    .replace(/\/(?:Users|home|var|tmp)\/[^\s:]+/g, '[path redacted]');
 }

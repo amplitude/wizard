@@ -20,6 +20,7 @@ import type {
   VerificationStartedData,
   VerificationResultData,
 } from '../lib/agent-events';
+import { EVENT_DATA_VERSIONS } from '../lib/agent-events';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
@@ -165,6 +166,13 @@ interface NDJSONEvent {
   message: string;
   session_id?: string;
   run_id?: string;
+  /**
+   * Per-event-type data-shape version. See `EVENT_DATA_VERSIONS` in
+   * `src/lib/agent-events.ts` — orchestrators branch on this to
+   * handle breaking changes to `data` without forcing a global
+   * envelope-version bump on every change.
+   */
+  data_version?: number;
   data?: unknown;
   level?: string;
 }
@@ -191,12 +199,59 @@ function getCorrelationIds(): { session_id: string; run_id: string } {
   return { session_id: _getSessionId(), run_id: _getRunId!() };
 }
 
+/**
+ * Look up the per-event-type data-shape version from the registry,
+ * keyed off the `data.event` discriminator. Returns `undefined` for
+ * events whose `data` shape isn't part of the orchestrator-facing
+ * contract (free-form `log`, `status`, `progress` payloads). Caller
+ * can override by passing `dataVersion` explicitly via `extra`.
+ */
+function lookupDataVersion(
+  data: unknown,
+  explicit: number | undefined,
+): number | undefined {
+  if (explicit !== undefined) return explicit;
+  if (typeof data !== 'object' || data === null) return undefined;
+  const eventKey = (data as { event?: unknown }).event;
+  if (typeof eventKey !== 'string') return undefined;
+  const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
+  return registry[eventKey];
+}
+
+/**
+ * Emit a `decision_auto` companion event after a `needs_input` whose
+ * caller auto-resolved the prompt. Lets orchestrators distinguish
+ * "this awaits a human answer" (needs_input alone) from "the wizard
+ * already picked one for you" (needs_input + decision_auto).
+ *
+ * The `reason` field is forward-looking: today we always emit
+ * `auto_approve` because every prompt path auto-resolves. Future
+ * wiring (when we honor `--auto-approve` strictly) will add
+ * `back_compat` (the `--agent` implies-autoApprove path) so
+ * orchestrators can detect and migrate away from the implicit grant.
+ */
+function emitDecisionAuto(data: {
+  code: string;
+  value: unknown;
+  reason: 'auto_approve' | 'back_compat';
+}): void {
+  emit('lifecycle', `decision_auto: ${data.code}=${String(data.value)}`, {
+    data: {
+      event: 'decision_auto',
+      code: data.code,
+      value: data.value,
+      reason: data.reason,
+    },
+  });
+}
+
 function emit(
   type: AgentEventType,
   message: string,
   extra?: Omit<NDJSONEvent, 'v' | '@timestamp' | 'type' | 'message'>,
 ): void {
   const { session_id, run_id } = getCorrelationIds();
+  const data_version = lookupDataVersion(extra?.data, extra?.data_version);
   const event: NDJSONEvent = {
     v: 1,
     '@timestamp': new Date().toISOString(),
@@ -205,6 +260,12 @@ function emit(
     session_id,
     run_id,
     ...extra,
+    // Stamp data_version AFTER spreading `extra` so the lookup result
+    // wins over any (unintentional) undefined in `extra`. Drop the
+    // key entirely when undefined so events without a registered
+    // shape don't ship `"data_version": undefined` (which JSON.stringify
+    // omits anyway, but keeping the key absent is clearer in tests).
+    ...(data_version !== undefined ? { data_version } : {}),
   };
   // safePipeWrite swallows EPIPE-class errors so a closed receiver
   // doesn't crash the wizard mid-run. The data is silently dropped —
@@ -528,8 +589,97 @@ export class AgentUI implements WizardUI {
 
   // ── Session state ───────────────────────────────────────────────────
 
+  /**
+   * Run-start timestamp (epoch ms). Captured by `startRun()` — read by
+   * `emitRunCompleted` to compute `durationMs`. `null` until the run
+   * actually begins so duration is reported accurately even when the
+   * wizard exits before reaching the inner agent (e.g.
+   * `auth_required`, `INPUT_REQUIRED`). In those early-exit cases
+   * `emitRunCompleted` reports `durationMs: 0` — orchestrators
+   * shouldn't read significance into a zero duration; the structured
+   * `outcome` + `exitCode` are the contract.
+   */
+  private _runStartedAtMs: number | null = null;
+
   startRun(): void {
+    this._runStartedAtMs = Date.now();
     emit('lifecycle', 'run_started', { data: { event: 'start_run' } });
+  }
+
+  /**
+   * Terminal lifecycle event. Emitted exactly once per run, immediately
+   * before the process exits via `wizardSuccessExit` / `wizardAbort`.
+   * See `RunCompletedData` in `agent-events.ts` for the contract.
+   */
+  emitRunCompleted(data: {
+    outcome: 'success' | 'error' | 'cancelled';
+    exitCode: number;
+    durationMs: number;
+    reason?: string;
+  }): void {
+    // Caller (`wizard-abort.ts`) computes durationMs from
+    // `_runStartedAtMs`. Pass-through with no transformation — keeps
+    // the AgentUI side a thin emitter.
+    emit('lifecycle', `run_completed: ${data.outcome}`, {
+      level:
+        data.outcome === 'error'
+          ? 'error'
+          : data.outcome === 'cancelled'
+          ? 'warn'
+          : 'success',
+      data: {
+        event: 'run_completed',
+        outcome: data.outcome,
+        exitCode: data.exitCode,
+        durationMs: data.durationMs,
+        ...(data.reason ? { reason: data.reason } : {}),
+      },
+    });
+  }
+
+  /**
+   * Read-only accessor for the run-start timestamp. Used by
+   * `wizard-abort.ts` to compute `durationMs` without exposing the
+   * private field. Returns `null` if `startRun()` was never called
+   * (early-exit paths like `auth_required` / `INPUT_REQUIRED`).
+   */
+  getRunStartedAtMs(): number | null {
+    return this._runStartedAtMs;
+  }
+
+  /**
+   * Emit aggregated agent-run metrics at finalize time. See
+   * `WizardUI.emitAgentMetrics` for the contract.
+   *
+   * Lands on the `progress` event type (not `lifecycle` /
+   * `result`) because metrics are observability data — orchestrators
+   * subscribing to operational telemetry will key on `progress`-type
+   * events; subscribers caring only about run outcomes (success /
+   * failure) won't be flooded with one-off cost data.
+   */
+  emitAgentMetrics(data: {
+    durationMs: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    costUsd?: number;
+    numTurns?: number;
+    totalToolCalls?: number;
+    totalMessages?: number;
+    isError?: boolean;
+  }): void {
+    // Drop undefined fields rather than ship `"costUsd": undefined`,
+    // which JSON.stringify omits but leaves the schema unclear in
+    // tests / docs. Output is a tight, dense object with only what
+    // the SDK actually reported.
+    const entries: Array<[string, unknown]> = Object.entries(data).filter(
+      ([, v]) => v !== undefined,
+    );
+    const payload = Object.fromEntries(entries);
+    emit('progress', `agent_metrics: ${data.durationMs}ms`, {
+      data: { event: 'agent_metrics', ...payload },
+    });
   }
 
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
@@ -664,6 +814,16 @@ export class AgentUI implements WizardUI {
       ],
       recommended: 'yes',
     });
+    // Then emit a `decision_auto` companion so orchestrators that
+    // subscribe to `needs_input` can tell "this was auto-resolved"
+    // from "this is awaiting an answer". Order matters: needs_input
+    // first, decision_auto after, both before the promise resolves
+    // (and before any subsequent control flow advances).
+    emitDecisionAuto({
+      code: 'confirm',
+      value: 'yes',
+      reason: 'auto_approve',
+    });
     return Promise.resolve(true);
   }
 
@@ -688,14 +848,61 @@ export class AgentUI implements WizardUI {
       choices: options.map((opt) => ({ value: opt, label: opt })),
       recommended: selected,
     });
+    emitDecisionAuto({
+      code: 'choice',
+      value: selected,
+      reason: 'auto_approve',
+    });
     return Promise.resolve(selected);
   }
 
   promptEventPlan(
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision> {
+    // Pre-decision: emit a structured `needs_input` so the
+    // contract holds — every `decision_auto` MUST follow a
+    // `needs_input` for the same `code`. Bugbot flagged that the
+    // previous shape emitted `decision_auto` orphaned (after a
+    // `result` event, with no preceding needs_input), which
+    // contradicted the docstring on `EVENT_DATA_VERSIONS.decision_auto`.
+    // Choices are flat strings so orchestrators can `resumeFlags`
+    // their way into a different decision if a human is in the loop.
+    this.emitNeedsInput<'approved' | 'skipped' | 'revised'>({
+      code: 'event_plan',
+      message: `Approve ${events.length} proposed events?`,
+      ui: {
+        component: 'confirmation',
+        priority: 'required',
+        title: 'Approve instrumentation plan',
+        description: `${events.length} events proposed. Review the list and approve, skip, or send revision feedback.`,
+      },
+      choices: [
+        { value: 'approved', label: 'Approve and instrument' },
+        { value: 'skipped', label: 'Skip event tracking for this run' },
+        { value: 'revised', label: 'Send revision feedback' },
+      ],
+      recommended: 'approved',
+    });
+    // The full event list is carried on the legacy `result` emit
+    // below — orchestrators rendering the plan inline read it from
+    // there. We don't shadow the events on `needs_input.metadata`
+    // because that field is constrained to primitives.
+
+    // Back-compat: keep the legacy `result` emit so existing
+    // orchestrators that key off `event: event_plan` continue to
+    // work unchanged.
     emit('result', 'event_plan auto-approved', {
       data: { event: 'event_plan', events },
+    });
+
+    // Companion `decision_auto` for the needs_input above. Orchestrators
+    // subscribed to needs_input → decision_auto pairs can tell that
+    // the wizard auto-resolved this prompt rather than awaiting a
+    // human answer.
+    emitDecisionAuto({
+      code: 'event_plan',
+      value: 'approved',
+      reason: 'auto_approve',
     });
     return Promise.resolve({ decision: 'approved' });
   }
