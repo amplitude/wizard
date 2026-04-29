@@ -1454,8 +1454,26 @@ export async function runAgentLocally(
       'ping',
       'stream_event',
     ]);
+    /**
+     * Belt-and-braces signature match for partial / pre-buffer protocol
+     * JSON. `JSON.parse` only succeeds on complete lines, so a chunk that
+     * splits mid-payload (very common for `content_block_delta`, which
+     * carries large strings) would otherwise slip past the strict check
+     * and reach the status pill as truncated noise like
+     * `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delt…`.
+     * Anchor on the `{"type":"<known>"` prefix to catch those before they
+     * paint to the UI.
+     */
+    const STREAM_EVENT_PREFIXES = Array.from(STREAM_EVENT_TYPES).map(
+      (t) => `{"type":"${t}"`,
+    );
     const looksLikeStreamEvent = (line: string): boolean => {
       if (line.length < 9 || line[0] !== '{') return false;
+      // Fast path: signature match on the prefix. Survives partial lines.
+      for (const prefix of STREAM_EVENT_PREFIXES) {
+        if (line.startsWith(prefix)) return true;
+      }
+      // Slow path: full parse for completeness (handles odd whitespace).
       try {
         const obj = JSON.parse(line) as { type?: unknown };
         return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
@@ -1464,15 +1482,35 @@ export async function runAgentLocally(
       }
     };
 
+    /**
+     * Line buffer for stdout. The OS pipes stdout in arbitrary-sized
+     * chunks — a single `data` event may carry multiple lines, half a
+     * line, or several lines plus a partial trailing one. Splitting each
+     * raw chunk on `\n` and treating every result as a complete line was
+     * the root cause of `{"type":"content_block_delta",…` leaking past
+     * the filter: the trailing fragment couldn't `JSON.parse`, so the
+     * strict signature check missed it. Buffer until we see a newline,
+     * emit only complete lines, and stash the remainder for the next
+     * chunk. (The prefix match above is a second line of defense if a
+     * line is genuinely longer than the pipe buffer.)
+     */
+    let stdoutBuffer = '';
+    const consumeLine = (line: string) => {
+      logToFile('claude stdout:', line);
+      if (looksLikeStreamEvent(line)) return;
+      pendingLine = line.slice(0, 80);
+      if (pushTimer === null) {
+        pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
+      }
+    };
+
     proc.stdout.on('data', (chunk: string) => {
-      const lines = chunk.split('\n').filter((l) => l.trim());
-      for (const line of lines) {
-        logToFile('claude stdout:', line);
-        if (looksLikeStreamEvent(line)) continue;
-        pendingLine = line.slice(0, 80);
-        if (pushTimer === null) {
-          pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
-        }
+      stdoutBuffer += chunk;
+      let nl: number;
+      while ((nl = stdoutBuffer.indexOf('\n')) !== -1) {
+        const line = stdoutBuffer.slice(0, nl);
+        stdoutBuffer = stdoutBuffer.slice(nl + 1);
+        if (line.trim()) consumeLine(line);
       }
     });
 
@@ -1481,6 +1519,12 @@ export async function runAgentLocally(
     });
 
     proc.on('close', (code) => {
+      // Flush any line still buffered without a trailing newline so the
+      // final partial line isn't dropped on close.
+      if (stdoutBuffer.trim()) {
+        consumeLine(stdoutBuffer);
+        stdoutBuffer = '';
+      }
       // Flush any pending status update so the very last line the user
       // sees reflects what actually happened just before exit.
       if (pushTimer !== null) {

@@ -207,9 +207,44 @@ export function resetWizardAbortController(): void {
   _wizardAbortController = null;
 }
 
+/**
+ * Tracks whether a `wizardAbort()` is currently in flight (between entry
+ * and `process.exit`). The OutroScreen dismissal handler reads this to
+ * decide whether to drive the exit itself.
+ *
+ * Why this exists: screens like DataIngestionCheckScreen, IntroScreen,
+ * SetupScreen, and ActivationOptionsScreen navigate to the cancel outro
+ * via `store.setOutroData({ kind: OutroKind.Cancel, ... })` — a UI-only
+ * navigation that does NOT go through `wizardAbort`. When the user
+ * pressed a key on that outro, `signalOutroDismissed` resolved a promise
+ * that nobody awaited, no analytics flush ran, no `process.exit` fired,
+ * and the wizard hung silently until Ctrl+C. By exporting this flag the
+ * outro can detect the "no awaiter" case and route through
+ * `wizardSuccessExit` to actually tear down the process.
+ *
+ * Why not always exit from the outro: when `wizardAbort` IS the caller,
+ * it owns the exit code (NETWORK / AGENT_FAILED / etc.) and runs its
+ * own analytics flush. A second `process.exit(0)` from the outro would
+ * race that path and either lose the real exit code or skip telemetry.
+ */
+let _wizardAbortInProgress = false;
+export function isWizardAbortInProgress(): boolean {
+  return _wizardAbortInProgress;
+}
+/**
+ * Test-only — production runs are one-shot processes that exit at the
+ * end of `wizardAbort`, so the flag never needs to be reset. Tests that
+ * mock `process.exit` (so `wizardAbort` returns instead of terminating)
+ * must call this between cases or the flag leaks across the suite.
+ */
+export function _resetWizardAbortInProgressForTests(): void {
+  _wizardAbortInProgress = false;
+}
+
 export async function wizardAbort(
   options?: WizardAbortOptions,
 ): Promise<never> {
+  _wizardAbortInProgress = true;
   const {
     message = 'Wizard setup cancelled.',
     error,
