@@ -28,6 +28,17 @@ export const ExitCode = {
    * here so outer agents can re-invoke with `--yes` or `--force`.
    */
   WRITE_REFUSED: 13,
+  /**
+   * Internal wizard bug — an uncaught exception, assertion violation, or
+   * other unexpected error in the wizard's own code (NOT in the inner
+   * Claude agent's behaviour). Distinct from `AGENT_FAILED=10` (the
+   * agent run terminated with a real failure, e.g. permission denial,
+   * network blip, model overload) and `GENERAL_ERROR=1` (catch-all
+   * "something went wrong"). Orchestrators should treat 20 as a wizard
+   * defect worth filing a bug report for; 10 is usually
+   * environmental/recoverable.
+   */
+  INTERNAL_ERROR: 20,
   USER_CANCELLED: 130,
 } as const;
 

@@ -52,7 +52,13 @@ function seedRunScreenStore() {
 // top of the per-second coaching timer. Advancing fake timers across
 // 90–305s flushes many React renders; bump the per-test timeout
 // generously to absorb that on slower CI hardware.
-const SLOW_TEST_TIMEOUT_MS = 30_000;
+//
+// Headroom note: in isolation this test runs in ~4s. Under heavy
+// parallel-suite load, the import + render phase has been seen to
+// stretch past 30s. Keep the ceiling generous so CI doesn't
+// false-positive on machine load that has nothing to do with the
+// behaviour being tested.
+const SLOW_TEST_TIMEOUT_MS = 60_000;
 
 describe('RunScreen — timeout coaching', () => {
   beforeEach(() => {

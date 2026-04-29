@@ -26,8 +26,17 @@
  *      from any code path that writes user output and shouldn't crash
  *      the run on a broken pipe.
  *
- * Both are no-ops once the pipe is broken — the data is silently dropped.
- * That's correct: there's nothing on the other end to receive it.
+ * On first pipe break, both layers register a one-shot trigger that
+ * schedules `abortWizard()` (in agent / non-TUI contexts) so the
+ * wizard exits cleanly rather than continuing to produce output that
+ * silently disappears. Without this, an orchestrator that drops its
+ * read end mid-stream would still be billed for a long-running agent
+ * run that has no audience.
+ *
+ * Subsequent writes after the pipe break are still no-ops — the data
+ * is silently dropped because there's nothing on the other end to
+ * receive it. The single-shot abort guarantees we don't burn cycles
+ * on a doomed run.
  *
  * Idempotent. `installPipeErrorHandlers()` may be called multiple times
  * (e.g. once from `bin.ts`, once from `agent-ui.ts` module init) without
@@ -52,6 +61,108 @@ function isPipeError(err: unknown): boolean {
 }
 
 /**
+ * One-shot trigger flag. The first detected pipe break schedules an
+ * `abortWizard()` call; subsequent breaks are no-ops (the wizard is
+ * already on its way out). Module-level state because the flag has
+ * to be shared across the two detection layers (sync `safePipeWrite`
+ * try/catch + async `process.stdout.on('error', ...)` listener).
+ */
+let _pipeAbortTriggered = false;
+
+/**
+ * Pluggable abort dispatcher. Defaults to dynamically importing
+ * `./wizard-abort` (avoids the circular load — `wizard-abort.ts`
+ * imports `./ui` which imports `./agent-ui` which imports this
+ * file). Tests inject a synchronous mock via
+ * `__setPipeAbortDispatcherForTests` so they don't have to wrestle
+ * with vi.mock and dynamic-import resolution timing.
+ */
+type AbortDispatcher = () => void | Promise<void>;
+
+/**
+ * Shape of the dynamically-imported `./wizard-abort` module surface
+ * we depend on. Hand-typed (vs `import type`) because TypeScript can
+ * lose narrow types through `await import()` under some module-mode
+ * settings, leaving downstream calls flagged as `any` by ESLint. A
+ * structural interface keeps the consumer code strongly typed.
+ */
+interface WizardAbortModuleShape {
+  abortWizard: (reason?: string) => void;
+  wizardAbort: (options?: {
+    message?: string;
+    exitCode?: number;
+  }) => Promise<never>;
+}
+
+const defaultAbortDispatcher: AbortDispatcher = async () => {
+  try {
+    // Cast through `unknown` to neutralize the `any`-typed surface of
+    // `await import()` under our tsconfig — TypeScript can lose
+    // narrow types through dynamic-import in nodenext module mode.
+    // The structural cast keeps downstream calls strongly typed.
+    const mod = (await import(
+      './wizard-abort.js'
+    )) as unknown as WizardAbortModuleShape;
+    // First flip the wizard-wide AbortController so any in-flight
+    // async work (agent SDK query, MCP fetches, ingestion polls)
+    // unwinds before wizardAbort starts running cleanup. Without
+    // this the abort would race with whatever was mid-flight.
+    mod.abortWizard('stdout pipe closed by consumer');
+    await mod.wizardAbort({
+      message: 'Output stream closed by consumer.',
+      exitCode: 130,
+    });
+  } catch {
+    // wizardAbort either successfully calls process.exit (in which
+    // case we don't get here), or it threw before exit. In the
+    // latter case, force-exit so we don't keep running on a doomed
+    // pipe.
+    process.exit(130);
+  }
+};
+
+let _abortDispatcher: AbortDispatcher = defaultAbortDispatcher;
+
+/**
+ * Schedule a wizard abort in response to a broken pipe. Idempotent —
+ * only the FIRST call schedules; subsequent calls are no-ops.
+ *
+ * Why deferred via `setImmediate`: the abort is dispatched from
+ * within a stream-write code path. Calling `abortWizard()` directly
+ * could re-enter the same write path (analytics, logging, etc.) and
+ * trigger weird ordering. Deferring lets the current stack unwind
+ * first, then the abort runs cleanly on the next tick.
+ *
+ * `USER_CANCELLED` (130) is the right exit code: the receiver going
+ * away is functionally identical to the user pressing Ctrl+C from
+ * the wizard's perspective — there's no audience left for our
+ * output.
+ */
+function triggerPipeAbort(): void {
+  if (_pipeAbortTriggered) return;
+  _pipeAbortTriggered = true;
+  setImmediate(() => {
+    void _abortDispatcher();
+  });
+}
+
+/** Test-only reset for `_pipeAbortTriggered`. */
+export const __resetPipeAbortTriggeredForTests = (): void => {
+  _pipeAbortTriggered = false;
+};
+
+/** Test-only dispatcher injection. Pass `null` to restore the default. */
+export const __setPipeAbortDispatcherForTests = (
+  dispatcher: AbortDispatcher | null,
+): void => {
+  if (dispatcher === null) {
+    _abortDispatcher = defaultAbortDispatcher;
+    return;
+  }
+  _abortDispatcher = dispatcher;
+};
+
+/**
  * Attach error listeners to `process.stdout` / `process.stderr` that
  * swallow EPIPE-class errors. Idempotent — subsequent calls are no-ops.
  *
@@ -64,7 +175,13 @@ export function installPipeErrorHandlers(): void {
   installed = true;
 
   const handler = (err: unknown): void => {
-    if (isPipeError(err)) return; // swallow
+    if (isPipeError(err)) {
+      // Pipe is broken — schedule a clean abort so we don't keep
+      // running with no audience. Subsequent writes still no-op via
+      // safePipeWrite; the abort will fire on the next tick.
+      triggerPipeAbort();
+      return;
+    }
     // Anything else is a real error — re-throw so the default
     // unhandled-error path runs and Sentry sees it.
     throw err;
@@ -94,7 +211,13 @@ export function safePipeWrite(
   try {
     return stream.write(data);
   } catch (err) {
-    if (isPipeError(err)) return false;
+    if (isPipeError(err)) {
+      // Same one-shot trigger as the async listener — the first
+      // detected EPIPE schedules a clean abort. Subsequent writes
+      // hit this branch and no-op until the deferred abort fires.
+      triggerPipeAbort();
+      return false;
+    }
     throw err;
   }
 }

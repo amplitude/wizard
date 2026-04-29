@@ -468,12 +468,17 @@ describe('AgentUI.emitNeedsInput', () => {
     ]);
   });
 
-  it('promptConfirm emits a needs_input event in addition to the legacy prompt event', () => {
+  it('promptConfirm emits prompt + needs_input + decision_auto, in that order', () => {
     const ui = new AgentUI();
     void ui.promptConfirm('Apply this plan?');
 
-    expect(writes.length).toBe(2);
-    const [legacy, modern] = writes.map(
+    // Order matters: legacy `prompt` first (back-compat), then the
+    // structured `needs_input`, then the `decision_auto` companion.
+    // Orchestrators that subscribe to needs_input MUST see
+    // decision_auto next on the same stream — that's the contract
+    // for distinguishing "awaiting input" from "auto-resolved".
+    expect(writes.length).toBe(3);
+    const [legacy, modern, decision] = writes.map(
       (l) => JSON.parse(l.trim()) as NDJSONEvent,
     );
     expect(legacy.type).toBe('prompt');
@@ -487,18 +492,34 @@ describe('AgentUI.emitNeedsInput', () => {
       { value: 'yes', label: 'Yes' },
       { value: 'no', label: 'No' },
     ]);
+    expect(decision.type).toBe('lifecycle');
+    expect(decision.data).toMatchObject({
+      event: 'decision_auto',
+      code: 'confirm',
+      value: 'yes',
+      reason: 'auto_approve',
+    });
   });
 
-  it('promptChoice emits a needs_input event with one choice per option', () => {
+  it('promptChoice emits prompt + needs_input + decision_auto, in that order', () => {
     const ui = new AgentUI();
     void ui.promptChoice('Pick a framework', ['nextjs', 'vue', 'svelte']);
 
-    expect(writes.length).toBe(2);
-    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(writes.length).toBe(3);
+    const events = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    const modern = events[1];
+    const decision = events[2];
     expect(modern.type).toBe('needs_input');
     expect(modern.data).toMatchObject({
       code: 'choice',
       recommended: 'nextjs',
+    });
+    expect(decision.type).toBe('lifecycle');
+    expect(decision.data).toMatchObject({
+      event: 'decision_auto',
+      code: 'choice',
+      value: 'nextjs',
+      reason: 'auto_approve',
     });
     expect(modern.data?.choices).toEqual([
       { value: 'nextjs', label: 'nextjs' },
@@ -591,5 +612,276 @@ describe('AgentUI.emitNeedsInput', () => {
       description: 'Org > WS > Prod',
       resumeFlags: ['--app-id', '123'],
     });
+  });
+});
+
+// ── Per-event data_version stamping ─────────────────────────────────
+//
+// Orchestrators that pin to envelope `v: 1` aren't protected from
+// breaking changes inside `data` — adding/renaming a field on (say)
+// `event_plan_proposed` keeps envelope `v` stable but silently shifts
+// the contract. The fix: every event whose `data` shape is part of
+// the public API carries a `data_version` integer. Orchestrators
+// branch on `(type, data?.event, data_version)`.
+//
+// These tests pin the contract: the registered events emit a
+// `data_version` field, and unregistered free-form payloads (log,
+// status, generic progress) do NOT, so we don't ship noise.
+
+describe('AgentUI — per-event data_version', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const eventsOfType = (type: string): NDJSONEvent[] =>
+    writes
+      .map((w) => JSON.parse(w.trim()) as NDJSONEvent)
+      .filter((e) => e.type === type);
+
+  it('stamps data_version=1 on auth_required (registered event)', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'Please log in.',
+      loginCommand: ['npx', '@amplitude/wizard', 'login'],
+    });
+    const event = eventsOfType('lifecycle').at(-1)!;
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('stamps data_version on dashboard_created (result event)', () => {
+    const ui = new AgentUI();
+    ui.setDashboardUrl('https://app.amplitude.com/dashboard/123');
+    const event = eventsOfType('result').at(-1)!;
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('stamps data_version on tool_call', () => {
+    const ui = new AgentUI();
+    ui.emitToolCall({
+      toolName: 'Edit',
+      summary: 'edit src/foo.ts',
+    });
+    const event = eventsOfType('progress').at(-1)!;
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('does NOT stamp data_version on free-form log events', () => {
+    const ui = new AgentUI();
+    ui.log.info('a free-form log line');
+    const event = eventsOfType('log').at(-1)!;
+    // log.* is a debug stream, not a versioned API surface — events
+    // without an `event` discriminator stay un-versioned so we don't
+    // imply a contract we'd have to honor.
+    expect((event as unknown as { data_version?: number }).data_version).toBe(
+      undefined,
+    );
+  });
+
+  it('does NOT stamp data_version on session_state events (free-form payload)', () => {
+    const ui = new AgentUI();
+    ui.setRegion('us');
+    const event = eventsOfType('session_state').at(-1)!;
+    expect((event as unknown as { data_version?: number }).data_version).toBe(
+      undefined,
+    );
+  });
+
+  it('preserves the v=1 envelope version regardless of data_version', () => {
+    // Envelope `v` is the framing-layer version; data_version is the
+    // payload-shape version. Bumping one must not implicitly bump the
+    // other.
+    const ui = new AgentUI();
+    ui.setDashboardUrl('https://example.com');
+    const event = eventsOfType('result').at(-1)!;
+    expect(event.v).toBe(1);
+  });
+});
+
+// ── Terminal `run_completed` lifecycle event ─────────────────────────
+//
+// Orchestrators rely on `run_completed` to distinguish "wizard
+// finished cleanly" from "wizard crashed mid-stream and tore the pipe
+// down". Absence of this event before stream EOF means crash; presence
+// with `outcome: success` is the only signal of a clean run. These
+// tests pin that contract.
+
+describe('AgentUI.emitRunCompleted', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('emits a lifecycle event tagged event=run_completed', () => {
+    const ui = new AgentUI();
+    ui.emitRunCompleted({
+      outcome: 'success',
+      exitCode: 0,
+      durationMs: 1234,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('lifecycle');
+    expect(event.message).toBe('run_completed: success');
+    expect(event.data).toMatchObject({
+      event: 'run_completed',
+      outcome: 'success',
+      exitCode: 0,
+      durationMs: 1234,
+    });
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('maps outcome to level (success → success, error → error, cancelled → warn)', () => {
+    const ui = new AgentUI();
+
+    ui.emitRunCompleted({ outcome: 'success', exitCode: 0, durationMs: 0 });
+    expect(lastEvent().level).toBe('success');
+
+    ui.emitRunCompleted({ outcome: 'error', exitCode: 10, durationMs: 0 });
+    expect(lastEvent().level).toBe('error');
+
+    ui.emitRunCompleted({ outcome: 'cancelled', exitCode: 130, durationMs: 0 });
+    expect(lastEvent().level).toBe('warn');
+  });
+
+  it('omits reason key when not provided (vs writing reason: undefined)', () => {
+    const ui = new AgentUI();
+    ui.emitRunCompleted({ outcome: 'success', exitCode: 0, durationMs: 5 });
+    const data = lastEvent().data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('reason');
+  });
+
+  it('includes reason when provided (e.g. wizardAbort with a message)', () => {
+    const ui = new AgentUI();
+    ui.emitRunCompleted({
+      outcome: 'error',
+      exitCode: 10,
+      durationMs: 5,
+      reason: 'Inner agent failed: model overloaded',
+    });
+    const data = lastEvent().data as Record<string, unknown>;
+    expect(data.reason).toBe('Inner agent failed: model overloaded');
+  });
+});
+
+describe('AgentUI.emitAgentMetrics', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('emits a progress event with event=agent_metrics', () => {
+    const ui = new AgentUI();
+    ui.emitAgentMetrics({
+      durationMs: 12345,
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadInputTokens: 800,
+      costUsd: 0.0123,
+      numTurns: 7,
+      totalToolCalls: 12,
+      totalMessages: 25,
+      isError: false,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('agent_metrics: 12345ms');
+    expect(event.data).toMatchObject({
+      event: 'agent_metrics',
+      durationMs: 12345,
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadInputTokens: 800,
+      costUsd: 0.0123,
+      numTurns: 7,
+      totalToolCalls: 12,
+      totalMessages: 25,
+      isError: false,
+    });
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('omits undefined fields rather than shipping {"costUsd": undefined}', () => {
+    const ui = new AgentUI();
+    ui.emitAgentMetrics({
+      durationMs: 100,
+      // No usage, no cost — SDK didn't report them.
+    });
+    const data = lastEvent().data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('inputTokens');
+    expect(data).not.toHaveProperty('costUsd');
+    expect(data).toMatchObject({
+      event: 'agent_metrics',
+      durationMs: 100,
+    });
+  });
+});
+
+describe('AgentUI.startRun + getRunStartedAtMs', () => {
+  it('captures start timestamp on startRun() so duration can be computed', () => {
+    const before = Date.now();
+    const ui = new AgentUI();
+    expect(ui.getRunStartedAtMs()).toBeNull();
+    ui.startRun();
+    const after = Date.now();
+    const ts = ui.getRunStartedAtMs();
+    expect(ts).not.toBeNull();
+    expect(ts!).toBeGreaterThanOrEqual(before);
+    expect(ts!).toBeLessThanOrEqual(after);
+  });
+
+  it('returns null before startRun() — early-exit paths report durationMs=0', () => {
+    // auth_required and INPUT_REQUIRED can fire before the inner
+    // agent run starts. wizard-abort's computeRunDurationMs reads
+    // null and reports 0 in that case.
+    const ui = new AgentUI();
+    expect(ui.getRunStartedAtMs()).toBeNull();
   });
 });
