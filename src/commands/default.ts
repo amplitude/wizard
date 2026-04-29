@@ -288,6 +288,23 @@ export const defaultCommand: CommandModule = {
             );
             await resolveCredentials(session);
 
+            // If resolveCredentials silently picked an org/project from
+            // disk (returning-user path), require an explicit confirmation
+            // before routing the run against it. The Auth flow gate reads
+            // this flag — without it we could silently target a project
+            // the user didn't intend (especially after upgrading from an
+            // old wizard version where project IDs may have rolled over).
+            // Skipped in --ci / --agent mode where there is no interactive
+            // confirm step and the user has already opted into automation.
+            if (
+              session.credentials !== null &&
+              !session.ci &&
+              !session.agent &&
+              (session.selectedOrgId || session.selectedProjectId)
+            ) {
+              session.requiresAccountConfirmation = true;
+            }
+
             // Resolve org/project display names so /whoami shows them.
             // Also extracts the numeric analytics project ID for MCP event detection.
             // Fire-and-forget so it doesn't block startup.
@@ -465,6 +482,27 @@ export const defaultCommand: CommandModule = {
           // AuthScreen calls store.setCredentials() when done, advancing the
           // router past Auth → RegionSelect → DataSetup → to IntroScreen.
           const authTask = (async () => {
+            // If we silently resolved credentials from disk on a returning
+            // run, the user is currently looking at the account-confirm
+            // step inside AuthScreen. Wait for them to either accept (the
+            // task can short-circuit and exit) or reject (credentials get
+            // cleared so we proceed into the OAuth pipeline below). Without
+            // this wait the task would early-return and leave the user
+            // stranded if they pressed [C] to change project.
+            if (tui.store.session.requiresAccountConfirmation) {
+              await new Promise<void>((resolve) => {
+                if (!tui.store.session.requiresAccountConfirmation) {
+                  resolve();
+                  return;
+                }
+                const unsub = tui.store.subscribe(() => {
+                  if (!tui.store.session.requiresAccountConfirmation) {
+                    unsub();
+                    resolve();
+                  }
+                });
+              });
+            }
             // Skip the full OAuth + SUSI flow when credentials were pre-populated
             // from ~/.ampli.json + the saved API key (returning user).
             if (tui.store.session.credentials !== null) return;
@@ -583,12 +621,51 @@ export const defaultCommand: CommandModule = {
                 // redundant network call, no browser fallback needed.
                 userInfo = signupUserInfo;
               } else {
+                // Probe the cached token with a bounded timeout. On a
+                // returning user from an older wizard version,
+                // performAmplitudeAuth can silently reuse a stored token
+                // whose idToken is rejected by the API (or whose call
+                // hangs). Without this bound the user sits on AuthScreen
+                // Step 1 with no URL until the network stack gives up —
+                // that's the "blank auth screen" symptom. Treat a timeout
+                // as a fetch failure and force a fresh OAuth so the
+                // browser opens and setLoginUrl fires immediately.
+                const STALE_TOKEN_PROBE_MS = 8_000;
+                // Capture the current (non-null) auth reference for the
+                // closure — the outer `auth` is typed `T | null` and the
+                // narrowing from the `if (auth === null)` branch above
+                // doesn't propagate into the inner async function. The
+                // catch block below may reassign auth on probe failure.
+                const probeAuth = auth;
+                const probeFetchUser = async () => {
+                  let timer: ReturnType<typeof setTimeout> | undefined;
+                  try {
+                    return await Promise.race([
+                      fetchAmplitudeUser(probeAuth.idToken, cloudRegion),
+                      new Promise<never>((_, reject) => {
+                        timer = setTimeout(() => {
+                          const err = new Error(
+                            `cached-token probe timed out after ${STALE_TOKEN_PROBE_MS}ms`,
+                          );
+                          err.name = 'TimeoutError';
+                          reject(err);
+                        }, STALE_TOKEN_PROBE_MS);
+                      }),
+                    ]);
+                  } finally {
+                    if (timer !== undefined) clearTimeout(timer);
+                  }
+                };
                 try {
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
+                  userInfo = await probeFetchUser();
+                } catch (probeErr) {
+                  const { logToFile: log } = await import('../utils/debug.js');
+                  log(
+                    '[bin] cached-token probe failed; forcing fresh OAuth',
+                    probeErr instanceof Error
+                      ? probeErr.message
+                      : String(probeErr),
                   );
-                } catch {
                   if (signupTokensObtained) {
                     // Signup succeeded moments ago so the tokens can't be
                     // expired — the fetch failure is almost certainly

@@ -313,13 +313,17 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
             The spinner stays — this is a *secondary* line that gives the
             user something to do (open Logs, cancel) instead of staring
-            at a frozen indicator. Resets when a new task appears. */}
+            at a frozen indicator. Resets when a new task appears.
+
+            NB: tabs switch with ← / → (or number keys); the Tab key is
+            wired to opening the slash-command input in ConsoleView. The
+            old copy said "(Tab)" and led users to the wrong key. */}
         {coachingTier >= 1 && (
           <Box marginTop={1}>
             <Text color={Colors.muted}>
               {coachingTier >= 2
-                ? "This is unusually slow. The Logs tab (Tab) may show what's stuck — or Ctrl+C to cancel."
-                : "Still working — switch to the Logs tab (Tab) to see what's happening, or Ctrl+C to cancel."}
+                ? "This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
+                : "Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
             </Text>
           </Box>
         )}
