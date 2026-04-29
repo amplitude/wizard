@@ -90,6 +90,18 @@ export async function runFrameworkDetection(
 ): Promise<DetectionResult[]> {
   const { signal } = options;
 
+  // Reset the dedup fingerprint at the start of every invocation. The
+  // fingerprint is meant to prevent intra-invocation double-fires
+  // (subscriber + inline call landing on the same installDir+integration
+  // pair), NOT to dedupe across invocations. Without this clear, a user
+  // who picks "Change directory" and submits the SAME path (or any
+  // path that resolves to the same (installDir, integration) pair as
+  // before) would have BOTH runDiscovery call sites match the stale
+  // cached fingerprint and skip — leaving `discoveredFeatures` empty
+  // and `autoEnableInlineAddons` uncalled. Session Replay, LLM, and
+  // Guides & Surveys opt-ins would silently vanish on re-detection.
+  lastDiscoveryFingerprint.delete(store);
+
   // Lazy import the registry so tests can mock it without dragging the
   // entire framework graph into the unit-test module load.
   const { FRAMEWORK_REGISTRY } = await import('./registry.js');

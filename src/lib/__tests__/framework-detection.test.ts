@@ -243,5 +243,45 @@ describe('runFrameworkDetection', () => {
       // Exactly one discovery fire for the (dir-b, vue) pair.
       expect(enableSpy).toHaveBeenCalledTimes(1);
     });
+
+    // Regression: bugbot Issue #6.
+    //
+    // The dedup fingerprint is meant to prevent INTRA-invocation
+    // double-fires (subscriber + inline). It must NOT dedupe across
+    // invocations — if it does, a user who picks "Change directory"
+    // and submits the same path (or any path that ends up matching
+    // the previous cached fingerprint) gets discovery silently
+    // skipped: `discoveredFeatures` stays empty, opt-in addons never
+    // auto-enable.
+    //
+    // Fix: clear the fingerprint at the start of every
+    // `runFrameworkDetection` call.
+    it('runs discovery on re-detection even when the same (installDir, integration) pair is detected again', async () => {
+      detectAllFrameworksMock.mockResolvedValue([
+        { integration: Integration.nextjs, detected: true },
+      ]);
+
+      const store = new WizardStore();
+      await runFrameworkDetection(store, '/tmp/same-dir');
+
+      const enableSpy = vi.spyOn(store, 'autoEnableInlineAddons');
+      enableSpy.mockClear();
+
+      // Mimic changeInstallDir: state reset (incl. discoveredFeatures
+      // back to []), but installDir resolves to the same path the
+      // user was already on (e.g. they hit Enter without editing the
+      // seeded default).
+      store.session.discoveredFeatures = [];
+      store.session.integration = null;
+      store.session.frameworkConfig = null;
+
+      // Re-detect. Without the fingerprint clear, both runDiscovery
+      // call sites would skip and opt-in features would silently
+      // disappear. With the clear, discovery fires (exactly once,
+      // thanks to the intra-invocation dedup).
+      await runFrameworkDetection(store, '/tmp/same-dir');
+
+      expect(enableSpy).toHaveBeenCalledTimes(1);
+    });
   });
 });
