@@ -32,6 +32,7 @@ import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
+import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
@@ -297,6 +298,17 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 
         {/* Tasks — the hero */}
         <ProgressList items={progressItems} title="Tasks" />
+
+        {/* Live per-file activity from the inner agent's write hooks.
+            Hidden until the first PreToolUse fires so it doesn't reserve
+            blank space during planning. The panel shares the spinner
+            frame so its in-progress rows tick in lockstep with the
+            header braille spinner. */}
+        <FileWritesPanel
+          entries={store.fileWrites}
+          installDir={store.session.installDir}
+          spinnerFrame={spinnerFrame}
+        />
 
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
             The spinner stays — this is a *secondary* line that gives the

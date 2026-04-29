@@ -428,6 +428,19 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  // WizardUI-shaped aliases (see wizard-ui.ts). Inner-lifecycle calls these
+  // via the abstract interface so InkUI can also receive file_change events
+  // for the TUI panel; AgentUI just delegates to its existing NDJSON
+  // emitters above. The schema-v:1 envelope on stdout is unchanged so outer
+  // agents that already parse `file_change_planned` / `file_change_applied`
+  // keep working.
+  recordFileChangePlanned(data: Omit<FileChangePlannedData, 'event'>): void {
+    this.emitFileChangePlanned(data);
+  }
+  recordFileChangeApplied(data: Omit<FileChangeAppliedData, 'event'>): void {
+    this.emitFileChangeApplied(data);
+  }
+
   /**
    * The inner agent has called `confirm_event_plan` with a proposed plan.
    * Outer agents see the events list before any `track()` call is written.

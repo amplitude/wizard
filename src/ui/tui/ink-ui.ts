@@ -222,6 +222,21 @@ export class InkUI implements WizardUI {
     this.store.syncTodos(todos);
   }
 
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    this.store.recordFileChangePlanned(data);
+  }
+
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    this.store.recordFileChangeApplied(data);
+  }
+
   setEventPlan(events: Array<{ name: string; description: string }>): void {
     this.store.setEventPlan(events);
   }
