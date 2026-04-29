@@ -32,33 +32,6 @@ Then('I should be able to continue anyway or exit', function () {
   assert.ok(!router(this).hasOverlay, 'Expected overlay to be dismissed');
 });
 
-Given('the settings file blocks the agent', function () {
-  session(this).settingsOverrideKeys = ['permissions.allow'];
-});
-
-When('the agent is about to start', function () {
-  // Simulate agent-runner.ts detecting blocking settings overrides and pushing the overlay
-  if (session(this).settingsOverrideKeys?.length) {
-    router(this).pushOverlay(Overlay.SettingsOverride);
-  }
-});
-
-Then('the SettingsOverrideScreen overlay should appear', function () {
-  assert.strictEqual(
-    router(this).resolve(session(this)),
-    Overlay.SettingsOverride,
-  );
-});
-
-Then(
-  'I should be able to back up and patch the settings to continue',
-  function () {
-    assert.ok(router(this).hasOverlay);
-    router(this).popOverlay();
-    assert.ok(!router(this).hasOverlay);
-  },
-);
-
 // ── Slash commands ────────────────────────────────────────────────────────────
 
 When('I enter the slash command {string}', function (command: string) {
@@ -154,23 +127,23 @@ Then('the data check should re-run for the new region', function () {
 // ── /whoami ───────────────────────────────────────────────────────────────────
 
 Given(
-  'my org is {string} and my workspace is {string} and my region is {string}',
-  function (org: string, workspace: string, region: string) {
+  'my org is {string} and my project is {string} and my region is {string}',
+  function (org: string, project: string, region: string) {
     session(this).selectedOrgName = org;
-    session(this).selectedWorkspaceName = workspace;
+    session(this).selectedProjectName = project;
     session(this).region = region as 'us' | 'eu';
   },
 );
 
-Then('I should see my org, workspace, and region', function () {
+Then('I should see my org, project, and region', function () {
   const text = getWhoamiText(session(this));
   assert.ok(
     text.includes(session(this).selectedOrgName ?? ''),
     `Expected org in: ${text}`,
   );
   assert.ok(
-    text.includes(session(this).selectedWorkspaceName ?? ''),
-    `Expected workspace in: ${text}`,
+    text.includes(session(this).selectedProjectName ?? ''),
+    `Expected project in: ${text}`,
   );
   assert.ok(
     text.includes(session(this).region ?? ''),

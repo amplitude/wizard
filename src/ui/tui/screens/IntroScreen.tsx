@@ -129,7 +129,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // ── Resume-from-checkpoint prompt ─────────────────────────────────
   if (showResume) {
     const orgLabel =
-      session.selectedOrgName ?? session.selectedWorkspaceName ?? null;
+      session.selectedOrgName ?? session.selectedProjectName ?? null;
 
     return (
       <Box

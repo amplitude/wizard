@@ -424,3 +424,21 @@ export function detectAmplitudeInProject(
 
   return grepSourceFiles(installDir);
 }
+
+/**
+ * Source-only Amplitude detection — ignores package.json / lockfile metadata
+ * and only searches actual source code for an Amplitude import statement.
+ *
+ * Use this to corroborate that the SDK is *wired up*, not just installed.
+ * Distinguishes "the dep is in package.json but no file actually imports it"
+ * (stale install) from "the SDK is actually being used at runtime".
+ *
+ * Returns 'low' on a hit (because grepping source is intrinsically a weaker
+ * signal than a package-file declaration), or 'none' if nothing imports
+ * Amplitude anywhere under `installDir`.
+ */
+export function detectAmplitudeInProjectSource(
+  installDir: string,
+): AmplitudeDetectionResult {
+  return grepSourceFiles(installDir);
+}

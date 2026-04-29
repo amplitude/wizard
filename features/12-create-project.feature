@@ -3,14 +3,14 @@ Feature: Inline "Create new project…" flow
   I want to create a new project from the CLI without leaving the wizard
   So that I can instrument a brand-new app end-to-end without switching to the browser
 
-  # The flow is triggered from two places in AuthScreen (workspace picker +
-  # project picker) and from the /create-project slash command. It mounts a
-  # dedicated CreateProjectScreen that POSTs to {proxyBase}/projects, stores
+  # The flow is triggered from two places in AuthScreen (project picker +
+  # environment picker) and from the /create-project slash command. It mounts
+  # a dedicated CreateProjectScreen that POSTs to {proxyBase}/projects, stores
   # the returned apiKey via setCredentials(), and advances the router.
 
-  Scenario: Entering create-project from the workspace picker
+  Scenario: Entering create-project from the project picker
     Given the user is authenticated with an org selected
-    When the user picks "Create new project…" from the workspace picker
+    When the user picks "Create new project…" from the project picker
     Then the router should resolve to the CreateProject screen
     And the session.createProject.pending flag should be true
 

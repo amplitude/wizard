@@ -223,6 +223,21 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     progressSignal: total,
   });
 
+  // Cold-start UX: until the agent finishes its first task the counter sits
+  // at "0 done · N to go" with the timer climbing — every screenshot the
+  // wizard's collected of users Ctrl+C-ing during Setup has been in this
+  // exact gap. The agent IS working (its [STATUS] shows up at the bottom),
+  // but the user's eye lands on the spinner header and the header looks
+  // dead. Surface the latest status next to the counter, and after 30s of
+  // zero completed tasks add an explanatory hint so a slow first response
+  // doesn't read as a hung wizard.
+  const lastStatus =
+    store.statusMessages.length > 0
+      ? store.statusMessages[store.statusMessages.length - 1]
+      : undefined;
+  const showColdStartHint =
+    completedDisplay === 0 && total > 0 && elapsed >= 30;
+
   return (
     <Box flexDirection="row" flexGrow={1}>
       {/* Left: tasks and status (takes all remaining width) */}
@@ -230,34 +245,52 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {/* Header bar: progress count + elapsed + (transient retry hint) +
             currently editing. Retry status renders inline as a muted chip
             after a 3s grace period — see RetryStatusChip. */}
-        <Box marginBottom={1} justifyContent="space-between">
-          <Box gap={1}>
-            <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
-            <Text color={Colors.body} bold>
-              {total > 0
-                ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
-                  // mid-run, which makes the progress bar look like it's
-                  // going backwards (6 tasks → 9 tasks). Show absolute
-                  // counts instead so the user sees forward motion.
-                  // `completedDisplay` is a high-water mark, so the "done"
-                  // count never regresses if new tasks appear after the
-                  // user already saw earlier ones finish.
-                  pending + inProgress > 0
-                  ? `${completedDisplay} done · ${inProgress + pending} to go`
-                  : `${completedDisplay} tasks complete`
-                : 'Agent running'}
-            </Text>
-            <Text color={Colors.muted}>
-              {Icons.dot} {formatElapsed(elapsed)}
-            </Text>
-            <RetryStatusChip
-              retryState={store.session.retryState}
-              now={Date.now()}
-            />
+        <Box marginBottom={1} flexDirection="column">
+          <Box justifyContent="space-between">
+            <Box gap={1}>
+              <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
+              <Text color={Colors.body} bold>
+                {total > 0
+                  ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                    // mid-run, which makes the progress bar look like it's
+                    // going backwards (6 tasks → 9 tasks). Show absolute
+                    // counts instead so the user sees forward motion.
+                    // `completedDisplay` is a high-water mark, so the "done"
+                    // count never regresses if new tasks appear after the
+                    // user already saw earlier ones finish.
+                    pending + inProgress > 0
+                    ? `${completedDisplay} done · ${inProgress + pending} to go`
+                    : `${completedDisplay} tasks complete`
+                  : 'Agent running'}
+              </Text>
+              <Text color={Colors.muted}>
+                {Icons.dot} {formatElapsed(elapsed)}
+              </Text>
+              {/* Show the latest agent status inline while nothing is
+                  finished yet. Once the first task lands, the regular
+                  status pill below the tabs takes over and we don't need
+                  to duplicate it in the header. */}
+              {completedDisplay === 0 && lastStatus && (
+                <Text color={Colors.muted} wrap="truncate-end">
+                  {Icons.dot} {lastStatus}
+                </Text>
+              )}
+              <RetryStatusChip
+                retryState={store.session.retryState}
+                now={Date.now()}
+              />
+            </Box>
+            {currentFile && (
+              <Text color={Colors.muted} wrap="truncate-end">
+                {currentFile}
+              </Text>
+            )}
           </Box>
-          {currentFile && (
-            <Text color={Colors.muted} wrap="truncate-end">
-              {currentFile}
+          {showColdStartHint && (
+            <Text color={Colors.muted}>
+              {Icons.dot} Still on the agent's first response — cold start can
+              take 30–60s while it loads skills and reads your project. The
+              status above shows it's working, not stuck.
             </Text>
           )}
         </Box>

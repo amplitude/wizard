@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { detectAmplitudeInProject } from '../detect-amplitude.js';
+import {
+  detectAmplitudeInProject,
+  detectAmplitudeInProjectSource,
+} from '../detect-amplitude.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -399,5 +402,38 @@ describe('detectAmplitudeInProject — priority', () => {
     const result = detectAmplitudeInProject(tmpDir);
     expect(result.confidence).toBe('high');
     expect(result.reason).toContain('package.json');
+  });
+});
+
+// ── Source-only detection ────────────────────────────────────────────────────
+
+describe('detectAmplitudeInProjectSource — source-only', () => {
+  // Regression for the "wizard says project is fully set up but the SDK file
+  // is gone" bug: a stale package.json dep must NOT be treated as evidence
+  // that the SDK is wired up.
+  it('returns none when package.json lists Amplitude but no source imports it', () => {
+    writePkg({ '@amplitude/unified': '^1.0.0' });
+    writeFile('src/index.ts', `console.log('hello');\n`);
+    const result = detectAmplitudeInProjectSource(tmpDir);
+    expect(result.confidence).toBe('none');
+  });
+
+  it('returns low when a source file imports an Amplitude SDK', () => {
+    writeFile(
+      'src/amplitude.ts',
+      `import { initAll } from '@amplitude/unified';\n`,
+    );
+    const result = detectAmplitudeInProjectSource(tmpDir);
+    expect(result.confidence).toBe('low');
+    expect(result.reason).toContain('amplitude');
+  });
+
+  it('ignores Amplitude imports inside node_modules', () => {
+    writeFile(
+      'node_modules/some-lib/index.js',
+      `const a = require('@amplitude/analytics-browser');\n`,
+    );
+    const result = detectAmplitudeInProjectSource(tmpDir);
+    expect(result.confidence).toBe('none');
   });
 });

@@ -329,16 +329,15 @@ describe('WizardStore', () => {
       expect(store.session.frameworkContext['srcDir']).toBe('src');
     });
 
-    it('setOrgAndWorkspace clears org/workspace IDs when called with empty inputs', () => {
+    it('setOrgAndProject clears org/project IDs when called with empty inputs', () => {
       // Regression: AuthScreen "Start Over", stale-org clear, and the
       // create-project fallback all pass `{ id: '', name: '' }` to reset
-      // session state. Both fields must collapse to null:
-      //  - `toWorkspaceId('')` would throw (WorkspaceIdSchema requires min(1)).
-      //  - An empty string `selectedOrgId` would still satisfy
-      //    `isAuthenticated`, leaving the session in a meaningless state.
+      // session state. Both fields must collapse to null so an empty string
+      // `selectedOrgId` doesn't still satisfy `isAuthenticated`, leaving the
+      // session in a meaningless state.
       const store = createStore();
       expect(() =>
-        store.setOrgAndWorkspace(
+        store.setOrgAndProject(
           { id: '', name: '' },
           { id: '', name: '' },
           '/tmp/no-such-dir',
@@ -346,45 +345,44 @@ describe('WizardStore', () => {
         ),
       ).not.toThrow();
       expect(store.session.selectedOrgId).toBeNull();
-      expect(store.session.selectedWorkspaceId).toBeNull();
-      expect(store.session.selectedWorkspaceName).toBe('');
+      expect(store.session.selectedProjectId).toBeNull();
+      expect(store.session.selectedProjectName).toBe('');
     });
 
-    it('restoreSessionIds clears selectedOrgId/WorkspaceId when called with empty inputs', () => {
+    it('restoreSessionIds clears selectedOrgId/ProjectId when called with empty inputs', () => {
       // Defense-in-depth: keep restoreSessionIds consistent with
-      // setOrgAndWorkspace so neither write path throws on empty input
+      // setOrgAndProject so neither write path throws on empty input
       // and neither leaves isAuthenticated reporting a meaningless empty id.
       const store = createStore();
       expect(() =>
         store.restoreSessionIds({
           orgId: '',
           orgName: '',
-          workspaceId: '',
-          workspaceName: '',
+          projectId: '',
+          projectName: '',
         }),
       ).not.toThrow();
       expect(store.session.selectedOrgId).toBeNull();
-      expect(store.session.selectedWorkspaceId).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
     });
 
-    it('restoreSessionIds brands non-empty workspace ids', () => {
+    it('restoreSessionIds stores non-empty project ids', () => {
       const store = createStore();
-      store.restoreSessionIds({ workspaceId: 'ws-77', workspaceName: 'Prod' });
-      expect(store.session.selectedWorkspaceId).toBe('ws-77');
-      expect(store.session.selectedWorkspaceName).toBe('Prod');
+      store.restoreSessionIds({ projectId: 'ws-77', projectName: 'Prod' });
+      expect(store.session.selectedProjectId).toBe('ws-77');
+      expect(store.session.selectedProjectName).toBe('Prod');
     });
 
-    it('setOrgAndWorkspace brands non-empty ids', () => {
+    it('setOrgAndProject stores non-empty ids', () => {
       const store = createStore();
-      store.setOrgAndWorkspace(
+      store.setOrgAndProject(
         { id: 'org-1', name: 'Acme' },
         { id: 'ws-42', name: 'Amplitude' },
         '/tmp/no-such-dir',
         { persist: false },
       );
-      // Branded value is structurally still the input string at runtime.
       expect(store.session.selectedOrgId).toBe('org-1');
-      expect(store.session.selectedWorkspaceId).toBe('ws-42');
+      expect(store.session.selectedProjectId).toBe('ws-42');
     });
 
     it('every setter emits exactly one change event', () => {
@@ -420,8 +418,8 @@ describe('WizardStore', () => {
       store.session.userEmail = 'user@example.com';
       store.session.selectedOrgId = 'org-1';
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceId = 'ws-1';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectId = 'ws-1';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedAppId = '769610';
       store.session.selectedEnvName = 'Production';
       store.session.projectHasData = true;
@@ -442,8 +440,8 @@ describe('WizardStore', () => {
       expect(store.session.userEmail).toBeNull();
       expect(store.session.selectedOrgId).toBeNull();
       expect(store.session.selectedOrgName).toBeNull();
-      expect(store.session.selectedWorkspaceId).toBeNull();
-      expect(store.session.selectedWorkspaceName).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+      expect(store.session.selectedProjectName).toBeNull();
       expect(store.session.selectedAppId).toBeNull();
       expect(store.session.selectedEnvName).toBeNull();
       expect(store.session.projectHasData).toBeNull();
@@ -612,8 +610,8 @@ describe('WizardStore', () => {
       });
       store.session.selectedOrgName = 'Acme';
       store.session.selectedOrgId = 'org-1';
-      store.session.selectedWorkspaceName = 'Amplitude';
-      store.session.selectedWorkspaceId = 'ws-1';
+      store.session.selectedProjectName = 'Amplitude';
+      store.session.selectedProjectId = 'ws-1';
       store.session.selectedAppId = 'app-1';
       store.setProjectHasData(false);
       expect(store.currentScreen).toBe(Screen.Run);
@@ -642,8 +640,8 @@ describe('WizardStore', () => {
       store.session.region = 'us';
       store.session.selectedOrgId = 'org-1';
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceId = 'ws-1';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectId = 'ws-1';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedEnvName = 'production';
 
       store.resetForFreshStart();
@@ -658,8 +656,8 @@ describe('WizardStore', () => {
       expect(store.session.region).toBeNull();
       expect(store.session.selectedOrgId).toBeNull();
       expect(store.session.selectedOrgName).toBeNull();
-      expect(store.session.selectedWorkspaceId).toBeNull();
-      expect(store.session.selectedWorkspaceName).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+      expect(store.session.selectedProjectName).toBeNull();
       expect(store.session.selectedEnvName).toBeNull();
     });
 
@@ -779,7 +777,7 @@ describe('WizardStore', () => {
     store.concludeIntro();
     // RegionSelect: set region (skips it)
     store.setRegion('us');
-    // Auth: set credentials + org/workspace/env (Auth screen isComplete
+    // Auth: set credentials + org/project/env (Auth screen isComplete
     // requires all four: credentials and all three names)
     store.setCredentials({
       accessToken: 'tok',
@@ -787,11 +785,11 @@ describe('WizardStore', () => {
       host: 'h',
       appId: 1,
     });
-    // Set org/workspace/env names directly to satisfy Auth.isComplete
+    // Set org/project/env names directly to satisfy Auth.isComplete
     // (it only checks names, not IDs — so we don't have to set IDs and
-    // trigger setOrgAndWorkspace's ampli.json write).
+    // trigger setOrgAndProject's ampli.json write).
     store.session.selectedOrgName = 'Acme';
-    store.session.selectedWorkspaceName = 'Amplitude';
+    store.session.selectedProjectName = 'Amplitude';
     store.setSelectedEnvName('Production');
     // DataSetup: set projectHasData (DataSetup screen isComplete)
     store.setProjectHasData(false);
@@ -1212,13 +1210,13 @@ describe('WizardStore', () => {
       });
 
       store.pushOverlay(Overlay.Outage); // -> outage
-      // Org/workspace/env names are required for Auth.isComplete. Assign
+      // Org/project/env names are required for Auth.isComplete. Assign
       // directly so subscribers only fire for the three explicit mutations
       // this test is exercising (setCredentials, setRegion, popOverlay).
       // Only names — IDs intentionally omitted to avoid setRegion below
       // triggering an ampli.json write.
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedEnvName = 'Production';
       store.setCredentials({
         // -> outage (overlay still on top)
@@ -1407,12 +1405,12 @@ describe('WizardStore', () => {
       expect(store.currentScreen).toBe(Screen.Auth);
 
       // Step 3: Authenticate (credentials set by AuthScreen SUSI flow).
-      // Org/workspace/env are resolved as part of the SUSI flow too; set them
+      // Org/project/env are resolved as part of the SUSI flow too; set them
       // directly (no setter) so Auth.isComplete passes without bumping the
       // version counter this test asserts on. Only names — Auth.isComplete
       // checks names, not IDs, and omitting IDs avoids side effects.
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedEnvName = 'Production';
       store.setCredentials({
         accessToken: 'tok',
@@ -1592,13 +1590,13 @@ describe('WizardStore', () => {
       expect(store.session.selectedOrgId).toBeNull();
     });
 
-    it('clearOrgAndWorkspaceSelection clears post-run state', () => {
+    it('clearOrgAndProjectSelection clears post-run state', () => {
       const store = createStore();
       seedPostRunState(store);
-      store.clearOrgAndWorkspaceSelection();
+      store.clearOrgAndProjectSelection();
       expectPostRunCleared(store);
       expect(store.session.selectedOrgId).toBeNull();
-      expect(store.session.selectedWorkspaceId).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
     });
 
     it('resetActivationCheck clears post-run state', () => {

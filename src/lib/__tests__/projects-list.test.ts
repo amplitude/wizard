@@ -33,7 +33,7 @@ const FIXTURE = {
     {
       id: 'org-amplitude',
       name: 'Amplitude',
-      workspaces: [
+      projects: [
         {
           id: 'ws-growth',
           name: 'Growth',
@@ -72,7 +72,7 @@ const FIXTURE = {
     {
       id: 'org-customer',
       name: 'Customer Co',
-      workspaces: [
+      projects: [
         {
           id: 'ws-default',
           name: 'Default',

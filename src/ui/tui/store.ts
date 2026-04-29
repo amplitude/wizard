@@ -19,7 +19,6 @@ import {
   type CloudRegion,
   type RetryState,
   buildSession,
-  toWorkspaceId,
 } from '../../lib/wizard-session.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
 import { resolveZone } from '../../lib/zone-resolution.js';
@@ -118,10 +117,6 @@ export class WizardStore {
   readonly setupComplete: Promise<void> = new Promise((resolve) => {
     this._resolveSetup = resolve;
   });
-
-  /** Blocks agent execution until the settings-override overlay is dismissed. */
-  private _resolveSettingsOverride: (() => void) | null = null;
-  private _backupAndFixSettings: (() => boolean) | null = null;
 
   /** Pending confirmation or choice prompt from the agent. */
   private $pendingPrompt = atom<PendingPrompt | null>(null);
@@ -233,11 +228,8 @@ export class WizardStore {
         email: session.userEmail,
         org_id: session.selectedOrgId ?? undefined,
         org_name: session.selectedOrgName ?? undefined,
-        workspace_id: session.selectedWorkspaceId ?? undefined,
-        workspace_name: session.selectedWorkspaceName ?? undefined,
-        // Canonical telemetry keys: `app_id` matches Python `app_id` and
-        // TS `appId`; `env_name` matches the Amplitude data-model shape
-        // (Org → Workspace → Environment → App).
+        project_id: session.selectedProjectId ?? undefined,
+        project_name: session.selectedProjectName ?? undefined,
         app_id: session.selectedAppId ?? credentials?.appId,
         env_name: session.selectedEnvName,
         region: zone,
@@ -456,11 +448,11 @@ export class WizardStore {
     // Persist the chosen zone to project-level ampli.json so the next
     // wizard run uses the right zone — even if the user exits before
     // completing SUSI. When the user is switching regions via /region the
-    // prior OrgId/WorkspaceId are invalid in the new zone; drop them so
-    // resolveCredentials doesn't silently steer back to a stale workspace.
+    // prior OrgId/ProjectId are invalid in the new zone; drop them so
+    // resolveCredentials doesn't silently steer back to a stale project.
     //
     // Only updates an existing ampli.json; never creates one. Fresh
-    // projects have their zone persisted later by setOrgAndWorkspace()
+    // projects have their zone persisted later by setOrgAndProject()
     // once the full SUSI flow completes.
     const session = this.$session.get();
     const typedZone = region as 'us' | 'eu';
@@ -472,13 +464,13 @@ export class WizardStore {
         const prior = readAmpliConfig(session.installDir);
         if (!prior.ok) return; // no existing ampli.json — nothing to update
         const next = { ...prior.config, Zone: typedZone };
-        if (session.selectedOrgId && session.selectedWorkspaceId) {
+        if (session.selectedOrgId && session.selectedProjectId) {
           next.OrgId = session.selectedOrgId;
-          next.WorkspaceId = session.selectedWorkspaceId;
+          next.ProjectId = session.selectedProjectId;
         } else {
           // Cleared by setRegionForced — IDs from the old zone are invalid.
           delete next.OrgId;
-          delete next.WorkspaceId;
+          delete next.ProjectId;
         }
         writeAmpliConfig(session.installDir, next);
       } catch (err) {
@@ -527,8 +519,8 @@ export class WizardStore {
     this.$session.setKey('userEmail', null);
     this.$session.setKey('selectedOrgId', null);
     this.$session.setKey('selectedOrgName', null);
-    this.$session.setKey('selectedWorkspaceId', null);
-    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
 
@@ -593,8 +585,8 @@ export class WizardStore {
     this.$session.setKey('region', null);
     this.$session.setKey('selectedOrgId', null);
     this.$session.setKey('selectedOrgName', null);
-    this.$session.setKey('selectedWorkspaceId', null);
-    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
     this.$session.setKey('selectedEnvName', null);
     this.emitChange();
   }
@@ -750,15 +742,15 @@ export class WizardStore {
   }
 
   /**
-   * Restore org/workspace/app session IDs that weren't populated at startup
+   * Restore org/project/app session IDs that weren't populated at startup
    * (e.g. because the fire-and-forget fetchAmplitudeUser failed due to expired token).
    * Only updates fields that are provided.
    */
   restoreSessionIds(fields: {
     orgId?: string;
     orgName?: string;
-    workspaceId?: string;
-    workspaceName?: string;
+    projectId?: string;
+    projectName?: string;
     appId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
@@ -767,18 +759,16 @@ export class WizardStore {
       this.$session.setKey('selectedOrgId', fields.orgId || null);
     if (fields.orgName !== undefined)
       this.$session.setKey('selectedOrgName', fields.orgName);
-    if (fields.workspaceId !== undefined)
-      // Mirror setOrgAndWorkspace: collapse empty strings to null instead of
-      // throwing in WorkspaceIdSchema's `min(1)` check. No current caller
-      // passes an empty string (CreateProjectScreen omits workspaceId,
-      // DataIngestionCheckScreen reads from API responses), but keeping the
-      // guard consistent across both write paths prevents future regressions.
-      this.$session.setKey(
-        'selectedWorkspaceId',
-        fields.workspaceId ? toWorkspaceId(fields.workspaceId) : null,
-      );
-    if (fields.workspaceName !== undefined)
-      this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
+    if (fields.projectId !== undefined)
+      // Mirror setOrgAndProject: collapse empty strings to null so an
+      // accidental '' from a caller is treated as "no project" rather than
+      // a real ID. No current caller passes empty (CreateProjectScreen
+      // omits projectId, DataIngestionCheckScreen reads from API
+      // responses), but keeping the guard consistent across both write
+      // paths prevents future regressions.
+      this.$session.setKey('selectedProjectId', fields.projectId || null);
+    if (fields.projectName !== undefined)
+      this.$session.setKey('selectedProjectName', fields.projectName);
     if (fields.appId !== undefined)
       this.$session.setKey('selectedAppId', fields.appId);
     this.emitChange();
@@ -877,7 +867,7 @@ export class WizardStore {
    * @param suggestedName optional pre-filled name (e.g. from /create-project <name> or --project-name)
    */
   startCreateProject(
-    source: 'workspace' | 'project' | 'slash' | 'cli-flag',
+    source: 'project' | 'environment' | 'slash' | 'cli-flag',
     suggestedName?: string | null,
   ): void {
     this.$session.setKey('createProject', {
@@ -915,8 +905,8 @@ export class WizardStore {
   }
 
   /**
-   * Called from AuthScreen when org + workspace selection changes.
-   * Records org/workspace on the session, and (when `persist` is true)
+   * Called from AuthScreen when org + project selection changes.
+   * Records org/project on the session, and (when `persist` is true)
    * writes the IDs to the project's ampli.json.
    *
    * Pass `persist: false` from synthesisers that only mirror existing state
@@ -926,9 +916,9 @@ export class WizardStore {
    * "create project") leave `persist` at its default of `true` so the
    * config file stays in sync with what the user picked.
    */
-  setOrgAndWorkspace(
+  setOrgAndProject(
     org: { id: string; name: string },
-    workspace: {
+    project: {
       id: string;
       name: string;
       environments?: Array<{
@@ -942,22 +932,17 @@ export class WizardStore {
     const { persist = true } = options;
 
     // Callers (e.g. AuthScreen "Start Over", stale-org clear, create-project
-    // fallback) pass `{ id: '', name: '' }` to reset session state.
-    // - `selectedOrgId` is `string | null`, so collapse `''` -> `null` to keep
-    //   `isAuthenticated` honest (an empty org id is not a real org).
-    // - `selectedWorkspaceId` is branded; an empty string fails
-    //   `WorkspaceIdSchema`'s `min(1)` check, so likewise collapse to null.
+    // fallback) pass `{ id: '', name: '' }` to reset session state. Collapse
+    // empty IDs to null so `isAuthenticated` and downstream truthy checks
+    // treat them as "not selected" rather than as real values.
     this.$session.setKey('selectedOrgId', org.id || null);
     this.$session.setKey('selectedOrgName', org.name);
-    this.$session.setKey(
-      'selectedWorkspaceId',
-      workspace.id ? toWorkspaceId(workspace.id) : null,
-    );
-    this.$session.setKey('selectedWorkspaceName', workspace.name);
+    this.$session.setKey('selectedProjectId', project.id || null);
+    this.$session.setKey('selectedProjectName', project.name);
 
     // Extract the Amplitude app ID from the lowest-rank environment.
     const appId =
-      workspace.environments
+      project.environments
         ?.slice()
         .sort((a, b) => a.rank - b.rank)
         .find((e) => e.app?.id)?.app?.id ?? null;
@@ -973,7 +958,7 @@ export class WizardStore {
         });
         writeAmpliConfig(installDir, {
           OrgId: org.id,
-          WorkspaceId: workspace.id,
+          ProjectId: project.id,
           Zone: zone,
         });
       });
@@ -992,37 +977,6 @@ export class WizardStore {
   setRetryState(state: RetryState | null): void {
     this.$session.setKey('retryState', state);
     this.emitChange();
-  }
-
-  /**
-   * Push the settings-override overlay and return a promise that blocks
-   * until the user dismisses it via backupAndFixSettingsOverride().
-   */
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    this.$session.setKey('settingsOverrideKeys', keys);
-    this._backupAndFixSettings = backupAndFix;
-    this.pushOverlay(Overlay.SettingsOverride);
-    return new Promise((resolve) => {
-      this._resolveSettingsOverride = resolve;
-    });
-  }
-
-  /**
-   * Back up .claude/settings.json. Dismisses the overlay on success.
-   */
-  backupAndFixSettingsOverride(): boolean {
-    const ok = this._backupAndFixSettings?.() ?? false;
-    if (ok) {
-      this.$session.setKey('settingsOverrideKeys', null);
-      this.popOverlay();
-      this._resolveSettingsOverride?.();
-      this._resolveSettingsOverride = null;
-      this._backupAndFixSettings = null;
-    }
-    return ok;
   }
 
   addDiscoveredFeature(feature: DiscoveredFeature): void {
@@ -1325,8 +1279,8 @@ export class WizardStore {
     this.$session.setKey('pendingOrgs', null);
     this.$session.setKey('selectedOrgId', null);
     this.$session.setKey('selectedOrgName', null);
-    this.$session.setKey('selectedWorkspaceId', null);
-    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);
@@ -1340,11 +1294,11 @@ export class WizardStore {
    * credentials so we don't force a fresh OAuth round-trip — only the
    * picked identity is cleared.
    */
-  clearOrgAndWorkspaceSelection(): void {
+  clearOrgAndProjectSelection(): void {
     this.$session.setKey('selectedOrgId', null);
     this.$session.setKey('selectedOrgName', null);
-    this.$session.setKey('selectedWorkspaceId', null);
-    this.$session.setKey('selectedWorkspaceName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);

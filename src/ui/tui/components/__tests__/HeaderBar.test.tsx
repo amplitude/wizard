@@ -1,5 +1,5 @@
 /**
- * HeaderBar — verify the org / workspace / env breadcrumb composition.
+ * HeaderBar — verify the org / project / env breadcrumb composition.
  *
  * Why this matters: the header is the user's only persistent visual hint
  * about which Amplitude project they're targeting. A null leak ("Acme //
@@ -30,12 +30,12 @@ describe('HeaderBar', () => {
     expect(out).not.toContain(' / ');
   });
 
-  it('joins org, workspace, env with a slash separator', () => {
+  it('joins org, project, env with a slash separator', () => {
     const out = frameOf(
       <HeaderBar
         width={80}
         orgName="Acme"
-        workspaceName="Amplitude"
+        projectName="Amplitude"
         envName="Production"
       />,
     );
@@ -47,7 +47,7 @@ describe('HeaderBar', () => {
       <HeaderBar
         width={80}
         orgName="Acme"
-        workspaceName={null}
+        projectName={null}
         envName="Production"
       />,
     );
@@ -65,12 +65,7 @@ describe('HeaderBar', () => {
   it('renders identically when nullish values are passed explicitly', () => {
     // Defensive: callers sometimes pass `null` rather than omitting the prop.
     const out = frameOf(
-      <HeaderBar
-        width={80}
-        orgName={null}
-        workspaceName={null}
-        envName={null}
-      />,
+      <HeaderBar width={80} orgName={null} projectName={null} envName={null} />,
     );
     expect(out).toContain('Amplitude Wizard');
     expect(out).not.toContain('null');

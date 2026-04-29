@@ -24,7 +24,7 @@ import {
   fetchAmplitudeUser,
   fetchHasAnyEventsMcp,
   fetchProjectActivationStatus,
-  fetchWorkspaceEventTypes,
+  fetchProjectEventTypes,
 } from '../../../lib/api.js';
 import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
@@ -220,8 +220,7 @@ export const DataIngestionCheckScreen = ({
       setApiUnavailable(true);
       return;
     }
-    const appId =
-      currentCredentials.appId || currentSession.selectedWorkspaceId;
+    const appId = currentCredentials.appId || currentSession.selectedProjectId;
     if (!appId) {
       setApiUnavailable(true);
       return;
@@ -244,7 +243,7 @@ export const DataIngestionCheckScreen = ({
 
     // Step 1: Query via MCP (Bearer auth, works for all users).
     // Uses _all event type so any custom track() calls are detected.
-    // Requires the numeric analytics project ID from workspace.environments[].app.id.
+    // Requires the numeric analytics project ID from project.environments[].app.id.
     //
     // selectedAppId may be null if the startup fire-and-forget fetchAmplitudeUser
     // failed (e.g. due to an expired token). Resolve lazily using the now-fresh token.
@@ -261,13 +260,13 @@ export const DataIngestionCheckScreen = ({
           ? userInfo.orgs.find((o) => o.id === currentSession.selectedOrgId) ??
             userInfo.orgs[0]
           : userInfo.orgs[0];
-        // Fall back to the first workspace if the stored ID doesn't match.
-        const ws =
-          org && currentSession.selectedWorkspaceId
-            ? org.workspaces.find(
-                (w) => w.id === currentSession.selectedWorkspaceId,
-              ) ?? org.workspaces[0]
-            : org?.workspaces[0];
+        // Fall back to the first project if the stored ID doesn't match.
+        const project =
+          org && currentSession.selectedProjectId
+            ? org.projects.find(
+                (p) => p.id === currentSession.selectedProjectId,
+              ) ?? org.projects[0]
+            : org?.projects[0];
 
         const restoredFields: Parameters<typeof store.restoreSessionIds>[0] =
           {};
@@ -276,13 +275,13 @@ export const DataIngestionCheckScreen = ({
           restoredFields.orgName = org.name;
           logToFile(`[DataIngestionCheck] lazily set orgId=${org.id}`);
         }
-        if (ws && !currentSession.selectedWorkspaceId) {
-          restoredFields.workspaceId = ws.id;
-          restoredFields.workspaceName = ws.name;
-          logToFile(`[DataIngestionCheck] lazily set workspaceId=${ws.id}`);
+        if (project && !currentSession.selectedProjectId) {
+          restoredFields.projectId = project.id;
+          restoredFields.projectName = project.name;
+          logToFile(`[DataIngestionCheck] lazily set projectId=${project.id}`);
         }
 
-        effectiveAppId = ws ? extractAppId(ws) : null;
+        effectiveAppId = project ? extractAppId(project) : null;
         if (effectiveAppId) {
           resolvedAppIdRef.current = effectiveAppId;
           restoredFields.appId = effectiveAppId;
@@ -370,12 +369,12 @@ export const DataIngestionCheckScreen = ({
 
       // Activation API only checks autocapture events. Fall back to the
       // event catalog which includes all event types.
-      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
-        const catalogEvents = await fetchWorkspaceEventTypes(
+      if (currentSession.selectedOrgId && currentSession.selectedProjectId) {
+        const catalogEvents = await fetchProjectEventTypes(
           dataApiToken,
           zone,
           currentSession.selectedOrgId,
-          currentSession.selectedWorkspaceId,
+          currentSession.selectedProjectId,
         );
         logToFile(
           `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
@@ -402,13 +401,13 @@ export const DataIngestionCheckScreen = ({
       // staring at "Checking your event catalog…" forever — on timeout we
       // treat the catalog as empty, which still unblocks the screen
       // (Enter/q hints render the moment apiUnavailable=true).
-      if (currentSession.selectedOrgId && currentSession.selectedWorkspaceId) {
+      if (currentSession.selectedOrgId && currentSession.selectedProjectId) {
         withTimeout(
-          fetchWorkspaceEventTypes(
+          fetchProjectEventTypes(
             dataApiToken,
             zone,
             currentSession.selectedOrgId,
-            currentSession.selectedWorkspaceId,
+            currentSession.selectedProjectId,
           ),
           15_000,
           'event catalog fetch',
@@ -691,7 +690,7 @@ export const DataIngestionCheckScreen = ({
       {apiUnavailable && eventTypes !== null && eventTypes.length > 0 && (
         <Box flexDirection="column" marginTop={1}>
           <Text color={Colors.secondary}>
-            Events cataloged in your workspace:
+            Events cataloged in your project:
           </Text>
           <Box flexDirection="column" marginTop={1} marginLeft={2}>
             {shown.map((name) => (

@@ -27,7 +27,12 @@ Everything the wizard touches at runtime beyond its own source code: APIs, OAuth
 
 ### Data API (GraphQL)
 
-The primary backend for user/org/workspace discovery after authentication.
+The primary backend for user/org/project discovery after authentication.
+
+> **Note.** The GraphQL schema still exposes the legacy field name
+> `workspaces`. At the TS boundary we rename it to `projects` on
+> `AmplitudeOrg`, matching the Amplitude website terminology. Do not rename the
+> GraphQL query field — that's a separate backend contract change.
 
 | Zone | Endpoint |
 |------|----------|
@@ -57,7 +62,7 @@ query orgs {
 }
 ```
 
-Used to populate org/workspace/project pickers and resolve the API key for the selected project.
+Used to populate org/project/environment pickers and resolve the API key for the selected environment. (GraphQL `workspaces` → TS `projects`; GraphQL `environments` maps to the env picker.)
 
 ### App API (GraphQL)
 
