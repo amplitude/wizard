@@ -504,9 +504,14 @@ const TargetSummary = ({
  *     detected workspace globs so the user has a hint for which
  *     direction to go.
  *
- * Both warnings end with a soft pointer to `wizard plan` for users who
- * want to preview changes without committing. The plan-mode entry
- * point already exists — this is the first time the intro mentions it.
+ * No "tip" line: the picker directly below this warning already offers
+ * Continue / Change framework / Change directory / Cancel, which covers
+ * every reasonable next step. An earlier version pointed users at the
+ * `wizard plan` CLI command for a no-write preview, but that's
+ * misleading inside the TUI — the user is already in an interactive
+ * session, and `npx @amplitude/wizard plan` isn't always reachable from
+ * the same environment they invoked the wizard from. The picker is the
+ * answer; the tip was noise.
  */
 interface WorkspaceWarningsProps {
   hasManifest: boolean;
@@ -546,14 +551,6 @@ const WorkspaceWarnings = ({
           )}
         </Box>
       )}
-
-      <Box marginTop={1}>
-        <Text color={Colors.muted}>
-          {Icons.dot} Tip: run{' '}
-          <Text color={Colors.accentSecondary}>wizard plan</Text> to preview
-          changes without writing files.
-        </Text>
-      </Box>
     </Box>
   );
 };
