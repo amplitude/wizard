@@ -79,12 +79,30 @@ vi.mock('../run', () => ({
   detectAllFrameworks: mockDetectAllFrameworks,
 }));
 vi.mock('semver', () => ({ satisfies: () => true }));
+const mockStartTUI = vi.fn(
+  (
+    _version: string,
+    _flow?: unknown,
+    initialSession?: Record<string, unknown>,
+  ) => {
+    // Mirror real start-tui.ts: when an initialSession is provided, attach it
+    // to the store so screens see flag-driven values (e.g. installDir) on the
+    // first render instead of the default `buildSession({})` cwd fallback.
+    if (initialSession) {
+      mockStore.session = {
+        ...mockStore.session,
+        ...initialSession,
+      } as Record<string, unknown>;
+    }
+    return {
+      unmount: vi.fn(),
+      waitForSetup: vi.fn().mockResolvedValue(undefined),
+      store: mockStore,
+    };
+  },
+);
 vi.mock('../ui/tui/start-tui', () => ({
-  startTUI: () => ({
-    unmount: vi.fn(),
-    waitForSetup: vi.fn().mockResolvedValue(undefined),
-    store: mockStore,
-  }),
+  startTUI: mockStartTUI,
 }));
 vi.mock('../lib/wizard-session', () => ({
   // Real buildSession includes region: null and credentials: null by default;
@@ -313,6 +331,23 @@ describe('CI mode validation', { timeout: 20_000 }, () => {
       expect.any(Function),
       expect.any(Object),
     );
+  });
+
+  test('--install-dir is applied to the TUI store before render so the IntroScreen Target line reflects the flag (regression: pnpm try:prod --install-dir was silently ignored, leaving the wizard repo cwd in the header)', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    await runCLI(['--install-dir', '/tmp/test-app']);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    // startTUI must be invoked with the parsed --install-dir as the third
+    // arg (initialSession). Without this, the Ink TUI mounts with
+    // `buildSession({}).installDir = process.cwd()` and the user sees the
+    // wizard's own working directory in the Target line for the few seconds
+    // it takes OAuth credential resolution to complete.
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession).toBeDefined();
+    expect(initialSession?.installDir).toBe('/tmp/test-app');
   });
 });
 
