@@ -22,18 +22,36 @@ file or Amplitude project is modified.
    NDJSON streams through your tool output in real time. Backgrounding it
    forces you to poll a tail file with `sleep && tail`, which adds minutes of
    latency between each progress update.
-3. **Always pass `--confirm-app`** when running `plan` or `apply`. This forces
+3. **NEVER spawn a second `apply` while one is already running.** If a previous
+   `apply` invocation is still streaming events on stdout, do NOT start
+   another. Each apply spawns an inner Claude SDK agent that writes files;
+   two of them stomp each other's edits and produce contradictory `setup_complete`
+   payloads. Wait for the current run's `run_completed` event before any retry.
+4. **Always pass `--confirm-app`** when running `plan` or `apply`. This forces
    the wizard to ask which Amplitude app to write into instead of silently
    picking the first one it finds.
-4. **Never auto-approve the event plan.** When you see `type: needs_input` with
+5. **Always pass `--install-dir <abs-path>` and confirm it's a real project.**
+   If the user invokes the wizard from their home directory, a multi-project
+   parent (`~/dev/`, `~/code/`, etc.), or any directory without a clear
+   project marker (`package.json`, `pyproject.toml`, `Cargo.toml`, `go.mod`,
+   `Gemfile`, `pom.xml`, `build.gradle`), STOP and ask the user which
+   project to set up. Do not guess.
+6. **Never auto-approve the event plan.** When you see `type: needs_input` with
    `code: event_plan`, STOP. Show the proposed events to the user. Re-invoke
    `apply` with `--approve-events`, `--skip-events`, or
    `--revise-events "<feedback>"` based on their answer.
-5. **Always render `type: diagnostic` events** as user-visible status.
+7. **Always render `type: diagnostic` events** as user-visible status.
    Transient retries should look like `⚠ retrying (2/6)...`, not silent gaps.
-6. **After `setup_complete`, lock your project context to `amplitude.appId`.**
+8. **After `setup_complete`, lock your project context to `amplitude.appId`.**
    Use only that app id for follow-up Amplitude MCP queries (charts, dashboards,
    events). Do not reuse any project context cached earlier in the session.
+9. **Wizard-managed artifacts are owned by the wizard.** Do NOT use `Write` /
+   `Edit` on `.amplitude/events.json`, `.amplitude/dashboard.json`,
+   `.amplitude-events.json`, or `.amplitude-dashboard.json`. The wizard's
+   `confirm_event_plan` MCP tool persists the events file in the canonical
+   shape; the dashboard watcher mirrors the dashboard JSON. Direct writes
+   are denied by the inner-agent permission hook with a clear error
+   message — if you see that deny, switch to the MCP tool.
 
 ## Step 1 — preflight (cheap, no writes)
 
@@ -158,6 +176,7 @@ own re-invocation — use those rather than composing your own.
 ## What to NEVER do
 
 - Do not background `apply`. Run it in foreground so events stream live.
+- Do not spawn a second `apply` while one is running. Wait for `run_completed`.
 - Do not auto-pick an Amplitude app, even when there's only one match. Always
   pass `--confirm-app` and surface the `setup_context` to the user.
 - Do not silently approve the event plan. The user's analytics taxonomy is
@@ -166,6 +185,43 @@ own re-invocation — use those rather than composing your own.
   authoritative `appId` is the one in that event — replace any earlier value.
 - Do not log raw NDJSON lines to the user. Translate each event into a
   one-line status using the table above.
+- Do not run the wizard from the user's home directory or a multi-project
+  parent dir without explicit `--install-dir`. Confirm the project first.
+- Do not `Write` or `Edit` `.amplitude/events.json`, `.amplitude/dashboard.json`,
+  `.amplitude-events.json`, or `.amplitude-dashboard.json`. They are owned
+  by the wizard's MCP tools.
+
+## Starting fresh — `wizard reset`
+
+If a previous wizard run left artifacts that no longer match the user's
+intent (stale event plan, wrong dashboard, instrumented for the wrong
+Amplitude app), run:
+
+```
+npx @amplitude/wizard reset --install-dir <abs-path> --json
+```
+
+This deletes `.amplitude/`, the legacy `.amplitude-*.json` dotfiles, and
+`amplitude-setup-report.md` from the project, and strips auth-scoped
+fields (`OrgId`, `AppId`, `AppName`, `EnvName`, `DashboardUrl`,
+`DashboardId`) from `ampli.json`. It does NOT log the user out and does
+NOT remove any `track()` calls already wired into source code — the
+user has to revert those manually if they want a true blank slate
+(`git checkout` is the safe path; `wizard reset` won't touch your code).
+
+When to suggest `reset`:
+
+- Previous run targeted the wrong Amplitude app.
+- User wants to switch from one Amplitude org to another.
+- The proposed event plan no longer fits the codebase (UI changed, new
+  flows added).
+
+When NOT to suggest `reset`:
+
+- The wizard is mid-run. Wait for `run_completed`.
+- The user just wants to add more events. Re-running `plan` + `apply`
+  is enough; the wizard supplements the existing plan rather than
+  replacing it.
 
 ## Quick reference (full command shape)
 

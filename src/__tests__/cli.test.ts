@@ -137,10 +137,22 @@ vi.mock('../utils/ampli-settings', () => ({
   getStoredToken: mockGetStoredToken,
   clearStoredCredentials: vi.fn(),
 }));
-vi.mock('../lib/ampli-config', () => ({
-  ampliConfigExists: mockAmpliConfigExists,
-  readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
-}));
+vi.mock('../lib/ampli-config', async () => {
+  // The reset and logout commands now call `clearAuthFieldsInAmpliConfig`
+  // to strip auth-scoped fields from `ampli.json` on sign-out / project
+  // reset. The reset test fixture writes a real `ampli.json` with
+  // `OrgId` + `SourceId` and asserts the auth field is gone afterward,
+  // so we can't fully mock this module — defer to the real
+  // implementation but keep the few helpers that earlier tests stub.
+  const actual = await vi.importActual<typeof import('../lib/ampli-config')>(
+    '../lib/ampli-config',
+  );
+  return {
+    ...actual,
+    ampliConfigExists: mockAmpliConfigExists,
+    readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
+  };
+});
 vi.mock('../utils/api-key-store', () => ({
   readApiKeyWithSource: vi.fn().mockReturnValue(null),
   persistApiKey: vi.fn().mockReturnValue('env'),
@@ -713,6 +725,172 @@ describe('logout command', () => {
     expect(consoleSpy).toHaveBeenCalledWith(
       expect.stringContaining('No active session'),
     );
+  });
+
+  test('--clean removes wizard artifacts from the install dir', async () => {
+    // Build a fake project with the artifacts the wizard could have left
+    // behind from a prior run. Then run `logout --clean` and verify all
+    // four targets are gone (legacy dotfiles, .amplitude/ dir, setup
+    // report) while a non-wizard sibling file survives.
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-clean-test-'),
+    );
+    fs.mkdirSync(path.join(projectDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.amplitude', 'events.json'), '[]');
+    fs.writeFileSync(
+      path.join(projectDir, '.amplitude', 'dashboard.json'),
+      '{}',
+    );
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, '.amplitude-dashboard.json'), '{}');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    fs.writeFileSync(path.join(projectDir, 'unrelated.json'), 'keep');
+    mockGetStoredUser.mockReturnValue({ email: 'jane@example.com' });
+
+    await runCLI(['logout', '--clean', '--install-dir', projectDir]);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    // All wizard-managed targets gone:
+    expect(fs.existsSync(path.join(projectDir, '.amplitude'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, '.amplitude-dashboard.json')),
+    ).toBe(false);
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(false);
+    // Unrelated files survive:
+    expect(fs.existsSync(path.join(projectDir, 'unrelated.json'))).toBe(true);
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test('default logout (no --clean) preserves wizard artifacts', async () => {
+    // Back-compat: a logout-during-debug should NOT nuke a user's setup
+    // report. Only `--clean` removes artifacts.
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-keep-test-'),
+    );
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    mockGetStoredUser.mockReturnValue({ email: 'jane@example.com' });
+
+    await runCLI(['logout', '--install-dir', projectDir]);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      true,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(true);
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+});
+
+// ── reset command ──────────────────────────────────────────────────────────────
+
+describe('reset command', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+    consoleSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    vi.resetModules();
+  });
+
+  test('removes all wizard artifacts and emits a JSON result', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-test-'),
+    );
+    fs.mkdirSync(path.join(projectDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.amplitude', 'events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    fs.writeFileSync(
+      path.join(projectDir, 'ampli.json'),
+      JSON.stringify({ OrgId: 'org-1', SourceId: 'keep' }),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    // All wizard-managed targets gone:
+    expect(fs.existsSync(path.join(projectDir, '.amplitude'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(false);
+    // ampli.json: auth-scoped fields stripped, tracking-plan fields preserved.
+    const ampli = JSON.parse(
+      fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8'),
+    ) as Record<string, string>;
+    expect(ampli.OrgId).toBeUndefined();
+    expect(ampli.SourceId).toBe('keep');
+
+    // JSON result line emitted to stdout:
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(3);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test('is a no-op (with friendly note) when there are no artifacts', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-empty-'),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(0);
+      expect(parsed.data.skipped.length).toBe(4);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
   });
 });
 

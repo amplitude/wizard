@@ -1275,6 +1275,79 @@ describe('wizardCanUseTool', () => {
     });
   });
 
+  describe('wizard-managed event-plan and dashboard files', () => {
+    // Defense-in-depth: even though the commandments tell agents to use
+    // confirm_event_plan instead of writing the file directly, bundled
+    // integration skills (owned by context-hub) still instruct agents to
+    // Write `.amplitude-events.json` themselves. The hook denies that
+    // path with a message pointing at the MCP tool, so the agent
+    // recovers without entering a "stale file / Write tool error" loop.
+
+    it('denies Write on .amplitude-events.json', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('deny');
+      expect(result.behavior === 'deny' && result.message).toContain(
+        'confirm_event_plan',
+      );
+    });
+
+    it('denies Edit on .amplitude-events.json', () => {
+      const result = wizardCanUseTool('Edit', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on .amplitude/events.json (canonical path)', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude/events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on .amplitude-dashboard.json', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude-dashboard.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on .amplitude/dashboard.json (canonical path)', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude/dashboard.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('allows Write on an unrelated `events.json` outside .amplitude/', () => {
+      // A user codebase may legitimately have an `events.json` somewhere
+      // — only the path INSIDE `.amplitude/` is wizard-managed.
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/src/events.json',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows Write on an unrelated `dashboard.json` outside .amplitude/', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/dashboards/dashboard.json',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows Read on .amplitude-events.json (read-only is fine)', () => {
+      // Reading the file is harmless — only writes are gated. Agents may
+      // legitimately want to read it (e.g. the conclude phase reads back
+      // the persisted plan to format the setup report).
+      const result = wizardCanUseTool('Read', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+  });
+
   describe('Grep', () => {
     it('denies Grep directly targeting a .env file', () => {
       const result = wizardCanUseTool('Grep', { path: '/project/.env' });
