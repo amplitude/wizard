@@ -118,10 +118,6 @@ export class WizardStore {
     this._resolveSetup = resolve;
   });
 
-  /** Blocks agent execution until the settings-override overlay is dismissed. */
-  private _resolveSettingsOverride: (() => void) | null = null;
-  private _backupAndFixSettings: (() => boolean) | null = null;
-
   /** Pending confirmation or choice prompt from the agent. */
   private $pendingPrompt = atom<PendingPrompt | null>(null);
 
@@ -833,37 +829,6 @@ export class WizardStore {
   setRetryState(state: RetryState | null): void {
     this.$session.setKey('retryState', state);
     this.emitChange();
-  }
-
-  /**
-   * Push the settings-override overlay and return a promise that blocks
-   * until the user dismisses it via backupAndFixSettingsOverride().
-   */
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    this.$session.setKey('settingsOverrideKeys', keys);
-    this._backupAndFixSettings = backupAndFix;
-    this.pushOverlay(Overlay.SettingsOverride);
-    return new Promise((resolve) => {
-      this._resolveSettingsOverride = resolve;
-    });
-  }
-
-  /**
-   * Back up .claude/settings.json. Dismisses the overlay on success.
-   */
-  backupAndFixSettingsOverride(): boolean {
-    const ok = this._backupAndFixSettings?.() ?? false;
-    if (ok) {
-      this.$session.setKey('settingsOverrideKeys', null);
-      this.popOverlay();
-      this._resolveSettingsOverride?.();
-      this._resolveSettingsOverride = null;
-      this._backupAndFixSettings = null;
-    }
-    return ok;
   }
 
   addDiscoveredFeature(feature: DiscoveredFeature): void {

@@ -69,7 +69,6 @@ const mockUIInstance = {
   pushStatus: vi.fn(),
   setLoginUrl: vi.fn(),
   showServiceStatus: vi.fn(),
-  showSettingsOverride: vi.fn(),
   startRun: vi.fn(),
   syncTodos: vi.fn(),
   groupMultiselect: vi.fn(),

@@ -106,13 +106,6 @@ export class InkUI implements WizardUI {
     this.store.setRetryState(state);
   }
 
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    return this.store.showSettingsOverride(keys, backupAndFix);
-  }
-
   startRun(): void {
     this.store.setRunPhase(RunPhase.Running);
   }
