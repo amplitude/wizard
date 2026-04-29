@@ -63,6 +63,28 @@ export interface PlannedEvent {
   description: string;
 }
 
+/**
+ * One row of the FileWritesPanel — bound to a single
+ * `recordFileChangePlanned` → `recordFileChangeApplied` pair from the
+ * inner agent. `path` is keyed on the absolute path the inner agent
+ * passed; relativization for display happens at render time so the
+ * panel renders correctly even if the same path comes through twice
+ * (Edit + verify pass).
+ */
+export interface FileWriteEntry {
+  /** Absolute path, as the inner agent's tool received it. */
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  /** 'planned' once PreToolUse fires; flips to 'applied' or 'failed' on PostToolUse. */
+  status: 'planned' | 'applied' | 'failed';
+  /** Wall-clock ms when the planned event arrived. Drives the elapsed timer. */
+  startedAt: number;
+  /** Wall-clock ms when the applied/failed event arrived. */
+  completedAt?: number;
+  /** Byte size from the inner agent's tool input, when available (Write only). */
+  bytes?: number;
+}
+
 export type PendingPrompt =
   | { kind: 'confirm'; message: string; resolve: (value: boolean) => void }
   | {
@@ -83,6 +105,13 @@ export class WizardStore {
   private $statusMessages = atom<string[]>([]);
   private $tasks = atom<TaskItem[]>([]);
   private $eventPlan = atom<PlannedEvent[]>([]);
+  /**
+   * Live list of file writes the inner agent has issued during the run.
+   * Bounded to the most recent MAX_FILE_WRITES entries (FIFO eviction)
+   * so a runaway inner agent that touches hundreds of files doesn't blow
+   * up the TUI's render budget.
+   */
+  private $fileWrites = atom<FileWriteEntry[]>([]);
   private $version = atom(0);
 
   /** True while the user is typing a slash command in the command bar. */
@@ -171,6 +200,10 @@ export class WizardStore {
 
   get eventPlan(): PlannedEvent[] {
     return this.$eventPlan.get();
+  }
+
+  get fileWrites(): FileWriteEntry[] {
+    return this.$fileWrites.get();
   }
 
   get pendingPrompt(): PendingPrompt | null {
@@ -1505,6 +1538,97 @@ export class WizardStore {
 
   setEventPlan(events: PlannedEvent[]): void {
     this.$eventPlan.set(events);
+    this.emitChange();
+  }
+
+  /**
+   * Cap on how many file-write rows we retain before evicting the oldest.
+   * The inner agent occasionally touches dozens of files (skill installs,
+   * lint passes, multi-step refactors) — keeping all of them alive in
+   * the TUI would blow our render budget on small terminals. Recent
+   * writes are the user-relevant signal; keep the tail.
+   */
+  static readonly MAX_FILE_WRITES = 50;
+
+  /**
+   * Append (or restart) a file write row from a `recordFileChangePlanned`
+   * call. If the same absolute path is already in `'planned'` state, we
+   * collapse the duplicate (MultiEdit fans out per file but the agent's
+   * PreToolUse fires once per tool invocation — defensive).
+   */
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    const now = Date.now();
+    const next: FileWriteEntry = {
+      path: data.path,
+      operation: data.operation,
+      status: 'planned',
+      startedAt: now,
+    };
+    const existing = this.$fileWrites.get();
+    // Collapse a back-to-back duplicate (same path, still planned). Otherwise
+    // append. Eviction at MAX_FILE_WRITES keeps the array bounded.
+    const dedupedTail =
+      existing.length > 0 &&
+      existing[existing.length - 1].path === data.path &&
+      existing[existing.length - 1].status === 'planned'
+        ? existing.slice(0, -1)
+        : existing;
+    const appended = [...dedupedTail, next];
+    const bounded =
+      appended.length > WizardStore.MAX_FILE_WRITES
+        ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
+        : appended;
+    this.$fileWrites.set(bounded);
+    this.emitChange();
+  }
+
+  /**
+   * Mark the most recent matching planned row as applied. We match the
+   * most recent occurrence (in case the same file is rewritten later in
+   * the run). If no planned row exists (the planned event was lost or the
+   * applied event arrived first), append a synthesized row that's
+   * already-completed — better to surface the write than silently drop
+   * it.
+   */
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    const now = Date.now();
+    const existing = this.$fileWrites.get();
+    for (let i = existing.length - 1; i >= 0; i--) {
+      if (existing[i].path === data.path && existing[i].status === 'planned') {
+        const updated = [...existing];
+        updated[i] = {
+          ...existing[i],
+          status: 'applied',
+          completedAt: now,
+          bytes: data.bytes,
+        };
+        this.$fileWrites.set(updated);
+        this.emitChange();
+        return;
+      }
+    }
+    // No matching planned row — synthesize a completed entry.
+    const synthesized: FileWriteEntry = {
+      path: data.path,
+      operation: data.operation,
+      status: 'applied',
+      startedAt: now,
+      completedAt: now,
+      bytes: data.bytes,
+    };
+    const appended = [...existing, synthesized];
+    const bounded =
+      appended.length > WizardStore.MAX_FILE_WRITES
+        ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
+        : appended;
+    this.$fileWrites.set(bounded);
     this.emitChange();
   }
 

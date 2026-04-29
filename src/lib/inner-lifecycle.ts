@@ -1,17 +1,25 @@
 /**
- * inner-lifecycle — bridge from Claude SDK hooks to AgentUI NDJSON events.
+ * inner-lifecycle — bridge from Claude SDK hooks to UI events.
  *
  * The wizard runs an inner Claude SDK agent and exposes hooks for
- * PreToolUse / PostToolUse / SessionStart / Stop. In `--agent` mode we
- * forward those hook events to the AgentUI so outer agents can see what
- * the inner agent is doing in real time. In TUI / CI mode the hooks are
- * no-ops here (the existing UIs handle their own status display).
+ * PreToolUse / PostToolUse / SessionStart / Stop.
+ *
+ * Two classes of events flow through here:
+ *
+ *  1. **NDJSON-only inner-agent telemetry** (SessionStart →
+ *     `inner_agent_started`, every tool call → `tool_call`, verification
+ *     phases). These only matter to outer agents auditing the inner run,
+ *     so the helpers early-return unless `--agent` mode is active.
+ *
+ *  2. **File-change events** (`recordFileChangePlanned` /
+ *     `recordFileChangeApplied`). Routed through the abstract `WizardUI`
+ *     so the TUI's `FileWritesPanel` populates as the inner agent writes,
+ *     while AgentUI continues to emit the existing
+ *     `file_change_planned` / `file_change_applied` NDJSON envelope on
+ *     stdout (schema v:1, unchanged for outer-agent compatibility).
  *
  * Hook factories in `agent-interface.ts` should compose these helpers
  * into their callbacks rather than calling `emit*` on the UI directly.
- * Keeping the AgentUI-detection in one place means future UI variants
- * (LoggingUI emitting structured logs, future MCP-style transport, etc.)
- * can opt in by implementing the same emit methods.
  *
  * Integration point (deferred to follow-up to avoid conflicts with #243's
  * PreToolUse refactor):
@@ -108,8 +116,7 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
   };
 
   const preToolUse: HookCallback = (input) => {
-    const ui = getAgentUI();
-    if (!ui) return Promise.resolve({});
+    const agentUI = getAgentUI();
     const toolName =
       typeof input.tool_name === 'string'
         ? input.tool_name
@@ -123,10 +130,14 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         ? input.toolInput
         : null;
     const summary = summarizeToolInput(toolName, toolInput);
-    ui.emitToolCall({ tool: toolName, summary });
+    // `tool_call` is NDJSON-only — useful to outer agents auditing what
+    // the inner agent did, but redundant in the TUI (the agent's own
+    // TodoWrite items already show user-facing progress).
+    if (agentUI) agentUI.emitToolCall({ tool: toolName, summary });
 
-    // For write tools, also emit `file_change_planned` so outer agents
-    // see the intended path before the change happens.
+    // File-change events go through the abstract WizardUI so InkUI can
+    // populate the FileWritesPanel and AgentUI keeps emitting NDJSON
+    // (recordFileChangePlanned on AgentUI delegates to emitFileChangePlanned).
     const operation = classifyWriteOperation(toolName);
     if (operation) {
       const obj =
@@ -140,15 +151,19 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           ? obj.path
           : null;
       if (path) {
-        ui.emitFileChangePlanned({ path, operation });
+        try {
+          getUI().recordFileChangePlanned({ path, operation });
+        } catch {
+          // getUI() throws before the wizard has bootstrapped a UI (e.g.
+          // when inner-lifecycle hooks fire from a probe call). Swallow —
+          // a missing pre-event is harmless, the apply-side handles it.
+        }
       }
     }
     return Promise.resolve({});
   };
 
   const postToolUse: HookCallback = (input) => {
-    const ui = getAgentUI();
-    if (!ui) return Promise.resolve({});
     const toolName =
       typeof input.tool_name === 'string'
         ? input.tool_name
@@ -179,11 +194,17 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       // and would drop `bytes` from the event. Outer agents need to
       // distinguish "byte count unknown" (no content captured) from
       // "zero-byte file" (empty `Write`).
-      ui.emitFileChangeApplied({
-        path,
-        operation,
-        ...(content !== null && { bytes: Buffer.byteLength(content, 'utf8') }),
-      });
+      try {
+        getUI().recordFileChangeApplied({
+          path,
+          operation,
+          ...(content !== null && {
+            bytes: Buffer.byteLength(content, 'utf8'),
+          }),
+        });
+      } catch {
+        // See preToolUse — same defensive swallow.
+      }
     }
     return Promise.resolve({});
   };

@@ -157,6 +157,35 @@ export interface WizardUI {
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void;
 
+  // ── Real-time file write activity from inner-agent hooks ──────────
+  /**
+   * The inner agent has requested a file write (Edit / Write / MultiEdit /
+   * NotebookEdit) at PreToolUse. The change has not yet been applied. The
+   * TUI surfaces this as a spinning row in the FileWritesPanel; agent mode
+   * emits the existing `file_change_planned` NDJSON event.
+   *
+   * `path` is the raw absolute path the inner agent passed to the tool; the
+   * TUI relativizes it for display, the NDJSON contract leaves it untouched
+   * for outer-agent compatibility (schema v:1).
+   */
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void;
+
+  /**
+   * The inner-agent's write tool succeeded at PostToolUse. Pairs with the
+   * preceding `recordFileChangePlanned` for the same path. `bytes` is
+   * present when the inner agent's tool input carried `content` (Write); it
+   * may be undefined for Edit / MultiEdit where the SDK doesn't surface the
+   * resulting file size to the hook.
+   */
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void;
+
   // ── Event plan from .amplitude-events.json ────────────────────
   setEventPlan(events: Array<{ name: string; description: string }>): void;
 

@@ -1872,4 +1872,115 @@ describe('WizardStore', () => {
       expect(withRedetectorCall?.[1]['has redetector']).toBe(true);
     });
   });
+
+  describe('recordFileChangePlanned / recordFileChangeApplied', () => {
+    it('appends a planned row, then flips it to applied with bytes + duration', () => {
+      const store = createStore();
+      expect(store.fileWrites).toEqual([]);
+
+      store.recordFileChangePlanned({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        status: 'planned',
+      });
+      expect(store.fileWrites[0].startedAt).toBeGreaterThan(0);
+      expect(store.fileWrites[0].completedAt).toBeUndefined();
+
+      store.recordFileChangeApplied({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        bytes: 512,
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        status: 'applied',
+        bytes: 512,
+      });
+      expect(store.fileWrites[0].completedAt).toBeGreaterThanOrEqual(
+        store.fileWrites[0].startedAt,
+      );
+    });
+
+    it('synthesizes an applied entry when no matching planned event arrived', () => {
+      // Edit / MultiEdit hooks can technically fire PostToolUse without a
+      // matching PreToolUse if the SDK reorders or drops a hook (rare but
+      // observed). Surface the write rather than silently dropping it.
+      const store = createStore();
+      store.recordFileChangeApplied({
+        path: '/proj/src/orphan.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/orphan.ts',
+        operation: 'modify',
+        status: 'applied',
+      });
+    });
+
+    it('collapses a back-to-back duplicate planned event for the same path', () => {
+      // Defensive: PreToolUse can fire twice for the same path during a
+      // retry loop. The user should see one in-progress row, not two.
+      const store = createStore();
+      store.recordFileChangePlanned({
+        path: '/proj/src/dup.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangePlanned({
+        path: '/proj/src/dup.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+    });
+
+    it('caps the list at MAX_FILE_WRITES with FIFO eviction', () => {
+      // A long-running run that touches hundreds of files (skill installs,
+      // lint fix-ups) shouldn't blow up the TUI. Oldest rows fall off.
+      const store = createStore();
+      for (let i = 0; i < WizardStore.MAX_FILE_WRITES + 5; i++) {
+        store.recordFileChangePlanned({
+          path: `/proj/file-${i}.ts`,
+          operation: 'create',
+        });
+      }
+      expect(store.fileWrites).toHaveLength(WizardStore.MAX_FILE_WRITES);
+      // First five rows should have been evicted.
+      expect(store.fileWrites[0].path).toBe('/proj/file-5.ts');
+    });
+
+    it('matches the most recent planned row when the same file is rewritten', () => {
+      // Common during multi-pass refactors. Apply the second planned row,
+      // not the first — otherwise the duration on the second row would
+      // count from the first plan, not the second.
+      const store = createStore();
+      store.recordFileChangePlanned({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangeApplied({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangePlanned({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      // At this point row 0 is applied, row 1 is planned.
+      expect(store.fileWrites[0].status).toBe('applied');
+      expect(store.fileWrites[1].status).toBe('planned');
+      store.recordFileChangeApplied({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites[0].status).toBe('applied');
+      expect(store.fileWrites[1].status).toBe('applied');
+    });
+  });
 });

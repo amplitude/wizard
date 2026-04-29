@@ -220,6 +220,25 @@ export class LoggingUI implements WizardUI {
     // No-op in CI mode
   }
 
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    // CI logs the plan-then-apply pair as a single line per file. Verbose
+    // enough to be useful when scanning a CI run, quiet enough not to drown
+    // out the rest of the output.
+    console.log(`◌  ${data.operation} ${data.path}`);
+  }
+
+  recordFileChangeApplied(_data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    // The planned-line above already announced the write. Skip the applied
+    // line in CI to avoid doubling the per-file output volume.
+  }
+
   setEventIngestionDetected(_eventNames: string[]): void {
     // No-op in CI/logging mode
   }
