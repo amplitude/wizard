@@ -48,6 +48,20 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+// Stub `getStoredUser` so the Wizard flow's RegionSelect gate (which calls
+// `tryResolveZone`) doesn't pick up the developer's real ~/.ampli.json.
+// `readAmpliConfig` is left un-mocked because store.test.ts already
+// exercises real reads/writes against per-test tmpdirs.
+vi.mock('../../../utils/ampli-settings.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../../utils/ampli-settings.js')
+  >();
+  return {
+    ...actual,
+    getStoredUser: vi.fn(() => undefined),
+  };
+});
+
 // Redirect fs-touching setters (setRegion, setOrgAndWorkspace) away from
 // the repo root so tests don't pollute the wizard's own ampli.json. Every
 // store gets a fresh isolated tmpdir; individual tests can override by

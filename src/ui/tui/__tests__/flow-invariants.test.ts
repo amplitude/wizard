@@ -6,8 +6,21 @@
  * invariants.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fc from 'fast-check';
+
+// Stub disk-backed zone signals so property tests don't pick up the
+// developer's real ~/.ampli.json. The Wizard flow's RegionSelect gate
+// uses `tryResolveZone`, which reads ampli.json + stored user as Tier
+// 2/3 — without these mocks, sessions with `region: null` would still
+// resolve to a non-null zone via disk and skip RegionSelect.
+vi.mock('../../../utils/ampli-settings.js', () => ({
+  getStoredUser: vi.fn(() => undefined),
+}));
+vi.mock('../../../lib/ampli-config.js', () => ({
+  readAmpliConfig: vi.fn(() => ({ ok: false, error: 'not_found' })),
+}));
+
 import { WizardRouter, Screen, Overlay, Flow } from '../router.js';
 import { FLOWS } from '../flows.js';
 import {
@@ -697,6 +710,26 @@ describe('WizardRouter additional invariants', () => {
     session.regionForced = true;
     const router = new WizardRouter(Flow.Wizard);
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
+  });
+
+  it('returning users skip RegionSelect when zone is resolvable from disk', async () => {
+    // Regression: after `wizard login`, ~/.ampli.json has the stored
+    // user's zone but session.region stays null (it represents *this
+    // run's* user intent). tryResolveZone reads disk Tier 2/3, so the
+    // gate must use it — not session.region — to skip RegionSelect.
+    const { getStoredUser } = await import('../../../utils/ampli-settings.js');
+    vi.mocked(getStoredUser).mockReturnValueOnce({
+      id: 'user-123',
+      email: 'returning@example.com',
+      firstName: 'R',
+      lastName: 'U',
+      zone: 'eu',
+    });
+    const session = freshSession();
+    session.introConcluded = true;
+    // session.region stays null — disk zone alone is enough.
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).not.toBe(Screen.RegionSelect);
   });
 
   it('full activation always lands on Mcp before Outro (no skipping post-run setup)', () => {
