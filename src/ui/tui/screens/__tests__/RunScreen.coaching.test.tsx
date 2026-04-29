@@ -4,10 +4,32 @@
  *
  * The hero of this screen is the task list. Coaching is intentionally a
  * secondary muted line — it should never replace the spinner.
+ *
+ * Why the SPINNER_INTERVAL mock below: the real RunScreen ticks a 200ms
+ * spinner on top of the 1Hz coaching timer. Advancing fake timers across
+ * 95–305 simulated seconds otherwise fires ~475–1525 spinner ticks, each
+ * triggering a React re-render of the entire RunScreen tree (logs tab,
+ * journey stepper, etc). Under parallel-test load on a busy machine the
+ * cascading re-render work consistently exceeded the 30 s test timeout.
+ *
+ * Pinning SPINNER_INTERVAL high makes the spinner effectively dormant
+ * during the test; the only timer the test cares about is the coaching
+ * 1Hz tick. The spinner code path is still exercised — it just doesn't
+ * fire mid-test.
  */
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
+vi.mock('../../styles.js', async (importActual) => {
+  const actual = await importActual<typeof import('../../styles.js')>();
+  return {
+    ...actual,
+    // 1 hour — well outside the largest timer we advance in any test.
+    SPINNER_INTERVAL: 60 * 60 * 1000,
+  };
+});
+
 import { render } from 'ink-testing-library';
 import { RunScreen } from '../RunScreen.js';
 import { makeStoreForSnapshot } from '../../__tests__/snapshot-utils.js';

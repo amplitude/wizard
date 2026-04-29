@@ -1360,10 +1360,11 @@ void yargs(hideBin(process.argv))
             // Apply SDK-level opt-out based on feature flags
             analytics.applyOptOut();
 
-            const { FRAMEWORK_REGISTRY } = await import(
-              './src/lib/registry.js'
-            );
-            const { detectAllFrameworks } = await import('./src/run.js');
+            // Detection (`detectAllFrameworks`), the registry, and
+            // `DETECTION_TIMEOUT_MS` all moved into
+            // `lib/framework-detection.ts` so the IntroScreen's "Change
+            // directory" flow can re-run detection inline. bin.ts now
+            // just calls the helper.
             const installDir = session.installDir ?? process.cwd();
 
             // Verbose startup diagnostics — always written to the log file;
@@ -1380,10 +1381,6 @@ void yargs(hideBin(process.argv))
               logToFile(`[verbose] platform      : ${process.platform}`);
               logToFile(`[verbose] argv          : ${process.argv.join(' ')}`);
             }
-
-            const { DETECTION_TIMEOUT_MS } = await import(
-              './src/lib/constants.js'
-            );
 
             // ── OAuth + account setup ──────────────────────────────
             // Runs concurrently with framework detection while AuthScreen shows.
@@ -1780,95 +1777,35 @@ void yargs(hideBin(process.argv))
             // ── Framework detection ────────────────────────────────
             // Runs concurrently with auth while AuthScreen shows.
             // Each detector has its own per-framework timeout internally,
-            // so no outer timeout is needed.
-            const detectionTask = (async () => {
-              const results = await detectAllFrameworks(installDir);
+            // so no outer timeout is needed. The same helper is invoked
+            // again from IntroScreen when the user picks "Change
+            // directory" — keeping a single implementation prevents the
+            // two paths from drifting apart.
+            const { runFrameworkDetection } = await import(
+              './src/lib/framework-detection.js'
+            );
 
-              // Store full results on session for diagnostics
-              session.detectionResults = results;
+            // Wire up an in-store re-detection trigger so the IntroScreen
+            // can swap the install directory inline without bin.ts having
+            // to expose a callback. The store keeps the AbortController
+            // for the active run; firing a new one cancels the previous.
+            tui.store.setFrameworkRedetector((nextDir, signal) =>
+              runFrameworkDetection(tui.store, nextDir, { signal }),
+            );
 
-              const detectedIntegration = results.find(
-                (r) => r.detected,
-              )?.integration;
+            // The INITIAL detection also needs to be cancellable. If
+            // the user picks "Change directory" before the first scan
+            // completes, `changeInstallDir` aborts whatever controller
+            // is registered as active — without this wiring it would
+            // miss the initial run, and the first detection's
+            // setDetectionComplete could fire after the reset and
+            // briefly flash stale results from the original tree.
+            const initialDetectionAbort = new AbortController();
+            tui.store.registerActiveDetection(initialDetectionAbort);
 
-              if (detectedIntegration) {
-                const config = FRAMEWORK_REGISTRY[detectedIntegration];
-
-                // Run gatherContext for the friendly variant label
-                if (config.metadata.gatherContext) {
-                  try {
-                    const context = await Promise.race([
-                      config.metadata.gatherContext({
-                        installDir,
-                        debug: session.debug,
-                        forceInstall: session.forceInstall,
-                        default: false,
-                        signup: session.signup,
-                        localMcp: session.localMcp,
-                        ci: session.ci,
-                        menu: session.menu,
-                        benchmark: session.benchmark,
-                      }),
-                      new Promise<Record<string, never>>((resolve) =>
-                        setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
-                      ),
-                    ]);
-                    for (const [key, value] of Object.entries(context)) {
-                      if (!(key in session.frameworkContext)) {
-                        tui.store.setFrameworkContext(key, value);
-                      }
-                    }
-                  } catch {
-                    // Detection failed — will show generic name
-                  }
-                }
-
-                tui.store.setFrameworkConfig(detectedIntegration, config);
-
-                if (!session.detectedFrameworkLabel) {
-                  tui.store.setDetectedFramework(config.metadata.name);
-                }
-              }
-
-              // Feature discovery — same helper that CI/agent uses, so the
-              // package and integration lists never drift between modes.
-              const { discoverFeatures } = await import(
-                './src/lib/feature-discovery.js'
-              );
-              const runDiscovery = () => {
-                for (const f of discoverFeatures({
-                  installDir,
-                  integration: tui.store.session.integration,
-                })) {
-                  tui.store.addDiscoveredFeature(f);
-                }
-                // Auto-enable every discovered opt-in addon
-                // (Session Replay + Guides & Surveys for unified-SDK
-                // web; LLM when the feature flag is on). Matches the
-                // out-of-box experience of the data-setup npm snippet
-                // and avoids burying first-time users under a privacy /
-                // quota picker that most don't have context to answer.
-                // Per-option inline comments in the generated init
-                // code give users a clear, code-level opt-out surface
-                // for any specific feature they want to disable.
-                tui.store.autoEnableInlineAddons('auto-tui');
-              };
-              runDiscovery();
-
-              // Re-run when integration changes (handles manual selection
-              // after auto-detection fails). Track last-seen to avoid the
-              // package.json scan firing on every store emit.
-              let lastIntegration = tui.store.session.integration;
-              tui.store.subscribe(() => {
-                const integration = tui.store.session.integration;
-                if (integration === lastIntegration) return;
-                lastIntegration = integration;
-                runDiscovery();
-              });
-
-              // Signal detection is done — IntroScreen shows picker or results
-              tui.store.setDetectionComplete();
-            })();
+            const detectionTask = runFrameworkDetection(tui.store, installDir, {
+              signal: initialDetectionAbort.signal,
+            });
 
             // Gate runWizard on the user reaching RunScreen — at that point
             // auth, data check, and any setup questions are all complete.
