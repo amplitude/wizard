@@ -1138,7 +1138,17 @@ void yargs(hideBin(process.argv))
         void (async () => {
           try {
             const { startTUI } = await import('./src/ui/tui/start-tui.js');
-            const tui = startTUI(WIZARD_VERSION);
+
+            // Build the session from CLI args BEFORE starting the TUI so the
+            // initial render reflects --install-dir (and any other flag-driven
+            // session fields) instead of the WizardStore's default
+            // `buildSession({})` which falls back to process.cwd(). Without
+            // this, a user who runs `pnpm try --install-dir=/some/app` sees
+            // the wizard's own cwd in the IntroScreen Target line for the
+            // ~seconds it takes to resolve OAuth credentials, until the
+            // `tui.store.session = session` swap below runs.
+            const session = await buildSessionFromOptions(options);
+            const tui = startTUI(WIZARD_VERSION, undefined, session);
 
             // Install the SIGINT handler IMMEDIATELY after starting the TUI.
             // This handler covers external `kill -INT <pid>` signals. When
@@ -1167,8 +1177,10 @@ void yargs(hideBin(process.argv))
               });
             });
 
-            // Build session from CLI args and attach to store
-            const session = await buildSessionFromOptions(options);
+            // Session is already built above (and attached to the store via
+            // startTUI's initialSession arg). Continue mutating it for
+            // checkpoint restoration / credential resolution; the final
+            // `tui.store.session = session` below re-emits the change.
 
             // If --api-key was provided, skip the OAuth/TUI auth flow entirely.
             if (session.apiKey) {
