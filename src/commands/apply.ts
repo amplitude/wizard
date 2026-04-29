@@ -78,9 +78,7 @@ export const applyCommand: CommandModule = {
       // with no project marker. Mirrors the guard in `plan` — both
       // commands can mutate `installDir`, so both must check. `--force`
       // bypasses for power users running against unusual layouts.
-      const { checkProjectGuard } = await import(
-        '../utils/project-marker.js'
-      );
+      const { checkProjectGuard } = await import('../utils/project-marker.js');
       const guard = checkProjectGuard(installDir);
       if (!guard.ok && !mode.allowDestructive) {
         if (mode.jsonOutput) {
@@ -194,8 +192,8 @@ export const applyCommand: CommandModule = {
             auth.user?.zone === 'eu'
               ? 'eu'
               : auth.user?.zone === 'us'
-                ? 'us'
-                : undefined;
+              ? 'us'
+              : undefined;
           const orgId =
             ampli.ok && ampli.config.OrgId ? ampli.config.OrgId : undefined;
           const projectId =

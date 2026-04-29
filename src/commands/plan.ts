@@ -30,9 +30,7 @@ export const planCommand: CommandModule = {
       // with no project marker. Without this guard, the wizard runs
       // from `~/` would scan thousands of files and pollute the home
       // dir with `.amplitude/`. `--force` bypasses for power users.
-      const { checkProjectGuard } = await import(
-        '../utils/project-marker.js'
-      );
+      const { checkProjectGuard } = await import('../utils/project-marker.js');
       const guard = checkProjectGuard(installDir);
       if (!guard.ok && !argv.force) {
         if (jsonOutput) {
@@ -74,8 +72,8 @@ export const planCommand: CommandModule = {
               auth.user?.zone === 'eu'
                 ? 'eu'
                 : auth.user?.zone === 'us'
-                  ? 'us'
-                  : undefined;
+                ? 'us'
+                : undefined;
             const orgId =
               ampli.ok && ampli.config.OrgId ? ampli.config.OrgId : undefined;
             const projectId =
