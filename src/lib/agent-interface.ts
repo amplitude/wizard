@@ -45,6 +45,10 @@ import {
 import { getWizardCommandments } from './commandments';
 import { sanitizeNestedClaudeEnv } from './sanitize-claude-env';
 import { applyScopedSettings } from './claude-settings-scope';
+import {
+  scanBashCommandForDestructive,
+  scanWriteContentForSecrets,
+} from './safety-scanner';
 import type { PackageManagerDetector } from './package-manager-detection';
 
 import { z } from 'zod';
@@ -379,6 +383,52 @@ export function createPreToolUseHook(): HookCallback {
       }
     }
 
+    // Run the explicit destructive-command blocklist BEFORE the canonical
+    // allowlist check. Both deny these commands, but the allowlist deny
+    // message is generic ("command not in allowlist") which invites the
+    // model to retry rephrased variants of the same destructive intent.
+    // The scanner emits a specific "this is destructive policy, abandon
+    // this path" message that breaks the retry loop. Fail-closed on
+    // scanner exception (the catch returns deny).
+    if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
+      try {
+        const scan = scanBashCommandForDestructive(command);
+        if (scan.matched && scan.rule) {
+          logToFile(
+            `Denying destructive bash command (rule: ${scan.rule.label}): ${command}`,
+          );
+          captureWizardError(
+            'Bash Policy',
+            `Destructive command blocked: ${scan.rule.label}`,
+            'createPreToolUseHook',
+            { 'rule id': scan.rule.id, command },
+          );
+          return Promise.resolve({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: scan.rule.message,
+            },
+          });
+        }
+      } catch (err) {
+        // Fail-closed: a scanner exception is a block decision. The only
+        // realistic source of throws is regex backtracking on pathological
+        // input, and on those we'd rather block than pass.
+        logToFile('Destructive-bash scanner threw; failing closed:', err);
+        return Promise.resolve({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason:
+              'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.',
+          },
+        });
+      }
+    }
+
     // Cap long sleeps before the canonical allowlist check, so the
     // diagnostic message is specific instead of "command not in allowlist".
     if (toolName === 'Bash') {
@@ -586,6 +636,7 @@ export function createUserPromptSubmitHook(state: AgentState): HookCallback {
  */
 export function createPostToolUseHook(state: AgentState): HookCallback {
   return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    let secretWarning: string | null = null;
     try {
       const toolName =
         typeof input.tool_name === 'string'
@@ -615,8 +666,74 @@ export function createPostToolUseHook(state: AgentState): HookCallback {
         state.recordModifiedFile(path);
         logToFile(`PostToolUse: recorded modified file ${path} (${toolName})`);
       }
+
+      // Scan the written content for hardcoded secrets (Amplitude API keys,
+      // JWT bearers). The write has already happened — we can't undo it
+      // here — but we can return `additionalContext` to the model so the
+      // next turn reverts and switches to an env-var pattern. This is
+      // strictly additive to the existing path-recording above.
+      //
+      // Content shape varies by tool:
+      //   Write       → `content` is the full new file body
+      //   Edit        → `new_string` is the replacement substring
+      //   MultiEdit   → `edits[].new_string`
+      //   NotebookEdit → `new_source` is the cell body
+      // Falling back across these covers every wizard-relevant write.
+      const candidates: string[] = [];
+      if (typeof obj.content === 'string') candidates.push(obj.content);
+      if (typeof obj.new_string === 'string') candidates.push(obj.new_string);
+      if (typeof obj.new_source === 'string') candidates.push(obj.new_source);
+      if (Array.isArray(obj.edits)) {
+        for (const edit of obj.edits) {
+          if (
+            edit &&
+            typeof edit === 'object' &&
+            typeof (edit as { new_string?: unknown }).new_string === 'string'
+          ) {
+            candidates.push((edit as { new_string: string }).new_string);
+          }
+        }
+      }
+      for (const text of candidates) {
+        const scan = scanWriteContentForSecrets(text);
+        if (scan.matched && scan.rule) {
+          logToFile(
+            `PostToolUse: hardcoded-secret rule matched (rule: ${
+              scan.rule.label
+            }, file: ${path ?? '<unknown>'}, tool: ${toolName})`,
+          );
+          captureWizardError(
+            'Safety Scanner',
+            `Hardcoded secret detected: ${scan.rule.label}`,
+            'createPostToolUseHook',
+            {
+              'rule id': scan.rule.id,
+              'tool name': toolName,
+              'file path': path ?? null,
+            },
+          );
+          // Build a single, focused remediation message keyed to the file
+          // path (so the model knows exactly which file to revert).
+          const ref = path ? ` at ${path}` : '';
+          secretWarning = `Safety scanner: a hardcoded secret was detected in the file you just wrote${ref}. ${scan.rule.message}`;
+          break;
+        }
+      }
     } catch (err) {
+      // Path recording / scanning errors are non-fatal — they must never
+      // break the agent loop. Logged for ops review.
       logToFile('PostToolUse handler threw:', err);
+    }
+    if (secretWarning) {
+      // `additionalContext` is forwarded to the model on its next turn,
+      // letting it self-correct. Returning a structured payload (not a
+      // bare string) per the SDK's hook protocol.
+      return Promise.resolve({
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: secretWarning,
+        },
+      });
     }
     return Promise.resolve({});
   };
