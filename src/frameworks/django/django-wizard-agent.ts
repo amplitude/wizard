@@ -14,6 +14,7 @@ import {
   getDjangoVersionBucket,
   DjangoProjectType,
   findDjangoSettingsFile,
+  IGNORE_PATTERNS,
 } from './utils';
 
 type DjangoContext = {
@@ -51,7 +52,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
 
       const managePyMatches = await fg('**/manage.py', {
         cwd: installDir,
-        ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+        ignore: IGNORE_PATTERNS,
       });
 
       if (managePyMatches.length > 0) {
@@ -80,7 +81,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
         ['**/requirements*.txt', '**/pyproject.toml', '**/setup.py'],
         {
           cwd: installDir,
-          ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+          ignore: IGNORE_PATTERNS,
         },
       );
 

@@ -15,6 +15,7 @@ import {
   getFlaskVersionBucket,
   FlaskProjectType,
   findFlaskAppFile,
+  IGNORE_PATTERNS,
 } from './utils';
 
 type FlaskContext = {
@@ -59,7 +60,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
         ],
         {
           cwd: installDir,
-          ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
@@ -84,13 +85,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
         ['**/app.py', '**/wsgi.py', '**/application.py', '**/__init__.py'],
         {
           cwd: installDir,
-          ignore: [
-            '**/venv/**',
-            '**/.venv/**',
-            '**/env/**',
-            '**/.env/**',
-            '**/__pycache__/**',
-          ],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
