@@ -1143,6 +1143,57 @@ export function wizardCanUseTool(
         message: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
       };
     }
+    // Block direct Write/Edit of the wizard-managed event-plan and dashboard
+    // artifacts. These files are owned by `confirm_event_plan` and the
+    // dashboard watcher — direct writes are the source of two recurring
+    // bugs: (1) the file already exists from a prior run and Write errors
+    // out (Write requires a prior Read of an existing file), forcing the
+    // agent into a confused "stale file" recovery loop; (2) the agent
+    // writes a different shape (event_name, file_path, etc.) than the
+    // wizard UI expects, so the manifest drifts from real track() calls.
+    // The integration skills owned by context-hub still instruct agents
+    // to write `.amplitude-events.json` directly — denying here is
+    // defense in depth that lands today, in advance of the upstream
+    // skill refresh.
+    if (toolName === 'Write' || toolName === 'Edit') {
+      const lower = basename.toLowerCase();
+      const isEventsFile =
+        lower === '.amplitude-events.json' || lower === 'events.json';
+      const isDashboardFile =
+        lower === '.amplitude-dashboard.json' || lower === 'dashboard.json';
+      // For the bare `events.json` / `dashboard.json` cases, only deny
+      // when the path is inside `.amplitude/` (the wizard's metadata
+      // dir). A user codebase might legitimately have an unrelated
+      // `events.json` somewhere else.
+      const insideMetaDir = filePath.includes(
+        `${path.sep}.amplitude${path.sep}`,
+      );
+      const isWizardArtifact =
+        (lower === '.amplitude-events.json' && true) ||
+        (lower === '.amplitude-dashboard.json' && true) ||
+        (lower === 'events.json' && insideMetaDir) ||
+        (lower === 'dashboard.json' && insideMetaDir);
+      if (isWizardArtifact) {
+        const which = isEventsFile ? 'event plan' : 'dashboard';
+        const tool =
+          which === 'event plan'
+            ? 'mcp__wizard-tools__confirm_event_plan'
+            : 'the dashboard watcher (which mirrors writes from the Amplitude MCP `create_dashboard` call)';
+        logToFile(
+          `Denying ${toolName} on wizard-managed ${which} file: ${filePath}`,
+        );
+        return {
+          behavior: 'deny',
+          message: `Direct ${toolName} of ${basename} is not allowed. The ${which} file is owned by ${tool}. Call that tool with the proposed plan instead — it persists the file in the canonical shape the wizard UI expects, so the manifest never drifts from real track() calls. ${
+            isDashboardFile
+              ? ''
+              : 'If a stale ' +
+                basename +
+                ' is on disk from a prior run, ignore it and call confirm_event_plan; the wizard atomically replaces it.'
+          }`,
+        };
+      }
+    }
     return { behavior: 'allow', updatedInput: input };
   }
 

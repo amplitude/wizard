@@ -116,6 +116,7 @@ import {
   defaultCommand,
   loginCommand,
   logoutCommand,
+  resetCommand,
   whoamiCommand,
   feedbackCommand,
   slackCommand,
@@ -475,6 +476,7 @@ void yargs(hideBin(process.argv))
   .command(defaultCommand)
   .command(loginCommand)
   .command(logoutCommand)
+  .command(resetCommand)
   .command(whoamiCommand)
   .command(feedbackCommand)
   .command(slackCommand)
