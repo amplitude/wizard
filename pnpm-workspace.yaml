@@ -1,7 +1,18 @@
 onlyBuiltDependencies:
   - esbuild
   - msw
+# 7-day quarantine on new package versions blocks supply-chain
+# attacks via newly-published malicious releases. Default for the
+# whole dependency graph.
 minimumReleaseAge: 10080
+# Narrow exception: the Claude Agent SDK ships meaningful perf and
+# correctness fixes faster than the 7-day window allows (improved
+# caching in 0.2.119, `updatedToolOutput` rename in 0.2.121, etc.).
+# Anthropic-published, not user-pinnable — supply-chain risk is
+# meaningfully lower than for typical npm packages. Limit the
+# exception to this single package; do not lower the global gate.
+minimumReleaseAgeExclude:
+  - '@anthropic-ai/claude-agent-sdk'
 
 
 packages:
