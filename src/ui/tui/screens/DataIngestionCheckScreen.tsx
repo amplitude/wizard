@@ -133,6 +133,30 @@ const BROWSER_FRAMEWORKS = new Set<Integration>(
     .map((config) => config.metadata.integration),
 );
 
+/**
+ * Backend / server-side SDKs. For these integrations the App API
+ * activation endpoint is unreliable as a success signal — autocapture is
+ * irrelevant and the user has no browser tab to "click around" in. We
+ * fall back to the data-API event catalog (taxonomy entries), which is
+ * a strong proxy for "ingestion is working" in a backend context where
+ * events are typically registered as the SDK initializes.
+ *
+ * Browser SDKs (nextjs/vue/react-router/javascript_web) intentionally
+ * do NOT get this fallback — schema registrations there can predate
+ * real ingestion and would falsely celebrate. Mobile / native / game
+ * engine integrations are excluded too: the PR's coaching tips are the
+ * primary unblock path for them and we don't want to over-trigger.
+ */
+export const BACKEND_SDK_INTEGRATIONS: ReadonlySet<Integration> = new Set([
+  Integration.django,
+  Integration.flask,
+  Integration.fastapi,
+  Integration.go,
+  Integration.java,
+  Integration.javascriptNode,
+  Integration.python,
+]);
+
 interface DataIngestionCheckScreenProps {
   store: WizardStore;
 }
@@ -367,20 +391,46 @@ export const DataIngestionCheckScreen = ({
         return;
       }
 
-      // Activation API only checks autocapture events. Fall back to the
-      // event catalog which includes all event types.
-      if (currentSession.selectedOrgId && currentSession.selectedProjectId) {
-        const catalogEvents = await fetchProjectEventTypes(
-          dataApiToken,
-          zone,
-          currentSession.selectedOrgId,
-          currentSession.selectedProjectId,
-        );
-        logToFile(
-          `[DataIngestionCheck] catalog fallback: ${catalogEvents.length} event types found`,
-        );
-        if (catalogEvents.length > 0) {
-          confirmWithCelebration(catalogEvents);
+      // Do NOT treat the event catalog as a success signal for browser /
+      // mobile / engine SDKs — it reflects schema registrations, not real
+      // ingestion, and would falsely celebrate.
+      //
+      // Backend SDKs are different: the activation endpoint is autocapture-
+      // only, so a Node/Django/Flask/FastAPI/Go/Java/Python user who's
+      // ingesting custom events will look like "no events" forever even
+      // when their server is firing. The cataloged event types are a
+      // reasonable proxy in that case — if any taxonomy entries exist for
+      // their workspace, treat that as the success signal so they aren't
+      // stuck on this screen until the outer timeout.
+      const integration = currentSession.integration;
+      if (
+        integration &&
+        BACKEND_SDK_INTEGRATIONS.has(integration) &&
+        currentSession.selectedOrgId &&
+        currentSession.selectedProjectId
+      ) {
+        try {
+          const names = await fetchProjectEventTypes(
+            dataApiToken,
+            zone,
+            currentSession.selectedOrgId,
+            currentSession.selectedProjectId,
+          );
+          if (names.length > 0) {
+            logToFile(
+              `[DataIngestionCheck] backend SDK catalog fallback: ${names.length} event types found, confirming`,
+            );
+            confirmWithCelebration(names);
+            return;
+          }
+        } catch (catalogErr) {
+          logToFile(
+            `[DataIngestionCheck] backend SDK catalog fallback errored: ${
+              catalogErr instanceof Error
+                ? catalogErr.message
+                : String(catalogErr)
+            }`,
+          );
         }
       }
     } catch (err) {
