@@ -8,6 +8,16 @@
  *
  * We use vitest fake timers to fast-forward past the 15s timeout instead
  * of waiting in real time — see https://vitest.dev/api/vi.html#vi-usefaketimers.
+ *
+ * Why module-level imports instead of dynamic imports inside the test:
+ * the prior shape (`await import(...)` inside the `it` body, after
+ * `vi.useFakeTimers()` had already activated) flaked under parallel-test
+ * load. ESM module resolution uses internal microtasks/timers; once fake
+ * timers are active, those internals don't make progress until the test
+ * explicitly advances the clock, which can cause the import promise to
+ * never settle within the 5 s test timeout. Hoisting the imports loads
+ * the module ONCE at file load (real timers), then each test just renders
+ * against an already-resolved module graph.
  */
 
 import React from 'react';
@@ -43,22 +53,21 @@ vi.mock('../../../../lib/api.js', async (importActual) => {
   };
 });
 
+import { DataIngestionCheckScreen } from '../DataIngestionCheckScreen.js';
+import { makeStoreForSnapshot } from '../../__tests__/snapshot-utils.js';
+
 describe('DataIngestionCheckScreen catalog hang', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Pure fake timers — no `shouldAdvanceTime: true`. The dual-time
+    // mode interacts unpredictably with `advanceTimersByTimeAsync`
+    // under heavy parallel test load.
+    vi.useFakeTimers();
   });
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it('falls through to setEventTypes([]) when the catalog fetch hangs past 15s', async () => {
-    const { DataIngestionCheckScreen } = await import(
-      '../DataIngestionCheckScreen.js'
-    );
-    const { makeStoreForSnapshot } = await import(
-      '../../__tests__/snapshot-utils.js'
-    );
-
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
