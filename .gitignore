@@ -41,3 +41,7 @@ plugins
 .vercel
 
 e2e-tests/fixtures/.tracking/*
+
+# Claude Code session-only state
+.claude/scheduled_tasks.lock
+.claude/scheduled_tasks.json
