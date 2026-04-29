@@ -1085,29 +1085,28 @@ export class AgentUI implements WizardUI {
     // Build the scope object dropping any undefined fields. JSON.stringify
     // would already omit them, but keeping the wire object lean makes
     // schema tests + orchestrator parsers easier to reason about.
-    const amplitude: SetupContextData['amplitude'] = {};
+    const amplitude: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(data.amplitude)) {
       if (v !== undefined && v !== null && v !== '') {
-        // @ts-expect-error dynamic key assignment over a typed surface
         amplitude[k] = v;
       }
     }
     const wire: SetupContextData = {
       event: 'setup_context',
       phase: data.phase,
-      amplitude,
+      amplitude: amplitude as SetupContextData['amplitude'],
       ...(data.sources ? { sources: data.sources } : {}),
       ...(data.requiresConfirmation !== undefined
         ? { requiresConfirmation: data.requiresConfirmation }
         : {}),
       ...(data.resumeFlags ? { resumeFlags: data.resumeFlags } : {}),
     };
-    const summary = [
-      amplitude.orgName,
-      amplitude.projectName,
-      amplitude.appName ?? amplitude.appId,
-      amplitude.envName,
-    ]
+    // Re-narrow for the summary builder so optional-property reads land
+    // on the typed surface (the loop above used a string-keyed record
+    // to silence the dynamic-assignment warning). Pure cast — no
+    // runtime cost.
+    const a = amplitude as SetupContextData['amplitude'];
+    const summary = [a.orgName, a.projectName, a.appName ?? a.appId, a.envName]
       .filter(Boolean)
       .join(' / ');
     emit(
@@ -1129,13 +1128,14 @@ export class AgentUI implements WizardUI {
    */
   emitSetupComplete(data: Omit<SetupCompleteData, 'event'>): void {
     // Drop empty optional sub-objects to keep the wire shape tight.
-    const cleanAmplitude: SetupCompleteData['amplitude'] = {};
+    const cleanAmplitudeRecord: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(data.amplitude)) {
       if (v !== undefined && v !== null && v !== '') {
-        // @ts-expect-error dynamic key assignment
-        cleanAmplitude[k] = v;
+        cleanAmplitudeRecord[k] = v;
       }
     }
+    const cleanAmplitude =
+      cleanAmplitudeRecord as SetupCompleteData['amplitude'];
     const wire: SetupCompleteData = {
       event: 'setup_complete',
       amplitude: cleanAmplitude,
