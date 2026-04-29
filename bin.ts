@@ -515,17 +515,45 @@ const resolveNonInteractiveCredentials = async (
     }
   }
 
-  // If we still don't have credentials, auth is required
+  // If we still don't have credentials, auth is required. Distinguish
+  // "you've never logged in" from "your stored login is broken" — both
+  // conditions surface here, but only the first is solvable by a fresh
+  // `wizard login`. If a stored token still exists at this point,
+  // resolveCredentials decided not to use it (refresh failed, idToken
+  // expired, fetchAmplitudeUser 401'd, etc.). Calling that
+  // `no_stored_credentials` is wrong: orchestrators that key off the
+  // reason will tell the user to run `wizard login` even though they
+  // already have, and the underlying token issue won't be obvious.
   if (!session.credentials) {
     if (mode === 'agent' && agentUI) {
+      const { getStoredToken } = await import('./src/utils/ampli-settings.js');
+      const { resolveZone } = await import('./src/lib/zone-resolution.js');
+      const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
+      const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+        readDisk: true,
+      });
+      const stored = getStoredToken(undefined, zone);
+      const hasStoredToken = !!stored;
+
+      const reason: 'no_stored_credentials' | 'token_expired' = hasStoredToken
+        ? 'token_expired'
+        : 'no_stored_credentials';
+
       const loginCommand = [...CLI_INVOCATION.split(' '), 'login'];
       const resumeCommand = [...CLI_INVOCATION.split(' '), '--agent'];
-      agentUI.emitAuthRequired({
-        reason: 'no_stored_credentials',
-        instruction:
-          'Not signed in to Amplitude. Ask the user to run ' +
+      const instruction = hasStoredToken
+        ? 'Your stored Amplitude credentials could not be used (the OIDC ' +
+          'id_token may have expired or the user account no longer has ' +
+          'access). Ask the user to run ' +
+          `\`${loginCommand.join(' ')}\` to refresh, then re-run ` +
+          `\`${resumeCommand.join(' ')}\` to resume.`
+        : 'Not signed in to Amplitude. Ask the user to run ' +
           `\`${loginCommand.join(' ')}\` in a terminal to authenticate, ` +
-          `then re-run \`${resumeCommand.join(' ')}\` to resume.`,
+          `then re-run \`${resumeCommand.join(' ')}\` to resume.`;
+
+      agentUI.emitAuthRequired({
+        reason,
+        instruction,
         loginCommand,
         resumeCommand,
       });
