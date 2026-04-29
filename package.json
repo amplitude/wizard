@@ -40,7 +40,7 @@
     "@amplitude/analytics-browser": "2.36.2",
     "@amplitude/analytics-node": "1.5.51",
     "@amplitude/experiment-node-server": "1.13.4",
-    "@anthropic-ai/claude-agent-sdk": "0.2.116",
+    "@anthropic-ai/claude-agent-sdk": "0.2.121",
     "@inkjs/ui": "2.0.0",
     "@inquirer/prompts": "8.3.0",
     "@langchain/core": "1.1.33",
