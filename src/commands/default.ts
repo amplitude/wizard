@@ -437,8 +437,6 @@ export const defaultCommand: CommandModule = {
           // Apply SDK-level opt-out based on feature flags
           analytics.applyOptOut();
 
-          const { FRAMEWORK_REGISTRY } = await import('../lib/registry.js');
-          const { detectAllFrameworks } = await import('../run.js');
           const installDir = session.installDir ?? process.cwd();
 
           // Verbose startup diagnostics — always written to the log file;
@@ -456,14 +454,96 @@ export const defaultCommand: CommandModule = {
             logToFile(`[verbose] argv          : ${process.argv.join(' ')}`);
           }
 
-          const { DETECTION_TIMEOUT_MS } = await import('../lib/constants.js');
-
           // ── OAuth + account setup ──────────────────────────────
           // Runs concurrently with framework detection while AuthScreen shows.
           // When OAuth completes, store.setOAuthComplete() triggers the
           // AuthScreen SUSI pickers (org → workspace → API key).
           // AuthScreen calls store.setCredentials() when done, advancing the
           // router past Auth → RegionSelect → DataSetup → to IntroScreen.
+          const waitForSessionState = (
+            predicate: () => boolean,
+          ): Promise<void> =>
+            new Promise<void>((resolve) => {
+              if (predicate()) {
+                resolve();
+                return;
+              }
+              const unsub = tui.store.subscribe(() => {
+                if (predicate()) {
+                  unsub();
+                  resolve();
+                }
+              });
+            });
+
+          // Run a single OAuth + fetchAmplitudeUser + setOAuthComplete
+          // cycle against the currently selected region. Shared between
+          // the initial auth task and the re-auth watcher that handles
+          // mid-session /region changes.
+          const runOAuthCycle = async (forceFresh: boolean): Promise<void> => {
+            const { performAmplitudeAuth } = await import('../utils/oauth.js');
+            const { fetchAmplitudeUser } = await import('../lib/api.js');
+            const { DEFAULT_AMPLITUDE_ZONE } = await import(
+              '../lib/constants.js'
+            );
+            const { storeToken } = await import('../utils/ampli-settings.js');
+            const { resolveZone } = await import('../lib/zone-resolution.js');
+
+            const zone = resolveZone(
+              tui.store.session,
+              DEFAULT_AMPLITUDE_ZONE,
+              {
+                readDisk: false,
+              },
+            );
+
+            let auth = await performAmplitudeAuth({ zone, forceFresh });
+
+            // Update login URL (clears the "copy this URL" hint)
+            tui.store.setLoginUrl(null);
+
+            const cloudRegion = zone;
+
+            let userInfo;
+            try {
+              userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+            } catch {
+              // Token may be expired — re-open the browser for a fresh login
+              tui.store.setLoginUrl(null);
+              auth = await performAmplitudeAuth({ zone, forceFresh: true });
+              userInfo = await fetchAmplitudeUser(auth.idToken, cloudRegion);
+            }
+
+            // Persist to ~/.ampli.json
+            storeToken(
+              {
+                id: userInfo.id,
+                firstName: userInfo.firstName,
+                lastName: userInfo.lastName,
+                email: userInfo.email,
+                zone: auth.zone,
+              },
+              {
+                accessToken: auth.accessToken,
+                idToken: auth.idToken,
+                refreshToken: auth.refreshToken,
+                expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+              },
+            );
+
+            tui.store.setUserEmail(userInfo.email);
+            analytics.setDistinctId(userInfo.email);
+            analytics.identifyUser({ email: userInfo.email });
+
+            // Signal AuthScreen — triggers org/project/API key pickers
+            tui.store.setOAuthComplete({
+              accessToken: auth.accessToken,
+              idToken: auth.idToken,
+              cloudRegion,
+              orgs: userInfo.orgs,
+            });
+          };
+
           const authTask = (async () => {
             // Skip the full OAuth + SUSI flow when credentials were pre-populated
             // from ~/.ampli.json + the saved API key (returning user).
@@ -487,24 +567,11 @@ export const defaultCommand: CommandModule = {
               // Wait for the user to dismiss the welcome screen AND pick a
               // region before opening the OAuth URL. This ensures the logo
               // and intro are visible before the browser opens.
-              await new Promise<void>((resolve) => {
-                if (
+              await waitForSessionState(
+                () =>
                   tui.store.session.introConcluded &&
-                  tui.store.session.region !== null
-                ) {
-                  resolve();
-                  return;
-                }
-                const unsub = tui.store.subscribe(() => {
-                  if (
-                    tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
-                  ) {
-                    unsub();
-                    resolve();
-                  }
-                });
-              });
+                  tui.store.session.region !== null,
+              );
               const { resolveZone } = await import('../lib/zone-resolution.js');
               const zone = resolveZone(
                 tui.store.session,
@@ -568,7 +635,8 @@ export const defaultCommand: CommandModule = {
               }
 
               if (auth === null) {
-                auth = await performAmplitudeAuth({ zone, forceFresh });
+                await runOAuthCycle(forceFresh);
+                return;
               }
 
               // Update login URL (clears the "copy this URL" hint)
@@ -590,13 +658,6 @@ export const defaultCommand: CommandModule = {
                   );
                 } catch {
                   if (signupTokensObtained) {
-                    // Signup succeeded moments ago so the tokens can't be
-                    // expired — the fetch failure is almost certainly
-                    // backend provisioning lag for a brand-new account.
-                    // Surface the transition so the user isn't confused
-                    // when a browser opens after "signup succeeded", and
-                    // emit telemetry so we can measure how often the rare
-                    // edge case actually hits production.
                     getUI().log.info(
                       'Account created, but user data is still being provisioned. ' +
                         'Opening browser to complete sign-in…',
@@ -659,88 +720,94 @@ export const defaultCommand: CommandModule = {
             }
           })();
 
+          // Fire-and-forget watcher that re-runs OAuth whenever a mid-session
+          // /region clears credentials. Without this the user would hang on
+          // AuthScreen's "Waiting for authentication..." spinner after
+          // switching regions. Never resolves — the process exit (via SIGINT
+          // or normal completion) tears it down.
+          void (async () => {
+            await authTask;
+            const { Overlay } = await import('../ui/tui/router.js');
+            let consecutiveFailures = 0;
+            while (true) {
+              // Wait for credentials to be populated first — either by the
+              // initial authTask above or by AuthScreen's SUSI pickers.
+              await waitForSessionState(
+                () => tui.store.session.credentials !== null,
+              );
+
+              // Then wait for them to be cleared AND the user to have
+              // picked a new region (so we don't fire while RegionSelect
+              // is still open).
+              await waitForSessionState(
+                () =>
+                  !tui.store.session.loggingOut &&
+                  tui.store.session.credentials === null &&
+                  tui.store.session.region !== null &&
+                  !tui.store.session.regionForced &&
+                  tui.store.session.introConcluded &&
+                  tui.store.currentScreen !== Overlay.Logout &&
+                  tui.store.session.outroData === null,
+              );
+
+              try {
+                await runOAuthCycle(false);
+                consecutiveFailures = 0;
+              } catch (err) {
+                consecutiveFailures += 1;
+                if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                  console.error('Re-auth error:', err);
+                }
+                tui.store.setCommandFeedback(
+                  consecutiveFailures === 1
+                    ? "Authentication didn't complete. Retrying — use /login to retry manually."
+                    : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
+                  consecutiveFailures >= 3 ? 8000 : 4000,
+                );
+                if (consecutiveFailures >= 3) {
+                  await waitForSessionState(
+                    () =>
+                      tui.store.currentScreen === Overlay.Login ||
+                      tui.store.session.regionForced,
+                  );
+                  consecutiveFailures = 0;
+                  continue;
+                }
+                await new Promise<void>((r) =>
+                  setTimeout(r, 1500 * consecutiveFailures),
+                );
+              }
+            }
+          })();
+
           // ── Framework detection ────────────────────────────────
           // Runs concurrently with auth while AuthScreen shows.
           // Each detector has its own per-framework timeout internally,
-          // so no outer timeout is needed.
-          const detectionTask = (async () => {
-            const results = await detectAllFrameworks(installDir);
+          // so no outer timeout is needed. The same helper is invoked
+          // again from IntroScreen when the user picks "Change
+          // directory" — keeping a single implementation prevents the
+          // two paths from drifting apart.
+          const { runFrameworkDetection } = await import(
+            '../lib/framework-detection.js'
+          );
 
-            // Store full results on session for diagnostics
-            session.detectionResults = results;
+          // Wire up an in-store re-detection trigger so the IntroScreen
+          // can swap the install directory inline without bin.ts having
+          // to expose a callback.
+          tui.store.setFrameworkRedetector((nextDir, signal) =>
+            runFrameworkDetection(tui.store, nextDir, { signal }),
+          );
 
-            const detectedIntegration = results.find(
-              (r) => r.detected,
-            )?.integration;
+          // The INITIAL detection also needs to be cancellable. If
+          // the user picks "Change directory" before the first scan
+          // completes, `changeInstallDir` aborts whatever controller
+          // is registered as active.
+          const initialDetectionAbort = new AbortController();
+          tui.store.registerActiveDetection(initialDetectionAbort);
 
-            if (detectedIntegration) {
-              const config = FRAMEWORK_REGISTRY[detectedIntegration];
-
-              // Run gatherContext for the friendly variant label
-              if (config.metadata.gatherContext) {
-                try {
-                  const context = await Promise.race([
-                    config.metadata.gatherContext({
-                      installDir,
-                      debug: session.debug,
-                      forceInstall: session.forceInstall,
-                      default: false,
-                      signup: session.signup,
-                      localMcp: session.localMcp,
-                      ci: session.ci,
-                      menu: session.menu,
-                      benchmark: session.benchmark,
-                    }),
-                    new Promise<Record<string, never>>((resolve) =>
-                      setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
-                    ),
-                  ]);
-                  for (const [key, value] of Object.entries(context)) {
-                    if (!(key in session.frameworkContext)) {
-                      tui.store.setFrameworkContext(key, value);
-                    }
-                  }
-                } catch {
-                  // Detection failed — will show generic name
-                }
-              }
-
-              tui.store.setFrameworkConfig(detectedIntegration, config);
-
-              if (!session.detectedFrameworkLabel) {
-                tui.store.setDetectedFramework(config.metadata.name);
-              }
-            }
-
-            // Feature discovery — same helper that CI/agent uses, so the
-            // package and integration lists never drift between modes.
-            const { discoverFeatures } = await import(
-              '../lib/feature-discovery.js'
-            );
-            const runDiscovery = () => {
-              for (const f of discoverFeatures({
-                installDir,
-                integration: tui.store.session.integration,
-              })) {
-                tui.store.addDiscoveredFeature(f);
-              }
-            };
-            runDiscovery();
-
-            // Re-run when integration changes (handles manual selection
-            // after auto-detection fails). Track last-seen to avoid the
-            // package.json scan firing on every store emit.
-            let lastIntegration = tui.store.session.integration;
-            tui.store.subscribe(() => {
-              const integration = tui.store.session.integration;
-              if (integration === lastIntegration) return;
-              lastIntegration = integration;
-              runDiscovery();
-            });
-
-            // Signal detection is done — IntroScreen shows picker or results
-            tui.store.setDetectionComplete();
-          })();
+          const detectionTask = runFrameworkDetection(tui.store, installDir, {
+            signal: initialDetectionAbort.signal,
+          });
 
           // Gate runWizard on the user reaching RunScreen — at that point
           // auth, data check, and any setup questions are all complete.
