@@ -50,7 +50,17 @@ npx @amplitude/wizard
 4. **Verify** — confirms events are flowing into Amplitude
 5. **Explore** — walks you through your first chart, dashboard, and taxonomy
 
-Type `/help` at any time to see available commands.
+Every successful run drops an `amplitude-setup-report.md` at the project
+root summarizing what changed, what to verify, and how to extend the
+instrumentation. The previous run's report is archived alongside it as
+`amplitude-setup-report.previous.md`.
+
+For browser-based SDK projects (Next.js, Vue, React Router, JavaScript
+web), the wizard auto-enables Autocapture, Session Replay, and Guides &
+Surveys when the project is using Amplitude's unified Browser SDK — no
+extra opt-in screens. Type any slash command (e.g. `/whoami`,
+`/diagnostics`) at any time; the prompt accepts them throughout the
+session.
 
 ## Running modes
 
@@ -281,19 +291,21 @@ Available at any point during the wizard:
 
 | Command | Description |
 |---------|-------------|
-| `/help` | List available commands |
-| `/whoami` | Show current user, org, project, and region |
-| `/org` | Switch the active org |
-| `/project` | Switch the active project |
+| `/whoami` | Show current user, org, and project |
 | `/region` | Switch data-center region (US / EU) |
 | `/login` | Re-authenticate |
-| `/logout` | Clear credentials |
-| `/chart` | Set up a new chart |
-| `/dashboard` | Create a new dashboard |
-| `/taxonomy` | Interact with the taxonomy agent |
-| `/overview` | Open the project overview in the browser |
-| `/slack` | Connect your Amplitude project to Slack |
-| `/feedback` | Send product feedback |
+| `/logout` | Clear stored credentials |
+| `/create-project` | Create a new Amplitude project inline |
+| `/mcp` | Install or remove the Amplitude MCP server in your editor |
+| `/slack` | Set up the Amplitude Slack integration |
+| `/feedback` | Send product feedback (with optional consent-gated diagnostics) |
+| `/clear` | Clear the Q&A conversation history |
+| `/debug` | Print a diagnostic snapshot (safe to share) |
+| `/diagnostics` | Show wizard storage paths (log file, cache, project meta dir) |
+| `/exit` | Exit the wizard |
+
+Some commands (`/login`, `/logout`, `/region`, `/create-project`) are paused
+while a setup run is active — cancel with Ctrl+C or wait for it to finish.
 
 ## Session and credentials
 
@@ -302,10 +314,16 @@ sessions refresh silently — you won't be asked to re-authenticate unless
 necessary. If the wizard is interrupted, the next launch in the same directory
 picks up where you left off.
 
-Credentials are stored in `~/.ampli.json` with restricted permissions. Project
-settings live in `.ampli.json` in your project directory (safe to commit for
-team sharing). API keys use your OS keychain when available, otherwise
-`.env.local` (gitignored).
+| What | Where |
+|------|-------|
+| OAuth tokens | `~/.ampli.json` (chmod 0600, owner-only) |
+| API keys | OS keychain (macOS Keychain, Linux `secret-tool`); falls back to `<project>/.env.local` |
+| Per-project cache (logs, checkpoints, plans, agent state) | `~/.amplitude/wizard/runs/<sha>/...` |
+| Project metadata (event plan, dashboard URL) | `<project>/.amplitude/` (gitignored) |
+| Setup report | `<project>/amplitude-setup-report.md` (the previous run is archived to `amplitude-setup-report.previous.md`) |
+
+Run `/diagnostics` at any time to print the exact paths for the current
+project — handy for filing bug reports.
 
 ## CLI reference
 
