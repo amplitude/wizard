@@ -19,8 +19,11 @@ import type {
   EventPlanConfirmedData,
   VerificationStartedData,
   VerificationResultData,
+  SetupContextData,
+  SetupCompleteData,
 } from '../lib/agent-events';
-import { EVENT_DATA_VERSIONS } from '../lib/agent-events';
+import { EVENT_DATA_VERSIONS, truncateLogMessage } from '../lib/agent-events';
+import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
@@ -252,11 +255,19 @@ function emit(
 ): void {
   const { session_id, run_id } = getCorrelationIds();
   const data_version = lookupDataVersion(extra?.data, extra?.data_version);
+  // Truncate `log`-type messages so a misbehaving caller can't blow up
+  // orchestrator parsers with a multi-KB SSE-body dump. Other event
+  // types (lifecycle / status / progress / result / etc.) carry
+  // bounded human-readable summaries by construction; capping them
+  // would risk losing semantic content. The cap is generous (2KB) to
+  // preserve readable error context while preventing the worst-case
+  // 50KB+ inner-agent error payloads observed in agent transcripts.
+  const safeMessage = type === 'log' ? truncateLogMessage(message) : message;
   const event: NDJSONEvent = {
     v: 1,
     '@timestamp': new Date().toISOString(),
     type,
-    message,
+    message: safeMessage,
     session_id,
     run_id,
     ...extra,
@@ -487,6 +498,18 @@ export class AgentUI implements WizardUI {
     emit('result', `file_change_applied: ${data.operation} ${data.path}`, {
       data: { event: 'file_change_applied', ...data },
     });
+    // Mirror into the setup_complete registry so the terminal
+    // event lists every file the wizard touched. `create` lands
+    // in `written`, `modify` in `modified`, `delete` is dropped
+    // (deletes don't produce a follow-up artifact). Path is the
+    // raw absolute path the inner agent passed; the orchestrator
+    // can relativize against `installDir` if it cares about
+    // shorter labels.
+    if (data.operation === 'create') {
+      registerSetupComplete({ files: { written: [data.path], modified: [] } });
+    } else if (data.operation === 'modify') {
+      registerSetupComplete({ files: { written: [], modified: [data.path] } });
+    }
   }
 
   // WizardUI-shaped aliases (see wizard-ui.ts). Inner-lifecycle calls these
@@ -742,12 +765,36 @@ export class AgentUI implements WizardUI {
         envName: credentials.envName ?? null,
       },
     });
+    // Mirror the Amplitude scope into the setup_complete registry
+    // so the terminal `setup_complete` event carries the right
+    // appId / orgId / projectId without forcing the agent-runner
+    // to plumb session state through a second channel. `appId` of
+    // 0 is a sentinel for "not yet resolved" — skip it so the
+    // orchestrator doesn't see `appId: "0"` (a real-looking value
+    // that would mis-route follow-up MCP queries).
+    registerSetupComplete({
+      amplitude: {
+        ...(credentials.appId && credentials.appId !== 0
+          ? { appId: String(credentials.appId) }
+          : {}),
+        ...(credentials.orgId ? { orgId: credentials.orgId } : {}),
+        ...(credentials.orgName ? { orgName: credentials.orgName } : {}),
+        ...(credentials.projectId ? { projectId: credentials.projectId } : {}),
+        ...(credentials.projectName
+          ? { projectName: credentials.projectName }
+          : {}),
+        ...(credentials.envName ? { envName: credentials.envName } : {}),
+      },
+    });
   }
 
   setRegion(region: string): void {
     emit('session_state', `region: ${region}`, {
       data: { field: 'region', value: region },
     });
+    if (region === 'us' || region === 'eu') {
+      registerSetupComplete({ amplitude: { region } });
+    }
   }
 
   setProjectHasData(value: boolean): void {
@@ -890,12 +937,69 @@ export class AgentUI implements WizardUI {
         description: `${events.length} events proposed. Review the list and approve, skip, or send revision feedback.`,
       },
       choices: [
-        { value: 'approved', label: 'Approve and instrument' },
-        { value: 'skipped', label: 'Skip event tracking for this run' },
-        { value: 'revised', label: 'Send revision feedback' },
+        {
+          value: 'approved',
+          label: 'Approve and instrument',
+          resumeFlags: [
+            'apply',
+            '--plan-id',
+            '<id>',
+            '--approve-events',
+            '--yes',
+          ],
+        },
+        {
+          value: 'skipped',
+          label: 'Skip event tracking for this run',
+          resumeFlags: ['apply', '--plan-id', '<id>', '--skip-events', '--yes'],
+        },
+        {
+          value: 'revised',
+          label: 'Send revision feedback',
+          resumeFlags: [
+            'apply',
+            '--plan-id',
+            '<id>',
+            '--revise-events',
+            '<feedback>',
+            '--yes',
+          ],
+        },
       ],
       recommended: 'approved',
     });
+
+    // Honor a pre-resolved decision injected by the parent `apply`
+    // process via env vars. The skill drives the agent to surface
+    // the `event_plan` `needs_input` to the user, then re-invoke
+    // `apply` with `--approve-events` / `--skip-events` /
+    // `--revise-events <feedback>`. The parent forwards that
+    // decision here so the inner agent acts on the user's choice
+    // instead of silently auto-approving.
+    const preResolved = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    const preFeedback = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK ?? '';
+    if (
+      preResolved === 'approved' ||
+      preResolved === 'skipped' ||
+      preResolved === 'revised'
+    ) {
+      // Back-compat: keep the legacy `result` emit so existing
+      // orchestrators that key off `event: event_plan` continue to
+      // work unchanged. Tag the message with the decision instead
+      // of "auto-approved" so a transcript is honest.
+      emit('result', `event_plan ${preResolved} (via flag)`, {
+        data: { event: 'event_plan', events, decision: preResolved },
+      });
+      // No `decision_auto` companion — the decision came from a
+      // user-driven flag, not the wizard's recommended pick. This
+      // is the contract that lets orchestrators distinguish
+      // "auto-resolved" from "user told me what to do".
+      if (preResolved === 'revised') {
+        return Promise.resolve({ decision: 'revised', feedback: preFeedback });
+      }
+      return Promise.resolve({ decision: preResolved });
+    }
+
     // The full event list is carried on the legacy `result` emit
     // below — orchestrators rendering the plan inline read it from
     // there. We don't shadow the events on `needs_input.metadata`
@@ -936,6 +1040,15 @@ export class AgentUI implements WizardUI {
     emit('result', `event_plan: ${events.length} events`, {
       data: { event: 'event_plan_set', events },
     });
+    // Capture the final approved event plan for `setup_complete`.
+    // Last writer wins — the canonical `event_plan_set` lands at
+    // confirmation time, after any feedback-loop revisions.
+    registerSetupComplete({
+      events: events.map((e) => ({
+        name: e.name,
+        description: e.description,
+      })),
+    });
   }
 
   setEventIngestionDetected(eventNames: string[]): void {
@@ -947,6 +1060,99 @@ export class AgentUI implements WizardUI {
   setDashboardUrl(url: string): void {
     emit('result', `dashboard_created: ${url}`, {
       data: { event: 'dashboard_created', dashboardUrl: url },
+    });
+    registerSetupComplete({ amplitude: { dashboardUrl: url } });
+  }
+
+  /**
+   * Emit a `setup_context` event so the outer agent can show the user
+   * exactly which Amplitude scope is about to be modified BEFORE any
+   * writes happen. Drops keys with `undefined` values from the wire
+   * payload so the orchestrator doesn't have to filter them.
+   *
+   * Called from:
+   *   - `wizard plan` (phase: 'plan') — initial detection
+   *   - `wizard apply` (phase: 'apply_started') — after env resolution
+   *   - `wizard whoami` (phase: 'whoami') — auth probe
+   */
+  emitSetupContext(data: {
+    phase: SetupContextData['phase'];
+    amplitude: SetupContextData['amplitude'];
+    sources?: SetupContextData['sources'];
+    requiresConfirmation?: boolean;
+    resumeFlags?: SetupContextData['resumeFlags'];
+  }): void {
+    // Build the scope object dropping any undefined fields. JSON.stringify
+    // would already omit them, but keeping the wire object lean makes
+    // schema tests + orchestrator parsers easier to reason about.
+    const amplitude: SetupContextData['amplitude'] = {};
+    for (const [k, v] of Object.entries(data.amplitude)) {
+      if (v !== undefined && v !== null && v !== '') {
+        // @ts-expect-error dynamic key assignment over a typed surface
+        amplitude[k] = v;
+      }
+    }
+    const wire: SetupContextData = {
+      event: 'setup_context',
+      phase: data.phase,
+      amplitude,
+      ...(data.sources ? { sources: data.sources } : {}),
+      ...(data.requiresConfirmation !== undefined
+        ? { requiresConfirmation: data.requiresConfirmation }
+        : {}),
+      ...(data.resumeFlags ? { resumeFlags: data.resumeFlags } : {}),
+    };
+    const summary = [
+      amplitude.orgName,
+      amplitude.projectName,
+      amplitude.appName ?? amplitude.appId,
+      amplitude.envName,
+    ]
+      .filter(Boolean)
+      .join(' / ');
+    emit(
+      'lifecycle',
+      summary
+        ? `setup_context (${data.phase}): ${summary}`
+        : `setup_context (${data.phase})`,
+      { data: wire },
+    );
+  }
+
+  /**
+   * Emit the terminal `setup_complete` event. Called exactly once per
+   * successful `apply` run, immediately before `run_completed`. The
+   * outer agent reads this to lock its project context on `appId` for
+   * any follow-up MCP queries. Routed through the `result` event type
+   * so orchestrators subscribed to outcome streams pick it up
+   * naturally.
+   */
+  emitSetupComplete(data: Omit<SetupCompleteData, 'event'>): void {
+    // Drop empty optional sub-objects to keep the wire shape tight.
+    const cleanAmplitude: SetupCompleteData['amplitude'] = {};
+    for (const [k, v] of Object.entries(data.amplitude)) {
+      if (v !== undefined && v !== null && v !== '') {
+        // @ts-expect-error dynamic key assignment
+        cleanAmplitude[k] = v;
+      }
+    }
+    const wire: SetupCompleteData = {
+      event: 'setup_complete',
+      amplitude: cleanAmplitude,
+      ...(data.files ? { files: data.files } : {}),
+      ...(data.envVars ? { envVars: data.envVars } : {}),
+      ...(data.events ? { events: data.events } : {}),
+      ...(data.durationMs !== undefined ? { durationMs: data.durationMs } : {}),
+      ...(data.followups ? { followups: data.followups } : {}),
+    };
+    const appLabel = cleanAmplitude.appName
+      ? `${cleanAmplitude.appName}${
+          cleanAmplitude.appId ? ` (${cleanAmplitude.appId})` : ''
+        }`
+      : cleanAmplitude.appId ?? 'unknown';
+    emit('result', `setup_complete: app ${appLabel}`, {
+      level: 'success',
+      data: wire,
     });
   }
 
@@ -1139,6 +1345,27 @@ export class AgentUI implements WizardUI {
     }
     if (outcome.kind === 'mismatch') {
       throw new Error(outcome.reason);
+    }
+
+    // `--confirm-app` (env-var bridge: AMPLITUDE_WIZARD_CONFIRM_APP=1) means
+    // the caller demanded an explicit app selection. If we got here without a
+    // stdin answer, the orchestrator either timed out or didn't know to
+    // respond — either way, refusing to auto-select is the safer behavior.
+    // The needs_input event has already been emitted above; throwing here
+    // bubbles up through the wizard's normal abort path, which routes the
+    // exit through `wizardAbort` and produces a clean `run_completed` with
+    // a non-zero exit code. The orchestrator can branch on `needs_input`
+    // (was emitted) + non-success exit. This is the contract that prevents
+    // the "wizard wrote to the wrong project" class of failure.
+    if (process.env.AMPLITUDE_WIZARD_CONFIRM_APP) {
+      emit(
+        'log',
+        'Refusing to auto-select an environment because --confirm-app is set. Re-invoke with --app-id <id> after the user picks one.',
+        { level: 'warn' },
+      );
+      throw new Error(
+        '--confirm-app set: refusing to auto-select an environment. Re-invoke with --app-id <id>.',
+      );
     }
 
     // Fallback: auto-select the first environment

@@ -221,6 +221,63 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emit a `setup_context` event carrying the resolved Amplitude scope
+   * (region, org, project, app, env) at a known phase boundary.
+   * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI
+   * no-op, since their UI already shows the equivalent context.
+   *
+   * Skill rule: the outer agent SHOULD show this scope to the user
+   * BEFORE asking them to approve the run, so they know which
+   * Amplitude app the wizard is about to write to.
+   */
+  emitSetupContext?(data: {
+    phase: 'plan' | 'apply_started' | 'whoami';
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+    };
+    sources?: Record<string, 'auto' | 'flag' | 'saved' | 'recommended'>;
+    requiresConfirmation?: boolean;
+    resumeFlags?: { changeApp: string[] };
+  }): void;
+
+  /**
+   * Emit a terminal `setup_complete` event once per successful run,
+   * just before `run_completed`. Carries the canonical artifact list
+   * (app id, dashboard URL, files, env vars, events) the outer agent
+   * needs to drive follow-up MCP calls into the right project.
+   * Optional; only AgentUI implements.
+   */
+  emitSetupComplete?(data: {
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+      dashboardUrl?: string;
+      dashboardId?: string;
+    };
+    files?: { written: string[]; modified: string[] };
+    envVars?: { added: string[]; modified: string[] };
+    events?: Array<{ name: string; description?: string; file?: string }>;
+    durationMs?: number;
+    followups?: {
+      mcpServer?: { command: string[]; description: string };
+      docsUrl?: string;
+    };
+  }): void;
+
+  /**
    * Aggregated agent-run metrics — emitted by the observability
    * middleware once per run at finalize time with token usage, tool
    * call counts, and duration. Optional; AgentUI emits a `progress`

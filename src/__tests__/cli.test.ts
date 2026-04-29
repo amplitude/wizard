@@ -744,7 +744,11 @@ describe('whoami command', () => {
     vi.resetModules();
   });
 
-  test('shows user name and email when logged in', async () => {
+  // Pass `--human` so the test exercises the chalk-formatted UI output
+  // (`getUI().log.info` → console.log) instead of the agent-friendly
+  // JSON path that fires by default when stdout is non-TTY (e.g. inside
+  // vitest). The JSON shape is covered by the dedicated test below.
+  test('shows user name and email when logged in (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-1',
       firstName: 'Jane',
@@ -754,7 +758,7 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -765,11 +769,11 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('shows not-logged-in message when no token', async () => {
+  test('shows not-logged-in message when no token (--human)', async () => {
     mockGetStoredUser.mockReturnValue(null);
     mockGetStoredToken.mockReturnValue(null);
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -784,7 +788,7 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('prints zone for EU users', async () => {
+  test('prints zone for EU users (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-2',
       firstName: 'Jean',
@@ -794,13 +798,85 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/eu/);
+  });
+
+  // Agent-mode contract: `whoami --json` emits a single NDJSON line on
+  // stdout carrying `{ event: 'whoami', loggedIn, email, region, ... }`.
+  // The skill reads this to render "you're logged in as X (Org Y)" in
+  // one line before any other action.
+  test('emits structured JSON when logged in', async () => {
+    mockGetStoredUser.mockReturnValue({
+      id: 'user-3',
+      firstName: 'Sam',
+      lastName: 'Cooper',
+      email: 'sam@example.com',
+      zone: 'us',
+    });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'token',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+
+    // JSON emission goes through process.stdout.write, not console.log,
+    // so spy on the underlying writer.
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    // Find the line that's our whoami payload (other modules may write
+    // unrelated lines during bin.ts startup; filter to ours).
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.type).toBe('result');
+    expect(payload.data.event).toBe('whoami');
+    expect(payload.data.loggedIn).toBe(true);
+    expect(payload.data.email).toBe('sam@example.com');
+    expect(payload.data.firstName).toBe('Sam');
+    expect(payload.data.lastName).toBe('Cooper');
+    expect(payload.data.region).toBe('us');
+    expect(payload.data.tokenExpiresAt).toBe('2099-01-01T00:00:00Z');
+
+    stdoutSpy.mockRestore();
+  });
+
+  test('emits structured JSON with loginCommand when logged out', async () => {
+    mockGetStoredUser.mockReturnValue(null);
+    mockGetStoredToken.mockReturnValue(null);
+
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.data.loggedIn).toBe(false);
+    expect(Array.isArray(payload.data.loginCommand)).toBe(true);
+    expect(payload.data.loginCommand).toContain('login');
+
+    stdoutSpy.mockRestore();
   });
 });
 

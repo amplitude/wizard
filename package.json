@@ -28,6 +28,7 @@
     "dist/src",
     "man/",
     "skills/",
+    ".claude/skills/amplitude-setup/",
     "package.json",
     "README.md"
   ],

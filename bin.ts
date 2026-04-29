@@ -458,6 +458,19 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_SKIP_BOOTSTRAP env-var passthrough',
       type: 'boolean',
     },
+    // Force the env-selection prompt to emit a `needs_input` for
+    // `app_selection` even when there's a single match. The skill
+    // always passes this so the user gets to confirm which app the
+    // wizard is about to write events into — no silent auto-pick.
+    // Honored via `AMPLITUDE_WIZARD_CONFIRM_APP=1` in the spawned
+    // child process so the inner agent's environment-selection path
+    // can read it without reaching back into yargs argv.
+    'confirm-app': {
+      default: false,
+      describe:
+        'Force a needs_input app_selection prompt even when only one app matches',
+      type: 'boolean',
+    },
   })
   .command(defaultCommand)
   .command(loginCommand)

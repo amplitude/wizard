@@ -367,8 +367,19 @@ export async function resolveCredentials(
               session.pendingAuthIdToken = storedToken.idToken;
               session.pendingAuthAccessToken = storedToken.accessToken;
             }
-          } else if (envsWithKey.length === 1) {
-            // Single environment — auto-select
+          } else if (
+            envsWithKey.length === 1 &&
+            !process.env.AMPLITUDE_WIZARD_CONFIRM_APP
+          ) {
+            // Single environment — auto-select. Skipped when
+            // `--confirm-app` (env-var bridge:
+            // `AMPLITUDE_WIZARD_CONFIRM_APP=1`) is set; in that mode
+            // we DEFER to the caller's env picker so the wizard
+            // emits a `needs_input: environment_selection` even
+            // when there's only one match. The skill always passes
+            // `--confirm-app` so the user is asked "is this the
+            // right app?" before any writes happen — fixes the
+            // "wizard wrote to the wrong project" class of bug.
             const selectedEnv = envsWithKey[0];
             const apiKey = selectedEnv.app!.apiKey!;
             const selectedAppId = selectedEnv.app?.id ?? null;
@@ -407,10 +418,22 @@ export async function resolveCredentials(
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
-          } else if (envsWithKey.length > 1) {
-            // Multiple environments — defer to caller for selection
+          } else if (
+            envsWithKey.length > 1 ||
+            (envsWithKey.length === 1 &&
+              process.env.AMPLITUDE_WIZARD_CONFIRM_APP)
+          ) {
+            // Multiple environments OR a single match while
+            // `--confirm-app` is forcing an explicit confirmation —
+            // defer to caller for selection so the wizard emits a
+            // structured `needs_input` and the user gets to choose
+            // (or confirm) before any writes happen.
             logToFile(
-              `[credential-resolution] ${envsWithKey.length} environments found — deferring to project picker`,
+              `[credential-resolution] ${
+                envsWithKey.length
+              } environments found — deferring to project picker (confirm-app=${
+                process.env.AMPLITUDE_WIZARD_CONFIRM_APP ? 'on' : 'off'
+              })`,
             );
             session.pendingOrgs = userInfo.orgs;
             session.pendingAuthIdToken = storedToken.idToken;
