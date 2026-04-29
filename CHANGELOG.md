@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.9.0](https://github.com/amplitude/wizard/compare/wizard-v1.8.1...wizard-v1.9.0) (2026-04-29)
+
+
+### Features
+
+* **safety:** L2 scanner for destructive bash + hardcoded secrets ([#377](https://github.com/amplitude/wizard/issues/377)) ([c700892](https://github.com/amplitude/wizard/commit/c700892eadcaa464e8c80f77fa4537fa96a23806))
+* **tui:** real-time per-file write activity panel in RunScreen ([#371](https://github.com/amplitude/wizard/issues/371)) ([f736a71](https://github.com/amplitude/wizard/commit/f736a7123cfa86ec238da83432f1f43049df8c7a))
+
+
+### Bug Fixes
+
+* **agent:** make --agent NDJSON contract reliable for orchestrators ([#367](https://github.com/amplitude/wizard/issues/367)) ([35ef309](https://github.com/amplitude/wizard/commit/35ef309fe3e7439a3488faca90de5c188d9a766e))
+* **agent:** slim environment_selection NDJSON + add silent-refresh tests ([#378](https://github.com/amplitude/wizard/issues/378)) ([b9d2e62](https://github.com/amplitude/wizard/commit/b9d2e62ec088c5a7e9941c52c774f0a00f12cb68))
+* **auth:** persist rotated id_token on silent refresh + accurate auth_required reason ([#373](https://github.com/amplitude/wizard/issues/373)) ([b4fe173](https://github.com/amplitude/wizard/commit/b4fe1736cd0f6f4d86f382200ba0675692641d15))
+* **auth:** source stored expiresAt from id_token JWT exp + 3-way auth_required reason ([#375](https://github.com/amplitude/wizard/issues/375)) ([a809e3d](https://github.com/amplitude/wizard/commit/a809e3d7fdee4987481a8d28321b2fbb1ab84376))
+* thread --install-dir into the TUI store before first render ([#365](https://github.com/amplitude/wizard/issues/365)) ([4ee0912](https://github.com/amplitude/wizard/commit/4ee0912dd8799d4bf74a0b39b8f41354c9dc9d24))
+
+
+### Performance Improvements
+
+* skip node_modules in python-family detection globs (130x speedup) ([#366](https://github.com/amplitude/wizard/issues/366)) ([59c01e3](https://github.com/amplitude/wizard/commit/59c01e38a819d0b245807f75acb650c7c99107a6))
+
 ## [1.8.1](https://github.com/amplitude/wizard/compare/wizard-v1.8.0...wizard-v1.8.1) (2026-04-29)
 
 
