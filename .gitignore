@@ -1,47 +1,78 @@
+# ──────────────────────────────────────────────────────────────
+# OS junk
+# ──────────────────────────────────────────────────────────────
 .DS_Store
-
-# Thumbnails
+# macOS AppleDouble resource forks
 ._*
-.claude/skills
-.claude/worktrees
-
-
-# Files that might appear on external disk
 .Spotlight-V100
 .Trashes
+Thumbs.db
 
-docs/_build
-docs/doctrees
+# ──────────────────────────────────────────────────────────────
+# Dependencies & build output
+# ──────────────────────────────────────────────────────────────
+node_modules/
+/dist/
+# Anchored to repo root — don't ignore arbitrary `build/` dirs
+/build/
+/coverage/
+/reports/
+.eslintcache
 
-build
-!bin/build
-node_modules
+# ──────────────────────────────────────────────────────────────
+# Logs
+# ──────────────────────────────────────────────────────────────
 npm-debug.log
-ios
-./android
 yarn-error.log
+*.log
 
-scratch/
+# ──────────────────────────────────────────────────────────────
+# Native / mobile build artifacts (anchored to repo root)
+# ──────────────────────────────────────────────────────────────
+/ios
+/android
+/plugins
 
+# ──────────────────────────────────────────────────────────────
+# Python (used by some skills / scripts)
+# ──────────────────────────────────────────────────────────────
 *.pyc
 __pycache__/
 
-.idea
+# ──────────────────────────────────────────────────────────────
+# Editors
+# ──────────────────────────────────────────────────────────────
+.idea/
 *.sublime-*
-
-dist/
-coverage/
-reports/
-plugins
-
-.eslintcache
-.mcp.json
+# Personal launch configs; share via docs instead
 .vscode/launch.json
+
+# ──────────────────────────────────────────────────────────────
+# Secrets & local config
+# ──────────────────────────────────────────────────────────────
 .env
+.env.*
+!.env.example
 .vercel
+# May contain user-specific MCP server secrets
+.mcp.json
 
-e2e-tests/fixtures/.tracking/*
+# ──────────────────────────────────────────────────────────────
+# Docs build output
+# ──────────────────────────────────────────────────────────────
+/docs/_build/
+/docs/doctrees/
 
-# Claude Code session-only state
+# ──────────────────────────────────────────────────────────────
+# Local scratch / fixtures
+# ──────────────────────────────────────────────────────────────
+/scratch/
+/e2e-tests/fixtures/.tracking/
+
+# ──────────────────────────────────────────────────────────────
+# Claude Code local state
+# ──────────────────────────────────────────────────────────────
+.claude/skills/
+.claude/worktrees/
 .claude/scheduled_tasks.lock
 .claude/scheduled_tasks.json
