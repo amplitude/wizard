@@ -80,6 +80,8 @@ vi.mock('../ui/tui/start-tui', () => ({
 vi.mock('../lib/wizard-session', () => ({
   // Real buildSession includes region: null and credentials: null by default;
   // mirror that so the auth-task checks behave correctly in tests.
+  // Also mirrors the schema's `acceptTos → tosAccepted` translation so
+  // runDirectSignupIfRequested's missing-flags gate sees the right value.
   buildSession: (args: Record<string, unknown>) => ({
     region: null,
     credentials: null,
@@ -87,6 +89,7 @@ vi.mock('../lib/wizard-session', () => ({
     frameworkContextAnswerOrder: [],
     apiKeyNotice: null,
     ...args,
+    tosAccepted: args.acceptTos === true ? true : null,
   }),
   DiscoveredFeature: { Stripe: 'stripe', LLM: 'llm' },
 }));
@@ -97,6 +100,7 @@ vi.mock('../lib/constants', () => ({
   DEFAULT_AMPLITUDE_ZONE: 'us',
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
   EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  TERMS_OF_SERVICE_URL: 'https://amplitude.com/terms',
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
@@ -911,6 +915,9 @@ describe('--email and --full-name flags', () => {
       'ada@example.com',
       '--full-name',
       'Ada Lovelace',
+      '--accept-tos',
+      '--region',
+      'us',
       '--install-dir',
       '/tmp/test',
     ]);
@@ -924,6 +931,7 @@ describe('--email and --full-name flags', () => {
       expect.objectContaining({
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
+        tosAccepted: true,
       }),
       expect.any(Function),
     );
@@ -942,12 +950,10 @@ describe('--email and --full-name flags', () => {
       'ada@example.com',
       '--full-name',
       'Ada Lovelace',
-      // `--region` is required in non-TUI modes now — without it,
-      // `tryResolveZone` returns null and `process.exit` fires before
-      // `performSignupOrAuth` is ever called. In test, `process.exit`
-      // is a no-op so the assertion would pass for the wrong reason
-      // (execution falling through with `zone: null`). Pass a real
-      // region so the production control flow is exercised.
+      '--accept-tos',
+      // `--region` is required in non-TUI modes — without it, the missing-flags
+      // gate in `runDirectSignupIfRequested` exits via INVALID_ARGS before
+      // `performSignupOrAuth` is ever called.
       '--region',
       'us',
       '--install-dir',
@@ -966,6 +972,109 @@ describe('--email and --full-name flags', () => {
         status: 'wrapper_exception',
         zone: expect.any(String),
       }),
+    );
+  });
+
+  test('--ci --signup without --accept-tos exits INVALID_ARGS', async () => {
+    // `vi.clearAllMocks()` clears call data but not stored implementations,
+    // so prior login-suite tests' `mockReturnValue` calls leak. Reset here.
+    mockGetStoredUser.mockReturnValue(undefined);
+    // Direct override instead of vi.spyOn — vitest's stderr capture
+    // intercepts writes before the spy sees them.
+    const stderrCalls: string[] = [];
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown) => {
+      stderrCalls.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada@example.com',
+        '--full-name',
+        'Ada Lovelace',
+        '--region',
+        'us',
+        '--install-dir',
+        '/tmp/test',
+      ]);
+
+      await waitFor(
+        () => (process.exit as unknown as Mock).mock.calls.length > 0,
+      );
+    } finally {
+      process.stderr.write = origStderrWrite;
+    }
+
+    // Exits with INVALID_ARGS (2) and prints a missing-flags error.
+    // (Don't assert mockRunWizard was not called — process.exit is a no-op
+    // in tests, so execution falls through to lazyRunWizard. In production
+    // the real exit prevents that.)
+    expect(process.exit).toHaveBeenCalledWith(2);
+    expect(stderrCalls.join('')).toMatch(/--accept-tos/);
+  });
+
+  test('--agent --signup with no other flags emits signup_input_required and exits INPUT_REQUIRED', async () => {
+    // Reset stored-user implementation leaked from earlier login tests so
+    // tryResolveZone returns null (otherwise zone resolves from a prior
+    // test's `mockGetStoredUser.mockReturnValue({ zone: 'us', ... })` and
+    // --region wouldn't appear in the missing[] list).
+    mockGetStoredUser.mockReturnValue(undefined);
+    // Direct stdout override — AgentUI emits NDJSON via process.stdout.write
+    // which goes through `safePipeWrite` (a non-spy-friendly path).
+    const stdoutCalls: string[] = [];
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: unknown) => {
+      stdoutCalls.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      await runCLI(['--signup', '--agent', '--install-dir', '/tmp/test']);
+
+      await waitFor(
+        () => (process.exit as unknown as Mock).mock.calls.length > 0,
+      );
+    } finally {
+      process.stdout.write = origStdoutWrite;
+    }
+
+    // Exits with INPUT_REQUIRED (12).
+    expect(process.exit).toHaveBeenCalledWith(12);
+
+    // stdout received an NDJSON line with event: 'signup_input_required'
+    // listing all four missing flags.
+    const events = stdoutCalls
+      .join('')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (e): e is { type: string; data?: { event?: string } } => e !== null,
+      );
+    const signupEvent = events.find(
+      (e) => e.data?.event === 'signup_input_required',
+    );
+    expect(signupEvent).toBeDefined();
+    const missingFlags = (
+      signupEvent?.data as { missing?: Array<{ flag: string }> } | undefined
+    )?.missing?.map((m) => m.flag);
+    expect(missingFlags).toEqual(
+      expect.arrayContaining([
+        '--region',
+        '--email',
+        '--full-name',
+        '--accept-tos',
+      ]),
     );
   });
 });

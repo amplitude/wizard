@@ -232,6 +232,7 @@ const buildSessionFromOptions = async (
     menu: options.menu as boolean | undefined,
     signupEmail: options.email as string | undefined,
     signupFullName: options['full-name'] as string | undefined,
+    acceptTos: options['accept-tos'] as boolean | undefined,
     // --region is canonical; --zone is a yargs alias, so `options.region`
     // is populated by either flag.
     region: options.region as AmplitudeZone | undefined,
@@ -550,52 +551,121 @@ const resolveNonInteractiveCredentials = async (
 /**
  * Run the direct-signup wrapper for agent / CI / classic modes.
  *
- * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
- * set. On a non-null result, optionally runs `onSuccess` (classic uses this
- * to populate `session.credentials` via `resolveCredentials`). On null or
- * thrown errors, logs a human message that points at the mode's fallback
- * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
+ * No-op when `session.signup` is false. When signup is requested but a
+ * required input (region, email, fullName, ToS acceptance) is missing,
+ * the failure is surfaced according to `mode`:
+ *   - `agent`: emits a structured `signup_input_required` NDJSON event
+ *     listing every missing flag so the orchestrator can prompt the human
+ *     and resume; exits `INPUT_REQUIRED` (12).
+ *   - `ci`:    writes a single missing-flags error to stderr; exits
+ *     `INVALID_ARGS` (2). CI runs are scripted, so the operator must pass
+ *     all flags up front.
+ *   - `classic`: returns silently — the TUI/OAuth fallback handles input.
+ *
+ * On a non-null `performSignupOrAuth` result, optionally runs `onSuccess`
+ * (classic uses this to populate `session.credentials` via
+ * `resolveCredentials`). On null or thrown errors, logs a human message
+ * that points at the mode's fallback path (`fallbackLabel`) and returns —
+ * the caller's own auth path runs next.
  */
 const runDirectSignupIfRequested = async (
   session: import('./src/lib/wizard-session').WizardSession,
   fallbackLabel: string,
+  mode: 'agent' | 'ci' | 'classic',
+  agentUI?: import('./src/ui/agent-ui').AgentUI,
   onSuccess?: () => Promise<void>,
 ): Promise<void> => {
-  if (!session.signup || !session.signupEmail || !session.signupFullName) {
-    return;
-  }
+  if (!session.signup) return;
   const { performSignupOrAuth, trackSignupAttempt } = await import(
     './src/utils/signup-or-auth.js'
   );
   const { tryResolveZone } = await import('./src/lib/zone-resolution.js');
+  const { TERMS_OF_SERVICE_URL, EMAIL_REGEX } = await import(
+    './src/lib/constants.js'
+  );
 
-  // Non-TUI modes have no RegionSelect screen to disambiguate — and the
-  // backend does not route cross-region, so POSTing an EU-intending email
-  // to the US provisioning endpoint would silently create the account in
-  // the US data center. Require an explicit signal (--region flag, project
-  // config, or stored user) before sending the signup request. Exit with
-  // AUTH_REQUIRED so orchestrators see a structured failure rather than a
-  // misrouted account.
+  // Non-TUI modes have no RegionSelect / ToS / email-capture screens, so
+  // every required input must arrive as a CLI flag. Build a single
+  // missing[] list so agent orchestrators see one structured event listing
+  // everything the human still needs to provide.
   const zone = tryResolveZone(session);
+  const missing: Array<{
+    flag: string;
+    description: string;
+    url?: string;
+    pattern?: string;
+  }> = [];
   if (zone == null) {
-    getUI().log.error(
-      'Cannot determine data center region for --signup. Pass --region us or --region eu.',
-    );
-    process.exit(ExitCode.AUTH_REQUIRED);
+    missing.push({
+      flag: '--region',
+      description:
+        'Amplitude data center for the new account (us or eu). The backend does not route cross-region.',
+      pattern: '^(us|eu)$',
+    });
   }
+  if (!session.signupEmail) {
+    missing.push({
+      flag: '--email',
+      description: 'Email address for the new Amplitude account.',
+      pattern: EMAIL_REGEX.source,
+    });
+  }
+  if (!session.signupFullName) {
+    missing.push({
+      flag: '--full-name',
+      description: 'Full name for the new Amplitude account.',
+    });
+  }
+  if (session.tosAccepted !== true) {
+    missing.push({
+      flag: '--accept-tos',
+      description:
+        'Explicit consent to the Amplitude Terms of Service. Pass this flag only after the human has read and accepted the terms.',
+      url: TERMS_OF_SERVICE_URL,
+    });
+  }
+
+  if (missing.length > 0) {
+    if (mode === 'classic') {
+      // TUI / OAuth fallback handles input collection — return silently.
+      return;
+    }
+    if (mode === 'agent' && agentUI) {
+      agentUI.emitSignupInputsRequired({
+        missing,
+        resumeCommand: [...CLI_INVOCATION.split(' '), '--agent', '--signup'],
+      });
+      process.exit(ExitCode.INPUT_REQUIRED);
+      // process.exit doesn't actually return in production, but it IS a
+      // no-op in tests (where it's spied on). Return explicitly so the
+      // CI-mode stderr branch below doesn't fire on the same call.
+      return;
+    }
+    // CI mode: print one stderr line listing the missing flags.
+    process.stderr.write(
+      `Error: --signup in --ci mode requires ${missing
+        .map((m) => m.flag)
+        .join(', ')}.\n`,
+    );
+    process.exit(ExitCode.INVALID_ARGS);
+    return;
+  }
+  // Type narrowing: missing.length === 0 means zone is non-null and
+  // signupEmail/signupFullName are populated.
+  const resolvedZone = zone!;
   let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
     tokens = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
-      zone,
+      zone: resolvedZone,
     });
   } catch (err) {
     // Only the wrapper itself threw — emit wrapper_exception and bail.
     // Scope this catch narrowly so an `onSuccess` throw below cannot
     // re-emit telemetry after the wrapper has already recorded a
     // `success` / `user_fetch_failed` event internally.
-    trackSignupAttempt({ status: 'wrapper_exception', zone });
+    trackSignupAttempt({ status: 'wrapper_exception', zone: resolvedZone });
     getUI().log.warn(
       `Direct signup errored: ${
         err instanceof Error ? err.message : String(err)
@@ -897,6 +967,12 @@ void yargs(hideBin(process.argv))
         return value;
       },
     },
+    'accept-tos': {
+      default: false,
+      describe:
+        'explicit consent to the Amplitude Terms of Service (required with --signup in --ci/--agent modes)',
+      type: 'boolean',
+    },
     // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
     // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN / _AGENT / _INSTALL_DIR / _CLASSIC
     // to these option names; declaring them here lets .strict() accept the
@@ -1072,8 +1148,14 @@ void yargs(hideBin(process.argv))
           // Attempt direct signup before falling through to cached-token
           // resolution. Agent mode has no browser, so a null result continues
           // to resolveNonInteractiveCredentials, which handles cached tokens
-          // or exits cleanly with AUTH_REQUIRED.
-          await runDirectSignupIfRequested(session, 'cached-token resolution');
+          // or exits cleanly with AUTH_REQUIRED. Missing inputs surface as a
+          // structured `signup_input_required` NDJSON event.
+          await runDirectSignupIfRequested(
+            session,
+            'cached-token resolution',
+            'agent',
+            agentUI,
+          );
 
           await resolveNonInteractiveCredentials(
             session,
@@ -1098,8 +1180,13 @@ void yargs(hideBin(process.argv))
           // Attempt direct signup before falling through to cached-token
           // resolution. CI mode has no browser, so a null result continues to
           // resolveNonInteractiveCredentials, which handles cached tokens or
-          // exits cleanly with AUTH_REQUIRED.
-          await runDirectSignupIfRequested(session, 'cached-token resolution');
+          // exits cleanly with AUTH_REQUIRED. Missing inputs hard-fail with a
+          // single missing-flags message and INVALID_ARGS exit code.
+          await runDirectSignupIfRequested(
+            session,
+            'cached-token resolution',
+            'ci',
+          );
 
           await resolveNonInteractiveCredentials(session, options, 'ci');
           await lazyRunWizard(
@@ -1126,12 +1213,18 @@ void yargs(hideBin(process.argv))
           // the TUI-only safety check that clears credentials when no org is
           // selected. Without this, a successful signup would get silently
           // cleared and the browser would open anyway, defeating the point.
-          await runDirectSignupIfRequested(session, 'OAuth', async () => {
-            const { resolveCredentials } = await import(
-              './src/lib/credential-resolution.js'
-            );
-            await resolveCredentials(session, { requireOrgId: false });
-          });
+          await runDirectSignupIfRequested(
+            session,
+            'OAuth',
+            'classic',
+            undefined,
+            async () => {
+              const { resolveCredentials } = await import(
+                './src/lib/credential-resolution.js'
+              );
+              await resolveCredentials(session, { requireOrgId: false });
+            },
+          );
 
           await lazyRunWizard(
             options as Parameters<typeof lazyRunWizard>[0],

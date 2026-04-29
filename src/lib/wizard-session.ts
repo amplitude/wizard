@@ -125,6 +125,7 @@ export const CliArgsSchema = z.object({
     .optional()
     .default(null),
   signupFullName: z.string().nullable().optional().default(null),
+  acceptTos: z.boolean().default(false),
   region: z.enum(['us', 'eu']).nullable().optional().default(null),
 });
 
@@ -725,6 +726,14 @@ export function buildSession(args: {
   signupEmail?: string;
   signupFullName?: string;
   /**
+   * From --accept-tos CLI flag. Explicit consent to the Amplitude Terms of
+   * Service. Required (alongside --email / --full-name / --region) when
+   * --signup is used in --ci or --agent modes; in TUI mode the ToSScreen
+   * still owns the consent UI, so this flag pre-accepts and skips that
+   * screen. Pre-populates `session.tosAccepted = true` when passed.
+   */
+  acceptTos?: boolean;
+  /**
    * From --region CLI flag (--zone is accepted as an alias). Lets non-TUI
    * modes (agent/CI/classic) pick the data center for direct signup, since
    * they have no RegionSelect screen. When provided, pre-populates the
@@ -825,7 +834,10 @@ export function buildSession(args: {
     userEmail: null,
     _restoredFromCheckpoint: false,
 
-    tosAccepted: null,
+    // --accept-tos pre-accepts ToS for non-TUI signup; in TUI mode the
+    // ToSScreen still owns the UX but its `isComplete` check sees `true`
+    // and skips. Email capture is independently flagged below.
+    tosAccepted: validated.acceptTos === true ? true : null,
     emailCaptureComplete: false,
 
     createProject: {

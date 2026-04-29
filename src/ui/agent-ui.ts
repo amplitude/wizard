@@ -326,6 +326,36 @@ export class AgentUI implements WizardUI {
   }
 
   /**
+   * Emit a structured `signup_input_required` lifecycle event when the
+   * wizard is invoked with `--agent --signup` but one or more required
+   * inputs are missing (region, email, full-name, accept-tos). The
+   * orchestrator inspects `missing[]`, prompts the human for the
+   * missing values, and re-invokes the wizard with `resumeCommand` plus
+   * the gathered flags.
+   *
+   * Always paired with process.exit(ExitCode.INPUT_REQUIRED) by the caller.
+   */
+  emitSignupInputsRequired(data: {
+    missing: Array<{
+      flag: string;
+      description: string;
+      url?: string;
+      pattern?: string;
+    }>;
+    resumeCommand: string[];
+  }): void {
+    const flagList = data.missing.map((m) => m.flag).join(', ');
+    emit('lifecycle', `Signup requires additional input: ${flagList}`, {
+      level: 'error',
+      data: {
+        event: 'signup_input_required',
+        missing: data.missing,
+        resumeCommand: data.resumeCommand,
+      },
+    });
+  }
+
+  /**
    * Emit a structured nested_agent lifecycle event when the wizard is
    * invoked from inside another Claude Code / Claude Agent SDK session.
    * The wizard sanitizes inherited Claude env vars before spawning its
