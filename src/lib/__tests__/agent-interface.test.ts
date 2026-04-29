@@ -2643,9 +2643,7 @@ describe('selectModel', () => {
     // is only reachable from internal callers that bypass the CLI parser.
     // Returning the production default keeps a misconfigured caller on
     // the safe path instead of silently routing somewhere unexpected.
-    expect(selectModel('bogus' as 'standard', true)).toBe(
-      'claude-sonnet-4-6',
-    );
+    expect(selectModel('bogus' as 'standard', true)).toBe('claude-sonnet-4-6');
     expect(selectModel('bogus' as 'standard', false)).toBe(
       'anthropic/claude-sonnet-4-6',
     );
