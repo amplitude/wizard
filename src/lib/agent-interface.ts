@@ -96,6 +96,13 @@ type SDKQueryOptions = {
   abortSignal?: AbortSignal;
   maxTurns?: number;
   thinking?: SDKThinkingConfig;
+  /**
+   * Anthropic API beta headers. Used to opt into the 1M context window via
+   * `'context-1m-2025-08-07'`. The SDK's own `Options.betas` is typed as
+   * `SdkBeta[]`; we accept plain strings here to avoid a hard import of an
+   * SDK-internal type.
+   */
+  betas?: string[];
 };
 
 type SDKQueryFn = (params: {
@@ -216,6 +223,14 @@ export type AgentConfig = {
    * ever does into a single session.
    */
   agentSessionId?: string;
+  /**
+   * Whether the active framework targets the browser. Mirrors
+   * `FrameworkConfig.metadata.targetsBrowser`. Used to gate browser-only
+   * commandment blocks (autocapture defaults, browser SDK init template)
+   * so mobile/server/generic runs don't carry that content in their
+   * system prompt every turn. Undefined = treat as non-browser.
+   */
+  targetsBrowser?: boolean;
 };
 
 /**
@@ -625,6 +640,12 @@ export type AgentRunConfig = {
    * Groups all `/v1/messages` calls in this run into one Agent Analytics session.
    */
   agentSessionId?: string;
+  /**
+   * Whether the active framework targets the browser. Threaded from
+   * `AgentConfig.targetsBrowser` so `runAgent` can ask `commandments.ts`
+   * for browser-specific guidance only when relevant.
+   */
+  targetsBrowser?: boolean;
 };
 
 const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
@@ -1279,6 +1300,7 @@ export async function initializeAgent(
       useLocalClaude,
       useDirectApiKey,
       agentSessionId: config.agentSessionId,
+      targetsBrowser: config.targetsBrowser,
     };
 
     logToFile('Agent config:', {
@@ -1994,6 +2016,12 @@ export async function runAgent(
             fallbackModel: agentConfig.useDirectApiKey
               ? 'claude-sonnet-4-5-20250514'
               : 'anthropic/claude-sonnet-4-5-20250514',
+            // Opt into the 1M context window so long instrumentation runs
+            // (commandments + skills + accumulated tool results) don't trip
+            // compaction mid-flow. Compactions cause the long mid-run pauses
+            // users perceive as "the agent froze". Safe to leave on — falls
+            // back to 200K if the backing model doesn't support it.
+            betas: ['context-1m-2025-08-07'],
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
@@ -2032,7 +2060,13 @@ export async function runAgent(
               preset: 'claude_code',
               // Append wizard-wide commandments (from YAML) rather than replacing
               // the preset so we keep default Claude Code behaviors.
-              append: getWizardCommandments(),
+              // Pass `targetsBrowser` so we don't ship browser-specific
+              // SDK init defaults / autocapture redundancy guidance to
+              // mobile / server / generic runs that can't use them. Saves
+              // several KB of system-prompt bloat on those paths.
+              append: getWizardCommandments({
+                targetsBrowser: agentConfig.targetsBrowser,
+              }),
               // Move per-session dynamic context (cwd, date, user, etc.) out of
               // the cached system prompt and into the first user message. This
               // lets the static preset + our commandments be cached across runs
@@ -2054,6 +2088,13 @@ export async function runAgent(
                 agentConfig.wizardFlags ?? {},
                 agentConfig.agentSessionId,
               ),
+              // Defer MCP tool schemas until the model actually needs them
+              // instead of stuffing every tool's JSONSchema into the system
+              // prompt up front. Our Amplitude MCP exposes 50+ tools;
+              // loading all schemas eagerly bloats every turn. The 'auto:0'
+              // value lets the SDK decide when to fetch schemas — observed
+              // savings on the order of ~100K tokens per turn on full runs.
+              ENABLE_TOOL_SEARCH: 'auto:0',
             },
             canUseTool: (toolName: string, input: unknown) => {
               logToFile('canUseTool called:', { toolName, input });

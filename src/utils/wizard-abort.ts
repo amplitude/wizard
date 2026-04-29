@@ -30,6 +30,42 @@ export class WizardError extends Error {
   }
 }
 
+/**
+ * Hard deadline (ms) for the post-dismissal cleanup race. After the user
+ * presses a key on the OutroScreen, we try to flush analytics + Sentry,
+ * but if the network is dead (the same condition that often produced the
+ * error in the first place), `analytics.shutdown()` awaits a promise that
+ * never resolves — the Amplitude SDK's `flush()` has no timeout. Without
+ * this deadline, `process.exit` never fires and "Press any key to exit"
+ * appears broken: the keypress is registered, the dismissal promise
+ * resolves, but the process sits silent forever.
+ *
+ * 3s is generous enough for any realistic flush over a slow connection
+ * while keeping the worst-case "stuck" window short enough that a user
+ * won't reach for Ctrl+C. Sentry has its own internal 2s flush cap.
+ */
+const POST_DISMISS_EXIT_DEADLINE_MS = 3000;
+
+/**
+ * Race a cleanup promise against a fixed deadline so the wizard is
+ * guaranteed to exit even if the cleanup hangs (typically: dead network
+ * during analytics flush). Returns when whichever completes first.
+ *
+ * The timeout uses `unref()` so it doesn't keep the event loop alive on
+ * its own — if the cleanup resolves first, the process exits cleanly
+ * without waiting for the timer.
+ */
+async function withExitDeadline(cleanup: Promise<unknown>): Promise<void> {
+  await Promise.race([
+    cleanup.catch(() => {
+      /* surfaced upstream; never block exit */
+    }),
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, POST_DISMISS_EXIT_DEADLINE_MS).unref();
+    }),
+  ]);
+}
+
 interface WizardAbortOptions {
   message?: string;
   error?: Error | WizardError;
@@ -97,12 +133,14 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
       /* cleanup should not prevent exit */
     }
   }
-  await Promise.all([
-    analytics.shutdown('success'),
-    flushSentry().catch(() => {
-      /* Sentry flush failure is non-fatal */
-    }),
-  ]);
+  await withExitDeadline(
+    Promise.all([
+      analytics.shutdown('success'),
+      flushSentry().catch(() => {
+        /* Sentry flush failure is non-fatal */
+      }),
+    ]),
+  );
   return process.exit(exitCode);
 }
 
@@ -218,12 +256,22 @@ export async function wizardAbort(
   //    wizardCapture events fired during outro interaction (e.g.
   //    'error outro log opened', 'error outro bug report written')
   //    are delivered before the process exits.
-  await Promise.all([
-    analytics.shutdown(error ? 'error' : 'cancelled'),
-    flushSentry().catch(() => {
-      /* Sentry flush failure is non-fatal */
-    }),
-  ]);
+  //
+  //    Wrapped in `withExitDeadline` because `analytics.shutdown` has no
+  //    internal timeout — when the network is dead (often the same
+  //    condition that triggered this abort), the Amplitude SDK's flush
+  //    awaits forever. Without the deadline, the user presses a key on
+  //    the OutroScreen, dismissal fires, but `process.exit` never runs
+  //    and the wizard appears to hang silently. The deadline guarantees
+  //    we exit within ~3s of dismissal even on a wedged network.
+  await withExitDeadline(
+    Promise.all([
+      analytics.shutdown(error ? 'error' : 'cancelled'),
+      flushSentry().catch(() => {
+        /* Sentry flush failure is non-fatal */
+      }),
+    ]),
+  );
 
   // 5. Exit (fires 'exit' event so TUI cleanup runs)
   //

@@ -729,6 +729,7 @@ async function runAgentWizardBody(
       skipAmplitudeMcp,
       skillsBaseUrl,
       agentSessionId: session.agentSessionId,
+      targetsBrowser: config.metadata.targetsBrowser,
     },
     sessionToOptions(session),
   );
