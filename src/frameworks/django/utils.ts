@@ -12,7 +12,7 @@ export enum DjangoProjectType {
   CHANNELS = 'channels', // Django Channels (async/websockets)
 }
 
-const IGNORE_PATTERNS = [
+export const IGNORE_PATTERNS = [
   '**/node_modules/**',
   '**/dist/**',
   '**/build/**',

@@ -11,7 +11,7 @@ export enum FastAPIProjectType {
   FULLSTACK = 'fullstack', // FastAPI with templates (Jinja2)
 }
 
-const IGNORE_PATTERNS = [
+export const IGNORE_PATTERNS = [
   '**/node_modules/**',
   '**/dist/**',
   '**/build/**',
