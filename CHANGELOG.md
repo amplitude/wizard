@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.8.1](https://github.com/amplitude/wizard/compare/wizard-v1.8.0...wizard-v1.8.1) (2026-04-29)
+
+
+### Bug Fixes
+
+* **outro:** unblock "Press any key to exit" with hard exit deadline + commandMode reset ([#368](https://github.com/amplitude/wizard/issues/368)) ([5dde591](https://github.com/amplitude/wizard/commit/5dde5914f55296b911f1625cb23dca6c26bf2aa1))
+* **tui:** skip RegionSelect for returning users with a stored zone ([#355](https://github.com/amplitude/wizard/issues/355)) ([75a4602](https://github.com/amplitude/wizard/commit/75a460277a5b73a003bfc4a6d025b3a84bedd7fc))
+
+
+### Performance Improvements
+
+* cut agent latency via 1M context, tool-search deferral, and trimmed commandments ([#363](https://github.com/amplitude/wizard/issues/363)) ([37cc590](https://github.com/amplitude/wizard/commit/37cc590726424a3d02feff05001d1e6466e6f1c8))
+
 ## [1.8.0](https://github.com/amplitude/wizard/compare/wizard-v1.7.0...wizard-v1.8.0) (2026-04-29)
 
 
