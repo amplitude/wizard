@@ -56,7 +56,7 @@ export const LogoutScreen = ({
   const handleConfirm = () => {
     clearStoredCredentials();
     clearApiKey(installDir);
-    clearCheckpoint(installDir);
+    clearCheckpoint(installDir, 'logout');
     // Strip OrgId/WorkspaceId/Zone from ampli.json so the next login shows
     // the org + project pickers instead of silently reusing stale IDs.
     // (Back-compat: ampli.json still stores the field as `WorkspaceId`.)

@@ -210,7 +210,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                   // direct `store.session = {...}` assignment worked for
                   // version-based subscribers but silently bypassed
                   // nanostores' per-key change events).
-                  clearCheckpoint(store.session.installDir);
+                  clearCheckpoint(store.session.installDir, 'manual');
                   store.resetForFreshStart();
                   setShowResume(false);
                 } else {

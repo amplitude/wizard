@@ -790,7 +790,7 @@ async function runAgentWizardBody(
       // state, and capture an analytics breadcrumb for cost/quality analysis.
       onPreCompact: ({ trigger }) => {
         try {
-          saveCheckpoint(session);
+          saveCheckpoint(session, 'pre_compact');
         } catch (err) {
           logToFile('PreCompact: saveCheckpoint failed', err);
         }

@@ -162,6 +162,30 @@ export const EVENT_DATA_VERSIONS = {
    * stalled.
    */
   heartbeat: 1,
+  /**
+   * `checkpoint_saved` — emitted whenever the wizard writes a session
+   * snapshot to `~/.amplitude/wizard/runs/<sha>/checkpoint.json`.
+   * Lets orchestrators know there's a recoverable state on disk so
+   * a rerun can pass `--resume` to skip already-completed steps
+   * (region pick, OAuth, framework detection, etc.).
+   */
+  checkpoint_saved: 1,
+  /**
+   * `checkpoint_loaded` — emitted at startup in agent / CI mode when
+   * `--resume` finds a fresh, schema-valid checkpoint and restores
+   * the session from it. Carries the file age so an orchestrator can
+   * decide whether the checkpoint is too stale to trust ("you saved
+   * this 22h ago, are you sure you want to keep going?").
+   */
+  checkpoint_loaded: 1,
+  /**
+   * `checkpoint_cleared` — emitted when the wizard removes a saved
+   * checkpoint. The `reason` discriminator covers the three legitimate
+   * triggers (`success` after a clean run, `manual` from a slash
+   * command, `logout` after sign-out). Lets orchestrators avoid
+   * showing a "resume?" prompt once the underlying state is gone.
+   */
+  checkpoint_cleared: 1,
 } as const;
 
 /** All NDJSON event-level types. */

@@ -811,6 +811,31 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  emitCheckpointSaved(data: {
+    path: string;
+    bytes: number;
+    phase: string;
+  }): void {
+    emit('progress', `checkpoint_saved (${data.phase}, ${data.bytes}B)`, {
+      data: { event: 'checkpoint_saved', ...data },
+    });
+  }
+
+  emitCheckpointLoaded(data: { path: string; ageSeconds: number }): void {
+    emit('progress', `checkpoint_loaded (${data.ageSeconds}s old)`, {
+      data: { event: 'checkpoint_loaded', ...data },
+    });
+  }
+
+  emitCheckpointCleared(data: {
+    path: string;
+    reason: 'success' | 'manual' | 'logout';
+  }): void {
+    emit('progress', `checkpoint_cleared (${data.reason})`, {
+      data: { event: 'checkpoint_cleared', ...data },
+    });
+  }
+
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     let sanitized: string;
