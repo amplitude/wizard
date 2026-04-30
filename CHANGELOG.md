@@ -1,5 +1,33 @@
 # Changelog
 
+## [1.13.1](https://github.com/amplitude/wizard/compare/wizard-v1.13.0...wizard-v1.13.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* **agent:** bound observer hooks so a hung hook can't pin the SDK turn ([#470](https://github.com/amplitude/wizard/issues/470)) ([386f647](https://github.com/amplitude/wizard/commit/386f64755bb82ac91c74860b50f10825b6323e00))
+* **agent:** explicitly disable extended thinking on agent query ([#471](https://github.com/amplitude/wizard/issues/471)) ([e367b15](https://github.com/amplitude/wizard/commit/e367b15808fbd847e2093f3424c09a2a48afa785))
+* **agent:** preserve files-on-disk + last-status across retry attempts ([#468](https://github.com/amplitude/wizard/issues/468)) ([e42e925](https://github.com/amplitude/wizard/commit/e42e92575896f73fccfaa18c91cd5437fbeb4d7e))
+* **agent:** stop masking gateway hangs as progress on the SDK's pre-wait envelope ([#467](https://github.com/amplitude/wizard/issues/467)) ([00d4cf5](https://github.com/amplitude/wizard/commit/00d4cf555020fecddc3782894a312dfabdff8ff4))
+* **agent:** tighten the stall timer's signal-to-noise (status + stream_event) ([#473](https://github.com/amplitude/wizard/issues/473)) ([2d0b5ee](https://github.com/amplitude/wizard/commit/2d0b5ee9642393e7ae18166aaf4b0591761f26fc))
+* **auth:** route MCP to bearer's issuer zone, not the env's data zone ([#466](https://github.com/amplitude/wizard/issues/466)) ([63c0f3c](https://github.com/amplitude/wizard/commit/63c0f3c78a7cd830d6482c657da3aa610e5a7817))
+* **mcp:** bound every gateway fetch with a per-call timeout ([#469](https://github.com/amplitude/wizard/issues/469)) ([a8d00a0](https://github.com/amplitude/wizard/commit/a8d00a02ecffe9738090aa3063671e37c4ff27fd))
+* **mcp:** fail fast on auth errors instead of burning agent fallback time ([#465](https://github.com/amplitude/wizard/issues/465)) ([8f4406f](https://github.com/amplitude/wizard/commit/8f4406f67faf3499ecf5531c2b14bb97c0d69e58))
+* **tui:** clear requiresAccountConfirmation on region switch ([#458](https://github.com/amplitude/wizard/issues/458)) ([b5df370](https://github.com/amplitude/wizard/commit/b5df3705de730788b8e7cddf0fd387ea569364ce))
+* **tui:** gate authTask on !regionForced so IntroScreen "Change region" hits the new zone ([#461](https://github.com/amplitude/wizard/issues/461)) ([0fe40d8](https://github.com/amplitude/wizard/commit/0fe40d8acdf86119cde3a59de8652a2347fc08fe))
+* **tui:** re-auth watcher fires on /region during AuthScreen SUSI ([#472](https://github.com/amplitude/wizard/issues/472)) ([4756054](https://github.com/amplitude/wizard/commit/4756054f490d62dd08d92795641b3f0d895c4338))
+
+
+### Performance Improvements
+
+* cut redundant disk scans and MCP handshakes per wizard run ([#463](https://github.com/amplitude/wizard/issues/463)) ([b476b65](https://github.com/amplitude/wizard/commit/b476b656fc59cbd9d0f19f04253fb59638b40d67))
+* slim shell-shape rules + allow multi-file Edit parallelism ([#464](https://github.com/amplitude/wizard/issues/464)) ([e680db0](https://github.com/amplitude/wizard/commit/e680db04d6bdb775a06b62e10e52fe6cb77b4a04))
+
+
+### Reverts
+
+* clear requiresAccountConfirmation on region switch ([#460](https://github.com/amplitude/wizard/issues/460)) ([51df833](https://github.com/amplitude/wizard/commit/51df833e0e9d660df5abb9a3a5165319e396d44d))
+
 ## [1.13.0](https://github.com/amplitude/wizard/compare/wizard-v1.12.0...wizard-v1.13.0) (2026-04-30)
 
 
