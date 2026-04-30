@@ -45,6 +45,31 @@ export const PROJECT_MARKER_FILES = [
   'composer.json',
 ] as const;
 
+/**
+ * Project markers that live one directory deeper than the install dir.
+ * Unity projects keep their version file inside `ProjectSettings/`; the
+ * top-level project root has no manifest at all by Unity convention,
+ * so without this entry every Unity user is told "no project manifest"
+ * even though the framework is supported and detected by
+ * `detectUnityProject` (`src/frameworks/unity/utils.ts`).
+ */
+export const PROJECT_MARKER_PATHS = [
+  // Unity 2017+ — present in every Unity project
+  'ProjectSettings/ProjectVersion.txt',
+] as const;
+
+/**
+ * Project markers identified by file extension at the install-dir root.
+ * Unreal Engine names its project file `<ProjectName>.uproject` — the
+ * exact filename varies, so a fixed-name match in `PROJECT_MARKER_FILES`
+ * doesn't work. We do a single non-recursive `readdir` and check
+ * extensions; the cost is bounded by the number of files at the root.
+ */
+export const PROJECT_MARKER_EXTENSIONS = [
+  // Unreal Engine — project descriptor
+  '.uproject',
+] as const;
+
 export type ProjectGuardResult =
   | { ok: true; markers: readonly string[] }
   | { ok: false; reason: ProjectGuardReason; details: string };
@@ -122,13 +147,36 @@ export function checkProjectGuard(
     };
   }
 
-  // Look for at least one project marker file at the top level. We
-  // intentionally do NOT recurse — every framework the wizard supports
-  // puts its manifest at the root.
+  // Look for at least one project marker at the top level. We do NOT
+  // recurse: every framework the wizard supports places its manifest
+  // either at the root, in a single fixed sub-path (Unity), or as a
+  // root-level file with a known extension (Unreal).
   const found: string[] = [];
   for (const marker of PROJECT_MARKER_FILES) {
     if (fs.existsSync(path.join(resolved, marker))) {
       found.push(marker);
+    }
+  }
+  for (const subPath of PROJECT_MARKER_PATHS) {
+    if (fs.existsSync(path.join(resolved, subPath))) {
+      found.push(subPath);
+    }
+  }
+  if (PROJECT_MARKER_EXTENSIONS.length > 0) {
+    // Single non-recursive readdir to find any extension-marker file at
+    // the root. Wrapped in try/catch so a permissions error on the dir
+    // (rare; install-dir was already `existsSync`-confirmed above) falls
+    // through to the regular "no marker" path instead of blowing up.
+    try {
+      for (const entry of fs.readdirSync(resolved)) {
+        const ext = path.extname(entry).toLowerCase();
+        if (PROJECT_MARKER_EXTENSIONS.some((m) => m.toLowerCase() === ext)) {
+          found.push(entry);
+          break;
+        }
+      }
+    } catch {
+      // unreadable dir — skip, fall through to no-marker error below
     }
   }
   if (found.length === 0) {

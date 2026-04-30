@@ -34,8 +34,13 @@ export class ScreenErrorBoundary extends Component<Props, State> {
     this.props.store.setScreenError(error);
 
     // Audit 6.1 — emit a redacted diagnostic snapshot so support can
-    // reproduce the boundary trigger. Writes to stderr (leaving stdout
-    // clean for NDJSON consumers) and to the wizard log file.
+    // reproduce the boundary trigger. The original implementation also
+    // wrote the snapshot to stderr, but that corrupts Ink's live frame
+    // (Ink's diff-based redraw doesn't account for direct stderr writes
+    // — the JSON either gets painted over or interleaves into the error
+    // screen the user is supposed to be reading). The log file already
+    // captures the same payload at full fidelity for support to read,
+    // so we drop the stderr write entirely.
     try {
       const store = this.props.store;
       void import('../utils/diagnostics.js')
@@ -52,15 +57,6 @@ export class ScreenErrorBoundary extends Component<Props, State> {
             },
             snapshot,
           };
-          try {
-            process.stderr.write(
-              '\n[screen-error] diagnostic snapshot:\n' +
-                JSON.stringify(payload, null, 2) +
-                '\n',
-            );
-          } catch {
-            // broken pipe — ignore
-          }
           void import('../../../utils/debug.js')
             .then(({ logToFile }) => {
               logToFile(

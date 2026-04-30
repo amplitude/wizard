@@ -19,6 +19,7 @@ import { parseEventPlanContent } from '../lib/event-plan-parser';
 import { getUI } from '../ui';
 import { analytics } from '../utils/analytics';
 import { logToFile } from '../utils/debug';
+import { persistDashboard } from '../lib/wizard-tools';
 import type { WizardSession } from '../lib/wizard-session';
 import type { Integration } from '../lib/constants';
 
@@ -152,6 +153,16 @@ export async function createDashboardStep(
       }`,
     );
   }
+
+  // 3. Mirror to the canonical `<installDir>/.amplitude/dashboard.json`
+  //    path so anything that reads `getDashboardFile()` (the `/diagnostics`
+  //    output, repeat-run plan recovery, skill packs, external integrations)
+  //    finds the file. Pre-#154 the agent wrote this via the file-watcher
+  //    in `agent-interface.ts`; since #154 moved dashboard creation OUT of
+  //    the agent loop, the watcher never fires and the canonical path was
+  //    silently never populated. Best-effort — `persistDashboard` already
+  //    swallows fs errors; a failure here must not fail the wizard.
+  persistDashboard(session.installDir, result);
 
   session.checklistDashboardUrl = result.dashboardUrl;
   ui.setDashboardUrl(result.dashboardUrl);
