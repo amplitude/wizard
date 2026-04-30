@@ -38,6 +38,8 @@ export interface StoredUser {
   lastName: string;
   email: string;
   zone: AmplitudeZone;
+  tosAccepted?: boolean;
+  tosAcceptedAt?: string; // ISO date string
 }
 
 const AmpliSettingsFileSchema = z.record(z.string(), z.unknown());
@@ -98,6 +100,8 @@ const StoredUserSchema = z.object({
   lastName: z.string(),
   email: z.string(),
   zone: z.string(),
+  tosAccepted: z.boolean().optional(),
+  tosAcceptedAt: z.string().optional(),
 });
 
 const UserEntrySchema = z

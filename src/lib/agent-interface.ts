@@ -289,6 +289,16 @@ export type AgentConfig = {
  */
 export const MAX_BASH_SLEEP_SECONDS = 5;
 
+/**
+ * Number of consecutive 401 / auth-flavored `api_retry` system messages from
+ * the Claude Agent SDK we'll tolerate before aborting the query and surfacing
+ * AUTH_ERROR. The SDK's default retry policy hammers a 401 ~10 times with
+ * exponential backoff (~3 min total) — but a 401 won't recover mid-run, so
+ * we cut the storm short and show the user a clear failure + manual-signup
+ * fallback instead of a stuck spinner.
+ */
+export const AUTH_RETRY_LIMIT = 2;
+
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
 
@@ -1925,6 +1935,16 @@ export async function runAgent(
   // outer function scope so both error-emit paths can see them.
   let attemptCount = 0;
   let upstreamGatewayFailures = 0;
+  // Auth tracking — hoisted to function scope so the outer catch can branch
+  // on authErrorDetected. Reset per-attempt inside the retry loop.
+  // - authErrorDetected: a 401 / auth-error result or repeated auth retries
+  //   were observed; route to AUTH_ERROR outro instead of generic API_ERROR.
+  // - authRetryCount: consecutive `api_retry` system messages with
+  //   error_status 401 (or auth-error patterns). When this hits
+  //   AUTH_RETRY_LIMIT we abort the SDK query early so the user isn't
+  //   stuck waiting through ~3 minutes of futile retries.
+  let authErrorDetected = false;
+  let authRetryCount = 0;
 
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
@@ -2140,9 +2160,8 @@ export async function runAgent(
     // 20-min fetch timeout).
     const STALL_TIMEOUT_MS = 120_000;
 
-    // Tracks whether an authentication failure was detected in the current attempt.
-    // Passed to createStopHook so it can skip reflection when auth is broken.
-    let authErrorDetected = false;
+    // (Auth tracking declared at outer function scope — see above the try
+    // block — so the outer catch can also branch on authErrorDetected.)
 
     // Tracks whether a post-stream retry banner is currently shown to the user.
     // Mirrors the pattern in src/lib/middleware/retry.ts: set true when we
@@ -2249,6 +2268,7 @@ export async function runAgent(
         collectedText.length = 0;
         recentStatuses.length = 0;
         authErrorDetected = false;
+        authRetryCount = 0;
         reportedError = null;
         // Reset the agent recovery bag too — without this, modifiedFiles /
         // lastStatus / compactionCount accumulated by a stalled attempt
@@ -2612,6 +2632,39 @@ export async function runAgent(
             logToFile('Auth error detected in result message');
           }
 
+          // Short-circuit the SDK's 401 retry storm. The SDK retries 401s up
+          // to 10 times with exponential backoff (~3 minutes total) — but a
+          // 401 is a credential problem that won't recover within the run.
+          // After AUTH_RETRY_LIMIT consecutive auth-flavored api_retry
+          // messages, abort the SDK query and route to the AUTH_ERROR outro
+          // so the user sees a clear failure + manual-signup fallback
+          // instead of a stuck spinner.
+          if (
+            message.type === 'system' &&
+            message.subtype === 'api_retry' &&
+            ((message as unknown as { error_status?: number }).error_status ===
+              401 ||
+              isAuthErrorMessage(JSON.stringify(message)))
+          ) {
+            authRetryCount++;
+            logToFile(
+              `Auth retry observed (${authRetryCount}/${AUTH_RETRY_LIMIT})`,
+            );
+            if (authRetryCount >= AUTH_RETRY_LIMIT) {
+              authErrorDetected = true;
+              logToFile(
+                'Auth retries exceeded threshold — aborting agent query',
+              );
+              analytics.wizardCapture('agent auth retry aborted', {
+                'retry count': authRetryCount,
+                attempt: attempt + 1,
+              });
+              if (!controller.signal.aborted) {
+                controller.abort('auth_failed');
+              }
+            }
+          }
+
           if (message.type === 'system' && message.subtype === 'init') {
             for (const server of (
               message as unknown as {
@@ -2726,6 +2779,16 @@ export async function runAgent(
         if (wizardSignal.aborted) {
           logToFile('Agent loop exiting: wizard signal aborted');
           throw innerError;
+        }
+
+        // Auth-aborted — do not retry. The early-detect block in the message
+        // loop fired controller.abort('auth_failed') after AUTH_RETRY_LIMIT
+        // consecutive 401 retries; falling into the stall-retry branch would
+        // re-run the same broken credentials. Break to the post-loop AUTH_ERROR
+        // path instead.
+        if (authErrorDetected) {
+          logToFile('Agent loop exiting: auth error detected, not retrying');
+          break;
         }
 
         // Stall-aborted or API error with retries remaining — try again
@@ -2908,6 +2971,17 @@ export async function runAgent(
   } catch (error) {
     // Signal done to unblock the async generator
     signalDone();
+
+    // Auth-aborted while the SDK was still streaming — the early-detect path
+    // fired controller.abort('auth_failed') and the resulting AbortError
+    // bubbled up. Surface AUTH_ERROR so agent-runner shows the friendly
+    // re-auth / manual-signup outro instead of a generic API_ERROR.
+    if (authErrorDetected) {
+      logToFile('Agent error (caught): AUTH_ERROR');
+      spinner.stop('Authentication failed');
+      _activeStatusReporter = undefined;
+      return { error: AgentErrorType.AUTH_ERROR };
+    }
 
     // If we already received a successful result, the error is from SDK cleanup
     // This happens due to a race condition: the SDK tries to send a cleanup command
