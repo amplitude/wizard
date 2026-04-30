@@ -27,7 +27,6 @@
  */
 
 import * as fs from 'node:fs';
-import { atomicWriteJSON } from './atomic-write.js';
 import { getApplyLockFile, ensureDir, getRunDir } from './storage-paths.js';
 
 /** Max age (ms) before we consider a lockfile stale and steal it. */
@@ -59,46 +58,90 @@ export function acquireApplyLock(
   const lockFile = getApplyLockFile(installDir);
   ensureDir(getRunDir(installDir), 0o700);
 
-  const existing = readLockHolder(lockFile);
-  if (existing) {
-    if (isStale(existing, now)) {
-      // Stale: prior process gone or run too old. Steal the lock.
-      try {
-        fs.rmSync(lockFile, { force: true });
-      } catch {
-        /* best-effort */
-      }
-    } else {
-      return { ok: false, holder: existing, reason: 'in_progress' };
-    }
-  }
-
   const holder: ApplyLockHolder = {
     pid: process.pid,
     startedAt: now.toISOString(),
     planId,
   };
-  try {
-    atomicWriteJSON(lockFile, holder, 0o600);
-  } catch {
-    // If the write fails, treat as not-locked rather than blocking
-    // the caller — better to risk a second apply than to make the
-    // primary path unreachable on a transient FS error.
-    return { ok: true, release: () => undefined };
-  }
-  const release = (): void => {
+  const payload = JSON.stringify(holder);
+
+  // Try to acquire by atomically creating the lockfile with O_CREAT|O_EXCL
+  // (`'wx'`). This is the only POSIX way to test-and-set on a regular file
+  // without TOCTOU. Two concurrent acquirers race on `openSync`; the OS
+  // serializes them, the loser gets EEXIST. The previous temp-file +
+  // rename approach (`atomicWriteJSON`) is last-writer-wins and let two
+  // processes both observe "no lock", both write, both believe they own
+  // it — the exact race this lock was built to prevent.
+  //
+  // We retry once on EEXIST after checking whether the existing lock is
+  // stale. Stale-steal is also race-safe: `unlinkSync` followed by
+  // `openSync('wx')` lets one stealer win and the rest fail with EEXIST,
+  // at which point they observe the new owner and refuse cleanly.
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      // Only remove if WE still own the lock — a stale-steal in
-      // another process may have taken it. Best-effort comparison.
-      const current = readLockHolder(lockFile);
-      if (current && current.pid === process.pid) {
-        fs.rmSync(lockFile, { force: true });
+      const fd = fs.openSync(lockFile, 'wx', 0o600);
+      try {
+        fs.writeFileSync(fd, payload);
+      } finally {
+        fs.closeSync(fd);
       }
-    } catch {
-      /* best-effort */
+      const release = (): void => {
+        try {
+          // Only remove if WE still own the lock — a stale-steal in
+          // another process may have taken it. Best-effort comparison.
+          const current = readLockHolder(lockFile);
+          if (current && current.pid === process.pid) {
+            fs.rmSync(lockFile, { force: true });
+          }
+        } catch {
+          /* best-effort */
+        }
+      };
+      return { ok: true, release };
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'EEXIST') {
+        // Non-existence error (EACCES, ENOSPC, etc.). Treat as
+        // not-locked rather than blocking the caller — better to risk
+        // a second apply than to make the primary path unreachable on
+        // a transient FS error. Same fail-open posture as the previous
+        // implementation.
+        return { ok: true, release: () => undefined };
+      }
+
+      // Lockfile exists. Inspect the holder.
+      const existing = readLockHolder(lockFile);
+      if (!existing) {
+        // File present but unparseable (truncated, foreign content). On
+        // first attempt, treat as stale and unlink; on second, give up
+        // and fail-open.
+        if (attempt === 0) {
+          try {
+            fs.rmSync(lockFile, { force: true });
+          } catch {
+            /* best-effort */
+          }
+          continue;
+        }
+        return { ok: true, release: () => undefined };
+      }
+      if (isStale(existing, now) && attempt === 0) {
+        // Stale: try to steal. If two stealers race, only one's
+        // `rmSync`+`openSync('wx')` pair will succeed; the rest go
+        // around the loop, observe the new live holder, and refuse.
+        try {
+          fs.rmSync(lockFile, { force: true });
+        } catch {
+          /* best-effort */
+        }
+        continue;
+      }
+      return { ok: false, holder: existing, reason: 'in_progress' };
     }
-  };
-  return { ok: true, release };
+  }
+  // Shouldn't be reachable — the loop either returns or continues at
+  // most once. Defensive fail-open if we ever fall through.
+  return { ok: true, release: () => undefined };
 }
 
 function readLockHolder(lockFile: string): ApplyLockHolder | null {
