@@ -1953,7 +1953,11 @@ export class WizardStore {
       if (explicit === 'completed') {
         status = TaskStatus.Completed;
       } else if (explicit === 'in_progress') {
-        status = TaskStatus.InProgress;
+        // Sequential cascade still applies — if a later step has been
+        // touched, this in_progress is stale (the agent moved on
+        // without explicitly completing this step). Promote to
+        // Completed so the user-visible list stays single-in_progress.
+        status = i < frontier ? TaskStatus.Completed : TaskStatus.InProgress;
       } else if (i < frontier) {
         // Sequential cascade — a later step has advanced, so this
         // earlier step must be done by definition.

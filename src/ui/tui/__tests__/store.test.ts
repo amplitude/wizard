@@ -1282,6 +1282,27 @@ describe('WizardStore', () => {
       expect(store.tasks[4].status).toBe(TaskStatus.Pending);
     });
 
+    it('promotes a stale in_progress step to completed when a later step is also in_progress', () => {
+      // The classifier emits per-tool-call transitions; nothing
+      // prevents `install: in_progress` from sitting in derived state
+      // when `wire: in_progress` later fires (no explicit "install
+      // completed" tool call ever lands — install completion is
+      // implicit via the sequential cascade).
+      //
+      // The user-visible list MUST stay single-in_progress: the older
+      // in_progress is stale and must render as Completed, even though
+      // it's still in the derived map as `in_progress`.
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+      store.applyJourneyTransition('wire', 'in_progress');
+
+      expect(store.tasks[0].status).toBe(TaskStatus.Completed); // detect (cascade)
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed); // install (was in_progress, cascaded)
+      expect(store.tasks[2].status).toBe(TaskStatus.Completed); // plan (cascade)
+      expect(store.tasks[3].status).toBe(TaskStatus.InProgress); // wire (frontier)
+      expect(store.tasks[4].status).toBe(TaskStatus.Pending); // dashboard
+    });
+
     it('forces monotonic progress — completed steps cannot regress', () => {
       // Retry scenario: a stale tool call replays after a step has been
       // verified completed. The store ignores the demotion.
