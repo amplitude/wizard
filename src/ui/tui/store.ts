@@ -44,6 +44,7 @@ import {
   CANONICAL_STEPS,
   matchCanonicalStep,
 } from '../../lib/canonical-tasks.js';
+import type { JourneyStepId, JourneyStatus } from '../../lib/journey-state.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -130,6 +131,26 @@ export class WizardStore {
    * don't stall after the 50th write.
    */
   private $fileWritesTotal = atom(0);
+  /**
+   * Per-step journey status derived from deterministic tool-call signals
+   * (see `src/lib/journey-state.ts`). This is the source of truth for the
+   * canonical 5-step progress UI; `syncTodos` only updates each step's
+   * `activeForm` flavor text. Initialised on first `applyJourneyTransition`
+   * call — until then each step is treated as `pending`.
+   */
+  private $derivedJourney = atom<Partial<Record<JourneyStepId, JourneyStatus>>>(
+    {},
+  );
+  /**
+   * Latest non-empty `activeForm` the agent has emitted via `TodoWrite`,
+   * keyed by canonical step id. Refreshed every `syncTodos` call. The
+   * renderer prefers this over the canonical `defaultActiveForm` so the
+   * user sees the agent's current narration ("Installing project
+   * dependencies") on the active row.
+   */
+  private $journeyActiveForms = atom<Partial<Record<JourneyStepId, string>>>(
+    {},
+  );
   private $version = atom(0);
 
   /** True while the user is typing a slash command in the command bar. */
@@ -276,17 +297,11 @@ export class WizardStore {
       this.$session.setKey('runStartedAt', Date.now());
       // Pre-populate the canonical 5 tasks so the user sees "0 done · 5
       // to go" from frame 1, not an empty list while the agent loads.
-      // Skip if the list is already populated (re-entry into Running, or
-      // a test that pre-seeded tasks via setTasks).
+      // The renderer derives rows from $derivedJourney + $journeyActiveForms;
+      // calling it on every Running entry is idempotent and preserves
+      // any progress already accumulated on a re-entry.
       if (this.$tasks.get().length === 0) {
-        this.$tasks.set(
-          CANONICAL_STEPS.map((step) => ({
-            label: step.label,
-            activeForm: step.defaultActiveForm,
-            status: TaskStatus.Pending,
-            done: false,
-          })),
-        );
+        this.renderJourneyTasks();
       }
     }
     this.emitChange();
@@ -1862,107 +1877,101 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Apply a deterministic journey transition derived from a tool call
+   * (see `src/lib/journey-state.ts`). Status of the named step is set to
+   * the incoming value with a monotonic guard — once a step has reached
+   * `completed`, no later transition demotes it. Sequential-ordering
+   * cascade (a later step advancing implies all earlier ones are done)
+   * is applied at render time.
+   *
+   * This is the source of truth for the canonical 5-step UI status.
+   * `syncTodos` only refreshes per-step `activeForm` flavor text; it
+   * never writes status here.
+   */
+  applyJourneyTransition(stepId: JourneyStepId, status: JourneyStatus): void {
+    const prev = this.$derivedJourney.get();
+    const current = prev[stepId];
+    // Monotonic guard — once completed, can't regress to in_progress.
+    if (current === 'completed' && status !== 'completed') return;
+    if (current === status) return;
+    this.$derivedJourney.set({ ...prev, [stepId]: status });
+    this.renderJourneyTasks();
+    this.emitChange();
+  }
+
+  /**
+   * Refresh per-step `activeForm` text from the agent's `TodoWrite`
+   * output. Status is owned by `applyJourneyTransition`; this method
+   * never touches it. Incoming todos that don't exactly match a
+   * canonical label are dropped.
+   *
+   * Safe fallback: when no journey transition has fired yet (early in a
+   * run, or in tests that exercise syncTodos directly), the renderer
+   * still seeds the canonical 5 rows as `pending` so the user-visible
+   * list is never empty.
+   */
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
-    // The user-visible list is locked to the five CANONICAL_STEPS.
-    // TodoWrite output is treated as a stream of updates against that
-    // fixed list: each incoming todo is matched to a canonical step by
-    // exact label (case-insensitive) and anything that doesn't match is
-    // dropped. The agent commandment is the contract — drift in wording
-    // is a prompt bug to fix in commandments.ts, not paper over here.
-    //
-    // Three invariants enforced after the per-step status is resolved:
-    //   1. Monotonic — once a step has been completed, no later sync can
-    //      demote it. Catches retry-induced regression where the agent
-    //      re-emits stale TodoWrite state after an HTTP 400 / 429.
-    //   2. Single in_progress — the canonical journey is sequential. If
-    //      multiple steps are simultaneously in_progress, only the
-    //      latest stays active.
-    //   3. Sequential ordering — when the agent skips ahead (marks a
-    //      later step in_progress while an earlier one is still
-    //      pending), the earlier steps roll up to completed.
-
-    // Start from existing tasks (pre-populated in setRunPhase). Defensive
-    // fallback when the list is empty (test-only or unusual entry).
-    const current = this.$tasks.get();
-    const base: TaskItem[] =
-      current.length === CANONICAL_STEPS.length
-        ? current.map((t) => ({ ...t }))
-        : CANONICAL_STEPS.map((step) => ({
-            label: step.label,
-            activeForm: step.defaultActiveForm,
-            status: TaskStatus.Pending,
-            done: false,
-          }));
-
-    // Bucket each incoming todo and aggregate per step.
-    const sawInProgress: boolean[] = base.map(() => false);
-    const sawCompleted: boolean[] = base.map(
-      (t) => t.status === TaskStatus.Completed,
-    );
-
+    const next: Partial<Record<JourneyStepId, string>> = {
+      ...this.$journeyActiveForms.get(),
+    };
     for (const todo of todos) {
       const idx = matchCanonicalStep(todo.content);
       if (idx < 0) continue;
-      const incomingStatus = (todo.status as TaskStatus) || TaskStatus.Pending;
-      if (incomingStatus === TaskStatus.Completed) sawCompleted[idx] = true;
-      if (incomingStatus === TaskStatus.InProgress) sawInProgress[idx] = true;
-      // Latest non-empty activeForm wins so the user sees current work
-      // ("Installing project dependencies"). Falls back to the canonical
-      // default when the step flips to in_progress without one.
       if (todo.activeForm && todo.activeForm.trim()) {
-        base[idx].activeForm = todo.activeForm;
+        next[CANONICAL_STEPS[idx].id] = todo.activeForm;
       }
     }
-
-    // Resolve each step's status with monotonic guard.
-    for (let i = 0; i < base.length; i++) {
-      if (sawCompleted[i]) {
-        base[i].status = TaskStatus.Completed;
-        base[i].done = true;
-      } else if (base[i].status === TaskStatus.Completed || base[i].done) {
-        base[i].status = TaskStatus.Completed;
-        base[i].done = true;
-      } else if (sawInProgress[i]) {
-        base[i].status = TaskStatus.InProgress;
-        base[i].done = false;
-      }
-    }
-
-    // Enforce single-in-progress + ordering.
-    let lastInProgressIdx = -1;
-    let lastCompletedIdx = -1;
-    for (let i = 0; i < base.length; i++) {
-      if (base[i].status === TaskStatus.InProgress) lastInProgressIdx = i;
-      if (base[i].status === TaskStatus.Completed) lastCompletedIdx = i;
-    }
-    const frontier = Math.max(lastInProgressIdx, lastCompletedIdx);
-    for (let i = 0; i < frontier; i++) {
-      if (base[i].status !== TaskStatus.Completed) {
-        base[i].status = TaskStatus.Completed;
-        base[i].done = true;
-      }
-    }
-    if (lastInProgressIdx >= 0) {
-      for (let i = 0; i < base.length; i++) {
-        if (
-          i !== lastInProgressIdx &&
-          base[i].status === TaskStatus.InProgress
-        ) {
-          if (i < lastInProgressIdx) {
-            base[i].status = TaskStatus.Completed;
-            base[i].done = true;
-          } else {
-            base[i].status = TaskStatus.Pending;
-            base[i].done = false;
-          }
-        }
-      }
-    }
-
-    this.$tasks.set(base);
+    this.$journeyActiveForms.set(next);
+    this.renderJourneyTasks();
     this.emitChange();
+  }
+
+  /**
+   * Re-render the canonical 5-row task list from the derived journey
+   * status + per-step activeForms. Sequential-ordering cascade applied
+   * here: when step N is in_progress or completed, every step before
+   * N rolls up to completed (the agent has demonstrably moved past
+   * them). Single-in-progress is implicit — the cascade walks earlier
+   * in_progress states up to completed.
+   */
+  private renderJourneyTasks(): void {
+    const derived = this.$derivedJourney.get();
+    const activeForms = this.$journeyActiveForms.get();
+
+    let frontier = -1;
+    for (let i = 0; i < CANONICAL_STEPS.length; i++) {
+      const status = derived[CANONICAL_STEPS[i].id];
+      if (status === 'in_progress' || status === 'completed') frontier = i;
+    }
+
+    const tasks: TaskItem[] = CANONICAL_STEPS.map((step, i) => {
+      let status: TaskStatus = TaskStatus.Pending;
+      const explicit = derived[step.id];
+      if (explicit === 'completed') {
+        status = TaskStatus.Completed;
+      } else if (explicit === 'in_progress') {
+        // Sequential cascade still applies — if a later step has been
+        // touched, this in_progress is stale (the agent moved on
+        // without explicitly completing this step). Promote to
+        // Completed so the user-visible list stays single-in_progress.
+        status = i < frontier ? TaskStatus.Completed : TaskStatus.InProgress;
+      } else if (i < frontier) {
+        // Sequential cascade — a later step has advanced, so this
+        // earlier step must be done by definition.
+        status = TaskStatus.Completed;
+      }
+      return {
+        label: step.label,
+        activeForm: activeForms[step.id] ?? step.defaultActiveForm,
+        status,
+        done: status === TaskStatus.Completed,
+      };
+    });
+
+    this.$tasks.set(tasks);
   }
 
   // ── React integration ───────────────────────────────────────────

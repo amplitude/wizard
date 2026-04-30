@@ -253,6 +253,13 @@ export class LoggingUI implements WizardUI {
     }
   }
 
+  applyJourneyTransition(
+    stepId: import('../lib/journey-state.js').JourneyStepId,
+    status: import('../lib/journey-state.js').JourneyStatus,
+  ): void {
+    console.log(`◌  journey: ${stepId} ${status}`);
+  }
+
   setEventPlan(_events: Array<{ name: string; description: string }>): void {
     // No-op in CI mode
   }

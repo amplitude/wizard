@@ -247,6 +247,13 @@ export class InkUI implements WizardUI {
     this.store.syncTodos(todos);
   }
 
+  applyJourneyTransition(
+    stepId: import('../../lib/journey-state.js').JourneyStepId,
+    status: import('../../lib/journey-state.js').JourneyStatus,
+  ): void {
+    this.store.applyJourneyTransition(stepId, status);
+  }
+
   recordFileChangePlanned(data: {
     path: string;
     operation: 'create' | 'modify' | 'delete';
