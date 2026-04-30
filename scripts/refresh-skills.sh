@@ -83,7 +83,7 @@ extract_zip() {
   fi
 
   mkdir -p "$dest"
-  unzip -q -o "$zip" -d "$dest" -x "${SKILL_EXCLUDE_PATTERNS[@]}"
+  unzip -q -o "$zip" -x "${SKILL_EXCLUDE_PATTERNS[@]}" -d "$dest"
 
   # Drop dangling reference list entries in SKILL.md that point at the
   # files we just excluded — without this, the agent loads SKILL.md, sees
