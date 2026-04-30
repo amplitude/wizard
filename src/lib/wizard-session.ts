@@ -318,6 +318,24 @@ export interface WizardSession {
   mode: import('../utils/types').WizardMode;
 
   /**
+   * Free-form context the outer orchestrator wants prepended to every
+   * agent turn. Sourced from `--context-file <path>` (or
+   * `AMPLITUDE_WIZARD_CONTEXT` env var) at the CLI boundary; threaded
+   * into `agent-interface.initializeAgent` and appended after the
+   * commandments in the cached system-prompt block.
+   *
+   * Lets a parent agent inject team conventions ("we use snake_case for
+   * events"), existing taxonomy hints, or project-specific instructions
+   * WITHOUT modifying any skill content. The wizard treats it as
+   * project-authoritative for conventions but never lets it override the
+   * hard safety rules at the top of `commandments.ts`.
+   *
+   * `null` when no context was provided. Capped at the CLI boundary
+   * (currently 64 KB) so a runaway file can't bloat the system prompt.
+   */
+  orchestratorContext: string | null;
+
+  /**
    * UUID v4 generated once per wizard run. Forwarded to the Amplitude LLM
    * gateway as the `x-amp-wizard-session-id` header so every `/v1/messages`
    * call across the wizard's discrete agent phases (taxonomy, integration,
@@ -825,6 +843,11 @@ export function buildSession(args: {
     menu: validated.menu ?? false,
     benchmark: validated.benchmark ?? false,
     mode: validated.mode ?? 'standard',
+    // The CLI boundary stamps this directly on the session after
+    // buildSession returns; default to null here so unit tests and any
+    // other buildSession caller that doesn't wire `--context-file`
+    // start with a known-empty value.
+    orchestratorContext: null,
     appId: parsed.success ? parsed.data.appId : parseAppIdArg(args.appId),
 
     // Stable across the entire wizard run; forwarded to the LLM gateway as

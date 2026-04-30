@@ -14,6 +14,60 @@ import {
 } from './helpers';
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
+import { ExitCode } from '../lib/exit-codes';
+import {
+  loadOrchestratorContext,
+  resolveOrchestratorContextPath,
+} from '../utils/orchestrator-context';
+import type { WizardSession } from '../lib/wizard-session';
+
+/**
+ * Load `--context-file` (or `AMPLITUDE_WIZARD_CONTEXT`) and stamp the
+ * resulting string onto `session.orchestratorContext`. Centralized here
+ * so all four mode branches (agent / CI / classic / TUI) share one
+ * read+validate path and emit one consistent error envelope.
+ *
+ * On failure: emits a structured NDJSON event in agent mode, plain
+ * stderr in every other mode, then exits with INVALID_ARGS so the
+ * orchestrator can distinguish "your config was bad" from "the wizard
+ * crashed mid-run". Returns void so callers can `return` immediately.
+ */
+function applyOrchestratorContext(
+  session: WizardSession,
+  options: Record<string, unknown>,
+  emitJson: boolean,
+): void {
+  const path = resolveOrchestratorContextPath(
+    options['context-file'] as string | undefined,
+  );
+  if (!path) return;
+
+  const result = loadOrchestratorContext(path, session.installDir);
+  if (!result.ok) {
+    if (emitJson) {
+      process.stdout.write(
+        JSON.stringify({
+          v: 1,
+          '@timestamp': new Date().toISOString(),
+          type: 'error',
+          message: result.message,
+          data: {
+            event: 'context_file_failed',
+            reason: result.reason,
+            sourcePath: result.sourcePath,
+          },
+        }) + '\n',
+      );
+    } else {
+      process.stderr.write(
+        `[wizard] --context-file: ${result.message} (${result.sourcePath})\n`,
+      );
+    }
+    process.exit(ExitCode.INVALID_ARGS);
+  }
+
+  session.orchestratorContext = result.content;
+}
 
 export const defaultCommand: CommandModule = {
   command: ['$0'],
@@ -92,6 +146,17 @@ export const defaultCommand: CommandModule = {
         describe: 'use the classic prompt-based UI',
         type: 'boolean',
       },
+      'context-file': {
+        // Lets an outer agent / CI pipeline inject team conventions
+        // ("we use snake_case for events", existing taxonomy snippets,
+        // project-specific guidance) WITHOUT modifying any skill content.
+        // The file is read once at startup and prepended to every agent
+        // turn's system prompt. 64 KB cap; UTF-8; falls back to
+        // AMPLITUDE_WIZARD_CONTEXT env var when the flag is omitted.
+        describe:
+          'path to a file whose contents are injected into the inner-agent system prompt',
+        type: 'string',
+      },
     }),
   handler: (argv) => {
     const options = { ...argv };
@@ -144,6 +209,7 @@ export const defaultCommand: CommandModule = {
 
         const session = await buildSessionFromOptions(options);
         session.agent = true;
+        applyOrchestratorContext(session, options, true);
 
         if (!gateAgentSignupArguments(session, agentUI)) {
           return;
@@ -174,6 +240,7 @@ export const defaultCommand: CommandModule = {
 
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
+        applyOrchestratorContext(session, options, false);
 
         if (!gateCiSignupAcceptToS(session)) {
           return;
@@ -199,6 +266,7 @@ export const defaultCommand: CommandModule = {
       // Classic mode: interactive prompts without the rich TUI
       void (async () => {
         const session = await buildSessionFromOptions(options);
+        applyOrchestratorContext(session, options, false);
 
         // Attempt direct signup before falling through to OAuth browser
         // flow. On success, run resolveCredentials so agent-runner's
@@ -237,6 +305,11 @@ export const defaultCommand: CommandModule = {
           // ~seconds it takes to resolve OAuth credentials, until the
           // `tui.store.session = session` swap below runs.
           const session = await buildSessionFromOptions(options);
+          // Loading the orchestrator context BEFORE startTUI so a bad
+          // path fails fast on stderr (no half-rendered TUI to tear
+          // down). The TUI branch keeps NDJSON off — interactive users
+          // get a plain error message they can read.
+          applyOrchestratorContext(session, options, false);
           const tui = startTUI(WIZARD_VERSION, undefined, session);
 
           // Install the SIGINT handler IMMEDIATELY after starting the TUI.
