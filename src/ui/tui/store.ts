@@ -19,6 +19,7 @@ import {
   type CloudRegion,
   type RetryState,
   buildSession,
+  toCredentialAppId,
 } from '../../lib/wizard-session.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
 import { resolveZone } from '../../lib/zone-resolution.js';
@@ -1065,13 +1066,29 @@ export class WizardStore {
     this.$session.setKey('selectedProjectId', project.id || null);
     this.$session.setKey('selectedProjectName', project.name);
 
-    // Extract the Amplitude app ID from the lowest-rank environment.
-    const appId =
-      project.environments
-        ?.slice()
-        .sort((a, b) => a.rank - b.rank)
-        .find((e) => e.app?.id)?.app?.id ?? null;
+    // Extract the Amplitude app ID (and api key, when present) from the
+    // lowest-rank environment.
+    const lowestEnv = project.environments
+      ?.slice()
+      .sort((a, b) => a.rank - b.rank)
+      .find((e) => e.app?.id);
+    const appId = lowestEnv?.app?.id ?? null;
+    const apiKey = lowestEnv?.app?.apiKey ?? null;
     this.$session.setKey('selectedAppId', appId);
+
+    // Keep credentials.appId / projectApiKey in sync with the freshly
+    // picked project. Without this, /whoami and any other reader that
+    // looks at credentials.* keeps showing the appId that was bound at
+    // initial OAuth (the user's first/old project) — even after they
+    // switched projects mid-session.
+    const currentCreds = this.$session.get().credentials;
+    if (currentCreds) {
+      this.$session.setKey('credentials', {
+        ...currentCreds,
+        appId: toCredentialAppId(appId),
+        projectApiKey: apiKey ?? currentCreds.projectApiKey,
+      });
+    }
 
     if (persist) {
       // Write ampli.json to the project directory.
