@@ -5,6 +5,7 @@ import * as os from 'os';
 import {
   resolveEnvPath,
   ensureGitignoreCoverage,
+  shouldSkipAutoGitignoreForEnvBasename,
   parseEnvKeys,
   mergeEnvValues,
   persistEventPlan,
@@ -201,9 +202,29 @@ describe('ensureGitignoreCoverage', () => {
 
   it('appends with newline if .gitignore lacks trailing newline', () => {
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules');
-    ensureGitignoreCoverage(tmpDir, '.env');
+    ensureGitignoreCoverage(tmpDir, '.env.secrets');
     const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
-    expect(content).toBe('node_modules\n.env\n');
+    expect(content).toBe('node_modules\n.env.secrets\n');
+  });
+
+  it('does not modify .gitignore for shared committed env template basenames', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules\n');
+    ensureGitignoreCoverage(tmpDir, '.env.development');
+    ensureGitignoreCoverage(tmpDir, '.env.production');
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('node_modules\n');
+  });
+
+  it('does not create .gitignore when only skipped basenames would be covered', () => {
+    ensureGitignoreCoverage(tmpDir, '.env');
+    expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
+  });
+
+  it('shouldSkipAutoGitignoreForEnvBasename matches shared template set', () => {
+    expect(shouldSkipAutoGitignoreForEnvBasename('.env.development')).toBe(
+      true,
+    );
+    expect(shouldSkipAutoGitignoreForEnvBasename('.env.local')).toBe(false);
   });
 
   it('does not duplicate an existing entry', () => {
