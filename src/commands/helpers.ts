@@ -675,7 +675,7 @@ export const runDirectSignupIfRequested = async (
     );
     return;
   }
-  if (tokens == null) {
+  if (tokens === null || tokens === '') {
     getUI().log.info(
       `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
     );
