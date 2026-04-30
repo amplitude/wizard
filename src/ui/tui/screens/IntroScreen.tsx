@@ -22,7 +22,7 @@ import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { analyzeWorkspace } from '../../../lib/workspace-analysis.js';
 import { ampliConfigExists } from '../../../lib/ampli-config.js';
 import { PickerMenu } from '../primitives/index.js';
-import { DirectoryPicker } from '../components/DirectoryPicker.js';
+import { PathInput } from '../components/PathInput.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
@@ -279,8 +279,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       */}
       {changingDirectory && (
         <Box marginY={1} flexDirection="column" alignItems="flex-start">
-          <DirectoryPicker
-            initialDir={session.installDir}
+          <PathInput
+            initialValue={session.installDir}
             onSubmit={(absolutePath) => {
               analytics.wizardCapture('install dir change submitted', {
                 'detected framework': session.detectedFrameworkLabel,
