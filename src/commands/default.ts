@@ -660,10 +660,22 @@ export const defaultCommand: CommandModule = {
               // Wait for the user to dismiss the welcome screen AND pick a
               // region before opening the OAuth URL. This ensures the logo
               // and intro are visible before the browser opens.
+              //
+              // The `!regionForced` guard handles the IntroScreen "Change
+              // region" path: a returning user already has `region` set
+              // from disk, so picking "Change region" calls
+              // setRegionForced() (regionForced=true) + concludeIntro()
+              // (introConcluded=true) — both fields the original wait
+              // condition watched. Without the guard the auth task would
+              // wake up and open the browser against the OLD region while
+              // the user is still picking the new one on RegionSelect.
+              // setRegion() flips regionForced back to false once the new
+              // region is chosen, releasing the wait against the right zone.
               await new Promise<void>((resolve) => {
                 if (
                   tui.store.session.introConcluded &&
-                  tui.store.session.region !== null
+                  tui.store.session.region !== null &&
+                  !tui.store.session.regionForced
                 ) {
                   resolve();
                   return;
@@ -671,7 +683,8 @@ export const defaultCommand: CommandModule = {
                 const unsub = tui.store.subscribe(() => {
                   if (
                     tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
+                    tui.store.session.region !== null &&
+                    !tui.store.session.regionForced
                   ) {
                     unsub();
                     resolve();
