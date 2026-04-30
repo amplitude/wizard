@@ -1030,15 +1030,21 @@ export const defaultCommand: CommandModule = {
             // keeps the 3-strike circuit-breaker as the only place that
             // hands control back to the user.
             while (true) {
-              // Wait for credentials to populate (via initial authTask
-              // or a previous SUSI completion).
-              await waitForSessionState(
-                () => tui.store.session.credentials !== null,
-              );
+              // Wait for /region to be invoked. setRegionForced sets
+              // regionForced=true (and clears credentials + pendingOrgs).
+              //
+              // Gating on regionForced rather than `credentials !== null`
+              // matters when /region is fired DURING the AuthScreen SUSI
+              // step — initial OAuth completed (pendingOrgs set) but the
+              // user hasn't picked an org/project yet, so credentials is
+              // still null. The old `credentials !== null` gate parked
+              // forever in that window and never reacted to setRegionForced.
+              // `await authTask` above already prevents racing with the
+              // initial OAuth, so we don't need the credentials sentinel.
+              await waitForSessionState(() => tui.store.session.regionForced);
 
-              // Then wait for them to be cleared AND the user to have
-              // picked a new region. setRegionForced clears credentials;
-              // the subsequent setRegion clears regionForced.
+              // Then wait for the user to pick a new region. setRegion
+              // clears regionForced.
               //
               // Skip when /logout is active (loggingOut flag) or an
               // outro is queued — /logout clears credentials and exits
