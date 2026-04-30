@@ -109,6 +109,19 @@ describe('browser-only commandment gating', () => {
     expect(browserText).toContain('initAll(API_KEY');
   });
 
+  // Regression — Excalidraw run review surfaced 6 instrumented files
+  // importing `track` directly from `@amplitude/analytics-browser`
+  // instead of from the project's own `excalidraw-app/amplitude.ts`
+  // wrapper, leaving its re-export as dead code. The browser
+  // commandments block explicitly forbids the direct-import pattern.
+  it('forbids importing track directly from @amplitude/analytics-browser on browser runs', () => {
+    expect(browserText).toContain('@amplitude/analytics-browser');
+    // The commandment shows the WRONG pattern as a negative example
+    // and the RIGHT pattern as the project-local relative import.
+    expect(browserText).toContain('// ✗ WRONG');
+    expect(browserText).toContain('// ✓ RIGHT');
+  });
+
   it('default (no options) treats run as non-browser — conservative', () => {
     // If we don't know the platform, ship the lean prompt. Mobile,
     // server, and generic frameworks must never carry browser-only
