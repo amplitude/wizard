@@ -23,6 +23,8 @@ import type { AmplitudeZone } from './constants.js';
 import { WIZARD_USER_AGENT } from './constants.js';
 import { getWizardProxyBase } from './api.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
+import { decodeJwtZone } from '../utils/jwt-exp.js';
+import { getMcpUrlFromZone } from '../utils/urls.js';
 
 const PlannedEventsSuccessSchema = z.object({
   createdCount: z.number(),
@@ -161,10 +163,12 @@ async function createPlannedEventsViaMcp(
   accessToken: string,
   appId: string,
   mcpEvents: Array<{ eventType: string; wasPlanned: boolean }>,
+  mcpUrl: string,
   abortSignal?: AbortSignal,
 ): Promise<CreateEventsOutcome | null> {
   return callAmplitudeMcp<CreateEventsOutcome>({
     accessToken,
+    mcpUrl,
     label: 'commitPlannedEvents.create',
     abortSignal,
     agentTimeoutMs: CREATE_EVENTS_TIMEOUT_MS,
@@ -237,6 +241,8 @@ export async function commitPlannedEvents(
   opts: CommitPlannedEventsOptions,
 ): Promise<CommitPlannedEventsResult> {
   const { accessToken, appId, events, zone, abortSignal } = opts;
+  const accountZone = decodeJwtZone(accessToken) ?? zone;
+  const mcpUrl = getMcpUrlFromZone(accountZone);
   const cleaned = dedupeAndClean(events);
 
   if (cleaned.length === 0 || !appId) {
@@ -271,6 +277,7 @@ export async function commitPlannedEvents(
       accessToken,
       appId,
       mcpEvents,
+      mcpUrl,
       abortSignal,
     )) ?? { success: false, message: 'create_events failed' };
   } else {
@@ -307,6 +314,7 @@ export async function commitPlannedEvents(
 
   const updateResult = await callAmplitudeMcp<{ success: boolean }>({
     accessToken,
+    mcpUrl,
     label: 'commitPlannedEvents.update',
     abortSignal,
     agentTimeoutMs: CREATE_EVENTS_TIMEOUT_MS,
