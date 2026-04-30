@@ -135,6 +135,40 @@ export function decodeJwtExpiryMs(
 }
 
 /**
+ * Decode the issuer (`iss`) of a JWT and map it to an Amplitude zone.
+ *
+ * Account zone (where the user's OAuth identity lives) is independent of
+ * the env's data zone (where ingested events go). The bearer's `iss`
+ * is the only authoritative signal for which MCP host will accept it —
+ * resolveZone reflects the data-zone the user picked, not the
+ * account zone.
+ *
+ * Picking an EU env in a US-account org used to derive `mcp.eu.amplitude.com`
+ * from the resolved zone, then pass a US-issued bearer to it, and EU
+ * MCP 401'd with `invalid_token`. Routing MCP off this helper keeps the
+ * bearer's zone authoritative, so the data-zone choice doesn't bleed
+ * into auth.
+ *
+ * Returns `null` for unparseable / unknown-issuer tokens so callers can
+ * fall back to their existing zone fallback. Never throws.
+ */
+export function decodeJwtZone(
+  token: string | undefined | null,
+): 'us' | 'eu' | null {
+  const claims = decodeJwtIssAud(token);
+  if (!claims?.iss) return null;
+  let issHost: string;
+  try {
+    issHost = new URL(claims.iss).host;
+  } catch {
+    return null;
+  }
+  if (issHost === 'auth.amplitude.com') return 'us';
+  if (issHost === 'auth.eu.amplitude.com') return 'eu';
+  return null;
+}
+
+/**
  * Decode the `iss` (issuer) and `aud` (audience) claims from a JWT.
  *
  * Used by `getStoredToken` to drop tokens that were issued by a different

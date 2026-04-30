@@ -950,6 +950,57 @@ export function mergeEnvValues(
 }
 
 // ---------------------------------------------------------------------------
+// Event-name normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize an event name to the canonical Title Case shape mandated by
+ * the wizard commandments ("[Noun] [Past-Tense Verb]", 2–5 words, ≤50
+ * chars).
+ *
+ * The system prompt asks the model for Title Case, but the
+ * `confirm_event_plan` tool schema historically said "lowercase". When
+ * the agent saw both, it sometimes emitted snake_case or all-lowercase
+ * names, which then rendered as ugly bullets in the Event Plan viewer
+ * and broke chart legends downstream. Rather than reject and force a
+ * second prompt round-trip, normalize forgivingly here so the contract
+ * is always met regardless of which guidance the model believed.
+ *
+ * Soft normalization — never throws, never rejects. Returns the name
+ * unchanged if it's already correctly shaped; converts snake_case,
+ * kebab-case, camelCase, and ALL-LOWERCASE inputs into Title Case.
+ *
+ * Exported for unit testing.
+ */
+export function normalizeEventName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  // Convert separators (underscore, hyphen, dot) to spaces.
+  let working = trimmed.replace(/[_\-.]+/g, ' ');
+  // Split camelCase / PascalCase boundaries: insert a space before any
+  // uppercase letter that follows a lowercase letter or digit. ASCII-only
+  // — event names are English by convention; non-ASCII is left alone so
+  // we don't munge intentional UTF-8 in pathological cases.
+  working = working.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  // Collapse runs of whitespace.
+  working = working.replace(/\s+/g, ' ').trim();
+  if (!working) return trimmed;
+  // Title-case each word. Preserve fully-uppercase tokens of length ≤4
+  // (acronyms like "API", "URL", "SDK"); otherwise capitalize first
+  // letter and lowercase the rest.
+  const titled = working
+    .split(' ')
+    .map((word) => {
+      if (!word) return word;
+      if (word.length <= 4 && /^[A-Z]+$/.test(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+  // Cap at 50 chars to match the wizard's truncation rule.
+  return titled.length > 50 ? titled.slice(0, 45) + '…' : titled;
+}
+
+// ---------------------------------------------------------------------------
 // Event plan persistence
 // ---------------------------------------------------------------------------
 
@@ -1269,15 +1320,22 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   } = options;
   const { tool, createSdkMcpServer } = await getSDKModule();
 
-  // Load skill menu: try remote first, fall back to bundled
-  const menu = skillsBaseUrl
-    ? (await fetchSkillMenu(skillsBaseUrl)) ?? loadBundledSkillMenu()
-    : loadBundledSkillMenu();
-  const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
-
-  const keys = Object.keys(cachedSkillMenu);
-  const categoryNames: [string, ...string[]] =
-    keys.length > 0 ? (keys as [string, ...string[]]) : ['integration'];
+  // Skill menu loading (cachedSkillMenu / categoryNames) intentionally
+  // skipped — the load_skill_menu / install_skill tools that consumed
+  // it are disabled (see the disabled-tool block further down). When
+  // those tools are re-enabled, restore the menu loading too:
+  //
+  //   const menu = skillsBaseUrl
+  //     ? (await fetchSkillMenu(skillsBaseUrl)) ?? loadBundledSkillMenu()
+  //     : loadBundledSkillMenu();
+  //   const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
+  //   const keys = Object.keys(cachedSkillMenu);
+  //   const categoryNames: [string, ...string[]] =
+  //     keys.length > 0 ? (keys as [string, ...string[]]) : ['integration'];
+  //
+  // `skillsBaseUrl` is still threaded through this factory's signature
+  // so re-enabling doesn't require changing the public API.
+  void skillsBaseUrl;
 
   // -- check_env_keys -------------------------------------------------------
 
@@ -1376,6 +1434,20 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   );
 
   // -- detect_package_manager -----------------------------------------------
+  //
+  // The agent typically calls this 2–3 times during a run (before
+  // installing the SDK, before running typecheck, sometimes again before
+  // verification). Each call previously paid a fresh disk scan of the
+  // working directory and any framework-specific lockfile probes —
+  // observably 50–250ms in dev, longer on a slow FS. The package manager
+  // can't change mid-run, so memoize the first scan for the lifetime of
+  // this tools server (one server per wizard run).
+  //
+  // The cache is a Promise so concurrent calls share the same in-flight
+  // scan instead of racing.
+  let detectPMCache: Promise<
+    Awaited<ReturnType<typeof detectPackageManager>>
+  > | null = null;
 
   const detectPM = tool(
     'detect_package_manager',
@@ -1384,9 +1456,17 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       reason: reasonField,
     },
     async (_args: { reason: string }) => {
-      logToFile(`detect_package_manager: scanning ${workingDirectory}`);
+      if (detectPMCache) {
+        logToFile(`detect_package_manager: cache hit for ${workingDirectory}`);
+      } else {
+        logToFile(`detect_package_manager: scanning ${workingDirectory}`);
+        detectPMCache = detectPackageManager(workingDirectory).catch((err) => {
+          detectPMCache = null;
+          throw err;
+        });
+      }
 
-      const result = await detectPackageManager(workingDirectory);
+      const result = await detectPMCache;
 
       logToFile(
         `detect_package_manager: detected ${result.detected.length} package manager(s)`,
@@ -1403,8 +1483,24 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
-  // -- load_skill_menu ------------------------------------------------------
-
+  // -- load_skill_menu / install_skill — DISABLED ───────────────────────────
+  //
+  // Both tools currently 400 in production: remote skill downloads return
+  // not-found errors and the bundled-skill fallback hits packs the agent
+  // can't make sense of without the runtime menu. Until the catalogue
+  // / download path is fixed, don't expose them to the agent — they
+  // confuse it more than they help (the agent loops calling
+  // load_skill_menu → install_skill → load_skill_menu) and waste turns.
+  //
+  // Constant skills (taxonomy + instrumentation + dashboard) are still
+  // pre-installed at runtime by `installConstantSkills`, so the agent
+  // can `Skill.load` them directly without going through this menu.
+  //
+  // To re-enable: uncomment the two `tool(...)` blocks below, add them
+  // back to the `tools: [...]` array on `createSdkMcpServer`, and add
+  // their names back to `WIZARD_TOOL_NAMES`. The original implementations
+  // are preserved here so re-enabling is a small diff.
+  /*
   const loadSkillMenu = tool(
     'load_skill_menu',
     'Load available Amplitude skills for a category. Returns skill IDs and names. Call this first, then use install_skill with the chosen ID.',
@@ -1438,8 +1534,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
-  // -- install_skill --------------------------------------------------------
-
   const installSkill = tool(
     'install_skill',
     'Download and install an Amplitude skill by ID. Call load_skill_menu first to see available skills. Extracts the skill to .claude/skills/<skillId>/.',
@@ -1464,7 +1558,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         };
       }
 
-      // Look up download URL from cached menu
       const allSkills: SkillEntry[] = Object.values(cachedSkillMenu).flat();
       const skill = allSkills.find((s) => s.id === args.skillId);
       if (!skill) {
@@ -1479,7 +1572,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         };
       }
 
-      // Try remote download if URL available, otherwise use bundled copy
       const result = skill.downloadUrl
         ? downloadSkill(skill, workingDirectory)
         : installBundledSkill(args.skillId, workingDirectory);
@@ -1505,6 +1597,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       }
     },
   );
+  */
 
   // -- confirm --------------------------------------------------------------
 
@@ -1564,7 +1657,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
             name: z
               .string()
               .describe(
-                'Short lowercase event name using spaces for separators, e.g. "user signed up", "product added to cart", "search performed". This is displayed as a bold label — keep it concise (2-5 words). Do NOT put descriptions or file paths here.',
+                'Title Case event name, [Noun] [Past-Tense Verb], 2-5 words. Examples: "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started". NOT snake_case ("user_signed_up"), camelCase ("userSignedUp"), or lowercase ("user signed up"). Do NOT put descriptions or file paths here.',
               ),
             description: z
               .string()
@@ -1582,15 +1675,27 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       reason: string;
     }) => {
       const { DEMO_MODE } = await import('./constants.js');
-      // Light normalization — truncate overly long names but don't try to
-      // extract names from descriptions.
-      const normalizedEvents = args.events.map((e) => ({
-        name:
-          e.name.trim().length > 50
-            ? e.name.trim().slice(0, 45) + '…'
-            : e.name.trim(),
-        description: e.description?.trim() || '',
-      }));
+      // Soft-gate the name format. Agents historically saw conflicting
+      // guidance (commandments said Title Case, the tool schema said
+      // lowercase) and emitted mixed shapes. Normalize forgivingly here
+      // so the persisted plan AND the user-facing prompt always match
+      // the canonical Title Case shape — no second prompt round-trip
+      // needed when the model gets it slightly wrong.
+      let normalizationCount = 0;
+      const normalizedEvents = args.events.map((e) => {
+        const original = e.name.trim();
+        const normalized = normalizeEventName(original);
+        if (normalized !== original) normalizationCount += 1;
+        return {
+          name: normalized,
+          description: e.description?.trim() || '',
+        };
+      });
+      if (normalizationCount > 0) {
+        logToFile(
+          `confirm_event_plan: normalized ${normalizationCount}/${args.events.length} event name(s) to Title Case`,
+        );
+      }
       const events =
         DEMO_MODE && normalizedEvents.length > 5
           ? normalizedEvents.slice(0, 5)
@@ -1700,6 +1805,121 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
   );
 
+  // -- record_dashboard -----------------------------------------------------
+  // Persists a dashboard the agent just created via the Amplitude MCP. This
+  // is the explicit hand-off from the in-loop agent (which does the actual
+  // chart/dashboard MCP calls during the "Open your dashboard" task) to the
+  // wizard's outro and post-agent step. Writes BOTH:
+  //   - canonical `.amplitude/dashboard.json` (via persistDashboard)
+  //   - legacy `.amplitude-dashboard.json` at the project root, for back-compat
+  //     with `createDashboardStep`'s readExistingDashboardFile path
+  //
+  // When this tool fires, `createDashboardStep` finds the file on its next
+  // pass and short-circuits to its reuse path — no 90s MCP+sub-agent fallback,
+  // no "Creating charts and dashboard in Amplitude…" spinner hang.
+  const recordDashboard = tool(
+    'record_dashboard',
+    `Record an Amplitude dashboard you just created via the Amplitude MCP server.
+Call this tool IMMEDIATELY after \`create_dashboard\` returns successfully — it persists the URL and chart metadata so the wizard's outro can link to it and the post-agent fallback step can short-circuit.
+Required: dashboardUrl. Optional but recommended: dashboardId, charts (id/title/type per chart).
+Returns: "ok" on successful persistence, an error string otherwise. Idempotent — safe to call again with updated values.`,
+    {
+      dashboardUrl: z
+        .string()
+        .url()
+        .describe(
+          'The full HTTPS URL to the created dashboard in Amplitude (e.g. https://app.amplitude.com/.../dashboard/abc123). Must be a valid URL — the outro renders this as a clickable link.',
+        ),
+      dashboardId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'The dashboard ID returned by the Amplitude MCP create_dashboard call. Optional but recommended for downstream tooling.',
+        ),
+      charts: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            title: z.string().optional(),
+            type: z.string().optional(),
+          }),
+        )
+        .optional()
+        .describe(
+          'Metadata for each chart on the dashboard. Used by the wizard outro and analytics. Pass at least the title and type per chart (e.g. funnel, line, retention).',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      dashboardUrl: string;
+      dashboardId?: string;
+      charts?: Array<{ id?: string; title?: string; type?: string }>;
+      reason: string;
+    }) => {
+      const payload: Record<string, unknown> = {
+        dashboardUrl: args.dashboardUrl,
+      };
+      if (args.dashboardId) payload.dashboardId = args.dashboardId;
+      if (args.charts) payload.charts = args.charts;
+
+      // 1. Canonical: <installDir>/.amplitude/dashboard.json (atomic).
+      const persistedCanonical = persistDashboard(workingDirectory, payload);
+      // 2. Legacy mirror: <installDir>/.amplitude-dashboard.json.
+      //    `createDashboardStep.readExistingDashboardFile` reads this path
+      //    today; the post-agent step will also gain a canonical-path read,
+      //    but the mirror keeps older skills/readers working.
+      let persistedLegacy = false;
+      try {
+        const legacyPath = path.join(
+          workingDirectory,
+          '.amplitude-dashboard.json',
+        );
+        atomicWriteJSON(legacyPath, payload);
+        persistedLegacy = true;
+      } catch (err) {
+        logToFile(
+          `record_dashboard: legacy mirror write failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      logToFile(
+        `record_dashboard: url=${args.dashboardUrl} charts=${
+          args.charts?.length ?? 0
+        } canonical=${persistedCanonical} legacy=${persistedLegacy}`,
+      );
+
+      // Surface the dashboard URL on the session immediately so the outro
+      // (and any soft-error abort path in agent-runner that probes
+      // `agentArtifactsLookComplete`) sees the success even if the rest of
+      // the agent run trips on a late-stage flush. The post-agent step also
+      // sets this, but doing it here makes the in-loop path self-contained.
+      try {
+        getUI().setDashboardUrl(args.dashboardUrl);
+      } catch (err) {
+        logToFile(
+          `record_dashboard: ui.setDashboardUrl failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      if (!persistedCanonical && !persistedLegacy) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'error: failed to persist dashboard to disk — see wizard log',
+            },
+          ],
+        };
+      }
+      return { content: [{ type: 'text' as const, text: 'ok' }] };
+    },
+  );
+
   // -- wizard_feedback ------------------------------------------------------
   // Structured agent-side feedback for blocked or stuck states. Distinct from
   // the user-facing /feedback slash command (`trackWizardFeedback`); this one
@@ -1783,12 +2003,15 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       checkEnvKeys,
       setEnvValues,
       detectPM,
-      loadSkillMenu,
-      installSkill,
+      // loadSkillMenu and installSkill intentionally not exposed — see
+      // the disabled-tool block above for context. Constant skills are
+      // pre-installed at runtime so the agent can `Skill.load` them
+      // directly.
       confirm,
       choose,
       confirmEventPlan,
       reportStatus,
+      recordDashboard,
       wizardFeedback,
     ],
   });
@@ -1805,12 +2028,14 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:check_env_keys`,
   `${SERVER_NAME}:set_env_values`,
   `${SERVER_NAME}:detect_package_manager`,
-  `${SERVER_NAME}:load_skill_menu`,
-  `${SERVER_NAME}:install_skill`,
+  // load_skill_menu / install_skill intentionally omitted while the
+  // skill catalogue / download path is broken — see the disabled-tool
+  // block in this file for context.
   `${SERVER_NAME}:confirm`,
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
   `${SERVER_NAME}:report_status`,
+  `${SERVER_NAME}:record_dashboard`,
   `${SERVER_NAME}:wizard_feedback`,
 ];
 

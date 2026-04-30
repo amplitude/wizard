@@ -25,10 +25,13 @@ import {
   isAuthErrorMessage,
   HOOK_BRIDGE_RACE_RE,
   partitionHookBridgeRace,
+  looksLikeStreamEventLine,
+  stripStreamEventNoise,
   captureDiscoveryFromMessage,
   AgentErrorType,
   AUTH_RETRY_LIMIT,
   selectModel,
+  isStallNonProgressMessage,
 } from '../agent-interface';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -1155,6 +1158,136 @@ describe('runAgent', () => {
 
       // ui.log.error should NOT have been called (errors suppressed for user)
       expect(mockUIInstance.log.error).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('isStallNonProgressMessage', () => {
+  describe('system status envelopes (SDKStatus = compacting | requesting | null)', () => {
+    // 'requesting' is the SDK saying "I just sent the request, now
+    // waiting for the first byte." Treating it as progress would mask
+    // gateway hangs — see the bug fixed in #467.
+    it('classifies status:requesting as non-progress', () => {
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: 'requesting',
+          uuid: 'abc',
+          session_id: 'sess',
+        }),
+      ).toBe(true);
+    });
+
+    it('classifies status:null (idle / cleared) as non-progress', () => {
+      // Per the SDK type union, status can be `null`. That means "no
+      // current status" — there's no observable activity to refresh
+      // the timer on, so it's non-progress.
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: null,
+        }),
+      ).toBe(true);
+    });
+
+    it('classifies status:compacting as PROGRESS — the SDK is actively working', () => {
+      // The third value in the SDK's SDKStatus union. Unlike
+      // 'requesting' / null, 'compacting' means the SDK is running
+      // compaction itself — that IS work, even if not LLM work.
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: 'compacting',
+        }),
+      ).toBe(false);
+    });
+
+    it('treats unknown future status values as non-progress (whitelist semantics)', () => {
+      // Defensive: if the SDK adds a new status value we haven't seen,
+      // err on the side of NOT resetting the timer. Worst case is an
+      // extra few seconds of stall sensitivity until real content
+      // arrives — strictly safer than letting an unknown envelope
+      // mask a hang.
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: 'some-future-shape',
+        }),
+      ).toBe(true);
+    });
+  });
+
+  describe('stream_event framing (BetaRawMessageStreamEvent)', () => {
+    // Six stream_event subtypes exist; only content_block_delta carries
+    // real model output. The other five are framing that flank deltas
+    // by milliseconds in the happy path.
+    it('classifies content_block_delta as PROGRESS', () => {
+      expect(
+        isStallNonProgressMessage({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: 'hi' },
+          },
+        }),
+      ).toBe(false);
+    });
+
+    it.each([
+      'message_start',
+      'message_delta',
+      'message_stop',
+      'content_block_start',
+      'content_block_stop',
+    ])('classifies %s framing as non-progress', (innerType) => {
+      expect(
+        isStallNonProgressMessage({
+          type: 'stream_event',
+          event: { type: innerType },
+        }),
+      ).toBe(true);
+    });
+
+    it('classifies a stream_event with no inner event as non-progress', () => {
+      // Bare envelope, missing the typed `event` payload — treat as
+      // bookkeeping noise.
+      expect(isStallNonProgressMessage({ type: 'stream_event' })).toBe(true);
+      expect(
+        isStallNonProgressMessage({ type: 'stream_event', event: null }),
+      ).toBe(true);
+    });
+  });
+
+  describe('progress events (timer should reset)', () => {
+    it.each([
+      ['assistant', { type: 'assistant' }],
+      ['user', { type: 'user' }],
+      [
+        'system api_retry',
+        { type: 'system', subtype: 'api_retry', attempt: 1 },
+      ],
+      [
+        'system compact_boundary',
+        { type: 'system', subtype: 'compact_boundary' },
+      ],
+      ['system init', { type: 'system', subtype: 'init' }],
+    ] as const)('treats %s as progress', (_label, msg) => {
+      expect(isStallNonProgressMessage(msg)).toBe(false);
+    });
+  });
+
+  describe('malformed inputs', () => {
+    it('returns false for null / undefined / primitives without throwing', () => {
+      expect(isStallNonProgressMessage(null)).toBe(false);
+      expect(isStallNonProgressMessage(undefined)).toBe(false);
+      expect(isStallNonProgressMessage('string')).toBe(false);
+      expect(isStallNonProgressMessage(42)).toBe(false);
+      expect(isStallNonProgressMessage({})).toBe(false);
     });
   });
 });
@@ -2808,6 +2941,126 @@ describe('partitionHookBridgeRace', () => {
       suppressed: 0,
       passthrough: chunk,
     });
+  });
+});
+
+describe('looksLikeStreamEventLine', () => {
+  it('matches bare-JSON stream events', () => {
+    expect(
+      looksLikeStreamEventLine(
+        '{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"foo"}}',
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeStreamEventLine('{"type":"message_start","message":{}}'),
+    ).toBe(true);
+  });
+
+  it('matches partial bare-JSON via prefix even when JSON.parse would fail', () => {
+    // Real production leak: a chunk split mid-payload — JSON.parse can't
+    // help, so the prefix match is the only defense.
+    expect(
+      looksLikeStreamEventLine(
+        '{"type":"content_block_delta","index":1,"delta":{"type":"input_json_del',
+      ),
+    ).toBe(true);
+  });
+
+  it('matches SSE event-name lines', () => {
+    expect(looksLikeStreamEventLine('event: content_block_delta')).toBe(true);
+    expect(looksLikeStreamEventLine('event: message_stop')).toBe(true);
+  });
+
+  it('matches SSE data-payload lines', () => {
+    expect(
+      looksLikeStreamEventLine(
+        'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"\\""}}',
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeStreamEventLine(
+        'data: {"type":"message_start","message":{"model":"claude-sonnet-4-6"}}',
+      ),
+    ).toBe(true);
+  });
+
+  it('ignores leading whitespace', () => {
+    expect(looksLikeStreamEventLine('  event: content_block_delta')).toBe(true);
+    expect(looksLikeStreamEventLine('  {"type":"content_block_delta"')).toBe(
+      true,
+    );
+  });
+
+  it('does not match real log lines', () => {
+    expect(
+      looksLikeStreamEventLine(
+        '[2026-04-30T06:42:00.706Z] [b8673a91] [legacy] DEBUG Retrying after transient SDK error',
+      ),
+    ).toBe(false);
+    expect(looksLikeStreamEventLine('TypeError: foo is not a function')).toBe(
+      false,
+    );
+    expect(looksLikeStreamEventLine('claude stdout: hello')).toBe(false);
+    expect(looksLikeStreamEventLine('')).toBe(false);
+    expect(looksLikeStreamEventLine('event:')).toBe(false);
+    expect(looksLikeStreamEventLine('data: ')).toBe(false);
+  });
+
+  it('does not match unknown event types', () => {
+    expect(looksLikeStreamEventLine('event: tool_result')).toBe(false);
+    expect(looksLikeStreamEventLine('{"type":"tool_use"}')).toBe(false);
+  });
+});
+
+describe('stripStreamEventNoise', () => {
+  it('returns zero suppressed and empty passthrough for empty input', () => {
+    expect(stripStreamEventNoise('')).toEqual({
+      suppressed: 0,
+      passthrough: '',
+    });
+  });
+
+  it('strips a full SSE block (event + data + blank-line framing)', () => {
+    // Production-shaped stderr chunk: alternating `event:` and `data:`
+    // lines separated by blank lines. All of it is noise, none should
+    // reach the log file.
+    const chunk =
+      'event: content_block_delta\n' +
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"pp/pa"}}\n' +
+      '\n' +
+      'event: content_block_stop\n' +
+      'data: {"type":"content_block_stop","index":0}\n';
+    const result = stripStreamEventNoise(chunk);
+    expect(result.suppressed).toBe(4);
+    expect(result.passthrough).toBe('\n');
+  });
+
+  it('preserves a genuine error riding alongside stream-event noise', () => {
+    // Same defense as partitionHookBridgeRace: a real error batched into
+    // the same chunk as protocol noise must survive.
+    const chunk =
+      'event: content_block_delta\n' +
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta"}}\n' +
+      'TypeError: Cannot read property foo of undefined\n';
+    expect(stripStreamEventNoise(chunk)).toEqual({
+      suppressed: 2,
+      passthrough: 'TypeError: Cannot read property foo of undefined\n',
+    });
+  });
+
+  it('passes non-noise chunks through unchanged', () => {
+    const chunk = 'TypeError: foo is not a function\n';
+    expect(stripStreamEventNoise(chunk)).toEqual({
+      suppressed: 0,
+      passthrough: chunk,
+    });
+  });
+
+  it('preserves trailing newline behavior', () => {
+    expect(stripStreamEventNoise('real line\n').passthrough).toBe(
+      'real line\n',
+    );
+    expect(stripStreamEventNoise('real line').passthrough).toBe('real line');
   });
 });
 

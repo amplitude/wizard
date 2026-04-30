@@ -19,6 +19,7 @@ import {
   clamp,
   clampViewportTop,
   findErrorEntryIndexes,
+  findSessionStartIndex,
   sliceViewportText,
 } from '../utils/log-viewer.js';
 import { watchFileWhenAvailable } from '../utils/watchFileWhenAvailable.js';
@@ -47,9 +48,23 @@ interface LogViewerProps {
   filePath: string;
   /** Fixed visible height. Defaults to terminal rows minus chrome. */
   height?: number;
+  /**
+   * Epoch-ms when the current wizard session started. When set, the live
+   * tail is scoped to lines whose timestamp is `>= sessionStartMs` so
+   * users don't see prior sessions' tails (the `log.txt` file is
+   * append-only across runs). Press `a` in the viewer to toggle the
+   * filter off and show the full file. Pass `null` (or omit) to disable
+   * scoping entirely — useful for `--debug` or when the user explicitly
+   * wants the full historical log.
+   */
+  sessionStartMs?: number | null;
 }
 
-export const LogViewer = ({ filePath, height }: LogViewerProps) => {
+export const LogViewer = ({
+  filePath,
+  height,
+  sessionStartMs = null,
+}: LogViewerProps) => {
   const [cols, rows] = useStdoutDimensions();
   const visibleLines = height ?? Math.max(8, rows - CHROME_ROWS);
   const viewportHeight = Math.max(3, visibleLines - VIEWER_CHROME_ROWS);
@@ -59,10 +74,27 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
   const [selectedLine, setSelectedLine] = useState(0);
   const [viewportTop, setViewportTop] = useState(0);
   const [horizontalOffset, setHorizontalOffset] = useState(0);
+  /**
+   * When false, scope the visible tail to the current wizard session
+   * (lines newer than `sessionStartMs`). Press `a` to toggle off and see
+   * the full historical file. Defaults to scoped (false=show-all is opt-in)
+   * when `sessionStartMs` is provided; when it's null, scoping is a no-op.
+   */
+  const [showAll, setShowAll] = useState(false);
+  /**
+   * Count of lines hidden by the session-scoping filter. Surfaced in the
+   * header so users know there's history available behind the `a` toggle.
+   */
+  const [hiddenCount, setHiddenCount] = useState(0);
 
   const modeRef = useRef(mode);
   const selectedLineRef = useRef(selectedLine);
   const viewportTopRef = useRef(viewportTop);
+  const showAllRef = useRef(showAll);
+
+  useEffect(() => {
+    showAllRef.current = showAll;
+  }, [showAll]);
 
   useEffect(() => {
     modeRef.current = mode;
@@ -129,8 +161,17 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
       try {
         const content = fs.readFileSync(filePath, 'utf-8');
         const allLines = content.split('\n');
+        // Scope to the current wizard session unless the user opted into
+        // "show all" with `a`. The historical tail above today's session
+        // is still on disk — toggle reveals it without re-reading.
+        const startIdx =
+          sessionStartMs !== null && !showAllRef.current
+            ? findSessionStartIndex(allLines, sessionStartMs)
+            : 0;
+        const scopedLines = startIdx > 0 ? allLines.slice(startIdx) : allLines;
+        setHiddenCount(startIdx);
         const safeLines =
-          allLines.length > 0 ? allLines : [EMPTY_LOG_PLACEHOLDER];
+          scopedLines.length > 0 ? scopedLines : [EMPTY_LOG_PLACEHOLDER];
         const nextLastIndex = Math.max(safeLines.length - 1, 0);
         const nextViewportTop = clampViewportTop(
           viewportTopRef.current,
@@ -194,7 +235,7 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
     });
 
     return () => handle.dispose();
-  }, [filePath, viewportHeight, lineWidth]);
+  }, [filePath, viewportHeight, lineWidth, sessionStartMs, showAll]);
 
   useEffect(() => {
     if (mode !== 'follow') {
@@ -291,6 +332,17 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
 
     if (input === 'p') {
       jumpToError(-1);
+      return;
+    }
+
+    if (input === 'a' && sessionStartMs !== null) {
+      // Toggle session-scoping. Drop back to follow mode + tail-bottom so
+      // the user lands on the most-recent entry whichever scope is now
+      // active — otherwise toggling while scrolled feels like jumping to
+      // a random offset.
+      setShowAll((prev) => !prev);
+      setMode('follow');
+      setHorizontalOffset(0);
     }
   });
 
@@ -320,6 +372,18 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
       <Box justifyContent="space-between">
         <Text color={mode === 'follow' ? Colors.accent : Colors.warning} bold>
           {mode === 'follow' ? 'LIVE FOLLOW' : 'INSPECT'}
+          {sessionStartMs !== null && !showAll && hiddenCount > 0 ? (
+            <Text color={Colors.muted} bold={false}>
+              {' '}
+              · this session
+            </Text>
+          ) : null}
+          {showAll ? (
+            <Text color={Colors.muted} bold={false}>
+              {' '}
+              · all history
+            </Text>
+          ) : null}
         </Text>
         <Text color={Colors.muted}>
           line {Math.min(selectedLine + 1, Math.max(lines.length, 1))}/
@@ -379,6 +443,9 @@ export const LogViewer = ({ filePath, height }: LogViewerProps) => {
       <Text color={Colors.muted} wrap="truncate-end">
         ↑↓/jk scroll · h/l pan · ←→ tabs · f follow ·{' '}
         {errorCount > 0 ? 'n/p next/prev error · ' : ''}g/G top/bottom · 0 reset
+        {sessionStartMs !== null
+          ? ` · a ${showAll ? 'this session' : 'show all'}`
+          : ''}
       </Text>
 
       <Text color={Colors.subtle} wrap="truncate-end">

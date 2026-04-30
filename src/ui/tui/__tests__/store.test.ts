@@ -487,6 +487,61 @@ describe('WizardStore', () => {
       expect(store.session.selectedProjectId).toBe('ws-42');
     });
 
+    it('setOrgAndProject syncs credentials.appId and projectApiKey to the new project', () => {
+      // Regression: switching project mid-session left credentials.appId
+      // pointing at the originally-OAuth'd project, so /whoami and any
+      // reader of credentials.* showed the stale id.
+      const store = createStore();
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'old-key',
+        host: 'https://api2.amplitude.com',
+        appId: 187520,
+      });
+      store.setOrgAndProject(
+        { id: 'org-2', name: 'EU Org' },
+        {
+          id: 'ws-99',
+          name: 'EU Project',
+          environments: [
+            {
+              rank: 0,
+              app: { id: '900001', apiKey: 'new-key' },
+            },
+          ],
+        },
+        '/tmp/no-such-dir',
+        { persist: false },
+      );
+      expect(store.session.selectedAppId).toBe('900001');
+      expect(store.session.credentials?.appId).toBe(900001);
+      expect(store.session.credentials?.projectApiKey).toBe('new-key');
+    });
+
+    it('setOrgAndProject preserves projectApiKey when env payload omits it', () => {
+      // Some picker payloads only carry app.id (no apiKey). Don't blank
+      // out the active key in that case — keep what we already had.
+      const store = createStore();
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'keep-me',
+        host: 'https://api2.amplitude.com',
+        appId: 187520,
+      });
+      store.setOrgAndProject(
+        { id: 'org-2', name: 'Acme' },
+        {
+          id: 'ws-99',
+          name: 'Other',
+          environments: [{ rank: 0, app: { id: '900001' } }],
+        },
+        '/tmp/no-such-dir',
+        { persist: false },
+      );
+      expect(store.session.credentials?.appId).toBe(900001);
+      expect(store.session.credentials?.projectApiKey).toBe('keep-me');
+    });
+
     it('every setter emits exactly one change event', () => {
       const store = createStore();
       const cb = vi.fn();

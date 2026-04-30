@@ -29,6 +29,7 @@ export {
   initCorrelation,
   getSessionId,
   getRunId,
+  getSessionStartMs,
   rotateRunId,
 } from './correlation';
 

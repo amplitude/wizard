@@ -320,6 +320,56 @@ export type AgentConfig = {
 export const MAX_BASH_SLEEP_SECONDS = 5;
 
 /**
+ * Returns true when an SDK message is the "I'm about to wait on the
+ * upstream API" envelope rather than actual progress.
+ *
+ * The Claude Agent SDK emits `system { subtype: 'status', status:
+ * 'requesting' }` immediately *before* it sends a request to the model
+ * — it means "request issued, now waiting for the first byte." It is
+ * NOT model output, NOT tool output, and NOT an SDK retry. Treating it
+ * as progress (resetting the stall timer when it arrives) masks
+ * gateway hangs: when the upstream goes silent, the timer was just
+ * reset to its full window from a non-event, so users wait the full
+ * STALL_TIMEOUT_MS past when the upstream actually hung.
+ *
+ * Other `system` subtypes (`init`, `api_retry`, `compact_boundary`,
+ * etc.) ARE real progress events — keep treating them as resets.
+ *
+ * Exported so unit tests can pin the classification without spinning
+ * up the full agent runtime.
+ */
+export function isStallNonProgressMessage(rawMessage: unknown): boolean {
+  if (!rawMessage || typeof rawMessage !== 'object') return false;
+  const msg = rawMessage as Record<string, unknown>;
+
+  // Class 1 — SDK status envelopes. The SDK type union is
+  //   SDKStatus = 'compacting' | 'requesting' | null
+  // 'compacting' is the only one that means "real work is happening";
+  // everything else (current 'requesting' / null, plus any future
+  // shape we don't recognize yet) is conservatively non-progress.
+  if (msg.type === 'system' && msg.subtype === 'status') {
+    return msg.status !== 'compacting';
+  }
+
+  // Class 2 — stream_event book-keeping frames. Under
+  // `includePartialMessages: true`, the SDK emits six stream_event
+  // subtypes; only `content_block_delta` carries real model output
+  // (text deltas, input_json deltas, thinking deltas). The other
+  // five (message_start / message_delta / message_stop /
+  // content_block_start / content_block_stop) are framing that flanks
+  // real deltas by milliseconds in the happy path — treating them as
+  // non-progress tightens the timer's signal-to-noise without risking
+  // false stalls during legitimate generation.
+  if (msg.type === 'stream_event') {
+    const event = msg.event;
+    if (event === null || typeof event !== 'object') return true;
+    return (event as Record<string, unknown>).type !== 'content_block_delta';
+  }
+
+  return false;
+}
+
+/**
  * Build the `systemPrompt.append` string the inner-agent SDK passes to
  * Claude every turn. Concatenates wizard-wide commandments with the
  * optional orchestrator-supplied context block, in that order:
@@ -464,6 +514,102 @@ export function partitionHookBridgeRace(data: string): {
   const kept: string[] = [];
   for (const line of lines) {
     if (HOOK_BRIDGE_RACE_RE.test(line)) {
+      suppressed++;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (kept.length === 0) return { suppressed, passthrough: '' };
+  return {
+    suppressed,
+    passthrough: kept.join('\n') + (hadTrailingNewline ? '\n' : ''),
+  };
+}
+
+/**
+ * Anthropic stream-event protocol shapes that leak through the CLI when
+ * verbose / stream-json output is enabled. The wizard never needs these —
+ * the SDK message stream provides the structured events we act on, while
+ * these raw protocol frames just bury real activity under thousands of
+ * `partial_json` deltas per turn (the in-app Logs tab quickly hits 10k+
+ * lines of noise). Used by both `runAgentLocally` (subprocess stdout) and
+ * the SDK path (subprocess stderr passthrough).
+ */
+const STREAM_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'message_start',
+  'message_delta',
+  'message_stop',
+  'content_block_start',
+  'content_block_delta',
+  'content_block_stop',
+  'ping',
+  'stream_event',
+]);
+const STREAM_EVENT_JSON_PREFIXES: readonly string[] = Array.from(
+  STREAM_EVENT_TYPES,
+).map((t) => `{"type":"${t}"`);
+const STREAM_EVENT_SSE_EVENT_PREFIXES: readonly string[] = Array.from(
+  STREAM_EVENT_TYPES,
+).map((t) => `event: ${t}`);
+const STREAM_EVENT_SSE_DATA_PREFIXES: readonly string[] = Array.from(
+  STREAM_EVENT_TYPES,
+).map((t) => `data: {"type":"${t}"`);
+
+/**
+ * True if `line` is Anthropic stream-event protocol noise. Matches both
+ * bare JSON (`{"type":"content_block_delta",...}`) and raw SSE framing
+ * (`event: content_block_delta` / `data: {"type":"content_block_delta",...}`).
+ * `JSON.parse` only succeeds on complete lines, so the prefix check is the
+ * primary defense against partial-line chunks. Exported for unit tests.
+ */
+export function looksLikeStreamEventLine(line: string): boolean {
+  const trimmed = line.trimStart();
+  if (trimmed.length < 9) return false;
+  const first = trimmed[0];
+  if (first === '{') {
+    for (const prefix of STREAM_EVENT_JSON_PREFIXES) {
+      if (trimmed.startsWith(prefix)) return true;
+    }
+    try {
+      const obj = JSON.parse(trimmed) as { type?: unknown };
+      return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
+    } catch {
+      return false;
+    }
+  }
+  if (first === 'e') {
+    for (const prefix of STREAM_EVENT_SSE_EVENT_PREFIXES) {
+      if (trimmed.startsWith(prefix)) return true;
+    }
+  }
+  if (first === 'd') {
+    for (const prefix of STREAM_EVENT_SSE_DATA_PREFIXES) {
+      if (trimmed.startsWith(prefix)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Strip stream-event protocol lines from a raw chunk while preserving
+ * everything else (and the chunk's trailing-newline behavior). Mirrors
+ * `partitionHookBridgeRace`: chunk-level filtering would drop genuine
+ * errors that happened to ride alongside protocol noise in the same
+ * batched stderr write, so we split on `\n`, drop only matching lines,
+ * and reconstruct. Exported for unit tests.
+ */
+export function stripStreamEventNoise(data: string): {
+  suppressed: number;
+  passthrough: string;
+} {
+  if (data.length === 0) return { suppressed: 0, passthrough: '' };
+  const hadTrailingNewline = data.endsWith('\n');
+  const lines = data.split('\n');
+  if (hadTrailingNewline) lines.pop();
+  let suppressed = 0;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (looksLikeStreamEventLine(line)) {
       suppressed++;
       continue;
     }
@@ -1950,54 +2096,6 @@ export async function runAgentLocally(
     };
 
     /**
-     * Detect Anthropic stream-event protocol JSON. These lines
-     * (`{"type":"message_start",...}`, `{"type":"content_block_delta",...}`,
-     * etc.) leak into stdout when claude is invoked with a streaming output
-     * format. They're useful in the log file but pure garbage in the status
-     * pill — the user sees raw protocol noise and the long, unbounded JSON
-     * also pushes the progress counter past terminal width and folds the
-     * header layout (see RunScreen.tsx `truncateStatus`). Drop them from
-     * the user-facing status; they're already captured in the per-line log.
-     */
-    const STREAM_EVENT_TYPES = new Set([
-      'message_start',
-      'message_delta',
-      'message_stop',
-      'content_block_start',
-      'content_block_delta',
-      'content_block_stop',
-      'ping',
-      'stream_event',
-    ]);
-    /**
-     * Belt-and-braces signature match for partial / pre-buffer protocol
-     * JSON. `JSON.parse` only succeeds on complete lines, so a chunk that
-     * splits mid-payload (very common for `content_block_delta`, which
-     * carries large strings) would otherwise slip past the strict check
-     * and reach the status pill as truncated noise like
-     * `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delt…`.
-     * Anchor on the `{"type":"<known>"` prefix to catch those before they
-     * paint to the UI.
-     */
-    const STREAM_EVENT_PREFIXES = Array.from(STREAM_EVENT_TYPES).map(
-      (t) => `{"type":"${t}"`,
-    );
-    const looksLikeStreamEvent = (line: string): boolean => {
-      if (line.length < 9 || line[0] !== '{') return false;
-      // Fast path: signature match on the prefix. Survives partial lines.
-      for (const prefix of STREAM_EVENT_PREFIXES) {
-        if (line.startsWith(prefix)) return true;
-      }
-      // Slow path: full parse for completeness (handles odd whitespace).
-      try {
-        const obj = JSON.parse(line) as { type?: unknown };
-        return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
-      } catch {
-        return false;
-      }
-    };
-
-    /**
      * Line buffer for stdout. The OS pipes stdout in arbitrary-sized
      * chunks — a single `data` event may carry multiple lines, half a
      * line, or several lines plus a partial trailing one. Splitting each
@@ -2011,8 +2109,13 @@ export async function runAgentLocally(
      */
     let stdoutBuffer = '';
     const consumeLine = (line: string) => {
+      // Drop stream-event protocol lines before logging — under stream-json
+      // output a single agent turn produces hundreds of `content_block_delta`
+      // frames, and writing them all to the log file makes the Logs tab
+      // unreadable (thousands of partial_json deltas burying real status).
+      // The SDK message stream already gives us structured events.
+      if (looksLikeStreamEventLine(line)) return;
       logToFile('claude stdout:', line);
-      if (looksLikeStreamEvent(line)) return;
       pendingLine = line.slice(0, 80);
       if (pushTimer === null) {
         pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
@@ -2455,10 +2558,18 @@ export async function runAgent(
     // Cold-start timeout: subprocess spawn + MCP server connections + first LLM response
     const INITIAL_STALL_TIMEOUT_MS = 60_000;
     // Mid-run timeout: between consecutive messages during active work.
-    // Raised from 30s to 120s to accommodate extended thinking (Opus can
-    // think for 10+ min before emitting the first token with the proxy's
-    // 20-min fetch timeout).
-    const STALL_TIMEOUT_MS = 120_000;
+    //
+    // Was 120s, originally raised from 30s "to accommodate extended
+    // thinking (Opus can think for 10+ min before emitting the first
+    // token)." That justification is now stale: extended thinking is
+    // explicitly DISABLED in the SDK options below (see comment near
+    // `query({...})`), so a 120s gap with no message means the upstream
+    // is hung, not "the model is thinking hard." Combined with the
+    // companion fix in `isStallNonProgressMessage` (don't reset the
+    // timer on the SDK's pre-wait `requesting` envelope), 60s is now
+    // both a tighter cap AND a more accurate one — a healthy
+    // sonnet-4-6 run starts streaming within 5–10s of `requesting`.
+    const STALL_TIMEOUT_MS = 60_000;
 
     // (Auth tracking declared at outer function scope — see above the try
     // block — so the outer catch can also branch on authErrorDetected.)
@@ -2763,6 +2874,15 @@ export async function runAgent(
             // them through the throttled spinner update at most every
             // STREAM_PILL_INTERVAL_MS so the UI doesn't thrash.
             includePartialMessages: true,
+            // Extended thinking — explicitly disabled.
+            //
+            // Leaving `thinking` unset lets the `claude_code` preset / SDK
+            // default re-enable it on Sonnet 4.6, which correlates with
+            // mid-stream "API Error: 400" cascades when the upstream
+            // gateway is under load. Production launch-day repro showed
+            // `thinking_delta` blocks streaming right before the 400.
+            // See the long-form rationale in the comment block below.
+            thinking: { type: 'disabled' },
             // Opt into the 1M context window so long instrumentation runs
             // (commandments + skills + accumulated tool results) don't trip
             // compaction mid-flow. Compactions cause the long mid-run pauses
@@ -2868,19 +2988,26 @@ export async function runAgent(
             tools: { type: 'preset', preset: 'claude_code' },
             // Capture stderr from CLI subprocess for debugging.
             //
-            // Known-benign hook-bridge-race lines (see HOOK_BRIDGE_RACE_RE)
-            // are partitioned out and counted; everything else passes
-            // through. Chunk-level matching would drop a genuine error
-            // riding alongside a race line in the same batched chunk —
-            // partitionHookBridgeRace splits before filtering so that
-            // can't happen. Summary count is logged at attempt boundary.
+            // Two filters run in sequence before anything reaches the log:
+            //   1. Known-benign hook-bridge-race lines (HOOK_BRIDGE_RACE_RE)
+            //      are partitioned out and counted; summary logged at
+            //      attempt boundary.
+            //   2. Anthropic stream-event protocol noise (event: ... /
+            //      data: {"type":"content_block_delta",...}) is dropped —
+            //      under verbose / stream-json output the CLI emits these
+            //      to stderr at hundreds of frames per turn, which makes
+            //      the in-app Logs tab unreadable.
+            // Chunk-level matching would drop genuine errors riding
+            // alongside noise in the same batched chunk — both helpers
+            // split line-by-line before filtering so that can't happen.
             stderr: (data: string) => {
-              const { suppressed, passthrough } = partitionHookBridgeRace(data);
-              hookBridgeRaceSuppressed += suppressed;
-              if (passthrough.length > 0) {
-                logToFile('CLI stderr:', passthrough);
+              const race = partitionHookBridgeRace(data);
+              hookBridgeRaceSuppressed += race.suppressed;
+              const stream = stripStreamEventNoise(race.passthrough);
+              if (stream.passthrough.length > 0) {
+                logToFile('CLI stderr:', stream.passthrough);
                 if (options.debug) {
-                  debug('CLI stderr:', passthrough);
+                  debug('CLI stderr:', stream.passthrough);
                 }
               }
             },
@@ -3018,12 +3145,33 @@ export async function runAgent(
 
         // Process the async generator — validate each message at the boundary
         for await (const rawMessage of sdkResponse) {
-          receivedFirstMessage = true;
-          lastMessageTime = Date.now();
-          lastMessageType =
-            (rawMessage as Record<string, unknown>)?.type?.toString() ??
-            'unknown';
-          resetStaleTimer();
+          // Reset the stale timer on every message EXCEPT the SDK's
+          // "I'm about to wait on the API" envelope. The Claude Agent
+          // SDK emits `system { subtype: 'status', status: 'requesting' }`
+          // immediately *before* it starts waiting on the upstream — it
+          // means "request sent, waiting for response", NOT "we made
+          // progress." Resetting the timer here masks gateway hangs:
+          // the model never streams a token, no further messages
+          // arrive, and the user sat through a fresh 120s clock that
+          // started from a non-event. Treat this envelope as non-
+          // progress so the stall fires close to when the upstream
+          // actually went silent.
+          //
+          // Other `system` subtypes (`init`, `api_retry`, `compact_boundary`)
+          // ARE real progress events and continue to reset the timer.
+          // We also gate `lastMessageTime`, `lastMessageType`, and
+          // `receivedFirstMessage` here so that stall diagnostics
+          // report elapsed time since the last real progress event,
+          // not since a non-progress `requesting` envelope.
+          if (!isStallNonProgressMessage(rawMessage)) {
+            receivedFirstMessage = true;
+            lastMessageTime = Date.now();
+            const rawType =
+              (rawMessage as Record<string, unknown>)?.type?.toString() ??
+              'unknown';
+            lastMessageType = rawType;
+            resetStaleTimer();
+          }
 
           // A post-stream retry banner is active from a previous attempt's
           // failure. The fact that a message arrived at all means the new
