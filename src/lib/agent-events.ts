@@ -793,7 +793,7 @@ export function classifyRunError(error: Error): {
     msg.includes('authentication_error') ||
     msg.includes('authentication_failed') ||
     msg.includes('invalid or expired token') ||
-    msg.includes('401') ||
+    /\b401\b/.test(msg) ||
     msg.includes('needs-auth')
   ) {
     return {
@@ -810,7 +810,7 @@ export function classifyRunError(error: Error): {
     msg.includes('quota_reached') ||
     msg.includes('quota exceeded') ||
     msg.includes('forbidden') ||
-    msg.includes('403')
+    /\b403\b/.test(msg)
   ) {
     return { recoverable: 'human_required' };
   }
@@ -834,18 +834,20 @@ export function classifyRunError(error: Error): {
   if (
     msg.includes('gateway_down') ||
     msg.includes('terminated') ||
-    msg.includes('502') ||
-    msg.includes('503') ||
-    msg.includes('504') ||
+    /\b502\b/.test(msg) ||
+    /\b503\b/.test(msg) ||
+    /\b504\b/.test(msg) ||
     msg.includes('econnreset') ||
     msg.includes('etimedout') ||
+    msg.includes('econnrefused') ||
+    msg.includes('enotfound') ||
     msg.includes('network')
   ) {
     return { recoverable: 'retry' };
   }
 
   // Rate limit — transient but the orchestrator should back off.
-  if (msg.includes('rate_limit') || msg.includes('429')) {
+  if (msg.includes('rate_limit') || /\b429\b/.test(msg)) {
     return { recoverable: 'retry' };
   }
 
