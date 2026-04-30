@@ -148,15 +148,27 @@ export class AgentState {
   }
 
   reset(): void {
-    this.modifiedFiles.clear();
-    this.lastStatus = null;
+    // `compactionCount` and `toolUseCounts` are per-attempt SDK
+    // conversation facts — a fresh attempt starts a fresh conversation
+    // so these reset.
     this.compactionCount = 0;
     this.toolUseCounts.clear();
-    // NOTE: `discoveries` is intentionally NOT cleared here. The retry path
-    // calls reset() between attempts but wants the prior attempt's
-    // discoveries (package manager, env keys, etc.) to carry forward into
-    // the next attempt's prompt. Use `clearDiscoveries()` for a hard reset
-    // (e.g. between unrelated wizard runs).
+    // NOTE: `modifiedFiles`, `lastStatus`, and `discoveries` are
+    // intentionally NOT cleared here. They describe **the run's effect
+    // on disk and the run's last reported user-visible state** — both
+    // survive a fresh SDK conversation and the next attempt needs them
+    // to avoid double-writing files the prior attempt already created
+    // and to know what the user last saw on the spinner. Use the
+    // dedicated `clear*` methods below for a hard reset (e.g. between
+    // unrelated wizard runs, in tests).
+  }
+
+  clearModifiedFiles(): void {
+    this.modifiedFiles.clear();
+  }
+
+  clearLastStatus(): void {
+    this.lastStatus = null;
   }
 
   clearDiscoveries(): void {
@@ -168,24 +180,59 @@ export class AgentState {
  * Render a compact retry-recovery note to prepend to the next attempt's
  * user prompt. Mirrors `buildRecoveryNote` (post-compaction) but is keyed
  * to wizard-level retries triggered by transient gateway errors. The
- * agent restarts with a fresh conversation; without this hint, it redoes
- * detect_package_manager / check_env_keys / Skill loads and burns 10–20s
- * on probes that already succeeded.
+ * agent restarts with a fresh conversation; without this hint, it
+ * redoes detect_package_manager / check_env_keys / Skill loads and
+ * — much worse — re-writes files the prior attempt already created
+ * (potentially with different content), since a fresh SDK conversation
+ * has no idea anything was written.
  *
- * Returns an empty string when there are no preserved discoveries — the
+ * Sections (each rendered only when it has content):
+ *   1. discoveries — facts probed by prior tool calls (skip the probes)
+ *   2. modifiedFiles — files already on disk (Read before re-writing)
+ *   3. lastStatus — the spinner message the user last saw
+ *
+ * Returns an empty string when none of the sections have content — the
  * caller can unconditionally concatenate.
  */
 export function buildRetryHint(state: AgentState): string {
   const discoveries = state.getDiscoveries();
-  if (discoveries.size === 0) return '';
+  const snap = state.snapshot();
+  const hasDiscoveries = discoveries.size > 0;
+  const hasModifiedFiles = snap.modifiedFiles.length > 0;
+  const hasLastStatus = snap.lastStatus !== null;
+  if (!hasDiscoveries && !hasModifiedFiles && !hasLastStatus) return '';
+
   const lines: string[] = [
     '<retry-recovery>',
-    'A prior attempt was interrupted by a transient upstream error and the wizard is retrying. The discoveries below were verified by tool calls in the prior attempt — trust them and SKIP the corresponding tool calls so this attempt can pick up from where the prior one left off:',
+    'A prior attempt was interrupted by a transient upstream error and the wizard is retrying. The facts below describe what the prior attempt already did — trust them. SKIP the corresponding tool calls and DO NOT overwrite files unless you Read them first and confirm the existing content is wrong.',
     '',
   ];
-  for (const [key, summary] of discoveries) {
-    lines.push(`- ${key}: ${summary}`);
+
+  if (hasDiscoveries) {
+    lines.push('Discoveries already verified by prior-attempt tool calls:');
+    for (const [key, summary] of discoveries) {
+      lines.push(`- ${key}: ${summary}`);
+    }
+    lines.push('');
   }
+
+  if (hasModifiedFiles) {
+    lines.push(
+      'Files already written by the prior attempt (still on disk; Read them before re-writing):',
+    );
+    for (const file of snap.modifiedFiles) {
+      lines.push(`- ${file}`);
+    }
+    lines.push('');
+  }
+
+  if (hasLastStatus && snap.lastStatus) {
+    lines.push(
+      `Last reported status before the interruption: [${snap.lastStatus.code}] ${snap.lastStatus.detail}`,
+      '',
+    );
+  }
+
   lines.push('</retry-recovery>', '');
   return lines.join('\n');
 }
