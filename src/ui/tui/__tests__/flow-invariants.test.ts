@@ -500,6 +500,48 @@ describe('WizardRouter complete happy path', () => {
 
     expect(router.resolve(session)).toBe(Screen.Mcp);
   });
+
+  it('locally-fully-wired re-runs skip Run but STILL show DataIngestionCheck', () => {
+    // Activation Check pre-flight: when all four local signals are present
+    // (SDK dep, source import, ampli.json scope, event plan on disk), the
+    // wizard short-circuits past Setup + Run by setting `activationLevel:
+    // 'full'` AND `localInstrumentationComplete: true`. The SECOND flag is
+    // what keeps DataIngestionCheck running — without it, a user who
+    // re-runs pre-deploy (no remote events yet) would silently skip the
+    // ingestion verification UX. With both set, they land on
+    // DataIngestionCheck after Mcp, which is the correct UX.
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = true;
+    session.activationLevel = 'full';
+    session.localInstrumentationComplete = true;
+    session.mcpComplete = true; // walk past Mcp to land on the next entry
+
+    expect(router.resolve(session)).toBe(Screen.DataIngestionCheck);
+  });
+
+  it('remote-confirmed full activation still skips DataIngestionCheck (no localInstrumentationComplete)', () => {
+    // Counter-case: when activation reaches 'full' via the API check
+    // (50+ events in the project) and NOT via the local pre-flight,
+    // localInstrumentationComplete stays false. DataIngestionCheck must
+    // still be skipped — events are already flowing, no need to poll.
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = true;
+    session.activationLevel = 'full';
+    session.localInstrumentationComplete = false;
+    session.mcpComplete = true;
+
+    expect(router.resolve(session)).toBe(Screen.Slack);
+  });
 });
 
 // ── Overlay tests ────────────────────────────────────────────────────

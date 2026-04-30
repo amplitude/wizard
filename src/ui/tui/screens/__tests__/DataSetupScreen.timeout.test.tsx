@@ -20,6 +20,20 @@ vi.mock('../../../../lib/api.js', () => ({
 
 vi.mock('../../../../lib/detect-amplitude.js', () => ({
   detectAmplitudeInProject: () => ({ confidence: 'none', reason: null }),
+  detectAmplitudeInProjectSource: () => ({ confidence: 'none', reason: null }),
+  // Force the pre-flight short-circuit to NOT fire so the timeout test
+  // exercises the API-call path it cares about.
+  isProjectFullyWired: () => ({
+    fullyWired: false,
+    signals: {
+      dependency: false,
+      sourceImport: false,
+      ampliConfig: false,
+      eventPlan: false,
+    },
+    present: [],
+    missing: ['dependency', 'sourceImport', 'ampliConfig', 'eventPlan'],
+  }),
 }));
 
 function seedStore() {

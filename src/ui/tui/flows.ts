@@ -235,12 +235,17 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       },
     },
     // 5. Wait for events — polls activation API until events are flowing.
-    //    Passes immediately for full users (already have data).
+    //    Passes immediately for full users (already have data) UNLESS
+    //    `localInstrumentationComplete` is set (meaning the wizard
+    //    pre-flighted to 'full' purely from on-disk signals — the
+    //    remote project may not have any events yet, and the user
+    //    expects to land here to verify their re-deploy is flowing).
     //    Skipped on error.
     {
       screen: Screen.DataIngestionCheck,
       show: (s) =>
-        s.runPhase !== RunPhase.Error && s.activationLevel !== 'full',
+        s.runPhase !== RunPhase.Error &&
+        (s.activationLevel !== 'full' || s.localInstrumentationComplete),
       isComplete: (s) => s.dataIngestionConfirmed,
       revert: (store) => {
         store.resetDataIngestion();

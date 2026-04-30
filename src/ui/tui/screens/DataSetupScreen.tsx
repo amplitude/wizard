@@ -23,7 +23,9 @@ import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import {
   detectAmplitudeInProject,
   detectAmplitudeInProjectSource,
+  isProjectFullyWired,
 } from '../../../lib/detect-amplitude.js';
+import { analytics } from '../../../utils/analytics.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { withTimeout } from '../utils/with-timeout.js';
 import { logToFile } from '../../../utils/debug.js';
@@ -81,6 +83,29 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
     logToFile(
       `[DataSetup] checking activation for appId=${appId} zone=${zone}`,
     );
+
+    // Pre-flight: if the project already has all four local "fully wired"
+    // signals (SDK dep, source import, ampli.json scope, event plan on
+    // disk), skip the agent loop entirely. The user is re-running the
+    // wizard on a project a prior run already finished — re-running the
+    // agent for 2-3 minutes to no-op is a launch-blocking UX bug. We set
+    // `activationLevel = 'full'` (which the router uses to skip Setup +
+    // Run) and `localInstrumentationComplete = true` (which the router
+    // uses to KEEP DataIngestionCheck running, since remote events may
+    // not have arrived yet — the user may be re-running pre-deploy).
+    const wireCheck = isProjectFullyWired(store.session.installDir);
+    logToFile(
+      `[DataSetup] local wiring check: present=[${wireCheck.present.join(',')}] missing=[${wireCheck.missing.join(',')}] fullyWired=${wireCheck.fullyWired}`,
+    );
+    if (wireCheck.fullyWired) {
+      analytics.wizardCapture('activation skip on local wiring', {
+        present: wireCheck.present,
+      });
+      store.setLocalInstrumentationComplete(true);
+      store.setSnippetConfigured(true);
+      store.setActivationLevel('full');
+      return;
+    }
 
     // Run local static check in parallel with the API call.
     const localDetection = detectAmplitudeInProject(store.session.installDir);
