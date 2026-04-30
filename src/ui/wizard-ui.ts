@@ -68,11 +68,35 @@ export interface WizardUI {
   pushStatus(message: string): void;
 
   /**
-   * Print a periodic "still running" summary of the last N status messages.
-   * Called by the agent runner every ~10 seconds while the agent is active.
-   * LoggingUI prints to stdout; InkUI is a no-op (TUI already shows live updates).
+   * Periodic "still alive" beat emitted every ~10s while the agent is
+   * running. Three implementations diverge:
+   *
+   *   - InkUI:     no-op — the TUI already renders status messages
+   *                reactively as `pushStatus()` fires.
+   *   - LoggingUI: prints the rolling tail of statuses (and only the
+   *                tail) so a CI log shows "still working…" without
+   *                going dark on long tool calls.
+   *   - AgentUI:   emits a structured `progress: heartbeat` NDJSON
+   *                event carrying elapsed time + retry attempt + the
+   *                rolling status tail. Always fires on the cadence —
+   *                absence of heartbeat is the canonical orchestrator
+   *                signal that the wizard process has stalled.
+   *
+   * `statuses` is the rolling last-N (3) `pushStatus()` messages —
+   * may be empty if no status was pushed since the last beat.
    */
-  heartbeat(statuses: string[]): void;
+  heartbeat(data: {
+    statuses: string[];
+    /** Milliseconds since `runAgent()` started. Monotonic. */
+    elapsedMs: number;
+    /**
+     * 1-indexed retry attempt the runner is on. Lets a stalled-agent
+     * heuristic distinguish "still on attempt 1, just slow" from
+     * "we're churning through retries" without re-parsing the
+     * `progress: agent_retry` events.
+     */
+    attempt?: number;
+  }): void;
 
   // ── Spinner ───────────────────────────────────────────────────────
   spinner(): SpinnerHandle;

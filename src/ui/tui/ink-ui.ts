@@ -208,7 +208,11 @@ export class InkUI implements WizardUI {
     this.store.pushStatus(message);
   }
 
-  heartbeat(_statuses: string[]): void {
+  heartbeat(_data: {
+    statuses: string[];
+    elapsedMs: number;
+    attempt?: number;
+  }): void {
     // TUI already shows live status updates reactively via pushStatus — no-op
   }
 
