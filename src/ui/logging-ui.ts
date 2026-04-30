@@ -9,7 +9,7 @@ import {
   type SpinnerHandle,
   type EventPlanDecision,
 } from './wizard-ui';
-import type { RetryState } from '../lib/wizard-session';
+import type { RetryState, PostAgentStep } from '../lib/wizard-session';
 
 export class LoggingUI implements WizardUI {
   intro(message: string): void {
@@ -95,6 +95,29 @@ export class LoggingUI implements WizardUI {
 
   pushStatus(message: string): void {
     console.log(`◇  ${message}`);
+  }
+
+  seedPostAgentSteps(steps: PostAgentStep[]): void {
+    if (steps.length === 0) return;
+    console.log(
+      `│  Finalizing in Amplitude (${steps.length} step${
+        steps.length === 1 ? '' : 's'
+      })…`,
+    );
+  }
+
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStep['status']; reason?: string },
+  ): void {
+    if (patch.status === 'in_progress') {
+      console.log(`◌  ${id}…`);
+    } else if (patch.status === 'completed') {
+      console.log(`●  ${id} done`);
+    } else if (patch.status === 'skipped') {
+      const reason = patch.reason ? ` — ${patch.reason}` : '';
+      console.log(`⊘  ${id} skipped${reason}`);
+    }
   }
 
   heartbeat(data: {

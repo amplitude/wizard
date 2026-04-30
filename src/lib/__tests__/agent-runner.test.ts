@@ -21,7 +21,10 @@ import {
   classifyAgentOutcome,
   classifyApiErrorSubtype,
   refreshTokenIfStale,
+  POST_AGENT_STEP_COMMIT_EVENTS,
+  POST_AGENT_STEP_CREATE_DASHBOARD,
 } from '../agent-runner.js';
+import { STEP_ID as CREATE_DASHBOARD_STEP_ID } from '../../steps/create-dashboard.js';
 import { AgentErrorType } from '../agent-interface.js';
 import { buildSession } from '../wizard-session.js';
 
@@ -47,6 +50,23 @@ vi.mock('../../utils/ampli-settings', () => ({
 vi.mock('../../utils/oauth', () => ({
   refreshAccessToken: vi.fn(),
 }));
+
+// Step-id constants are referenced by agent-runner (`seedPostAgentSteps`)
+// AND by each step file (`setPostAgentStep` calls). They must stay
+// equal — the FinalizingPanel finds rows by id and the patch is a no-op
+// for unknown ids. This test catches a rename of either constant.
+describe('post-agent step id constants', () => {
+  it('agent-runner POST_AGENT_STEP_CREATE_DASHBOARD matches create-dashboard STEP_ID', () => {
+    expect(POST_AGENT_STEP_CREATE_DASHBOARD).toBe(CREATE_DASHBOARD_STEP_ID);
+  });
+
+  it('the two step ids are stable strings, not symbols / non-enumerable', () => {
+    expect(typeof POST_AGENT_STEP_COMMIT_EVENTS).toBe('string');
+    expect(POST_AGENT_STEP_COMMIT_EVENTS.length).toBeGreaterThan(0);
+    expect(typeof POST_AGENT_STEP_CREATE_DASHBOARD).toBe('string');
+    expect(POST_AGENT_STEP_CREATE_DASHBOARD.length).toBeGreaterThan(0);
+  });
+});
 
 describe('classifyApiErrorSubtype', () => {
   // Each subtype tag maps to a distinct user-facing message and

@@ -33,6 +33,8 @@ import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
+import { FinalizingPanel } from '../components/FinalizingPanel.js';
+import { PostAgentStepStatus } from '../session-constants.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
@@ -237,14 +239,16 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // post-agent `createDashboardStep` runs as a slow fallback and sets
   // `dashboardFallbackPhase` to `in_progress`. Without this row the user
   // sees a "5 / 5 tasks complete" header for the duration of the spinner —
-  // the bug we fixed in PR #479. The row only appears when the fallback
-  // genuinely fires, so on a healthy run the list still shows exactly five
-  // items end-to-end.
+  // the bug we fixed in PR #479.
   //
-  // Restored after a rebase against main accidentally dropped this block
-  // in this PR (#474). `RunScreen.dashboardFallback.test.tsx` pins the
-  // contract — without this restore, that test fails on Node 22 + 24.
-  if (store.session.dashboardFallbackPhase === 'in_progress') {
+  // Guard: only render this synthetic task when postAgentSteps has NOT
+  // been seeded. Once the FinalizingPanel is active it owns the
+  // "Create your starter dashboard" row — showing both is a confusing
+  // duplicate.
+  if (
+    store.session.dashboardFallbackPhase === 'in_progress' &&
+    store.session.postAgentSteps.length === 0
+  ) {
     progressItems.push({
       label: 'Create your starter dashboard',
       activeForm: 'Creating your starter dashboard...',
@@ -307,7 +311,9 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // post-agent fallback starts running. Otherwise the agent silence right
   // before the fallback could trip the 90s "unusually slow" tier just as
   // we're entering a known-slow path.
-  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${store.fileWritesTotal}|${store.session.dashboardFallbackPhase ?? ''}`;
+  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${
+    store.fileWritesTotal
+  }|${store.session.dashboardFallbackPhase ?? ''}`;
   const { tier: coachingTier } = useTimedCoaching({
     thresholds: [90, 300],
     progressSignal,
@@ -421,6 +427,14 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
           </Box>
         )}
 
+        {/* Post-agent steps (commit events, create dashboard, …).
+            Rendered as its own panel below the agent task list — keeps
+            the "main agent work done" milestone intact while still
+            surfacing the work happening between agent completion and
+            the MCP/Verify screens. Empty until agent-runner seeds the
+            queue, so it's a no-op during the agent run itself. */}
+        <FinalizingPanel steps={store.session.postAgentSteps} />
+
         {/* Inline event plan */}
         <InlineEventPlan store={store} />
 
@@ -442,10 +456,22 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
   useScreenHints(RUN_HINTS);
 
+  // Footer status: when a post-agent step is in_progress, drive the
+  // footer line from the step's `activeForm` so the visible task and
+  // the spinner footer always agree (single source of truth). Without
+  // this, the agent's last pushStatus("Creating charts and dashboard…")
+  // sits frozen beneath the FinalizingPanel and the message can lag
+  // the actual step state. Falls back to the agent's last status when
+  // no post-agent step is active (during the run, before seeding, or
+  // after all steps finish).
+  const activePostAgentStep = store.session.postAgentSteps.find(
+    (s) => s.status === PostAgentStepStatus.InProgress,
+  );
   const lastStatus =
-    store.statusMessages.length > 0
+    activePostAgentStep?.activeForm ??
+    (store.statusMessages.length > 0
       ? store.statusMessages[store.statusMessages.length - 1]
-      : undefined;
+      : undefined);
 
   const hasEvents = store.eventPlan.length > 0;
 

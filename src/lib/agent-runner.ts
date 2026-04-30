@@ -53,6 +53,15 @@ import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent
 const SUPPORT_EMAIL = 'wizard@amplitude.com';
 
 /**
+ * Stable ids for the post-agent step queue. Each id is used in two
+ * places — `getUI().seedPostAgentSteps` to register the row, and
+ * `getUI().setPostAgentStep(id, …)` from inside the step function to
+ * update its status. Coupled by string but cheap to find-and-replace.
+ */
+export const POST_AGENT_STEP_COMMIT_EVENTS = 'commit-events';
+export const POST_AGENT_STEP_CREATE_DASHBOARD = 'create-dashboard';
+
+/**
  * Build the "you can bypass the Amplitude gateway with a direct Anthropic
  * key" hint shown in upstream-failure error messages. Shared by the
  * GATEWAY_DOWN, terminated-400, rate-limit, and generic API_ERROR branches —
@@ -1198,6 +1207,31 @@ async function runAgentWizardBody(
     logToFile('[agent-runner] post-run token refreshed');
   }
 
+  // Surface the post-agent steps as a visible sub-list under the agent's
+  // task list so the user sees forward motion through what was previously
+  // a silent gap (5/5 agent tasks ✓ + a static "Creating charts…" footer
+  // for up to 90s reads as a hung wizard). Each step transitions
+  // pending → in_progress → completed | skipped from inside the step
+  // function itself (commitPlannedEventsStep / createDashboardStep);
+  // the FinalizingPanel renders the queue with per-step elapsed time.
+  // Step ids are coupled to the labels here intentionally — the step
+  // function calls setPostAgentStep with the matching id and owns its
+  // own outcome. agent-runner just seeds + invokes.
+  getUI().seedPostAgentSteps([
+    {
+      id: POST_AGENT_STEP_COMMIT_EVENTS,
+      label: 'Save your event plan to Amplitude',
+      activeForm: 'Saving your event plan to Amplitude',
+      status: 'pending',
+    },
+    {
+      id: POST_AGENT_STEP_CREATE_DASHBOARD,
+      label: 'Create your starter dashboard',
+      activeForm: 'Creating your starter dashboard in Amplitude',
+      status: 'pending',
+    },
+  ]);
+
   // Commit the instrumented event plan to the Amplitude tracking plan as
   // planned events so the names show up in the Data tab immediately — even
   // before any track() call fires in the user's app.
@@ -1609,9 +1643,15 @@ Important: Use the detect_package_manager tool (from the wizard-tools MCP server
  * planned events. Returns an outro-ready summary string (empty if nothing was
  * committed). Never throws — a failure here must not block the outro.
  *
- * Falls back to `session.selectedAppId` and finally a live fetchAmplitudeUser
- * lookup when `session.credentials.appId` is 0 (the env picker couldn't match
- * an app to the chosen API key).
+ * Owns its post-agent step lifecycle: marks the `commit-events` step
+ * `in_progress` on entry and `completed` / `skipped` (with reason) on
+ * exit so the FinalizingPanel reflects real outcomes. Failures emit
+ * `analytics.wizardCapture` breadcrumbs + `ui.log.warn` so silent
+ * skips never go unaccounted for.
+ *
+ * Falls back to `session.selectedAppId` and finally a (single-retried)
+ * `fetchAmplitudeUser` lookup when `session.credentials.appId` is 0 —
+ * the env picker couldn't match an app to the chosen API key.
  */
 async function commitPlannedEventsStep(
   plannedEvents: Array<{ name: string; description: string }>,
@@ -1620,44 +1660,47 @@ async function commitPlannedEventsStep(
   session: WizardSession,
   cloudRegion: string,
 ): Promise<string> {
+  const ui = getUI();
+  ui.setPostAgentStep(POST_AGENT_STEP_COMMIT_EVENTS, { status: 'in_progress' });
+
+  // Pure local guard — `no events` is a benign skip (the agent
+  // instrumented nothing this run), distinct from the appId-failure
+  // skip below. Surface it as `skipped` with a soft reason so the user
+  // sees ⊘ rather than ✓ — the wizard didn't commit anything to their
+  // tracking plan.
   if (!plannedEvents || plannedEvents.length === 0) {
     logToFile('[commitPlannedEventsStep] no planned events — skipping');
+    ui.setPostAgentStep(POST_AGENT_STEP_COMMIT_EVENTS, {
+      status: 'skipped',
+      reason: 'no events instrumented',
+    });
     return '';
   }
 
   let appId: string | number | null | undefined = credentialsAppId;
   if (!appId) appId = session.selectedAppId;
   if (!appId) {
-    try {
-      const { fetchAmplitudeUser } = await import('./api.js');
-      const userInfo = await fetchAmplitudeUser(
-        accessToken,
-        cloudRegion as 'us' | 'eu',
-      );
-      const org = session.selectedOrgId
-        ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
-        : userInfo.orgs[0];
-      const ws =
-        org && session.selectedProjectId
-          ? org.projects.find((w) => w.id === session.selectedProjectId)
-          : org?.projects[0];
-      appId =
-        ws?.environments
-          ?.slice()
-          .sort((a, b) => a.rank - b.rank)
-          .find((e) => e.app?.id)?.app?.id ?? null;
-      if (appId) session.selectedAppId = String(appId);
-    } catch (err) {
-      logToFile(
-        `[commitPlannedEventsStep] could not resolve appId: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+    appId = await resolveAppIdViaUserApi(session, accessToken, cloudRegion);
+    if (appId) session.selectedAppId = String(appId);
   }
 
   if (!appId) {
+    // Loud failure — the wizard otherwise reports success but the
+    // tracking plan stays empty. Capture telemetry so we can size the
+    // bug, and log a warn the user actually sees in the FinalizingPanel
+    // / NDJSON / CI log.
     logToFile('[commitPlannedEventsStep] no appId — skipping');
+    analytics.wizardCapture('planned events skipped', {
+      reason: 'no app id',
+      'planned events count': plannedEvents.length,
+    });
+    ui.log.warn(
+      "Couldn't save your event plan to Amplitude — your tracked events still flow once they fire, but the planned-events list won't pre-populate the Data tab. Re-run the wizard if this is unexpected.",
+    );
+    ui.setPostAgentStep(POST_AGENT_STEP_COMMIT_EVENTS, {
+      status: 'skipped',
+      reason: "couldn't resolve project",
+    });
     return '';
   }
 
@@ -1685,7 +1728,14 @@ async function commitPlannedEventsStep(
       } described=${result.described} error=${result.error ?? ''}`,
     );
 
-    if (result.created === 0) return '';
+    if (result.created === 0) {
+      ui.setPostAgentStep(POST_AGENT_STEP_COMMIT_EVENTS, {
+        status: 'skipped',
+        reason: result.error ?? 'tracking plan write unavailable',
+      });
+      return '';
+    }
+    ui.setPostAgentStep(POST_AGENT_STEP_COMMIT_EVENTS, { status: 'completed' });
     const eventWord = result.created === 1 ? 'event' : 'events';
     return `Added ${result.created} planned ${eventWord} to your tracking plan`;
   } catch (err) {
@@ -1694,6 +1744,65 @@ async function commitPlannedEventsStep(
         err instanceof Error ? err.message : String(err)
       }`,
     );
+    ui.setPostAgentStep(POST_AGENT_STEP_COMMIT_EVENTS, {
+      status: 'skipped',
+      reason: 'unexpected error',
+    });
     return '';
   }
+}
+
+/**
+ * Resolve the numeric app id via the Data API GraphQL endpoint, with a
+ * single retry on transient network/auth failure. Returns null if the
+ * call fails twice or the user's selected project has no environment
+ * with an app yet.
+ *
+ * Pulled out of the inline appId-resolution chain so the failure
+ * message logs a single line per attempt and the retry doesn't
+ * duplicate the catch block. The retry covers the single most common
+ * failure mode we see in practice — a stale OAuth token that the
+ * post-run refresh just rotated, where the first call races the new
+ * token's propagation.
+ */
+async function resolveAppIdViaUserApi(
+  session: WizardSession,
+  accessToken: string,
+  cloudRegion: string,
+): Promise<string | null> {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const { fetchAmplitudeUser } = await import('./api.js');
+      const userInfo = await fetchAmplitudeUser(
+        accessToken,
+        cloudRegion as 'us' | 'eu',
+      );
+      const org = session.selectedOrgId
+        ? userInfo.orgs.find((o) => o.id === session.selectedOrgId)
+        : userInfo.orgs[0];
+      const ws =
+        org && session.selectedProjectId
+          ? org.projects.find((w) => w.id === session.selectedProjectId)
+          : org?.projects[0];
+      const appId =
+        ws?.environments
+          ?.slice()
+          .sort((a, b) => a.rank - b.rank)
+          .find((e) => e.app?.id)?.app?.id ?? null;
+      if (appId) return String(appId);
+      // Got a valid response but no env had an app — re-trying won't help.
+      return null;
+    } catch (err) {
+      logToFile(
+        `[commitPlannedEventsStep] fetchAmplitudeUser attempt ${attempt} failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+      if (attempt === 2) return null;
+      // Tiny backoff before the retry; transient failures we see in logs
+      // resolve well within ~500ms.
+      await new Promise((r) => setTimeout(r, 500));
+    }
+  }
+  return null;
 }

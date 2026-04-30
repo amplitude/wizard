@@ -5,7 +5,7 @@
  */
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
-import type { RetryState } from '../lib/wizard-session';
+import type { RetryState, PostAgentStep } from '../lib/wizard-session';
 import type {
   AgentEventType,
   NeedsInputChoice,
@@ -783,6 +783,35 @@ export class AgentUI implements WizardUI {
         }
       },
     };
+  }
+
+  // ── Post-agent step lifecycle ───────────────────────────────────────
+
+  seedPostAgentSteps(steps: PostAgentStep[]): void {
+    emit('progress', `post_agent_seeded: ${steps.length} step(s)`, {
+      data: {
+        event: 'post_agent_seeded',
+        steps: steps.map((s) => ({
+          id: s.id,
+          label: s.label,
+          status: s.status,
+        })),
+      },
+    });
+  }
+
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStep['status']; reason?: string },
+  ): void {
+    emit('progress', `post_agent_step: ${id} ${patch.status}`, {
+      data: {
+        event: 'post_agent_step',
+        id,
+        status: patch.status,
+        reason: patch.reason,
+      },
+    });
   }
 
   // ── Session state ───────────────────────────────────────────────────

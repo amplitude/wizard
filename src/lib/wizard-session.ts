@@ -173,6 +173,39 @@ export const RunPhase = {
 } as const;
 export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 
+/**
+ * Status of a single post-agent step (commit planned events, create
+ * dashboard, etc.) — work that runs between the Claude agent finishing
+ * and the wizard transitioning to the MCP screen. Modeled separately
+ * from agent TodoWrite tasks because these are framework-controlled,
+ * not agent-controlled, and rendering them in the same list would break
+ * the `syncTodos` "agent-authoritative" invariant.
+ *
+ * NOTE: Mirrored in src/ui/tui/session-constants.ts (ESM/CJS workaround).
+ */
+export const PostAgentStepStatus = {
+  Pending: 'pending',
+  InProgress: 'in_progress',
+  Completed: 'completed',
+  Skipped: 'skipped',
+} as const;
+export type PostAgentStepStatus =
+  (typeof PostAgentStepStatus)[keyof typeof PostAgentStepStatus];
+
+export interface PostAgentStep {
+  /** Stable id (e.g. 'commit-events', 'create-dashboard') */
+  id: string;
+  /** Past-tense label shown when pending or completed. */
+  label: string;
+  /** Present-continuous label shown while in progress. */
+  activeForm: string;
+  status: PostAgentStepStatus;
+  /** When `status === 'skipped'`, a short user-facing reason. */
+  reason?: string;
+  /** Wall-clock ms when this step transitioned to in_progress. */
+  startedAt?: number;
+}
+
 /** Features discovered by the feature-discovery subagent */
 export const DiscoveredFeature = {
   Stripe: 'stripe',
@@ -548,6 +581,16 @@ export interface WizardSession {
     appId: AppId | 0;
   } | null;
 
+  /**
+   * Ordered queue of framework-controlled steps that run after the
+   * Claude agent finishes (commit planned events, create dashboard,
+   * etc.). Rendered as the FinalizingPanel under the agent task list
+   * so the user sees forward motion during what would otherwise be a
+   * silent post-agent gap. Empty until the agent run completes; never
+   * re-ordered after seeding.
+   */
+  postAgentSteps: PostAgentStep[];
+
   // Lifecycle
   runPhase: RunPhase;
   /**
@@ -905,6 +948,7 @@ export function buildSession(args: {
     region: parsed.success ? validated.region ?? null : null,
     regionForced: false,
 
+    postAgentSteps: [],
     runPhase: RunPhase.Idle,
     runStartedAt: null,
     discoveredFeatures: [],
