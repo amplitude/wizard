@@ -20,13 +20,14 @@ import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OutroScreen } from '../OutroScreen.js';
+import { OutroScreen, exitCodeForOutroKind } from '../OutroScreen.js';
 import {
   makeStoreForSnapshot,
   renderSnapshot,
 } from '../../__tests__/snapshot-utils.js';
 import { OutroKind } from '../../session-constants.js';
 import { toWizardDashboardOpenUrl } from '../../../../utils/dashboard-open-url.js';
+import { ExitCode } from '../../../../lib/exit-codes.js';
 
 const GATEWAY_DOWN_MESSAGE = `Amplitude LLM gateway unavailable
 
@@ -146,6 +147,38 @@ describe('OutroScreen — error variants', () => {
     renderSnapshot(<OutroScreen store={store} />, store);
 
     expect(store.commandMode).toBe(false);
+  });
+
+  // ── Regression: screen-initiated dismissal must honor the outro kind ────
+  //
+  // PR #379 wired `wizardSuccessExit(0)` into the outro's dismissal
+  // handler so that screens which navigate to outro via setOutroData
+  // (without going through wizardAbort) actually exit when the user
+  // presses any key. Hardcoding `0` was a regression though: every
+  // user-cancelled run reported success to CI / outer agents (USER_CANCELLED
+  // = 130 and AGENT_FAILED = 10 exist in lib/exit-codes.ts but were unused
+  // on this path). This guard locks the kind→code mapping in.
+  describe('exitCodeForOutroKind', () => {
+    it('maps Cancel → USER_CANCELLED (130)', () => {
+      expect(exitCodeForOutroKind(OutroKind.Cancel)).toBe(
+        ExitCode.USER_CANCELLED,
+      );
+    });
+
+    it('maps Error → AGENT_FAILED (10)', () => {
+      expect(exitCodeForOutroKind(OutroKind.Error)).toBe(ExitCode.AGENT_FAILED);
+    });
+
+    it('maps Success → SUCCESS (0)', () => {
+      expect(exitCodeForOutroKind(OutroKind.Success)).toBe(ExitCode.SUCCESS);
+    });
+
+    it('maps undefined → SUCCESS (0) for defense in depth', () => {
+      // Undefined isn't reachable in practice — outroData has a kind by
+      // the time this screen renders — but the helper should still produce
+      // a sane code instead of NaN / undefined leaking into process.exit.
+      expect(exitCodeForOutroKind(undefined)).toBe(ExitCode.SUCCESS);
+    });
   });
 
   it('renders the MCP_MISSING copy without leaking "MCP" jargon', () => {
