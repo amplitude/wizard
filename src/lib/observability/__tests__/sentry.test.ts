@@ -81,9 +81,9 @@ describe('wrapMcpServerWithSentry', () => {
     vi.clearAllMocks();
   });
 
-  it('returns the input server unchanged when telemetry is disabled', () => {
+  it('returns the input server unchanged when telemetry is disabled', async () => {
     disableTelemetry();
-    initSentry({
+    await initSentry({
       sessionId: 's',
       version: '0',
       mode: 'ci',
@@ -96,9 +96,9 @@ describe('wrapMcpServerWithSentry', () => {
     restoreEnv();
   });
 
-  it('delegates to Sentry.wrapMcpServerWithSentry when initialized', () => {
+  it('delegates to Sentry.wrapMcpServerWithSentry when initialized', async () => {
     enableTelemetry();
-    initSentry({
+    await initSentry({
       sessionId: 's',
       version: '0',
       mode: 'ci',
@@ -111,9 +111,9 @@ describe('wrapMcpServerWithSentry', () => {
     restoreEnv();
   });
 
-  it('falls back to the raw server when Sentry throws', () => {
+  it('falls back to the raw server when Sentry throws', async () => {
     enableTelemetry();
-    initSentry({
+    await initSentry({
       sessionId: 's',
       version: '0',
       mode: 'ci',
@@ -134,9 +134,9 @@ describe('setSpanMeasurement', () => {
     vi.clearAllMocks();
   });
 
-  it('is a no-op when telemetry is disabled', () => {
+  it('is a no-op when telemetry is disabled', async () => {
     disableTelemetry();
-    initSentry({
+    await initSentry({
       sessionId: 's',
       version: '0',
       mode: 'ci',
@@ -147,9 +147,9 @@ describe('setSpanMeasurement', () => {
     restoreEnv();
   });
 
-  it('forwards name, value, unit to Sentry.setMeasurement', () => {
+  it('forwards name, value, unit to Sentry.setMeasurement', async () => {
     enableTelemetry();
-    initSentry({
+    await initSentry({
       sessionId: 's',
       version: '0',
       mode: 'ci',
@@ -164,9 +164,9 @@ describe('setSpanMeasurement', () => {
     restoreEnv();
   });
 
-  it('skips non-finite values (NaN / Infinity) without touching Sentry', () => {
+  it('skips non-finite values (NaN / Infinity) without touching Sentry', async () => {
     enableTelemetry();
-    initSentry({
+    await initSentry({
       sessionId: 's',
       version: '0',
       mode: 'ci',
@@ -178,9 +178,9 @@ describe('setSpanMeasurement', () => {
     restoreEnv();
   });
 
-  it('swallows Sentry errors so the caller never sees them', () => {
+  it('swallows Sentry errors so the caller never sees them', async () => {
     enableTelemetry();
-    initSentry({
+    await initSentry({
       sessionId: 's',
       version: '0',
       mode: 'ci',

@@ -167,11 +167,22 @@ import {
 
   // Initialize Sentry error tracking.
   // Respects DO_NOT_TRACK=1 and AMPLITUDE_WIZARD_NO_TELEMETRY=1 for opt-out.
-  initSentry({
+  //
+  // Fire-and-forget: `initSentry` is async because it lazy-imports the
+  // heavy `@sentry/node` module (~80–150 ms saved on cold start). Awaiting
+  // here would re-block the bootstrap; not awaiting means events captured
+  // in the first ~tens of milliseconds before init resolves are silently
+  // dropped — acceptable for a CLI's startup window. A `.catch(() => {})`
+  // tail keeps an unhandled-rejection event from leaking out.
+  void initSentry({
     sessionId: analytics.getAnonymousId(),
     version: WIZARD_VERSION,
     mode,
     debug: isDebug,
+  }).catch(() => {
+    // Sentry init failure is already swallowed inside initSentry — this
+    // catch is belt-and-braces against a future regression that throws
+    // outside the inner try/catch.
   });
 
   // Set session-scoped properties so every event includes mode/version/platform.
