@@ -97,6 +97,23 @@ async function maybeResumeFromCheckpoint(
   session.introConcluded = true;
 }
 
+/**
+ * Wipe per-project caches that survived a `git reset` (or manual deletion
+ * of `<installDir>/ampli.json`). Without this, a stale checkpoint +
+ * stale stored API key silently steers the wizard back into the prior
+ * project — the user reaches a "Continue with this Amplitude project?"
+ * prompt against state they thought they wiped, with no obvious way to
+ * re-auth. See `src/lib/self-heal.ts` for the full rationale.
+ *
+ * Runs synchronously and BEFORE both `maybeResumeFromCheckpoint` and
+ * `resolveCredentials` so neither sees the stale data. Safe to call
+ * unconditionally — no-ops on fresh and on healthy projects.
+ */
+async function selfHealIfNeeded(session: WizardSession): Promise<void> {
+  const { selfHealStaleProjectState } = await import('../lib/self-heal.js');
+  selfHealStaleProjectState(session.installDir);
+}
+
 export const defaultCommand: CommandModule = {
   command: ['$0'],
   describe: 'Run the Amplitude setup wizard',
@@ -251,6 +268,7 @@ export const defaultCommand: CommandModule = {
         const session = await buildSessionFromOptions(options);
         session.agent = true;
         applyOrchestratorContext(session, options, true);
+        await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
         if (!gateAgentSignupArguments(session, agentUI)) {
@@ -283,6 +301,7 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
         applyOrchestratorContext(session, options, false);
+        await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
         if (!gateCiSignupAcceptToS(session)) {
@@ -310,6 +329,7 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options);
         applyOrchestratorContext(session, options, false);
+        await selfHealIfNeeded(session);
 
         // Attempt direct signup before falling through to OAuth browser
         // flow. On success, run resolveCredentials so agent-runner's
@@ -405,6 +425,14 @@ export const defaultCommand: CommandModule = {
           } else {
             // Pre-populate region + credentials from stored OAuth tokens.
             const { logToFile } = await import('../utils/debug.js');
+
+            // Self-heal stale per-project caches BEFORE loading the
+            // checkpoint or resolving credentials. After `git reset`,
+            // `<installDir>/ampli.json` is gone but the per-project
+            // checkpoint + stored API key still point at the prior
+            // project — without this, the wizard silently steers the
+            // user past auth into stale state. See `src/lib/self-heal.ts`.
+            await selfHealIfNeeded(session);
 
             // Check for crash-recovery checkpoint
             const { loadCheckpoint } = await import(
