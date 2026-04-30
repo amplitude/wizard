@@ -659,6 +659,26 @@ export interface WizardSession {
    */
   checklistDashboardUrl: string | null;
 
+  /**
+   * Lifecycle phase of the post-agent dashboard fallback step
+   * (`createDashboardStep` in src/steps/create-dashboard.ts).
+   *
+   *   `null`         — fallback hasn't started, or the agent already produced
+   *                    `.amplitude/dashboard.json` so the fallback short-circuits.
+   *   `in_progress`  — fallback is actively running its sub-agent + MCP calls.
+   *                    RunScreen surfaces this as a 6th synthetic task so the
+   *                    "X / 5 tasks complete" header stops lying while the
+   *                    spinner is spinning.
+   *   `completed`    — fallback finished (success or graceful skip).
+   *
+   * When the in-loop agent calls `record_dashboard` (the post-#PR-XXX path),
+   * this field stays null end-to-end and the RunScreen never shows a 6th task.
+   * The 6th task only appears when the agent didn't do its job and the
+   * fallback actually fires — that's the rare case we still want to be
+   * transparent about.
+   */
+  dashboardFallbackPhase: 'in_progress' | 'completed' | null;
+
   /** Email address of the authenticated user (from ~/.ampli.json stored profile). */
   userEmail: string | null;
 
@@ -925,6 +945,7 @@ export function buildSession(args: {
 
     dataIngestionConfirmed: false,
     checklistDashboardUrl: null,
+    dashboardFallbackPhase: null,
 
     userEmail: null,
     _restoredFromCheckpoint: false,

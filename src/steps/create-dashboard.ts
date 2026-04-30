@@ -23,12 +23,21 @@ import { getUI } from '../ui';
 import { analytics } from '../utils/analytics';
 import { logToFile } from '../utils/debug';
 import { persistDashboard } from '../lib/wizard-tools';
+import { getDashboardFile } from '../utils/storage-paths';
 import type { WizardSession } from '../lib/wizard-session';
 import type { Integration } from '../lib/constants';
 
 const EVENTS_FILE = '.amplitude-events.json';
 const DASHBOARD_FILE = '.amplitude-dashboard.json';
-const DASHBOARD_TIMEOUT_MS = 90_000;
+// Tightened from 90s → 30s. With the in-loop `record_dashboard` tool, the
+// agent is the primary path for dashboard creation; this step is now a
+// genuine fallback for the rare case where the agent failed to create or
+// record the dashboard. A 30s ceiling is enough for a single MCP retry but
+// short enough that the user-visible "Creating charts and dashboard..."
+// spinner doesn't sit for 90s on every cold MCP gateway. The bigger win
+// is that this step now usually short-circuits via the reuse path below
+// in <100ms — the timeout matters only when the fallback genuinely runs.
+const DASHBOARD_TIMEOUT_MS = 30_000;
 
 interface EventsFile {
   events: Array<{ name: string; description: string }>;
@@ -68,7 +77,8 @@ export async function createDashboardStep(
   const ui = getUI();
 
   const eventsPath = path.join(session.installDir, EVENTS_FILE);
-  const dashboardPath = path.join(session.installDir, DASHBOARD_FILE);
+  const legacyDashboardPath = path.join(session.installDir, DASHBOARD_FILE);
+  const canonicalDashboardPath = getDashboardFile(session.installDir);
 
   // 1. Read the instrumentation manifest the agent just wrote.
   const events = readEventsFile(eventsPath);
@@ -83,13 +93,23 @@ export async function createDashboardStep(
     return;
   }
 
-  // 1b. If the agent already created a dashboard (bundled skill instructs it
-  //     to, even though the post-#154 design says it shouldn't), reuse that
-  //     result instead of re-running the work. Without this guard the
-  //     post-agent agent fallback re-attempts chart/dashboard creation from
-  //     scratch and almost always hits the 90s ceiling — the user-visible
-  //     "Creating charts and dashboard in Amplitude…" hang.
-  const existing = readExistingDashboardFile(dashboardPath);
+  // 1b. If the in-loop agent already created the dashboard (the post-PR-XXX
+  //     happy path: agent calls Amplitude MCP `create_dashboard` and then
+  //     wizard-tools `record_dashboard`, which writes BOTH the canonical
+  //     `<installDir>/.amplitude/dashboard.json` AND the legacy
+  //     `<installDir>/.amplitude-dashboard.json`), short-circuit. This is
+  //     now the dominant path — the fallback below should only fire on
+  //     buggy / aborted agent runs.
+  //
+  //     Read order: canonical FIRST. The agent's `record_dashboard` writes
+  //     the canonical path atomically; reading there avoids a window where
+  //     only the legacy mirror has landed (and is theoretically safer if a
+  //     future skill release stops writing the legacy mirror). Fall back to
+  //     legacy for back-compat with older skills that wrote the file
+  //     themselves via plain Edit/Write.
+  const existing =
+    readExistingDashboardFile(canonicalDashboardPath) ??
+    readExistingDashboardFile(legacyDashboardPath);
   if (existing) {
     logToFile(
       `[createDashboard] reusing dashboard already created by agent: ${existing.dashboardUrl}`,
@@ -106,99 +126,115 @@ export async function createDashboardStep(
     return;
   }
 
+  // 2. Fallback path: the in-loop agent didn't record a dashboard, so we
+  //    have to create one ourselves via a sub-agent + Amplitude MCP. This
+  //    is the slow path (a cold sub-agent + chained MCP calls routinely
+  //    pushes 30s) and the user sees the spinner. Mark the session so
+  //    RunScreen can render a 6th synthetic task — without this, the
+  //    "5/5 tasks complete" header lies for the duration of the spinner.
+  //    Cleared in finally below regardless of outcome.
+  session.dashboardFallbackPhase = 'in_progress';
   ui.pushStatus('Creating your analytics dashboard');
   const spinner = ui.spinner();
   spinner.start('Creating charts and dashboard in Amplitude…');
 
-  // Wrap the entire dashboard run in try/finally so an unexpected throw from
-  // runCreateDashboard (e.g. SDK module load failure outside the agent's own
-  // try/catch) cannot leave the spinner running. The function's contract is
-  // "never throws" — enforce that here even when callees violate it.
+  // Wrap the entire fallback run so we ALWAYS clear `dashboardFallbackPhase`
+  // and stop the spinner — even if `runCreateDashboard` throws unexpectedly
+  // (e.g. SDK module load failure outside the agent's own try/catch). The
+  // function's contract is "never throws"; this enforces that even when a
+  // callee violates it. RunScreen's 6th synthetic task disappears the moment
+  // this finally runs, so a stuck phase would leave a stale "Creating your
+  // analytics dashboard" task pinned forever.
   const startedAt = Date.now();
   let result: DashboardResult | null = null;
   let unexpectedError: unknown = null;
   try {
-    result = await runCreateDashboard({
-      accessToken,
-      events,
-      session,
-    });
-  } catch (err) {
-    unexpectedError = err;
-    logToFile(
-      `[createDashboard] unexpected error: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-  const durationMs = Date.now() - startedAt;
-
-  if (!result) {
-    // Distinguish three failure modes for accurate user-visible messaging:
-    // - unexpected throw (e.g. SDK module load)
-    // - hard timeout (we hit the 90s ceiling)
-    // - MCP/agent returned null quickly (parse error, empty output, session
-    //   handshake refused, etc.)
-    let spinnerMessage: string;
-    let warnMessage: string;
-    let reason: string;
-    if (unexpectedError) {
-      spinnerMessage = 'Dashboard step failed — skipping';
-      warnMessage =
-        'Amplitude is configured, but the wizard hit an unexpected error creating a starter dashboard. Open app.amplitude.com to create one manually.';
-      reason = 'unexpected error';
-    } else if (durationMs >= DASHBOARD_TIMEOUT_MS) {
-      spinnerMessage = 'Dashboard step timed out — skipping';
-      warnMessage = `Amplitude is configured, but the wizard could not create a starter dashboard within ${
-        DASHBOARD_TIMEOUT_MS / 1000
-      } seconds. Open app.amplitude.com to create one manually.`;
-      reason = 'timeout';
-    } else {
-      spinnerMessage = 'Dashboard step skipped';
-      warnMessage =
-        'Amplitude is configured, but the wizard could not create a starter dashboard. Open app.amplitude.com to create one manually.';
-      reason = 'mcp error or unparseable response';
+    try {
+      result = await runCreateDashboard({
+        accessToken,
+        events,
+        session,
+      });
+    } catch (err) {
+      unexpectedError = err;
+      logToFile(
+        `[createDashboard] unexpected error: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
     }
-    spinner.stop(spinnerMessage);
-    ui.log.warn(warnMessage);
-    analytics.wizardCapture('dashboard failed', {
+    const durationMs = Date.now() - startedAt;
+
+    if (!result) {
+      // Distinguish three failure modes for accurate user-visible messaging:
+      // - unexpected throw (e.g. SDK module load)
+      // - hard timeout (we hit the timeout ceiling)
+      // - MCP/agent returned null quickly (parse error, empty output, session
+      //   handshake refused, etc.)
+      let spinnerMessage: string;
+      let warnMessage: string;
+      let reason: string;
+      if (unexpectedError) {
+        spinnerMessage = 'Dashboard step failed — skipping';
+        warnMessage =
+          'Amplitude is configured, but the wizard hit an unexpected error creating a starter dashboard. Open app.amplitude.com to create one manually.';
+        reason = 'unexpected error';
+      } else if (durationMs >= DASHBOARD_TIMEOUT_MS) {
+        spinnerMessage = 'Dashboard step timed out — skipping';
+        warnMessage = `Amplitude is configured, but the wizard could not create a starter dashboard within ${
+          DASHBOARD_TIMEOUT_MS / 1000
+        } seconds. Open app.amplitude.com to create one manually.`;
+        reason = 'timeout';
+      } else {
+        spinnerMessage = 'Dashboard step skipped';
+        warnMessage =
+          'Amplitude is configured, but the wizard could not create a starter dashboard. Open app.amplitude.com to create one manually.';
+        reason = 'mcp error or unparseable response';
+      }
+      spinner.stop(spinnerMessage);
+      ui.log.warn(warnMessage);
+      analytics.wizardCapture('dashboard failed', {
+        integration,
+        reason,
+        'duration ms': durationMs,
+      });
+      return;
+    }
+
+    // Persist the wizard-visible artifact so OutroScreen can link to it.
+    // Legacy mirror at the project root (older readers) and canonical
+    // `<installDir>/.amplitude/dashboard.json` (`/diagnostics`, repeat-run
+    // plan recovery, skill packs). Best-effort — failures here must not
+    // fail the wizard; the user's project is already configured.
+    try {
+      fs.writeFileSync(
+        legacyDashboardPath,
+        JSON.stringify(result, null, 2),
+        'utf8',
+      );
+    } catch (err) {
+      logToFile(
+        `[createDashboard] failed to write ${DASHBOARD_FILE}: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+    persistDashboard(session.installDir, result);
+
+    session.checklistDashboardUrl = result.dashboardUrl;
+    ui.setDashboardUrl(result.dashboardUrl);
+    spinner.stop('Dashboard ready');
+    analytics.wizardCapture('dashboard created', {
       integration,
-      reason,
+      'chart count': result.charts?.length ?? 0,
       'duration ms': durationMs,
+      source: 'post-agent',
     });
-    return;
+  } finally {
+    // ALWAYS clear the phase so RunScreen drops the 6th synthetic task,
+    // regardless of how this branch exited (success, soft-skip, throw).
+    session.dashboardFallbackPhase = 'completed';
   }
-
-  // 2. Persist the wizard-visible artifact so OutroScreen can link to it.
-  try {
-    fs.writeFileSync(dashboardPath, JSON.stringify(result, null, 2), 'utf8');
-  } catch (err) {
-    logToFile(
-      `[createDashboard] failed to write ${DASHBOARD_FILE}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
-
-  // 3. Mirror to the canonical `<installDir>/.amplitude/dashboard.json`
-  //    path so anything that reads `getDashboardFile()` (the `/diagnostics`
-  //    output, repeat-run plan recovery, skill packs, external integrations)
-  //    finds the file. Pre-#154 the agent wrote this via the file-watcher
-  //    in `agent-interface.ts`; since #154 moved dashboard creation OUT of
-  //    the agent loop, the watcher never fires and the canonical path was
-  //    silently never populated. Best-effort — `persistDashboard` already
-  //    swallows fs errors; a failure here must not fail the wizard.
-  persistDashboard(session.installDir, result);
-
-  session.checklistDashboardUrl = result.dashboardUrl;
-  ui.setDashboardUrl(result.dashboardUrl);
-  spinner.stop('Dashboard ready');
-  analytics.wizardCapture('dashboard created', {
-    integration,
-    'chart count': result.charts?.length ?? 0,
-    'duration ms': durationMs,
-    source: 'post-agent',
-  });
 }
 
 /**
@@ -286,13 +322,18 @@ async function runCreateDashboard(args: {
   session: WizardSession;
 }): Promise<DashboardResult | null> {
   const { accessToken, events, session } = args;
-  // Region-aware MCP URL: an EU user's dashboard / chart MCP calls must
-  // route to mcp.eu.amplitude.com so the dashboard lands in the right
-  // data center. readDisk: true — create-dashboard runs post-agent and
-  // can be reached from non-TUI paths (CI, agent mode) where the
-  // RegionSelect tier-1 invariant isn't guaranteed.
-  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
-  const mcpUrl = getMcpUrlFromZone(zone, { local: session.localMcp });
+  const ui = getUI();
+  // MCP host follows the bearer's account zone, not the env data zone.
+  // EU MCP 401s any US-issued bearer (and vice versa) — so a US-account
+  // user picking an EU env still needs to talk to US MCP. The env's
+  // data still lands in EU because the appId carries that routing
+  // server-side.
+  const { decodeJwtZone } = await import('../utils/jwt-exp.js');
+  const envZone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+    readDisk: true,
+  });
+  const accountZone = decodeJwtZone(accessToken) ?? envZone;
+  const mcpUrl = getMcpUrlFromZone(accountZone, { local: session.localMcp });
 
   const agentPrompt = buildAgentPrompt(events, session);
 
@@ -303,6 +344,18 @@ async function runCreateDashboard(args: {
     logToFile(
       `[createDashboard] aborting — hit ${DASHBOARD_TIMEOUT_MS}ms ceiling`,
     );
+    // Update the user-visible status the moment the timer fires. The SDK
+    // subprocess can take several seconds to wind down after `controller.abort()`,
+    // and until it does the spinner stays parked on "Creating charts and
+    // dashboard in Amplitude…" — the UI lies that work is in flight while the
+    // wizard has already given up. Pushing here gives the user immediate
+    // feedback; the eventual `spinner.stop(spinnerMessage)` in the caller
+    // overwrites this with the final timeout message.
+    try {
+      ui.pushStatus('Dashboard step is taking too long — wrapping up…');
+    } catch {
+      // pushStatus is best-effort here; never let a UI hiccup mask the abort.
+    }
     controller.abort();
   }, DASHBOARD_TIMEOUT_MS);
 
@@ -315,10 +368,69 @@ async function runCreateDashboard(args: {
       abortSignal: controller.signal,
       agentPrompt,
       parseAgent: parseAgentOutput,
+      // Translate the fallback agent's MCP tool calls into status pill
+      // updates so the 90s budget feels alive instead of frozen. The model
+      // calls Amplitude MCP write tools as `mcp__amplitude__create_chart`,
+      // `mcp__amplitude__create_dashboard`, etc. — any other tool name
+      // falls through to a generic message.
+      onAgentToolUse: ({ name, input }) => {
+        const status = describeAgentToolUse(name, input);
+        if (status) ui.pushStatus(status);
+      },
     });
   } finally {
     clearTimeout(abortTimer);
   }
+}
+
+/**
+ * Map an inner-agent tool_use to a human-readable status pill string.
+ * Returns `null` when the tool isn't worth surfacing (e.g. read-only MCP
+ * probes, internal SDK plumbing) so we don't churn the pill on noise.
+ *
+ * Exported for unit tests.
+ */
+export function describeAgentToolUse(
+  name: string,
+  input: unknown,
+): string | null {
+  // MCP tools land as `mcp__<server>__<tool>` — strip the prefix so we can
+  // pattern-match on the bare tool name.
+  const mcpMatch = name.match(/^mcp__[a-z0-9_-]+__(.+)$/i);
+  const tool = mcpMatch ? mcpMatch[1] : name;
+  // Pull a chart title out of the input when present; the model emits
+  // `{ title: "..." }` in current Amplitude MCP schemas, but we treat it
+  // as untrusted (string-cap, single-line).
+  const title =
+    readStringField(input, 'title') ?? readStringField(input, 'name');
+  const trimmedTitle =
+    title && title.length > 0
+      ? `: ${title.replace(/\s+/g, ' ').slice(0, 60)}`
+      : '';
+  switch (tool) {
+    case 'create_chart':
+      return `Creating chart in Amplitude${trimmedTitle}…`;
+    case 'create_dashboard':
+      return `Assembling your dashboard in Amplitude${trimmedTitle}…`;
+    case 'add_chart_to_dashboard':
+    case 'attach_chart_to_dashboard':
+      return 'Adding chart to dashboard…';
+    case 'update_chart':
+      return `Updating chart in Amplitude${trimmedTitle}…`;
+    case 'update_dashboard':
+      return `Updating dashboard in Amplitude${trimmedTitle}…`;
+    default:
+      // Read-only probes (list_charts, search_events, get_*) are noise —
+      // the user doesn't care that the agent is browsing. Skip everything
+      // we don't explicitly recognise as a write action.
+      return null;
+  }
+}
+
+function readStringField(input: unknown, key: string): string | null {
+  if (input === null || typeof input !== 'object') return null;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : null;
 }
 
 function buildAgentPrompt(events: EventsFile, session: WizardSession): string {

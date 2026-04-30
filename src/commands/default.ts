@@ -97,6 +97,23 @@ async function maybeResumeFromCheckpoint(
   session.introConcluded = true;
 }
 
+/**
+ * Wipe per-project caches that survived a `git reset` (or manual deletion
+ * of `<installDir>/ampli.json`). Without this, a stale checkpoint +
+ * stale stored API key silently steers the wizard back into the prior
+ * project — the user reaches a "Continue with this Amplitude project?"
+ * prompt against state they thought they wiped, with no obvious way to
+ * re-auth. See `src/lib/self-heal.ts` for the full rationale.
+ *
+ * Runs synchronously and BEFORE both `maybeResumeFromCheckpoint` and
+ * `resolveCredentials` so neither sees the stale data. Safe to call
+ * unconditionally — no-ops on fresh and on healthy projects.
+ */
+async function selfHealIfNeeded(session: WizardSession): Promise<void> {
+  const { selfHealStaleProjectState } = await import('../lib/self-heal.js');
+  selfHealStaleProjectState(session.installDir);
+}
+
 export const defaultCommand: CommandModule = {
   command: ['$0'],
   describe: 'Run the Amplitude setup wizard',
@@ -251,6 +268,7 @@ export const defaultCommand: CommandModule = {
         const session = await buildSessionFromOptions(options);
         session.agent = true;
         applyOrchestratorContext(session, options, true);
+        await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
         if (!gateAgentSignupArguments(session, agentUI)) {
@@ -283,6 +301,7 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
         applyOrchestratorContext(session, options, false);
+        await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
         if (!gateCiSignupAcceptToS(session)) {
@@ -310,6 +329,7 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options);
         applyOrchestratorContext(session, options, false);
+        await selfHealIfNeeded(session);
 
         // Attempt direct signup before falling through to OAuth browser
         // flow. On success, run resolveCredentials so agent-runner's
@@ -405,6 +425,14 @@ export const defaultCommand: CommandModule = {
           } else {
             // Pre-populate region + credentials from stored OAuth tokens.
             const { logToFile } = await import('../utils/debug.js');
+
+            // Self-heal stale per-project caches BEFORE loading the
+            // checkpoint or resolving credentials. After `git reset`,
+            // `<installDir>/ampli.json` is gone but the per-project
+            // checkpoint + stored API key still point at the prior
+            // project — without this, the wizard silently steers the
+            // user past auth into stale state. See `src/lib/self-heal.ts`.
+            await selfHealIfNeeded(session);
 
             // Check for crash-recovery checkpoint
             const { loadCheckpoint } = await import(
@@ -660,10 +688,22 @@ export const defaultCommand: CommandModule = {
               // Wait for the user to dismiss the welcome screen AND pick a
               // region before opening the OAuth URL. This ensures the logo
               // and intro are visible before the browser opens.
+              //
+              // The `!regionForced` guard handles the IntroScreen "Change
+              // region" path: a returning user already has `region` set
+              // from disk, so picking "Change region" calls
+              // setRegionForced() (regionForced=true) + concludeIntro()
+              // (introConcluded=true) — both fields the original wait
+              // condition watched. Without the guard the auth task would
+              // wake up and open the browser against the OLD region while
+              // the user is still picking the new one on RegionSelect.
+              // setRegion() flips regionForced back to false once the new
+              // region is chosen, releasing the wait against the right zone.
               await new Promise<void>((resolve) => {
                 if (
                   tui.store.session.introConcluded &&
-                  tui.store.session.region !== null
+                  tui.store.session.region !== null &&
+                  !tui.store.session.regionForced
                 ) {
                   resolve();
                   return;
@@ -671,7 +711,8 @@ export const defaultCommand: CommandModule = {
                 const unsub = tui.store.subscribe(() => {
                   if (
                     tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
+                    tui.store.session.region !== null &&
+                    !tui.store.session.regionForced
                   ) {
                     unsub();
                     resolve();
@@ -1017,15 +1058,21 @@ export const defaultCommand: CommandModule = {
             // keeps the 3-strike circuit-breaker as the only place that
             // hands control back to the user.
             while (true) {
-              // Wait for credentials to populate (via initial authTask
-              // or a previous SUSI completion).
-              await waitForSessionState(
-                () => tui.store.session.credentials !== null,
-              );
+              // Wait for /region to be invoked. setRegionForced sets
+              // regionForced=true (and clears credentials + pendingOrgs).
+              //
+              // Gating on regionForced rather than `credentials !== null`
+              // matters when /region is fired DURING the AuthScreen SUSI
+              // step — initial OAuth completed (pendingOrgs set) but the
+              // user hasn't picked an org/project yet, so credentials is
+              // still null. The old `credentials !== null` gate parked
+              // forever in that window and never reacted to setRegionForced.
+              // `await authTask` above already prevents racing with the
+              // initial OAuth, so we don't need the credentials sentinel.
+              await waitForSessionState(() => tui.store.session.regionForced);
 
-              // Then wait for them to be cleared AND the user to have
-              // picked a new region. setRegionForced clears credentials;
-              // the subsequent setRegion clears regionForced.
+              // Then wait for the user to pick a new region. setRegion
+              // clears regionForced.
               //
               // Skip when /logout is active (loggingOut flag) or an
               // outro is queued — /logout clears credentials and exits

@@ -31,6 +31,7 @@ import {
   AgentErrorType,
   AUTH_RETRY_LIMIT,
   selectModel,
+  isStallNonProgressMessage,
 } from '../agent-interface';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -1157,6 +1158,136 @@ describe('runAgent', () => {
 
       // ui.log.error should NOT have been called (errors suppressed for user)
       expect(mockUIInstance.log.error).not.toHaveBeenCalled();
+    });
+  });
+});
+
+describe('isStallNonProgressMessage', () => {
+  describe('system status envelopes (SDKStatus = compacting | requesting | null)', () => {
+    // 'requesting' is the SDK saying "I just sent the request, now
+    // waiting for the first byte." Treating it as progress would mask
+    // gateway hangs — see the bug fixed in #467.
+    it('classifies status:requesting as non-progress', () => {
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: 'requesting',
+          uuid: 'abc',
+          session_id: 'sess',
+        }),
+      ).toBe(true);
+    });
+
+    it('classifies status:null (idle / cleared) as non-progress', () => {
+      // Per the SDK type union, status can be `null`. That means "no
+      // current status" — there's no observable activity to refresh
+      // the timer on, so it's non-progress.
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: null,
+        }),
+      ).toBe(true);
+    });
+
+    it('classifies status:compacting as PROGRESS — the SDK is actively working', () => {
+      // The third value in the SDK's SDKStatus union. Unlike
+      // 'requesting' / null, 'compacting' means the SDK is running
+      // compaction itself — that IS work, even if not LLM work.
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: 'compacting',
+        }),
+      ).toBe(false);
+    });
+
+    it('treats unknown future status values as non-progress (whitelist semantics)', () => {
+      // Defensive: if the SDK adds a new status value we haven't seen,
+      // err on the side of NOT resetting the timer. Worst case is an
+      // extra few seconds of stall sensitivity until real content
+      // arrives — strictly safer than letting an unknown envelope
+      // mask a hang.
+      expect(
+        isStallNonProgressMessage({
+          type: 'system',
+          subtype: 'status',
+          status: 'some-future-shape',
+        }),
+      ).toBe(true);
+    });
+  });
+
+  describe('stream_event framing (BetaRawMessageStreamEvent)', () => {
+    // Six stream_event subtypes exist; only content_block_delta carries
+    // real model output. The other five are framing that flank deltas
+    // by milliseconds in the happy path.
+    it('classifies content_block_delta as PROGRESS', () => {
+      expect(
+        isStallNonProgressMessage({
+          type: 'stream_event',
+          event: {
+            type: 'content_block_delta',
+            index: 0,
+            delta: { type: 'text_delta', text: 'hi' },
+          },
+        }),
+      ).toBe(false);
+    });
+
+    it.each([
+      'message_start',
+      'message_delta',
+      'message_stop',
+      'content_block_start',
+      'content_block_stop',
+    ])('classifies %s framing as non-progress', (innerType) => {
+      expect(
+        isStallNonProgressMessage({
+          type: 'stream_event',
+          event: { type: innerType },
+        }),
+      ).toBe(true);
+    });
+
+    it('classifies a stream_event with no inner event as non-progress', () => {
+      // Bare envelope, missing the typed `event` payload — treat as
+      // bookkeeping noise.
+      expect(isStallNonProgressMessage({ type: 'stream_event' })).toBe(true);
+      expect(
+        isStallNonProgressMessage({ type: 'stream_event', event: null }),
+      ).toBe(true);
+    });
+  });
+
+  describe('progress events (timer should reset)', () => {
+    it.each([
+      ['assistant', { type: 'assistant' }],
+      ['user', { type: 'user' }],
+      [
+        'system api_retry',
+        { type: 'system', subtype: 'api_retry', attempt: 1 },
+      ],
+      [
+        'system compact_boundary',
+        { type: 'system', subtype: 'compact_boundary' },
+      ],
+      ['system init', { type: 'system', subtype: 'init' }],
+    ] as const)('treats %s as progress', (_label, msg) => {
+      expect(isStallNonProgressMessage(msg)).toBe(false);
+    });
+  });
+
+  describe('malformed inputs', () => {
+    it('returns false for null / undefined / primitives without throwing', () => {
+      expect(isStallNonProgressMessage(null)).toBe(false);
+      expect(isStallNonProgressMessage(undefined)).toBe(false);
+      expect(isStallNonProgressMessage('string')).toBe(false);
+      expect(isStallNonProgressMessage(42)).toBe(false);
+      expect(isStallNonProgressMessage({})).toBe(false);
     });
   });
 });

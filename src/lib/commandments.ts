@@ -41,30 +41,23 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
 
   'Every wizard-tools MCP tool call (`mcp__wizard-tools__*`) MUST include a `reason` argument (≤25 words) explaining what you\'re trying to accomplish at this step. Captured in Agent Analytics. Write a real rationale tied to the immediate goal — not a paraphrase of the tool description, generic phrases like "calling tool", or the literal string "reason". When you\'re truly stuck (unresolvable error, missing prerequisite, ambiguous codebase shape), call `wizard_feedback` (severity="warn" if you can continue degraded, "error" if not) instead of silently continuing or repeating failed calls.',
 
-  'NEVER run Bash commands to verify env vars. Forbidden: `node -e "console.log(process.env...)"`, `node --eval`, `printenv`, `echo $VAR`, `cat .env*`, `grep AMPLITUDE .env`, `bash -c \'...\'` evals, or any shell incantation aimed at inspecting env-var presence/values. The bash allowlist denies all variants — silently rephrasing `node -e` as `node --eval` is the exact pattern this rule forbids. The ONLY sanctioned check: wizard-tools `check_env_keys` (reports presence without exposing values). If keys are missing, call `set_env_values`. Do not invent a "verify" phase that loops shell commands.',
+  'NEVER use Bash to verify env vars — `node -e`, `node --eval`, `printenv`, `echo $VAR`, `cat .env*`, `grep AMPLITUDE .env`, `bash -c "..."` are all denied by the allowlist. The ONLY sanctioned check is wizard-tools `check_env_keys` (reports presence without exposing values); if keys are missing, call `set_env_values`. Read the deny message for details — do not retry with a reworded variant.',
 
-  `Build / typecheck / lint verification — keep the shape SIMPLE. The bash allowlist accepts package-manager scripts (\`yarn test:typecheck\`, \`pnpm tsc --noEmit\`, \`npx eslint --fix src/file.ts\`, \`npx tsc --noEmit\`) and at most a single pipe to \`tail\` / \`head\` for output limiting. It does NOT allow:
-
-    ✗ \`yarn typecheck 2>&1 | grep -E "(error TS|...)" | head -30\`   ← parens trip the dangerous-operators rule
-    ✗ \`yarn lint | grep error | head\`                                ← multiple pipes
-    ✗ \`yarn build && yarn lint\`                                      ← && chaining
-    ✗ \`tsc --noEmit; yarn lint\`                                      ← semicolon chaining
-
-  The allowed shapes:
-
-    ✓ \`yarn test:typecheck\`                          ← full output, no pipe
-    ✓ \`yarn test:typecheck | tail -50\`               ← last 50 lines (single pipe to tail)
-    ✓ \`pnpm tsc --noEmit | head -30\`                 ← first 30 lines (single pipe to head)
-    ✓ \`npx tsc --noEmit\`                             ← direct invocation
-    ✓ \`npx eslint --fix src/init.ts\` then \`npx tsc --noEmit\`  ← sequential, two separate Bash calls
-
-  Note: these are SYNTAX shapes the allowlist permits. You must still scope lint/build to edited files only (see the scoping commandment below) — never run project-wide \`yarn lint\`, \`npm run build\`, etc.
-
-  When you need to filter output to a substring, use \`Grep\` (the dedicated tool) on the captured stdout — not a shell pipe. When the output is short enough to read in full, just don't pipe at all.
-
-  If the simple form gets denied (extremely rare — the allowlist covers all common build-tool sub-commands), DO NOT retry with progressively more shell composition. Note the limitation in the setup report (\`Could not run \\\`<command>\\\` automatically. Run it manually after install.\`) and move on. The retry-budget rule applies.`,
+  `Build/typecheck/lint verification — keep shell shapes SIMPLE. Allowed: package-manager scripts (\`yarn test:typecheck\`, \`npx tsc --noEmit\`, \`npx eslint --fix src/file.ts\`) optionally piped to a SINGLE \`| tail -50\` or \`| head -30\`. Denied: ✗ \`yarn typecheck | grep -E "..." | head -30\` (multiple pipes, parens), ✗ \`yarn build && yarn lint\` (\`&&\` chaining), ✗ \`tsc --noEmit; yarn lint\` (\`;\` chaining). Use \`Grep\` for substring filtering on captured stdout, not a shell pipe. Scope to edited files only (see scoping commandment below) — never run project-wide. On a deny, DO NOT retry with progressively more shell composition; note in the setup report and move on.`,
 
   'When installing packages, start the install as a background task and continue with other work. Do not block on installs unless explicitly instructed.',
+
+  `Discovery parallelism — fan out independent probes in ONE assistant message instead of serializing them turn-by-turn. The Claude Agent SDK runs every tool call in a single message in parallel, so a 3-tool batch costs ~one round-trip; the same 3 calls split across 3 messages costs ~3 round-trips and ~10–20s of avoidable wall time on cold-start.
+
+Combine in the SAME message when none depend on each other (typical for the very first project sniff):
+  - \`mcp__wizard-tools__detect_package_manager\`
+  - \`mcp__wizard-tools__check_env_keys\`
+  - \`Glob\` (e.g. \`package.json\`, \`pyproject.toml\`, \`pubspec.yaml\` — whatever signals the framework)
+  - \`Read\` of a file you know exists (typically \`package.json\` from the framework-detection prompt context)
+
+Same rule for any later "I want to understand the project shape" batch: when you'd be calling several Read / Glob / Grep / wizard-tools probes whose results are independent, fire them together. DO serialize when one truly depends on another (Glob first, Read the matched paths second). If unsure, parallelism is the safer default — the wizard's status spinner stays responsive and the cache hit rate on the first user message stays hot.
+
+Write tools (Edit / Write) — DO parallelize when each call targets a DIFFERENT file. Instrumenting an event across 5 files = 5 Edit calls in ONE assistant message; that's the single biggest wall-clock win in the "Wire up event tracking" phase. The Read-before-Write rule still applies (each file needs a prior Read), and you must NEVER fan out two writes to the SAME file in one message — those races corrupt content. When in doubt about file independence, serialize.`,
 
   "NEVER install non-Amplitude packages on the user's behalf. The wizard's job is to add Amplitude — not build tooling, env-var loaders, bundler plugins, polyfills, or other utilities. Out of scope: `dotenv` and variants, `webpack`, `vite`, `@types/*`, polyfill libraries, env-injection plugins. Hard test before any `npm install` / `pnpm add` / `yarn add` / `pip install` / `gem install` / `go get`: does the package start with `@amplitude/`? If not, is it explicitly listed as a required peer dependency by the active integration skill (e.g. `@react-native-async-storage/async-storage` for React Native)? If neither, DO NOT install. If env-var wiring or build-config changes are needed, document the required change in the setup report and let the user decide. Sample EXAMPLE.md files under skills/integration may show `dotenv` etc. — those are reference snippets, not install instructions.",
 
@@ -90,9 +83,11 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
   4. Wire up event tracking
   5. Open your dashboard
 
-These are the ONLY allowed top-level todos. Do NOT add a sixth — internal steps (env var writes, Content Security Policy edits, build verification, setup report, dashboard creation, doc fetches) roll into the appropriate parent (CSP and env vars into "Install Amplitude"; setup report and dashboard creation into "Open your dashboard"; build verification into "Wire up event tracking"). Engineering phases from the integration skill (1.0-begin / 1.1-edit / 1.2-revise / 1.3-conclude) are internal — they do not appear here.
+These are the ONLY allowed top-level todos. Do NOT add a sixth — internal steps (env var writes, Content Security Policy edits, build verification, setup report, doc fetches) roll into the appropriate parent (CSP and env vars into "Install Amplitude"; setup report into "Open your dashboard"; build verification into "Wire up event tracking"). Engineering phases from the integration skill (1.0-begin / 1.1-edit / 1.2-revise / 1.3-conclude) are internal — they do not appear here.
 
-Mark each in_progress when you start the parent step and completed AS SOON AS that specific work is done — not batched at end of phase. The wizard renders this as "X / 5 tasks complete"; the denominator MUST stay 5 from first frame to last. Plan once at the start; never grow the list. Mark "Detect your project setup" completed the instant detection is done; "Install Amplitude" the instant the install starts as a background task; "Plan and approve events to track" the instant confirm_event_plan returns approved; "Wire up event tracking" the moment the last track() call lands. Delaying the TodoWrite update by even a few tool calls leaves the counter stuck and users assume the wizard hung.`,
+Mark each in_progress when you start the parent step and completed AS SOON AS that specific work is done — not batched at end of phase. The wizard renders this as "X / 5 tasks complete"; the denominator MUST stay 5 from first frame to last. Plan once at the start; never grow the list. Mark "Detect your project setup" completed the instant detection is done; "Install Amplitude" the instant the install starts as a background task; "Plan and approve events to track" the instant confirm_event_plan returns approved; "Wire up event tracking" the moment the last track() call lands.
+
+CRITICAL — "Open your dashboard" is real work, not a placeholder. Mark it in_progress when you start creating charts via the Amplitude MCP, and mark it completed ONLY AFTER \`record_dashboard\` returns "ok". A premature completion is the single most common UX bug: the spinner header reads "5/5 tasks complete" while the wizard hangs running a fallback dashboard step the agent should have done. If chart/dashboard creation fails partway, leave the task in_progress and let the post-agent fallback handle it — DO NOT mark complete to "move on". Delaying the TodoWrite update by even a few tool calls leaves the counter stuck and users assume the wizard hung.`,
 
   `After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call \`confirm_event_plan\` to present the proposed instrumentation plan. Only proceed after approval. If the user gives feedback, revise and call again. If skipped, do not instrument any events.
 
@@ -117,14 +112,16 @@ CRITICAL — identify wiring. For any flow with authenticated users or a post-co
 
   'Autocapture (Amplitude\'s auto-tracking of element clicks, form interactions, page/screen views, sessions, app lifecycle, file downloads) is commonly enabled by the wizard for web SDKs (`@amplitude/unified`, `@amplitude/analytics-browser`) but is NOT default everywhere (Swift requires opt-in plugin; backend SDKs don\'t track interactions; existing projects may have it off). Before proposing events, check the SDK init code to see whether autocapture is on and what it covers for this platform. If on, do NOT propose events that duplicate it — names like "[X] Clicked", "[X] Tapped", "[X] Pressed", "Form Submitted", "Form Started", "Input Changed", "Page Viewed", "Screen Viewed" are redundant and must be excluded. Either way, prefer events for business outcomes, state changes, async success/failure, and multi-step flow milestones over raw interaction events (see skills/instrumentation/discover-event-surfaces/references/best-practices.md section R4). For landing pages or starter templates with autocapture on, lean toward a minimal plan and let autocapture do the work — `confirm_event_plan` still requires at least one event, so pick the single most meaningful state change. Keep this reasoning internal — do NOT write autocapture justifications into descriptions.',
 
-  `After all event and identity instrumentation is complete, write \`.amplitude-events.json\` at the project root. Shape: a top-level JSON array — \`[ { "name": "<exact event name>", "description": "<short description>", "file": "<path where instrumented>" } ]\`. Use the key \`name\` (matching the event_type you passed to track()) — not \`event\`, \`event_type\`, or \`eventName\`. Do NOT wrap the array in an object (e.g. \`{ "events": [...] }\`); the wizard's parsers expect a top-level array. Do NOT create charts or dashboards yourself — the wizard runs a dedicated post-agent step that reads this file and creates the dashboard with bounded timeouts and progress reporting. Your job ends at instrumentation + writing this file.`,
+  `After all event and identity instrumentation is complete, write \`.amplitude-events.json\` at the project root. Shape: a top-level JSON array — \`[ { "name": "<exact event name>", "description": "<short description>", "file": "<path where instrumented>" } ]\`. Use the key \`name\` (matching the event_type you passed to track()) — not \`event\`, \`event_type\`, or \`eventName\`. Do NOT wrap the array in an object (e.g. \`{ "events": [...] }\`); the wizard's parsers expect a top-level array.
+
+After writing this file you proceed to dashboard creation as STEP 5 (see the per-run instructions). Create 4–6 charts and a dashboard via the Amplitude MCP, then call the wizard-tools \`record_dashboard\` tool with the dashboard URL — that tool persists the result so the wizard outro links to it and the post-agent fallback step short-circuits. Do NOT skip \`record_dashboard\`: a dashboard the wizard never sees is a dashboard the user never sees.`,
 
   `You MUST write \`amplitude-setup-report.md\` at the project root before the run ends. The wizard's outro screen reads this file as the user-facing recap; without it the user has no record of what changed. Write it even after partial failures, missed steps, or running out of turns — a thinner report is far better than none.
 
 The integration skill's \`basic-integration-1.3-conclude.md\` reference has the canonical format — load and follow it. If unavailable, write the report from session knowledge with at minimum:
   - Integration summary (SDK installed, framework, init location)
   - Events instrumented (table: event name, description, file path)
-  - Dashboard link (omit — the wizard's post-agent step creates the dashboard and writes its URL itself)
+  - Dashboard link (the URL you just passed to \`record_dashboard\`)
   - Env var setup notes (what was set, what user needs for prod)
   - Next steps
 

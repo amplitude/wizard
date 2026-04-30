@@ -320,6 +320,56 @@ export type AgentConfig = {
 export const MAX_BASH_SLEEP_SECONDS = 5;
 
 /**
+ * Returns true when an SDK message is the "I'm about to wait on the
+ * upstream API" envelope rather than actual progress.
+ *
+ * The Claude Agent SDK emits `system { subtype: 'status', status:
+ * 'requesting' }` immediately *before* it sends a request to the model
+ * — it means "request issued, now waiting for the first byte." It is
+ * NOT model output, NOT tool output, and NOT an SDK retry. Treating it
+ * as progress (resetting the stall timer when it arrives) masks
+ * gateway hangs: when the upstream goes silent, the timer was just
+ * reset to its full window from a non-event, so users wait the full
+ * STALL_TIMEOUT_MS past when the upstream actually hung.
+ *
+ * Other `system` subtypes (`init`, `api_retry`, `compact_boundary`,
+ * etc.) ARE real progress events — keep treating them as resets.
+ *
+ * Exported so unit tests can pin the classification without spinning
+ * up the full agent runtime.
+ */
+export function isStallNonProgressMessage(rawMessage: unknown): boolean {
+  if (!rawMessage || typeof rawMessage !== 'object') return false;
+  const msg = rawMessage as Record<string, unknown>;
+
+  // Class 1 — SDK status envelopes. The SDK type union is
+  //   SDKStatus = 'compacting' | 'requesting' | null
+  // 'compacting' is the only one that means "real work is happening";
+  // everything else (current 'requesting' / null, plus any future
+  // shape we don't recognize yet) is conservatively non-progress.
+  if (msg.type === 'system' && msg.subtype === 'status') {
+    return msg.status !== 'compacting';
+  }
+
+  // Class 2 — stream_event book-keeping frames. Under
+  // `includePartialMessages: true`, the SDK emits six stream_event
+  // subtypes; only `content_block_delta` carries real model output
+  // (text deltas, input_json deltas, thinking deltas). The other
+  // five (message_start / message_delta / message_stop /
+  // content_block_start / content_block_stop) are framing that flanks
+  // real deltas by milliseconds in the happy path — treating them as
+  // non-progress tightens the timer's signal-to-noise without risking
+  // false stalls during legitimate generation.
+  if (msg.type === 'stream_event') {
+    const event = msg.event;
+    if (event === null || typeof event !== 'object') return true;
+    return (event as Record<string, unknown>).type !== 'content_block_delta';
+  }
+
+  return false;
+}
+
+/**
  * Build the `systemPrompt.append` string the inner-agent SDK passes to
  * Claude every turn. Concatenates wizard-wide commandments with the
  * optional orchestrator-supplied context block, in that order:
@@ -2508,10 +2558,18 @@ export async function runAgent(
     // Cold-start timeout: subprocess spawn + MCP server connections + first LLM response
     const INITIAL_STALL_TIMEOUT_MS = 60_000;
     // Mid-run timeout: between consecutive messages during active work.
-    // Raised from 30s to 120s to accommodate extended thinking (Opus can
-    // think for 10+ min before emitting the first token with the proxy's
-    // 20-min fetch timeout).
-    const STALL_TIMEOUT_MS = 120_000;
+    //
+    // Was 120s, originally raised from 30s "to accommodate extended
+    // thinking (Opus can think for 10+ min before emitting the first
+    // token)." That justification is now stale: extended thinking is
+    // explicitly DISABLED in the SDK options below (see comment near
+    // `query({...})`), so a 120s gap with no message means the upstream
+    // is hung, not "the model is thinking hard." Combined with the
+    // companion fix in `isStallNonProgressMessage` (don't reset the
+    // timer on the SDK's pre-wait `requesting` envelope), 60s is now
+    // both a tighter cap AND a more accurate one — a healthy
+    // sonnet-4-6 run starts streaming within 5–10s of `requesting`.
+    const STALL_TIMEOUT_MS = 60_000;
 
     // (Auth tracking declared at outer function scope — see above the try
     // block — so the outer catch can also branch on authErrorDetected.)
@@ -2816,6 +2874,15 @@ export async function runAgent(
             // them through the throttled spinner update at most every
             // STREAM_PILL_INTERVAL_MS so the UI doesn't thrash.
             includePartialMessages: true,
+            // Extended thinking — explicitly disabled.
+            //
+            // Leaving `thinking` unset lets the `claude_code` preset / SDK
+            // default re-enable it on Sonnet 4.6, which correlates with
+            // mid-stream "API Error: 400" cascades when the upstream
+            // gateway is under load. Production launch-day repro showed
+            // `thinking_delta` blocks streaming right before the 400.
+            // See the long-form rationale in the comment block below.
+            thinking: { type: 'disabled' },
             // Opt into the 1M context window so long instrumentation runs
             // (commandments + skills + accumulated tool results) don't trip
             // compaction mid-flow. Compactions cause the long mid-run pauses
@@ -3078,12 +3145,33 @@ export async function runAgent(
 
         // Process the async generator — validate each message at the boundary
         for await (const rawMessage of sdkResponse) {
-          receivedFirstMessage = true;
-          lastMessageTime = Date.now();
-          lastMessageType =
-            (rawMessage as Record<string, unknown>)?.type?.toString() ??
-            'unknown';
-          resetStaleTimer();
+          // Reset the stale timer on every message EXCEPT the SDK's
+          // "I'm about to wait on the API" envelope. The Claude Agent
+          // SDK emits `system { subtype: 'status', status: 'requesting' }`
+          // immediately *before* it starts waiting on the upstream — it
+          // means "request sent, waiting for response", NOT "we made
+          // progress." Resetting the timer here masks gateway hangs:
+          // the model never streams a token, no further messages
+          // arrive, and the user sat through a fresh 120s clock that
+          // started from a non-event. Treat this envelope as non-
+          // progress so the stall fires close to when the upstream
+          // actually went silent.
+          //
+          // Other `system` subtypes (`init`, `api_retry`, `compact_boundary`)
+          // ARE real progress events and continue to reset the timer.
+          // We also gate `lastMessageTime`, `lastMessageType`, and
+          // `receivedFirstMessage` here so that stall diagnostics
+          // report elapsed time since the last real progress event,
+          // not since a non-progress `requesting` envelope.
+          if (!isStallNonProgressMessage(rawMessage)) {
+            receivedFirstMessage = true;
+            lastMessageTime = Date.now();
+            const rawType =
+              (rawMessage as Record<string, unknown>)?.type?.toString() ??
+              'unknown';
+            lastMessageType = rawType;
+            resetStaleTimer();
+          }
 
           // A post-stream retry banner is active from a previous attempt's
           // failure. The fact that a message arrived at all means the new

@@ -1467,6 +1467,26 @@ export class WizardStore {
   }
 
   /**
+   * Wipe in-memory auth state after the user confirmed /logout (disk
+   * credentials are cleared by LogoutScreen itself). Routes through
+   * `setKey` so per-key listeners (`listenKeys`) fire — direct
+   * `store.session.X = null` assignments only notify version-bumped
+   * subscribers and silently miss key-scoped subscriptions.
+   */
+  clearAuthForLogout(): void {
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('userEmail', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    this.emitChange();
+  }
+
+  /**
    * Revert past the Auth step back into the org/workspace picker. Keeps
    * credentials so we don't force a fresh OAuth round-trip — only the
    * picked identity is cleared.

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
-import { decodeJwtExpiryMs, resolveStoredExpiryMs } from '../jwt-exp.js';
+import {
+  decodeJwtExpiryMs,
+  decodeJwtZone,
+  resolveStoredExpiryMs,
+} from '../jwt-exp.js';
 
 vi.mock('../debug.js', () => ({ logToFile: vi.fn() }));
 
@@ -120,5 +124,44 @@ describe('resolveStoredExpiryMs', () => {
       now: NOW,
     });
     expect(result).toBe(NOW + 60 * 60 * 1000);
+  });
+});
+
+describe('decodeJwtZone', () => {
+  it('returns "us" for an auth.amplitude.com issuer', () => {
+    const token = makeJwt({ iss: 'https://auth.amplitude.com' });
+    expect(decodeJwtZone(token)).toBe('us');
+  });
+
+  it('returns "us" when the issuer carries a trailing slash (Ory default)', () => {
+    const token = makeJwt({ iss: 'https://auth.amplitude.com/' });
+    expect(decodeJwtZone(token)).toBe('us');
+  });
+
+  it('returns "eu" for an auth.eu.amplitude.com issuer', () => {
+    const token = makeJwt({ iss: 'https://auth.eu.amplitude.com' });
+    expect(decodeJwtZone(token)).toBe('eu');
+  });
+
+  it('returns null for unknown issuer hosts', () => {
+    const token = makeJwt({ iss: 'https://auth.example.com' });
+    expect(decodeJwtZone(token)).toBeNull();
+  });
+
+  it('returns null when the iss claim is absent', () => {
+    const token = makeJwt({ sub: 'user@example.com' });
+    expect(decodeJwtZone(token)).toBeNull();
+  });
+
+  it('returns null for a malformed iss URL', () => {
+    const token = makeJwt({ iss: 'not a url' });
+    expect(decodeJwtZone(token)).toBeNull();
+  });
+
+  it('returns null for unparseable tokens', () => {
+    expect(decodeJwtZone(undefined)).toBeNull();
+    expect(decodeJwtZone(null)).toBeNull();
+    expect(decodeJwtZone('')).toBeNull();
+    expect(decodeJwtZone('not.a-jwt')).toBeNull();
   });
 });
