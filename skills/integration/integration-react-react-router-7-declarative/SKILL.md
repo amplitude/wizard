@@ -14,10 +14,10 @@ This skill helps you add Amplitude analytics to React Router v7 - Declarative mo
 
 Follow these steps in order to complete the integration:
 
-1. `basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
-2. `basic-integration-1.1-edit.md` - Amplitude Setup - Edit
-3. `basic-integration-1.2-revise.md` - Amplitude Setup - Revise
-4. `basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
+1. `references/basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
+2. `references/basic-integration-1.1-edit.md` - Amplitude Setup - Edit
+3. `references/basic-integration-1.2-revise.md` - Amplitude Setup - Revise
+4. `references/basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
 
 ## Reference files
 
