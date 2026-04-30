@@ -2560,10 +2560,29 @@ export async function runAgent(
           options: {
             model: agentConfig.model,
             // Fallback model if primary is unavailable (e.g. Vertex outage).
-            // Must be capable enough for code generation — haiku is too weak.
-            fallbackModel: agentConfig.useDirectApiKey
-              ? 'claude-sonnet-4-5-20250514'
-              : 'anthropic/claude-sonnet-4-5-20250514',
+            //
+            // Attempts 0-1 fall back to the previous Sonnet (same family, same
+            // gateway pool) — it usually picks up trivial blips fast.
+            //
+            // Attempts 2+ fall back cross-tier to Haiku 4.5. When a Sonnet
+            // outage persists past two retries, the gateway pool is genuinely
+            // degraded and another Sonnet pick will fail the same way.
+            // Haiku is weaker for greenfield code-gen but absolutely capable
+            // of finishing an already-mostly-done instrumentation run, which
+            // is the realistic state by the third retry. Recovering with a
+            // weaker model beats giving up with WIZARD_GATEWAY_DOWN.
+            fallbackModel: (() => {
+              const directIds = {
+                sonnet: 'claude-sonnet-4-5-20250514',
+                haiku: 'claude-haiku-4-5-20251001',
+              };
+              const gatewayIds = {
+                sonnet: 'anthropic/claude-sonnet-4-5-20250514',
+                haiku: 'anthropic/claude-haiku-4-5-20251001',
+              };
+              const ids = agentConfig.useDirectApiKey ? directIds : gatewayIds;
+              return attempt >= 2 ? ids.haiku : ids.sonnet;
+            })(),
             // Opt into the 1M context window so long instrumentation runs
             // (commandments + skills + accumulated tool results) don't trip
             // compaction mid-flow. Compactions cause the long mid-run pauses
