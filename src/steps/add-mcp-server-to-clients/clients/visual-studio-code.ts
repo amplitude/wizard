@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
 import { buildMCPUrl } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 
 export const VisualStudioCodeMCPConfig = z
   .object({
@@ -82,10 +83,11 @@ export class VisualStudioCodeClient extends DefaultMCPClient {
     type: 'sse' | 'streamable-http',
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): MCPServerConfig {
     const config: MCPServerConfig = {
       type: 'http',
-      url: buildMCPUrl(type, selectedFeatures, local),
+      url: buildMCPUrl(type, selectedFeatures, local, zone),
     };
     if (apiKey) {
       config.headers = { Authorization: `Bearer ${apiKey}` };
@@ -97,12 +99,14 @@ export class VisualStudioCodeClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     return this._addServerType(
       apiKey,
       'streamable-http',
       selectedFeatures,
       local,
+      zone,
     );
   }
 }

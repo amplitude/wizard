@@ -26,7 +26,7 @@ import {
   AgentErrorType,
   buildWizardMetadata,
 } from './agent-interface';
-import { getLlmGatewayUrlFromHost } from '../utils/urls';
+import { getLlmGatewayUrlFromHost, getMcpUrlFromZone } from '../utils/urls';
 import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
@@ -749,10 +749,11 @@ async function runAgentWizardBody(
   const wizardFlags = await analytics.getAllFlagsForWizard();
   const wizardMetadata = buildWizardMetadata(wizardFlags);
 
-  // Determine MCP URL: CLI flag > env var > production default
-  const mcpUrl = session.localMcp
-    ? 'http://localhost:8787/mcp'
-    : process.env.MCP_URL || 'https://mcp.amplitude.com/mcp';
+  // Determine MCP URL: CLI flag > env var > region-aware production default.
+  // Routing an EU user through the US MCP host runs their session against
+  // US infrastructure even though their data lives in EU — both a UX bug
+  // (wrong project, no events) and a compliance bug.
+  const mcpUrl = getMcpUrlFromZone(cloudRegion, { local: session.localMcp });
 
   // Skills URL: derived from the same host as the LLM proxy.
   // Always tries remote first; falls back to bundled if fetch fails.
@@ -784,6 +785,12 @@ async function runAgentWizardBody(
       agentSessionId: session.agentSessionId,
       targetsBrowser: config.metadata.targetsBrowser,
       mode: session.mode,
+      // Forward orchestrator-supplied context (from `--context-file`
+      // / `AMPLITUDE_WIZARD_CONTEXT`) so it lands in the cached
+      // system-prompt block alongside the commandments. Undefined when
+      // no context was provided — keeps the cached preset stable for
+      // every "no context" run.
+      orchestratorContext: session.orchestratorContext ?? undefined,
     },
     sessionToOptions(session),
   );
@@ -822,7 +829,7 @@ async function runAgentWizardBody(
       // state, and capture an analytics breadcrumb for cost/quality analysis.
       onPreCompact: ({ trigger }) => {
         try {
-          saveCheckpoint(session);
+          saveCheckpoint(session, 'pre_compact');
         } catch (err) {
           logToFile('PreCompact: saveCheckpoint failed', err);
         }
@@ -830,6 +837,40 @@ async function runAgentWizardBody(
           trigger,
           integration: session.integration ?? null,
           'detected framework': session.detectedFrameworkLabel ?? null,
+        });
+      },
+      // Fires once when MAX_CONSECUTIVE_BASH_DENIES consecutive Bash denies
+      // accumulate — the agent is thrashing on a command that will never
+      // be allowed (real-world repro: 47-turn loop verifying env vars via
+      // `node -e` / `printenv` / `cat .env`). Trigger graceful halt so the
+      // remaining turn budget isn't burned on the same denied call.
+      // Fire-and-forget: wizardAbort returns Promise<never> and exits the
+      // process, but the hook callback can't await it. Subsequent denied
+      // calls between this and process.exit re-hit the deny path and
+      // return without further side effects (the breaker is one-shot).
+      onCircuitBreakerTripped: ({ consecutiveDenies, lastCommand }) => {
+        analytics.wizardCapture('bash deny circuit breaker tripped', {
+          'consecutive denies': consecutiveDenies,
+          'last command': lastCommand.slice(0, 200),
+          integration: session.integration ?? null,
+          'detected framework': session.detectedFrameworkLabel ?? null,
+        });
+        const abortMessage = `Setup halted: the agent kept trying Bash commands the wizard does not permit (${consecutiveDenies} in a row). This usually means the agent was looping on env-var verification or a similar denied operation. Re-run the wizard; if it happens again, file an issue with the log file path shown below.`;
+        session.outroData = {
+          kind: OutroKind.Error,
+          message: abortMessage,
+          canRestart: true,
+        };
+        // Fire and forget — wizardAbort tears down the process. We
+        // intentionally don't await so we don't deadlock the hook return.
+        void wizardAbort({
+          message: abortMessage,
+          error: new WizardError('Bash deny circuit breaker tripped', {
+            'consecutive denies': consecutiveDenies,
+            'last command': lastCommand,
+            integration: session.integration,
+          }),
+          exitCode: ExitCode.AGENT_FAILED,
         });
       },
     },

@@ -68,11 +68,35 @@ export interface WizardUI {
   pushStatus(message: string): void;
 
   /**
-   * Print a periodic "still running" summary of the last N status messages.
-   * Called by the agent runner every ~10 seconds while the agent is active.
-   * LoggingUI prints to stdout; InkUI is a no-op (TUI already shows live updates).
+   * Periodic "still alive" beat emitted every ~10s while the agent is
+   * running. Three implementations diverge:
+   *
+   *   - InkUI:     no-op — the TUI already renders status messages
+   *                reactively as `pushStatus()` fires.
+   *   - LoggingUI: prints the rolling tail of statuses (and only the
+   *                tail) so a CI log shows "still working…" without
+   *                going dark on long tool calls.
+   *   - AgentUI:   emits a structured `progress: heartbeat` NDJSON
+   *                event carrying elapsed time + retry attempt + the
+   *                rolling status tail. Always fires on the cadence —
+   *                absence of heartbeat is the canonical orchestrator
+   *                signal that the wizard process has stalled.
+   *
+   * `statuses` is the rolling last-N (3) `pushStatus()` messages —
+   * may be empty if no status was pushed since the last beat.
    */
-  heartbeat(statuses: string[]): void;
+  heartbeat(data: {
+    statuses: string[];
+    /** Milliseconds since `runAgent()` started. Monotonic. */
+    elapsedMs: number;
+    /**
+     * 1-indexed retry attempt the runner is on. Lets a stalled-agent
+     * heuristic distinguish "still on attempt 1, just slow" from
+     * "we're churning through retries" without re-parsing the
+     * `progress: agent_retry` events.
+     */
+    attempt?: number;
+  }): void;
 
   // ── Spinner ───────────────────────────────────────────────────────
   spinner(): SpinnerHandle;
@@ -299,6 +323,40 @@ export interface WizardUI {
    * card so the number stays consistent with the gateway's billing
    * source of truth.
    */
+  /**
+   * Emitted whenever the wizard writes a session snapshot to disk.
+   * Optional — only AgentUI implements (LoggingUI / InkUI no-op).
+   * Lets an outer orchestrator know there's a recoverable state on
+   * disk so it can advertise `--resume` to the user on a retry.
+   *
+   * `phase` is a free-form label of the trigger ("pre_compact",
+   * "screen_run", "screen_data_setup", etc.) so an orchestrator can
+   * distinguish "we hit a checkpoint inside the integration loop"
+   * from "the agent just blew through a phase boundary".
+   */
+  emitCheckpointSaved?(data: {
+    path: string;
+    bytes: number;
+    phase: string;
+  }): void;
+
+  /**
+   * Emitted at startup in agent / CI mode when `--resume` finds a
+   * fresh, schema-valid checkpoint and restores the session from it.
+   * Optional — only AgentUI implements.
+   */
+  emitCheckpointLoaded?(data: { path: string; ageSeconds: number }): void;
+
+  /**
+   * Emitted when the wizard removes a saved checkpoint. Reason
+   * discriminator: `success` (clean run), `manual` (user invoked a
+   * clear-state action), `logout`. Optional — only AgentUI implements.
+   */
+  emitCheckpointCleared?(data: {
+    path: string;
+    reason: 'success' | 'manual' | 'logout';
+  }): void;
+
   emitAgentMetrics?(data: {
     durationMs: number;
     inputTokens?: number;
@@ -310,5 +368,16 @@ export interface WizardUI {
     totalToolCalls?: number;
     totalMessages?: number;
     isError?: boolean;
+    /**
+     * Per-tool invocation counts. Lets orchestrators answer
+     * "where did the time/cost go?" without parsing every
+     * `progress: tool_call` event. Keys are the SDK's tool-name
+     * strings — built-in tools (`"Read"`, `"Edit"`, `"Bash"`,
+     * `"Grep"`, `"TodoWrite"`) and MCP tools (e.g.
+     * `"mcp__amplitude-wizard__check_env_keys"`). Values are
+     * integer counts. Omitted entirely (not `{}`) when the run
+     * had zero tool_use blocks (auth-required early-exits etc.).
+     */
+    toolCallsByTool?: Record<string, number>;
   }): void;
 }

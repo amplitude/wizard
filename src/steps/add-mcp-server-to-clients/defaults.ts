@@ -1,4 +1,6 @@
 import z from 'zod';
+import type { CloudRegion } from '../../utils/types';
+import { getMcpHostFromRegion } from '../../utils/urls';
 
 export const DefaultMCPClientConfig = z
   .object({
@@ -74,8 +76,13 @@ export const buildMCPUrl = (
   type: MCPServerType,
   selectedFeatures?: string[],
   local?: boolean,
+  // Default 'us' keeps the call sites (every editor's `addServer`) and
+  // their tests stable for non-EU runs. EU users should ALWAYS pass
+  // their resolved zone — this URL gets baked into the user's editor
+  // config and persists past the wizard run.
+  zone: CloudRegion = 'us',
 ) => {
-  const host = local ? 'http://localhost:8787' : 'https://mcp.amplitude.com';
+  const host = local ? 'http://localhost:8787' : getMcpHostFromRegion(zone);
   const baseUrl = `${host}/${type === 'sse' ? 'sse' : 'mcp'}`;
 
   const isAllFeaturesSelected =
@@ -102,9 +109,10 @@ export const getNativeHTTPServerConfig = (
   type: MCPServerType,
   selectedFeatures?: string[],
   local?: boolean,
+  zone: CloudRegion = 'us',
 ) => {
   const config: Record<string, unknown> = {
-    url: buildMCPUrl(type, selectedFeatures, local),
+    url: buildMCPUrl(type, selectedFeatures, local, zone),
   };
 
   // Only add auth header if API key is provided (not OAuth mode)
@@ -122,8 +130,9 @@ export const getDefaultServerConfig = (
   type: MCPServerType,
   selectedFeatures?: string[],
   local?: boolean,
+  zone: CloudRegion = 'us',
 ) => {
-  const urlWithFeatures = buildMCPUrl(type, selectedFeatures, local);
+  const urlWithFeatures = buildMCPUrl(type, selectedFeatures, local, zone);
 
   // OAuth mode: no auth header, let MCP handle OAuth
   if (!apiKey) {

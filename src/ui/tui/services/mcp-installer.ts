@@ -12,6 +12,7 @@ import {
   getInstalledClients,
 } from '../../../steps/add-mcp-server-to-clients/index.js';
 import { ALL_FEATURE_VALUES } from '../../../steps/add-mcp-server-to-clients/defaults.js';
+import type { CloudRegion } from '../../../utils/types.js';
 import { logToFile } from '../../../utils/debug.js';
 
 const RawMCPClientSchema = z
@@ -29,6 +30,7 @@ interface RawMCPClient {
     apiKey: string | undefined,
     features: string[],
     local: boolean,
+    zone: CloudRegion,
   ): Promise<{ success: boolean } | undefined>;
 }
 
@@ -40,8 +42,19 @@ export interface McpInstaller {
   /** Detect which MCP-capable editors are available on this machine. */
   detectClients(): Promise<McpClientInfo[]>;
 
-  /** Install the Amplitude MCP server to the given clients. Returns names of successfully installed clients. */
-  install(clientNames: string[]): Promise<string[]>;
+  /**
+   * Install the Amplitude MCP server to the given clients.
+   *
+   * `zone` is read at install-time (not at construction) because the user's
+   * region isn't known when the installer is created at app mount — it's
+   * picked on RegionSelect later. The MCP URL written into each editor's
+   * config persists past the wizard run, so passing the wrong zone leaves
+   * an EU user pointed at the US MCP host forever. Defaults to 'us' for
+   * test stubs and rare callers without zone context.
+   *
+   * Returns names of successfully installed clients.
+   */
+  install(clientNames: string[], zone?: CloudRegion): Promise<string[]>;
 
   /** Remove the Amplitude MCP server from all installed clients. Returns names of removed clients. */
   remove(): Promise<string[]>;
@@ -65,7 +78,10 @@ export function createMcpInstaller(local = false): McpInstaller {
       return supported.map((c) => ({ name: c.name }));
     },
 
-    async install(clientNames: string[]): Promise<string[]> {
+    async install(
+      clientNames: string[],
+      zone: CloudRegion = 'us',
+    ): Promise<string[]> {
       const features = [...ALL_FEATURE_VALUES];
 
       // No access token — write URL only and let each editor handle OAuth on
@@ -99,7 +115,12 @@ export function createMcpInstaller(local = false): McpInstaller {
       const installed: string[] = [];
       for (const client of toInstall) {
         try {
-          const result = await client.addServer(accessToken, features, local);
+          const result = await client.addServer(
+            accessToken,
+            features,
+            local,
+            zone,
+          );
           if (result?.success) {
             installed.push(client.name);
           } else {

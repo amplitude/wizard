@@ -1,8 +1,13 @@
 import { z } from 'zod';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
+// `codex` ships as `codex.cmd` when installed via npm on Windows; the
+// stock `spawnSync` does not consult PATHEXT and ENOENTs on the bare
+// name. `execSync` routes through `cmd.exe` and is fine.
+import { spawnSync } from '../../../utils/cross-platform-spawn.js';
 
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 
 import { analytics } from '../../../utils/analytics';
 
@@ -63,9 +68,10 @@ export class CodexMCPClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     const serverName = local ? 'amplitude-local' : 'amplitude';
-    const url = buildMCPUrl('streamable-http', selectedFeatures, local);
+    const url = buildMCPUrl('streamable-http', selectedFeatures, local, zone);
 
     const args = ['mcp', 'add', serverName, '--url', url];
 

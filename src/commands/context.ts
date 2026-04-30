@@ -5,7 +5,6 @@
 
 import { readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
-import { z } from 'zod';
 
 /**
  * Dev mode toggle — when set (e.g. via `pnpm try` / `pnpm dev`), internal
@@ -26,11 +25,24 @@ export const WIZARD_VERSION: string = (() => {
     for (let i = 0; i < 5; i += 1) {
       const candidate = resolve(dir, 'package.json');
       try {
-        const pkg = z
-          .object({ version: z.string().optional() })
-          .passthrough()
-          .parse(JSON.parse(readFileSync(candidate, 'utf-8')));
-        if (pkg.version) return pkg.version;
+        // Plain validation (no zod): we only need a single string field, and
+        // pulling in zod just for `parse({version: z.string()})` adds 30–50 ms
+        // of import time on every CLI launch — bin.ts → context.ts is on the
+        // synchronous boot path. Keep startup lean by hand-rolling the check.
+        const parsed: unknown = JSON.parse(readFileSync(candidate, 'utf-8'));
+        if (
+          parsed !== null &&
+          typeof parsed === 'object' &&
+          typeof (parsed as { version?: unknown }).version === 'string' &&
+          // An empty string is technically a string, but the previous
+          // `if (pkg.version)` truthiness check skipped it and walked
+          // up the tree; preserve that behavior so we don't propagate
+          // an empty `WIZARD_VERSION` into Sentry release tags, the
+          // update notifier, or analytics.
+          (parsed as { version: string }).version.length > 0
+        ) {
+          return (parsed as { version: string }).version;
+        }
       } catch {
         // not at this level — keep walking up
       }

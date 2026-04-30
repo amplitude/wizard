@@ -81,4 +81,52 @@ describe('checkProjectGuard', () => {
       expect(result.markers).toContain('go.mod');
     }
   });
+
+  // ── Regression: Unity & Unreal projects were rejected ────────────────
+  //
+  // FRAMEWORK_REGISTRY supports both, but `PROJECT_MARKER_FILES` only
+  // covered top-level fixed-name manifests. Unity's marker lives in a
+  // sub-path (`ProjectSettings/ProjectVersion.txt`) and Unreal's
+  // filename varies (`<ProjectName>.uproject`). Every Unity/Unreal user
+  // hit `no_project_marker` and was told to pass `--force` even though
+  // the framework is fully supported. Lock both paths in.
+
+  it('passes for a Unity project (ProjectSettings/ProjectVersion.txt)', () => {
+    const settingsDir = path.join(tmp, 'ProjectSettings');
+    fs.mkdirSync(settingsDir);
+    fs.writeFileSync(
+      path.join(settingsDir, 'ProjectVersion.txt'),
+      'm_EditorVersion: 2022.3.0f1\n',
+    );
+    const result = checkProjectGuard(tmp);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.markers).toContain('ProjectSettings/ProjectVersion.txt');
+    }
+  });
+
+  it('passes for an Unreal project (.uproject file at root)', () => {
+    fs.writeFileSync(path.join(tmp, 'MyGame.uproject'), '{}');
+    const result = checkProjectGuard(tmp);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.markers).toContain('MyGame.uproject');
+    }
+  });
+
+  it('passes for an Unreal project with a different .uproject name', () => {
+    // Confirms the extension match isn't tied to a specific filename.
+    fs.writeFileSync(path.join(tmp, 'OtherProject.uproject'), '{}');
+    const result = checkProjectGuard(tmp);
+    expect(result.ok).toBe(true);
+  });
+
+  it('does NOT match an unrelated extension that happens to be present', () => {
+    // Sanity: only `.uproject` (and other registered extensions) count.
+    // `.json` should not be enough on its own.
+    fs.writeFileSync(path.join(tmp, 'random.json'), '{}');
+    const result = checkProjectGuard(tmp);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe('no_project_marker');
+  });
 });

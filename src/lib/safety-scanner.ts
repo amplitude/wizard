@@ -74,8 +74,14 @@ const SECRET_RULES: SafetyRule[] = [
   {
     id: 'hardcoded amplitude api key',
     label: 'amplitude-api-key',
+    // `\b` after the {32} ensures the trailing position is a word
+    // boundary — without it, a 33+ char hex string like
+    // `apiKey: 'a1b2…c5d6abc'` would match the first 32 chars as a key
+    // and trigger a false positive on a clearly non-key blob (e.g. an
+    // SHA-256 hex digest). The boundary lets the optional closing quote
+    // remain optional while still rejecting longer-than-32 hex.
     pattern:
-      /(?:api[_-]?key|amplitudeapikey|amplitude_api_key|projectapikey|project_api_key)\s*[:=]\s*['"]?([a-f0-9]{32})['"]?/i,
+      /(?:api[_-]?key|amplitudeapikey|amplitude_api_key|projectapikey|project_api_key)\s*[:=]\s*['"]?([a-f0-9]{32})\b['"]?/i,
     message:
       'A 32-character hex string was written into an `apiKey`/`projectApiKey` assignment. Amplitude project keys must NEVER be hardcoded into source. Replace this with an environment variable read (e.g. `process.env.AMPLITUDE_API_KEY`) and use the wizard-tools `set_env_values` MCP tool to write the value to .env.local. Then revert this file change before continuing.',
   },
@@ -169,7 +175,12 @@ const DESTRUCTIVE_BASH_RULES: SafetyRule[] = [
     // `curl ... | bash` / `curl ... | sh` / `wget ... | bash`. Running
     // remote scripts unverified in the user\'s repo context is a
     // supply-chain risk regardless of intent.
-    pattern: /\b(?:curl|wget)\s[^|]*\|\s*(?:bash|sh|zsh)\b/,
+    //
+    // `[^\n]*` (not `[^|]*`) so intermediate pipes are allowed — the
+    // narrower form let `curl x | tee /tmp/x | bash` evade the rule.
+    // Anchored to a single line so a curl on one line and an unrelated
+    // shell invocation on another can't trip the rule.
+    pattern: /\b(?:curl|wget)\s[^\n]*\|\s*(?:bash|sh|zsh)\b/,
     message:
       "Piping `curl`/`wget` output into a shell is permanently denied — it executes arbitrary remote code in the user's repository, which is a supply-chain risk even if the URL looks legitimate. If a setup step requires a binary or script, install via the user's package manager (npm/pnpm/brew/pip) so the lockfile records what was installed.",
   },

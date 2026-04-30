@@ -17,6 +17,7 @@ import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
 import { Integration } from './constants.js';
+import { getUI } from '../ui';
 
 // ── Constants ──────────────────────────────────────────────────────────
 
@@ -92,8 +93,18 @@ type Checkpoint = z.infer<typeof CheckpointSchema>;
 /**
  * Write a sanitized session snapshot to disk.
  * Strips credentials and any fields that should be re-evaluated on resume.
+ *
+ * `phase` is a free-form trigger label ("pre_compact",
+ * "screen_run", "screen_data_setup", etc.) — emitted on the NDJSON
+ * stream in agent mode so an orchestrator can distinguish "we hit a
+ * checkpoint inside the integration loop" from "the agent just blew
+ * through a phase boundary". Defaults to `"unknown"` for legacy
+ * callers that haven't been updated yet.
  */
-export function saveCheckpoint(session: WizardSession): void {
+export function saveCheckpoint(
+  session: WizardSession,
+  phase: string = 'unknown',
+): void {
   const checkpoint: Checkpoint = {
     savedAt: new Date().toISOString(),
     installDir: session.installDir,
@@ -116,7 +127,20 @@ export function saveCheckpoint(session: WizardSession): void {
 
   // Ensure the per-project run dir exists; cache root may not have been created yet.
   ensureDir(getRunDir(session.installDir));
-  atomicWriteJSON(checkpointPath(session.installDir), checkpoint, 0o600);
+  const filePath = checkpointPath(session.installDir);
+  atomicWriteJSON(filePath, checkpoint, 0o600);
+
+  // Surface the write to AgentUI so an orchestrator knows there's a
+  // recoverable state on disk for `--resume`. Wrapped in try/catch
+  // because the UI emit must never disturb the actual checkpoint
+  // write (a thrown emitter would leave the user without crash
+  // recovery — strictly worse than a silent telemetry drop).
+  try {
+    const bytes = Buffer.byteLength(JSON.stringify(checkpoint), 'utf8');
+    getUI().emitCheckpointSaved?.({ path: filePath, bytes, phase });
+  } catch {
+    /* checkpoint persistence wins over telemetry */
+  }
 }
 
 /**
@@ -163,6 +187,17 @@ export async function loadCheckpoint(
     integration,
     checkpoint.detectedFrameworkLabel,
   );
+
+  // Surface the load to AgentUI so an orchestrator can confirm the
+  // resumed state is the one it expected (and refuse to keep going if
+  // the checkpoint is older than its policy allows). Wrapped in
+  // try/catch — telemetry must not block restoration.
+  try {
+    const ageSeconds = Math.round(age / 1000);
+    getUI().emitCheckpointLoaded?.({ path: filePath, ageSeconds });
+  } catch {
+    /* restore must not be blocked by a UI emit */
+  }
 
   // Return only the fields that are safe to restore.
   // Credentials, runPhase, activation state, and post-run steps are
@@ -220,14 +255,36 @@ async function deriveFrameworkLabel(
 
 /**
  * Delete the checkpoint file. Call on successful wizard completion.
+ *
+ * `reason` is a discriminator for the structured NDJSON event:
+ *   - `success` — clean run, the wizard finished
+ *   - `manual`  — user invoked a clear-state action (e.g. resetting
+ *                 from the IntroScreen "start fresh" button)
+ *   - `logout`  — the auth flow was reset; checkpoint is no longer
+ *                 attributable to the current account
+ *
+ * Defaults to `success` to keep legacy callers working.
  */
-export function clearCheckpoint(installDir: string): void {
+export function clearCheckpoint(
+  installDir: string,
+  reason: 'success' | 'manual' | 'logout' = 'success',
+): void {
+  const filePath = checkpointPath(installDir);
+  let removed = false;
   try {
-    const filePath = checkpointPath(installDir);
     if (existsSync(filePath)) {
       unlinkSync(filePath);
+      removed = true;
     }
   } catch {
     // Best-effort — if deletion fails, the staleness check will expire it.
+  }
+
+  if (removed) {
+    try {
+      getUI().emitCheckpointCleared?.({ path: filePath, reason });
+    } catch {
+      /* clear must not be blocked by a UI emit */
+    }
   }
 }
