@@ -479,6 +479,66 @@ describe('TUI auth task: region determines OAuth zone', () => {
     );
   });
 
+  test('does not start OAuth when intro concludes with regionForced=true (IntroScreen "Change region")', async () => {
+    // Regression: IntroScreen's "Change region" option fires
+    // setRegionForced() + concludeIntro() back-to-back. A returning user
+    // already has session.region populated, so the original wait condition
+    // (introConcluded && region !== null) was satisfied as soon as the
+    // intro concluded — even though regionForced=true means the user is
+    // about to pick a *new* region. The auth task would race ahead and
+    // open the browser at the OLD region's OAuth host. Adding the
+    // !regionForced guard keeps OAuth parked on RegionSelect until the
+    // user actually picks the new zone.
+    let storedCallback: (() => void) | null = null;
+    (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
+      if (!storedCallback) storedCallback = cb;
+      return vi.fn();
+    });
+
+    const cliPromise = runCLI([]);
+
+    // Give authTask time to subscribe before the first state update.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
+
+    // Step 1: returning user lands on IntroScreen with region='us'
+    // already populated from disk. They pick "Change region", which
+    // fires setRegionForced (regionForced=true) + concludeIntro
+    // (introConcluded=true).
+    mockStore.session = {
+      ...mockStore.session,
+      region: 'us',
+      introConcluded: true,
+      regionForced: true,
+    };
+    (storedCallback as (() => void) | null)?.();
+
+    // OAuth must NOT start while regionForced=true — the user hasn't
+    // picked the new region yet.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
+
+    // Step 2: user picks 'eu' on RegionSelect. setRegion sets
+    // region='eu' and clears regionForced. Now OAuth should fire
+    // against the NEW region.
+    mockStore.session = {
+      ...mockStore.session,
+      region: 'eu',
+      regionForced: false,
+    };
+    (storedCallback as (() => void) | null)?.();
+
+    await cliPromise;
+    await waitFor(() => mockPerformAmplitudeAuth.mock.calls.length > 0);
+
+    expect(mockPerformAmplitudeAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ zone: 'eu' }),
+    );
+    // And exactly once — the wait must not have fired prematurely
+    // against the old zone before the user finished picking.
+    expect(mockPerformAmplitudeAuth).toHaveBeenCalledTimes(1);
+  });
+
   test('forceFresh is false when ampli.json exists (returning user)', async () => {
     mockAmpliConfigExists.mockReturnValue(true);
     simulateRegionSelect('us');
