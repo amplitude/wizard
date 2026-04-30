@@ -1502,7 +1502,12 @@ export class AgentUI implements WizardUI {
       emit('log', rejectionMessage, { level: 'warn' });
     }
 
-    const outcome = resolveEnvSelectionFromStdin(parsed, choices);
+    // Validate stdin against the PRE-CAP `sortedChoices`, not the capped
+    // `choices`. The wire contract advertises `allowManualEntry: true` with
+    // `pagination.total > pagination.returned`, telling orchestrators that
+    // above-cap entries are valid; rejecting an above-cap app-id forwarded
+    // on stdin would contradict the manualEntry contract.
+    const outcome = resolveEnvSelectionFromStdin(parsed, sortedChoices);
     for (const warning of outcome.warnings) {
       emit('log', warning, { level: 'warn' });
     }
