@@ -58,10 +58,15 @@ if (process.env.NODE_ENV === undefined) {
   }
 }
 
-import { satisfies } from 'semver';
 import { red } from './src/utils/logging';
 import { config as loadDotenv } from 'dotenv';
-loadDotenv();
+// Skip dotenv when there's no .env to load. dotenv parses the file even
+// when it's missing, which is wasted work for `--help`, `manifest`,
+// `auth token`, and the agent-orchestrated subcommands that never
+// expect a project .env. Keeps cold start lean for those paths.
+if (existsSync(resolvePath(process.cwd(), '.env'))) {
+  loadDotenv();
+}
 
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
@@ -92,13 +97,20 @@ import {
   WIZARD_VERSION,
 } from './src/commands/context';
 
-const NODE_VERSION_RANGE = '>=20';
+const MIN_NODE_MAJOR = 20;
 
-// Have to run this above the other imports because they are importing clack that
-// has the problematic imports.
-if (!satisfies(process.version, NODE_VERSION_RANGE)) {
+// Inline check instead of `semver.satisfies` so we don't pay the
+// ~50KB-of-regex import cost on every cold start just to compare a
+// single integer. The package still depends on semver for richer
+// version logic elsewhere (update-notifier, framework detect helpers),
+// but those are loaded lazily — bin.ts shouldn't be.
+//
+// Have to run this above the other imports because they are importing
+// clack that has the problematic imports.
+const nodeMajor = Number(process.versions.node.split('.')[0]);
+if (!Number.isFinite(nodeMajor) || nodeMajor < MIN_NODE_MAJOR) {
   red(
-    `Amplitude wizard requires Node.js ${NODE_VERSION_RANGE}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
+    `Amplitude wizard requires Node.js >=${MIN_NODE_MAJOR}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
   );
   process.exit(1);
 }
