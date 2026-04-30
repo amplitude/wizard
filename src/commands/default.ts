@@ -593,8 +593,6 @@ export const defaultCommand: CommandModule = {
           // Apply SDK-level opt-out based on feature flags
           analytics.applyOptOut();
 
-          const { FRAMEWORK_REGISTRY } = await import('../lib/registry.js');
-          const { detectAllFrameworks } = await import('../run.js');
           const installDir = session.installDir ?? process.cwd();
 
           // Verbose startup diagnostics — always written to the log file;
@@ -611,8 +609,6 @@ export const defaultCommand: CommandModule = {
             logToFile(`[verbose] platform      : ${process.platform}`);
             logToFile(`[verbose] argv          : ${process.argv.join(' ')}`);
           }
-
-          const { DETECTION_TIMEOUT_MS } = await import('../lib/constants.js');
 
           // ── OAuth + account setup ──────────────────────────────
           // Runs concurrently with framework detection while AuthScreen shows.
@@ -1093,86 +1089,22 @@ export const defaultCommand: CommandModule = {
 
           // ── Framework detection ────────────────────────────────
           // Runs concurrently with auth while AuthScreen shows.
-          // Each detector has its own per-framework timeout internally,
-          // so no outer timeout is needed.
-          const detectionTask = (async () => {
-            const results = await detectAllFrameworks(installDir);
-
-            // Store full results on session for diagnostics
-            session.detectionResults = results;
-
-            const detectedIntegration = results.find(
-              (r) => r.detected,
-            )?.integration;
-
-            if (detectedIntegration) {
-              const config = FRAMEWORK_REGISTRY[detectedIntegration];
-
-              // Run gatherContext for the friendly variant label
-              if (config.metadata.gatherContext) {
-                try {
-                  const context = await Promise.race([
-                    config.metadata.gatherContext({
-                      installDir,
-                      debug: session.debug,
-                      forceInstall: session.forceInstall,
-                      default: false,
-                      signup: session.signup,
-                      localMcp: session.localMcp,
-                      ci: session.ci,
-                      menu: session.menu,
-                      benchmark: session.benchmark,
-                    }),
-                    new Promise<Record<string, never>>((resolve) =>
-                      setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
-                    ),
-                  ]);
-                  for (const [key, value] of Object.entries(context)) {
-                    if (!(key in session.frameworkContext)) {
-                      tui.store.setFrameworkContext(key, value);
-                    }
-                  }
-                } catch {
-                  // Detection failed — will show generic name
-                }
-              }
-
-              tui.store.setFrameworkConfig(detectedIntegration, config);
-
-              if (!session.detectedFrameworkLabel) {
-                tui.store.setDetectedFramework(config.metadata.name);
-              }
-            }
-
-            // Feature discovery — same helper that CI/agent uses, so the
-            // package and integration lists never drift between modes.
-            const { discoverFeatures } = await import(
-              '../lib/feature-discovery.js'
-            );
-            const runDiscovery = () => {
-              for (const f of discoverFeatures({
-                installDir,
-                integration: tui.store.session.integration,
-              })) {
-                tui.store.addDiscoveredFeature(f);
-              }
-            };
-            runDiscovery();
-
-            // Re-run when integration changes (handles manual selection
-            // after auto-detection fails). Track last-seen to avoid the
-            // package.json scan firing on every store emit.
-            let lastIntegration = tui.store.session.integration;
-            tui.store.subscribe(() => {
-              const integration = tui.store.session.integration;
-              if (integration === lastIntegration) return;
-              lastIntegration = integration;
-              runDiscovery();
-            });
-
-            // Signal detection is done — IntroScreen shows picker or results
-            tui.store.setDetectionComplete();
-          })();
+          // Delegates to the shared `runFrameworkDetection` helper so the
+          // initial run and any "Change directory" re-runs go through the
+          // exact same code path. The redetector is wired below — without
+          // it, the IntroScreen "Change directory" flow would silently
+          // skip detection and leave the spinner spinning forever.
+          const { runFrameworkDetection } = await import(
+            '../lib/framework-detection.js'
+          );
+          tui.store.setFrameworkRedetector((target, signal) =>
+            runFrameworkDetection(tui.store, target, { signal }),
+          );
+          const initialDetectionController = new AbortController();
+          tui.store.registerActiveDetection(initialDetectionController);
+          const detectionTask = runFrameworkDetection(tui.store, installDir, {
+            signal: initialDetectionController.signal,
+          });
 
           // Gate runWizard on the user reaching RunScreen — at that point
           // auth, data check, and any setup questions are all complete.
