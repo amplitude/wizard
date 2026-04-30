@@ -33,6 +33,7 @@ import {
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
+import { getDashboardFile } from '../../../utils/storage-paths.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -66,7 +67,16 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // agent before this screen mounts, so a one-shot read is sufficient.
   const [reportExists, setReportExists] = useState(false);
 
-  const isSuccess = store.session.outroData?.kind === OutroKind.Success;
+  // `isSuccess` / `isError` drive input handling and the action picker.
+  // We compute them off the raw session.outroData (so error/cancel paths
+  // are unaffected) and the activationLevel === 'full' synthetic-success
+  // case (so re-runs of healthy projects render the success picker
+  // instead of "Press any key to exit").
+  const isFullActivationSuccess =
+    store.session.activationLevel === 'full' && !store.session.outroData;
+  const isSuccess =
+    store.session.outroData?.kind === OutroKind.Success ||
+    isFullActivationSuccess;
   const isError = store.session.outroData?.kind === OutroKind.Error;
 
   // Any-key-to-exit for non-success states; success uses the picker.
@@ -117,11 +127,40 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     if (showReport && key.escape) setShowReport(false);
   });
 
-  const outroData = store.session.outroData;
+  const rawOutroData = store.session.outroData;
   const visibleEvents = store.eventPlan.filter((e) => e.name.trim().length > 0);
 
+  // For activationLevel === 'full' users, the agent run is skipped — so
+  // `outro()` on InkUI never fires and `outroData` stays null when the
+  // router lands them here. Without this defaulting, those users would
+  // see the "Finishing up…" placeholder forever (a mute dead-end at the
+  // tail of an otherwise healthy re-run). Treat "reached Outro with full
+  // activation and no error" as Success so the success view renders.
+  const isFullActivation = store.session.activationLevel === 'full';
+  const outroData =
+    rawOutroData ??
+    (isFullActivation
+      ? { kind: OutroKind.Success, changes: [] as string[] }
+      : null);
+
+  // Disk-resident dashboard URL for full-activation re-runs. The agent
+  // never runs, so the in-process watcher in agent-interface.ts that
+  // populates `checklistDashboardUrl` is bypassed. Read directly from
+  // `.amplitude/dashboard.json` (or the legacy `.amplitude-dashboard.json`)
+  // so the user still sees a clickable link to the dashboard the agent
+  // created on a prior run. One-shot read on mount — see comment on
+  // `reportExists` below for the same pattern.
+  const installDir = store.session.installDir;
+  const [diskDashboardUrl, setDiskDashboardUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (store.session.checklistDashboardUrl) return;
+    const url = readDashboardUrlFromDisk(installDir);
+    if (url) setDiskDashboardUrl(url);
+  }, [installDir, store.session.checklistDashboardUrl]);
+
   /** Browser link with sign-in / refresh gate — see `toWizardDashboardOpenUrl`. */
-  const dashboardCanonicalUrl = store.session.checklistDashboardUrl;
+  const dashboardCanonicalUrl =
+    store.session.checklistDashboardUrl ?? diskDashboardUrl;
   const dashboardOpenUrl = dashboardCanonicalUrl
     ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
     : null;
@@ -134,8 +173,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     );
   }
 
-  // Build the report file path from the install directory.
-  const installDir = store.session.installDir;
+  // Build the report file path from the install directory. `installDir`
+  // is already declared above for the dashboard-URL effect; reuse it
+  // rather than redeclaring.
   const reportPath = installDir.endsWith(path.sep)
     ? `${installDir}${REPORT_FILE}`
     : `${installDir}${path.sep}${REPORT_FILE}`;
@@ -177,10 +217,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       {/* ── Success ───────────────────────────────────────────────────── */}
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
+          {/* Heading copy splits on the activation level. Fresh-install
+              success deserves the "live!" celebration. Full-activation
+              re-runs (returning user, project already healthy) get a
+              calmer "your project is healthy" line — the wizard didn't
+              just set anything up, so the celebratory tone would feel
+              false. Both paths share every other element below. */}
           <Text color={Colors.success} bold>
-            🎉 Amplitude is live!
+            {isFullActivationSuccess
+              ? `${Icons.checkmark} Your Amplitude project is healthy`
+              : '🎉 Amplitude is live!'}
           </Text>
-          {visibleEvents.length > 0 && (
+          {isFullActivationSuccess && (
+            <Text color={Colors.body}>
+              {store.session.selectedProjectName
+                ? `${store.session.selectedProjectName} is already ingesting events.`
+                : 'This project is already ingesting events.'}
+            </Text>
+          )}
+          {!isFullActivationSuccess && visibleEvents.length > 0 && (
             <Text color={Colors.body}>
               {visibleEvents.length} event
               {visibleEvents.length !== 1 ? 's' : ''} instrumented
@@ -220,7 +275,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           {/* Dashboard link — the hero of the outro. The wizard always creates
               a dashboard during the conclude phase; surface it as a clickable
               link with a clear "this is your next step" framing so users
-              don't bounce out of the terminal wondering "what now?". */}
+              don't bounce out of the terminal wondering "what now?".
+              For full-activation re-runs the dashboard URL is read from
+              `.amplitude/dashboard.json` on disk (the agent never ran this
+              session) — same hero block, slightly recalibrated copy: the
+              user has been collecting data for a while, so we lead with
+              "Open it now" rather than "first charts populate". */}
           {dashboardOpenUrl && (
             <Box marginTop={1} flexDirection="column">
               <Text color={Colors.accent} bold>
@@ -228,13 +288,16 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
               <Box marginLeft={2}>
                 <Text color={Colors.body}>
-                  <TerminalLink url={dashboardOpenUrl}>{dashboardOpenUrl}</TerminalLink>
+                  <TerminalLink url={dashboardOpenUrl}>
+                    {dashboardOpenUrl}
+                  </TerminalLink>
                 </Text>
               </Box>
               <Box marginLeft={2}>
                 <Text color={Colors.muted}>
-                  Open it now to see your first charts populate as users hit the
-                  app.
+                  {isFullActivationSuccess
+                    ? 'Open it now to see what your users are up to today.'
+                    : 'Open it now to see your first charts populate as users hit the app.'}
                 </Text>
               </Box>
             </Box>
@@ -410,3 +473,59 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     </Box>
   );
 };
+
+/**
+ * Read the persisted dashboard URL from `<installDir>/.amplitude/dashboard.json`
+ * (or the legacy `<installDir>/.amplitude-dashboard.json`, whichever is fresher).
+ *
+ * Used by full-activation re-runs where the agent never executes — the
+ * in-process watcher in agent-interface.ts that normally pushes the URL
+ * onto the session is bypassed entirely. Without this, returning users
+ * with already-healthy projects would never see their dashboard surfaced
+ * in the outro and would bounce out of the terminal wondering whether
+ * the wizard did anything.
+ *
+ * Returns null on every failure mode (missing file, invalid JSON, missing
+ * `dashboardUrl` field). The caller falls back to the canonical
+ * "Open Amplitude" link.
+ */
+function readDashboardUrlFromDisk(installDir: string): string | null {
+  const canonical = getDashboardFile(installDir);
+  const legacy = path.join(installDir, '.amplitude-dashboard.json');
+
+  let chosenPath: string | null = null;
+  let chosenMtime = 0;
+  for (const p of [canonical, legacy]) {
+    try {
+      const stat = fs.statSync(p);
+      if (stat.isFile() && stat.mtime.getTime() > chosenMtime) {
+        chosenPath = p;
+        chosenMtime = stat.mtime.getTime();
+      }
+    } catch {
+      // ENOENT / EACCES — file's just not there, that's fine.
+    }
+  }
+  if (!chosenPath) return null;
+
+  try {
+    const content = fs.readFileSync(chosenPath, 'utf-8');
+    const parsed: unknown = JSON.parse(content);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      typeof (parsed as { dashboardUrl?: unknown }).dashboardUrl === 'string'
+    ) {
+      const url = (parsed as { dashboardUrl: string }).dashboardUrl;
+      // Sanity-check: an empty string or non-http URL is worthless.
+      // The wizard always writes a fully-qualified `https://` URL, so
+      // anything else is either a stale placeholder or hand-edited junk.
+      if (url.startsWith('https://') || url.startsWith('http://')) {
+        return url;
+      }
+    }
+  } catch {
+    // Read or JSON.parse failed — treat as no URL.
+  }
+  return null;
+}
