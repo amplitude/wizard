@@ -541,6 +541,26 @@ describe('OutroScreen — full-activation re-runs', () => {
     expect(frame).not.toContain('javascript:');
   });
 
+  it('rejects an http:// dashboardUrl (https-only contract)', () => {
+    // The wizard always writes https://. Accepting http:// would let a
+    // local attacker who edits .amplitude/dashboard.json point opn() at
+    // an unencrypted URL.
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({ dashboardUrl: 'http://attacker.example/phish' }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).not.toContain('Your dashboard is ready');
+    expect(frame).not.toContain('http://attacker.example');
+  });
+
   it('does not synthesize success for partial activation (those users still saw Run)', () => {
     const store = makeStoreForSnapshot({
       outroData: null,

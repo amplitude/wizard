@@ -299,8 +299,27 @@ export const DataIngestionCheckScreen = ({
     //
     // selectedAppId may be null if the startup fire-and-forget fetchAmplitudeUser
     // failed (e.g. due to an expired token). Resolve lazily using the now-fresh token.
+    //
+    // `currentCredentials.appId` is the third source: the `--api-key`
+    // + `--app-id` CLI path stamps the numeric app ID directly into
+    // credentials and short-circuits OAuth-based resolution, so neither
+    // `selectedAppId` nor the lazy `fetchAmplitudeUser` path will populate
+    // it. Without this fallback, those users would always hit
+    // `setApiUnavailable(true)` despite passing a valid app ID. The
+    // bail-out condition above (`!credentials.appId && !selectedAppId
+    // && !resolvedAppIdRef.current && !selectedOrgId`) already mirrors
+    // this set; keep them in sync so what gets us past the bail-out is
+    // the same thing the API call below uses.
+    //
+    // `credentials.appId` is `AppId | 0` (0 = sentinel for "unknown"),
+    // so explicitly check truthiness before stringifying.
+    const credentialsAppId = currentCredentials.appId
+      ? String(currentCredentials.appId)
+      : null;
     let effectiveAppId =
-      currentSession.selectedAppId ?? resolvedAppIdRef.current;
+      currentSession.selectedAppId ??
+      resolvedAppIdRef.current ??
+      credentialsAppId;
     if (!effectiveAppId) {
       const tryResolve = async () => {
         const userInfo = await fetchAmplitudeUser(

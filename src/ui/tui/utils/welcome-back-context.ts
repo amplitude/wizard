@@ -19,7 +19,10 @@
  */
 
 import * as fs from 'node:fs';
-import { getEventsFile } from '../../../utils/storage-paths.js';
+import {
+  getEventsFile,
+  pickFreshestExisting,
+} from '../../../utils/storage-paths.js';
 import { parseEventPlanContent } from '../../../lib/event-plan-parser.js';
 
 export interface PreviousRunSummary {
@@ -40,28 +43,28 @@ export interface PreviousRunSummary {
  * whole intro for a user who has a junk JSON file lying around.
  */
 export function readPreviousRunSummary(installDir: string): PreviousRunSummary {
-  const canonical = getEventsFile(installDir);
-  const legacy = `${installDir}/.amplitude-events.json`;
-
-  // Pick the freshest of the two paths so we don't use a stale legacy
-  // file as the "last run" signal when the user has run a more recent
-  // wizard build that wrote canonical.
-  let chosenPath: string | null = null;
-  let chosenMtime = 0;
-  for (const p of [canonical, legacy]) {
-    try {
-      const stat = fs.statSync(p);
-      if (stat.isFile() && stat.mtime.getTime() > chosenMtime) {
-        chosenPath = p;
-        chosenMtime = stat.mtime.getTime();
-      }
-    } catch {
-      // ENOENT / EACCES — file's just not there, that's fine.
-    }
-  }
+  // Pick the freshest of canonical vs. legacy so we don't use a stale
+  // legacy file as the "last run" signal when the user has run a more
+  // recent wizard build that wrote canonical.
+  const chosenPath = pickFreshestExisting([
+    getEventsFile(installDir),
+    `${installDir}/.amplitude-events.json`,
+  ]);
 
   if (!chosenPath) {
     return { eventCount: 0, lastRunAt: null };
+  }
+
+  // Re-stat the chosen path for its mtime. The double-stat is cheap
+  // (cached by the kernel) and keeps `pickFreshestExisting` returning a
+  // single path instead of a `{ path, mtime }` tuple every caller has
+  // to destructure.
+  let lastRunAt: Date | null = null;
+  try {
+    lastRunAt = new Date(fs.statSync(chosenPath).mtime.getTime());
+  } catch {
+    // The file vanished between stat and read — fall through with the
+    // count we can still parse below.
   }
 
   let eventCount = 0;
@@ -80,7 +83,7 @@ export function readPreviousRunSummary(installDir: string): PreviousRunSummary {
 
   return {
     eventCount,
-    lastRunAt: new Date(chosenMtime),
+    lastRunAt,
   };
 }
 

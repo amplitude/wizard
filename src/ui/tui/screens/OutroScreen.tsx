@@ -41,7 +41,10 @@ import {
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
-import { getDashboardFile } from '../../../utils/storage-paths.js';
+import {
+  getDashboardFile,
+  pickFreshestExisting,
+} from '../../../utils/storage-paths.js';
 import { retryFromCheckpoint } from '../../../lib/retry-from-checkpoint.js';
 import { isInteractiveOutro } from '../utils/outro-mode.js';
 
@@ -648,22 +651,10 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
  * "Open Amplitude" link.
  */
 function readDashboardUrlFromDisk(installDir: string): string | null {
-  const canonical = getDashboardFile(installDir);
-  const legacy = path.join(installDir, '.amplitude-dashboard.json');
-
-  let chosenPath: string | null = null;
-  let chosenMtime = 0;
-  for (const p of [canonical, legacy]) {
-    try {
-      const stat = fs.statSync(p);
-      if (stat.isFile() && stat.mtime.getTime() > chosenMtime) {
-        chosenPath = p;
-        chosenMtime = stat.mtime.getTime();
-      }
-    } catch {
-      // ENOENT / EACCES — file's just not there, that's fine.
-    }
-  }
+  const chosenPath = pickFreshestExisting([
+    getDashboardFile(installDir),
+    path.join(installDir, '.amplitude-dashboard.json'),
+  ]);
   if (!chosenPath) return null;
 
   try {
@@ -675,10 +666,14 @@ function readDashboardUrlFromDisk(installDir: string): string | null {
       typeof (parsed as { dashboardUrl?: unknown }).dashboardUrl === 'string'
     ) {
       const url = (parsed as { dashboardUrl: string }).dashboardUrl;
-      // Sanity-check: an empty string or non-http URL is worthless.
-      // The wizard always writes a fully-qualified `https://` URL, so
-      // anything else is either a stale placeholder or hand-edited junk.
-      if (url.startsWith('https://') || url.startsWith('http://')) {
+      // Sanity-check: the wizard always writes a fully-qualified
+      // `https://` URL, so anything else is a stale placeholder, a
+      // hand-edited file, or an attempt to redirect the user's browser
+      // somewhere unencrypted. Reject `http://` too — accepting it would
+      // open a small phishing vector for a local attacker who can edit
+      // `.amplitude/dashboard.json` since this URL is opened directly
+      // via `opn()`.
+      if (url.startsWith('https://')) {
         return url;
       }
     }

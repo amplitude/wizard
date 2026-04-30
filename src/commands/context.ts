@@ -33,7 +33,13 @@ export const WIZARD_VERSION: string = (() => {
         if (
           parsed !== null &&
           typeof parsed === 'object' &&
-          typeof (parsed as { version?: unknown }).version === 'string'
+          typeof (parsed as { version?: unknown }).version === 'string' &&
+          // An empty string is technically a string, but the previous
+          // `if (pkg.version)` truthiness check skipped it and walked
+          // up the tree; preserve that behavior so we don't propagate
+          // an empty `WIZARD_VERSION` into Sentry release tags, the
+          // update notifier, or analytics.
+          (parsed as { version: string }).version.length > 0
         ) {
           return (parsed as { version: string }).version;
         }

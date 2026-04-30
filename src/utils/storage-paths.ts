@@ -32,7 +32,7 @@
  *     its actual sensitivity — same precedent as `~/.ampli.json`).
  */
 
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -195,6 +195,34 @@ export function getEventsFile(installDir: string): string {
 /** Dashboard URL JSON written by the agent after dashboard creation. */
 export function getDashboardFile(installDir: string): string {
   return join(getProjectMetaDir(installDir), 'dashboard.json');
+}
+
+/**
+ * Pick the freshest existing file from a list of candidate paths, comparing
+ * by mtime. Used to prefer the canonical project-meta path over a legacy
+ * fallback when both exist. Returns `null` if none of the paths point at a
+ * regular file.
+ *
+ * Intentionally lives in `storage-paths.ts` (zero non-stdlib deps) so the
+ * intro / outro screens can depend on it without dragging in the heavier
+ * `agent-interface.ts` dep graph for what is fundamentally a 5-line stat
+ * loop.
+ */
+export function pickFreshestExisting(paths: readonly string[]): string | null {
+  let chosenPath: string | null = null;
+  let chosenMtime = -Infinity;
+  for (const p of paths) {
+    try {
+      const stat = statSync(p);
+      if (stat.isFile() && stat.mtime.getTime() > chosenMtime) {
+        chosenPath = p;
+        chosenMtime = stat.mtime.getTime();
+      }
+    } catch {
+      // ENOENT / EACCES — file's just not there, that's fine.
+    }
+  }
+  return chosenPath;
 }
 
 // ── Directory creation ────────────────────────────────────────────────

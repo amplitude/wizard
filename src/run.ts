@@ -12,6 +12,7 @@ import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
+import { NoOrgsError } from './utils/zone-probe';
 import { getVersionCheckInfo } from './lib/version-check';
 import { initFeatureFlags } from './lib/feature-flags';
 import { autoEnableOptInFeatures } from './lib/feature-discovery';
@@ -168,6 +169,21 @@ export async function runWizard(
       }
 
       const debugInfo = session.debug && errorStack ? `\n\n${errorStack}` : '';
+
+      // NoOrgsError is a terminal condition — the user's account literally
+      // has no organizations on this zone. Re-running the same wizard with
+      // the same auth and zone will produce the same result, so offering
+      // a "press R to retry" is misleading. Route straight through abort()
+      // so registered cleanup, analytics, and Sentry capture all run, and
+      // the process exits with the standard contract instead of looping
+      // back through setRunError → setRunError → setRunError forever.
+      if (error instanceof NoOrgsError) {
+        await wizardAbort({
+          message: errorMessage,
+          error: error as Error,
+        });
+        return;
+      }
 
       retry = await getUI().setRunError(error as Error);
       if (!retry) {
