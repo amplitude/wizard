@@ -1178,7 +1178,34 @@ export const defaultCommand: CommandModule = {
           // Gate runWizard on the user reaching RunScreen — at that point
           // auth, data check, and any setup questions are all complete.
           const { Screen } = await import('../ui/tui/router.js');
-          tui.store.onEnterScreen(Screen.Run, () => tui.store.completeSetup());
+          // RunPhase is also exported from `wizard-session.ts`, but the TUI
+          // layer keeps its own copy in session-constants.ts to dodge the
+          // tsx ESM/CJS dual-loading bug documented at the top of that
+          // file — and importing from there avoids tripping the cli.test
+          // module mock for `../lib/wizard-session` which only exposes
+          // `buildSession` + `DiscoveredFeature`.
+          const { RunPhase: RunPhaseEnum } = await import(
+            '../ui/tui/session-constants.js'
+          );
+          tui.store.onEnterScreen(Screen.Run, () => {
+            // Eagerly transition into the Running phase the instant the
+            // user lands on RunScreen. Without this, the screen renders
+            // with `runPhase === Idle` while runAgentWizard does its
+            // async setup (skill staging, gateway liveness probe, agent
+            // SDK init, MCP connect) — anywhere from a few seconds on a
+            // warm cache to ~30s on a cold one. During that window the
+            // header shows a misleading "Agent running · 0s" with the
+            // empty-tasks placeholder ("Analyzing project…"), the timer
+            // never advances (runStartedAt is null so it falls back to
+            // Date.now() each render), and the Logs tab sits at
+            // "Waiting for the agent to start writing logs…". From the
+            // user's perspective the wizard looks hung. setRunPhase
+            // populates the canonical 5 tasks, stamps runStartedAt, and
+            // is idempotent against agent-runner's later
+            // getUI().startRun() call.
+            tui.store.setRunPhase(RunPhaseEnum.Running);
+            tui.store.completeSetup();
+          });
 
           // Session checkpointing — save at key transitions so crash
           // recovery can skip already-completed steps.
