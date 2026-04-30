@@ -556,6 +556,7 @@ describe('WizardStore', () => {
       store.session.pendingAuthIdToken = 'idt';
       store.session.pendingAuthAccessToken = 'at';
       store.session.apiKeyNotice = 'stale';
+      store.session.requiresAccountConfirmation = true;
 
       store.setRegionForced();
 
@@ -578,6 +579,52 @@ describe('WizardStore', () => {
       expect(store.session.pendingAuthIdToken).toBeNull();
       expect(store.session.pendingAuthAccessToken).toBeNull();
       expect(store.session.apiKeyNotice).toBeNull();
+      expect(store.session.requiresAccountConfirmation).toBe(false);
+    });
+
+    it('setRegionForced clears requiresAccountConfirmation so AuthScreen does not render the empty confirm prompt', () => {
+      // Regression for the /region-mid-confirm bug: switching regions while
+      // the returning-user "Continue with this Amplitude project?" prompt is
+      // showing left the flag stuck on, so AuthScreen short-circuited to the
+      // confirm UI with em-dash org/project (the new zone has no selection
+      // yet) instead of triggering re-auth against the new region.
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedProjectId = 'proj-1';
+      store.session.selectedProjectName = 'Amplitude';
+      store.session.requiresAccountConfirmation = true;
+
+      store.setRegionForced();
+
+      expect(store.session.requiresAccountConfirmation).toBe(false);
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+    });
+
+    it('resetAuthForRegionChange clears requiresAccountConfirmation', () => {
+      // Same reasoning as setRegionForced: the Esc-back path from AuthScreen
+      // to RegionSelect must not leave the confirm flag stranded.
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      store.session.requiresAccountConfirmation = true;
+
+      store.resetAuthForRegionChange();
+
+      expect(store.session.requiresAccountConfirmation).toBe(false);
     });
 
     it('setRegionForced clears framework + feature state so a new-zone run starts clean', () => {

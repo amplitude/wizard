@@ -617,6 +617,12 @@ export class WizardStore {
     this.$session.setKey('pendingAuthIdToken', null);
     this.$session.setKey('pendingAuthAccessToken', null);
     this.$session.setKey('apiKeyNotice', null);
+    // The returning-user confirm prompt was set against the old zone's
+    // stored selection, which we just cleared. Leaving it true makes
+    // AuthScreen short-circuit to "Continue with this Amplitude project?"
+    // with em-dash org/project (the values just got nulled), instead of
+    // rendering the OAuth-waiting state for the new zone.
+    this.$session.setKey('requiresAccountConfirmation', false);
 
     // User / org / workspace / project selection — all lived in the old zone
     this.$session.setKey('userEmail', null);
@@ -1426,6 +1432,9 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);
+    // Same reasoning as setRegionForced: the confirm prompt was set
+    // against the old-zone selection we just cleared.
+    this.$session.setKey('requiresAccountConfirmation', false);
     this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
     this.emitChange();
