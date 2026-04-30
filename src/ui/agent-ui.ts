@@ -1268,6 +1268,15 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  applyJourneyTransition(
+    stepId: import('../lib/journey-state.js').JourneyStepId,
+    status: import('../lib/journey-state.js').JourneyStatus,
+  ): void {
+    emit('progress', `journey: ${stepId} -> ${status}`, {
+      data: { event: 'journey_transition', stepId, status },
+    });
+  }
+
   // ── Event plan ──────────────────────────────────────────────────────
 
   setEventPlan(events: Array<{ name: string; description: string }>): void {

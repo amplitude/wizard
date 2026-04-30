@@ -56,6 +56,11 @@ import {
   type StatusReporter,
 } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
+import {
+  classifyToolEvent,
+  type JourneyStepId,
+  type JourneyStatus,
+} from './journey-state';
 import { sanitizeNestedClaudeEnv } from './sanitize-claude-env';
 import { applyScopedSettings } from './claude-settings-scope';
 import {
@@ -3033,6 +3038,64 @@ export async function runAgent(
               });
               const recordPostToolUse = createPostToolUseHook(agentState);
 
+              // Per-step status the journey classifier has emitted so far
+              // this run. Passed back into `classifyToolEvent` so triggers
+              // that depend on prior steps (e.g. `wire` enters in_progress
+              // only after `plan` is `completed`) can gate correctly.
+              const derivedJourney: Partial<
+                Record<JourneyStepId, JourneyStatus>
+              > = {};
+              const advanceJourney = (
+                phase: 'pre' | 'post',
+                input: Record<string, unknown>,
+              ): void => {
+                try {
+                  const toolName =
+                    typeof input.tool_name === 'string'
+                      ? input.tool_name
+                      : typeof input.toolName === 'string'
+                      ? input.toolName
+                      : '';
+                  if (!toolName) return;
+                  const toolInput =
+                    typeof input.tool_input !== 'undefined'
+                      ? input.tool_input
+                      : typeof input.toolInput !== 'undefined'
+                      ? input.toolInput
+                      : null;
+                  const toolResult =
+                    typeof input.tool_response !== 'undefined'
+                      ? input.tool_response
+                      : typeof input.tool_result !== 'undefined'
+                      ? input.tool_result
+                      : null;
+                  const transition = classifyToolEvent({
+                    phase,
+                    toolName,
+                    toolInput,
+                    toolResult,
+                    prevDerived: derivedJourney,
+                  });
+                  if (!transition) return;
+                  // Mirror the monotonic guard in WizardStore — a completed
+                  // step never regresses to in_progress, so don't push that
+                  // demotion into the UI.
+                  const prev = derivedJourney[transition.stepId];
+                  if (prev === 'completed' && transition.status !== 'completed')
+                    return;
+                  derivedJourney[transition.stepId] = transition.status;
+                  getUI().applyJourneyTransition(
+                    transition.stepId,
+                    transition.status,
+                  );
+                } catch (err) {
+                  // Classifier errors are non-fatal — the user-visible
+                  // checklist falls back to the canonical 5 pending rows
+                  // until the next valid signal lands.
+                  logToFile('journey classifier threw:', err);
+                }
+              };
+
               // Compose: inner observer + authoritative gate run concurrently.
               // The observer is decision-neutral (emits NDJSON for outer-agent
               // telemetry only) so its return value is discarded; the gate's
@@ -3046,6 +3109,7 @@ export async function runAgent(
                 toolUseID,
                 hookOpts,
               ) => {
+                advanceJourney('pre', input);
                 const observer = innerHooks
                   .PreToolUse(input, toolUseID, hookOpts)
                   .catch((err: unknown) => {
@@ -3063,6 +3127,7 @@ export async function runAgent(
                 toolUseID,
                 hookOpts,
               ) => {
+                advanceJourney('post', input);
                 const observer = innerHooks
                   .PostToolUse(input, toolUseID, hookOpts)
                   .catch((err: unknown) => {

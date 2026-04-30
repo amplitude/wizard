@@ -40,6 +40,11 @@ import {
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
 import { clearApiKey } from '../../utils/api-key-store.js';
+import {
+  CANONICAL_STEPS,
+  matchCanonicalStep,
+} from '../../lib/canonical-tasks.js';
+import type { JourneyStepId, JourneyStatus } from '../../lib/journey-state.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -126,6 +131,26 @@ export class WizardStore {
    * don't stall after the 50th write.
    */
   private $fileWritesTotal = atom(0);
+  /**
+   * Per-step journey status derived from deterministic tool-call signals
+   * (see `src/lib/journey-state.ts`). This is the source of truth for the
+   * canonical 5-step progress UI; `syncTodos` only updates each step's
+   * `activeForm` flavor text. Initialised on first `applyJourneyTransition`
+   * call — until then each step is treated as `pending`.
+   */
+  private $derivedJourney = atom<Partial<Record<JourneyStepId, JourneyStatus>>>(
+    {},
+  );
+  /**
+   * Latest non-empty `activeForm` the agent has emitted via `TodoWrite`,
+   * keyed by canonical step id. Refreshed every `syncTodos` call. The
+   * renderer prefers this over the canonical `defaultActiveForm` so the
+   * user sees the agent's current narration ("Installing project
+   * dependencies") on the active row.
+   */
+  private $journeyActiveForms = atom<Partial<Record<JourneyStepId, string>>>(
+    {},
+  );
   private $version = atom(0);
 
   /** True while the user is typing a slash command in the command bar. */
@@ -270,6 +295,14 @@ export class WizardStore {
     // unmounts inactive tabs).
     if (phase === RunPhase.Running && prevPhase !== RunPhase.Running) {
       this.$session.setKey('runStartedAt', Date.now());
+      // Pre-populate the canonical 5 tasks so the user sees "0 done · 5
+      // to go" from frame 1, not an empty list while the agent loads.
+      // The renderer derives rows from $derivedJourney + $journeyActiveForms;
+      // calling it on every Running entry is idempotent and preserves
+      // any progress already accumulated on a re-entry.
+      if (this.$tasks.get().length === 0) {
+        this.renderJourneyTasks();
+      }
     }
     this.emitChange();
   }
@@ -1844,45 +1877,101 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Apply a deterministic journey transition derived from a tool call
+   * (see `src/lib/journey-state.ts`). Status of the named step is set to
+   * the incoming value with a monotonic guard — once a step has reached
+   * `completed`, no later transition demotes it. Sequential-ordering
+   * cascade (a later step advancing implies all earlier ones are done)
+   * is applied at render time.
+   *
+   * This is the source of truth for the canonical 5-step UI status.
+   * `syncTodos` only refreshes per-step `activeForm` flavor text; it
+   * never writes status here.
+   */
+  applyJourneyTransition(stepId: JourneyStepId, status: JourneyStatus): void {
+    const prev = this.$derivedJourney.get();
+    const current = prev[stepId];
+    // Monotonic guard — once completed, can't regress to in_progress.
+    if (current === 'completed' && status !== 'completed') return;
+    if (current === status) return;
+    this.$derivedJourney.set({ ...prev, [stepId]: status });
+    this.renderJourneyTasks();
+    this.emitChange();
+  }
+
+  /**
+   * Refresh per-step `activeForm` text from the agent's `TodoWrite`
+   * output. Status is owned by `applyJourneyTransition`; this method
+   * never touches it. Incoming todos that don't exactly match a
+   * canonical label are dropped.
+   *
+   * Safe fallback: when no journey transition has fired yet (early in a
+   * run, or in tests that exercise syncTodos directly), the renderer
+   * still seeds the canonical 5 rows as `pending` so the user-visible
+   * list is never empty.
+   */
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
-    // Index the previous task list by label so we can preserve
-    // already-completed work across re-plans. Common scenario: an SDK
-    // retry (HTTP 400 / 429) causes the agent to re-emit its TodoWrite
-    // with stale state — tasks that were already ✓ get demoted back to
-    // ◐ or ○. The user sees their progress visibly un-check. We force
-    // monotonic progress: once a task with a given label is completed,
-    // it stays completed even if a later TodoWrite says otherwise.
-    const previousByLabel = new Map(this.$tasks.get().map((t) => [t.label, t]));
+    const next: Partial<Record<JourneyStepId, string>> = {
+      ...this.$journeyActiveForms.get(),
+    };
+    for (const todo of todos) {
+      const idx = matchCanonicalStep(todo.content);
+      if (idx < 0) continue;
+      if (todo.activeForm && todo.activeForm.trim()) {
+        next[CANONICAL_STEPS[idx].id] = todo.activeForm;
+      }
+    }
+    this.$journeyActiveForms.set(next);
+    this.renderJourneyTasks();
+    this.emitChange();
+  }
 
-    const incoming = todos.map((t) => {
-      const prev = previousByLabel.get(t.content);
-      let status = (t.status as TaskStatus) || TaskStatus.Pending;
-      let done = status === TaskStatus.Completed;
-      if (prev?.done && !done) {
+  /**
+   * Re-render the canonical 5-row task list from the derived journey
+   * status + per-step activeForms. Sequential-ordering cascade applied
+   * here: when step N is in_progress or completed, every step before
+   * N rolls up to completed (the agent has demonstrably moved past
+   * them). Single-in-progress is implicit — the cascade walks earlier
+   * in_progress states up to completed.
+   */
+  private renderJourneyTasks(): void {
+    const derived = this.$derivedJourney.get();
+    const activeForms = this.$journeyActiveForms.get();
+
+    let frontier = -1;
+    for (let i = 0; i < CANONICAL_STEPS.length; i++) {
+      const status = derived[CANONICAL_STEPS[i].id];
+      if (status === 'in_progress' || status === 'completed') frontier = i;
+    }
+
+    const tasks: TaskItem[] = CANONICAL_STEPS.map((step, i) => {
+      let status: TaskStatus = TaskStatus.Pending;
+      const explicit = derived[step.id];
+      if (explicit === 'completed') {
         status = TaskStatus.Completed;
-        done = true;
+      } else if (explicit === 'in_progress') {
+        // Sequential cascade still applies — if a later step has been
+        // touched, this in_progress is stale (the agent moved on
+        // without explicitly completing this step). Promote to
+        // Completed so the user-visible list stays single-in_progress.
+        status = i < frontier ? TaskStatus.Completed : TaskStatus.InProgress;
+      } else if (i < frontier) {
+        // Sequential cascade — a later step has advanced, so this
+        // earlier step must be done by definition.
+        status = TaskStatus.Completed;
       }
       return {
-        label: t.content,
-        activeForm: t.activeForm,
+        label: step.label,
+        activeForm: activeForms[step.id] ?? step.defaultActiveForm,
         status,
-        done,
+        done: status === TaskStatus.Completed,
       };
     });
 
-    // Trust the agent's TodoWrite list as authoritative for *which* tasks
-    // exist. We previously retained "orphaned" completed tasks (done but
-    // missing from the new list) on the theory that Claude Code might
-    // compact away history — in practice the agent keeps completed items
-    // and *renames* in-progress ones, and the retention logic surfaced
-    // zombie labels like "Set up env" alongside its renamed successor
-    // "Set up env and install SDK". Trusting the incoming list eliminates
-    // the duplicate; the monotonic guard above protects against the
-    // retry-induced regression case.
-    this.$tasks.set(incoming);
-    this.emitChange();
+    this.$tasks.set(tasks);
   }
 
   // ── React integration ───────────────────────────────────────────

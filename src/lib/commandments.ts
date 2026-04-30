@@ -75,7 +75,7 @@ Write tools (Edit / Write) — DO parallelize when each call targets a DIFFERENT
 
   'Do not spawn subagents unless explicitly instructed.',
 
-  `Use TodoWrite to render the user-visible progress bar. The list MUST be EXACTLY these five todos, in order, with these exact labels:
+  `Use TodoWrite to narrate progress. The wizard renders the user-visible 5-step checklist from your tool calls (PreToolUse / PostToolUse), so step status is mechanical and you don't need to micro-manage it. Your job here is to mark each step in_progress when you start it and completed when you finish — the wizard treats your list as advisory \`activeForm\` text only ("Installing project dependencies") and ignores status discrepancies. Use EXACTLY these five labels, in order, so the renderer can match them:
 
   1. Detect your project setup
   2. Install Amplitude
@@ -83,11 +83,7 @@ Write tools (Edit / Write) — DO parallelize when each call targets a DIFFERENT
   4. Wire up event tracking
   5. Build your starter dashboard
 
-These are the ONLY allowed top-level todos. Do NOT add a sixth — internal steps (env var writes, Content Security Policy edits, build verification, setup report, doc fetches) roll into the appropriate parent (CSP and env vars into "Install Amplitude"; setup report into "Build your starter dashboard"; build verification into "Wire up event tracking"). Engineering phases from the integration skill (1.0-begin / 1.1-edit / 1.2-revise / 1.3-conclude) are internal — they do not appear here.
-
-Mark each in_progress when you start the parent step and completed AS SOON AS that specific work is done — not batched at end of phase. The wizard renders this as "X / 5 tasks complete"; the denominator MUST stay 5 from first frame to last. Plan once at the start; never grow the list. Mark "Detect your project setup" completed the instant detection is done; "Install Amplitude" the instant the install starts as a background task; "Plan and approve events to track" the instant confirm_event_plan returns approved; "Wire up event tracking" the moment the last track() call lands.
-
-CRITICAL — "Build your starter dashboard" is real work, not a placeholder. Mark it in_progress when you start creating charts via the Amplitude MCP, and mark it completed ONLY AFTER \`record_dashboard\` returns "ok". A premature completion is the single most common UX bug: the spinner header reads "5/5 tasks complete" while the wizard hangs running a fallback dashboard step the agent should have done. If chart/dashboard creation fails partway, leave the task in_progress and let the post-agent fallback handle it — DO NOT mark complete to "move on". Delaying the TodoWrite update by even a few tool calls leaves the counter stuck and users assume the wizard hung.`,
+Do NOT add a sixth — internal steps (env var writes, Content Security Policy edits, build verification, setup report, doc fetches) roll into the appropriate parent (CSP and env vars into "Install Amplitude"; setup report into "Build your starter dashboard"; build verification into "Wire up event tracking"). Engineering phases from the integration skill (1.0-begin / 1.1-edit / 1.2-revise / 1.3-conclude) are internal — they do not appear here. The denominator MUST stay 5 — the wizard renders "X / 5 tasks complete" regardless of what your list says.`,
 
   `After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call \`confirm_event_plan\` to present the proposed instrumentation plan. Only proceed after approval. If the user gives feedback, revise and call again. If skipped, do not instrument any events.
 

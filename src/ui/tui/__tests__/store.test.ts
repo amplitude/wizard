@@ -258,6 +258,36 @@ describe('WizardStore', () => {
       expect(store.session.runStartedAt).toBe(stamped);
     });
 
+    it('setRunPhase(Running) pre-populates the canonical 5 tasks', () => {
+      // Empty list while the agent cold-starts is a known abandonment
+      // moment. Pre-populate at the Running transition so the user sees
+      // "0 done · 5 to go" from frame 1.
+      const store = createStore();
+      expect(store.tasks).toHaveLength(0);
+      store.setRunPhase(RunPhase.Running);
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.map((t) => t.label)).toEqual([
+        'Detect your project setup',
+        'Install Amplitude',
+        'Plan and approve events to track',
+        'Wire up event tracking',
+        'Build your starter dashboard',
+      ]);
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
+    });
+
+    it('setRunPhase(Running) does not clobber existing task progress on re-entry', () => {
+      const store = createStore();
+      store.setRunPhase(RunPhase.Running);
+      store.applyJourneyTransition('install', 'completed');
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+      store.setRunPhase(RunPhase.Idle);
+      store.setRunPhase(RunPhase.Running);
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+    });
+
     it('setCredentials updates session.credentials', () => {
       const store = createStore();
       const creds = {
@@ -1208,126 +1238,167 @@ describe('WizardStore', () => {
     });
   });
 
-  describe('syncTodos', () => {
-    it('maps incoming todos to TaskItems', () => {
+  describe('applyJourneyTransition', () => {
+    // The 5-step user-visible journey is driven by deterministic tool-call
+    // signals classified in `src/lib/journey-state.ts`. These tests pin
+    // the store-side semantics: a transition updates the named step's
+    // status, applies a monotonic guard (completed steps cannot regress),
+    // and the renderer cascades earlier steps to completed when a later
+    // step advances (sequential ordering invariant).
+
+    it('renders exactly the five canonical steps from frame 1', () => {
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.map((t) => t.label)).toEqual([
+        'Detect your project setup',
+        'Install Amplitude',
+        'Plan and approve events to track',
+        'Wire up event tracking',
+        'Build your starter dashboard',
+      ]);
+    });
+
+    it('marks the named step in_progress and earlier steps completed', () => {
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+
+      expect(store.tasks[0].status).toBe(TaskStatus.Completed); // detect
+      expect(store.tasks[1].status).toBe(TaskStatus.InProgress); // install
+      expect(store.tasks[2].status).toBe(TaskStatus.Pending); // plan
+    });
+
+    it('cascades earlier steps to completed when a later step advances', () => {
+      // Same invariant as PR-A's "skips ahead" case, now derived from
+      // a deterministic tool call rather than a TodoWrite string.
+      const store = createStore();
+      store.applyJourneyTransition('wire', 'in_progress');
+
+      expect(store.tasks[0].status).toBe(TaskStatus.Completed);
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+      expect(store.tasks[2].status).toBe(TaskStatus.Completed);
+      expect(store.tasks[3].status).toBe(TaskStatus.InProgress);
+      expect(store.tasks[4].status).toBe(TaskStatus.Pending);
+    });
+
+    it('promotes a stale in_progress step to completed when a later step is also in_progress', () => {
+      // The classifier emits per-tool-call transitions; nothing
+      // prevents `install: in_progress` from sitting in derived state
+      // when `wire: in_progress` later fires (no explicit "install
+      // completed" tool call ever lands — install completion is
+      // implicit via the sequential cascade).
+      //
+      // The user-visible list MUST stay single-in_progress: the older
+      // in_progress is stale and must render as Completed, even though
+      // it's still in the derived map as `in_progress`.
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+      store.applyJourneyTransition('wire', 'in_progress');
+
+      expect(store.tasks[0].status).toBe(TaskStatus.Completed); // detect (cascade)
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed); // install (was in_progress, cascaded)
+      expect(store.tasks[2].status).toBe(TaskStatus.Completed); // plan (cascade)
+      expect(store.tasks[3].status).toBe(TaskStatus.InProgress); // wire (frontier)
+      expect(store.tasks[4].status).toBe(TaskStatus.Pending); // dashboard
+    });
+
+    it('forces monotonic progress — completed steps cannot regress', () => {
+      // Retry scenario: a stale tool call replays after a step has been
+      // verified completed. The store ignores the demotion.
+      const store = createStore();
+      store.applyJourneyTransition('install', 'completed');
+      store.applyJourneyTransition('install', 'in_progress');
+
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+    });
+
+    it('is idempotent — re-applying the same transition is a no-op', () => {
+      const store = createStore();
+      const cb = vi.fn();
+      store.applyJourneyTransition('install', 'in_progress');
+      store.subscribe(cb);
+      store.applyJourneyTransition('install', 'in_progress');
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it('emits change for every effective transition', () => {
+      const store = createStore();
+      const cb = vi.fn();
+      store.subscribe(cb);
+      store.applyJourneyTransition('install', 'in_progress');
+      store.applyJourneyTransition('install', 'completed');
+      expect(cb).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('syncTodos (activeForm only)', () => {
+    // syncTodos no longer drives status — it only refreshes the
+    // `activeForm` flavor text shown beside each canonical step. Status
+    // is owned by `applyJourneyTransition`. The list is always rendered
+    // as the canonical 5 rows, regardless of TodoWrite content.
+
+    it('renders exactly the five canonical steps even with no derived status', () => {
       const store = createStore();
       store.syncTodos([
-        { content: 'Install SDK', status: 'pending' },
-        { content: 'Configure', status: 'completed' },
+        { content: 'Install Amplitude', status: 'in_progress' },
       ]);
 
-      expect(store.tasks).toHaveLength(2);
-      expect(store.tasks[0]).toEqual({
-        label: 'Install SDK',
-        activeForm: undefined,
-        status: TaskStatus.Pending,
-        done: false,
-      });
-      expect(store.tasks[1]).toEqual({
-        label: 'Configure',
-        activeForm: undefined,
-        status: TaskStatus.Completed,
-        done: true,
-      });
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.map((t) => t.label)).toEqual([
+        'Detect your project setup',
+        'Install Amplitude',
+        'Plan and approve events to track',
+        'Wire up event tracking',
+        'Build your starter dashboard',
+      ]);
     });
 
-    it('treats incoming todos as the authoritative list (drops orphans)', () => {
-      // Regression: we used to retain `done` tasks the agent stopped
-      // mentioning, on the theory that Claude Code might compact away
-      // history. In practice the agent keeps completed items and *renames*
-      // in-progress ones — so retention surfaced zombie labels (e.g.
-      // "Set up env" alongside its renamed successor "Set up env and
-      // install SDK"). Trusting the incoming list eliminates the
-      // duplicate.
+    it('does not change step status — that is owned by applyJourneyTransition', () => {
       const store = createStore();
-      store.setTasks([
-        { label: 'Old done task', status: TaskStatus.Completed, done: true },
-        { label: 'Old pending task', status: TaskStatus.Pending, done: false },
-      ]);
+      store.syncTodos([{ content: 'Install Amplitude', status: 'completed' }]);
 
-      store.syncTodos([{ content: 'New task', status: 'pending' }]);
-
-      expect(store.tasks).toHaveLength(1);
-      expect(store.tasks[0].label).toBe('New task');
+      // Even with status='completed' in the TodoWrite, the step stays
+      // pending until a deterministic tool-call signal flips it.
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
     });
 
-    it('does not duplicate tasks that appear in both old and incoming lists', () => {
+    it('updates the matched step activeForm so the user sees current narration', () => {
       const store = createStore();
-      store.setTasks([
-        { label: 'Shared task', status: TaskStatus.Completed, done: true },
-      ]);
-
-      store.syncTodos([{ content: 'Shared task', status: 'completed' }]);
-
-      expect(store.tasks).toHaveLength(1);
-      expect(store.tasks[0].label).toBe('Shared task');
-    });
-
-    it('forces monotonic progress — completed tasks cannot regress', () => {
-      // Regression scenario observed in production: an HTTP 400 SDK retry
-      // causes the agent to re-emit its TodoWrite list with stale state,
-      // demoting tasks that were already completed back to in_progress.
-      // From the user's perspective their progress visibly un-checks.
-      // Once a task hits "completed", subsequent syncs cannot drop it
-      // back to in_progress / pending.
-      const store = createStore();
-      store.setTasks([
-        { label: 'Done', status: TaskStatus.Completed, done: true },
-        { label: 'Active', status: TaskStatus.InProgress, done: false },
-      ]);
-
-      store.syncTodos([
-        { content: 'Done', status: 'in_progress' }, // retry-induced regression
-        { content: 'Active', status: 'in_progress' }, // legitimately still active
-      ]);
-
-      const done = store.tasks.find((t) => t.label === 'Done');
-      expect(done?.status).toBe(TaskStatus.Completed);
-      expect(done?.done).toBe(true);
-
-      const active = store.tasks.find((t) => t.label === 'Active');
-      expect(active?.status).toBe(TaskStatus.InProgress);
-      expect(active?.done).toBe(false);
-    });
-
-    it('still allows new tasks to enter as pending or in_progress', () => {
-      // Sanity: monotonic guard only protects already-completed labels.
-      // Genuinely new tasks should appear in whatever state the agent
-      // declares.
-      const store = createStore();
-      store.setTasks([
-        { label: 'A', status: TaskStatus.Completed, done: true },
-      ]);
-
-      store.syncTodos([
-        { content: 'A', status: 'completed' },
-        { content: 'B', status: 'in_progress' },
-        { content: 'C', status: 'pending' },
-      ]);
-
-      expect(store.tasks).toHaveLength(3);
-      expect(store.tasks[1].status).toBe(TaskStatus.InProgress);
-      expect(store.tasks[2].status).toBe(TaskStatus.Pending);
-    });
-
-    it('preserves activeForm from incoming todos', () => {
-      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
       store.syncTodos([
         {
-          content: 'Installing',
+          content: 'Install Amplitude',
           status: 'in_progress',
-          activeForm: 'Installing SDK...',
+          activeForm: 'Installing project dependencies',
         },
       ]);
 
-      expect(store.tasks[0].activeForm).toBe('Installing SDK...');
+      expect(store.tasks[1].activeForm).toBe('Installing project dependencies');
+    });
+
+    it('drops todos that do not exactly match a canonical label', () => {
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+      store.syncTodos([
+        {
+          content: 'Install Amplitude SDK',
+          status: 'in_progress',
+          activeForm: 'Installing extra thing',
+        },
+      ]);
+
+      // Drift label dropped; activeForm falls back to the canonical default.
+      expect(store.tasks[1].activeForm).toBe('Installing Amplitude');
     });
 
     it('emits change', () => {
       const store = createStore();
       const cb = vi.fn();
       store.subscribe(cb);
-      store.syncTodos([{ content: 'task', status: 'pending' }]);
+      store.syncTodos([{ content: 'Install Amplitude', status: 'pending' }]);
       expect(cb).toHaveBeenCalled();
     });
   });
@@ -1538,23 +1609,27 @@ describe('WizardStore', () => {
       expect(store.statusMessages).toEqual(['']);
     });
 
-    it('syncTodos with empty array clears all tasks', () => {
+    it('syncTodos with empty array seeds the canonical 5 as pending', () => {
+      // The user-visible list is locked to the canonical 5. With no
+      // derived journey state and an empty TodoWrite, all 5 rows still
+      // render so the user sees the journey ahead.
       const store = createStore();
-      store.setTasks([
-        { label: 'Pending', status: TaskStatus.Pending, done: false },
-        { label: 'Done', status: TaskStatus.Completed, done: true },
-      ]);
-
       store.syncTodos([]);
 
-      // Authoritative semantics: an empty incoming list means no tasks.
-      expect(store.tasks).toEqual([]);
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
     });
 
-    it('syncTodos with unknown status defaults to Pending', () => {
+    it('syncTodos with no derived journey state leaves every step pending', () => {
       const store = createStore();
-      store.syncTodos([{ content: 'Task', status: '' }]);
-      expect(store.tasks[0].status).toBe(TaskStatus.Pending);
+      store.syncTodos([{ content: 'Install Amplitude', status: '' }]);
+      // syncTodos cannot set status on its own — without a journey
+      // transition every step stays pending.
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
     });
 
     it('updateTask with negative index is a no-op', () => {
