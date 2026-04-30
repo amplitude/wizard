@@ -3113,13 +3113,6 @@ export async function runAgent(
 
         // Process the async generator — validate each message at the boundary
         for await (const rawMessage of sdkResponse) {
-          receivedFirstMessage = true;
-          lastMessageTime = Date.now();
-          const rawType =
-            (rawMessage as Record<string, unknown>)?.type?.toString() ??
-            'unknown';
-          lastMessageType = rawType;
-
           // Reset the stale timer on every message EXCEPT the SDK's
           // "I'm about to wait on the API" envelope. The Claude Agent
           // SDK emits `system { subtype: 'status', status: 'requesting' }`
@@ -3134,7 +3127,17 @@ export async function runAgent(
           //
           // Other `system` subtypes (`init`, `api_retry`, `compact_boundary`)
           // ARE real progress events and continue to reset the timer.
+          // We also gate `lastMessageTime`, `lastMessageType`, and
+          // `receivedFirstMessage` here so that stall diagnostics
+          // report elapsed time since the last real progress event,
+          // not since a non-progress `requesting` envelope.
           if (!isStallNonProgressMessage(rawMessage)) {
+            receivedFirstMessage = true;
+            lastMessageTime = Date.now();
+            const rawType =
+              (rawMessage as Record<string, unknown>)?.type?.toString() ??
+              'unknown';
+            lastMessageType = rawType;
             resetStaleTimer();
           }
 
