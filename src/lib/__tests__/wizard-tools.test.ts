@@ -20,6 +20,7 @@ import {
   WIZARD_TOOL_NAMES,
   WIZARD_TOOLS_SERVER_NAME,
 } from '../wizard-tools';
+import { toWizardDashboardOpenUrl } from '../../utils/dashboard-open-url';
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-tools-'));
@@ -837,14 +838,15 @@ describe('buildFallbackReport', () => {
     expect(md).toContain('Body with \\| pipe in description');
   });
 
-  it('renders the dashboard URL when present', () => {
+  it('renders the wizard dashboard open URL when present', () => {
+    const canonical =
+      'https://app.amplitude.com/analytics/test/dashboard/abc123';
     const md = buildFallbackReport({
       installDir: tmpDir,
-      dashboardUrl: 'https://app.amplitude.com/analytics/test/dashboard/abc123',
+      dashboardUrl: canonical,
     });
-    expect(md).toContain(
-      'https://app.amplitude.com/analytics/test/dashboard/abc123',
-    );
+    expect(md).toContain(toWizardDashboardOpenUrl(canonical));
+    expect(md).not.toContain(`Open your dashboard: ${canonical}`);
   });
 
   it('falls back to a generic Amplitude link when no dashboard URL is captured', () => {
@@ -911,10 +913,11 @@ describe('writeFallbackReportIfMissing', () => {
       { name: 'User Signed Up', description: 'After signup form submit' },
     ]);
 
+    const canonical = 'https://app.amplitude.com/analytics/x/dashboard/foo';
     const result = writeFallbackReportIfMissing({
       installDir: tmpDir,
       integration: 'nextjs',
-      dashboardUrl: 'https://app.amplitude.com/analytics/x/dashboard/foo',
+      dashboardUrl: canonical,
       workspaceName: 'Acme',
       envName: 'production',
     });
@@ -922,9 +925,7 @@ describe('writeFallbackReportIfMissing', () => {
 
     const written = fs.readFileSync(reportPathFor(tmpDir), 'utf8');
     expect(written).toContain('User Signed Up');
-    expect(written).toContain(
-      'https://app.amplitude.com/analytics/x/dashboard/foo',
-    );
+    expect(written).toContain(toWizardDashboardOpenUrl(canonical));
     expect(written).toContain('nextjs');
     expect(written).toContain('Acme');
   });

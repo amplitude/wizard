@@ -406,6 +406,12 @@ void yargs(hideBin(process.argv))
         return value;
       },
     },
+    'accept-tos': {
+      default: false,
+      describe:
+        'explicitly agree to Amplitude Terms of Service when using --signup in --ci or --agent (non-interactive signup)',
+      type: 'boolean',
+    },
     // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
     // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN / _AGENT / _INSTALL_DIR / _CLASSIC
     // to these option names; declaring them here lets .strict() accept the

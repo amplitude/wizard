@@ -27,6 +27,7 @@ import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
+import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
 
 // Belt-and-suspenders: bin.ts also installs these. Idempotent, so a
 // second call from this module covers test harnesses and any other
@@ -312,6 +313,12 @@ export class AgentUI implements WizardUI {
     return Promise.resolve();
   }
 
+  setOutroData(data: import('../lib/wizard-session.js').OutroData): void {
+    emit('lifecycle', data.message ?? '', {
+      data: { event: 'outro_data', kind: data.kind },
+    });
+  }
+
   /**
    * Emit a structured auth_required lifecycle event when the wizard is invoked
    * in --agent mode without valid credentials. Agent orchestrators (Claude
@@ -391,6 +398,36 @@ export class AgentUI implements WizardUI {
         event: 'project_create_error',
         code: data.code,
         name: data.name,
+      },
+    });
+  }
+
+  /**
+   * Emit a structured `signup_input_required` lifecycle event when the
+   * wizard is invoked with `--agent --signup` but one or more required
+   * inputs are missing (region, email, full-name, accept-tos). The
+   * orchestrator inspects `missing[]`, prompts the human for the
+   * missing values, and re-invokes the wizard with `resumeCommand` plus
+   * the gathered flags.
+   *
+   * Always paired with process.exit(ExitCode.INPUT_REQUIRED) by the caller.
+   */
+  emitSignupInputsRequired(data: {
+    missing: Array<{
+      flag: string;
+      description: string;
+      url?: string;
+      pattern?: string;
+    }>;
+    resumeCommand: string[];
+  }): void {
+    const flagList = data.missing.map((m) => m.flag).join(', ');
+    emit('lifecycle', `Signup requires additional input: ${flagList}`, {
+      level: 'error',
+      data: {
+        event: 'signup_input_required',
+        missing: data.missing,
+        resumeCommand: data.resumeCommand,
       },
     });
   }
@@ -1068,8 +1105,9 @@ export class AgentUI implements WizardUI {
   }
 
   setDashboardUrl(url: string): void {
-    emit('result', `dashboard_created: ${url}`, {
-      data: { event: 'dashboard_created', dashboardUrl: url },
+    const openUrl = toWizardDashboardOpenUrl(url);
+    emit('result', `dashboard_created: ${openUrl}`, {
+      data: { event: 'dashboard_created', dashboardUrl: openUrl },
     });
     registerSetupComplete({ amplitude: { dashboardUrl: url } });
   }

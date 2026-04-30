@@ -71,6 +71,8 @@ export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // ── URLs ─────────────────────────────────────────────────────────────
 
 export const DEFAULT_URL = 'https://amplitude.com';
+export const TERMS_OF_SERVICE_URL = 'https://amplitude.com/terms';
+export const PRIVACY_POLICY_URL = 'https://amplitude.com/privacy';
 /**
  * Default Amplitude data ingestion host used when region resolution isn't
  * available (e.g. CI mode without OAuth, --api-key path). Always points at

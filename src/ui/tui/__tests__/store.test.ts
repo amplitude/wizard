@@ -48,6 +48,11 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+vi.mock('../../../utils/api-key-store.js', () => ({
+  clearApiKey: vi.fn(),
+  persistApiKey: vi.fn(),
+  readApiKeyWithSource: vi.fn(),
+}));
 // Stub `getStoredUser` so the Wizard flow's RegionSelect gate (which calls
 // `tryResolveZone`) doesn't pick up the developer's real ~/.ampli.json.
 // `readAmpliConfig` is left un-mocked because store.test.ts already
@@ -265,6 +270,25 @@ describe('WizardStore', () => {
       expect(store.session.credentials).toEqual(creds);
     });
 
+    it('setOAuthComplete clears any cached project API key for the install dir', async () => {
+      const { clearApiKey } = await import('../../../utils/api-key-store.js');
+      const store = createStore();
+      (clearApiKey as Mock).mockClear();
+
+      store.setOAuthComplete({
+        accessToken: 'access',
+        idToken: 'id',
+        cloudRegion: 'us',
+        orgs: [],
+      });
+
+      // Stale keychain entries from prior runs in different orgs must be
+      // wiped so AuthScreen step 1 misses and the freshly-fetched env key
+      // wins. See src/ui/tui/screens/AuthScreen.tsx step 1.
+      expect(clearApiKey).toHaveBeenCalledTimes(1);
+      expect(clearApiKey).toHaveBeenCalledWith(store.session.installDir);
+    });
+
     it('setFrameworkConfig updates integration and frameworkConfig', () => {
       const store = createStore();
       const integration = Integration.nextjs;
@@ -346,6 +370,23 @@ describe('WizardStore', () => {
       const data = { kind: OutroKind.Success, message: 'Done!' };
       store.setOutroData(data);
       expect(store.session.outroData).toEqual(data);
+    });
+
+    it('setOutroData notifies subscribers even when data shape is unchanged', () => {
+      // Regression: the agent-runner AUTH_ERROR path used to direct-mutate
+      // `session.outroData`, then call `cancel()` which skipped its own
+      // setOutroData branch when outroData was already truthy. The
+      // OutroScreen never received a re-emit and the user could miss the
+      // auth-failure confirmation before being routed back to login.
+      // ink-ui's cancel() now re-calls setOutroData; this guards the
+      // contract that calling setOutroData fires a change notification.
+      const store = createStore();
+      const listener = vi.fn();
+      const data = { kind: OutroKind.Error, message: 'Authentication failed' };
+      store.setOutroData(data);
+      store.subscribe(listener);
+      store.setOutroData(data);
+      expect(listener).toHaveBeenCalled();
     });
 
     it('setFrameworkContext sets key-value pairs', () => {

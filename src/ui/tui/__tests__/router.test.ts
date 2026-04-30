@@ -814,6 +814,8 @@ describe('WizardRouter', () => {
         }),
       resetDataIngestion: () => mutate({ dataIngestionConfirmed: false }),
       resetSlack: () => mutate({ slackComplete: false, slackOutcome: null }),
+      resetEmailCapture: () => mutate({ emailCaptureComplete: false }),
+      resetToS: () => mutate({ tosAccepted: null }),
       cancelCreateProject: () =>
         mutate({
           createProject: { pending: false, source: null, suggestedName: null },
