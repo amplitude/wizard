@@ -97,7 +97,11 @@ function extractCurrentFile(
 ): string | null {
   if (fileWrites.length === 0) return null;
   const path = fileWrites[fileWrites.length - 1].path;
-  if (installDir && path.startsWith(installDir)) {
+  if (
+    installDir &&
+    path.startsWith(installDir) &&
+    (path.length === installDir.length || path[installDir.length] === '/')
+  ) {
     return path.slice(installDir.length).replace(/^\/+/, '') || path;
   }
   return path;
