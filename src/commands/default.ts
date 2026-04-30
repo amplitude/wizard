@@ -69,6 +69,34 @@ function applyOrchestratorContext(
   session.orchestratorContext = result.content;
 }
 
+/**
+ * If `--resume` was passed, look up the per-project checkpoint and
+ * restore its fields onto the session BEFORE credentials are
+ * resolved. Silently no-ops when no fresh checkpoint exists so
+ * orchestrators can pass `--resume` unconditionally on every retry
+ * without branching on disk state. Used by the agent / CI mode
+ * branches; TUI mode has its own restore path inside the auth task.
+ *
+ * Telemetry: `loadCheckpoint` emits `progress: checkpoint_loaded` on
+ * success — no extra plumbing needed here.
+ */
+async function maybeResumeFromCheckpoint(
+  session: WizardSession,
+  options: Record<string, unknown>,
+): Promise<void> {
+  if (!options.resume) return;
+  const { loadCheckpoint } = await import('../lib/session-checkpoint.js');
+  const restored = await loadCheckpoint(session.installDir);
+  if (!restored) return;
+  Object.assign(session, restored);
+  // Treat resume as an explicit user action — the intro / region pick
+  // screens shouldn't replay just because the checkpoint had stale
+  // intro state. (TUI mode handles this with its own
+  // `_restoredFromCheckpoint` flag; for headless mode the equivalent
+  // is "we skipped past the screens, don't second-guess.")
+  session.introConcluded = true;
+}
+
 export const defaultCommand: CommandModule = {
   command: ['$0'],
   describe: 'Run the Amplitude setup wizard',
@@ -157,6 +185,19 @@ export const defaultCommand: CommandModule = {
           'path to a file whose contents are injected into the inner-agent system prompt',
         type: 'string',
       },
+      resume: {
+        // In agent / CI mode: load the per-project crash-recovery
+        // checkpoint at startup so a rerun skips already-completed
+        // setup steps (region pick, framework detection, org/project
+        // selection). TUI mode auto-restores; this flag is the
+        // headless equivalent. Silently no-ops when no checkpoint
+        // exists so orchestrators can pass `--resume` unconditionally
+        // without branching on disk state.
+        default: false,
+        describe:
+          'load the saved checkpoint and skip already-completed setup steps',
+        type: 'boolean',
+      },
     }),
   handler: (argv) => {
     const options = { ...argv };
@@ -210,6 +251,7 @@ export const defaultCommand: CommandModule = {
         const session = await buildSessionFromOptions(options);
         session.agent = true;
         applyOrchestratorContext(session, options, true);
+        await maybeResumeFromCheckpoint(session, options);
 
         if (!gateAgentSignupArguments(session, agentUI)) {
           return;
@@ -241,6 +283,7 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
         applyOrchestratorContext(session, options, false);
+        await maybeResumeFromCheckpoint(session, options);
 
         if (!gateCiSignupAcceptToS(session)) {
           return;
@@ -927,17 +970,17 @@ export const defaultCommand: CommandModule = {
           );
           // After auth completes (most expensive step to repeat)
           tui.store.onEnterScreen(Screen.DataSetup, () => {
-            saveCheckpoint(tui.store.session);
+            saveCheckpoint(tui.store.session, 'screen_data_setup');
           });
           // Before agent starts (captures all setup state)
           tui.store.onEnterScreen(Screen.Run, () => {
-            saveCheckpoint(tui.store.session);
+            saveCheckpoint(tui.store.session, 'screen_run');
           });
           // Clear checkpoint only on successful completion — error/cancel
           // should preserve the checkpoint so users can resume next run.
           tui.store.onEnterScreen(Screen.Outro, () => {
             if (tui.store.session.outroData?.kind === 'success') {
-              clearCheckpoint(tui.store.session.installDir);
+              clearCheckpoint(tui.store.session.installDir, 'success');
             }
           });
 

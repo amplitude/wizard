@@ -323,6 +323,40 @@ export interface WizardUI {
    * card so the number stays consistent with the gateway's billing
    * source of truth.
    */
+  /**
+   * Emitted whenever the wizard writes a session snapshot to disk.
+   * Optional — only AgentUI implements (LoggingUI / InkUI no-op).
+   * Lets an outer orchestrator know there's a recoverable state on
+   * disk so it can advertise `--resume` to the user on a retry.
+   *
+   * `phase` is a free-form label of the trigger ("pre_compact",
+   * "screen_run", "screen_data_setup", etc.) so an orchestrator can
+   * distinguish "we hit a checkpoint inside the integration loop"
+   * from "the agent just blew through a phase boundary".
+   */
+  emitCheckpointSaved?(data: {
+    path: string;
+    bytes: number;
+    phase: string;
+  }): void;
+
+  /**
+   * Emitted at startup in agent / CI mode when `--resume` finds a
+   * fresh, schema-valid checkpoint and restores the session from it.
+   * Optional — only AgentUI implements.
+   */
+  emitCheckpointLoaded?(data: { path: string; ageSeconds: number }): void;
+
+  /**
+   * Emitted when the wizard removes a saved checkpoint. Reason
+   * discriminator: `success` (clean run), `manual` (user invoked a
+   * clear-state action), `logout`. Optional — only AgentUI implements.
+   */
+  emitCheckpointCleared?(data: {
+    path: string;
+    reason: 'success' | 'manual' | 'logout';
+  }): void;
+
   emitAgentMetrics?(data: {
     durationMs: number;
     inputTokens?: number;
