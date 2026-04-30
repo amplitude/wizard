@@ -136,7 +136,10 @@ export function saveCheckpoint(
   // write (a thrown emitter would leave the user without crash
   // recovery — strictly worse than a silent telemetry drop).
   try {
-    const bytes = Buffer.byteLength(JSON.stringify(checkpoint), 'utf8');
+    const bytes = Buffer.byteLength(
+      JSON.stringify(checkpoint, null, 2) + '\n',
+      'utf8',
+    );
     getUI().emitCheckpointSaved?.({ path: filePath, bytes, phase });
   } catch {
     /* checkpoint persistence wins over telemetry */
