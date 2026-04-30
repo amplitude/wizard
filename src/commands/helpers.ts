@@ -82,6 +82,7 @@ export const buildSessionFromOptions = async (
       typeof buildSession
     >[0]['integration'],
     benchmark: options.benchmark as boolean | undefined,
+    mode: options.mode as 'fast' | 'standard' | 'thorough' | undefined,
     // --app-id is the canonical flag; --project-id is now a separate flag that
     // refers to the Amplitude project (formerly workspace), not the app.
     appId: options.appId as string | undefined,

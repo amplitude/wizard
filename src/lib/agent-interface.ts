@@ -203,6 +203,38 @@ export function resolveMaxTurns(
 // can route structured events back into the per-run state bag.
 let _activeStatusReporter: StatusReporter | undefined;
 
+/**
+ * Map a `WizardMode` to a Claude model alias. Internal — see
+ * `docs/internal/agent-mode-flag.md` for the full mapping and rationale.
+ *
+ * The Amplitude LLM gateway expects the `anthropic/<alias>` prefix; the
+ * direct Anthropic API expects the bare alias. The wizard's `fallbackModel`
+ * is a different model on a different routing path, so a tier the gateway
+ * doesn't currently vend silently degrades rather than failing the run.
+ *
+ * Exported so unit tests can pin the mapping without standing up the
+ * full agent runtime.
+ */
+export function selectModel(
+  mode: import('../utils/types').WizardMode,
+  useDirectApiKey: boolean,
+): string {
+  let alias: string;
+  switch (mode) {
+    case 'fast':
+      alias = 'claude-haiku-4-5';
+      break;
+    case 'thorough':
+      alias = 'claude-opus-4-7';
+      break;
+    case 'standard':
+    default:
+      alias = 'claude-sonnet-4-6';
+      break;
+  }
+  return useDirectApiKey ? alias : `anthropic/${alias}`;
+}
+
 export type AgentConfig = {
   workingDirectory: string;
   amplitudeMcpUrl: string;
@@ -218,6 +250,12 @@ export type AgentConfig = {
   skipAmplitudeMcp?: boolean;
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
+  /**
+   * Internal agent model tier — see `docs/internal/agent-mode-flag.md`.
+   * Threaded from `WizardSession.mode` via `agent-runner.ts`.
+   * Undefined defaults to `'standard'` (the wizard's default model).
+   */
+  mode?: import('../utils/types').WizardMode;
   /**
    * UUID v4 that groups all `/v1/messages` calls in this wizard run into one
    * Agent Analytics session. Sourced from `WizardSession.agentSessionId`,
@@ -1477,10 +1515,11 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
-      // Gateway expects 'anthropic/claude-sonnet-4-6'; direct Anthropic API expects 'claude-sonnet-4-6'
-      model: useDirectApiKey
-        ? 'claude-sonnet-4-6'
-        : 'anthropic/claude-sonnet-4-6',
+      // Mode → model alias. Default 'standard' = current behavior;
+      // see `docs/internal/agent-mode-flag.md` for the full mapping.
+      // Gateway expects the `anthropic/<alias>` prefix; direct API expects
+      // the bare alias — `selectModel` handles both.
+      model: selectModel(config.mode ?? 'standard', useDirectApiKey),
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,

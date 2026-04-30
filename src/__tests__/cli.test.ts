@@ -361,6 +361,37 @@ describe('CI mode validation', { timeout: 20_000 }, () => {
     expect(initialSession).toBeDefined();
     expect(initialSession?.installDir).toBe('/tmp/test-app');
   });
+
+  // Internal `--mode` flag — see `docs/internal/agent-mode-flag.md`.
+  // We pin (a) the default and (b) that a non-default value threads
+  // through to the session, but deliberately do NOT enumerate the
+  // non-default tiers in test names or stderr-style messaging. The flag
+  // is hidden from `--help` and shouldn't be advertised in test output
+  // either.
+  test('--mode defaults to "standard" so existing users are unaffected', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    await runCLI([]);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession?.mode).toBe('standard');
+  });
+
+  test('--mode threads through to the initial session when set', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    // Pick the cheapest non-default tier to exercise threading. We do
+    // NOT test the high-capability tier here — see the internal doc for
+    // why that path is left to manual verification.
+    await runCLI(['--mode', 'fast']);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession?.mode).toBe('fast');
+  });
 });
 
 // ── TUI auth task: region determines OAuth zone ────────────────────────────────

@@ -730,6 +730,7 @@ async function runAgentWizardBody(
       skillsBaseUrl,
       agentSessionId: session.agentSessionId,
       targetsBrowser: config.metadata.targetsBrowser,
+      mode: session.mode,
     },
     sessionToOptions(session),
   );

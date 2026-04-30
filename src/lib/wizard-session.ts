@@ -116,6 +116,9 @@ export const CliArgsSchema = z.object({
   localMcp: z.boolean().default(false),
   menu: z.boolean().default(false),
   benchmark: z.boolean().default(false),
+  // Agent model tier. See `src/utils/types.ts:WizardMode` for the mapping.
+  // Default 'standard' = current behavior (no change for existing users).
+  mode: z.enum(['fast', 'standard', 'thorough']).default('standard'),
   apiKey: z.string().optional(),
   integration: z.string().optional(),
   appName: z.string().optional(),
@@ -310,6 +313,8 @@ export interface WizardSession {
   apiKey?: string;
   menu: boolean;
   benchmark: boolean;
+  /** Agent model tier — 'fast' / 'standard' / 'thorough'. See WizardMode. */
+  mode: import('../utils/types').WizardMode;
 
   /**
    * UUID v4 generated once per wizard run. Forwarded to the Amplitude LLM
@@ -731,6 +736,8 @@ export function buildSession(args: {
   menu?: boolean;
   integration?: Integration;
   benchmark?: boolean;
+  /** Agent model tier — 'fast' / 'standard' / 'thorough'. Defaults to 'standard'. */
+  mode?: import('../utils/types').WizardMode;
   /** From --app-id / --project-id CLI flag. */
   appId?: string;
   /** From --app-name / --project-name CLI flag — pre-fills CreateAppScreen. */
@@ -776,6 +783,7 @@ export function buildSession(args: {
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
     benchmark: validated.benchmark ?? false,
+    mode: validated.mode ?? 'standard',
     appId: parsed.success ? parsed.data.appId : parseAppIdArg(args.appId),
 
     // Stable across the entire wizard run; forwarded to the LLM gateway as

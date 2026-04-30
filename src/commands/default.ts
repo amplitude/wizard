@@ -67,6 +67,19 @@ export const defaultCommand: CommandModule = {
         describe: 'collect performance metrics during the run',
         type: 'boolean',
       },
+      // `--mode` is intentionally hidden. See `docs/internal/agent-mode-flag.md`
+      // for the full rationale and the model mapping. Briefly: this is an
+      // internal performance / capability knob — not advertised in --help,
+      // README, CLAUDE.md, or any agent-facing skill, and not for casual
+      // recommendation. The default ('standard') is the only tier most
+      // users should ever see.
+      mode: {
+        default: 'standard',
+        choices: ['fast', 'standard', 'thorough'] as const,
+        describe: 'internal — see docs/internal/agent-mode-flag.md',
+        type: 'string',
+        hidden: true,
+      },
       agent: {
         default: false,
         describe: 'emit structured NDJSON output for automation',
