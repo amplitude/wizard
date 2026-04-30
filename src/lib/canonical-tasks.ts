@@ -62,6 +62,7 @@ export const CANONICAL_STEPS: readonly CanonicalStep[] = [
     defaultActiveForm: 'Wiring up event tracking',
     keywords: [
       'wire',
+      'wiring',
       'instrument',
       'track call',
       'tracking',
@@ -73,7 +74,14 @@ export const CANONICAL_STEPS: readonly CanonicalStep[] = [
     id: 'dashboard',
     label: 'Open your dashboard',
     defaultActiveForm: 'Opening your dashboard',
-    keywords: ['dashboard', 'report', 'outro', 'finalize', 'wrap up'],
+    keywords: [
+      'dashboard',
+      'report',
+      'outro',
+      'finalize',
+      'finalizing',
+      'wrap up',
+    ],
   },
 ] as const;
 
