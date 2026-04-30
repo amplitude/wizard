@@ -22,6 +22,7 @@ import {
   DEFAULT_AMPLITUDE_ZONE,
   OUTBOUND_URLS,
 } from '../../../lib/constants.js';
+import { ExitCode } from '../../../lib/exit-codes.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
@@ -36,6 +37,33 @@ import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 import { getDashboardFile } from '../../../utils/storage-paths.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
+
+/**
+ * Map an outro kind to the process exit code emitted by the
+ * screen-initiated dismissal path (the `setOutroData(...) → key →
+ * wizardSuccessExit` flow used when the user cancels from
+ * IntroScreen / SetupScreen / DataIngestionCheckScreen /
+ * ActivationOptionsScreen).
+ *
+ * Why a pure helper: this mapping is easy to ship the wrong way (PR
+ * #379 hardcoded `0` for the entire path, silently flipping every
+ * user-cancelled run to "success" in CI), so we extract it to a
+ * named function with a unit test guarding the invariant.
+ *
+ * - Cancel  → 130 (POSIX SIGINT convention; matches what
+ *                  graceful-exit also emits on Ctrl+C).
+ * - Error   → 10  (AGENT_FAILED — generic failure that didn't go
+ *                  through wizardAbort, so we don't have a more
+ *                  specific code).
+ * - Success → 0   (unreachable in practice — success outros are
+ *                  dismissed via the picker, not this any-key path —
+ *                  but mapped for symmetry / defense in depth).
+ */
+export function exitCodeForOutroKind(kind: OutroKind | undefined): number {
+  if (kind === OutroKind.Cancel) return ExitCode.USER_CANCELLED;
+  if (kind === OutroKind.Error) return ExitCode.AGENT_FAILED;
+  return ExitCode.SUCCESS;
+}
 
 interface OutroScreenProps {
   store: WizardStore;
@@ -107,20 +135,28 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       // caller is awaiting this signal — once it resolves, abort runs
       // its own analytics flush and `process.exit` with the real exit
       // code (NETWORK / AGENT_FAILED / etc.). Don't double-exit in that
-      // case: a bare `process.exit(0)` here would (1) force exitCode 0
-      // on every error, hiding real failures from CI; (2) skip the
+      // case: a bare exit here would (1) force a hardcoded exitCode on
+      // every error, hiding real failures from CI; (2) skip the
       // analytics shutdown wizardAbort runs after cancel.
       store.signalOutroDismissed();
       // BUT — several screens (DataIngestionCheckScreen `q`, IntroScreen
       // resume-cancel, SetupScreen back-out, ActivationOptionsScreen
-      // 'exit') navigate to the cancel outro via `setOutroData` without
-      // going through wizardAbort. In that path nobody is awaiting
-      // outroDismissed, so the dismissal signal resolves a promise no
-      // one is listening to and the process hangs forever — only Ctrl+C
-      // escapes. Detect "no abort in flight" and drive the exit
-      // ourselves so any-key really does exit.
+      // 'exit') navigate to the cancel/error outro via `setOutroData`
+      // without going through wizardAbort. In that path nobody is
+      // awaiting outroDismissed, so the dismissal signal resolves a
+      // promise no one is listening to and the process hangs forever
+      // — only Ctrl+C escapes. Detect "no abort in flight" and drive
+      // the exit ourselves so any-key really does exit, BUT honor the
+      // outro kind in the exit code: Cancel → 130, Error → 10. The
+      // earlier version (#379) hardcoded `0` on this path, so every
+      // user-cancelled run looked successful to CI/orchestrators.
+      // ExitCode.SUCCESS for the Success path is unreachable here —
+      // success outros use the picker (below), not this dismissal
+      // handler — but we map it explicitly for symmetry.
       if (!isWizardAbortInProgress()) {
-        void wizardSuccessExit(0);
+        void wizardSuccessExit(
+          exitCodeForOutroKind(store.session.outroData?.kind),
+        );
       }
       return;
     }
