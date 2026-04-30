@@ -16,6 +16,23 @@ export interface SlashCommand {
   desc: string;
 }
 
+/**
+ * Returns true when the current input value should open the slash-command
+ * picker. The first whitespace-delimited word must start with '/' AND be a
+ * prefix of at least one known command. This prevents file paths like
+ * `/lib/config.ts` from triggering slash mode.
+ */
+export function computeIsSlashMode(
+  value: string,
+  commands: SlashCommand[],
+): boolean {
+  const firstWord = value.split(' ')[0] ?? '';
+  return (
+    firstWord.startsWith('/') &&
+    commands.some((c) => c.cmd.startsWith(firstWord))
+  );
+}
+
 interface SlashCommandInputProps {
   commands?: SlashCommand[];
   isActive: boolean;
@@ -42,7 +59,7 @@ export const SlashCommandInput = ({
     return () => clearInterval(id);
   }, [isActive]);
 
-  const isSlashMode = value.startsWith('/');
+  const isSlashMode = computeIsSlashMode(value, commands);
   const query = value.slice(1).toLowerCase();
   const filtered = isSlashMode
     ? commands

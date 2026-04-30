@@ -5,6 +5,7 @@ import {
   getWhoamiText,
   getDiagnosticsText,
   checkCommandBlockedByRun,
+  isKnownCommand,
   COMMANDS,
 } from '../console-commands.js';
 import { RunPhase } from '../../../lib/wizard-session.js';
@@ -262,6 +263,42 @@ describe('checkCommandBlockedByRun', () => {
     expect(
       checkCommandBlockedByRun('/not-a-real-command', RunPhase.Running),
     ).toBeNull();
+  });
+});
+
+describe('isKnownCommand — ConsoleView handleSubmit routing', () => {
+  it('returns true for an exact command match', () => {
+    expect(isKnownCommand('/region')).toBe(true);
+    expect(isKnownCommand('/logout')).toBe(true);
+    expect(isKnownCommand('/clear')).toBe(true);
+  });
+
+  it('returns true when the command has trailing arguments', () => {
+    expect(isKnownCommand('/feedback love this tool')).toBe(true);
+    expect(isKnownCommand('/create-project My App')).toBe(true);
+  });
+
+  it('returns false for a slash-prefixed file path', () => {
+    expect(isKnownCommand('/lib/config.ts')).toBe(false);
+    expect(isKnownCommand('/lib/config.ts is broken')).toBe(false);
+  });
+
+  it('returns false for a prefix that does not exactly match any command', () => {
+    expect(isKnownCommand('/r')).toBe(false);
+    expect(isKnownCommand('/reg')).toBe(false);
+  });
+
+  it('returns false for plain text without a slash', () => {
+    expect(isKnownCommand('hello world')).toBe(false);
+    expect(isKnownCommand('what is the best framework?')).toBe(false);
+  });
+
+  it('returns false for empty string', () => {
+    expect(isKnownCommand('')).toBe(false);
+  });
+
+  it('returns false for bare /', () => {
+    expect(isKnownCommand('/')).toBe(false);
   });
 });
 
