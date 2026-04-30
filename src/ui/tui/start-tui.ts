@@ -47,6 +47,15 @@ export function startTUI(
     store.session = initialSession;
   }
 
+  // Register the live session so process-level safety-net handlers
+  // (uncaughtException / unhandledRejection in bin.ts) can save a
+  // checkpoint without pulling in the TUI module graph. Best-effort
+  // — the safety net works even if this is never called (e.g.
+  // agent / CI mode that never mounts the TUI).
+  void import('../../utils/active-session.js').then(({ setActiveSession }) => {
+    setActiveSession(store.session);
+  });
+
   // Swap in the InkUI
   const inkUI = new InkUI(store);
   setUI(inkUI);
