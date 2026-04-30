@@ -489,6 +489,15 @@ void yargs(hideBin(process.argv))
         'Force a needs_input app_selection prompt even when only one app matches',
       type: 'boolean',
     },
+    // AMPLITUDE_WIZARD_CONTEXT is read from process.env in
+    // resolveOrchestratorContextPath, but .env('AMPLITUDE_WIZARD')
+    // auto-maps it to `--context`. Without this shadow, .strict()
+    // rejects the unknown argument.
+    context: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_CONTEXT env-var passthrough',
+      type: 'string',
+    },
   })
   .command(defaultCommand)
   .command(loginCommand)
