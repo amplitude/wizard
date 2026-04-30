@@ -4,7 +4,7 @@
 
 // Kept in sync by release-please (x-release-please-version marker).
 // The prebuild script (sync-version.mjs) acts as a safety net.
-const VERSION = '1.11.1'; // x-release-please-version
+const VERSION = '1.12.0'; // x-release-please-version
 
 /** Public alias for the wizard version. Same value as the internal `VERSION`
  * but exported for consumers (e.g. the bug-report module). */
