@@ -70,6 +70,26 @@ describe('TodoWrite user-journey commandment', () => {
     // negative test so a sloppy re-merge can't bring it back.
     expect(text).not.toContain('every high-level area of work');
   });
+
+  // Regression — the Excalidraw run review surfaced two bash denies
+  // when the agent went straight to a complex `grep -E "(error TS|...)"
+  // | head -30` form to filter typecheck output (parens trip
+  // DANGEROUS_OPERATORS, multi-pipe trips the single-pipe-only rule).
+  // The setup report claimed "TypeScript type-checking could not be
+  // run with pipe operators" — misleading; the simple form would have
+  // worked. Lock the simple-form examples in.
+  it('shows simple build/typecheck shapes that survive the bash allowlist', () => {
+    // Direct invocation — no pipe, no chaining
+    expect(text).toContain('yarn test:typecheck');
+    expect(text).toContain('npx tsc --noEmit');
+    // Single-pipe-to-tail/head allowance
+    expect(text).toContain('| tail -50');
+    expect(text).toContain('| head -30');
+    // Negative examples flagged with ✗
+    expect(text).toContain('✗');
+    expect(text).toContain('grep -E');
+    expect(text).toContain('multiple pipes');
+  });
 });
 
 /**
