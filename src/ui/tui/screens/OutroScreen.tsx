@@ -205,9 +205,16 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       const peeked = peekSetupComplete();
       const written = peeked?.files?.written ?? [];
       const modified = peeked?.files?.modified ?? [];
-      if (written.length + modified.length > 0) {
+      // De-dupe via the same builder the picker path uses. Without this
+      // a path that lands in both `written` and `modified` (the registry
+      // allows that — see registerSetupComplete) would inflate the
+      // keystroke-path count vs. the picker's deduped `changedFiles.length`,
+      // making the 'file count' property unreliable for cross-source
+      // comparison in analytics. Bugbot caught this on PR #412.
+      const fileCount = buildChangedFileList(written, modified).length;
+      if (fileCount > 0) {
         analytics.wizardCapture('view changes opened', {
-          'file count': written.length + modified.length,
+          'file count': fileCount,
           source: 'keystroke',
         });
         setShowChangedFiles(true);
@@ -439,8 +446,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           {changedFiles.length > 0 && (
             <Box marginTop={reportExists ? 0 : 1}>
               <Text color={Colors.muted}>
-                Press <Text bold color={Colors.accent}>D</Text> to review the{' '}
-                {changedFiles.length} file
+                Press{' '}
+                <Text bold color={Colors.accent}>
+                  D
+                </Text>{' '}
+                to review the {changedFiles.length} file
                 {changedFiles.length === 1 ? '' : 's'} changed.
               </Text>
             </Box>
@@ -469,8 +479,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Text>
             {showRetryHint && (
               <Text color={Colors.secondary}>
-                {Icons.arrowRight} Press <Text bold>R</Text> to retry from
-                where we left off
+                {Icons.arrowRight} Press <Text bold>R</Text> to retry from where
+                we left off
               </Text>
             )}
             <Text color={Colors.secondary}>
@@ -609,8 +619,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                     readDisk: false,
                   },
                 );
-                const url =
-                  dashboardOpenUrl ?? OUTBOUND_URLS.overview[zone];
+                const url = dashboardOpenUrl ?? OUTBOUND_URLS.overview[zone];
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });
