@@ -778,6 +778,40 @@ async function runAgentWizardBody(
           'detected framework': session.detectedFrameworkLabel ?? null,
         });
       },
+      // Fires once when MAX_CONSECUTIVE_BASH_DENIES consecutive Bash denies
+      // accumulate — the agent is thrashing on a command that will never
+      // be allowed (real-world repro: 47-turn loop verifying env vars via
+      // `node -e` / `printenv` / `cat .env`). Trigger graceful halt so the
+      // remaining turn budget isn't burned on the same denied call.
+      // Fire-and-forget: wizardAbort returns Promise<never> and exits the
+      // process, but the hook callback can't await it. Subsequent denied
+      // calls between this and process.exit re-hit the deny path and
+      // return without further side effects (the breaker is one-shot).
+      onCircuitBreakerTripped: ({ consecutiveDenies, lastCommand }) => {
+        analytics.wizardCapture('bash deny circuit breaker tripped', {
+          'consecutive denies': consecutiveDenies,
+          'last command': lastCommand.slice(0, 200),
+          integration: session.integration ?? null,
+          'detected framework': session.detectedFrameworkLabel ?? null,
+        });
+        const abortMessage = `Setup halted: the agent kept trying Bash commands the wizard does not permit (${consecutiveDenies} in a row). This usually means the agent was looping on env-var verification or a similar denied operation. Re-run the wizard; if it happens again, file an issue with the log file path shown below.`;
+        session.outroData = {
+          kind: OutroKind.Error,
+          message: abortMessage,
+          canRestart: true,
+        };
+        // Fire and forget — wizardAbort tears down the process. We
+        // intentionally don't await so we don't deadlock the hook return.
+        void wizardAbort({
+          message: abortMessage,
+          error: new WizardError('Bash deny circuit breaker tripped', {
+            'consecutive denies': consecutiveDenies,
+            'last command': lastCommand,
+            integration: session.integration,
+          }),
+          exitCode: ExitCode.AGENT_FAILED,
+        });
+      },
     },
     middleware,
   );
