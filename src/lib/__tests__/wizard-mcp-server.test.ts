@@ -78,14 +78,22 @@ describe('registerWizardTools', () => {
     registerWizardTools(fake);
   });
 
-  it('registers exactly the six expected tools by name', () => {
+  it('registers exactly the eight expected tools by name', () => {
+    // The server now exposes write-capable tools (`apply_plan`,
+    // `reset_project`) alongside the original read-only set. The
+    // additions are the killer feature for Claude Code: an outer
+    // agent can drive the full setup without spawning `npx` for each
+    // step. Lock the surface here so a future PR doesn't quietly
+    // drop one of the writes.
     const names = fake.tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      'apply_plan',
       'detect_framework',
       'get_auth_status',
       'get_auth_token',
       'get_project_status',
       'plan_setup',
+      'reset_project',
       'verify_setup',
     ]);
   });

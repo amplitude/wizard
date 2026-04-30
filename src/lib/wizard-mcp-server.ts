@@ -211,6 +211,128 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
       return jsonContent(result);
     },
   );
+
+  // -- apply_plan ---------------------------------------------------------
+  // The killer feature for Claude Code. Pre-fix, an agent had to spawn
+  // `npx @amplitude/wizard apply --plan-id <id>` as a Bash tool — paying
+  // 5-10s of cold-start every invocation, then polling a tail file with
+  // `sleep && tail` because Bash output is buffered. With this tool, the
+  // wizard MCP server (already running in-process) spawns the apply child
+  // ONCE, captures every NDJSON line as it arrives, and returns a single
+  // structured summary — agents see real-time progress via stderr (which
+  // we forward) and get the canonical `setup_complete` payload as the
+  // tool result. No `npx`, no tail-file polling, no cold start.
+  server.registerTool(
+    'apply_plan',
+    {
+      title: 'Apply an Amplitude setup plan (writes files)',
+      description:
+        'Execute a plan returned by `plan_setup`. Spawns the wizard apply ' +
+        'flow in-process (no `npx` cold start), streams NDJSON progress to ' +
+        'stderr for live visibility, and returns the canonical ' +
+        '`setup_complete` payload (resolved Amplitude appId, dashboardUrl, ' +
+        'list of files written / modified, env vars added, final approved ' +
+        'event list). REQUIRES the user to have explicitly approved the ' +
+        'plan — pass `eventDecision: "approved" | "skipped" | "revised"`. ' +
+        'For the user-driven approval flow: call `plan_setup` first, ' +
+        'present the events to the user, get their answer, then call this ' +
+        'with their decision. Returns `{ exitCode, setupComplete }` — ' +
+        'check `exitCode === 0` for success.',
+      inputSchema: {
+        planId: z
+          .string()
+          .describe(
+            'Plan ID returned from `plan_setup`. Must be < 24 hours old.',
+          ),
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            "Project directory the plan was generated against. Defaults to the plan's stored installDir.",
+          ),
+        eventDecision: z
+          .enum(['approved', 'skipped', 'revised'])
+          .describe(
+            'User\'s explicit decision on the proposed event plan. Required — never silently auto-approve. "approved" = instrument all proposed events; "skipped" = no track() calls written; "revised" = pass `reviseFeedback` for the agent to revise.',
+          ),
+        reviseFeedback: z
+          .string()
+          .optional()
+          .describe(
+            'Free-form feedback when eventDecision="revised". Ignored otherwise.',
+          ),
+        appId: z
+          .string()
+          .optional()
+          .describe(
+            'Numeric Amplitude app id (e.g. "769610"). Pass this to skip the env-selection prompt. If omitted, the wizard emits `needs_input: environment_selection` on stderr and refuses to auto-pick (because `--confirm-app` is implicit).',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { planId, installDir, eventDecision, reviseFeedback, appId } =
+        (args ?? {}) as {
+          planId?: string;
+          installDir?: string;
+          eventDecision?: 'approved' | 'skipped' | 'revised';
+          reviseFeedback?: string;
+          appId?: string;
+        };
+      if (!planId) {
+        return jsonContent({
+          ok: false,
+          error: 'planId is required (returned from plan_setup)',
+        });
+      }
+      if (!eventDecision) {
+        return jsonContent({
+          ok: false,
+          error:
+            'eventDecision is required. Surface the proposed events from plan_setup to the user, get their answer, then pass "approved" / "skipped" / "revised".',
+        });
+      }
+      const { runApplyInProcess } = await import('./mcp-apply-runner.js');
+      const result = await runApplyInProcess({
+        planId,
+        installDir,
+        eventDecision,
+        reviseFeedback,
+        appId,
+      });
+      return jsonContent(result);
+    },
+  );
+
+  // -- reset_project ------------------------------------------------------
+  server.registerTool(
+    'reset_project',
+    {
+      title:
+        'Reset a project (remove wizard artifacts, keep auth + tracking-plan)',
+      description:
+        'Remove wizard-managed artifacts from a project: `.amplitude/` dir, ' +
+        'legacy `.amplitude-*.json` dotfiles, `amplitude-setup-report.md`, ' +
+        'plus auth-scoped fields (OrgId / AppId / EnvName / DashboardUrl / ' +
+        'DashboardId) from `ampli.json`. Does NOT log out the user, does ' +
+        'NOT remove track() calls already wired into source code, and does ' +
+        'NOT touch tracking-plan fields (SourceId / Branch / Version). ' +
+        'Use when the user wants to start a fresh setup run on this codebase.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Project directory to reset. Defaults to the current working directory.',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const { runResetInProcess } = await import('./mcp-apply-runner.js');
+      const result = await runResetInProcess(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
 }
 
 /**

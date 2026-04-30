@@ -14,6 +14,7 @@ export { detectCommand } from './detect';
 export { projectsCommand } from './projects';
 export { planCommand } from './plan';
 export { applyCommand } from './apply';
+export { goCommand } from './go';
 export { verifyCommand } from './verify';
 export { statusCommand } from './status';
 export { authCommand } from './auth';
