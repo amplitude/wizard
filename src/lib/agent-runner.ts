@@ -1615,6 +1615,7 @@ async function commitPlannedEventsStep(
       accessToken,
       appId: String(appId),
       events: plannedEvents,
+      zone: cloudRegion === 'eu' ? 'eu' : 'us',
     });
 
     analytics.wizardCapture('planned events committed', {
