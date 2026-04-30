@@ -25,7 +25,7 @@ property names are typically written in code here.
 When determining naming conventions in this skill, use the following sources in strict order of preference:
 1. Events and properties observed from the Amplitude MCP server
 2. Real tracking call sites in the codebase
-3. The `taxonomy` skill at `../taxonomy/SKILL.md`
+3. The `taxonomy` skill at `../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md`
 
 ---
 
