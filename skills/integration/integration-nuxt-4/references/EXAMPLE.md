@@ -11,7 +11,7 @@ Path: basics/nuxt-4
 
 This is a [Nuxt 4](https://nuxt.com) example demonstrating Amplitude integration with product analytics and event tracking.
 
-For Nuxt 3.0 - 3.6, see the [Nuxt 3.6 example](../nuxt-3.6) for an alternative approach.
+For Nuxt 3.0 - 3.6, see the [Nuxt 3.6 example](../../integration-nuxt-3.6/) for an alternative approach.
 
 ### Amplitude SDKs
 

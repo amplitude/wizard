@@ -127,7 +127,7 @@ Use this precedence order:
    sites in the repository. If the codebase shows multiple conventions, call
    out the dominant one and note meaningful local exceptions.
 3. **Taxonomy fallback last.** If neither MCP nor codebase evidence is
-   clear enough, fall back to the `taxonomy` skill at `../taxonomy/SKILL.md`.
+   clear enough, fall back to the `taxonomy` skill at `../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md`.
 
 Do not guess. If one or both conventions remain unclear even after checking
 those sources, say so explicitly.

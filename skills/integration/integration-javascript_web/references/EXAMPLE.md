@@ -17,7 +17,7 @@ Use Amplitude’s [Browser Unified SDK (npm)](https://amplitude.com/docs/sdks/an
 
 The `experiment` block configures **Feature Experiment** (`@amplitude/experiment-js-client`). Amplitude’s [product support table](https://amplitude.com/docs/sdks/analytics/browser/browser-unified-sdk#product-support-by-installation-method) lists **Web Experiment** (`@amplitude/experiment-tag`, including the visual editor) for the Unified **CDN** script, not the Unified **npm** row.
 
-For analytics from Node or other servers, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node) (for example the [javascript-node](../javascript-node) app), not `@amplitude/unified`.
+For analytics from Node or other servers, use [`@amplitude/analytics-node`](https://www.npmjs.com/package/@amplitude/analytics-node) (for example the [javascript-node](../../integration-javascript_node/) app), not `@amplitude/unified`.
 
 ## Purpose
 
