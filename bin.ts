@@ -17,6 +17,15 @@ sanitizeNestedClaudeEnv();
 import { installPipeErrorHandlers } from './src/utils/pipe-errors';
 installPipeErrorHandlers();
 
+// Process-level safety net. Without this, a throw inside an agent
+// hook, MCP callback, or stray promise chain crashes Node with a raw
+// stack trace — no Outro, no checkpoint flush, no Sentry. The handler
+// captures the error, saves a checkpoint, and routes through
+// `wizardAbort` so the user lands on the Error outro with recovery
+// affordances (Retry / Resume / Open log / Bug report).
+import { installSafetyNet } from './src/utils/safety-net';
+installSafetyNet();
+
 // Default NODE_ENV based on installation source. Without this, React's CJS
 // entry (node_modules/react/index.js) falls through to react.development.js
 // whenever NODE_ENV is unset — about 10× larger and noticeably slower on Ink

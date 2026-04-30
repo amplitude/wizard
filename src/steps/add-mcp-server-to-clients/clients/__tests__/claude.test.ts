@@ -334,11 +334,15 @@ describe('ClaudeMCPClient', () => {
 
       await client.addServer(mockApiKey);
 
+      // The trailing 'us' is the zone arg threaded through addServer →
+      // _addServerType → getServerConfig → getDefaultServerConfig so EU
+      // users get their region's MCP host baked into editor configs.
       expect(getDefaultServerConfigMock).toHaveBeenCalledWith(
         mockApiKey,
         'streamable-http',
         undefined,
         undefined,
+        'us',
       );
     });
 
@@ -352,6 +356,21 @@ describe('ClaudeMCPClient', () => {
         'streamable-http',
         undefined,
         undefined,
+        'us',
+      );
+    });
+
+    it('writes the EU MCP URL when zone="eu" is passed', async () => {
+      existsSyncMock.mockReturnValue(false);
+
+      await client.addServer(mockApiKey, undefined, false, 'eu');
+
+      expect(getDefaultServerConfigMock).toHaveBeenCalledWith(
+        mockApiKey,
+        'streamable-http',
+        undefined,
+        false,
+        'eu',
       );
     });
   });

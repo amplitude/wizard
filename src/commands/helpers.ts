@@ -335,6 +335,63 @@ export const resolveNonInteractiveCredentials = async (
         }
       }
     } else if (agentUI) {
+      // Agent mode short-circuit: if the orchestrator passed a scope
+      // flag (`--app-id`, `--project-id`, etc.) that didn't match any
+      // known environment, refuse to fall through to auto-select —
+      // that would silently write to a different project than the
+      // orchestrator asked for. Emit a structured rejection carrying
+      // both the bad value AND the candidate list so the orchestrator
+      // can re-prompt the human with one round-trip instead of doing
+      // a fresh discovery cycle. Without this short-circuit,
+      // `promptEnvironmentSelection` would emit `needs_input` and then
+      // (with a non-interactive stdin) auto-select the first env in
+      // `pendingOrgs` — exactly the data-integrity failure mode the
+      // confirm-app gate elsewhere in this codebase exists to prevent.
+      if (session.scopeFilterMismatch) {
+        const mismatch = session.scopeFilterMismatch;
+        const choices = session.pendingOrgs.flatMap((org) =>
+          org.projects.flatMap((proj) =>
+            (proj.environments ?? [])
+              .filter((e) => e.app?.apiKey)
+              .sort((a, b) => a.rank - b.rank)
+              .map((e) => ({
+                orgId: org.id,
+                orgName: org.name,
+                projectId: proj.id,
+                projectName: proj.name,
+                appId: e.app?.id ?? null,
+                envName: e.name,
+                // `rank` is part of the canonical `EnvSelectionChoice` —
+                // include it so orchestrators that reuse their
+                // env-selection widget against this auth_required envelope
+                // (as the JSDoc on emitAuthRequired encourages) don't see
+                // `undefined` when accessing `.rank`.
+                rank: e.rank,
+                label: `${org.name} / ${proj.name} / ${e.name}`,
+              })),
+          ),
+        );
+        const choicesField =
+          mismatch.flag === '--project-id'
+            ? 'projectId'
+            : mismatch.flag === '--env'
+            ? 'envName'
+            : mismatch.flag === '--org'
+            ? 'orgName'
+            : 'appId';
+        agentUI.emitAuthRequired({
+          reason: 'env_selection_failed',
+          instruction:
+            `${mismatch.reason} Re-run ${CLI_INVOCATION} with ` +
+            `${mismatch.flag} set to a value from data.choices[].${choicesField} ` +
+            `(or another scope flag from data.choices[]).`,
+          loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
+          previousAttempt: mismatch,
+          choices,
+        });
+        process.exit(ExitCode.AUTH_REQUIRED);
+      }
+
       // Agent mode: emit a structured prompt event with the full
       // org/project/app/env hierarchy. The orchestrator can either
       // reply on stdin with { appId } or re-invoke with --app-id (globally

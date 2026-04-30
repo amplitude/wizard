@@ -17,16 +17,38 @@
  */
 
 import React from 'react';
-import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+} from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { OutroScreen } from '../OutroScreen.js';
+
+// Default to "interactive" so the retry hint renders by default. Tests
+// that exercise the non-interactive path override this mock per case.
+vi.mock('../../utils/outro-mode.js', () => ({
+  isInteractiveOutro: vi.fn(() => true),
+}));
+import { isInteractiveOutro } from '../../utils/outro-mode.js';
+
+import { OutroScreen, exitCodeForOutroKind } from '../OutroScreen.js';
 import {
   makeStoreForSnapshot,
   renderSnapshot,
 } from '../../__tests__/snapshot-utils.js';
 import { OutroKind } from '../../session-constants.js';
 import { toWizardDashboardOpenUrl } from '../../../../utils/dashboard-open-url.js';
+import { ExitCode } from '../../../../lib/exit-codes.js';
+import {
+  registerSetupComplete,
+  resetSetupComplete,
+} from '../../../../lib/setup-complete-registry.js';
 
 const GATEWAY_DOWN_MESSAGE = `Amplitude LLM gateway unavailable
 
@@ -148,6 +170,38 @@ describe('OutroScreen — error variants', () => {
     expect(store.commandMode).toBe(false);
   });
 
+  // ── Regression: screen-initiated dismissal must honor the outro kind ────
+  //
+  // PR #379 wired `wizardSuccessExit(0)` into the outro's dismissal
+  // handler so that screens which navigate to outro via setOutroData
+  // (without going through wizardAbort) actually exit when the user
+  // presses any key. Hardcoding `0` was a regression though: every
+  // user-cancelled run reported success to CI / outer agents (USER_CANCELLED
+  // = 130 and AGENT_FAILED = 10 exist in lib/exit-codes.ts but were unused
+  // on this path). This guard locks the kind→code mapping in.
+  describe('exitCodeForOutroKind', () => {
+    it('maps Cancel → USER_CANCELLED (130)', () => {
+      expect(exitCodeForOutroKind(OutroKind.Cancel)).toBe(
+        ExitCode.USER_CANCELLED,
+      );
+    });
+
+    it('maps Error → AGENT_FAILED (10)', () => {
+      expect(exitCodeForOutroKind(OutroKind.Error)).toBe(ExitCode.AGENT_FAILED);
+    });
+
+    it('maps Success → SUCCESS (0)', () => {
+      expect(exitCodeForOutroKind(OutroKind.Success)).toBe(ExitCode.SUCCESS);
+    });
+
+    it('maps undefined → SUCCESS (0) for defense in depth', () => {
+      // Undefined isn't reachable in practice — outroData has a kind by
+      // the time this screen renders — but the helper should still produce
+      // a sane code instead of NaN / undefined leaking into process.exit.
+      expect(exitCodeForOutroKind(undefined)).toBe(ExitCode.SUCCESS);
+    });
+  });
+
   it('renders the MCP_MISSING copy without leaking "MCP" jargon', () => {
     // Mirrors what agent-runner.ts emits for AgentErrorType.MCP_MISSING.
     // The wizard's user is installing Amplitude — they shouldn't have to
@@ -188,6 +242,146 @@ describe('OutroScreen — error variants', () => {
     expect(frame).not.toContain('the setup resource');
   });
 
+  // ── "View files changed" picker entry ───────────────────────────────────
+  //
+  // The success outro should advertise a review step so the user can audit
+  // exactly what the wizard touched. Two invariants:
+  //   1. When the registry has tracked files, the picker option AND the
+  //      `Press D` discovery hint both appear.
+  //   2. When the registry is empty, NEITHER appears — a dead-end picker
+  //      option ("View files changed → 0 files") is worse than no option
+  //      at all.
+
+  it('shows "View files changed" picker option and D-hint when files were tracked', () => {
+    resetSetupComplete();
+    registerSetupComplete({
+      files: {
+        written: ['src/instrument.ts'],
+        modified: ['src/App.tsx'],
+      },
+    });
+    try {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('View files changed');
+      expect(frame).toContain('2 files');
+      // The discovery hint above the picker — equally load-bearing.
+      expect(frame).toContain('Press');
+      expect(frame).toMatch(/D[^a-zA-Z]/); // 'D' as a standalone keystroke
+    } finally {
+      resetSetupComplete();
+    }
+  });
+
+  it('hides "View files changed" when the registry is empty', () => {
+    resetSetupComplete();
+    const store = makeStoreForSnapshot({
+      outroData: { kind: OutroKind.Success, changes: ['x'] },
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).not.toContain('View files changed');
+    // The D-hint copy is gated on the same condition — make sure it's
+    // gone too. Use the full sentence so we don't false-positive on
+    // bare "Press" anywhere else.
+    expect(frame).not.toMatch(/Press .* D .* to review/);
+  });
+
+  it('singularizes the count when exactly one file was changed', () => {
+    resetSetupComplete();
+    registerSetupComplete({
+      files: { written: ['src/instrument.ts'], modified: [] },
+    });
+    try {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('1 file');
+      expect(frame).not.toContain('1 files');
+    } finally {
+      resetSetupComplete();
+    }
+  });
+
+  // ── Retry hotkey ─────────────────────────────────────────────────────
+  //
+  // The retry hint turns errors into a one-keystroke recovery instead of
+  // forcing a full re-run from scratch. The wizard's checkpoint already
+  // preserves region / org / project / framework selections, so a retry
+  // resumes where the failure happened. Auth failures are intentionally
+  // excluded because the same stored creds will fail again.
+
+  describe('retry hotkey hint', () => {
+    beforeEach(() => {
+      // Reset to interactive default per test.
+      vi.mocked(isInteractiveOutro).mockReturnValue(true);
+    });
+
+    it('renders the "Press R to retry" hint on error outros', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('renders the retry hint on cancel outros too', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Cancel, message: 'Setup cancelled.' },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toMatch(/press\s+R\s+now to resume/i);
+    });
+
+    it('does NOT render the retry hint when running in non-interactive mode', () => {
+      vi.mocked(isInteractiveOutro).mockReturnValue(false);
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('Setup failed');
+      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('does NOT render the retry hint on auth-failure error outros', () => {
+      // promptLogin: true is how agent-runner marks AUTH_ERROR outros.
+      // Re-running with the same bad credentials will fail the same way,
+      // so advertising retry would be a misleading dead-end.
+      const store = makeStoreForSnapshot({
+        outroData: {
+          kind: OutroKind.Error,
+          message: 'Authentication failed.',
+          promptLogin: true,
+        },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('Setup failed');
+      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('renders the retry hint on non-auth error outros (promptLogin missing)', () => {
+      const store = makeStoreForSnapshot({
+        outroData: {
+          kind: OutroKind.Error,
+          message: 'Some non-auth failure.',
+        },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('does NOT render the retry hint on success outros', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('Amplitude is live');
+      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+    });
+  });
+
   it('shows event count + env name in success summary when events were planned', () => {
     const store = makeStoreForSnapshot({
       outroData: { kind: OutroKind.Success, changes: ['x'] },
@@ -201,5 +395,200 @@ describe('OutroScreen — error variants', () => {
     expect(frame).toContain('2 events instrumented in Production');
     expect(frame).toContain('signup_started');
     expect(frame).toContain('signup_completed');
+  });
+});
+
+// ── Full-activation re-runs (returning users with a healthy project) ──
+//
+// When a user re-runs the wizard against a project that's already
+// ingesting events, `activationLevel === 'full'` causes the flow to
+// skip Run + DataIngestionCheck. The agent never executes, which means
+// `outroData` is null AND the in-process dashboard-URL watcher never
+// fires. The OutroScreen has to handle this case directly: synthesize a
+// success state, read the persisted dashboard URL from disk, and
+// surface it prominently — otherwise the user lands on a mute
+// "Finishing up…" placeholder forever.
+describe('OutroScreen — full-activation re-runs', () => {
+  let installDir: string;
+
+  beforeEach(() => {
+    installDir = mkdtempSync(join(tmpdir(), 'outro-full-test-'));
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(installDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  });
+
+  it('renders a calm "project is healthy" success when activationLevel is full and outroData is null', () => {
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      selectedProjectName: 'Acme Analytics',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your Amplitude project is healthy');
+    expect(frame).toContain('Acme Analytics is already ingesting events');
+    // The "live!" celebration is for fresh installs only — it would feel
+    // false to a returning user whose project was already healthy when
+    // they ran the wizard.
+    expect(frame).not.toContain('Amplitude is live');
+    // Must NOT fall through to "Finishing up…" — that was the bug.
+    expect(frame).not.toContain('Finishing up');
+  });
+
+  it('surfaces the dashboard URL read from .amplitude/dashboard.json on disk', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({
+        dashboardUrl: 'https://app.amplitude.com/analytics/d/persisted-1',
+      }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      selectedProjectName: 'Acme Analytics',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your dashboard is ready');
+    // Use a unique substring of the dashboard ID — the full URL gets
+    // line-wrapped at 80 cols, so toContain on the entire URL fails.
+    expect(frame).toContain('persisted-1');
+    // The wrapped URL flows through the same toWizardDashboardOpenUrl
+    // helper; verify the redirect host is present rather than the whole
+    // URL.
+    expect(frame).toContain('app.amplitude.com/login');
+    // Returning-user copy on the dashboard hero — fresh-install copy
+    // would mention "first charts populate" and feel weird to a user
+    // who's been collecting data for months.
+    expect(frame).toContain('see what your users are up to today');
+    expect(frame).not.toContain('first charts populate');
+  });
+
+  it('reads the legacy .amplitude-dashboard.json when canonical is absent', () => {
+    fs.writeFileSync(
+      join(installDir, '.amplitude-dashboard.json'),
+      JSON.stringify({
+        dashboardUrl: 'https://app.amplitude.com/analytics/d/legacy-2',
+      }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your dashboard is ready');
+    expect(frame).toContain('legacy-2');
+  });
+
+  it('falls back gracefully to "Open Amplitude" when no dashboard file exists', () => {
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    // Heading still renders — the user is not stranded.
+    expect(frame).toContain('Your Amplitude project is healthy');
+    // No dashboard hero block, but the picker still offers a way out.
+    expect(frame).not.toContain('Your dashboard is ready');
+    expect(frame).toContain('Open Amplitude');
+  });
+
+  it('silently skips a malformed dashboard.json without crashing', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      'this is not valid json {{',
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    expect(() =>
+      renderSnapshot(<OutroScreen store={store} />, store),
+    ).not.toThrow();
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your Amplitude project is healthy');
+    expect(frame).not.toContain('Your dashboard is ready');
+  });
+
+  it('rejects a non-https dashboardUrl as suspect / hand-edited', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({ dashboardUrl: 'javascript:alert(1)' }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).not.toContain('Your dashboard is ready');
+    expect(frame).not.toContain('javascript:');
+  });
+
+  it('rejects an http:// dashboardUrl (https-only contract)', () => {
+    // The wizard always writes https://. Accepting http:// would let a
+    // local attacker who edits .amplitude/dashboard.json point opn() at
+    // an unencrypted URL.
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({ dashboardUrl: 'http://attacker.example/phish' }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).not.toContain('Your dashboard is ready');
+    expect(frame).not.toContain('http://attacker.example');
+  });
+
+  it('does not synthesize success for partial activation (those users still saw Run)', () => {
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'partial',
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    // Partial users go through Run; if they reach Outro with no data
+    // it's a different bug — render the placeholder so we don't mask it.
+    expect(frame).toContain('Finishing up');
+  });
+
+  it('prefers session.checklistDashboardUrl over the on-disk file', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({
+        dashboardUrl: 'https://app.amplitude.com/analytics/d/from-disk',
+      }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: { kind: OutroKind.Success, changes: [] },
+      activationLevel: 'full',
+      checklistDashboardUrl: 'https://app.amplitude.com/analytics/d/from-session',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('from-session');
+    expect(frame).not.toContain('from-disk');
   });
 });

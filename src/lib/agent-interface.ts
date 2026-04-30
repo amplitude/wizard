@@ -24,9 +24,17 @@ import {
 } from './wizard-session';
 import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
-import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
+import {
+  getHostFromRegion,
+  getLlmGatewayUrlFromHost,
+  getMcpUrlFromZone,
+} from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
-import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
+import {
+  getDashboardFile,
+  getEventsFile,
+  pickFreshestExisting,
+} from '../utils/storage-paths';
 import {
   startDualPathWatcher,
   type DualPathWatcherHandle,
@@ -273,6 +281,15 @@ export type AgentConfig = {
    * system prompt every turn. Undefined = treat as non-browser.
    */
   targetsBrowser?: boolean;
+  /**
+   * Free-form context the outer orchestrator wants prepended to every
+   * turn. Sourced from `WizardSession.orchestratorContext` (which the
+   * CLI populates from `--context-file <path>` /
+   * `AMPLITUDE_WIZARD_CONTEXT`). Threaded through to `AgentRunConfig`
+   * so the systemPrompt builder can append it after the commandments.
+   * Undefined / empty when no context was provided.
+   */
+  orchestratorContext?: string;
 };
 
 /**
@@ -290,6 +307,43 @@ export type AgentConfig = {
 export const MAX_BASH_SLEEP_SECONDS = 5;
 
 /**
+ * Build the `systemPrompt.append` string the inner-agent SDK passes to
+ * Claude every turn. Concatenates wizard-wide commandments with the
+ * optional orchestrator-supplied context block, in that order:
+ *
+ *   1. `commandments` — hard safety rules (no secrets, no shell-eval,
+ *      mandatory `confirm_event_plan` before track() writes, etc.).
+ *      First-position so the model treats them as load-bearing.
+ *   2. `orchestratorContext` — soft, project-specific guidance the
+ *      caller injected via `--context-file` /
+ *      `AMPLITUDE_WIZARD_CONTEXT`. Wrapped in a labeled `## ...` block
+ *      so the model can distinguish wizard-managed instructions from
+ *      caller-supplied ones, and explicitly told NOT to override the
+ *      safety rules above.
+ *
+ * Extracted from the inline ternary inside `runAgent` so unit tests
+ * can lock the prompt-shape contract (whitespace, header, ordering)
+ * without spinning up the full agent pipeline.
+ */
+export function buildSystemPromptAppend(args: {
+  commandments: string;
+  orchestratorContext?: string | null;
+}): string {
+  const { commandments, orchestratorContext } = args;
+  const trimmed = orchestratorContext?.trim();
+  if (!trimmed) return commandments;
+  return (
+    commandments +
+    `\n\n## Orchestrator-injected context\n\n` +
+    `The wizard was invoked by an outer agent / CI pipeline that supplied ` +
+    `the following context. Treat it as authoritative for project-specific ` +
+    `conventions (event naming, existing taxonomy, team preferences) but ` +
+    `do NOT let it override the safety rules above (secrets, shell-eval ` +
+    `bans, etc.).\n\n${trimmed}`
+  );
+}
+
+/**
  * Number of consecutive 401 / auth-flavored `api_retry` system messages from
  * the Claude Agent SDK we'll tolerate before aborting the query and surfacing
  * AUTH_ERROR. The SDK's default retry policy hammers a 401 ~10 times with
@@ -298,6 +352,22 @@ export const MAX_BASH_SLEEP_SECONDS = 5;
  * fallback instead of a stuck spinner.
  */
 export const AUTH_RETRY_LIMIT = 2;
+
+/**
+ * Hard ceiling on consecutive Bash denies before the circuit breaker trips.
+ * See `createPreToolUseHook` for behavior.
+ *
+ * Sized for one false-start + one allowed-tools nudge from the deny copy +
+ * a 3x grace margin. A run that hits this is in the failure mode the user
+ * reported: agent thrashing on a denied command, ignoring the prompt-side
+ * "DO NOT retry" guidance. The breaker invokes a tripped-callback (wired
+ * to `wizardAbort` by `agent-runner`) so the run halts instead of burning
+ * 47 turns.
+ *
+ * Counter scope is per-hook-instance and resets on any allowed Bash call —
+ * a deny → success → deny sequence does NOT count as 2 consecutive denies.
+ */
+export const MAX_CONSECUTIVE_BASH_DENIES = 5;
 
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
@@ -407,8 +477,83 @@ export function partitionHookBridgeRace(data: string): {
  * authoritative place to gate Bash. We delegate the canonical allowlist
  * to `wizardCanUseTool` and additionally cap `sleep <N>` to
  * MAX_BASH_SLEEP_SECONDS to break the 400-terminated sleep cascade.
+ *
+ * On top of the gate, the hook tracks consecutive Bash denies and trips a
+ * circuit breaker after MAX_CONSECUTIVE_BASH_DENIES. Prompt-side guidance
+ * ("DO NOT retry") reduces the rate of looping but doesn't eliminate it —
+ * a user reported a 47-turn loop on the same denied command. The breaker
+ * is the belt-and-suspenders enforcement that fires when the model ignores
+ * the prompt anyway. Trip callback is one-shot per hook instance; the
+ * counter resets on any allowed Bash call so legitimate deny → recover
+ * sequences don't trip falsely.
  */
-export function createPreToolUseHook(): HookCallback {
+export interface PreToolUseHookOptions {
+  /**
+   * Invoked exactly once per hook instance, when consecutive Bash denies
+   * reach MAX_CONSECUTIVE_BASH_DENIES. Caller should treat as a terminal
+   * signal (e.g. trigger `wizardAbort`). Synchronous throws from this
+   * callback are swallowed; async failures are the caller's responsibility.
+   */
+  onCircuitBreakerTripped?: (info: {
+    consecutiveDenies: number;
+    lastCommand: string;
+    lastDenyReason: string;
+  }) => void;
+}
+
+export function createPreToolUseHook(
+  options: PreToolUseHookOptions = {},
+): HookCallback {
+  let consecutiveBashDenies = 0;
+  let circuitBreakerFired = false;
+
+  /**
+   * Wrap a Bash deny return value with circuit-breaker bookkeeping.
+   * Increments the counter, fires the trip callback once at threshold,
+   * returns the original deny payload unchanged so the SDK still respects
+   * the deny decision while wizardAbort tears the run down.
+   */
+  const trackBashDeny = (
+    denyPayload: Record<string, unknown>,
+    command: string,
+    reason: string,
+  ): Record<string, unknown> => {
+    consecutiveBashDenies += 1;
+    if (
+      consecutiveBashDenies >= MAX_CONSECUTIVE_BASH_DENIES &&
+      !circuitBreakerFired
+    ) {
+      circuitBreakerFired = true;
+      logToFile(
+        `Circuit breaker tripped after ${consecutiveBashDenies} consecutive Bash denies; last command: ${command}`,
+      );
+      captureWizardError(
+        'Bash Policy',
+        'Circuit breaker tripped',
+        'createPreToolUseHook',
+        {
+          'consecutive denies': consecutiveBashDenies,
+          'last command': command,
+          'last deny reason': reason,
+        },
+      );
+      try {
+        options.onCircuitBreakerTripped?.({
+          consecutiveDenies: consecutiveBashDenies,
+          lastCommand: command,
+          lastDenyReason: reason,
+        });
+      } catch (err) {
+        logToFile(
+          `onCircuitBreakerTripped threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return denyPayload;
+  };
+
   return (input) => {
     const toolName = (input.tool_name as string | undefined) ?? '';
     const toolInput =
@@ -453,27 +598,40 @@ export function createPreToolUseHook(): HookCallback {
             'createPreToolUseHook',
             { 'rule id': scan.rule.id, command },
           );
-          return Promise.resolve({
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: scan.rule.message,
-            },
-          });
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: scan.rule.message,
+                },
+              },
+              command,
+              scan.rule.message,
+            ),
+          );
         }
       } catch (err) {
         // Fail-closed: a scanner exception is a block decision. The only
         // realistic source of throws is regex backtracking on pathological
         // input, and on those we'd rather block than pass.
         logToFile('Destructive-bash scanner threw; failing closed:', err);
-        return Promise.resolve({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason:
-              'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.',
-          },
-        });
+        const reason =
+          'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.';
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: reason,
+              },
+            },
+            command,
+            reason,
+          ),
+        );
       }
     }
 
@@ -495,13 +653,20 @@ export function createPreToolUseHook(): HookCallback {
             'createPreToolUseHook',
             { 'sleep seconds': seconds, command },
           );
-          return Promise.resolve({
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`,
-            },
-          });
+          const reason = `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`;
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: reason,
+                },
+              },
+              command,
+              reason,
+            ),
+          );
         }
       }
     }
@@ -510,16 +675,29 @@ export function createPreToolUseHook(): HookCallback {
     // tools (Read/Write/Edit/Grep on .env, MCP tools) we keep canUseTool
     // as the primary gate since it already runs reliably for those.
     if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
       const decision = wizardCanUseTool(toolName, toolInput);
       if (decision.behavior === 'deny') {
-        return Promise.resolve({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: decision.message,
-          },
-        });
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: decision.message,
+              },
+            },
+            command,
+            decision.message,
+          ),
+        );
       }
+      // Allowed Bash call — reset the consecutive-deny counter so a
+      // future deny → success → deny sequence doesn't accumulate falsely.
+      // The breaker is for a stuck agent, not for incidental denies
+      // sprinkled across an otherwise-progressing run.
+      consecutiveBashDenies = 0;
     }
 
     return Promise.resolve({});
@@ -811,6 +989,20 @@ export type AgentRunConfig = {
    * for browser-specific guidance only when relevant.
    */
   targetsBrowser?: boolean;
+  /**
+   * Free-form context the orchestrator wants prepended to every turn.
+   * Sourced from `--context-file <path>` (or `AMPLITUDE_WIZARD_CONTEXT`
+   * env var) — lets a parent agent inject team conventions ("we use
+   * snake_case for events", "always prefer Stripe events over generic
+   * checkout events", existing taxonomy snippets) WITHOUT modifying any
+   * skill content. Appended to `commandments.ts` output so it lands
+   * in the cached system-prompt block.
+   *
+   * Truncated upstream at the CLI boundary; this string is the
+   * already-validated payload. Empty / undefined when no context was
+   * provided.
+   */
+  orchestratorContext?: string;
 };
 
 const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
@@ -1012,30 +1204,7 @@ const DANGEROUS_OPERATORS = /[;`$()]/;
 import { parseEventPlanContent } from './event-plan-parser.js';
 export { parseEventPlanContent };
 
-/**
- * Pick the most recently modified existing file from a list of candidates.
- *
- * Used by the event-plan and dashboard watchers when both canonical
- * (`<installDir>/.amplitude/...`) and legacy (`<installDir>/.amplitude-*`)
- * paths might exist simultaneously — for example, when the migration
- * shim moved an old run's canonical file into place but the agent later
- * writes the legacy path during the current run. Returns null if none
- * exist. Exported for testing.
- */
-export function pickFreshestExisting(...paths: string[]): string | null {
-  let best: { path: string; mtimeMs: number } | null = null;
-  for (const p of paths) {
-    try {
-      const stat = fs.statSync(p);
-      if (best === null || stat.mtimeMs > best.mtimeMs) {
-        best = { path: p, mtimeMs: stat.mtimeMs };
-      }
-    } catch {
-      // File doesn't exist or is unreadable; skip.
-    }
-  }
-  return best?.path ?? null;
-}
+// `pickFreshestExisting` is imported from `../utils/storage-paths`.
 
 /**
  * Check if command is a Amplitude skill installation from MCP.
@@ -1536,6 +1705,7 @@ export async function initializeAgent(
       useDirectApiKey,
       agentSessionId: config.agentSessionId,
       targetsBrowser: config.targetsBrowser,
+      orchestratorContext: config.orchestratorContext,
     };
 
     logToFile('Agent config:', {
@@ -1579,7 +1749,10 @@ function buildDefaultAgentConfig(): AgentConfig {
       : DEFAULT_AMPLITUDE_ZONE;
   const storedToken = getStoredToken(storedUser?.id, zone)?.accessToken ?? '';
   const host = getHostFromRegion(zone);
-  const mcpUrl = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
+  // Region-aware MCP URL: an EU stored user must talk to the EU MCP host,
+  // not US. The MCP_URL env override (test/dev) is honored inside the
+  // helper.
+  const mcpUrl = getMcpUrlFromZone(zone);
   return {
     workingDirectory: process.cwd(),
     amplitudeMcpUrl: mcpUrl,
@@ -1637,7 +1810,11 @@ export async function runAgentLocally(
   successMessage: string,
   errorMessage: string,
 ): Promise<{ error?: AgentErrorType; message?: string }> {
-  const { spawn } = await import('child_process');
+  // Use the cross-platform shim wrapper — `claude` ships as `claude.cmd`
+  // when installed via npm on Windows, and `child_process.spawn` would
+  // ENOENT on the bare name (it doesn't consult PATHEXT). See
+  // `src/utils/cross-platform-spawn.ts`.
+  const { spawn } = await import('../utils/cross-platform-spawn.js');
 
   logToFile('Running agent via local claude CLI');
 
@@ -1870,6 +2047,18 @@ export async function runAgent(
      * hook factory — a throwing handler will not abort the compaction.
      */
     onPreCompact?: (input: { trigger: 'manual' | 'auto' }) => void;
+    /**
+     * Fires once per run when the PreToolUse circuit breaker trips —
+     * MAX_CONSECUTIVE_BASH_DENIES consecutive Bash denies have accumulated.
+     * Treat as a terminal signal: trigger graceful run halt
+     * (e.g. `wizardAbort`) so the agent doesn't keep burning turns on a
+     * command that will never be allowed.
+     */
+    onCircuitBreakerTripped?: (info: {
+      consecutiveDenies: number;
+      lastCommand: string;
+      lastDenyReason: string;
+    }) => void;
   },
   middleware?: {
     onMessage(message: SDKMessage): void;
@@ -2011,12 +2200,20 @@ export async function runAgent(
     return { plannedEvents: lastParsedEventPlan };
   };
 
-  // Heartbeat interval — every 10s print the last 3 STATUS messages so the
-  // user can see progress in the CLI without waiting for the next update.
+  // Heartbeat interval — fires unconditionally every 10s so AgentUI's
+  // `progress: heartbeat` NDJSON event lands on a fixed cadence even
+  // when the agent is mid-tool-call and nobody has called pushStatus
+  // recently. Orchestrators treat absence of heartbeat as "the wizard
+  // process hung"; gating on `recentStatuses.length > 0` (the prior
+  // behaviour) made long quiet tool calls look indistinguishable from
+  // a hang. LoggingUI / InkUI continue to short-circuit on an empty
+  // status tail so terminal output stays clean.
   const heartbeatInterval = setInterval(() => {
-    if (recentStatuses.length > 0) {
-      getUI().heartbeat([...recentStatuses]);
-    }
+    getUI().heartbeat({
+      statuses: [...recentStatuses],
+      elapsedMs: Date.now() - startTime,
+      attempt: attemptCount > 0 ? attemptCount : undefined,
+    });
   }, 10_000);
 
   // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
@@ -2066,7 +2263,7 @@ export async function runAgent(
       // would shadow the agent's fresh write to legacy) AND the
       // events.json case where `persistEventPlan` writes both paths
       // atomically.
-      const winner = pickFreshestExisting(eventPlanPath, legacyEventPlanPath);
+      const winner = pickFreshestExisting([eventPlanPath, legacyEventPlanPath]);
       if (!winner) return;
       try {
         const events = parseEventPlanContent(fs.readFileSync(winner, 'utf-8'));
@@ -2110,10 +2307,10 @@ export async function runAgent(
       // run — only the agent writes legacy, so a migrated stale
       // canonical from a prior run would otherwise shadow the agent's
       // fresh URL.
-      const winner = pickFreshestExisting(
+      const winner = pickFreshestExisting([
         dashboardFilePath,
         legacyDashboardFilePath,
-      );
+      ]);
       if (!winner) return;
       try {
         const content = fs.readFileSync(winner, 'utf-8');
@@ -2415,8 +2612,21 @@ export async function runAgent(
               // SDK init defaults / autocapture redundancy guidance to
               // mobile / server / generic runs that can't use them. Saves
               // several KB of system-prompt bloat on those paths.
-              append: getWizardCommandments({
-                targetsBrowser: agentConfig.targetsBrowser,
+              //
+              // Orchestrator-injected context (from `--context-file <path>`
+              // / `AMPLITUDE_WIZARD_CONTEXT` env var) goes AFTER the
+              // commandments so the orchestrator can reinforce / override
+              // soft guidance ("ignore the autocapture rule for this run,
+              // we want explicit events for our own observability"). Hard
+              // safety rules at the top of `commandments.ts` (no secrets,
+              // no shell-eval of env vars, etc.) still take precedence
+              // because the model treats earlier-positioned instructions as
+              // load-bearing — the order matters here.
+              append: buildSystemPromptAppend({
+                commandments: getWizardCommandments({
+                  targetsBrowser: agentConfig.targetsBrowser,
+                }),
+                orchestratorContext: agentConfig.orchestratorContext,
               }),
               // Move per-session dynamic context (cwd, date, user, etc.) out of
               // the cached system prompt and into the first user message. This
@@ -2483,7 +2693,9 @@ export async function runAgent(
               // allowlist still runs for every tool call.
               const inner = createInnerLifecycleHooks({ phase: 'wizard' });
               const innerHooks = inner.hooks();
-              const gatedPreToolUse = createPreToolUseHook();
+              const gatedPreToolUse = createPreToolUseHook({
+                onCircuitBreakerTripped: config?.onCircuitBreakerTripped,
+              });
               const recordPostToolUse = createPostToolUseHook(agentState);
 
               // Compose: inner observer first (best-effort, never alters

@@ -336,6 +336,41 @@ export class AgentUI implements WizardUI {
     instruction: string;
     loginCommand: string[];
     resumeCommand?: string[];
+    /**
+     * When `reason === 'env_selection_failed'` and the failure was
+     * caused by a scope flag (`--app-id`, `--project-id`, `--env`,
+     * `--org`) that didn't match any known environment, this echoes
+     * the bad value back so the orchestrator can render a useful
+     * "you passed X, here are valid options" prompt without parsing
+     * the human-readable `instruction` string.
+     */
+    previousAttempt?: {
+      flag: '--app-id' | '--project-id' | '--env' | '--org';
+      value: string;
+      reason: string;
+    };
+    /**
+     * Candidate environments to retry against. Identical shape to
+     * the `choices` array in the `needs_input: environment_selection`
+     * event — orchestrators that already render that picker can reuse
+     * the same widget here without re-discovery. Empty / omitted when
+     * the failure isn't selection-related.
+     *
+     * MUST stay in sync with `EnvSelectionChoice` (above). When that
+     * canonical shape gains a field, mirror it here so orchestrators
+     * that reuse their env-selection widget don't see `undefined` on
+     * what should be a present property.
+     */
+    choices?: Array<{
+      orgId: string;
+      orgName: string;
+      projectId: string;
+      projectName: string;
+      appId: string | null;
+      envName: string;
+      rank: number;
+      label: string;
+    }>;
   }): void {
     emit('lifecycle', data.instruction, {
       level: 'error',
@@ -344,6 +379,10 @@ export class AgentUI implements WizardUI {
         reason: data.reason,
         loginCommand: data.loginCommand,
         resumeCommand: data.resumeCommand,
+        ...(data.previousAttempt
+          ? { previousAttempt: data.previousAttempt }
+          : {}),
+        ...(data.choices ? { choices: data.choices } : {}),
       },
     });
   }
@@ -633,10 +672,28 @@ export class AgentUI implements WizardUI {
     emit('status', message, { data: { kind: 'push' } });
   }
 
-  heartbeat(statuses: string[]): void {
-    if (statuses.length === 0) return;
-    emit('status', `heartbeat: ${statuses.length} active`, {
-      data: { kind: 'heartbeat', statuses },
+  heartbeat(data: {
+    statuses: string[];
+    elapsedMs: number;
+    attempt?: number;
+  }): void {
+    // Always fire — orchestrators rely on the cadence to detect a
+    // stalled wizard ("no heartbeat in 30s + no result event = the
+    // process hung"). Drops the prior empty-statuses gate which made
+    // long, quiet tool calls (Bash, MCP, file edit chains) look
+    // indistinguishable from a hang.
+    const seconds = Math.round(data.elapsedMs / 1000);
+    const summary =
+      data.statuses.length > 0
+        ? `heartbeat (${seconds}s, ${data.statuses.length} recent)`
+        : `heartbeat (${seconds}s, idle)`;
+    emit('progress', summary, {
+      data: {
+        event: 'heartbeat',
+        statuses: data.statuses,
+        elapsedMs: data.elapsedMs,
+        ...(data.attempt !== undefined ? { attempt: data.attempt } : {}),
+      },
     });
   }
 
@@ -757,6 +814,31 @@ export class AgentUI implements WizardUI {
     const payload = Object.fromEntries(entries);
     emit('progress', `agent_metrics: ${data.durationMs}ms`, {
       data: { event: 'agent_metrics', ...payload },
+    });
+  }
+
+  emitCheckpointSaved(data: {
+    path: string;
+    bytes: number;
+    phase: string;
+  }): void {
+    emit('progress', `checkpoint_saved (${data.phase}, ${data.bytes}B)`, {
+      data: { event: 'checkpoint_saved', ...data },
+    });
+  }
+
+  emitCheckpointLoaded(data: { path: string; ageSeconds: number }): void {
+    emit('progress', `checkpoint_loaded (${data.ageSeconds}s old)`, {
+      data: { event: 'checkpoint_loaded', ...data },
+    });
+  }
+
+  emitCheckpointCleared(data: {
+    path: string;
+    reason: 'success' | 'manual' | 'logout';
+  }): void {
+    emit('progress', `checkpoint_cleared (${data.reason})`, {
+      data: { event: 'checkpoint_cleared', ...data },
     });
   }
 

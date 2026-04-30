@@ -11,12 +11,23 @@
 import path from 'path';
 import { logToFile } from '../utils/debug.js';
 import { getWizardAbortSignal } from '../utils/wizard-abort.js';
+import { getMcpUrlFromZone } from '../utils/urls.js';
 import { WIZARD_USER_AGENT } from './constants.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { withWizardSpan, addBreadcrumb } from './observability/index.js';
 
-export const AMPLITUDE_MCP_URL =
-  process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
+/**
+ * Default MCP URL when no zone is known to the caller.
+ *
+ * Most consumers (`agent-runner`, `agent-interface.buildDefaultAgentConfig`,
+ * `addMCPServerToClientsStep`) DO know the zone and should pass `mcpUrl`
+ * explicitly via `getMcpUrlFromZone(zone)`. This constant exists for the
+ * narrow set of callers that genuinely have no zone context (bootstrap
+ * paths, test mocks); falling back to US matches the historical behaviour.
+ *
+ * Honors the `MCP_URL` env override for tests / dev.
+ */
+export const AMPLITUDE_MCP_URL = getMcpUrlFromZone('us');
 
 // ── SDK dynamic import ────────────────────────────────────────────────────────
 

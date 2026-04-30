@@ -108,13 +108,23 @@ export function resetSetupComplete(): void {
 }
 
 /**
- * Test-only accessor for the in-flight payload without consuming it.
- * Exported because adding a separate test helper module just for one
- * peek would be heavier than this single-line escape hatch.
+ * Read the accumulated payload WITHOUT consuming it. Used by the
+ * OutroScreen's "View files changed" view so the user can review the
+ * file list before exit while leaving the registry intact for the
+ * downstream `wizardSuccessExit` → `setup_complete` emission.
+ *
+ * Returns the live reference (not a clone) — callers must treat the
+ * result as read-only. Returns `null` when nothing was registered.
  */
-export function _peekSetupCompleteForTests(): Pending | null {
+export function peekSetupComplete(): Readonly<Pending> | null {
   return pending;
 }
+
+/**
+ * Back-compat alias for the original test-only accessor. Retained so
+ * existing tests don't churn — new callers should use `peekSetupComplete`.
+ */
+export const _peekSetupCompleteForTests = peekSetupComplete;
 
 /**
  * Derive a dashboard ID from a dashboard URL. Last path segment after

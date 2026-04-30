@@ -101,6 +101,70 @@ describe('AgentUI.emitAuthRequired', () => {
       expect(event.data?.reason).toBe(reasons[i]);
     });
   });
+
+  it('emits previousAttempt + choices on env_selection_failed for structured retries', () => {
+    // Regression: when the orchestrator passed a bad scope flag
+    // (e.g. `--app-id 99999` when no env has that id), the
+    // `auth_required` envelope must echo BOTH the bad value and the
+    // candidate list so the orchestrator can re-prompt without doing
+    // a fresh discovery cycle. Without this, orchestrators saw a
+    // generic "could not resolve" error and had to re-invoke the
+    // wizard once just to learn the valid set.
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'env_selection_failed',
+      instruction:
+        'No Amplitude environment with app-id=99999. Re-run with --app-id from data.choices[].',
+      loginCommand: ['amplitude-wizard', 'login'],
+      previousAttempt: {
+        flag: '--app-id',
+        value: '99999',
+        reason: 'No Amplitude environment with app-id=99999.',
+      },
+      choices: [
+        {
+          orgId: 'org-1',
+          orgName: 'DevX',
+          projectId: 'proj-a',
+          projectName: 'Sandbox',
+          appId: '187520',
+          envName: 'Production',
+          label: 'DevX / Sandbox / Production',
+        },
+      ],
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    const data = event.data as {
+      reason: string;
+      previousAttempt?: { flag: string; value: string; reason: string };
+      choices?: Array<{ appId: string | null; label: string }>;
+    };
+    expect(data.reason).toBe('env_selection_failed');
+    expect(data.previousAttempt).toEqual({
+      flag: '--app-id',
+      value: '99999',
+      reason: 'No Amplitude environment with app-id=99999.',
+    });
+    expect(data.choices).toHaveLength(1);
+    expect(data.choices?.[0]).toMatchObject({
+      appId: '187520',
+      label: 'DevX / Sandbox / Production',
+    });
+  });
+
+  it('omits previousAttempt + choices when not provided (no schema bloat for non-selection failures)', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'Run wizard login.',
+      loginCommand: ['amplitude-wizard', 'login'],
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.data).not.toHaveProperty('previousAttempt');
+    expect(event.data).not.toHaveProperty('choices');
+  });
 });
 
 describe('AgentUI.emitNestedAgent', () => {
@@ -1409,5 +1473,84 @@ describe('truncateLogMessage (log-spillover guard)', () => {
     const out = truncateLogMessage(oversized);
     expect(out.length).toBe(MAX_LOG_MESSAGE_LENGTH);
     expect(out.endsWith('[truncated; see verbose log]')).toBe(true);
+  });
+});
+
+describe('AgentUI.heartbeat', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('always emits — even when the status tail is empty', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 12_345 });
+    // Single line, regardless of empty statuses — orchestrators rely
+    // on the cadence to detect a stalled wizard.
+    expect(writes.length).toBe(1);
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.data).toMatchObject({
+      event: 'heartbeat',
+      statuses: [],
+      elapsedMs: 12_345,
+    });
+  });
+
+  it('emits the structured progress event with elapsedMs and statuses', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({
+      statuses: ['Detecting framework', 'Installing SDK'],
+      elapsedMs: 27_500,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toMatch(/heartbeat \(28s, 2 recent\)/);
+    expect(event.data).toMatchObject({
+      event: 'heartbeat',
+      statuses: ['Detecting framework', 'Installing SDK'],
+      elapsedMs: 27_500,
+    });
+  });
+
+  it('includes attempt only when supplied (omitted on attempt 0 / undefined)', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000 });
+    expect(lastEvent().data?.attempt).toBeUndefined();
+
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000, attempt: 2 });
+    expect(lastEvent().data?.attempt).toBe(2);
+  });
+
+  it('uses a different summary string when the status tail is empty vs not', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 5_000 });
+    expect(lastEvent().message).toMatch(/heartbeat \(5s, idle\)/);
+    ui.heartbeat({ statuses: ['working'], elapsedMs: 5_000 });
+    expect(lastEvent().message).toMatch(/heartbeat \(5s, 1 recent\)/);
+  });
+
+  it('stamps data_version from the EVENT_DATA_VERSIONS registry', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000 });
+    const last = JSON.parse(writes[writes.length - 1].trim());
+    expect(last.data_version).toBe(1);
   });
 });

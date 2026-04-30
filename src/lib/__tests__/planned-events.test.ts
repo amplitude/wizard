@@ -221,4 +221,43 @@ describe('commitPlannedEvents', () => {
     expect(result.created).toBe(0);
     expect(result.error).toBe('permission denied');
   });
+
+  // Regression — prevents the "MCP server doesn't expose create_events"
+  // failure mode (visible across every successful instrumentation run in
+  // ~/.amplitude/wizard/runs/*/log.txt) from spinning up a 20s Claude-agent
+  // fallback that confirms the same conclusion. The MCP tool returns a
+  // string body that begins with "MCP error" when its underlying handler
+  // throws; we treat that as "tool not implemented" and short-circuit.
+  it('short-circuits without an agent fallback when MCP returns "MCP error"', async () => {
+    primeSession();
+    // create_events returns plain "MCP error: ..." text inside content[0].text
+    mockFetch.mockResolvedValueOnce(
+      makeFetchResponse(
+        `data: ${JSON.stringify({
+          result: {
+            content: [
+              {
+                text: 'MCP error: tool create_events is not implemented in this category',
+              },
+            ],
+          },
+        })}\n`,
+      ),
+    );
+
+    const result = await commitPlannedEvents({
+      accessToken: 'tok',
+      appId: '12345',
+      events: [{ name: 'Button Clicked', description: 'fired on click' }],
+    });
+
+    expect(result.attempted).toBe(1);
+    expect(result.created).toBe(0);
+    expect(result.described).toBe(0);
+    expect(result.error).toContain('not available');
+
+    // Critical: no agent SDK call. The whole point of this fix is to skip
+    // the 20s Claude fallback that ends in the same place.
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
 });

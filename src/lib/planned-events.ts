@@ -96,6 +96,33 @@ export async function commitPlannedEvents(
         events: mcpEvents,
       });
       if (!text) return null;
+
+      // Hard short-circuit: the Amplitude MCP server's `create_events` tool
+      // currently returns a payload that begins with the literal string
+      // "MCP error" (visible across every successful instrumentation run we
+      // have logs for — the taxonomy MCP category exposes only read-only
+      // tools today: get_events / get_properties / get_custom_or_labeled_events
+      // / get_transformations / get_group_types). Treat that signature as
+      // "tool not implemented" and return a non-null sentinel so the
+      // callAmplitudeMcp wrapper does NOT fall back to a 20s Claude-agent
+      // round-trip that ends in the same conclusion. The events the agent
+      // wrote into `.amplitude/events.json` will still register in the
+      // user's Data tab once the events fire from the user's app — this
+      // step was only ever a "make them visible BEFORE first ingestion"
+      // nicety. When the MCP server eventually grows a write tool, the text
+      // won't start with "MCP error" anymore and the normal parse path
+      // takes over without any code change here.
+      if (text.startsWith('MCP error')) {
+        logToFile(
+          `[commitPlannedEvents] create_events not available on Amplitude MCP — events will register on first ingestion`,
+        );
+        return {
+          success: false,
+          createdEvents: [],
+          message: 'create_events tool not available on Amplitude MCP server',
+        };
+      }
+
       try {
         const parsed = CreateEventsResponse.parse(JSON.parse(text));
         return {

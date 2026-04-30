@@ -26,7 +26,7 @@ import {
 } from '../../../lib/console-query.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
-import { getLogFile } from '../../../utils/storage-paths.js';
+import { getLogFile, getRunDir } from '../../../utils/storage-paths.js';
 import {
   COMMANDS,
   checkCommandBlockedByRun,
@@ -188,14 +188,15 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       store.showSnakeOverlay();
       break;
     case '/debug': {
-      // Surface a redacted diagnostic snapshot — credentials / tokens are
-      // stripped. Writes the full snapshot to stderr for copy/paste
-      // sharing; the console only shows a brief summary.
+      // Write a redacted diagnostic snapshot to a file the user can read
+      // AFTER the wizard exits. Earlier versions wrote to stderr while
+      // Ink owned the terminal — Ink's diff-based redraw doesn't account
+      // for stderr writes, so the JSON either got painted over or
+      // interleaved with the live frame. The file approach is boring,
+      // robust, and gives the user something they can copy directly into
+      // a bug report.
       void import('../utils/diagnostics.js')
-        .then(({ createDiagnosticSnapshot }) => {
-          // Use the real wizard version (set on the store by startTUI from
-          // package.json). Using a hardcoded placeholder would make every
-          // bug-report snapshot read "wizard_version: dev".
+        .then(async ({ createDiagnosticSnapshot }) => {
           const snapshot = createDiagnosticSnapshot(
             store,
             store.version || 'unknown',
@@ -208,15 +209,6 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             };
             tasks_count?: number;
           };
-          try {
-            process.stderr.write(
-              '\n[/debug] diagnostic snapshot:\n' +
-                JSON.stringify(snapshot, null, 2) +
-                '\n',
-            );
-          } catch {
-            // ignore broken pipe
-          }
           const summary =
             `flow: ${snapshot.active_flow ?? 'n/a'} | screen: ${
               snapshot.current_screen ?? 'n/a'
@@ -225,10 +217,30 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             `zone: ${snapshot.session?.region ?? 'n/a'} | tasks: ${
               snapshot.tasks_count ?? 0
             }`;
-          store.setCommandFeedback(
-            summary + ' (full snapshot written to stderr)',
-            30_000,
-          );
+          try {
+            const fs = await import('node:fs');
+            const path = await import('node:path');
+            const runDir = getRunDir(store.session.installDir);
+            fs.mkdirSync(runDir, { recursive: true, mode: 0o700 });
+            const snapshotPath = path.join(runDir, 'debug-snapshot.json');
+            fs.writeFileSync(
+              snapshotPath,
+              JSON.stringify(snapshot, null, 2),
+              'utf8',
+            );
+            store.setCommandFeedback(
+              `${summary} · saved to ${snapshotPath}`,
+              30_000,
+            );
+          } catch {
+            // Filesystem write failed (read-only fs, permissions, etc.)
+            // — fall back to surfacing the summary alone. Don't write to
+            // stderr; corrupting the TUI mid-render is the original bug.
+            store.setCommandFeedback(
+              `${summary} · (could not save full snapshot to disk)`,
+              30_000,
+            );
+          }
         })
         .catch(() => {
           // Surface the actual per-project log path. Two parallel runs land
@@ -243,22 +255,33 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       break;
     }
     case '/diagnostics': {
-      // Print the wizard's storage layout for the current project so users
-      // can attach the right log to a bug report. The full text goes to
-      // stderr (one paste's worth), and the console gets a one-line summary
-      // pointing at the run dir.
+      // Print the wizard's storage layout to a file so the user can read
+      // it AFTER the wizard exits. Same rationale as /debug: writing to
+      // stderr while Ink owns the terminal corrupts the live frame.
       const text = getDiagnosticsText(store.session.installDir);
-      try {
-        process.stderr.write('\n' + text + '\n\n');
-      } catch {
-        // broken pipe — non-fatal
-      }
-      store.setCommandFeedback(
-        `Storage paths printed to stderr. Logs: ${getLogFile(
-          store.session.installDir,
-        )}`,
-        30_000,
-      );
+      void (async () => {
+        try {
+          const fs = await import('node:fs');
+          const path = await import('node:path');
+          const runDir = getRunDir(store.session.installDir);
+          fs.mkdirSync(runDir, { recursive: true, mode: 0o700 });
+          const diagPath = path.join(runDir, 'diagnostics.txt');
+          fs.writeFileSync(diagPath, text + '\n', 'utf8');
+          store.setCommandFeedback(
+            `Storage paths saved to ${diagPath} · log file: ${getLogFile(
+              store.session.installDir,
+            )}`,
+            30_000,
+          );
+        } catch {
+          store.setCommandFeedback(
+            `Could not write diagnostics file. Log file: ${getLogFile(
+              store.session.installDir,
+            )}`,
+            30_000,
+          );
+        }
+      })();
       break;
     }
     case '/exit':

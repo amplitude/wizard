@@ -155,5 +155,79 @@ describe(
       const loaded = await loadCheckpoint(installDir);
       expect(loaded?.selectedEnvName).toBe('Production');
     });
+
+    // ── Hydration + TTL invariants ────────────────────────────────────────
+    //
+    // These four cover the contract the rest of the wizard relies on:
+    //   1. A fresh checkpoint hydrates region + org/project + framework.
+    //   2. A checkpoint older than 24h is treated as stale and ignored.
+    //   3. A checkpoint belonging to a different installDir is ignored.
+    //   4. Malformed JSON / schema-mismatch returns null cleanly.
+    //
+    // bin.ts wires the load through `Object.assign(session, checkpoint)` so
+    // any field the loader doesn't return is a silent regression — the
+    // Object.assign would simply skip it. That makes it cheap to add fields
+    // to the schema and easy to forget to surface them on read; these
+    // assertions catch that failure mode.
+
+    it('hydrates region + org/project + framework when fresh', async () => {
+      filePath = writeCheckpoint(installDir, {
+        region: 'eu',
+        selectedOrgId: 'org-42',
+        selectedOrgName: 'Acme EU',
+        selectedWorkspaceId: 'ws-1',
+        selectedWorkspaceName: 'Production',
+        integration: Integration.nextjs,
+        detectedFrameworkLabel: 'Next.js',
+        detectionComplete: true,
+        introConcluded: true,
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.region).toBe('eu');
+      expect(loaded?.selectedOrgId).toBe('org-42');
+      expect(loaded?.selectedOrgName).toBe('Acme EU');
+      expect(loaded?.selectedProjectId).toBe('ws-1');
+      expect(loaded?.selectedProjectName).toBe('Production');
+      expect(loaded?.integration).toBe(Integration.nextjs);
+      expect(loaded?.detectionComplete).toBe(true);
+      expect(loaded?.introConcluded).toBe(true);
+    });
+
+    it('treats a >24h-old checkpoint as stale and returns null', async () => {
+      const stale = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+      filePath = writeCheckpoint(installDir, {
+        savedAt: stale,
+        region: 'us',
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded).toBeNull();
+    });
+
+    it('ignores a checkpoint whose installDir does not match', async () => {
+      // Write a checkpoint at our installDir, but tag it as belonging to
+      // a different project. Mirrors what would happen if a user copied
+      // a temp dir between projects, or if the cache root were shared.
+      filePath = writeCheckpoint(installDir, {
+        installDir: '/some/other/project',
+        region: 'us',
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded).toBeNull();
+    });
+
+    it('returns null for malformed JSON without throwing', async () => {
+      filePath = checkpointPathFor(installDir);
+      fs.mkdirSync(getRunDir(installDir), { recursive: true });
+      fs.writeFileSync(filePath, '{ this is not valid json');
+
+      // Must not throw — startup should never crash because of a bad
+      // checkpoint file.
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded).toBeNull();
+    });
   },
 );

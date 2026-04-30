@@ -318,6 +318,24 @@ export interface WizardSession {
   mode: import('../utils/types').WizardMode;
 
   /**
+   * Free-form context the outer orchestrator wants prepended to every
+   * agent turn. Sourced from `--context-file <path>` (or
+   * `AMPLITUDE_WIZARD_CONTEXT` env var) at the CLI boundary; threaded
+   * into `agent-interface.initializeAgent` and appended after the
+   * commandments in the cached system-prompt block.
+   *
+   * Lets a parent agent inject team conventions ("we use snake_case for
+   * events"), existing taxonomy hints, or project-specific instructions
+   * WITHOUT modifying any skill content. The wizard treats it as
+   * project-authoritative for conventions but never lets it override the
+   * hard safety rules at the top of `commandments.ts`.
+   *
+   * `null` when no context was provided. Capped at the CLI boundary
+   * (currently 64 KB) so a runaway file can't bloat the system prompt.
+   */
+  orchestratorContext: string | null;
+
+  /**
    * UUID v4 generated once per wizard run. Forwarded to the Amplitude LLM
    * gateway as the `x-amp-wizard-session-id` header so every `/v1/messages`
    * call across the wizard's discrete agent phases (taxonomy, integration,
@@ -451,6 +469,24 @@ export interface WizardSession {
 
   /** OAuth access_token held during SUSI — used for Hydra-validated proxy auth. */
   pendingAuthAccessToken: string | null;
+
+  /**
+   * Set by `resolveCredentials` when the user passed a scope filter
+   * (`--app-id`, `--project-id`, etc.) that didn't match any known
+   * environment. Drives the structured `auth_required: env_selection_failed`
+   * emission in agent mode: the orchestrator gets back the bad value it
+   * passed AND the candidate list in one event, instead of having to
+   * re-discover environments after a silent fall-through to auto-select.
+   *
+   * `null` when no scope filters were specified (multi-env path) or
+   * filters matched cleanly (success path).
+   */
+  scopeFilterMismatch: {
+    flag: '--app-id' | '--project-id' | '--env' | '--org';
+    value: string;
+    /** Plain-language explanation: "no environment with appId=99999". */
+    reason: string;
+  } | null;
 
   /** Org selected during SUSI (written to ampli.json). */
   selectedOrgId: string | null;
@@ -807,6 +843,11 @@ export function buildSession(args: {
     menu: validated.menu ?? false,
     benchmark: validated.benchmark ?? false,
     mode: validated.mode ?? 'standard',
+    // The CLI boundary stamps this directly on the session after
+    // buildSession returns; default to null here so unit tests and any
+    // other buildSession caller that doesn't wire `--context-file`
+    // start with a known-empty value.
+    orchestratorContext: null,
     appId: parsed.success ? parsed.data.appId : parseAppIdArg(args.appId),
 
     // Stable across the entire wizard run; forwarded to the LLM gateway as
@@ -846,6 +887,7 @@ export function buildSession(args: {
     pendingOrgs: null,
     pendingAuthIdToken: null,
     pendingAuthAccessToken: null,
+    scopeFilterMismatch: null,
     selectedOrgId: null,
     selectedOrgName: null,
     selectedProjectId: null,
