@@ -1269,15 +1269,22 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   } = options;
   const { tool, createSdkMcpServer } = await getSDKModule();
 
-  // Load skill menu: try remote first, fall back to bundled
-  const menu = skillsBaseUrl
-    ? (await fetchSkillMenu(skillsBaseUrl)) ?? loadBundledSkillMenu()
-    : loadBundledSkillMenu();
-  const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
-
-  const keys = Object.keys(cachedSkillMenu);
-  const categoryNames: [string, ...string[]] =
-    keys.length > 0 ? (keys as [string, ...string[]]) : ['integration'];
+  // Skill menu loading (cachedSkillMenu / categoryNames) intentionally
+  // skipped — the load_skill_menu / install_skill tools that consumed
+  // it are disabled (see the disabled-tool block further down). When
+  // those tools are re-enabled, restore the menu loading too:
+  //
+  //   const menu = skillsBaseUrl
+  //     ? (await fetchSkillMenu(skillsBaseUrl)) ?? loadBundledSkillMenu()
+  //     : loadBundledSkillMenu();
+  //   const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
+  //   const keys = Object.keys(cachedSkillMenu);
+  //   const categoryNames: [string, ...string[]] =
+  //     keys.length > 0 ? (keys as [string, ...string[]]) : ['integration'];
+  //
+  // `skillsBaseUrl` is still threaded through this factory's signature
+  // so re-enabling doesn't require changing the public API.
+  void skillsBaseUrl;
 
   // -- check_env_keys -------------------------------------------------------
 
@@ -1403,8 +1410,24 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
-  // -- load_skill_menu ------------------------------------------------------
-
+  // -- load_skill_menu / install_skill — DISABLED ───────────────────────────
+  //
+  // Both tools currently 400 in production: remote skill downloads return
+  // not-found errors and the bundled-skill fallback hits packs the agent
+  // can't make sense of without the runtime menu. Until the catalogue
+  // / download path is fixed, don't expose them to the agent — they
+  // confuse it more than they help (the agent loops calling
+  // load_skill_menu → install_skill → load_skill_menu) and waste turns.
+  //
+  // Constant skills (taxonomy + instrumentation + dashboard) are still
+  // pre-installed at runtime by `installConstantSkills`, so the agent
+  // can `Skill.load` them directly without going through this menu.
+  //
+  // To re-enable: uncomment the two `tool(...)` blocks below, add them
+  // back to the `tools: [...]` array on `createSdkMcpServer`, and add
+  // their names back to `WIZARD_TOOL_NAMES`. The original implementations
+  // are preserved here so re-enabling is a small diff.
+  /*
   const loadSkillMenu = tool(
     'load_skill_menu',
     'Load available Amplitude skills for a category. Returns skill IDs and names. Call this first, then use install_skill with the chosen ID.',
@@ -1438,8 +1461,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
-  // -- install_skill --------------------------------------------------------
-
   const installSkill = tool(
     'install_skill',
     'Download and install an Amplitude skill by ID. Call load_skill_menu first to see available skills. Extracts the skill to .claude/skills/<skillId>/.',
@@ -1464,7 +1485,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         };
       }
 
-      // Look up download URL from cached menu
       const allSkills: SkillEntry[] = Object.values(cachedSkillMenu).flat();
       const skill = allSkills.find((s) => s.id === args.skillId);
       if (!skill) {
@@ -1479,7 +1499,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         };
       }
 
-      // Try remote download if URL available, otherwise use bundled copy
       const result = skill.downloadUrl
         ? downloadSkill(skill, workingDirectory)
         : installBundledSkill(args.skillId, workingDirectory);
@@ -1505,6 +1524,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       }
     },
   );
+  */
 
   // -- confirm --------------------------------------------------------------
 
@@ -1783,8 +1803,10 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       checkEnvKeys,
       setEnvValues,
       detectPM,
-      loadSkillMenu,
-      installSkill,
+      // loadSkillMenu and installSkill intentionally not exposed — see
+      // the disabled-tool block above for context. Constant skills are
+      // pre-installed at runtime so the agent can `Skill.load` them
+      // directly.
       confirm,
       choose,
       confirmEventPlan,
@@ -1805,8 +1827,9 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:check_env_keys`,
   `${SERVER_NAME}:set_env_values`,
   `${SERVER_NAME}:detect_package_manager`,
-  `${SERVER_NAME}:load_skill_menu`,
-  `${SERVER_NAME}:install_skill`,
+  // load_skill_menu / install_skill intentionally omitted while the
+  // skill catalogue / download path is broken — see the disabled-tool
+  // block in this file for context.
   `${SERVER_NAME}:confirm`,
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
