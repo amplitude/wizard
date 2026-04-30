@@ -14,8 +14,13 @@ import {
 import { logToFile } from './debug.js';
 import { withWizardSpan, addBreadcrumb } from '../lib/observability/index.js';
 
-/** Five minutes in milliseconds — refresh proactively before actual expiry. */
-const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
+/**
+ * Five minutes in milliseconds — refresh proactively before actual expiry.
+ * Exported so other refresh paths (notably the polling refresh inside
+ * `DataIngestionCheckScreen`) apply the same skew tolerance and don't 401
+ * on users whose laptop clock drifted by a few seconds.
+ */
+export const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
 /**
  * Bound on the OAuth refresh-token HTTP exchange. The wizard blocks on this

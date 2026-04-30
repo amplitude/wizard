@@ -196,6 +196,36 @@ describe('readApiKeyWithSource', () => {
     expect(readApiKeyWithSource(tmpDir)).toBeNull();
   });
 
+  it('strips surrounding double quotes from .env.local values (dotenv style)', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.env.local'),
+      'AMPLITUDE_API_KEY="quoted-value"\n',
+      'utf8',
+    );
+    const result = readApiKeyWithSource(tmpDir);
+    expect(result).toEqual({ key: 'quoted-value', source: 'env' });
+  });
+
+  it('strips surrounding single quotes from .env.local values (dotenv style)', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.env.local'),
+      "AMPLITUDE_API_KEY='single-quoted'\n",
+      'utf8',
+    );
+    const result = readApiKeyWithSource(tmpDir);
+    expect(result).toEqual({ key: 'single-quoted', source: 'env' });
+  });
+
+  it('does not strip un-paired quotes inside the value', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.env.local'),
+      'AMPLITUDE_API_KEY=mid"quote"value\n',
+      'utf8',
+    );
+    const result = readApiKeyWithSource(tmpDir);
+    expect(result).toEqual({ key: 'mid"quote"value', source: 'env' });
+  });
+
   it('ignores a corrupt credentials.json without throwing', () => {
     fs.writeFileSync(
       path.join(cacheDir, 'credentials.json'),

@@ -94,7 +94,11 @@ function envRead(installDir: string): string | null {
   if (!existsSync(envPath)) return null;
   const contents = readFileSync(envPath, 'utf8');
   const match = contents.match(/^AMPLITUDE_API_KEY=(.+)$/m);
-  return match ? match[1].trim() : null;
+  if (!match) return null;
+  // Strip surrounding single/double quotes — dotenv-style files commonly
+  // wrap values in quotes (`AMPLITUDE_API_KEY="abc"`), and submitting the
+  // literal-quoted string to the API is rejected. Match dotenv's behavior.
+  return match[1].trim().replace(/^(['"])(.*)\1$/, '$2');
 }
 
 function envWrite(installDir: string, key: string): void {

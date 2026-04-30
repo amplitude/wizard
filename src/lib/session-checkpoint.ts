@@ -77,7 +77,11 @@ const CheckpointSchema = z
       ...rest,
       selectedProjectId: selectedProjectId ?? selectedWorkspaceId ?? null,
       selectedProjectName: selectedProjectName ?? selectedWorkspaceName ?? null,
-      selectedEnvName: rest.selectedEnvName ?? selectedProjectName ?? null,
+      // selectedEnvName has no semantic relationship to selectedProjectName
+      // — falling back from one to the other would silently use the project
+      // name as the environment name in HeaderBar / `/whoami`, and break
+      // any code path that filters environments by name.
+      selectedEnvName: rest.selectedEnvName ?? null,
     };
   });
 
