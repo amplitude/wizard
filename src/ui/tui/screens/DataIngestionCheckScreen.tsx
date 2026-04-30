@@ -812,16 +812,22 @@ export const DataIngestionCheckScreen = ({
   const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
   const overflow = (eventTypes?.length ?? 0) - MAX_EVENTS_SHOWN;
 
-  // Tracking-plan rendering: split planned events into observed vs.
-  // pending so we can render observed first (they're the user's positive
-  // signal) and not bury them under a long pending list. Only the first
-  // MAX_EVENTS_SHOWN of each category render — the overflow line keeps
-  // small terminals from wrapping into garbage.
-  const plannedShown = plannedEvents.slice(0, MAX_EVENTS_SHOWN);
-  const plannedOverflow = plannedEvents.length - MAX_EVENTS_SHOWN;
+  // Tracking-plan rendering: sort observed events first so the user's
+  // positive signal is always visible at the top, then show pending
+  // events below. Only the first MAX_EVENTS_SHOWN render — the overflow
+  // line keeps small terminals from wrapping into garbage.
   const observedCount = plannedEvents.filter((e) =>
     observedEventNames.has(e.name),
   ).length;
+  const plannedSorted =
+    observedCount > 0
+      ? [
+          ...plannedEvents.filter((e) => observedEventNames.has(e.name)),
+          ...plannedEvents.filter((e) => !observedEventNames.has(e.name)),
+        ]
+      : plannedEvents;
+  const plannedShown = plannedSorted.slice(0, MAX_EVENTS_SHOWN);
+  const plannedOverflow = plannedEvents.length - MAX_EVENTS_SHOWN;
 
   // ── Celebration state ──────────────────────────────────────────────────
 

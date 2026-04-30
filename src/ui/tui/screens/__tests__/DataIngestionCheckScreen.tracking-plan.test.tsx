@@ -91,9 +91,15 @@ function makeStore(installDir: string) {
   });
 }
 
-/** Drain N frames so async chains (poll → setState → re-render) settle. */
-async function settle(frames = 8): Promise<void> {
-  for (let i = 0; i < frames; i++) await waitForFrame();
+/**
+ * Drain async chains (poll → setState → re-render). Uses a real
+ * setTimeout to allow dynamic `import()` resolution (which requires
+ * I/O-level scheduling, not just microtask/setImmediate ticks), then
+ * follows with setImmediate frames so React commits land.
+ */
+async function settle(ms = 50): Promise<void> {
+  await new Promise<void>((r) => setTimeout(r, ms));
+  for (let i = 0; i < 4; i++) await waitForFrame();
 }
 
 describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
@@ -187,7 +193,7 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
       <DataIngestionCheckScreen store={store} />,
     );
 
-    await settle(10);
+    await settle(150);
 
     const frame = stripAnsi(lastFrame() ?? '');
     // Header reflects the partial observation count.
@@ -214,7 +220,7 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
 
     // Drain frames so MCP poll resolves, activation API rejects, catalog
     // fetch resolves, and apiUnavailable + eventTypes=[] commit.
-    await settle(12);
+    await settle(150);
 
     // Sanity-check we're in the apiUnavailable state before pressing Enter.
     const preEnterFrame = stripAnsi(lastFrame() ?? '');
@@ -225,7 +231,7 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
       'setDataIngestionConfirmed',
     );
     stdin.write('\r');
-    await settle(3);
+    await settle();
 
     expect(setDataIngestionConfirmedSpy).not.toHaveBeenCalled();
     const frame = stripAnsi(lastFrame() ?? '');
@@ -248,16 +254,16 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
       <DataIngestionCheckScreen store={store} />,
     );
 
-    await settle(12);
+    await settle(150);
 
     // First Enter → surfaces skip-confirm.
     stdin.write('\r');
-    await settle(3);
+    await settle();
     expect(setDataIngestionConfirmedSpy).not.toHaveBeenCalled();
 
     // 'y' → actually confirms.
     stdin.write('y');
-    await settle(3);
+    await settle();
     expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
 
     unmount();
@@ -279,10 +285,10 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
     );
 
     // Wait for the catalog fetch to resolve before pressing Enter.
-    await settle(15);
+    await settle(150);
 
     stdin.write('\r');
-    await settle(3);
+    await settle();
 
     expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
 
