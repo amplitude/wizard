@@ -20,6 +20,7 @@ import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { analyzeWorkspace } from '../../../lib/workspace-analysis.js';
+import { ampliConfigExists } from '../../../lib/ampli-config.js';
 import { PickerMenu } from '../primitives/index.js';
 import { PathInput } from '../components/PathInput.js';
 import { Colors, Icons } from '../styles.js';
@@ -30,6 +31,10 @@ import { useScreenHints } from '../hooks/useScreenHints.js';
 import { analytics } from '../../../utils/analytics.js';
 import { logToFile } from '../../../utils/debug.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
+import {
+  readPreviousRunSummary,
+  humanizeAge,
+} from '../utils/welcome-back-context.js';
 
 const INTRO_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '↑↓', label: 'Navigate' },
@@ -89,6 +94,24 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     () => analyzeWorkspace(session.installDir),
     [session.installDir],
   );
+
+  // "Welcome back" gate — true when the user is signed in AND this
+  // directory has been instrumented before (ampli.json present). First-
+  // time users with no email or no prior project still see the marketing
+  // tagline below; the personalized panel only fires when we have real
+  // signal that this isn't a fresh install. The disk reads are fast
+  // (single stat) and re-run only when installDir / userEmail change.
+  const welcomeBack = useMemo(() => {
+    if (!session.userEmail) return null;
+    if (!ampliConfigExists(session.installDir)) return null;
+    const previous = readPreviousRunSummary(session.installDir);
+    return {
+      email: session.userEmail,
+      eventCount: previous.eventCount,
+      lastRunAt: previous.lastRunAt,
+    };
+  }, [session.userEmail, session.installDir]);
+
   const config = session.frameworkConfig;
   const frameworkLabel =
     session.detectedFrameworkLabel ?? config?.metadata.name;
@@ -215,19 +238,35 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       {/* Logo (responsive — hidden when terminal is too small) */}
       {showLogo && <AmplitudeTextLogo />}
 
-      {/* Heading — collapses to a single line when the viewport is tight */}
+      {/* Heading — collapses to a single line when the viewport is tight.
+          Returning users (signed in + ampli.json on disk) see a personalized
+          "Welcome back" panel instead of the marketing tagline. The first
+          second of a re-run shouldn't pretend the user is brand new. */}
       <Box
         flexDirection="column"
         alignItems="center"
         marginBottom={compact ? 0 : 1}
       >
-        <Text bold color={Colors.heading}>
-          Amplitude Wizard
-        </Text>
-        {!compact && (
-          <Text color={Colors.muted}>
-            AI-powered analytics setup in minutes
-          </Text>
+        {welcomeBack ? (
+          <WelcomeBackPanel
+            email={welcomeBack.email}
+            projectName={session.selectedProjectName}
+            region={session.region}
+            eventCount={welcomeBack.eventCount}
+            lastRunAt={welcomeBack.lastRunAt}
+            compact={compact}
+          />
+        ) : (
+          <>
+            <Text bold color={Colors.heading}>
+              Amplitude Wizard
+            </Text>
+            {!compact && (
+              <Text color={Colors.muted}>
+                AI-powered analytics setup in minutes
+              </Text>
+            )}
+          </>
         )}
       </Box>
 
@@ -413,6 +452,73 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         </Box>
       )}
     </Box>
+  );
+};
+
+/**
+ * "Welcome back" header — replaces the marketing tagline for returning
+ * users. Three lines of context, each best-effort:
+ *
+ *   Welcome back, kelson@amplitude.com
+ *   Acme Corp Analytics · US
+ *   12 events instrumented · last run 2 hours ago
+ *
+ * Lines 2 and 3 each fall back gracefully:
+ *   - Line 2 hides if we don't yet have a project name (e.g. user signed
+ *     in but hasn't picked a workspace this run; the picker will surface
+ *     it shortly).
+ *   - Line 3 hides if we have no events file on disk OR can't parse it.
+ *     The previous-run-context helper returns 0/null in both cases.
+ */
+interface WelcomeBackPanelProps {
+  email: string;
+  projectName: string | null;
+  region: string | null;
+  eventCount: number;
+  lastRunAt: Date | null;
+  compact: boolean;
+}
+
+const WelcomeBackPanel = ({
+  email,
+  projectName,
+  region,
+  eventCount,
+  lastRunAt,
+  compact,
+}: WelcomeBackPanelProps) => {
+  // Project + region read together — neither alone tells the user which
+  // Amplitude environment we're about to write to. If we have only the
+  // region (no project picked yet) we still show it on its own line so
+  // the user can spot a wrong /region setting before pressing Continue.
+  const projectLine = projectName
+    ? region
+      ? `${projectName} · ${region.toUpperCase()}`
+      : projectName
+    : region
+      ? region.toUpperCase()
+      : null;
+
+  // Events line: only show when we know something concrete. "0 events
+  // instrumented" by itself is misleading — it usually means the events
+  // file just hasn't been written yet, not that the user did zero work.
+  const eventsLine =
+    eventCount > 0 && lastRunAt
+      ? `${eventCount} event${eventCount === 1 ? '' : 's'} instrumented · last run ${humanizeAge(lastRunAt)}`
+      : null;
+
+  return (
+    <>
+      <Text bold color={Colors.heading}>
+        Welcome back, <Text color={Colors.accent}>{email}</Text>
+      </Text>
+      {!compact && projectLine && (
+        <Text color={Colors.secondary}>{projectLine}</Text>
+      )}
+      {!compact && eventsLine && (
+        <Text color={Colors.muted}>{eventsLine}</Text>
+      )}
+    </>
   );
 };
 

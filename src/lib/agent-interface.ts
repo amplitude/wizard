@@ -1761,7 +1761,11 @@ export async function runAgentLocally(
   successMessage: string,
   errorMessage: string,
 ): Promise<{ error?: AgentErrorType; message?: string }> {
-  const { spawn } = await import('child_process');
+  // Use the cross-platform shim wrapper — `claude` ships as `claude.cmd`
+  // when installed via npm on Windows, and `child_process.spawn` would
+  // ENOENT on the bare name (it doesn't consult PATHEXT). See
+  // `src/utils/cross-platform-spawn.ts`.
+  const { spawn } = await import('../utils/cross-platform-spawn.js');
 
   logToFile('Running agent via local claude CLI');
 
