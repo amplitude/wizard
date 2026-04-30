@@ -18,6 +18,7 @@ import {
   type DiscoveredFeature,
   type CloudRegion,
   type RetryState,
+  type PostAgentStep,
   buildSession,
   toCredentialAppId,
 } from '../../lib/wizard-session.js';
@@ -28,6 +29,7 @@ import {
   McpOutcome,
   SlackOutcome,
   RunPhase,
+  PostAgentStepStatus,
 } from './session-constants.js';
 import {
   WizardRouter,
@@ -53,8 +55,9 @@ export {
   RunPhase,
   McpOutcome,
   SlackOutcome,
+  PostAgentStepStatus,
 };
-export type { ScreenName, OutroData, WizardSession, RetryState };
+export type { ScreenName, OutroData, WizardSession, RetryState, PostAgentStep };
 
 export interface TaskItem {
   label: string;
@@ -286,6 +289,48 @@ export class WizardStore {
         );
       }
     }
+    this.emitChange();
+  }
+
+  /**
+   * Seed the post-agent step queue once, before the first step starts.
+   * Idempotent: a second call replaces the queue, so callers should only
+   * invoke this at the post-agent boundary.
+   */
+  seedPostAgentSteps(steps: PostAgentStep[]): void {
+    this.$session.setKey('postAgentSteps', steps);
+    this.emitChange();
+  }
+
+  /**
+   * Patch a single post-agent step by id. No-op if the id isn't seeded.
+   * Callers transition `pending → in_progress → completed | skipped`;
+   * we stamp `startedAt` on the in_progress transition so the
+   * FinalizingPanel can compute per-step elapsed time without a separate
+   * timer.
+   */
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStepStatus; reason?: string },
+  ): void {
+    const current = this.session.postAgentSteps;
+    const idx = current.findIndex((s) => s.id === id);
+    if (idx === -1) return;
+    const prev = current[idx];
+    const next: PostAgentStep = {
+      ...prev,
+      status: patch.status,
+      reason: patch.reason ?? prev.reason,
+    };
+    if (
+      patch.status === PostAgentStepStatus.InProgress &&
+      prev.status !== PostAgentStepStatus.InProgress
+    ) {
+      next.startedAt = Date.now();
+    }
+    const replaced = current.slice();
+    replaced[idx] = next;
+    this.$session.setKey('postAgentSteps', replaced);
     this.emitChange();
   }
 

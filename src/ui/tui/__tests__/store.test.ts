@@ -781,6 +781,101 @@ describe('WizardStore', () => {
     });
   });
 
+  // ── postAgentSteps (FinalizingPanel state) ────────────────────────
+
+  describe('post-agent step queue', () => {
+    it('seedPostAgentSteps replaces the queue and emits change', () => {
+      const store = createStore();
+      const cb = vi.fn();
+      store.subscribe(cb);
+      cb.mockClear();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      expect(store.session.postAgentSteps).toHaveLength(1);
+      expect(store.session.postAgentSteps[0].id).toBe('commit-events');
+      expect(cb).toHaveBeenCalled();
+    });
+
+    it('setPostAgentStep stamps startedAt on in_progress transition', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'create-dashboard',
+          label: 'Create dashboard',
+          activeForm: 'Creating dashboard',
+          status: 'pending',
+        },
+      ]);
+      const before = Date.now();
+      store.setPostAgentStep('create-dashboard', { status: 'in_progress' });
+      const step = store.session.postAgentSteps[0];
+      expect(step.status).toBe('in_progress');
+      expect(step.startedAt).toBeGreaterThanOrEqual(before);
+      expect(step.startedAt).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('setPostAgentStep preserves startedAt across status transitions', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      store.setPostAgentStep('commit-events', { status: 'in_progress' });
+      const startedAt = store.session.postAgentSteps[0].startedAt;
+      // A subsequent transition shouldn't reset the timer.
+      store.setPostAgentStep('commit-events', { status: 'completed' });
+      expect(store.session.postAgentSteps[0].startedAt).toBe(startedAt);
+    });
+
+    it('setPostAgentStep records skip reason', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      store.setPostAgentStep('commit-events', {
+        status: 'skipped',
+        reason: "couldn't resolve project",
+      });
+      expect(store.session.postAgentSteps[0].status).toBe('skipped');
+      expect(store.session.postAgentSteps[0].reason).toBe(
+        "couldn't resolve project",
+      );
+    });
+
+    it('setPostAgentStep is a no-op for unknown ids', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      const cb = vi.fn();
+      store.subscribe(cb);
+      cb.mockClear();
+      store.setPostAgentStep('does-not-exist', { status: 'completed' });
+      expect(cb).not.toHaveBeenCalled();
+      expect(store.session.postAgentSteps[0].status).toBe('pending');
+    });
+  });
+
   // ── resetForFreshStart (IntroScreen "Start fresh" branch) ───────
 
   describe('resetForFreshStart', () => {

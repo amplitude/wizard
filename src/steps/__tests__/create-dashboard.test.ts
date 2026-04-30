@@ -35,6 +35,7 @@ vi.mock('../../ui', () => {
   const ui = {
     pushStatus: vi.fn(),
     setDashboardUrl: vi.fn(),
+    setPostAgentStep: vi.fn(),
     spinner: vi.fn(() => ({
       start: vi.fn(),
       stop: vi.fn(),

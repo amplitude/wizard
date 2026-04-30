@@ -8,7 +8,11 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
-import type { OutroData, RetryState } from '../lib/wizard-session';
+import type {
+  OutroData,
+  RetryState,
+  PostAgentStep,
+} from '../lib/wizard-session';
 
 /** Result returned by the confirm_event_plan tool to the agent. */
 export type EventPlanDecision =
@@ -100,6 +104,32 @@ export interface WizardUI {
 
   // ── Spinner ───────────────────────────────────────────────────────
   spinner(): SpinnerHandle;
+
+  // ── Post-agent step lifecycle ─────────────────────────────────────
+  /**
+   * Seed the framework-controlled post-agent queue once, before the
+   * first step starts. Items render in a `<FinalizingPanel>` below the
+   * agent's task list so the user sees forward motion during what
+   * would otherwise be a silent gap between agent completion and the
+   * MCP/Verify screens.
+   *
+   * AgentUI emits a `progress: post_agent_seeded` event with the queue
+   * for orchestrator visibility. InkUI updates session state. LoggingUI
+   * may log a single step header.
+   */
+  seedPostAgentSteps(steps: PostAgentStep[]): void;
+
+  /**
+   * Update one post-agent step's status by id. Callers transition
+   * `pending → in_progress → completed | skipped`. `reason` is a short
+   * user-facing string surfaced when status === 'skipped' (e.g.
+   * "couldn't resolve project"). InkUI stamps `startedAt` on the
+   * in_progress transition; AgentUI emits a `progress` event per call.
+   */
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStep['status']; reason?: string },
+  ): void;
 
   // ── Session state (triggers reactive screen resolution in TUI) ────
   /** Signal that the main work (agent run) has started. */

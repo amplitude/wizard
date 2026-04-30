@@ -65,16 +65,28 @@ export interface CreateDashboardStepArgs {
   integration: Integration;
 }
 
+// Stable id used by agent-runner's seedPostAgentSteps + setPostAgentStep
+// calls. Inlined here to avoid a cycle between this step and agent-runner.
+// agent-runner exports the same string from POST_AGENT_STEP_CREATE_DASHBOARD;
+// keep them in sync — a small unit test asserts the equality.
+export const STEP_ID = 'create-dashboard';
+
 /**
  * Run the dashboard creation step. Never throws — on failure or timeout,
  * logs a warning and returns. The wizard run still succeeds; users see a
  * "create a dashboard manually" note in the outro.
+ *
+ * Owns its post-agent step lifecycle: marks `create-dashboard` step
+ * `in_progress` on entry and `completed` / `skipped` on exit so the
+ * FinalizingPanel reflects real outcomes including the three distinct
+ * failure modes (unexpected throw, hard timeout, MCP returned null).
  */
 export async function createDashboardStep(
   args: CreateDashboardStepArgs,
 ): Promise<void> {
   const { session, accessToken, integration } = args;
   const ui = getUI();
+  ui.setPostAgentStep(STEP_ID, { status: 'in_progress' });
 
   const eventsPath = path.join(session.installDir, EVENTS_FILE);
   const legacyDashboardPath = path.join(session.installDir, DASHBOARD_FILE);
@@ -89,6 +101,10 @@ export async function createDashboardStep(
     analytics.wizardCapture('dashboard skipped', {
       integration,
       reason: 'no events file',
+    });
+    ui.setPostAgentStep(STEP_ID, {
+      status: 'skipped',
+      reason: 'no events to chart',
     });
     return;
   }
@@ -123,6 +139,7 @@ export async function createDashboardStep(
       'duration ms': 0,
       source: 'agent',
     });
+    ui.setPostAgentStep(STEP_ID, { status: 'completed' });
     return;
   }
 
@@ -198,6 +215,7 @@ export async function createDashboardStep(
         reason,
         'duration ms': durationMs,
       });
+      ui.setPostAgentStep(STEP_ID, { status: 'skipped', reason });
       return;
     }
 
@@ -224,6 +242,7 @@ export async function createDashboardStep(
     session.checklistDashboardUrl = result.dashboardUrl;
     ui.setDashboardUrl(result.dashboardUrl);
     spinner.stop('Dashboard ready');
+    ui.setPostAgentStep(STEP_ID, { status: 'completed' });
     analytics.wizardCapture('dashboard created', {
       integration,
       'chart count': result.charts?.length ?? 0,
@@ -321,6 +340,15 @@ async function runCreateDashboard(args: {
   events: EventsFile;
   session: WizardSession;
 }): Promise<DashboardResult | null> {
+  // TODO(follow-up PR): wire a `direct` MCP path that calls
+  // `create_chart` per chart-definition and then `create_dashboard`
+  // sequentially. Today this step has only an `agentPrompt` path —
+  // every dashboard creation runs a full Claude inference for what
+  // could be ~6 deterministic MCP tool calls. Naming the LLM path
+  // "fallback" obscures that it's the only path. Verify which write
+  // tools the Amplitude MCP server actually exposes (cf.
+  // src/lib/planned-events.ts:100, where `create_events` returns the
+  // literal "MCP error" sentinel today) before wiring the direct path.
   const { accessToken, events, session } = args;
   const ui = getUI();
   // MCP host follows the bearer's account zone, not the env data zone.
