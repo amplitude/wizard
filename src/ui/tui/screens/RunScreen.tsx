@@ -227,14 +227,30 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     completedHighRef.current = completed;
   const completedDisplay = completedHighRef.current;
 
-  // Coaching tiers for "spinner spins forever". The progress signal is the
-  // task count — every time the agent reports a new task, the timer resets
-  // because forward motion means the user shouldn't be nagged. Tiers fire
-  // at 90s (calm reassurance) and 5min (escalated suggestion).
+  // Coaching tiers for "spinner spins forever". The progress signal must
+  // change every time the agent does ANYTHING the user can see — finishing
+  // a task, emitting a new status line, or writing a file. Using just the
+  // task count was a bug: post-#347 the TodoWrite list is locked at exactly
+  // 5 todos, so `total` never changes after the first frame, and the tier-1
+  // line ("Still working — switch to Logs") plus the tier-2 line ("This is
+  // unusually slow") fired on every run at 90s/5min regardless of activity.
+  // Calling a 5-minute wizard run "unusually slow" while the agent is
+  // actively shipping status updates undermines trust — the wizard
+  // shouldn't lie to the user about what it's doing.
+  //
+  // The new signal concatenates three monotonically-increasing counters:
+  //   - `completedDisplay` — high-water-marked completed task count
+  //   - `store.statusMessages.length` — every [STATUS] line from the agent
+  //   - `store.fileWrites.length` — every PreToolUse(Write|Edit) hit
+  // Any one of them ticking forward resets the coaching timer. True silence
+  // (no status, no file write, no completion) for 90s now means the agent
+  // really is on a long thought, and the coaching copy is honest.
+  // Tiers fire at 90s (calm reassurance) and 5min (escalated suggestion).
   // RUN_COACHING_TIER_T1_S=90, RUN_COACHING_TIER_T2_S=300.
+  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${store.fileWrites.length}`;
   const { tier: coachingTier } = useTimedCoaching({
     thresholds: [90, 300],
-    progressSignal: total,
+    progressSignal,
   });
 
   // Cold-start UX: until the agent finishes its first task the counter sits
