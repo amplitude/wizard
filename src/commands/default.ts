@@ -875,6 +875,201 @@ export const defaultCommand: CommandModule = {
             }
           })();
 
+          // ── Mid-session re-auth watcher (handles /region) ──────────
+          // setRegionForced() clears credentials and pendingOrgs so the
+          // RegionSelect screen re-appears. Once the user picks a new
+          // region, the Auth flow gate would otherwise sit on a blank
+          // AuthScreen because `authTask` is single-shot — it's already
+          // resolved against the OLD region. This watcher re-fires the
+          // OAuth pipeline against the new region so AuthScreen actually
+          // makes progress.
+          //
+          // PR #296 (the bin.ts split) silently dropped this watcher —
+          // /region mid-session has been broken on main since that
+          // refactor. Restoring it here. The probe + bounded fetchUser
+          // (same as authTask) catches stale tokens that would otherwise
+          // leave the new-region AuthScreen blank after a region switch.
+          //
+          // Deferred until authTask resolves so the watcher doesn't add
+          // a second subscribe during the initial-auth window.
+          void (async () => {
+            await authTask;
+            const { Overlay } = await import('../ui/tui/router.js');
+            const { performAmplitudeAuth } = await import('../utils/oauth.js');
+            const { fetchAmplitudeUser } = await import('../lib/api.js');
+            const { storeToken } = await import('../utils/ampli-settings.js');
+            const { resolveZone } = await import('../lib/zone-resolution.js');
+            const { DEFAULT_AMPLITUDE_ZONE } = await import(
+              '../lib/constants.js'
+            );
+
+            const waitForSessionState = (
+              predicate: () => boolean,
+            ): Promise<void> =>
+              new Promise<void>((resolve) => {
+                if (predicate()) {
+                  resolve();
+                  return;
+                }
+                const unsub = tui.store.subscribe(() => {
+                  if (predicate()) {
+                    unsub();
+                    resolve();
+                  }
+                });
+              });
+
+            // Single OAuth + fetchUser + setOAuthComplete cycle against
+            // the currently-selected region. Includes the same
+            // stale-token probe as authTask so a returning user who
+            // switches regions doesn't get stuck on a blank AuthScreen
+            // when their old per-zone token in ~/.ampli.json works for
+            // performAmplitudeAuth's cache check but fails the
+            // fetchAmplitudeUser call against the new zone.
+            const runReauthCycle = async (): Promise<void> => {
+              const zone = resolveZone(
+                tui.store.session,
+                DEFAULT_AMPLITUDE_ZONE,
+                { readDisk: false },
+              );
+
+              let auth = await performAmplitudeAuth({
+                zone,
+                forceFresh: false,
+              });
+              tui.store.setLoginUrl(null);
+
+              const STALE_TOKEN_PROBE_MS = 8_000;
+              const probeAuth = auth;
+              const probeFetchUser = async () => {
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                try {
+                  return await Promise.race([
+                    fetchAmplitudeUser(probeAuth.idToken, zone),
+                    new Promise<never>((_, reject) => {
+                      timer = setTimeout(() => {
+                        const err = new Error(
+                          `cached-token probe timed out after ${STALE_TOKEN_PROBE_MS}ms`,
+                        );
+                        err.name = 'TimeoutError';
+                        reject(err);
+                      }, STALE_TOKEN_PROBE_MS);
+                    }),
+                  ]);
+                } finally {
+                  if (timer !== undefined) clearTimeout(timer);
+                }
+              };
+
+              let userInfo;
+              try {
+                userInfo = await probeFetchUser();
+              } catch (probeErr) {
+                const { logToFile } = await import('../utils/debug.js');
+                logToFile(
+                  '[reauth] cached-token probe failed; forcing fresh OAuth',
+                  probeErr instanceof Error
+                    ? probeErr.message
+                    : String(probeErr),
+                );
+                tui.store.setLoginUrl(null);
+                auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                userInfo = await fetchAmplitudeUser(auth.idToken, zone);
+              }
+
+              storeToken(
+                {
+                  id: userInfo.id,
+                  firstName: userInfo.firstName,
+                  lastName: userInfo.lastName,
+                  email: userInfo.email,
+                  zone: auth.zone,
+                },
+                {
+                  accessToken: auth.accessToken,
+                  idToken: auth.idToken,
+                  refreshToken: auth.refreshToken,
+                  expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+                },
+              );
+
+              tui.store.setUserEmail(userInfo.email);
+              analytics.setDistinctId(userInfo.email);
+              analytics.identifyUser({ email: userInfo.email });
+
+              tui.store.setOAuthComplete({
+                accessToken: auth.accessToken,
+                idToken: auth.idToken,
+                cloudRegion: zone,
+                orgs: userInfo.orgs,
+              });
+            };
+
+            // Bounded retry loop. Three consecutive failures and we
+            // back off until the user takes manual action (/login or
+            // /region) — prevents hot-spinning OAuth attempts when the
+            // new zone keeps rejecting.
+            let consecutiveFailures = 0;
+            while (true) {
+              // Wait for credentials to populate (via initial authTask
+              // or a previous SUSI completion).
+              await waitForSessionState(
+                () => tui.store.session.credentials !== null,
+              );
+
+              // Then wait for them to be cleared AND the user to have
+              // picked a new region. setRegionForced clears credentials;
+              // the subsequent setRegion clears regionForced.
+              //
+              // Skip when /logout is active (loggingOut flag) or an
+              // outro is queued — /logout clears credentials and exits
+              // 1.5s later; without this guard the watcher would race
+              // the exit and pop a browser during "Logged out".
+              await waitForSessionState(
+                () =>
+                  !tui.store.session.loggingOut &&
+                  tui.store.session.credentials === null &&
+                  tui.store.session.region !== null &&
+                  !tui.store.session.regionForced &&
+                  tui.store.session.introConcluded &&
+                  tui.store.currentScreen !== Overlay.Logout &&
+                  tui.store.session.outroData === null,
+              );
+
+              try {
+                await runReauthCycle();
+                consecutiveFailures = 0;
+              } catch (err) {
+                consecutiveFailures += 1;
+                if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                  console.error('Re-auth error:', err);
+                }
+                tui.store.setCommandFeedback(
+                  consecutiveFailures === 1
+                    ? "Authentication didn't complete. Retrying — use /login to retry manually."
+                    : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
+                  consecutiveFailures >= 3 ? 8000 : 4000,
+                );
+                if (consecutiveFailures >= 3) {
+                  // After 3 strikes, stop auto-retrying. The user can
+                  // resume via /login or /region; both clear credentials
+                  // and unblock the watcher.
+                  await waitForSessionState(
+                    () =>
+                      tui.store.currentScreen === Overlay.Login ||
+                      tui.store.session.regionForced,
+                  );
+                  consecutiveFailures = 0;
+                  continue;
+                }
+                // Linear backoff before next attempt.
+                await new Promise<void>((r) =>
+                  setTimeout(r, 1500 * consecutiveFailures),
+                );
+              }
+            }
+          })();
+
           // ── Framework detection ────────────────────────────────
           // Runs concurrently with auth while AuthScreen shows.
           // Each detector has its own per-framework timeout internally,
