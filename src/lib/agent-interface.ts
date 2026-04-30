@@ -2534,10 +2534,28 @@ export async function runAgent(
       });
 
       const createPromptStream = async function* () {
+        // The first user message contains the framework-specific
+        // integration prompt (~1.5 KB) plus any orchestrator context.
+        // It's identical across every turn in the run — cache it so
+        // turn 2+ pays 0.1× input cost for that prefix instead of full
+        // rate. The system prompt is auto-cached by the SDK; the first
+        // user message is treated as fresh tokens unless we mark it
+        // explicitly with `cache_control: ephemeral`. Without this we
+        // saw `cache_creation_input_tokens` rebuilt on every turn for
+        // a block that never changes.
         yield {
           type: 'user',
           session_id: '',
-          message: { role: 'user', content: prompt },
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: prompt,
+                cache_control: { type: 'ephemeral' },
+              },
+            ],
+          },
           parent_tool_use_id: null,
         };
         await resultReceived;
