@@ -7,7 +7,18 @@
  *   3. Data-API event catalog (taxonomy events as a proxy)
  *
  * Active guidance as prominent instruction with framework-aware hint.
- * BrailleSpinner while waiting. Success celebration (with event names) when events arrive.
+ *
+ * Surfaces the agent's tracking plan inline (read from
+ * `<installDir>/.amplitude/events.json` via `readLocalEventPlan`) so users
+ * remember what they need to trigger. Each planned event is rendered with a
+ * status marker that flips from spinner → ✓ as the polling loop accumulates
+ * `activeEventNames` from the MCP `get_events` response — same "live arrival"
+ * feedback the data-setup phase showed during instrumentation.
+ *
+ * Skip guard: when the activation API is unavailable and zero events have
+ * been observed, hitting Enter no longer silently confirms — instead it
+ * surfaces a "No events detected — continue anyway? [y]es / [Esc] keep
+ * waiting" prompt so the user can't accidentally bypass verification.
  */
 
 import { Box, Text } from 'ink';
@@ -30,6 +41,8 @@ import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { FRAMEWORK_REGISTRY } from '../../../lib/registry.js';
+import { readLocalEventPlan } from '../../../lib/event-plan-parser.js';
+import type { PlannedEvent } from '../store.js';
 import { OutroKind } from '../session-constants.js';
 import { logToFile } from '../../../utils/debug.js';
 import { detectBoundPort } from '../../../utils/port-detection.js';
@@ -186,6 +199,39 @@ export const DataIngestionCheckScreen = ({
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [detectedPort, setDetectedPort] = useState<number | null>(null);
 
+  /**
+   * Tracking plan rendered above the spinner so users can see what they
+   * need to trigger. Prefer the live store (populated by the dual-path
+   * watcher in `agent-interface.ts` while the agent runs); fall back to
+   * reading the file from disk on mount in case the screen is reached on
+   * a fresh process where the watcher never set it (re-runs, recovery,
+   * activationLevel = 'partial' paths).
+   */
+  const [plannedEvents, setPlannedEvents] = useState<PlannedEvent[]>(() =>
+    store.eventPlan.length > 0
+      ? store.eventPlan
+      : readLocalEventPlan(session.installDir),
+  );
+
+  /**
+   * Names observed across the polling loop. We accumulate (rather than
+   * replacing the snapshot from the latest poll) so a transient empty
+   * response doesn't visually un-check events the user has already
+   * triggered. A Set so we can render the planned-list checkmarks in O(1).
+   */
+  const [observedEventNames, setObservedEventNames] = useState<Set<string>>(
+    () => new Set(),
+  );
+
+  /**
+   * One-shot guard against accidental Enter when the activation API is
+   * unavailable AND no events have been observed. First Enter flips this
+   * on and renders a confirmation prompt; second Enter (now interpreted
+   * as 'y') skips. Esc cancels the prompt and goes back to listening.
+   * Cassie's feedback: at-launch verification was too easy to skip past.
+   */
+  const [awaitingSkipConfirm, setAwaitingSkipConfirm] = useState(false);
+
   /** Confirm ingestion with a celebration, then wait for user to press Enter. */
   function confirmWithCelebration(events?: string[]) {
     if (pollingRef.current !== null) clearInterval(pollingRef.current);
@@ -194,6 +240,28 @@ export const DataIngestionCheckScreen = ({
     celebrationTimerRef.current = setTimeout(() => {
       setCelebrationReady(true);
     }, CELEBRATION_DELAY_MS);
+  }
+
+  /**
+   * Merge a poll's `activeEventNames` into the observed set. Returns
+   * true if any new events were added (used to log progressive arrivals
+   * and to trigger React state updates only when there's actually a
+   * change — Set identity matters for `useEffect` deps elsewhere).
+   */
+  function recordObservedEvents(names: readonly string[]): boolean {
+    if (names.length === 0) return false;
+    let mutated = false;
+    setObservedEventNames((prev) => {
+      const next = new Set(prev);
+      for (const name of names) {
+        if (!next.has(name)) {
+          next.add(name);
+          mutated = true;
+        }
+      }
+      return mutated ? next : prev;
+    });
+    return mutated;
   }
 
   /**
@@ -360,6 +428,19 @@ export const DataIngestionCheckScreen = ({
       logToFile(
         `[DataIngestionCheck] MCP check: hasEvents=${result.hasEvents} appId=${effectiveAppId} events=${result.activeEventNames.length}`,
       );
+      // Accumulate observed event names every poll — even when hasEvents
+      // is false (the underlying API returns an empty list in that case,
+      // so this is a no-op there but keeps the call site uniform). When
+      // hasEvents flips true the merged set drives the live tracking-plan
+      // checkmarks; the user sees events tick off as they trigger them.
+      const added = recordObservedEvents(result.activeEventNames);
+      if (added) {
+        logToFile(
+          `[DataIngestionCheck] new events observed: ${result.activeEventNames.join(
+            ', ',
+          )}`,
+        );
+      }
       if (result.hasEvents) {
         setApiUnavailable(false);
         confirmWithCelebration(result.activeEventNames);
@@ -514,6 +595,28 @@ export const DataIngestionCheckScreen = ({
     return () => clearInterval(id);
   }, [lastChecked, pollingStartTime]);
 
+  // Pick up tracking-plan updates that land AFTER mount. The dual-path
+  // watcher in `agent-interface.ts` calls `store.setEventPlan()` when the
+  // agent writes `events.json`; if that happens while this screen is
+  // already mounted (e.g. an inner-agent re-emit), the initial-state
+  // snapshot would be stale. Refresh whenever the store's plan grows or
+  // its contents change. We only widen — never overwrite a populated
+  // local state with an empty store value, since the agent-runtime
+  // watcher tears down between runs.
+  useEffect(() => {
+    const incoming = store.eventPlan;
+    if (incoming.length === 0) return;
+    setPlannedEvents((prev) => {
+      if (prev.length === 0) return incoming;
+      // Same length AND every name matches → nothing changed.
+      if (prev.length === incoming.length) {
+        const prevNames = new Set(prev.map((e) => e.name));
+        if (incoming.every((e) => prevNames.has(e.name))) return prev;
+      }
+      return incoming;
+    });
+  }, [store.eventPlan]);
+
   // Detect a bound dev-server port for web frameworks, then poll every 10s
   // so the hint switches to the live URL as soon as the user starts their app.
   // Only match ports whose listener is running out of the install dir — a
@@ -554,6 +657,23 @@ export const DataIngestionCheckScreen = ({
       }
       return;
     }
+
+    // Enter-guard: if the user is staring at the skip-confirm prompt,
+    // 'y' confirms the skip, anything else cancels it. This is the
+    // second-Enter step Cassie's feedback called for — without it,
+    // hitting Enter when no events were detected silently confirmed
+    // verification, which was easy to do by accident.
+    if (awaitingSkipConfirm) {
+      if (_char === 'y' || _char === 'Y') {
+        if (pollingRef.current !== null) clearInterval(pollingRef.current);
+        store.setDataIngestionConfirmed();
+        return;
+      }
+      // Any other key (incl. Esc, Enter, n) dismisses the prompt.
+      setAwaitingSkipConfirm(false);
+      return;
+    }
+
     // q → "I'll come back later" exit. Esc is owned by useEscapeBack
     // above (back-nav), keeping the Esc=back convention consistent across
     // the wizard.
@@ -566,8 +686,22 @@ export const DataIngestionCheckScreen = ({
       });
       return;
     }
-    // Manual confirmation when API is unavailable
+    // Manual confirmation when API is unavailable.
+    //
+    // Two-step guard against accidental skip: if zero events have been
+    // observed AND we don't have a cataloged-events fallback to fall
+    // back on, surface a confirmation prompt instead of silently
+    // advancing. If the user has actually triggered events (observed >
+    // 0) or the catalog produced names, treat Enter as the deliberate
+    // "I'm done" confirmation since they can SEE what was verified.
     if (apiUnavailable && key.return) {
+      const hasAnyEvidence =
+        observedEventNames.size > 0 ||
+        (eventTypes !== null && eventTypes.length > 0);
+      if (!hasAnyEvidence) {
+        setAwaitingSkipConfirm(true);
+        return;
+      }
       if (pollingRef.current !== null) clearInterval(pollingRef.current);
       store.setDataIngestionConfirmed();
     }
@@ -598,29 +732,82 @@ export const DataIngestionCheckScreen = ({
   const shown = eventTypes?.slice(0, MAX_EVENTS_SHOWN) ?? [];
   const overflow = (eventTypes?.length ?? 0) - MAX_EVENTS_SHOWN;
 
+  // Tracking-plan rendering: split planned events into observed vs.
+  // pending so we can render observed first (they're the user's positive
+  // signal) and not bury them under a long pending list. Only the first
+  // MAX_EVENTS_SHOWN of each category render — the overflow line keeps
+  // small terminals from wrapping into garbage.
+  const plannedShown = plannedEvents.slice(0, MAX_EVENTS_SHOWN);
+  const plannedOverflow = plannedEvents.length - MAX_EVENTS_SHOWN;
+  const observedCount = plannedEvents.filter((e) =>
+    observedEventNames.has(e.name),
+  ).length;
+
   // ── Celebration state ──────────────────────────────────────────────────
 
   if (celebrating) {
+    // Reconcile the celebration against the tracking plan when we have
+    // one. If every planned event has been observed, render the full
+    // plan with checkmarks (positive completion signal). If the plan is
+    // partial (some still pending), render the same checked/pending
+    // split as the waiting state so the user can see exactly what's
+    // missing — they may want to keep waiting before pressing Enter.
+    // No tracking plan? Fall back to the legacy flat list of arrived
+    // event names so we don't regress for legacy runs.
+    const hasPlan = plannedEvents.length > 0;
+    const allPlannedObserved =
+      hasPlan && observedCount === plannedEvents.length;
+
     return (
       <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
         <Text bold color={Colors.success}>
-          {Icons.checkmark} Events detected!
+          {Icons.checkmark}{' '}
+          {allPlannedObserved
+            ? 'All planned events detected!'
+            : 'Events detected!'}
         </Text>
-        {arrivedEvents.length > 0 && (
+
+        {hasPlan ? (
           <Box flexDirection="column" marginTop={1} marginLeft={2}>
-            {arrivedEvents.slice(0, MAX_EVENTS_SHOWN).map((name) => (
-              <Text key={name} color={Colors.success}>
-                {Icons.diamond} {name}
-              </Text>
-            ))}
-            {arrivedEvents.length > MAX_EVENTS_SHOWN && (
+            {plannedShown.map((event) => {
+              const observed = observedEventNames.has(event.name);
+              return (
+                <Box key={event.name} gap={1}>
+                  {observed ? (
+                    <Text color={Colors.success}>{Icons.checkmark}</Text>
+                  ) : (
+                    <Text color={Colors.muted}>{Icons.diamond}</Text>
+                  )}
+                  <Text color={observed ? Colors.success : Colors.body}>
+                    {event.name}
+                  </Text>
+                </Box>
+              );
+            })}
+            {plannedOverflow > 0 && (
               <Text color={Colors.muted}>
-                {Icons.ellipsis} and {arrivedEvents.length - MAX_EVENTS_SHOWN}{' '}
-                more
+                {Icons.ellipsis} and {plannedOverflow} more
               </Text>
             )}
           </Box>
+        ) : (
+          arrivedEvents.length > 0 && (
+            <Box flexDirection="column" marginTop={1} marginLeft={2}>
+              {arrivedEvents.slice(0, MAX_EVENTS_SHOWN).map((name) => (
+                <Text key={name} color={Colors.success}>
+                  {Icons.diamond} {name}
+                </Text>
+              ))}
+              {arrivedEvents.length > MAX_EVENTS_SHOWN && (
+                <Text color={Colors.muted}>
+                  {Icons.ellipsis} and {arrivedEvents.length - MAX_EVENTS_SHOWN}{' '}
+                  more
+                </Text>
+              )}
+            </Box>
+          )
         )}
+
         <Box marginTop={1}>
           {celebrationReady ? (
             <Box gap={1}>
@@ -662,6 +849,45 @@ export const DataIngestionCheckScreen = ({
         Your SDK is installed. Once you interact with your app, events will
         start flowing into Amplitude.
       </Text>
+
+      {/* Tracking plan from .amplitude/events.json — what the agent
+          instrumented. Rendered with a per-event status marker that flips
+          spinner → ✓ as MCP polls accumulate `activeEventNames`. Cassie's
+          feedback: users couldn't remember what to trigger because the
+          plan wasn't visible at this step. */}
+      {plannedEvents.length > 0 && (
+        <Box flexDirection="column" marginTop={1}>
+          <Text color={Colors.secondary}>
+            {observedCount > 0
+              ? `Tracking plan (${observedCount} of ${plannedEvents.length} observed):`
+              : `Tracking plan (${plannedEvents.length} ${
+                  plannedEvents.length === 1 ? 'event' : 'events'
+                }) — trigger any of these:`}
+          </Text>
+          <Box flexDirection="column" marginTop={1} marginLeft={2}>
+            {plannedShown.map((event) => {
+              const observed = observedEventNames.has(event.name);
+              return (
+                <Box key={event.name} gap={1}>
+                  {observed ? (
+                    <Text color={Colors.success}>{Icons.checkmark}</Text>
+                  ) : (
+                    <Text color={Colors.muted}>{Icons.diamond}</Text>
+                  )}
+                  <Text color={observed ? Colors.success : Colors.body}>
+                    {event.name}
+                  </Text>
+                </Box>
+              );
+            })}
+            {plannedOverflow > 0 && (
+              <Text color={Colors.muted}>
+                {Icons.ellipsis} and {plannedOverflow} more
+              </Text>
+            )}
+          </Box>
+        </Box>
+      )}
 
       {/* 0s restart reminder — suppressed in agent/NDJSON mode where there's
           no human dev server to restart. Phrased conservatively: we don't
@@ -768,27 +994,60 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* Key hints — unified bracket format */}
-      <Box marginTop={2} gap={2}>
-        {apiUnavailable && (
+      {/* Skip-confirm prompt: surfaced when the user pressed Enter while
+          the activation API was unavailable AND no events had been
+          observed. Two-step intentional acknowledgment so a stray Enter
+          can't bypass verification. */}
+      {awaitingSkipConfirm && (
+        <Box flexDirection="column" marginTop={2}>
+          <Text color={Colors.warning}>
+            {Icons.arrowRight} No events detected yet. Continue without
+            verifying?
+          </Text>
+          <Box marginTop={1} gap={2}>
+            <Box>
+              <Text color={Colors.muted}>[</Text>
+              <Text color={Colors.body} bold>
+                y
+              </Text>
+              <Text color={Colors.muted}>] Yes, skip verification</Text>
+            </Box>
+            <Box>
+              <Text color={Colors.muted}>[</Text>
+              <Text color={Colors.body} bold>
+                Esc
+              </Text>
+              <Text color={Colors.muted}>] Keep waiting</Text>
+            </Box>
+          </Box>
+        </Box>
+      )}
+
+      {/* Key hints — unified bracket format. Suppressed while the
+          skip-confirm prompt is up so the user sees one set of
+          instructions, not two competing hint rows. */}
+      {!awaitingSkipConfirm && (
+        <Box marginTop={2} gap={2}>
+          {apiUnavailable && (
+            <Box>
+              <Text color={Colors.muted}>[</Text>
+              <Text color={Colors.body} bold>
+                Enter
+              </Text>
+              <Text color={Colors.muted}>
+                ] {eventTypes && eventTypes.length > 0 ? 'Continue' : 'Confirm'}
+              </Text>
+            </Box>
+          )}
           <Box>
             <Text color={Colors.muted}>[</Text>
             <Text color={Colors.body} bold>
-              Enter
+              q
             </Text>
-            <Text color={Colors.muted}>
-              ] {eventTypes && eventTypes.length > 0 ? 'Continue' : 'Confirm'}
-            </Text>
+            <Text color={Colors.muted}>] Exit and resume later</Text>
           </Box>
-        )}
-        <Box>
-          <Text color={Colors.muted}>[</Text>
-          <Text color={Colors.body} bold>
-            q
-          </Text>
-          <Text color={Colors.muted}>] Exit and resume later</Text>
         </Box>
-      </Box>
+      )}
     </Box>
   );
 };
