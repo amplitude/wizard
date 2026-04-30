@@ -967,31 +967,35 @@ export const defaultCommand: CommandModule = {
             // /region) — prevents hot-spinning OAuth attempts when the
             // new zone keeps rejecting.
             let consecutiveFailures = 0;
+            let retrying = false;
             while (true) {
-              // Wait for credentials to populate (via initial authTask
-              // or a previous SUSI completion).
-              await waitForSessionState(
-                () => tui.store.session.credentials !== null,
-              );
+              if (!retrying) {
+                // Wait for credentials to populate (via initial authTask
+                // or a previous SUSI completion).
+                await waitForSessionState(
+                  () => tui.store.session.credentials !== null,
+                );
 
-              // Then wait for them to be cleared AND the user to have
-              // picked a new region. setRegionForced clears credentials;
-              // the subsequent setRegion clears regionForced.
-              //
-              // Skip when /logout is active (loggingOut flag) or an
-              // outro is queued — /logout clears credentials and exits
-              // 1.5s later; without this guard the watcher would race
-              // the exit and pop a browser during "Logged out".
-              await waitForSessionState(
-                () =>
-                  !tui.store.session.loggingOut &&
-                  tui.store.session.credentials === null &&
-                  tui.store.session.region !== null &&
-                  !tui.store.session.regionForced &&
-                  tui.store.session.introConcluded &&
-                  tui.store.currentScreen !== Overlay.Logout &&
-                  tui.store.session.outroData === null,
-              );
+                // Then wait for them to be cleared AND the user to have
+                // picked a new region. setRegionForced clears credentials;
+                // the subsequent setRegion clears regionForced.
+                //
+                // Skip when /logout is active (loggingOut flag) or an
+                // outro is queued — /logout clears credentials and exits
+                // 1.5s later; without this guard the watcher would race
+                // the exit and pop a browser during "Logged out".
+                await waitForSessionState(
+                  () =>
+                    !tui.store.session.loggingOut &&
+                    tui.store.session.credentials === null &&
+                    tui.store.session.region !== null &&
+                    !tui.store.session.regionForced &&
+                    tui.store.session.introConcluded &&
+                    tui.store.currentScreen !== Overlay.Logout &&
+                    tui.store.session.outroData === null,
+                );
+              }
+              retrying = false;
 
               try {
                 await runReauthCycle();
@@ -1017,12 +1021,14 @@ export const defaultCommand: CommandModule = {
                       tui.store.session.regionForced,
                   );
                   consecutiveFailures = 0;
+                  retrying = true;
                   continue;
                 }
                 // Linear backoff before next attempt.
                 await new Promise<void>((r) =>
                   setTimeout(r, 1500 * consecutiveFailures),
                 );
+                retrying = true;
               }
             }
           })();
