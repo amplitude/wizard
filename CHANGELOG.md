@@ -1,5 +1,28 @@
 # Changelog
 
+## [1.13.2](https://github.com/amplitude/wizard/compare/wizard-v1.13.1...wizard-v1.13.2) (2026-04-30)
+
+
+### Bug Fixes
+
+* **dashboard:** surface inner-agent progress and abort feedback during the 90s budget ([#480](https://github.com/amplitude/wizard/issues/480)) ([ea563da](https://github.com/amplitude/wizard/commit/ea563daeb1fb1be127335117d3f34c9f138bd9e8))
+* harden TUI mutations + agent error paths pre-launch ([#457](https://github.com/amplitude/wizard/issues/457)) ([8bfbe97](https://github.com/amplitude/wizard/commit/8bfbe979c2cec0fc3580311ea5ea5ad4284157de))
+* self-heal stale per-project caches after git reset ([#475](https://github.com/amplitude/wizard/issues/475)) ([61c83b3](https://github.com/amplitude/wizard/commit/61c83b3a9834bb1baf62901b34078fc6db69aa8c))
+* **tui:** rename task [#5](https://github.com/amplitude/wizard/issues/5) to "Build your starter dashboard" ([#482](https://github.com/amplitude/wizard/issues/482)) ([4c89889](https://github.com/amplitude/wizard/commit/4c89889afc19ea9b16c379c1065c5b1060777dd1))
+* **tui:** stop raw stream-event JSON from leaking into the Setup progress UI ([#474](https://github.com/amplitude/wizard/issues/474)) ([6bc75b7](https://github.com/amplitude/wizard/commit/6bc75b73458e56e20df1a570d2d508378e2372dd))
+* **tui:** surface post-agent work so the wizard doesn't look hung ([#443](https://github.com/amplitude/wizard/issues/443)) ([2e8fb4b](https://github.com/amplitude/wizard/commit/2e8fb4bd3dc9d69fb8cb3c8ddea48db09d63cd08))
+* **wizard:** bring dashboard creation back into the agent loop via record_dashboard ([#479](https://github.com/amplitude/wizard/issues/479)) ([09cac43](https://github.com/amplitude/wizard/commit/09cac43c3247e61476341b4b7b0fa40818020c0c))
+
+
+### Performance Improvements
+
+* **skills:** prune scraped HTML doc references from integration skills ([#455](https://github.com/amplitude/wizard/issues/455)) ([269d4b1](https://github.com/amplitude/wizard/commit/269d4b164945d2292fff9e3d2dcbd2a138b1ab22))
+
+
+### Reverts
+
+* **skills:** drop scrape-strip filter now that context-hub ships lean refs ([#481](https://github.com/amplitude/wizard/issues/481)) ([d010556](https://github.com/amplitude/wizard/commit/d01055607a7fe82efec386c47f776b9377e1a29a))
+
 ## [1.13.1](https://github.com/amplitude/wizard/compare/wizard-v1.13.0...wizard-v1.13.1) (2026-04-30)
 
 
