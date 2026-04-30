@@ -215,8 +215,25 @@ export interface WizardUI {
   ): Promise<EventPlanDecision>;
 
   // ── Todo tracking from SDK TodoWrite events ───────────────────────
+  /**
+   * Refresh per-step `activeForm` flavor text from the agent's
+   * `TodoWrite` output. Status of each canonical step is owned by
+   * `applyJourneyTransition` (deterministic tool-call signals); this
+   * call only updates the in-progress narration string.
+   */
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
+  ): void;
+
+  /**
+   * Apply a deterministic journey transition derived from a tool call
+   * the agent just issued (see `src/lib/journey-state.ts`). One of the
+   * five canonical steps moves to `in_progress` or `completed`. Once
+   * `completed`, a step can never regress.
+   */
+  applyJourneyTransition(
+    stepId: import('../lib/journey-state.js').JourneyStepId,
+    status: import('../lib/journey-state.js').JourneyStatus,
   ): void;
 
   // ── Real-time file write activity from inner-agent hooks ──────────
