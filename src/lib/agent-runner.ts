@@ -325,18 +325,13 @@ export async function refreshTokenIfStale(
       '../utils/ampli-settings.js'
     );
     const { refreshAccessToken } = await import('../utils/oauth.js');
+    const { EXPIRY_BUFFER_MS } = await import('../utils/token-refresh.js');
     const user = getStoredUser();
     const stored = getStoredToken(user?.id, user?.zone);
     if (!stored?.accessToken) return fallback;
-    // 5-minute pre-expiry buffer matches `tryRefreshToken` in
-    // `src/utils/token-refresh.ts`. The agent-runner's pre-run path used a
-    // strict `>` check, which left a window where the token was minutes
-    // away from expiring at run-start, then expired DURING the agent run.
-    // Padding the buffer covers that race.
-    const REFRESH_BUFFER_MS = 5 * 60 * 1000;
     const needsRefresh =
       user &&
-      Date.now() + REFRESH_BUFFER_MS > new Date(stored.expiresAt).getTime();
+      Date.now() + EXPIRY_BUFFER_MS > new Date(stored.expiresAt).getTime();
     if (!needsRefresh) return stored.accessToken;
     const startedAt = Date.now();
     try {
