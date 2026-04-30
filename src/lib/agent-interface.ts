@@ -40,7 +40,12 @@ import {
   type DualPathWatcherHandle,
 } from './dual-path-watcher';
 import { LINTING_TOOLS } from './safe-tools';
-import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
+import {
+  AgentState,
+  buildRecoveryNote,
+  buildRetryHint,
+  consumeSnapshot,
+} from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
 import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
@@ -2623,6 +2628,25 @@ export async function runAgent(
         signalDone = resolve;
       });
 
+      // Retry-recovery hint: when attempt > 0, prepend a small `<retry-recovery>`
+      // block listing the discoveries the prior attempt already made (package
+      // manager, env-key probes, which skill was loaded). The fresh attempt
+      // starts a new SDK conversation, so without this hint it redoes the
+      // same probes — typically 10–20s of avoidable wall time on cold
+      // discovery tool calls. Empty string on attempt 0 (no prior facts to
+      // share) and when the prior attempt died before any discovery
+      // captured anything (`buildRetryHint` returns ''); concatenation is
+      // a no-op in those cases.
+      const retryHint = attempt > 0 ? buildRetryHint(agentState) : '';
+      const attemptPrompt = retryHint ? `${prompt}\n\n${retryHint}` : prompt;
+      if (retryHint) {
+        logToFile(
+          `Retry hint: prepending ${
+            agentState.getDiscoveries().size
+          } prior-attempt discovery facts to attempt ${attempt + 1} prompt`,
+        );
+      }
+
       const createPromptStream = async function* () {
         // The first user message contains the framework-specific
         // integration prompt (~1.5 KB) plus any orchestrator context.
@@ -2641,7 +2665,13 @@ export async function runAgent(
             content: [
               {
                 type: 'text',
-                text: prompt,
+                // `attemptPrompt` equals `prompt` on attempt 0 (cache stays
+                // hot across runs); on attempt N+1 it's `prompt + retry hint`,
+                // which is a fresh cache key — that's fine because the only
+                // time we trigger the retry path is when something already
+                // went wrong, and skipping ~3 probe tool calls beats a hot
+                // cache hit on the first turn.
+                text: attemptPrompt,
                 cache_control: { type: 'ephemeral' },
               },
             ],
@@ -3076,6 +3106,21 @@ export async function runAgent(
             receivedSuccessResult,
             recentStatuses,
           );
+
+          // Sniff this message for discovery-shaped tool results (package
+          // manager, env-key probe, which skill loaded). Captured into
+          // agentState so a subsequent retry can prepend a `<retry-recovery>`
+          // hint that lets the model skip the same probes. No-op for
+          // non-discovery messages; failures are swallowed so a malformed
+          // tool_result never tanks the run.
+          try {
+            captureDiscoveryFromMessage(message, agentState);
+          } catch (err) {
+            logToFile(
+              'captureDiscoveryFromMessage threw (non-fatal):',
+              err instanceof Error ? err.message : String(err),
+            );
+          }
 
           try {
             middleware?.onMessage(message);
@@ -3694,5 +3739,99 @@ function handleSDKMessage(
         debug(`Unhandled message type: ${message.type}`);
       }
       break;
+  }
+}
+
+/**
+ * Sniff a single SDK message for discovery-shaped tool calls / results
+ * (package manager probe, env-key probe, which skill loaded) and stash a
+ * compact summary into the supplied AgentState. The retry path reads
+ * those summaries via `buildRetryHint` to skip redundant probes on
+ * attempt N+1.
+ *
+ * Strategy:
+ *   - assistant.tool_use: bump per-tool counters (used for diagnostics).
+ *   - user.tool_result: extract the relevant signal for our cache list.
+ *
+ * The set of tools we care about is intentionally narrow — these are the
+ * cold-start probes that dominate the early seconds of a run. Adding more
+ * here grows the retry-hint block, which costs prompt tokens; bias toward
+ * "would skipping this tool call save more than the hint costs?".
+ *
+ * Exported for unit tests.
+ */
+export function captureDiscoveryFromMessage(
+  message: SDKMessage,
+  state: AgentState,
+): void {
+  if (message.type === 'assistant') {
+    const content = message.message?.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+      if (
+        block?.type === 'tool_use' &&
+        typeof (block as { name?: unknown }).name === 'string'
+      ) {
+        const toolName = (block as { name: string }).name;
+        state.recordToolUse(toolName);
+        // Skill loads: capture the skill ID directly off the tool input
+        // (no wait for tool_result needed — the agent commits to the
+        // skill at the tool_use site).
+        if (toolName === 'Skill') {
+          const input = (block as { input?: unknown }).input;
+          if (input && typeof input === 'object') {
+            const skillId = (input as { skill?: unknown }).skill;
+            if (typeof skillId === 'string' && skillId.length <= 200) {
+              state.recordDiscovery('Skill loaded', skillId);
+            }
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  if (message.type !== 'user') return;
+  const content = message.message?.content;
+  if (!Array.isArray(content)) return;
+  for (const block of content) {
+    if (block?.type !== 'tool_result') continue;
+    // SDKContentBlock's tool_result variant types `content` as
+    // (string | ContentBlock[]) — narrow defensively. Array shapes
+    // (multimodal tool replies) aren't useful for our discovery sniff.
+    const rawContent = (block as unknown as { content?: unknown }).content;
+    const text = typeof rawContent === 'string' ? rawContent : null;
+    if (!text) continue;
+
+    // Tool name isn't on the tool_result block itself — `tool_use_result`
+    // sits at the message root. The shape is the SDK's own envelope; we
+    // try a couple of lookup paths defensively.
+    const envelope = (
+      message as unknown as {
+        tool_use_result?: { commandName?: string; tool_name?: string };
+      }
+    ).tool_use_result;
+    const toolName =
+      envelope?.commandName ?? envelope?.tool_name ?? '<unknown>';
+
+    if (toolName === 'mcp__wizard-tools__detect_package_manager') {
+      // Result text has shape "Detected: pnpm (lockfile: pnpm-lock.yaml)…"
+      // or similar; just stash the first line so the next attempt can
+      // skip the probe and use the same install command.
+      const firstLine = text.split('\n')[0]?.trim();
+      if (firstLine) {
+        state.recordDiscovery('Package manager (already probed)', firstLine);
+      }
+    } else if (toolName === 'mcp__wizard-tools__check_env_keys') {
+      // Result lists which Amplitude env keys are present in .env files.
+      // Trim to the first 3 lines — full output can be hundreds of bytes.
+      const summary = text.split('\n').slice(0, 3).join(' | ').trim();
+      if (summary) {
+        state.recordDiscovery(
+          'Env keys (already probed)',
+          summary.slice(0, 200),
+        );
+      }
+    }
   }
 }

@@ -42,6 +42,26 @@ export class AgentState {
   private lastStatus: { code: string; detail: string } | null = null;
   private compactionCount = 0;
   private attemptId: string | null = null;
+  /**
+   * Discovery facts captured from prior in-attempt tool calls so a retry
+   * doesn't redo the same exploration. Keyed by short stable names. Values
+   * are short human-readable summaries already trimmed for prompt context.
+   * Populated incrementally as tool results stream in (see
+   * `recordToolResultDiscovery` below); read on retry to build the
+   * `<retry-recovery>` hint prepended to the next attempt's user prompt.
+   *
+   * Bounded to a few entries — these are only the pre-discovery tools that
+   * dominate the cold-start tail (package-manager / env-key probes / which
+   * skill was loaded). Don't dump full Read/Glob outputs here; the hint
+   * is meant to skip a tool call, not replay an entire conversation.
+   */
+  private readonly discoveries = new Map<string, string>();
+  /**
+   * Tool calls observed in the current attempt — small bounded counter
+   * keyed by tool name. Used to surface "you already tried X N times" in
+   * the retry hint so the model doesn't loop on a tool that's failing.
+   */
+  private readonly toolUseCounts = new Map<string, number>();
 
   setAttemptId(attemptId: string): void {
     this.attemptId = attemptId;
@@ -57,6 +77,35 @@ export class AgentState {
 
   recordCompaction(): void {
     this.compactionCount += 1;
+  }
+
+  recordToolUse(toolName: string): void {
+    if (!toolName) return;
+    this.toolUseCounts.set(
+      toolName,
+      (this.toolUseCounts.get(toolName) ?? 0) + 1,
+    );
+  }
+
+  /**
+   * Stash a one-line summary of a discovery-shaped tool result so the next
+   * attempt (after a transient retry) can skip the corresponding probe.
+   *
+   * Caller is responsible for trimming the summary — anything longer than
+   * ~200 chars gets dropped to keep the retry-hint block small. Empty /
+   * unknown summaries are a no-op (better to omit a fact than ship a
+   * misleading one to the next attempt).
+   */
+  recordDiscovery(key: string, summary: string): void {
+    if (!key) return;
+    const trimmed = summary?.trim();
+    if (!trimmed) return;
+    if (trimmed.length > 200) return;
+    this.discoveries.set(key, trimmed);
+  }
+
+  getDiscoveries(): ReadonlyMap<string, string> {
+    return this.discoveries;
   }
 
   snapshot(): SerializedAgentState {
@@ -102,7 +151,43 @@ export class AgentState {
     this.modifiedFiles.clear();
     this.lastStatus = null;
     this.compactionCount = 0;
+    this.toolUseCounts.clear();
+    // NOTE: `discoveries` is intentionally NOT cleared here. The retry path
+    // calls reset() between attempts but wants the prior attempt's
+    // discoveries (package manager, env keys, etc.) to carry forward into
+    // the next attempt's prompt. Use `clearDiscoveries()` for a hard reset
+    // (e.g. between unrelated wizard runs).
   }
+
+  clearDiscoveries(): void {
+    this.discoveries.clear();
+  }
+}
+
+/**
+ * Render a compact retry-recovery note to prepend to the next attempt's
+ * user prompt. Mirrors `buildRecoveryNote` (post-compaction) but is keyed
+ * to wizard-level retries triggered by transient gateway errors. The
+ * agent restarts with a fresh conversation; without this hint, it redoes
+ * detect_package_manager / check_env_keys / Skill loads and burns 10–20s
+ * on probes that already succeeded.
+ *
+ * Returns an empty string when there are no preserved discoveries — the
+ * caller can unconditionally concatenate.
+ */
+export function buildRetryHint(state: AgentState): string {
+  const discoveries = state.getDiscoveries();
+  if (discoveries.size === 0) return '';
+  const lines: string[] = [
+    '<retry-recovery>',
+    'A prior attempt was interrupted by a transient upstream error and the wizard is retrying. The discoveries below were verified by tool calls in the prior attempt — trust them and SKIP the corresponding tool calls so this attempt can pick up from where the prior one left off:',
+    '',
+  ];
+  for (const [key, summary] of discoveries) {
+    lines.push(`- ${key}: ${summary}`);
+  }
+  lines.push('</retry-recovery>', '');
+  return lines.join('\n');
 }
 
 /**

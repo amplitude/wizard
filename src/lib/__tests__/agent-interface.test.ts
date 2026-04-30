@@ -25,6 +25,7 @@ import {
   isAuthErrorMessage,
   HOOK_BRIDGE_RACE_RE,
   partitionHookBridgeRace,
+  captureDiscoveryFromMessage,
   AgentErrorType,
   AUTH_RETRY_LIMIT,
   selectModel,
@@ -3092,5 +3093,130 @@ describe('selectModel', () => {
     expect(selectModel('bogus' as 'standard', false)).toBe(
       'anthropic/claude-sonnet-4-6',
     );
+  });
+});
+
+describe('captureDiscoveryFromMessage', () => {
+  // Production wizard runs hit a Vertex 400-cascade and the wizard's retry
+  // loop kicks off a fresh SDK conversation. Without these captures the
+  // model redoes detect_package_manager / check_env_keys / Skill loads on
+  // every retry — typically 10–20s of wasted wall time. The captures feed
+  // the `<retry-recovery>` hint that's prepended to attempt N+1's prompt.
+
+  it('records Skill tool_use as a discovery (skip the load on retry)', () => {
+    const state = new AgentState();
+    captureDiscoveryFromMessage(
+      {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Skill',
+              input: { skill: 'integration-nextjs-pages-router' },
+              id: 'tool-1',
+            },
+          ],
+        },
+        // unknown extra fields tolerated
+      } as unknown as Parameters<typeof captureDiscoveryFromMessage>[0],
+      state,
+    );
+    expect(state.getDiscoveries().get('Skill loaded')).toBe(
+      'integration-nextjs-pages-router',
+    );
+  });
+
+  it('records detect_package_manager tool_result with first-line summary', () => {
+    const state = new AgentState();
+    captureDiscoveryFromMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 't-pm',
+              content:
+                'Detected: pnpm (lockfile: pnpm-lock.yaml)\nUse `pnpm install` for dependencies.',
+            },
+          ],
+        },
+        tool_use_result: {
+          commandName: 'mcp__wizard-tools__detect_package_manager',
+        },
+      } as unknown as Parameters<typeof captureDiscoveryFromMessage>[0],
+      state,
+    );
+    expect(state.getDiscoveries().get('Package manager (already probed)')).toBe(
+      'Detected: pnpm (lockfile: pnpm-lock.yaml)',
+    );
+  });
+
+  it('records check_env_keys tool_result trimmed to first three lines', () => {
+    const state = new AgentState();
+    captureDiscoveryFromMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 't-env',
+              content:
+                'NEXT_PUBLIC_AMPLITUDE_API_KEY: present in .env.local\nAMPLITUDE_API_KEY: not set\nAMPLITUDE_HOST: not set\n(40 more lines of noise...)',
+            },
+          ],
+        },
+        tool_use_result: {
+          commandName: 'mcp__wizard-tools__check_env_keys',
+        },
+      } as unknown as Parameters<typeof captureDiscoveryFromMessage>[0],
+      state,
+    );
+    const captured = state.getDiscoveries().get('Env keys (already probed)');
+    expect(captured).toContain('NEXT_PUBLIC_AMPLITUDE_API_KEY: present');
+    expect(captured).not.toContain('40 more lines');
+  });
+
+  it("ignores tool_results from tools we don't care about", () => {
+    const state = new AgentState();
+    captureDiscoveryFromMessage(
+      {
+        type: 'user',
+        message: {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 't-read',
+              content: 'package.json contents go here',
+            },
+          ],
+        },
+        tool_use_result: { commandName: 'Read' },
+      } as unknown as Parameters<typeof captureDiscoveryFromMessage>[0],
+      state,
+    );
+    expect(state.getDiscoveries().size).toBe(0);
+  });
+
+  it('survives malformed messages without throwing', () => {
+    const state = new AgentState();
+    // No content array, no envelope — this happens for system / result
+    // messages and shouldn't blow up the discovery sniff.
+    expect(() =>
+      captureDiscoveryFromMessage(
+        {
+          type: 'user',
+          message: { role: 'user' },
+        } as unknown as Parameters<typeof captureDiscoveryFromMessage>[0],
+        state,
+      ),
+    ).not.toThrow();
+    expect(state.getDiscoveries().size).toBe(0);
   });
 });
