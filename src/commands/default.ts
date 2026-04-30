@@ -9,6 +9,8 @@ import {
   buildSessionFromOptions,
   resolveNonInteractiveCredentials,
   runDirectSignupIfRequested,
+  gateCiSignupAcceptToS,
+  gateAgentSignupArguments,
 } from './helpers';
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
@@ -143,6 +145,10 @@ export const defaultCommand: CommandModule = {
         const session = await buildSessionFromOptions(options);
         session.agent = true;
 
+        if (!gateAgentSignupArguments(session, agentUI)) {
+          return;
+        }
+
         // Attempt direct signup before falling through to cached-token
         // resolution. Agent mode has no browser, so a null result continues
         // to resolveNonInteractiveCredentials, which handles cached tokens
@@ -168,6 +174,10 @@ export const defaultCommand: CommandModule = {
 
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
+
+        if (!gateCiSignupAcceptToS(session)) {
+          return;
+        }
 
         // Attempt direct signup before falling through to cached-token
         // resolution. CI mode has no browser, so a null result continues to

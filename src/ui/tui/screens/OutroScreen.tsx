@@ -32,6 +32,7 @@ import {
 } from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
+import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -118,6 +119,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
 
   const outroData = store.session.outroData;
   const visibleEvents = store.eventPlan.filter((e) => e.name.trim().length > 0);
+
+  /** Browser link with sign-in / refresh gate — see `toWizardDashboardOpenUrl`. */
+  const dashboardCanonicalUrl = store.session.checklistDashboardUrl;
+  const dashboardOpenUrl = dashboardCanonicalUrl
+    ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
+    : null;
 
   if (!outroData) {
     return (
@@ -214,16 +221,14 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               a dashboard during the conclude phase; surface it as a clickable
               link with a clear "this is your next step" framing so users
               don't bounce out of the terminal wondering "what now?". */}
-          {store.session.checklistDashboardUrl && (
+          {dashboardOpenUrl && (
             <Box marginTop={1} flexDirection="column">
               <Text color={Colors.accent} bold>
                 {Icons.diamond} Your dashboard is ready
               </Text>
               <Box marginLeft={2}>
                 <Text color={Colors.body}>
-                  <TerminalLink url={store.session.checklistDashboardUrl}>
-                    {store.session.checklistDashboardUrl}
-                  </TerminalLink>
+                  <TerminalLink url={dashboardOpenUrl}>{dashboardOpenUrl}</TerminalLink>
                 </Text>
               </Box>
               <Box marginLeft={2}>
@@ -348,7 +353,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             // Without the existsSync gate, the option would point at a stale
             // report from a previous run (e.g. against a different workspace).
             options={(() => {
-              const dashboardUrl = store.session.checklistDashboardUrl;
+              const dashboardUrl = dashboardOpenUrl;
               return [
                 {
                   label: dashboardUrl
@@ -384,8 +389,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   },
                 );
                 const url =
-                  store.session.checklistDashboardUrl ??
-                  OUTBOUND_URLS.overview[zone];
+                  dashboardOpenUrl ?? OUTBOUND_URLS.overview[zone];
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });

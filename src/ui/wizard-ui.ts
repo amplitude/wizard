@@ -8,7 +8,7 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
-import type { RetryState } from '../lib/wizard-session';
+import type { OutroData, RetryState } from '../lib/wizard-session';
 
 /** Result returned by the confirm_event_plan tool to the agent. */
 export type EventPlanDecision =
@@ -46,6 +46,14 @@ export interface WizardUI {
    *     render and no user to interact with the message.
    */
   cancel(message: string, options?: { docsUrl?: string }): Promise<void>;
+
+  /**
+   * Set the OutroScreen state reactively. Use from business logic that needs
+   * to render an Error or Success outro before calling `cancel()` — direct
+   * mutation of `session.outroData` doesn't notify subscribers, so the
+   * OutroScreen would not re-render and the user would miss the message.
+   */
+  setOutroData(data: OutroData): void;
 
   // ── Logging ───────────────────────────────────────────────────────
   log: {
