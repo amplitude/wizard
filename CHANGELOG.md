@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.13.0](https://github.com/amplitude/wizard/compare/wizard-v1.12.0...wizard-v1.13.0) (2026-04-30)
+
+
+### Features
+
+* **commandments:** fan out independent discovery probes in one message ([#453](https://github.com/amplitude/wizard/issues/453)) ([e3a6f8e](https://github.com/amplitude/wizard/commit/e3a6f8ea51365ea89c78447f34630937f061c8dc))
+
 ## [1.12.0](https://github.com/amplitude/wizard/compare/wizard-v1.11.1...wizard-v1.12.0) (2026-04-30)
 
 
