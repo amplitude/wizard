@@ -83,6 +83,29 @@ export async function createDashboardStep(
     return;
   }
 
+  // 1b. If the agent already created a dashboard (bundled skill instructs it
+  //     to, even though the post-#154 design says it shouldn't), reuse that
+  //     result instead of re-running the work. Without this guard the
+  //     post-agent agent fallback re-attempts chart/dashboard creation from
+  //     scratch and almost always hits the 90s ceiling — the user-visible
+  //     "Creating charts and dashboard in Amplitude…" hang.
+  const existing = readExistingDashboardFile(dashboardPath);
+  if (existing) {
+    logToFile(
+      `[createDashboard] reusing dashboard already created by agent: ${existing.dashboardUrl}`,
+    );
+    persistDashboard(session.installDir, existing);
+    session.checklistDashboardUrl = existing.dashboardUrl;
+    ui.setDashboardUrl(existing.dashboardUrl);
+    analytics.wizardCapture('dashboard created', {
+      integration,
+      'chart count': existing.charts?.length ?? 0,
+      'duration ms': 0,
+      source: 'agent',
+    });
+    return;
+  }
+
   ui.pushStatus('Creating your analytics dashboard');
   const spinner = ui.spinner();
   spinner.start('Creating charts and dashboard in Amplitude…');
@@ -174,7 +197,33 @@ export async function createDashboardStep(
     integration,
     'chart count': result.charts?.length ?? 0,
     'duration ms': durationMs,
+    source: 'post-agent',
   });
+}
+
+/**
+ * Try to load an already-written `.amplitude-dashboard.json`. Returns the
+ * parsed result if present and valid, null otherwise (missing file,
+ * unreadable, malformed JSON, fails schema validation, or empty
+ * dashboardUrl). Failures fall through to the agent fallback path.
+ */
+function readExistingDashboardFile(
+  dashboardPath: string,
+): DashboardResult | null {
+  if (!fs.existsSync(dashboardPath)) return null;
+  try {
+    const content = fs.readFileSync(dashboardPath, 'utf8');
+    const parsed = DashboardFileSchema.parse(JSON.parse(content));
+    if (!parsed.dashboardUrl) return null;
+    return parsed;
+  } catch (err) {
+    logToFile(
+      `[createDashboard] existing ${dashboardPath} unusable, will run agent: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return null;
+  }
 }
 
 // ── Helpers (exported for testing) ─────────────────────────────────────────
