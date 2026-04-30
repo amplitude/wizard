@@ -18,14 +18,7 @@
 
 import React from 'react';
 import * as fs from 'node:fs';
-import {
-  describe,
-  it,
-  expect,
-  vi,
-  beforeEach,
-  afterEach,
-} from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -96,8 +89,7 @@ describe('OutroScreen — error variants', () => {
   });
 
   it('uses the dashboard-aware label when checklistDashboardUrl is set', () => {
-    const canonicalDashboard =
-      'https://app.amplitude.com/analytics/d/abc123';
+    const canonicalDashboard = 'https://app.amplitude.com/analytics/d/abc123';
     const store = makeStoreForSnapshot({
       outroData: {
         kind: OutroKind.Success,
@@ -300,6 +292,67 @@ describe('OutroScreen — error variants', () => {
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
       expect(frame).toContain('1 file');
       expect(frame).not.toContain('1 files');
+    } finally {
+      resetSetupComplete();
+    }
+  });
+
+  // ── Analytics dedup regression (Bugbot, PR #412) ────────────────────
+  //
+  // The 'view changes opened' event has two emit sites: the 'D' keystroke
+  // shortcut and the picker's "View files changed" entry. Both should
+  // report the same `'file count'` for the same registry state — the
+  // picker uses `buildChangedFileList(...).length` (deduped) but the
+  // keystroke path used `written.length + modified.length` (raw sum).
+  // When `registerSetupComplete` is called with a path that lands in
+  // both arrays (allowed by the registry), the two sites diverged,
+  // breaking cross-source comparison. Fix: dedup at both sites.
+
+  it('emits a deduped file count on the keystroke path even when written and modified overlap', async () => {
+    resetSetupComplete();
+    // Same path in both lists — the registry permits this and our
+    // picker-path file list is deduped (`buildChangedFileList` drops
+    // the duplicate). The keystroke path must follow suit.
+    registerSetupComplete({
+      files: {
+        written: ['src/App.tsx'],
+        modified: ['src/App.tsx'],
+      },
+    });
+    try {
+      const { analytics } = await import('../../../../utils/analytics.js');
+      const wizardCaptureSpy = vi
+        .spyOn(analytics, 'wizardCapture')
+        .mockImplementation(() => {});
+
+      const { render } = await import('ink-testing-library');
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+      });
+      const { stdin, unmount } = render(<OutroScreen store={store} />);
+
+      // Two frames so the picker mounts and the screen-input handler
+      // is registered.
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      stdin.write('D');
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+
+      const opened = wizardCaptureSpy.mock.calls.find(
+        ([name]) => name === 'view changes opened',
+      );
+      expect(opened).toBeDefined();
+      // Deduped count is 1 (the same path in both lists). The pre-fix
+      // code would have reported 2 here.
+      expect(opened?.[1]).toMatchObject({
+        'file count': 1,
+        source: 'keystroke',
+      });
+
+      wizardCaptureSpy.mockRestore();
+      unmount();
     } finally {
       resetSetupComplete();
     }
@@ -584,7 +637,8 @@ describe('OutroScreen — full-activation re-runs', () => {
     const store = makeStoreForSnapshot({
       outroData: { kind: OutroKind.Success, changes: [] },
       activationLevel: 'full',
-      checklistDashboardUrl: 'https://app.amplitude.com/analytics/d/from-session',
+      checklistDashboardUrl:
+        'https://app.amplitude.com/analytics/d/from-session',
       installDir,
     });
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
