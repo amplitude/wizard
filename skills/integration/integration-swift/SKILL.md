@@ -24,7 +24,7 @@ Follow these steps in order to complete the integration:
 ## Reference files
 
 - `references/EXAMPLE.md` - Swift (iOS/macOS) example project code
-- `references/ios.md` - Amplitude documentation for Ios
+- `references/ios.md` - Ios
 - `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
 - `references/basic-integration-1.1-edit.md` - Amplitude setup - edit

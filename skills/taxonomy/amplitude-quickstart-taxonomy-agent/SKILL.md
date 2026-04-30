@@ -113,8 +113,26 @@ Infer which Amplitude patterns apply:
 
 1. **Business outcomes, not UI noise** — what happened, not “button clicked”.
    Prefer `Order Completed`, `Trial Started`, not `Modal Opened`.
-2. **Autocapture-first** — Do **not** define custom “Page Viewed” (Autocapture
-   covers pages). Focus on state changes and meaningful actions.
+2. **Autocapture-first** — Do **not** emit custom events that duplicate anything Amplitude Browser SDK Autocapture already produces. Suggest custom events **only** for business outcomes and state changes Autocapture can’t see.
+
+   **Excluded event names** (emitted by Autocapture — never suggest these as custom events):
+
+   | Autocapture option        | Event name(s)                                                                                                |
+   | ------------------------- | ------------------------------------------------------------------------------------------------------------ |
+   | `pageViews`               | `[Amplitude] Page Viewed`                                                                                    |
+   | `sessions`                | `[Amplitude] Start Session`, `[Amplitude] End Session`                                                       |
+   | `formInteractions`        | `[Amplitude] Form Started`, `[Amplitude] Form Submitted`                                                     |
+   | `fileDownloads`           | `[Amplitude] File Downloaded`                                                                                |
+   | `elementInteractions`     | `[Amplitude] Element Clicked`, `[Amplitude] Element Changed`                                                 |
+   | `frustrationInteractions` | `[Amplitude] Rage Click`, `[Amplitude] Dead Click`, `[Amplitude] Error Click`, `[Amplitude] Thrashed Cursor` |
+   | `networkTracking`         | `[Amplitude] Network Request`                                                                                |
+   | `webVitals`               | `[Amplitude] Web Vitals`                                                                                     |
+
+   **Also exclude conceptual duplicates** regardless of name. Examples: `Page Viewed`, `Button Clicked`, `Link Clicked`, `Form Submitted`, `Session Started`, `File Downloaded` — these all duplicate Autocapture in concept even without the `[Amplitude]` prefix. Prefer business outcomes (`Order Completed`, `Signup Completed`, `Video Watched`) over UI interactions.
+
+   Attribution does **not** emit an event — it sets user properties — so no exclusion is needed there.
+
+   *Source of truth:* this list is maintained here. The sibling instrumentation skills (`skills/instrumentation/instrument-events/references/best-practices.md` and `skills/instrumentation/discover-event-surfaces/references/best-practices.md`) carry an abbreviated version and must be updated in lockstep when the authoritative list changes.
 3. **Properties (max ~7 per event)** — factual, stable, chart-useful. **No
    PII.**
    - For transactional events: **`product_engagement.*`** +
@@ -128,11 +146,15 @@ Infer which Amplitude patterns apply:
 
 - Transactional events: dual arrays where applicable
 - Funnel events: shared properties for linkage
-- No custom generic pageview events
+- **No suggested event duplicates an Autocapture-covered event** — verify against
+  the excluded-event table in Step 6, rule 2 (includes `[Amplitude] Page Viewed`,
+  element / form / session / file-download / frustration / network / web-vitals
+  events, and conceptual equivalents like `Button Clicked`)
 - Count discipline: 10–30 events
 - Error coverage: `Error Encountered` if flows can fail
-- Naming: Lowercase with spaces for event names (e.g. `order completed`),
-  consistent property naming
+- Naming: Title Case with spaces following `[Noun] + [Past-Tense Verb]` (e.g.
+  `Order Completed`, `Video Watched`). Property names use snake_case. Apply
+  consistently across all events.
 
 ---
 

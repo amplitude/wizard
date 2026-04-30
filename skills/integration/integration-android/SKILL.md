@@ -22,7 +22,7 @@ Follow these steps in order to complete the integration:
 ## Reference files
 
 - `references/EXAMPLE.md` - Android example project code
-- `references/android.md` - Amplitude documentation for Android
+- `references/android.md` - Android
 - `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
 - `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
