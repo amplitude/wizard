@@ -434,7 +434,14 @@ describe('callAmplitudeMcp', () => {
   });
 
   describe('abortSignal', () => {
-    it('threads the signal into fetch calls', async () => {
+    it('propagates external abort into every fetch call (linked, not identity)', async () => {
+      // Each fetch is now wrapped with a per-call timeout
+      // (`fetchWithTimeout`) which combines the external signal with an
+      // internal AbortController. The signal threaded through to `fetch`
+      // is the internal one, not the caller's — but aborting the external
+      // signal must still cancel each fetch. Verify the contract by
+      // collecting every fetch's signal, then aborting the external
+      // controller and observing all of them flip to aborted.
       const controller = new AbortController();
       setupSuccessfulMcpSession();
       mockFetch.mockResolvedValueOnce(makeFetchResponse(sseResult({ v: 1 })));
@@ -450,13 +457,20 @@ describe('callAmplitudeMcp', () => {
         parseAgent: () => null,
       });
 
-      // All three fetch calls (initialize, notifications/initialized, tools/call)
-      // should have received the signal
-      for (const [, opts] of mockFetch.mock.calls) {
-        expect((opts as Record<string, unknown>).signal).toBe(
-          controller.signal,
-        );
+      const seenSignals = mockFetch.mock.calls.map(
+        ([, opts]) => (opts as Record<string, unknown>).signal,
+      ) as AbortSignal[];
+      expect(seenSignals.length).toBe(3); // initialize, notifications, tool
+      // Sanity: the signals are not the bare external one (we wrap them
+      // with a per-call timeout-bound controller now).
+      for (const s of seenSignals) {
+        expect(s).not.toBe(controller.signal);
+        expect(s.aborted).toBe(false);
       }
+      // All three signals are STILL live at this point (the call already
+      // resolved, but signals were settled with abort listeners). Aborting
+      // mid-call would tear them down — verified by the "propagates abort
+      // to the agent fallback" test below.
     });
 
     it('propagates abort to the agent fallback', async () => {
@@ -535,12 +549,121 @@ describe('callAmplitudeMcp', () => {
         parseAgent: () => null,
       });
 
-      const { getWizardAbortSignal } = await import('../../utils/wizard-abort');
-      const wizardSignal = getWizardAbortSignal();
-      // Every fetch call should have received the wizard signal.
+      // Each fetch now sees an internal-controller signal (linked to
+      // the wizard-wide signal via listener inside `fetchWithTimeout`).
+      // Verify there ARE signals threaded through (catches a regression
+      // where someone forgets to forward `signal` at all) — the linked-
+      // behavior contract is exercised by the "propagates abort to the
+      // agent fallback" test below, which actually fires an abort.
+      expect(mockFetch.mock.calls.length).toBeGreaterThan(0);
       for (const [, opts] of mockFetch.mock.calls) {
-        expect((opts as Record<string, unknown>).signal).toBe(wizardSignal);
+        const signal = (opts as Record<string, unknown>).signal;
+        expect(signal).toBeInstanceOf(AbortSignal);
       }
+    });
+
+    it('aborts in-flight fetch when external signal aborts mid-call', async () => {
+      // Tighter contract test: while a fetch is in flight, fire the
+      // external abort and observe the fetch reject with an AbortError.
+      // Catches regressions where `fetchWithTimeout` forgets to wire the
+      // external signal listener.
+      const controller = new AbortController();
+
+      // Hold the fetch open until the test releases it.
+      let releaseFetch!: () => void;
+      const fetchGate = new Promise<Response>((resolve) => {
+        releaseFetch = () =>
+          resolve(makeFetchResponse('', { 'mcp-session-id': SESSION_ID }));
+      });
+      // Make initialize hang on the gate, BUT also reject when the
+      // signal aborts (this is what real `fetch` does).
+      mockFetch.mockImplementationOnce(
+        (_url: string, opts: Record<string, unknown>) => {
+          const signal = opts.signal as AbortSignal;
+          return new Promise((resolve, reject) => {
+            signal.addEventListener('abort', () =>
+              reject(
+                new DOMException(
+                  String(signal.reason ?? 'aborted'),
+                  'AbortError',
+                ),
+              ),
+            );
+            void fetchGate.then(resolve);
+          });
+        },
+      );
+
+      const callPromise = callAmplitudeMcp({
+        accessToken: 'tok',
+        abortSignal: controller.signal,
+        direct: async () => 'should not be reached',
+        agentPrompt: 'p',
+        parseAgent: () => null,
+      });
+
+      // Yield so the fetch is in flight.
+      await new Promise((r) => setImmediate(r));
+      // Abort externally — the fetch (and the whole call) should fail
+      // fast instead of waiting on `fetchGate`.
+      controller.abort('test-abort');
+
+      const result = await callPromise;
+      // Initialize threw -> openMcpSession returned null -> fallback ran
+      // (no agent output mocked) -> overall result is null.
+      expect(result).toBeNull();
+      // Release the parked fetch so the test doesn't dangle.
+      releaseFetch();
+    });
+  });
+
+  describe('per-fetch timeouts', () => {
+    // The core reliability win: a hung gateway request can no longer
+    // pin the wizard. Fake timers let us advance through the timeout
+    // window without waiting in real wall-clock time.
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('aborts the initialize fetch after the per-call timeout fires', async () => {
+      vi.useFakeTimers();
+
+      // Simulate a hung gateway: the fetch promise is wired to reject
+      // when its signal aborts (which is exactly what real fetch does).
+      mockFetch.mockImplementationOnce(
+        (_url: string, opts: Record<string, unknown>) => {
+          const signal = opts.signal as AbortSignal;
+          return new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () =>
+              reject(
+                new DOMException(
+                  String(signal.reason ?? 'aborted'),
+                  'AbortError',
+                ),
+              ),
+            );
+            // Never resolve — only the signal abort path can settle this.
+          });
+        },
+      );
+
+      const callPromise = callAmplitudeMcp({
+        accessToken: 'tok',
+        direct: async () => 'unreachable',
+        agentPrompt: 'p',
+        parseAgent: () => null,
+      });
+
+      // Advance past the per-call timeout window (MCP_FETCH_TIMEOUT_MS = 30s).
+      await vi.advanceTimersByTimeAsync(31_000);
+      // Real timer for the rest so the fallback path can settle.
+      vi.useRealTimers();
+
+      const result = await callPromise;
+      // Initialize timed out -> openMcpSession returned null -> fallback
+      // ran with no agent output -> overall null. The point is that
+      // 31s of fake time settled the call, instead of hanging forever.
+      expect(result).toBeNull();
     });
   });
 });

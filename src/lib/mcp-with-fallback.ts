@@ -82,6 +82,69 @@ type SessionOpenResult =
   | { ok: true; callTool: CallToolFnInternal }
   | { ok: false; deterministic: boolean; reason: string };
 const MCP_SESSION_TTL_MS = 60_000;
+
+// ── Per-fetch timeouts ────────────────────────────────────────────────────────
+//
+// Without these caps, a hung MCP gateway pinned the wizard with no upper
+// bound: `openMcpSessionInner` and the bound `callTool` closure both
+// awaited bare `fetch(...)` calls relying solely on the caller's external
+// abort signal. In practice that meant a hang propagated all the way up
+// to the outer agent's stall timer (60s) before anything reacted,
+// burning the entire SDK turn for what was usually a single hung request.
+//
+// Matched against the rest of the wizard's network budget:
+//   - Token-refresh: 10s
+//   - Gateway-liveness probe: 8s
+//   - Agent fallback: 12s
+//   - SSE stream stall: 60s (active phase)
+// 30s for tool calls is generous (the Amplitude MCP server typically
+// responds in <2s; 30s suggests something is wrong) and 5s for the
+// fire-and-forget `notifications/initialized` is generous (we don't
+// even use the response). The fetch is still race-cancelled by the
+// caller's external signal — these caps are the upper bound, not a
+// floor.
+
+/** Tool-call + initialize round-trip cap. */
+const MCP_FETCH_TIMEOUT_MS = 30_000;
+/** Fire-and-forget `notifications/initialized` cap. */
+const MCP_NOTIFY_TIMEOUT_MS = 5_000;
+
+/**
+ * `fetch` wrapped with a per-call timeout. Combines the caller's
+ * external `AbortSignal` (if any) with an internal AbortController so
+ * either source — caller cancellation OR timeout — tears down the
+ * request immediately. Always cleans up the timer in the win path.
+ *
+ * Throws on timeout exactly the way `fetch` throws on caller-side
+ * abort: an `AbortError` from the underlying controller. Callers that
+ * already have `try/catch` on `fetch` need no changes; the existing
+ * `[MCP] X failed: ...` log lines absorb the new error class.
+ */
+async function fetchWithTimeout(
+  url: string,
+  init: Parameters<typeof fetch>[1],
+  timeoutMs: number,
+  externalSignal?: AbortSignal,
+): Promise<Response> {
+  // Bail immediately if the external signal is already aborted —
+  // matches the standard `fetch` contract for already-aborted signals.
+  if (externalSignal?.aborted) {
+    throw new DOMException(
+      String(externalSignal.reason ?? 'aborted'),
+      'AbortError',
+    );
+  }
+  const controller = new AbortController();
+  const onExternalAbort = (): void => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+  }
+}
 const mcpSessionCache = new Map<
   string,
   { callTool: CallToolFnInternal; expiresAt: number }
@@ -158,21 +221,25 @@ async function openMcpSessionInner(
 
   let sessionId: string | undefined;
   try {
-    const initRes = await fetch(mcpUrl, {
-      method: 'POST',
-      headers: { ...headers, Accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 0,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: { name: 'amplitude-wizard', version: '1.0.0' },
-        },
-      }),
+    const initRes = await fetchWithTimeout(
+      mcpUrl,
+      {
+        method: 'POST',
+        headers: { ...headers, Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 0,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'amplitude-wizard', version: '1.0.0' },
+          },
+        }),
+      },
+      MCP_FETCH_TIMEOUT_MS,
       signal,
-    });
+    );
     // 401/403 mean the access token is bad. The agent fallback uses the
     // same token, so it would just hit the same wall after a 12s setup —
     // fail fast instead. 5xx is transient (gateway hiccup); fall through.
@@ -206,15 +273,19 @@ async function openMcpSessionInner(
   }
 
   try {
-    const notifRes = await fetch(mcpUrl, {
-      method: 'POST',
-      headers: { ...headers, 'Mcp-Session-Id': sessionId },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }),
+    const notifRes = await fetchWithTimeout(
+      mcpUrl,
+      {
+        method: 'POST',
+        headers: { ...headers, 'Mcp-Session-Id': sessionId },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notifications/initialized',
+        }),
+      },
+      MCP_NOTIFY_TIMEOUT_MS,
       signal,
-    });
+    );
     await notifRes.body?.cancel().catch(() => undefined);
   } catch {
     logToFile('[MCP] notifications/initialized failed (continuing)');
@@ -231,21 +302,25 @@ async function openMcpSessionInner(
       { 'mcp.tool': name, 'mcp.session_id': sessionId },
       async () => {
         try {
-          const res = await fetch(mcpUrl, {
-            method: 'POST',
-            headers: {
-              ...headers,
-              'Mcp-Session-Id': sessionId,
-              Accept: 'application/json, text/event-stream',
+          const res = await fetchWithTimeout(
+            mcpUrl,
+            {
+              method: 'POST',
+              headers: {
+                ...headers,
+                'Mcp-Session-Id': sessionId,
+                Accept: 'application/json, text/event-stream',
+              },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id,
+                method: 'tools/call',
+                params: { name, arguments: args },
+              }),
             },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id,
-              method: 'tools/call',
-              params: { name, arguments: args },
-            }),
+            MCP_FETCH_TIMEOUT_MS,
             signal,
-          });
+          );
           const body = await res.text();
           const sseData = body.match(/^data: (.+)$/m)?.[1] ?? '';
           const rpc = JSON.parse(sseData) as {
