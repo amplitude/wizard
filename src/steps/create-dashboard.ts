@@ -14,8 +14,11 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 
-import { callAmplitudeMcp, AMPLITUDE_MCP_URL } from '../lib/mcp-with-fallback';
+import { callAmplitudeMcp } from '../lib/mcp-with-fallback';
 import { parseEventPlanContent } from '../lib/event-plan-parser';
+import { getMcpUrlFromZone } from '../utils/urls';
+import { resolveZone } from '../lib/zone-resolution';
+import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
 import { getUI } from '../ui';
 import { analytics } from '../utils/analytics';
 import { logToFile } from '../utils/debug';
@@ -223,9 +226,13 @@ async function runCreateDashboard(args: {
   session: WizardSession;
 }): Promise<DashboardResult | null> {
   const { accessToken, events, session } = args;
-  const mcpUrl = session.localMcp
-    ? 'http://localhost:8787/mcp'
-    : process.env.MCP_URL || AMPLITUDE_MCP_URL;
+  // Region-aware MCP URL: an EU user's dashboard / chart MCP calls must
+  // route to mcp.eu.amplitude.com so the dashboard lands in the right
+  // data center. readDisk: true — create-dashboard runs post-agent and
+  // can be reached from non-TUI paths (CI, agent mode) where the
+  // RegionSelect tier-1 invariant isn't guaranteed.
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
+  const mcpUrl = getMcpUrlFromZone(zone, { local: session.localMcp });
 
   const agentPrompt = buildAgentPrompt(events, session);
 

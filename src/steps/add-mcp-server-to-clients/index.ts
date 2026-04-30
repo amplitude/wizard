@@ -1,4 +1,5 @@
 import type { Integration } from '../../lib/constants';
+import type { CloudRegion } from '../../utils/types';
 import { traceStep } from '../../telemetry';
 import { analytics } from '../../utils/analytics';
 import { getUI } from '../../ui';
@@ -74,10 +75,19 @@ export const addMCPServerToClientsStep = async ({
   integration,
   local = false,
   ci = false,
+  zone = 'us',
 }: {
   integration?: Integration;
   local?: boolean;
   ci?: boolean;
+  /**
+   * User's resolved Amplitude zone. The MCP URL written to each editor's
+   * config persists past the wizard run, so an EU user installing while
+   * we hardcoded US would be stuck talking to the US MCP host forever.
+   * Defaults to 'us' for the rare callers that genuinely have no zone
+   * context (CLI mode `mcp add` outside a wizard run).
+   */
+  zone?: CloudRegion;
 }): Promise<string[]> => {
   const ui = getUI();
 
@@ -103,6 +113,7 @@ export const addMCPServerToClientsStep = async ({
       undefined,
       [...ALL_FEATURE_VALUES],
       local,
+      zone,
     );
   });
 
@@ -175,9 +186,10 @@ export const addMCPServer = async (
   personalApiKey?: string,
   selectedFeatures?: string[],
   local?: boolean,
+  zone: CloudRegion = 'us',
 ): Promise<void> => {
   for (const client of clients) {
-    await client.addServer(personalApiKey, selectedFeatures, local);
+    await client.addServer(personalApiKey, selectedFeatures, local, zone);
   }
 };
 

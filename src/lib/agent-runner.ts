@@ -26,7 +26,7 @@ import {
   AgentErrorType,
   buildWizardMetadata,
 } from './agent-interface';
-import { getLlmGatewayUrlFromHost } from '../utils/urls';
+import { getLlmGatewayUrlFromHost, getMcpUrlFromZone } from '../utils/urls';
 import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
@@ -696,10 +696,11 @@ async function runAgentWizardBody(
   const wizardFlags = await analytics.getAllFlagsForWizard();
   const wizardMetadata = buildWizardMetadata(wizardFlags);
 
-  // Determine MCP URL: CLI flag > env var > production default
-  const mcpUrl = session.localMcp
-    ? 'http://localhost:8787/mcp'
-    : process.env.MCP_URL || 'https://mcp.amplitude.com/mcp';
+  // Determine MCP URL: CLI flag > env var > region-aware production default.
+  // Routing an EU user through the US MCP host runs their session against
+  // US infrastructure even though their data lives in EU — both a UX bug
+  // (wrong project, no events) and a compliance bug.
+  const mcpUrl = getMcpUrlFromZone(cloudRegion, { local: session.localMcp });
 
   // Skills URL: derived from the same host as the LLM proxy.
   // Always tries remote first; falls back to bundled if fetch fails.

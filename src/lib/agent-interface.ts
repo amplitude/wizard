@@ -24,7 +24,11 @@ import {
 } from './wizard-session';
 import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
-import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
+import {
+  getHostFromRegion,
+  getLlmGatewayUrlFromHost,
+  getMcpUrlFromZone,
+} from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
 import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
 import {
@@ -1569,7 +1573,10 @@ function buildDefaultAgentConfig(): AgentConfig {
       : DEFAULT_AMPLITUDE_ZONE;
   const storedToken = getStoredToken(storedUser?.id, zone)?.accessToken ?? '';
   const host = getHostFromRegion(zone);
-  const mcpUrl = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
+  // Region-aware MCP URL: an EU stored user must talk to the EU MCP host,
+  // not US. The MCP_URL env override (test/dev) is honored inside the
+  // helper.
+  const mcpUrl = getMcpUrlFromZone(zone);
   return {
     workingDirectory: process.cwd(),
     amplitudeMcpUrl: mcpUrl,

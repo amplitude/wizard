@@ -39,8 +39,24 @@ export const mcpCommand: CommandModule = {
               const { addMCPServerToClientsStep } = await import(
                 '../steps/add-mcp-server-to-clients/index.js'
               );
+              // No TUI = no RegionSelect, so resolve zone from ~/.ampli.json
+              // via the stored user. Otherwise EU users running `mcp add` in
+              // a non-TTY context (CI, headless) get the US MCP host baked
+              // into their editor configs.
+              const { getStoredUser } = await import(
+                '../utils/ampli-settings.js'
+              );
+              const { DEFAULT_AMPLITUDE_ZONE } = await import(
+                '../lib/constants.js'
+              );
+              const storedUser = getStoredUser();
+              const zone =
+                storedUser && storedUser.id !== 'pending'
+                  ? storedUser.zone
+                  : DEFAULT_AMPLITUDE_ZONE;
               await addMCPServerToClientsStep({
                 local: options.local as boolean | undefined,
+                zone,
               });
             }
           })();

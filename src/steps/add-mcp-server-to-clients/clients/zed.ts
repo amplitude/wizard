@@ -3,6 +3,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
 import { buildMCPUrl } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 
 export const ZedMCPConfig = z
   .object({
@@ -73,10 +74,11 @@ export class ZedClient extends DefaultMCPClient {
     type: 'sse' | 'streamable-http',
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): MCPServerConfig {
     const config: MCPServerConfig = {
       enabled: true,
-      url: buildMCPUrl(type, selectedFeatures, local),
+      url: buildMCPUrl(type, selectedFeatures, local, zone),
     };
     if (apiKey) {
       config.headers = { Authorization: `Bearer ${apiKey}` };
@@ -88,12 +90,14 @@ export class ZedClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     return this._addServerType(
       apiKey,
       'streamable-http',
       selectedFeatures,
       local,
+      zone,
     );
   }
 }

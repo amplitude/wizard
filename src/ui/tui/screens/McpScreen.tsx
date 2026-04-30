@@ -22,6 +22,8 @@ import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import type { McpInstaller, McpClientInfo } from '../services/mcp-installer.js';
 import { analytics, captureWizardError } from '../../../utils/analytics.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 
 export type McpMode = 'install' | 'remove';
 
@@ -163,7 +165,15 @@ export const McpScreen = ({
     setPhase(Phase.Working);
     let result: string[] = [];
     try {
-      result = await installer.install(names);
+      // readDisk: false — McpScreen runs after RegionSelect + Auth, so the
+      // session region is the authoritative tier-1 source. The zone gets
+      // baked into the URL written to each editor's MCP config and persists
+      // past the wizard run; an EU user installing here without this would
+      // be stuck talking to mcp.amplitude.com (US) forever.
+      const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+        readDisk: false,
+      });
+      result = await installer.install(names, zone);
       setResultClients(result);
     } catch {
       setResultClients([]);
