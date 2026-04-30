@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.10.0](https://github.com/amplitude/wizard/compare/wizard-v1.9.0...wizard-v1.10.0) (2026-04-30)
+
+
+### Features
+
+* **agent-ux:** top-notch agent setup UX for launch ([#381](https://github.com/amplitude/wizard/issues/381)) ([b83903b](https://github.com/amplitude/wizard/commit/b83903b3071561a55745121ff03c16d10e43ce6f))
+* **auth:** support AMPLITUDE_WIZARD_PROXY_BEARER env-var separation ([#380](https://github.com/amplitude/wizard/issues/380)) ([97355ab](https://github.com/amplitude/wizard/commit/97355ab03dee73c88c76f1e94543ff00b6330d7b))
+* internal --mode flag for agent model tier (hidden from --help) ([#376](https://github.com/amplitude/wizard/issues/376)) ([fb55fcc](https://github.com/amplitude/wizard/commit/fb55fcc38bcfa4829b732184e68d0ef54ffda435))
+
+
+### Bug Fixes
+
+* **auth:** drop OS keychain backend + clean up gitignore ([#384](https://github.com/amplitude/wizard/issues/384)) ([0d1bf30](https://github.com/amplitude/wizard/commit/0d1bf30c486fe1f997a770306d558800201d820d))
+* **auth:** resilient returning-user auth + always-actionable AuthScreen ([#383](https://github.com/amplitude/wizard/issues/383)) ([9cdeb88](https://github.com/amplitude/wizard/commit/9cdeb88f128e9390ac9dd941c378d101c1bfd2f2))
+* move dashboard creation out of agent loop; stop false-positive ingestion ([#154](https://github.com/amplitude/wizard/issues/154)) ([006d130](https://github.com/amplitude/wizard/commit/006d1304c5f121f7db63dbbfdd79d105985babbc))
+* **tui:** run-screen status, cancel-outro exit, intro warning cleanup ([#379](https://github.com/amplitude/wizard/issues/379)) ([716a7dd](https://github.com/amplitude/wizard/commit/716a7ddc7b4dd609f92818ed0048eb7a3e46fda0))
+
 ## [1.9.0](https://github.com/amplitude/wizard/compare/wizard-v1.8.1...wizard-v1.9.0) (2026-04-29)
 
 
