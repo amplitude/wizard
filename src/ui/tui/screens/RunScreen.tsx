@@ -230,6 +230,28 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     });
   }
 
+  // Synthetic 6th task for the post-agent dashboard fallback. The agent's
+  // 5-task TodoWrite list is locked at five and "Open your dashboard"
+  // covers the agent-side dashboard work. When the agent didn't actually
+  // create the dashboard (skill drift, retry exhaustion, abort), the
+  // post-agent `createDashboardStep` runs as a slow fallback and sets
+  // `dashboardFallbackPhase` to `in_progress`. Without this row the user
+  // sees a "5 / 5 tasks complete" header for the duration of the spinner —
+  // the bug we fixed in PR #479. The row only appears when the fallback
+  // genuinely fires, so on a healthy run the list still shows exactly five
+  // items end-to-end.
+  //
+  // Restored after a rebase against main accidentally dropped this block
+  // in this PR (#474). `RunScreen.dashboardFallback.test.tsx` pins the
+  // contract — without this restore, that test fails on Node 22 + 24.
+  if (store.session.dashboardFallbackPhase === 'in_progress') {
+    progressItems.push({
+      label: 'Create your starter dashboard',
+      activeForm: 'Creating your starter dashboard...',
+      status: 'in_progress',
+    });
+  }
+
   const rawFile = extractCurrentFile(
     store.fileWrites,
     store.session.installDir,
