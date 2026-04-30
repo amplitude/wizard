@@ -2670,6 +2670,15 @@ export async function runAgent(
       streamPillTimer = null;
       const line = streamPillBuffer.replace(/\s+/g, ' ').trim();
       if (!line) return;
+      // Defense in depth: if the rolling tail looks like Anthropic stream-event
+      // protocol JSON (e.g. `{"type":"content_block_delta","index":0,...`), drop
+      // it instead of surfacing the raw frame in the status pill. The SDK path
+      // already filters these at the message layer, but a `text_delta` whose
+      // payload is itself JSON (the model occasionally narrates with a JSON
+      // example, or a tool result snippet flows through as text) would
+      // otherwise reach the user as `{"type":"content_block_delta",...` —
+      // which is exactly the production leak the user reported.
+      if (looksLikeStreamEventLine(line)) return;
       spinner.message(line);
       getUI().pushStatus(line);
     };
