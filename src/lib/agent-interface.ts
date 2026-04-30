@@ -2698,21 +2698,29 @@ export async function runAgent(
               });
               const recordPostToolUse = createPostToolUseHook(agentState);
 
-              // Compose: inner observer first (best-effort, never alters
-              // decision), then the authoritative gate. If the gate denies,
-              // the SDK respects the deny regardless of the observer's
-              // earlier resolved value.
+              // Compose: inner observer + authoritative gate run concurrently.
+              // The observer is decision-neutral (emits NDJSON for outer-agent
+              // telemetry only) so its return value is discarded; the gate's
+              // value is what the SDK acts on. Both must complete before we
+              // return so the NDJSON tool_call event lands on stdout before
+              // the SDK starts the tool — preserving emit ordering for the
+              // outer orchestrator. Observer errors are swallowed to file so a
+              // broken NDJSON sink can never alter a deny decision.
               const preToolUse: HookCallback = async (
                 input,
                 toolUseID,
                 hookOpts,
               ) => {
-                try {
-                  await innerHooks.PreToolUse(input, toolUseID, hookOpts);
-                } catch (err) {
-                  logToFile('inner PreToolUse observer threw:', err);
-                }
-                return gatedPreToolUse(input, toolUseID, hookOpts);
+                const observer = innerHooks
+                  .PreToolUse(input, toolUseID, hookOpts)
+                  .catch((err: unknown) => {
+                    logToFile('inner PreToolUse observer threw:', err);
+                  });
+                const gate = Promise.resolve(
+                  gatedPreToolUse(input, toolUseID, hookOpts),
+                );
+                const [, gateResult] = await Promise.all([observer, gate]);
+                return gateResult;
               };
 
               const postToolUse: HookCallback = async (
@@ -2720,12 +2728,16 @@ export async function runAgent(
                 toolUseID,
                 hookOpts,
               ) => {
-                try {
-                  await innerHooks.PostToolUse(input, toolUseID, hookOpts);
-                } catch (err) {
-                  logToFile('inner PostToolUse observer threw:', err);
-                }
-                return recordPostToolUse(input, toolUseID, hookOpts);
+                const observer = innerHooks
+                  .PostToolUse(input, toolUseID, hookOpts)
+                  .catch((err: unknown) => {
+                    logToFile('inner PostToolUse observer threw:', err);
+                  });
+                const gate = Promise.resolve(
+                  recordPostToolUse(input, toolUseID, hookOpts),
+                );
+                const [, gateResult] = await Promise.all([observer, gate]);
+                return gateResult;
               };
 
               // PreCompact: record + persist AgentState for in-run recovery,
