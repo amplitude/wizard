@@ -118,8 +118,15 @@ const DESTRUCTIVE_BASH_RULES: SafetyRule[] = [
     // `-fR`) — agents emit these interchangeably. The double lookahead
     // requires both `[rR]` and `f` to appear somewhere in the flag chars,
     // in any order.
+    //
+    // Dot-path arms split out so legitimate relative paths like
+    // `./dist` or `./node_modules` aren't false-flagged:
+    //   - `\.\.(?:\s|\/|$)` — `..`, `../`, `../foo` (always destructive)
+    //   - `\.(?:\s|\/(?:\.|$|\s)|$)` — `.`, `./`, `./.`, `./..`, `./../foo`
+    //     (destructive because they all resolve to `.` or `..`); but NOT
+    //     `./dist` (safe — same as `dist`).
     pattern:
-      /\brm\s+-(?=[a-zA-Z]*[rR])(?=[a-zA-Z]*f)[a-zA-Z]+\s+(\/(?!tmp\b|var\/(?:folders|tmp|log)\b)|~|\$HOME\b|\.{1,2}(?:\s|\/|$))/,
+      /\brm\s+-(?=[a-zA-Z]*[rR])(?=[a-zA-Z]*f)[a-zA-Z]+\s+(\/(?!tmp\b|var\/(?:folders|tmp|log)\b)|~|\$HOME\b|\.\.(?:\s|\/|$)|\.(?:\s|\/(?:\.|$|\s)|$))/,
     message:
       'Recursive `rm -rf` against `/`, `~`, `.`, or `..` is permanently denied by wizard policy regardless of phrasing. This is not a retry-with-different-flags situation — abandon this approach. If you genuinely need to clean a build artifact, target the specific subdirectory (e.g. `dist/`) explicitly. If you need to remove a single file, use a targeted path. If neither applies, document the limitation in the setup report and proceed.',
   },
