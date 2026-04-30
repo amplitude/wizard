@@ -247,21 +247,30 @@ export const DataIngestionCheckScreen = ({
    * true if any new events were added (used to log progressive arrivals
    * and to trigger React state updates only when there's actually a
    * change — Set identity matters for `useEffect` deps elsewhere).
+   *
+   * `mutated` MUST be computed synchronously against the committed
+   * snapshot — React's functional updater runs during the next render,
+   * so reading inside the setter and returning afterwards always
+   * yielded `false`. We compute the diff against the captured
+   * `observedEventNames` instead and only enqueue a state update when
+   * something actually changed.
    */
   function recordObservedEvents(names: readonly string[]): boolean {
     if (names.length === 0) return false;
     let mutated = false;
+    for (const name of names) {
+      if (!observedEventNames.has(name)) {
+        mutated = true;
+        break;
+      }
+    }
+    if (!mutated) return false;
     setObservedEventNames((prev) => {
       const next = new Set(prev);
-      for (const name of names) {
-        if (!next.has(name)) {
-          next.add(name);
-          mutated = true;
-        }
-      }
-      return mutated ? next : prev;
+      for (const name of names) next.add(name);
+      return next;
     });
-    return mutated;
+    return true;
   }
 
   /**
@@ -644,8 +653,12 @@ export const DataIngestionCheckScreen = ({
   // Both are hidden during the celebration phase: at that point the user
   // wants to advance forward, not rewind past a successful run, and an
   // accidental Esc should not undo the agent's work.
+  // While the skip-confirm prompt is up, the prompt's own Esc handler
+  // (below) dismisses the overlay; useEscapeBack would otherwise *also*
+  // fire and call store.goBack(), undoing the agent's work despite the
+  // visible "[Esc] Keep waiting" hint promising the opposite.
   useEscapeBack(store, {
-    enabled: !celebrating,
+    enabled: !celebrating && !awaitingSkipConfirm,
     extraHints: celebrating ? NO_HINTS : SKIP_HINT,
   });
 
