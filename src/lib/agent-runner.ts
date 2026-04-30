@@ -291,6 +291,90 @@ function sessionToOptions(session: WizardSession): WizardOptions {
 }
 
 /**
+ * Read the freshest stored OAuth token, refreshing it from the stored
+ * refresh token when it has expired (or is within the 5-minute pre-expiry
+ * buffer). Returns the new access token on success, or `fallback` when no
+ * stored token / refresh token / refresh-attempt success is available.
+ *
+ * This is the post-run-token-staleness fix:
+ *
+ * Pre-PR, agent-runner had this logic inline ONCE — at the top of the
+ * run, before the agent started. After a 14-minute Excalidraw run the
+ * 1-hour OAuth token was already past its `expiresAt` by the time
+ * `commitPlannedEventsStep` / `createDashboardStep` / `pollForDataIngestion`
+ * fired their MCP / data-API calls, surfacing the same
+ * "Authentication failed while trying to fetch Amplitude user data"
+ * cascade we already fixed for the in-run path in PR #348.
+ *
+ * Now extracted so the agent-runner can re-invoke it at the post-run
+ * boundary, AND so the freshly-refreshed token gets mirrored back onto
+ * `session.credentials.accessToken` — that way late-render screens
+ * (SlackScreen, OutroScreen) automatically pick up the new value when
+ * they read from session.
+ *
+ * Failure mode: returns `fallback` and logs an analytics breadcrumb. The
+ * downstream API call will then fail loudly — better than swallowing the
+ * auth error twice.
+ */
+export async function refreshTokenIfStale(
+  fallback: string,
+  label: string,
+): Promise<string> {
+  try {
+    const { getStoredToken, getStoredUser, storeToken } = await import(
+      '../utils/ampli-settings.js'
+    );
+    const { refreshAccessToken } = await import('../utils/oauth.js');
+    const user = getStoredUser();
+    const stored = getStoredToken(user?.id, user?.zone);
+    if (!stored?.accessToken) return fallback;
+    // 5-minute pre-expiry buffer matches `tryRefreshToken` in
+    // `src/utils/token-refresh.ts`. The agent-runner's pre-run path used a
+    // strict `>` check, which left a window where the token was minutes
+    // away from expiring at run-start, then expired DURING the agent run.
+    // Padding the buffer covers that race.
+    const REFRESH_BUFFER_MS = 5 * 60 * 1000;
+    const needsRefresh =
+      user &&
+      Date.now() + REFRESH_BUFFER_MS > new Date(stored.expiresAt).getTime();
+    if (!needsRefresh) return stored.accessToken;
+    const startedAt = Date.now();
+    try {
+      // CRITICAL: pass the user's zone — without it `refreshAccessToken`
+      // defaults to the US OAuth host and EU users' refresh tokens get
+      // rejected. (Same root cause as PR #348's in-run fix.)
+      const refreshed = await refreshAccessToken(
+        stored.refreshToken,
+        user.zone,
+      );
+      storeToken(user, {
+        accessToken: refreshed.accessToken,
+        idToken: refreshed.idToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: refreshed.expiresAt,
+      });
+      analytics.wizardCapture('auth refreshed silently', {
+        label,
+        'duration ms': Date.now() - startedAt,
+      });
+      return refreshed.accessToken;
+    } catch (err) {
+      analytics.wizardCapture('auth refresh failed', {
+        label,
+        reason: err instanceof Error ? err.message : 'unknown',
+        'duration ms': Date.now() - startedAt,
+      });
+      // Even when refresh fails, return whatever non-refreshed token we
+      // already pulled from disk — it might still be live (we may have
+      // entered the buffer but not yet expired).
+      return stored.accessToken;
+    }
+  } catch {
+    return fallback;
+  }
+}
+
+/**
  * Universal agent-powered wizard runner.
  * Handles the complete flow for any framework using Amplitude MCP integration.
  *
@@ -597,54 +681,13 @@ async function runAgentWizardBody(
   // The TUI's AuthScreen may have stored the id_token instead of the
   // OAuth access token (the field names were swapped historically).
   // Always prefer the real OAuth access token from ~/.ampli.json for Hydra auth.
-  let accessToken = rawAccessToken;
-  try {
-    const { getStoredToken, getStoredUser, storeToken } = await import(
-      '../utils/ampli-settings.js'
-    );
-    const { refreshAccessToken } = await import('../utils/oauth.js');
-    const user = getStoredUser();
-    const stored = getStoredToken(user?.id, user?.zone);
-    if (stored?.accessToken) {
-      accessToken = stored.accessToken;
-      // Silently refresh if the access token has expired but the refresh window is still valid.
-      // CRITICAL: pass the user's zone — without it `refreshAccessToken` defaults
-      // to the US OAuth host (auth.amplitude.com) and EU users' refresh tokens
-      // get rejected. The catch below then logs "auth refresh failed" and the
-      // wizard proceeds with the (already-expired) access token; every
-      // subsequent fetchAmplitudeUser / Amplitude MCP call surfaces as
-      // "Authentication failed while trying to fetch Amplitude user data" —
-      // both during the agent run and afterwards in DataIngestionCheckScreen.
-      if (user && new Date() > new Date(stored.expiresAt)) {
-        const refreshStartedAt = Date.now();
-        try {
-          const refreshed = await refreshAccessToken(
-            stored.refreshToken,
-            user.zone,
-          );
-          storeToken(user, {
-            accessToken: refreshed.accessToken,
-            idToken: refreshed.idToken,
-            refreshToken: refreshed.refreshToken,
-            expiresAt: refreshed.expiresAt,
-          });
-          accessToken = refreshed.accessToken;
-          analytics.wizardCapture('auth refreshed silently', {
-            'duration ms': Date.now() - refreshStartedAt,
-          });
-        } catch (err) {
-          // Refresh failed — proceed with the existing token; auth error will
-          // surface during the run. Instrument the reason so we can distinguish
-          // expired refresh tokens from network failures in dashboards.
-          analytics.wizardCapture('auth refresh failed', {
-            reason: err instanceof Error ? err.message : 'unknown',
-            'duration ms': Date.now() - refreshStartedAt,
-          });
-        }
-      }
-    }
-  } catch {
-    // Fall back to whatever the TUI provided
+  let accessToken = await refreshTokenIfStale(rawAccessToken, 'pre-run');
+  // Mirror the freshest token onto the session so SlackScreen / OutroScreen
+  // and any other late screen that reads `session.credentials.accessToken`
+  // pick it up. Without this, the screens still see the ~14m-old token from
+  // before the agent run and fail with "Authentication failed".
+  if (accessToken !== rawAccessToken && session.credentials) {
+    session.credentials.accessToken = accessToken;
   }
   // Derive cloudRegion from session via the centralized resolver.
   // readDisk: true — the agent runner may be entered via paths (classic UI,
@@ -1025,6 +1068,25 @@ async function runAgentWizardBody(
     getUI().pushStatus(
       `Your Amplitude env vars are set. If your dev server or build was already running, restart it (with whatever command you started it with) so the new values load — then click around your app and we'll wait for events.`,
     );
+  }
+
+  // Refresh the access token AT the post-run boundary so the three
+  // downstream consumers (commitPlannedEvents, createDashboard,
+  // pollForDataIngestion) and any subsequent screens (SlackScreen,
+  // OutroScreen) see a fresh bearer token. Long agent runs (~14m on a
+  // big repo like Excalidraw) push past the 1-hour OAuth expiry, and
+  // the pre-run refresh from runtime-start is no longer valid here.
+  // Without this, the post-run paths surface "Authentication failed
+  // while trying to fetch Amplitude user data" silently — the wizard
+  // claims success but the events never register in the Data tab and
+  // the dashboard never gets created.
+  const postRunToken = await refreshTokenIfStale(accessToken, 'post-run');
+  if (postRunToken !== accessToken) {
+    accessToken = postRunToken;
+    if (session.credentials) {
+      session.credentials.accessToken = postRunToken;
+    }
+    logToFile('[agent-runner] post-run token refreshed');
   }
 
   // Commit the instrumented event plan to the Amplitude tracking plan as
