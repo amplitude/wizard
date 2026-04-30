@@ -745,6 +745,7 @@ export class AgentUI implements WizardUI {
     totalToolCalls?: number;
     totalMessages?: number;
     isError?: boolean;
+    toolCallsByTool?: Record<string, number>;
   }): void {
     // Drop undefined fields rather than ship `"costUsd": undefined`,
     // which JSON.stringify omits but leaves the schema unclear in
