@@ -22,7 +22,7 @@ import { useEffect, useState } from 'react';
 import { Box, Text } from 'ink';
 import type { PostAgentStep } from '../../../lib/wizard-session.js';
 import { PostAgentStepStatus } from '../session-constants.js';
-import { Colors, Icons, SPINNER_INTERVAL } from '../styles.js';
+import { Colors, Icons } from '../styles.js';
 
 interface FinalizingPanelProps {
   steps: PostAgentStep[];
@@ -41,22 +41,22 @@ function formatElapsed(ms: number): string {
 }
 
 export const FinalizingPanel = ({ steps }: FinalizingPanelProps) => {
+  const hasSteps = steps.length > 0;
+
   // Tick once per second so the active-step elapsed time and coaching
-  // tier transitions render — the panel is otherwise stateless.
+  // tier transitions render. Only starts when steps are seeded to avoid
+  // wasted state-update cycles during the main agent run.
   const [, setTick] = useState(0);
   useEffect(() => {
-    const id = setInterval(() => setTick((t) => t + 1), SPINNER_INTERVAL);
+    if (!hasSteps) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [hasSteps]);
 
-  if (steps.length === 0) return null;
+  if (!hasSteps) return null;
 
-  const active = steps.find(
-    (s) => s.status === PostAgentStepStatus.InProgress,
-  );
-  const activeElapsedMs = active?.startedAt
-    ? Date.now() - active.startedAt
-    : 0;
+  const active = steps.find((s) => s.status === PostAgentStepStatus.InProgress);
+  const activeElapsedMs = active?.startedAt ? Date.now() - active.startedAt : 0;
   const tier =
     !active || activeElapsedMs < TIER_1_THRESHOLD_MS
       ? 0
