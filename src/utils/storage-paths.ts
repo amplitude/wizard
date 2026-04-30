@@ -32,7 +32,7 @@
  *     its actual sensitivity — same precedent as `~/.ampli.json`).
  */
 
-import { mkdirSync, realpathSync } from 'node:fs';
+import { mkdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -211,6 +211,32 @@ export function ensureDir(dir: string, mode = 0o700): void {
   } catch {
     // Best-effort
   }
+}
+
+// ── Freshest-file picking ─────────────────────────────────────────────
+
+/**
+ * Given multiple candidate paths, return the one whose mtime is the most
+ * recent, or null if none exist. Useful when both canonical and legacy
+ * paths might coexist and we want the freshest signal.
+ *
+ * This is a lightweight duplicate-free equivalent of the heavier
+ * `pickFreshestExisting` in `agent-interface.ts`; kept here so callers
+ * that only need disk-stat logic don't pull in the agent's transitive deps.
+ */
+export function pickFreshestFile(...paths: string[]): string | null {
+  let best: { path: string; mtimeMs: number } | null = null;
+  for (const p of paths) {
+    try {
+      const stat = statSync(p);
+      if (stat.isFile() && (best === null || stat.mtimeMs > best.mtimeMs)) {
+        best = { path: p, mtimeMs: stat.mtimeMs };
+      }
+    } catch {
+      // ENOENT / EACCES — skip.
+    }
+  }
+  return best?.path ?? null;
 }
 
 // ── Legacy paths (one-shot migration) ─────────────────────────────────

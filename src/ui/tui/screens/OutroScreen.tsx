@@ -33,7 +33,10 @@ import {
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
-import { getDashboardFile } from '../../../utils/storage-paths.js';
+import {
+  getDashboardFile,
+  pickFreshestFile,
+} from '../../../utils/storage-paths.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -493,19 +496,7 @@ function readDashboardUrlFromDisk(installDir: string): string | null {
   const canonical = getDashboardFile(installDir);
   const legacy = path.join(installDir, '.amplitude-dashboard.json');
 
-  let chosenPath: string | null = null;
-  let chosenMtime = 0;
-  for (const p of [canonical, legacy]) {
-    try {
-      const stat = fs.statSync(p);
-      if (stat.isFile() && stat.mtime.getTime() > chosenMtime) {
-        chosenPath = p;
-        chosenMtime = stat.mtime.getTime();
-      }
-    } catch {
-      // ENOENT / EACCES — file's just not there, that's fine.
-    }
-  }
+  const chosenPath = pickFreshestFile(canonical, legacy);
   if (!chosenPath) return null;
 
   try {
@@ -517,10 +508,10 @@ function readDashboardUrlFromDisk(installDir: string): string | null {
       typeof (parsed as { dashboardUrl?: unknown }).dashboardUrl === 'string'
     ) {
       const url = (parsed as { dashboardUrl: string }).dashboardUrl;
-      // Sanity-check: an empty string or non-http URL is worthless.
+      // Sanity-check: an empty string or non-https URL is worthless.
       // The wizard always writes a fully-qualified `https://` URL, so
       // anything else is either a stale placeholder or hand-edited junk.
-      if (url.startsWith('https://') || url.startsWith('http://')) {
+      if (url.startsWith('https://')) {
         return url;
       }
     }

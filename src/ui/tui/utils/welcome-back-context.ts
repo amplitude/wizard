@@ -19,7 +19,10 @@
  */
 
 import * as fs from 'node:fs';
-import { getEventsFile } from '../../../utils/storage-paths.js';
+import {
+  getEventsFile,
+  pickFreshestFile,
+} from '../../../utils/storage-paths.js';
 import { parseEventPlanContent } from '../../../lib/event-plan-parser.js';
 
 export interface PreviousRunSummary {
@@ -46,22 +49,19 @@ export function readPreviousRunSummary(installDir: string): PreviousRunSummary {
   // Pick the freshest of the two paths so we don't use a stale legacy
   // file as the "last run" signal when the user has run a more recent
   // wizard build that wrote canonical.
-  let chosenPath: string | null = null;
-  let chosenMtime = 0;
-  for (const p of [canonical, legacy]) {
-    try {
-      const stat = fs.statSync(p);
-      if (stat.isFile() && stat.mtime.getTime() > chosenMtime) {
-        chosenPath = p;
-        chosenMtime = stat.mtime.getTime();
-      }
-    } catch {
-      // ENOENT / EACCES — file's just not there, that's fine.
-    }
-  }
+  const chosenPath = pickFreshestFile(canonical, legacy);
 
   if (!chosenPath) {
     return { eventCount: 0, lastRunAt: null };
+  }
+
+  // Retrieve mtime for the chosen file (stat already succeeded inside
+  // pickFreshestFile, so this is safe barring a race).
+  let chosenMtime: number | null = null;
+  try {
+    chosenMtime = fs.statSync(chosenPath).mtime.getTime();
+  } catch {
+    // Race between pickFreshestFile and this stat — treat as no timestamp.
   }
 
   let eventCount = 0;
@@ -80,7 +80,7 @@ export function readPreviousRunSummary(installDir: string): PreviousRunSummary {
 
   return {
     eventCount,
-    lastRunAt: new Date(chosenMtime),
+    lastRunAt: chosenMtime !== null ? new Date(chosenMtime) : null,
   };
 }
 
