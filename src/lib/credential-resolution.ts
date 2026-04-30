@@ -332,7 +332,7 @@ export async function resolveCredentials(
             : options?.org?.toLowerCase();
           const projectIdFilter = appIdFilter ? undefined : options?.projectId;
           const hasSpecificFilter = Boolean(
-            appIdFilter || envMatch || projectIdFilter,
+            appIdFilter || envMatch || projectIdFilter || orgFilter,
           );
           if (hasSpecificFilter) {
             for (const org of userInfo.orgs) {
@@ -401,6 +401,42 @@ export async function resolveCredentials(
               session.pendingOrgs = userInfo.orgs;
               session.pendingAuthIdToken = tokenForRun.idToken;
               session.pendingAuthAccessToken = tokenForRun.accessToken;
+
+              // Stamp the specific filter that mismatched so the agent-mode
+              // emit path can surface a structured rejection (the bad
+              // value the orchestrator passed + the candidate list) in one
+              // `auth_required` event. Order matches the precedence
+              // hasSpecificFilter check above: --app-id wins over the
+              // legacy filters because it's globally unique.
+              if (appIdFilter) {
+                session.scopeFilterMismatch = {
+                  flag: '--app-id',
+                  value: appIdFilter,
+                  reason: `No Amplitude environment with app-id=${appIdFilter}.`,
+                };
+              } else if (projectIdFilter) {
+                session.scopeFilterMismatch = {
+                  flag: '--project-id',
+                  value: projectIdFilter,
+                  reason: `No Amplitude project with project-id=${projectIdFilter}.`,
+                };
+              } else if (envMatch) {
+                session.scopeFilterMismatch = {
+                  flag: '--env',
+                  value: options?.env ?? envMatch,
+                  reason: `No environment named "${
+                    options?.env ?? envMatch
+                  }" in any project.`,
+                };
+              } else if (orgFilter) {
+                session.scopeFilterMismatch = {
+                  flag: '--org',
+                  value: options?.org ?? orgFilter,
+                  reason: `No org name contains "${
+                    options?.org ?? orgFilter
+                  }".`,
+                };
+              }
             }
           } else if (
             envsWithKey.length === 1 &&
