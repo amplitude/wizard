@@ -4,6 +4,7 @@ import {
   clampViewportTop,
   classifyLogLine,
   findErrorEntryIndexes,
+  findSessionStartIndex,
   sliceViewportText,
 } from '../log-viewer.js';
 
@@ -59,5 +60,53 @@ describe('clampViewportTop', () => {
 describe('sliceViewportText', () => {
   it('returns an unwrapped horizontal slice', () => {
     expect(sliceViewportText('abcdefghij', 3, 4)).toBe('defg');
+  });
+});
+
+describe('findSessionStartIndex', () => {
+  // Real-shape lines from `src/lib/observability/logger.ts:354`. Two prior
+  // wizard runs (Apr 28 + Apr 29 morning) above today's session that
+  // started at `sessionStartMs`.
+  const lines = [
+    '[2026-04-28T23:57:09.376Z] [5b9c573c] [legacy] DEBUG yesterday line 1',
+    '[2026-04-28T23:57:09.436Z] [5b9c573c] [legacy] DEBUG yesterday line 2',
+    '[2026-04-29T04:27:13.900Z] [03a3e2f9] [legacy] DEBUG morning line 1',
+    '[2026-04-30T04:11:58.037Z] [d82db118] [legacy] DEBUG today line 1',
+    '  "type": "user",',
+    '  "session_id": "abc"',
+    '}',
+    '[2026-04-30T04:11:58.038Z] [d82db118] [legacy] DEBUG today line 2',
+  ];
+
+  it('returns 0 when sessionStartMs is null (no scoping requested)', () => {
+    expect(findSessionStartIndex(lines, null)).toBe(0);
+  });
+
+  it('finds the first line at or after sessionStartMs', () => {
+    const todayMs = Date.parse('2026-04-30T04:00:00.000Z');
+    expect(findSessionStartIndex(lines, todayMs)).toBe(3);
+  });
+
+  it('skips multi-line JSON continuations (no leading [ts])', () => {
+    // The cut still lands on the first timestamped entry of the session,
+    // not on a continuation line.
+    const todayMs = Date.parse('2026-04-30T04:00:00.000Z');
+    const idx = findSessionStartIndex(lines, todayMs);
+    expect(lines[idx]).toMatch(/today line 1/);
+  });
+
+  it('returns lines.length when no entry is recent enough', () => {
+    const farFutureMs = Date.parse('2030-01-01T00:00:00.000Z');
+    expect(findSessionStartIndex(lines, farFutureMs)).toBe(lines.length);
+  });
+
+  it('handles malformed timestamps gracefully', () => {
+    const garbage = [
+      '[not-a-timestamp] foo',
+      'bare line',
+      '[2026-04-30T04:11:58.037Z] [run] DEBUG today',
+    ];
+    const todayMs = Date.parse('2026-04-30T04:00:00.000Z');
+    expect(findSessionStartIndex(garbage, todayMs)).toBe(2);
   });
 });

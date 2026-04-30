@@ -41,6 +41,7 @@ import {
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { getLogFile } from '../../../utils/storage-paths.js';
+import { getSessionStartMs } from '../../../lib/observability/index.js';
 
 const RUN_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '←→', label: 'Tabs' },
@@ -414,7 +415,16 @@ export const RunScreen = ({ store }: RunScreenProps) => {
       // PR 322 added getLogFilePath() with a runtime AMPLITUDE_WIZARD_LOG
       // override; per-project pathing supersedes it. If a future PR wants
       // both, getLogFile() can grow an env-override branch.
-      component: <LogViewer filePath={getLogFile(store.session.installDir)} />,
+      // Scope the live tail to the current wizard session by default. The
+      // per-project log file is append-only across runs (5 MB rotation),
+      // so without this scope users see yesterday's runs above today's
+      // startup banner. `a` toggles to show the full historical log.
+      component: (
+        <LogViewer
+          filePath={getLogFile(store.session.installDir)}
+          sessionStartMs={getSessionStartMs()}
+        />
+      ),
     },
     {
       id: 'snake',
