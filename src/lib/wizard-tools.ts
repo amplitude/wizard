@@ -950,31 +950,9 @@ export function mergeEnvValues(
 }
 
 // ---------------------------------------------------------------------------
-// Event plan persistence
+// Event-name normalization
 // ---------------------------------------------------------------------------
 
-/**
- * Write the canonical event plan to `<workingDirectory>/.amplitude/events.json`
- * using the shape the wizard UI expects: `[{name, description}]`.
- *
- * Also mirror the file to the legacy `<workingDirectory>/.amplitude-events.json`
- * for backwards compatibility with bundled integration skills that still
- * instruct the agent to read the legacy path. Both files are gitignored
- * (`.amplitude/` covers the canonical path; the legacy dotfile is listed
- * explicitly in WIZARD_GITIGNORE_PATTERNS) and intentionally preserved
- * across runs for re-instrumentation. Drop the mirror once context-hub
- * ships an updated skill set that reads the canonical path.
- *
- * The agent is instructed (via commandments + integration skills) not to
- * write either file itself — the wizard tool is the single writer so the
- * shape can't drift. Exported for testing.
- *
- * The `.amplitude/` directory is created lazily on first write and is
- * gitignored as a single line.
- *
- * Returns true on success, false on any filesystem error (the caller logs
- * but doesn't fail the tool call over persistence issues).
- */
 /**
  * Normalize an event name to the canonical Title Case shape mandated by
  * the wizard commandments ("[Noun] [Past-Tense Verb]", 2–5 words, ≤50
@@ -1022,6 +1000,32 @@ export function normalizeEventName(raw: string): string {
   return titled.length > 50 ? titled.slice(0, 45) + '…' : titled;
 }
 
+// ---------------------------------------------------------------------------
+// Event plan persistence
+// ---------------------------------------------------------------------------
+
+/**
+ * Write the canonical event plan to `<workingDirectory>/.amplitude/events.json`
+ * using the shape the wizard UI expects: `[{name, description}]`.
+ *
+ * Also mirror the file to the legacy `<workingDirectory>/.amplitude-events.json`
+ * for backwards compatibility with bundled integration skills that still
+ * instruct the agent to read the legacy path. Both files are gitignored
+ * (`.amplitude/` covers the canonical path; the legacy dotfile is listed
+ * explicitly in WIZARD_GITIGNORE_PATTERNS) and intentionally preserved
+ * across runs for re-instrumentation. Drop the mirror once context-hub
+ * ships an updated skill set that reads the canonical path.
+ *
+ * The agent is instructed (via commandments + integration skills) not to
+ * write either file itself — the wizard tool is the single writer so the
+ * shape can't drift. Exported for testing.
+ *
+ * The `.amplitude/` directory is created lazily on first write and is
+ * gitignored as a single line.
+ *
+ * Returns true on success, false on any filesystem error (the caller logs
+ * but doesn't fail the tool call over persistence issues).
+ */
 export function persistEventPlan(
   workingDirectory: string,
   events: Array<{ name: string; description: string }>,
