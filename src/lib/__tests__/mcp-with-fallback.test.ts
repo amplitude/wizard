@@ -180,6 +180,97 @@ describe('callAmplitudeMcp', () => {
       expect(result).toEqual({ value: 99 });
     });
 
+    it('invokes onAgentToolUse for each tool_use block the agent emits', async () => {
+      // Long-running fallbacks (createDashboard's 90s budget) need to surface
+      // inner-agent activity to the UI or the user stares at a static spinner.
+      // The hook fires per tool_use block in the order the model emits them.
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(
+        makeFetchResponse(sseError(-32602, 'nope')),
+      );
+
+      mockQuery.mockReturnValue(
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                { type: 'text', text: 'planning…' },
+                {
+                  type: 'tool_use',
+                  name: 'mcp__amplitude__create_chart',
+                  input: { title: 'Funnel' },
+                },
+                {
+                  type: 'tool_use',
+                  name: 'mcp__amplitude__create_dashboard',
+                  input: { title: 'Starter' },
+                },
+                { type: 'text', text: '{"done":true}' },
+              ],
+            },
+          };
+        })(),
+      );
+
+      const seen: Array<{ name: string; input: unknown }> = [];
+
+      await callAmplitudeMcp({
+        accessToken: 'tok',
+        direct: async () => null,
+        agentPrompt: 'go',
+        parseAgent: () => ({ done: true }),
+        onAgentToolUse: (event) => seen.push(event),
+      });
+
+      expect(seen).toEqual([
+        { name: 'mcp__amplitude__create_chart', input: { title: 'Funnel' } },
+        {
+          name: 'mcp__amplitude__create_dashboard',
+          input: { title: 'Starter' },
+        },
+      ]);
+    });
+
+    it('does not crash when onAgentToolUse throws', async () => {
+      // A buggy hook must not abort the fallback — that would leave the user
+      // worse off than no progress at all (no result + a stuck spinner).
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(
+        makeFetchResponse(sseError(-32602, 'nope')),
+      );
+
+      mockQuery.mockReturnValue(
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  name: 'mcp__amplitude__create_chart',
+                  input: {},
+                },
+                { type: 'text', text: '{"done":true}' },
+              ],
+            },
+          };
+        })(),
+      );
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'tok',
+        direct: async () => null,
+        agentPrompt: 'go',
+        parseAgent: () => ({ done: true }),
+        onAgentToolUse: () => {
+          throw new Error('hook is broken');
+        },
+      });
+
+      expect(result).toEqual({ done: true });
+    });
+
     it('passes the agentPrompt to the SDK query', async () => {
       setupSuccessfulMcpSession();
       mockFetch.mockResolvedValueOnce(

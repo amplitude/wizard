@@ -434,12 +434,33 @@ async function openMcpSessionInner(
 // to a fraction of the original.
 const AGENT_FALLBACK_TIMEOUT_MS = 12_000;
 
+/**
+ * Optional progress hook for the agent fallback. Invoked once per `tool_use`
+ * block the model emits so callers can surface human-readable status updates
+ * (e.g. "Creating chart in Amplitude…") instead of leaving the user staring
+ * at a static spinner for the duration of the fallback's timeout budget.
+ *
+ * Receives:
+ *   - `name` — the SDK tool name as the model called it. For MCP tools this is
+ *     prefixed `mcp__<server>__<tool>` (e.g. `mcp__amplitude__create_chart`).
+ *   - `input` — the raw input the model passed; useful for pulling a chart
+ *     title or chart count out, but treat as untrusted (model-generated).
+ *
+ * Errors thrown by the callback are caught and logged so a buggy hook can
+ * never abort the fallback.
+ */
+export type AgentFallbackToolUseHook = (event: {
+  name: string;
+  input: unknown;
+}) => void;
+
 async function runAgentFallback(
   accessToken: string,
   mcpUrl: string,
   agentPrompt: string,
   timeoutMs: number,
   externalSignal?: AbortSignal,
+  onToolUse?: AgentFallbackToolUseHook,
 ): Promise<string> {
   return withWizardSpan(
     'mcp.fallback.agent',
@@ -452,6 +473,7 @@ async function runAgentFallback(
         agentPrompt,
         timeoutMs,
         externalSignal,
+        onToolUse,
       ),
   );
 }
@@ -462,6 +484,7 @@ async function runAgentFallbackInner(
   agentPrompt: string,
   timeoutMs: number,
   externalSignal?: AbortSignal,
+  onToolUse?: AgentFallbackToolUseHook,
 ): Promise<string> {
   const { query } = await getSDKModule();
   const cliPath = getClaudeCodeExecutablePath();
@@ -505,6 +528,24 @@ async function runAgentFallbackInner(
           for (const block of content) {
             if (block.type === 'text' && typeof block.text === 'string') {
               collectedText.push(block.text);
+            } else if (
+              onToolUse &&
+              block.type === 'tool_use' &&
+              typeof block.name === 'string'
+            ) {
+              // Surface tool_use to the caller so the UI can move beyond
+              // a static spinner. Wrapped in try/catch — a hook that throws
+              // must not abort the fallback (it would leave the user with
+              // an even worse "Creating charts…" hang and no result).
+              try {
+                onToolUse({ name: block.name, input: block.input });
+              } catch (hookErr) {
+                logToFile(
+                  `[MCP-fallback] onToolUse hook threw: ${
+                    hookErr instanceof Error ? hookErr.message : String(hookErr)
+                  }`,
+                );
+              }
             }
           }
         }
@@ -556,6 +597,15 @@ export interface CallAmplitudeMcpOptions<T> {
    * The top-level application should wire this to its exit / cleanup handler.
    */
   abortSignal?: AbortSignal;
+  /**
+   * Optional hook fired once per `tool_use` block emitted by the agent fallback.
+   * Use this to translate inner-agent activity into user-visible status updates
+   * during long-running fallbacks (e.g. dashboard creation, where a 90s budget
+   * with a static spinner is the difference between "wizard is working" and
+   * "wizard is hung"). Only fires when the fallback runs — direct-path calls
+   * never invoke the hook.
+   */
+  onAgentToolUse?: AgentFallbackToolUseHook;
 }
 
 /**
@@ -583,6 +633,7 @@ export async function callAmplitudeMcp<T>(
     // pick up Ctrl+C / SIGINT cancellation. Pass `abortSignal: undefined`
     // explicitly only in tests that need un-aborted isolation.
     abortSignal = getWizardAbortSignal(),
+    onAgentToolUse,
   } = opts;
 
   return withWizardSpan(
@@ -600,6 +651,7 @@ export async function callAmplitudeMcp<T>(
         label,
         agentTimeoutMs,
         abortSignal,
+        onAgentToolUse,
       );
       addBreadcrumb('mcp', `callAmplitudeMcp:${label} done`, {
         ok: result !== null,
@@ -618,6 +670,7 @@ async function callAmplitudeMcpInner<T>(
   label: string,
   agentTimeoutMs: number,
   abortSignal?: AbortSignal,
+  onAgentToolUse?: AgentFallbackToolUseHook,
 ): Promise<T | null> {
   // ── Direct path ────────────────────────────────────────────────────────────
   let directResult: T | null = null;
@@ -672,6 +725,7 @@ async function callAmplitudeMcpInner<T>(
     agentPrompt,
     agentTimeoutMs,
     abortSignal,
+    onAgentToolUse,
   );
 
   if (!agentText) {

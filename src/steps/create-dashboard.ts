@@ -286,6 +286,7 @@ async function runCreateDashboard(args: {
   session: WizardSession;
 }): Promise<DashboardResult | null> {
   const { accessToken, events, session } = args;
+  const ui = getUI();
   // MCP host follows the bearer's account zone, not the env data zone.
   // EU MCP 401s any US-issued bearer (and vice versa) — so a US-account
   // user picking an EU env still needs to talk to US MCP. The env's
@@ -307,6 +308,18 @@ async function runCreateDashboard(args: {
     logToFile(
       `[createDashboard] aborting — hit ${DASHBOARD_TIMEOUT_MS}ms ceiling`,
     );
+    // Update the user-visible status the moment the timer fires. The SDK
+    // subprocess can take several seconds to wind down after `controller.abort()`,
+    // and until it does the spinner stays parked on "Creating charts and
+    // dashboard in Amplitude…" — the UI lies that work is in flight while the
+    // wizard has already given up. Pushing here gives the user immediate
+    // feedback; the eventual `spinner.stop(spinnerMessage)` in the caller
+    // overwrites this with the final timeout message.
+    try {
+      ui.pushStatus('Dashboard step is taking too long — wrapping up…');
+    } catch {
+      // pushStatus is best-effort here; never let a UI hiccup mask the abort.
+    }
     controller.abort();
   }, DASHBOARD_TIMEOUT_MS);
 
@@ -319,10 +332,69 @@ async function runCreateDashboard(args: {
       abortSignal: controller.signal,
       agentPrompt,
       parseAgent: parseAgentOutput,
+      // Translate the fallback agent's MCP tool calls into status pill
+      // updates so the 90s budget feels alive instead of frozen. The model
+      // calls Amplitude MCP write tools as `mcp__amplitude__create_chart`,
+      // `mcp__amplitude__create_dashboard`, etc. — any other tool name
+      // falls through to a generic message.
+      onAgentToolUse: ({ name, input }) => {
+        const status = describeAgentToolUse(name, input);
+        if (status) ui.pushStatus(status);
+      },
     });
   } finally {
     clearTimeout(abortTimer);
   }
+}
+
+/**
+ * Map an inner-agent tool_use to a human-readable status pill string.
+ * Returns `null` when the tool isn't worth surfacing (e.g. read-only MCP
+ * probes, internal SDK plumbing) so we don't churn the pill on noise.
+ *
+ * Exported for unit tests.
+ */
+export function describeAgentToolUse(
+  name: string,
+  input: unknown,
+): string | null {
+  // MCP tools land as `mcp__<server>__<tool>` — strip the prefix so we can
+  // pattern-match on the bare tool name.
+  const mcpMatch = name.match(/^mcp__[a-z0-9_-]+__(.+)$/i);
+  const tool = mcpMatch ? mcpMatch[1] : name;
+  // Pull a chart title out of the input when present; the model emits
+  // `{ title: "..." }` in current Amplitude MCP schemas, but we treat it
+  // as untrusted (string-cap, single-line).
+  const title =
+    readStringField(input, 'title') ?? readStringField(input, 'name');
+  const trimmedTitle =
+    title && title.length > 0
+      ? `: ${title.replace(/\s+/g, ' ').slice(0, 60)}`
+      : '';
+  switch (tool) {
+    case 'create_chart':
+      return `Creating chart in Amplitude${trimmedTitle}…`;
+    case 'create_dashboard':
+      return `Assembling your dashboard in Amplitude${trimmedTitle}…`;
+    case 'add_chart_to_dashboard':
+    case 'attach_chart_to_dashboard':
+      return 'Adding chart to dashboard…';
+    case 'update_chart':
+      return `Updating chart in Amplitude${trimmedTitle}…`;
+    case 'update_dashboard':
+      return `Updating dashboard in Amplitude${trimmedTitle}…`;
+    default:
+      // Read-only probes (list_charts, search_events, get_*) are noise —
+      // the user doesn't care that the agent is browsing. Skip everything
+      // we don't explicitly recognise as a write action.
+      return null;
+  }
+}
+
+function readStringField(input: unknown, key: string): string | null {
+  if (input === null || typeof input !== 'object') return null;
+  const value = (input as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : null;
 }
 
 function buildAgentPrompt(events: EventsFile, session: WizardSession): string {
