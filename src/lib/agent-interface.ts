@@ -2851,6 +2851,15 @@ export async function runAgent(
             // them through the throttled spinner update at most every
             // STREAM_PILL_INTERVAL_MS so the UI doesn't thrash.
             includePartialMessages: true,
+            // Extended thinking — explicitly disabled.
+            //
+            // Leaving `thinking` unset lets the `claude_code` preset / SDK
+            // default re-enable it on Sonnet 4.6, which correlates with
+            // mid-stream "API Error: 400" cascades when the upstream
+            // gateway is under load. Production launch-day repro showed
+            // `thinking_delta` blocks streaming right before the 400.
+            // See the long-form rationale in the comment block below.
+            thinking: { type: 'disabled' },
             // Opt into the 1M context window so long instrumentation runs
             // (commandments + skills + accumulated tool results) don't trip
             // compaction mid-flow. Compactions cause the long mid-run pauses
