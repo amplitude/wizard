@@ -235,6 +235,6 @@ describe('discovery parallelism commandment', () => {
     // is a correctness footgun (write/write races, Read-then-Edit
     // chains breaking). Lock the negative case in.
     expect(text).toContain('write tools');
-    expect(text).toMatch(/Edit|Write/);
+    expect(text).toContain('(Edit / Write)');
   });
 });
