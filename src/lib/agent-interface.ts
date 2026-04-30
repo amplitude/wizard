@@ -115,6 +115,14 @@ type SDKQueryOptions = {
    * SDK-internal type.
    */
   betas?: string[];
+  /**
+   * When true, the SDK emits `SDKPartialAssistantMessage` envelopes carrying
+   * `content_block_delta` events as the model streams its response. The
+   * wizard intercepts these in the for-await loop to surface text deltas in
+   * the status pill so the user sees the model's voice during long tool
+   * calls. See `enqueueStreamDelta` below.
+   */
+  includePartialMessages?: boolean;
 };
 
 type SDKQueryFn = (params: {
@@ -2436,6 +2444,49 @@ export async function runAgent(
       );
     };
 
+    // Streaming text-delta → status pill plumbing.
+    //
+    // With `includePartialMessages: true`, the SDK emits high-frequency
+    // `stream_event` envelopes carrying `content_block_delta` text deltas
+    // as the model writes its response. Surfacing them keeps the status
+    // pill alive during 30s+ tool calls — without this the user sees a
+    // static spinner and assumes the agent is hung.
+    //
+    // We keep an 80-char rolling tail of recent assistant text and flush
+    // at most once per `STREAM_PILL_INTERVAL_MS` so the UI doesn't thrash.
+    // Cleared between attempts via `resetStreamPill()` so a stalled
+    // attempt's last words don't bleed into a fresh retry.
+    const STREAM_PILL_INTERVAL_MS = 150;
+    const STREAM_PILL_MAX_CHARS = 80;
+    let streamPillBuffer = '';
+    let streamPillTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushStreamPill = (): void => {
+      streamPillTimer = null;
+      const line = streamPillBuffer.replace(/\s+/g, ' ').trim();
+      if (!line) return;
+      spinner.message(line);
+      getUI().pushStatus(line);
+    };
+    const enqueueStreamDelta = (delta: string): void => {
+      if (!delta) return;
+      // Keep a rolling tail just larger than the pill width so successive
+      // deltas overwrite older text and the user always sees the model's
+      // most recent voice.
+      streamPillBuffer = (streamPillBuffer + delta).slice(
+        -(STREAM_PILL_MAX_CHARS * 2),
+      );
+      if (streamPillTimer === null) {
+        streamPillTimer = setTimeout(flushStreamPill, STREAM_PILL_INTERVAL_MS);
+      }
+    };
+    const resetStreamPill = (): void => {
+      if (streamPillTimer !== null) {
+        clearTimeout(streamPillTimer);
+        streamPillTimer = null;
+      }
+      streamPillBuffer = '';
+    };
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -2471,6 +2522,10 @@ export async function runAgent(
         // lastStatus / compactionCount accumulated by a stalled attempt
         // would leak into the next attempt's snapshot. (Bugbot catch.)
         agentState.reset();
+        // Drop any partial-message text from the stalled attempt so the
+        // user doesn't see "...rewriting the package.json" carry over
+        // into a fresh retry's pill.
+        resetStreamPill();
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received
@@ -2583,6 +2638,12 @@ export async function runAgent(
               const ids = agentConfig.useDirectApiKey ? directIds : gatewayIds;
               return attempt >= 2 ? ids.haiku : ids.sonnet;
             })(),
+            // Stream text deltas as `stream_event` envelopes so we can
+            // surface them in the status pill during long tool calls. The
+            // for-await loop below extracts text_delta payloads and pushes
+            // them through the throttled spinner update at most every
+            // STREAM_PILL_INTERVAL_MS so the UI doesn't thrash.
+            includePartialMessages: true,
             // Opt into the 1M context window so long instrumentation runs
             // (commandments + skills + accumulated tool results) don't trip
             // compaction mid-flow. Compactions cause the long mid-run pauses
@@ -2834,6 +2895,37 @@ export async function runAgent(
             continue;
           }
           const message = parsed.message;
+
+          // Partial-assistant text deltas flow through this branch. Surface
+          // them in the status pill so the user sees the model's voice
+          // during long tool calls — without this they stare at a static
+          // spinner. handleSDKMessage doesn't need these (no collectedText
+          // push, no system/result handling), so short-circuit and continue.
+          if (message.type === 'stream_event') {
+            const event = (message as { event?: unknown }).event;
+            if (
+              event !== null &&
+              typeof event === 'object' &&
+              (event as { type?: unknown }).type === 'content_block_delta'
+            ) {
+              const delta = (event as { delta?: unknown }).delta;
+              if (
+                delta !== null &&
+                typeof delta === 'object' &&
+                (delta as { type?: unknown }).type === 'text_delta' &&
+                typeof (delta as { text?: unknown }).text === 'string'
+              ) {
+                enqueueStreamDelta((delta as { text: string }).text);
+              }
+            }
+            continue;
+          }
+
+          // Any meaningful non-partial message means the model has stopped
+          // streaming a paragraph and is producing a tool call or result —
+          // drop the rolling pill buffer so the next paragraph starts fresh
+          // instead of carrying tail words from the previous one.
+          resetStreamPill();
 
           // Pass receivedSuccessResult so handleSDKMessage can suppress user-facing error
           // output for post-success cleanup errors while still logging them to file
