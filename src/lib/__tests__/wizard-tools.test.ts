@@ -781,14 +781,14 @@ describe('WIZARD_TOOL_NAMES', () => {
     expect(WIZARD_TOOL_NAMES).toContain('wizard-tools:wizard_feedback');
   });
 
-  it('includes every existing wizard-tools tool', () => {
+  it('includes every currently-exposed wizard-tools tool', () => {
     expect(WIZARD_TOOL_NAMES).toEqual(
       expect.arrayContaining([
         'wizard-tools:check_env_keys',
         'wizard-tools:set_env_values',
         'wizard-tools:detect_package_manager',
-        'wizard-tools:load_skill_menu',
-        'wizard-tools:install_skill',
+        // load_skill_menu / install_skill intentionally absent — see
+        // the disabled-tool block in src/lib/wizard-tools.ts
         'wizard-tools:confirm',
         'wizard-tools:choose',
         'wizard-tools:confirm_event_plan',
@@ -796,6 +796,15 @@ describe('WIZARD_TOOL_NAMES', () => {
         'wizard-tools:wizard_feedback',
       ]),
     );
+  });
+
+  it('does not expose disabled skill-menu tools', () => {
+    // load_skill_menu / install_skill currently 400 — keep them out of
+    // the agent's allowlist until the catalogue / download path is
+    // fixed. If this regresses, the agent will start looping on broken
+    // tool calls again.
+    expect(WIZARD_TOOL_NAMES).not.toContain('wizard-tools:load_skill_menu');
+    expect(WIZARD_TOOL_NAMES).not.toContain('wizard-tools:install_skill');
   });
 
   it('has no duplicate entries', () => {
