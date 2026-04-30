@@ -43,7 +43,7 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
 
   'NEVER run Bash commands to verify env vars. Forbidden: `node -e "console.log(process.env...)"`, `node --eval`, `printenv`, `echo $VAR`, `cat .env*`, `grep AMPLITUDE .env`, `bash -c \'...\'` evals, or any shell incantation aimed at inspecting env-var presence/values. The bash allowlist denies all variants — silently rephrasing `node -e` as `node --eval` is the exact pattern this rule forbids. The ONLY sanctioned check: wizard-tools `check_env_keys` (reports presence without exposing values). If keys are missing, call `set_env_values`. Do not invent a "verify" phase that loops shell commands.',
 
-  `Build / typecheck / lint verification — keep the shape SIMPLE. The bash allowlist accepts package-manager scripts (\`yarn test:typecheck\`, \`pnpm tsc --noEmit\`, \`npm run build\`, \`npx tsc --noEmit\`) and at most a single pipe to \`tail\` / \`head\` for output limiting. It does NOT allow:
+  `Build / typecheck / lint verification — keep the shape SIMPLE. The bash allowlist accepts package-manager scripts (\`yarn test:typecheck\`, \`pnpm tsc --noEmit\`, \`npx eslint --fix src/file.ts\`, \`npx tsc --noEmit\`) and at most a single pipe to \`tail\` / \`head\` for output limiting. It does NOT allow:
 
     ✗ \`yarn typecheck 2>&1 | grep -E "(error TS|...)" | head -30\`   ← parens trip the dangerous-operators rule
     ✗ \`yarn lint | grep error | head\`                                ← multiple pipes
@@ -56,7 +56,9 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
     ✓ \`yarn test:typecheck | tail -50\`               ← last 50 lines (single pipe to tail)
     ✓ \`pnpm tsc --noEmit | head -30\`                 ← first 30 lines (single pipe to head)
     ✓ \`npx tsc --noEmit\`                             ← direct invocation
-    ✓ \`yarn lint\` then \`yarn typecheck\`              ← sequential, two separate Bash calls
+    ✓ \`npx eslint --fix src/init.ts\` then \`npx tsc --noEmit\`  ← sequential, two separate Bash calls
+
+  Note: these are SYNTAX shapes the allowlist permits. You must still scope lint/build to edited files only (see the scoping commandment below) — never run project-wide \`yarn lint\`, \`npm run build\`, etc.
 
   When you need to filter output to a substring, use \`Grep\` (the dedicated tool) on the captured stdout — not a shell pipe. When the output is short enough to read in full, just don't pipe at all.
 
