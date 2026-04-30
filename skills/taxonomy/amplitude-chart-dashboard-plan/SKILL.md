@@ -173,7 +173,7 @@ Always include a brief `reason` per the wizard's tool-call convention.
 file yourself — that path drifts from the canonical schema and the wizard
 will silently re-run the dashboard step from scratch.
 
-After the call returns `"ok"`, mark the "Open your dashboard" todo
+After the call returns `"ok"`, mark the "Build your starter dashboard" todo
 completed.
 
 ---

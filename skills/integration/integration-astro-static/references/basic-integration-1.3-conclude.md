@@ -34,7 +34,7 @@ and follow it exactly. The flow is:
    single most common bug; the user sees a 30s "Creating charts and
    dashboard…" spinner because the wizard had to redo the work itself.
 
-Mark the "Open your dashboard" todo completed only after `record_dashboard`
+Mark the "Build your starter dashboard" todo completed only after `record_dashboard`
 returns `"ok"`.
 
 ---
