@@ -90,6 +90,26 @@ describe('performDirectSignup', () => {
     }
   });
 
+  it('accepts empty-string dashboard_url and surfaces it as null', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'oauth',
+          oauth: { code: 'auth-code-xyz' },
+          dashboard_url: '',
+        }),
+      ),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.dashboardUrl).toBeNull();
+    }
+  });
+
   it('returns requires_redirect on requires_auth response', async () => {
     server.use(
       http.post(PROVISIONING_URL, () =>

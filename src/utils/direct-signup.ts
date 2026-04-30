@@ -19,7 +19,10 @@ const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
 const OAuthProvisioningSchema = z.object({
   type: z.literal('oauth'),
   oauth: z.object({ code: z.string().min(1) }),
-  dashboard_url: z.string().min(1).nullish(),
+  // `.nullish()` (no `min(1)`): a metadata field with strict validation
+  // would fail-closed the entire signup whenever the API returns an empty
+  // string or null. Treat empty as null at the read site.
+  dashboard_url: z.string().nullish(),
 });
 
 const RedirectSchema = z.object({
@@ -224,6 +227,9 @@ export async function performDirectSignup(
       expiresAt,
       zone: input.zone,
     },
-    dashboardUrl: parsedCode.data.dashboard_url ?? null,
+    // Coerce empty-string to null so downstream code (which displays the
+    // URL or short-circuits on missing) doesn't have to handle "" as a
+    // distinct third case.
+    dashboardUrl: parsedCode.data.dashboard_url || null,
   };
 }
