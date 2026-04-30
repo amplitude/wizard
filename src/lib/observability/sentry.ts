@@ -11,7 +11,12 @@
  * - All events pass through the redaction layer before transmission
  */
 
-import * as Sentry from '@sentry/node';
+// `@sentry/node` is the single biggest synchronous load on the wizard's
+// startup path (~80–150 ms cold start). Type-only import here costs nothing
+// at runtime; the actual module is lazy-imported inside `initSentry()` so
+// `bin.ts` can finish its sync bootstrap before Sentry's heavy init walks
+// the integration registry, installs unhandled-rejection handlers, etc.
+import type * as Sentry from '@sentry/node';
 import type { LogLevel } from './logger';
 import { setSentrySink } from './logger';
 import { redact, redactString } from './redact';
@@ -63,7 +68,16 @@ export interface SentryConfig {
 
 // ── State ───────────────────────────────────────────────────────────
 
-let initialized = false;
+/**
+ * Lazy-imported `@sentry/node` module. Populated by `initSentry()` after
+ * the dynamic `await import('@sentry/node')` resolves. All runtime accessors
+ * gate on this being non-null — when telemetry is disabled or init failed,
+ * this stays null and every Sentry call is a no-op without ever touching
+ * the heavy module. (Replaces the previous `initialized` boolean — having
+ * a single source of truth removes the possibility of "init said yes but
+ * the module reference is null" bugs.)
+ */
+let sentryRT: typeof Sentry | null = null;
 
 // ── Telemetry opt-out ───────────────────────────────────────────────
 
@@ -162,18 +176,33 @@ function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
 
 /**
  * Initialize Sentry for the wizard CLI.
- * Must be called early in startup (bin.ts), after correlation is initialized.
+ *
+ * Called from `bin.ts` early in startup after correlation is initialized.
+ * The function is `async` so that the `@sentry/node` module — by far the
+ * heaviest single import in the boot chain — loads on a microtask AFTER
+ * `bin.ts` has finished its synchronous bootstrap. Callers don't need to
+ * await: events captured before init resolves are silently dropped (the
+ * `initialized` / `sentryRT` guards no-op every accessor), which is
+ * acceptable for a CLI's first ~tens of milliseconds (the `sentryRT`
+ * guards no-op every accessor until init resolves).
+ *
+ * When telemetry is disabled (DO_NOT_TRACK / AMPLITUDE_WIZARD_NO_TELEMETRY
+ * / NODE_ENV=test), `@sentry/node` is never imported at all — saving the
+ * full module-load cost for opted-out users and the entire test run.
  */
-export function initSentry(config: SentryConfig): void {
+export async function initSentry(config: SentryConfig): Promise<void> {
   if (isTelemetryDisabled()) {
-    initialized = false;
+    sentryRT = null;
     // Still register the sink so the logger doesn't error, but it will no-op
     registerSentrySink();
     return;
   }
 
   try {
-    Sentry.init({
+    // Lazy-import the heavy module. This is what we're saving on cold start.
+    sentryRT = await import('@sentry/node');
+
+    sentryRT.init({
       dsn: process.env.SENTRY_DSN ?? WIZARD_SENTRY_DSN,
       release: `@amplitude/wizard@${config.version}`,
       environment: resolveEnvironment(config.mode),
@@ -182,7 +211,7 @@ export function initSentry(config: SentryConfig): void {
       tracesSampleRate: 1.0, // Low volume CLI — every run matters
       sendDefaultPii: false, // Never send PII by default
 
-      // Structured logs — feeds Sentry.logger.* calls and the logger sink
+      // Structured logs — feeds sentryRT.logger.* calls and the logger sink
       enableLogs: true,
 
       // Error filtering and redaction
@@ -193,16 +222,14 @@ export function initSentry(config: SentryConfig): void {
     });
 
     // Set initial context
-    Sentry.setTag('mode', config.mode);
-    Sentry.setTag('wizard_version', config.version);
-    Sentry.setTag('platform', process.platform);
-    Sentry.setTag('node_version', process.version);
-    Sentry.setTag('session_id', config.sessionId);
-
-    initialized = true;
+    sentryRT.setTag('mode', config.mode);
+    sentryRT.setTag('wizard_version', config.version);
+    sentryRT.setTag('platform', process.platform);
+    sentryRT.setTag('node_version', process.version);
+    sentryRT.setTag('session_id', config.sessionId);
   } catch {
     // Sentry init failure is non-fatal — wizard continues without error tracking
-    initialized = false;
+    sentryRT = null;
   }
 
   registerSentrySink();
@@ -210,9 +237,9 @@ export function initSentry(config: SentryConfig): void {
 
 /**
  * Register the logger sink so:
- *   - log.error() → Sentry.captureException (issue-grouped, fingerprinted)
- *   - log.warn() / log.info() → Sentry.logger.* (searchable structured logs)
- *                             + Sentry.addBreadcrumb (attached to any later error)
+ *   - log.error() → sentryRT.captureException (issue-grouped, fingerprinted)
+ *   - log.warn() / log.info() → sentryRT.logger.* (searchable structured logs)
+ *                             + sentryRT.addBreadcrumb (attached to any later error)
  *
  * Breadcrumbs stay because they give pre-error context on the issue view;
  * Sentry.logger gives full-text log search decoupled from error events.
@@ -225,7 +252,7 @@ function registerSentrySink(): void {
       msg: string,
       ctx?: Record<string, unknown>,
     ) => {
-      if (!initialized) return;
+      if (!sentryRT) return;
       if (level === 'error') {
         captureError(new Error(msg), { namespace, ...ctx });
         return;
@@ -236,9 +263,9 @@ function registerSentrySink(): void {
       };
       try {
         const redactedMsg = redactString(msg);
-        if (level === 'warn') Sentry.logger.warn(redactedMsg, attrs);
-        else if (level === 'info') Sentry.logger.info(redactedMsg, attrs);
-        else Sentry.logger.debug(redactedMsg, attrs);
+        if (level === 'warn') sentryRT.logger.warn(redactedMsg, attrs);
+        else if (level === 'info') sentryRT.logger.info(redactedMsg, attrs);
+        else sentryRT.logger.debug(redactedMsg, attrs);
       } catch {
         // Non-fatal
       }
@@ -254,9 +281,9 @@ export function captureError(
   error: Error,
   context?: Record<string, unknown>,
 ): void {
-  if (!initialized) return;
+  if (!sentryRT) return;
   try {
-    Sentry.captureException(error, {
+    sentryRT.captureException(error, {
       contexts: {
         wizard: context ? (redact(context) as Record<string, unknown>) : {},
       },
@@ -274,9 +301,9 @@ export function addBreadcrumb(
   message: string,
   data?: Record<string, unknown>,
 ): void {
-  if (!initialized) return;
+  if (!sentryRT) return;
   try {
-    Sentry.addBreadcrumb({
+    sentryRT.addBreadcrumb({
       category,
       message,
       data: data ? (redact(data) as Record<string, unknown>) : undefined,
@@ -291,9 +318,9 @@ export function addBreadcrumb(
  * Set the Sentry user context (called when analytics.setDistinctId fires).
  */
 export function setSentryUser(userId: string): void {
-  if (!initialized) return;
+  if (!sentryRT) return;
   try {
-    Sentry.setUser({ id: userId });
+    sentryRT.setUser({ id: userId });
   } catch {
     // Non-fatal
   }
@@ -303,9 +330,9 @@ export function setSentryUser(userId: string): void {
  * Set a tag on the current Sentry scope.
  */
 export function setSentryTag(key: string, value: string): void {
-  if (!initialized) return;
+  if (!sentryRT) return;
   try {
-    Sentry.setTag(key, value);
+    sentryRT.setTag(key, value);
   } catch {
     // Non-fatal
   }
@@ -319,7 +346,7 @@ export function setSentryTag(key: string, value: string): void {
  * no-op that's safe to call.
  *
  * Use this for cross-callback lifecycles (e.g., agent run from onInit to
- * onFinalize) where `Sentry.startSpan(cb)` doesn't fit.
+ * onFinalize) where `sentryRT.startSpan(cb)` doesn't fit.
  */
 export interface WizardSpan {
   end(): void;
@@ -356,11 +383,11 @@ export function startWizardSpan(
   op: string,
   attributes?: Record<string, unknown>,
 ): WizardSpan {
-  if (!initialized) {
+  if (!sentryRT) {
     return { end: () => {}, setAttribute: () => {} };
   }
   try {
-    const span = Sentry.startInactiveSpan({
+    const span = sentryRT.startInactiveSpan({
       name,
       op,
       attributes: attributes
@@ -392,7 +419,7 @@ export function startWizardSpan(
  * Wrap a sync or async callback in an active Sentry span.
  *
  * Unlike `startWizardSpan` (inactive span — manual lifecycle, no context
- * propagation), this uses `Sentry.startSpan` which sets the span as the
+ * propagation), this uses `sentryRT.startSpan` which sets the span as the
  * active scope. Outbound HTTP requests, child spans, and errors thrown
  * inside `fn` are automatically attached to this span — including any
  * `axios` / `fetch` call picked up by the default httpIntegration.
@@ -410,9 +437,9 @@ export function withWizardSpan<T>(
   attributes: Record<string, unknown> | undefined,
   fn: () => T,
 ): T {
-  if (!initialized) return fn();
+  if (!sentryRT) return fn();
 
-  // Build attributes outside Sentry.startSpan so a redact/serialization
+  // Build attributes outside sentryRT.startSpan so a redact/serialization
   // throw doesn't get conflated with a callback error. If attribute prep
   // fails, fall through to a span without attributes rather than skipping
   // the span entirely.
@@ -425,14 +452,14 @@ export function withWizardSpan<T>(
     safeAttrs = undefined;
   }
 
-  // `fnInvoked` lets us distinguish "Sentry.startSpan threw before our
+  // `fnInvoked` lets us distinguish "sentryRT.startSpan threw before our
   // callback ran" from "our callback ran and threw". In the first case it's
   // safe to fall back by running fn() directly; in the second case fn() has
   // already executed and its error must propagate — re-running would
   // silently double-execute the callback (Bugbot finding).
   let fnInvoked = false;
   try {
-    return Sentry.startSpan({ name, op, attributes: safeAttrs }, (span) => {
+    return sentryRT.startSpan({ name, op, attributes: safeAttrs }, (span) => {
       fnInvoked = true;
       const markError = (): void => {
         try {
@@ -474,9 +501,9 @@ export function withWizardSpan<T>(
  * Flush pending Sentry events before exit (2s timeout).
  */
 export async function flushSentry(): Promise<void> {
-  if (!initialized) return;
+  if (!sentryRT) return;
   try {
-    await Sentry.flush(2000);
+    await sentryRT.flush(2000);
   } catch {
     // Flush failure is non-fatal — don't block exit
   }
@@ -498,9 +525,9 @@ export async function flushSentry(): Promise<void> {
  * guard so a Sentry-side throw doesn't take the wizard down.
  */
 export function wrapMcpServerWithSentry<T extends object>(server: T): T {
-  if (!initialized) return server;
+  if (!sentryRT) return server;
   try {
-    return Sentry.wrapMcpServerWithSentry(server);
+    return sentryRT.wrapMcpServerWithSentry(server);
   } catch {
     // Sentry instrumentation failure is non-fatal — fall back to the raw server.
     return server;
@@ -527,10 +554,10 @@ export function setSpanMeasurement(
   value: number,
   unit: string,
 ): void {
-  if (!initialized) return;
+  if (!sentryRT) return;
   if (!Number.isFinite(value)) return;
   try {
-    Sentry.setMeasurement(name, value, unit);
+    sentryRT.setMeasurement(name, value, unit);
   } catch {
     // Measurement failure is non-fatal
   }
