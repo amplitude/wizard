@@ -1476,6 +1476,135 @@ describe('truncateLogMessage (log-spillover guard)', () => {
   });
 });
 
+describe('AgentUI.promptEnvironmentSelection — pagination cap', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Build N environments across one org/project so the test is
+  // deterministic and we can verify the cap takes effect.
+  const buildOrgsWithEnvs = (count: number) => [
+    {
+      id: 'org-mega',
+      name: 'MegaCorp',
+      projects: [
+        {
+          id: 'proj-big',
+          name: 'Big',
+          environments: Array.from({ length: count }, (_, i) => ({
+            name: `Env${String(i).padStart(3, '0')}`,
+            // Spread ranks so the sort (rank → orgName → projectName → envName)
+            // is exercised. rank 1 first slot, rank 2 next 100, etc.
+            rank: i < 100 ? 1 : 2,
+            app: { id: `app-${i}`, apiKey: `k-${i}` },
+          })),
+        },
+      ],
+    },
+  ];
+
+  const runAndGetEvents = async (
+    ui: AgentUI,
+    orgs: Parameters<AgentUI['promptEnvironmentSelection']>[0],
+  ): Promise<NDJSONEvent[]> => {
+    const originalStdin = process.stdin;
+    Object.defineProperty(process, 'stdin', {
+      configurable: true,
+      value: { readable: false },
+    });
+    try {
+      await ui.promptEnvironmentSelection(orgs);
+    } finally {
+      Object.defineProperty(process, 'stdin', {
+        configurable: true,
+        value: originalStdin,
+      });
+    }
+    return writes.map((line) => JSON.parse(line.trim()) as NDJSONEvent);
+  };
+
+  it('does not truncate when choices fit under the cap', async () => {
+    const ui = new AgentUI();
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(5));
+    const promptEvent = events.find((e) => e.type === 'prompt');
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    expect(promptEvent).toBeDefined();
+    expect(needsInputEvent).toBeDefined();
+    const data = needsInputEvent!.data as {
+      pagination: { total: number; returned: number };
+      choices: unknown[];
+    };
+    expect(data.pagination.total).toBe(5);
+    expect(data.pagination.returned).toBe(5);
+    expect(data.choices).toHaveLength(5);
+  });
+
+  it('caps the wire payload at MAX_ENV_SELECTION_CHOICES (50)', async () => {
+    const ui = new AgentUI();
+    // 200 envs total — well above the cap.
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(200));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      pagination: { total: number; returned: number };
+      choices: unknown[];
+    };
+    expect(data.pagination.total).toBe(200);
+    expect(data.pagination.returned).toBe(50);
+    expect(data.choices).toHaveLength(50);
+  });
+
+  it('signals truncation via pagination.total > pagination.returned', async () => {
+    const ui = new AgentUI();
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(75));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      pagination: { total: number; returned: number };
+    };
+    // total > returned is the canonical truncation signal.
+    expect(data.pagination.total).toBeGreaterThan(data.pagination.returned);
+  });
+
+  it('keeps higher-ranked envs (rank 1 = Production) in the truncated set', async () => {
+    const ui = new AgentUI();
+    // 200 envs: first 100 are rank 1, next 100 are rank 2. After
+    // sort+cap we should ONLY see rank-1 envs.
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(200));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      choices: Array<{ metadata: { rank: number } }>;
+    };
+    for (const c of data.choices) {
+      expect(c.metadata.rank).toBe(1);
+    }
+  });
+
+  it('still surfaces a recommended env when truncation is in effect', async () => {
+    const ui = new AgentUI();
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(200));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      recommended?: string;
+      choices: Array<{ value: string }>;
+    };
+    expect(data.recommended).toBeDefined();
+    // Recommended must point to a value that survived the cap.
+    expect(data.choices.some((c) => c.value === data.recommended)).toBe(true);
+  });
+});
+
 describe('AgentUI.heartbeat', () => {
   let writes: string[];
   let spy: ReturnType<typeof vi.spyOn>;
