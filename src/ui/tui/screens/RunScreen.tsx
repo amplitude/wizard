@@ -201,6 +201,24 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     });
   }
 
+  // Synthetic 6th task for the post-agent dashboard fallback. The agent's
+  // 5-task TodoWrite list is locked at five and "Open your dashboard"
+  // covers the agent-side dashboard work. When the agent didn't actually
+  // create the dashboard (skill drift, retry exhaustion, abort), the
+  // post-agent `createDashboardStep` runs as a slow fallback and sets
+  // `dashboardFallbackPhase` to `in_progress`. Without this row the user
+  // sees a "5 / 5 tasks complete" header for the duration of the spinner —
+  // the bug we fixed in PR #XXX. The row only appears when the fallback
+  // genuinely fires, so on a healthy run the list still shows exactly five
+  // items end-to-end.
+  if (store.session.dashboardFallbackPhase === 'in_progress') {
+    progressItems.push({
+      label: 'Create your starter dashboard',
+      activeForm: 'Creating your starter dashboard...',
+      status: 'in_progress',
+    });
+  }
+
   const rawFile = extractCurrentFile(store.statusMessages);
   const lastFileRef = useRef<string | null>(null);
   if (rawFile) lastFileRef.current = rawFile;
@@ -249,7 +267,11 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // really is on a long thought, and the coaching copy is honest.
   // Tiers fire at 90s (calm reassurance) and 5min (escalated suggestion).
   // RUN_COACHING_TIER_T1_S=90, RUN_COACHING_TIER_T2_S=300.
-  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${store.fileWritesTotal}`;
+  // Include `dashboardFallbackPhase` so the coaching timer resets when the
+  // post-agent fallback starts running. Otherwise the agent silence right
+  // before the fallback could trip the 90s "unusually slow" tier just as
+  // we're entering a known-slow path.
+  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${store.fileWritesTotal}|${store.session.dashboardFallbackPhase ?? ''}`;
   const { tier: coachingTier } = useTimedCoaching({
     thresholds: [90, 300],
     progressSignal,

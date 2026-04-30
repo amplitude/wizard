@@ -297,6 +297,135 @@ describe('createDashboardStep — agent already created dashboard', () => {
     );
   });
 
+  it('reuses .amplitude/dashboard.json (canonical path written by record_dashboard) without calling the agent', async () => {
+    // The post-record_dashboard happy path: agent called the wizard-tools
+    // `record_dashboard` MCP tool, which wrote BOTH paths atomically. This
+    // test pins the canonical path is read FIRST so a future change that
+    // dropped the legacy mirror wouldn't silently regress to the slow
+    // post-agent fallback.
+    const dashboard = {
+      dashboardUrl:
+        'https://app.amplitude.com/analytics/amplitude/dashboard/canonical-id',
+      dashboardId: 'canonical-id',
+      charts: [{ id: 'c1', title: 'Onboarding Funnel', type: 'funnel' }],
+    };
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify(dashboard),
+    );
+    const session = makeSession();
+
+    await createDashboardStep({
+      session: session as any,
+      accessToken: 'token',
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    expect(mockedCallAmplitudeMcp).not.toHaveBeenCalled();
+    expect(session.checklistDashboardUrl).toBe(dashboard.dashboardUrl);
+    expect(ui.setDashboardUrl).toHaveBeenCalledWith(dashboard.dashboardUrl);
+    expect(ui.spinner).not.toHaveBeenCalled();
+    expect(mockedWizardCapture).toHaveBeenCalledWith(
+      'dashboard created',
+      expect.objectContaining({ source: 'agent' }),
+    );
+  });
+
+  it('does NOT set dashboardFallbackPhase when the reuse path fires', async () => {
+    // Agent already created the dashboard via record_dashboard. The 6th
+    // synthetic task in RunScreen should never appear — the fallback never
+    // ran. This is the headline UX guarantee of the in-loop record_dashboard
+    // path: a healthy run shows exactly five tasks, never six.
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({ dashboardUrl: 'https://x/y/z' }),
+    );
+    const session: any = makeSession();
+
+    await createDashboardStep({
+      session,
+      accessToken: 'token',
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    // Phase stays null end-to-end on the reuse path.
+    expect(session.dashboardFallbackPhase ?? null).toBeNull();
+  });
+
+  it('sets dashboardFallbackPhase=in_progress before the agent fallback fires, then completed after', async () => {
+    // No pre-existing dashboard file → fallback runs. We assert the phase
+    // transitions through in_progress (so RunScreen can render the 6th
+    // task) and ends at completed (so the 6th task drops cleanly).
+    let phaseDuringFallback: string | null | undefined = 'NOT_OBSERVED';
+    mockedCallAmplitudeMcp.mockImplementation(async (opts: any) => {
+      phaseDuringFallback = opts && (session as any).dashboardFallbackPhase;
+      return null; // simulate a soft-skip
+    });
+    const session: any = makeSession();
+
+    await createDashboardStep({
+      session,
+      accessToken: 'token',
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    expect(phaseDuringFallback).toBe('in_progress');
+    expect(session.dashboardFallbackPhase).toBe('completed');
+  });
+
+  it('sets dashboardFallbackPhase=completed even when runCreateDashboard throws', async () => {
+    // Contract: the fallback step "never throws" and must always clear
+    // its phase, otherwise the synthetic 6th task would pin forever and
+    // leak into the outro screen.
+    mockedCallAmplitudeMcp.mockImplementation(async () => {
+      throw new Error('synthetic SDK module load failure');
+    });
+    const session: any = makeSession();
+
+    await createDashboardStep({
+      session,
+      accessToken: 'token',
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    expect(session.dashboardFallbackPhase).toBe('completed');
+  });
+
+  it('prefers canonical .amplitude/dashboard.json when both files exist', async () => {
+    // If both exist with different URLs (mid-migration / partial write),
+    // canonical wins. record_dashboard writes both atomically, but a
+    // future skill that switches to canonical-only must not regress.
+    const canonical = {
+      dashboardUrl: 'https://app.amplitude.com/.../dashboard/canonical-wins',
+      dashboardId: 'canonical-wins',
+    };
+    const legacyOlder = {
+      dashboardUrl: 'https://app.amplitude.com/.../dashboard/stale-legacy',
+      dashboardId: 'stale-legacy',
+    };
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify(canonical),
+    );
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude-dashboard.json'),
+      JSON.stringify(legacyOlder),
+    );
+    const session = makeSession();
+
+    await createDashboardStep({
+      session: session as any,
+      accessToken: 'token',
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    expect(session.checklistDashboardUrl).toBe(canonical.dashboardUrl);
+    expect(mockedCallAmplitudeMcp).not.toHaveBeenCalled();
+  });
+
   it('falls through to agent fallback when .amplitude-dashboard.json is malformed', async () => {
     fs.writeFileSync(
       path.join(installDir, '.amplitude-dashboard.json'),
