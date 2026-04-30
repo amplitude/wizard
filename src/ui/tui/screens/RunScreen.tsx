@@ -40,6 +40,7 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import path from 'node:path';
 import { getLogFile } from '../../../utils/storage-paths.js';
 import { getSessionStartMs } from '../../../lib/observability/index.js';
 
@@ -47,10 +48,6 @@ const RUN_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '←→', label: 'Tabs' },
   { key: 'Ctrl+C', label: 'Cancel' },
 ]);
-
-/** File extensions used to detect "currently editing" from status messages. */
-const FILE_EXT_PATTERN =
-  /\S+\.(?:tsx?|jsx?|py|swift|kt|java|go|dart|cs|cpp|vue|svelte|rb)\b/;
 
 /** Format elapsed seconds as "Xm Ys". */
 function formatElapsed(seconds: number): string {
@@ -73,13 +70,45 @@ function truncateStatus(s: string): string {
   return s.slice(0, STATUS_MAX_LEN - 1) + '…';
 }
 
-/** Extract a file path from the most recent status message, if any. */
-function extractCurrentFile(messages: string[]): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const match = messages[i].match(FILE_EXT_PATTERN);
-    if (match) return match[0];
+/**
+ * Resolve the path of the file the inner agent is currently working on.
+ *
+ * Source of truth: PreToolUse/PostToolUse hooks populate `store.fileWrites`
+ * with structured rows (planned → applied/failed). The most recent row is
+ * the file the agent has its hands on right now.
+ *
+ * The previous implementation regex'd `store.statusMessages` for tokens
+ * matching `\S+\.(tsx?|jsx?|py|...)`. That worked when status strings were
+ * structured `[STATUS]` markers, but `pushStatus` now also receives raw
+ * model text deltas and SDK stream-event protocol fragments — both of
+ * which can contain `.js`, `.ts`, etc. Production users were seeing
+ * markdown code refs (`` `src/index.js` ``, leading backtick included)
+ * and partial JSON like `{"type":"content_block_delta","index":0,...}`
+ * surface in the "currently editing" slot. The header lied.
+ *
+ * Reading from `fileWrites` is the structural fix: PreToolUse only fires
+ * for actual Edit/Write/MultiEdit invocations, so prose and protocol
+ * frames can't contaminate the value. Returns the relative path when an
+ * `installDir` is provided (so wide paths don't blow out the header
+ * slot).
+ */
+function extractCurrentFile(
+  fileWrites: readonly { path: string }[],
+  installDir?: string,
+): string | null {
+  if (fileWrites.length === 0) return null;
+  const filePath = fileWrites[fileWrites.length - 1].path;
+  if (
+    installDir &&
+    filePath.startsWith(installDir) &&
+    (filePath.length === installDir.length ||
+      filePath[installDir.length] === '/' ||
+      filePath[installDir.length] === '\\')
+  ) {
+    const rel = path.relative(installDir, filePath);
+    return rel === '' ? filePath : rel;
   }
-  return null;
+  return filePath;
 }
 
 interface RunScreenProps {
@@ -208,9 +237,13 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // post-agent `createDashboardStep` runs as a slow fallback and sets
   // `dashboardFallbackPhase` to `in_progress`. Without this row the user
   // sees a "5 / 5 tasks complete" header for the duration of the spinner —
-  // the bug we fixed in PR #XXX. The row only appears when the fallback
+  // the bug we fixed in PR #479. The row only appears when the fallback
   // genuinely fires, so on a healthy run the list still shows exactly five
   // items end-to-end.
+  //
+  // Restored after a rebase against main accidentally dropped this block
+  // in this PR (#474). `RunScreen.dashboardFallback.test.tsx` pins the
+  // contract — without this restore, that test fails on Node 22 + 24.
   if (store.session.dashboardFallbackPhase === 'in_progress') {
     progressItems.push({
       label: 'Create your starter dashboard',
@@ -219,7 +252,10 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     });
   }
 
-  const rawFile = extractCurrentFile(store.statusMessages);
+  const rawFile = extractCurrentFile(
+    store.fileWrites,
+    store.session.installDir,
+  );
   const lastFileRef = useRef<string | null>(null);
   if (rawFile) lastFileRef.current = rawFile;
   const currentFile = lastFileRef.current;
