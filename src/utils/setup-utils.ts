@@ -18,6 +18,7 @@ import {
   DEFAULT_HOST_URL,
   DEFAULT_AMPLITUDE_ZONE,
   OUTBOUND_URLS,
+  type AmplitudeZone,
 } from '../lib/constants';
 import { analytics } from './analytics';
 import { getUI } from '../ui';
@@ -27,6 +28,11 @@ import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
 import { type AppId, toCredentialAppId } from '../lib/wizard-session';
 import { storeToken } from './ampli-settings';
 import { detectRegionFromToken } from './urls';
+import {
+  probeOtherZoneForOrgs,
+  buildNoOrgsMessage,
+  NoOrgsError,
+} from './zone-probe';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
 import {
@@ -598,16 +604,32 @@ async function askForWizardLogin(
 
     // ── 4. Org resolution (flowchart: sign-in → determine destination org) ──
     if (userInfo.orgs.length === 0) {
-      // New user who hasn't created an org yet — direct them to the browser
+      // Before we surface a dead-end "no orgs" error, probe the OTHER zone.
+      // If the user's org is on the opposite data center, the data API on
+      // the current zone will return 0 orgs even though the user is signed
+      // in fine. Without this branch the wizard would tell the user "your
+      // account has no organizations" — factually wrong when they just
+      // happen to have picked (or defaulted to) the wrong region.
+      //
+      // We never silently switch — region is a user-consented setting, not
+      // something we should change behind their back. Instead we throw a
+      // typed error so the TUI / outro can render an actionable recovery
+      // hint with a one-key region switch.
+      const probe = await probeOtherZoneForOrgs(cloudRegion);
+      const message = buildNoOrgsMessage(cloudRegion, probe);
       getUI().log.error(
         `${chalk.red('No Amplitude organization found.')}\n\n` +
-          chalk.dim(
-            'Your account has no organizations. Please complete signup at ' +
-              chalk.cyan('https://app.amplitude.com') +
-              ' and create an organization, then re-run the wizard.',
-          ),
+          chalk.dim(message),
       );
-      await abort();
+      // Wrap the new-style typed error and rethrow so abort() can carry the
+      // metadata. Falling through to abort() preserves the existing exit
+      // contract (rejected promise, exit code) for callers.
+      throw new NoOrgsError(
+        message,
+        cloudRegion as AmplitudeZone,
+        probe.otherZone,
+        probe.otherOrgCount,
+      );
     } else if (userInfo.orgs.length === 1) {
       selectedOrg = userInfo.orgs[0];
     } else {
