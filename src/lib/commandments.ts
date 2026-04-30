@@ -66,6 +66,18 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
 
   'When installing packages, start the install as a background task and continue with other work. Do not block on installs unless explicitly instructed.',
 
+  `Discovery parallelism — fan out independent probes in ONE assistant message instead of serializing them turn-by-turn. The Claude Agent SDK runs every tool call in a single message in parallel, so a 3-tool batch costs ~one round-trip; the same 3 calls split across 3 messages costs ~3 round-trips and ~10–20s of avoidable wall time on cold-start.
+
+Combine in the SAME message when none depend on each other (typical for the very first project sniff):
+  - \`mcp__wizard-tools__detect_package_manager\`
+  - \`mcp__wizard-tools__check_env_keys\`
+  - \`Glob\` (e.g. \`package.json\`, \`pyproject.toml\`, \`pubspec.yaml\` — whatever signals the framework)
+  - \`Read\` of a file you know exists (typically \`package.json\` from the framework-detection prompt context)
+
+Same rule for any later "I want to understand the project shape" batch: when you'd be calling several Read / Glob / Grep / wizard-tools probes whose results are independent, fire them together. DO serialize when one truly depends on another (Glob first, Read the matched paths second). If unsure, parallelism is the safer default — the wizard's status spinner stays responsive and the cache hit rate on the first user message stays hot.
+
+Don't fan out write tools (Edit / Write) the same way; those touch shared state and the model needs to see each result before continuing.`,
+
   "NEVER install non-Amplitude packages on the user's behalf. The wizard's job is to add Amplitude — not build tooling, env-var loaders, bundler plugins, polyfills, or other utilities. Out of scope: `dotenv` and variants, `webpack`, `vite`, `@types/*`, polyfill libraries, env-injection plugins. Hard test before any `npm install` / `pnpm add` / `yarn add` / `pip install` / `gem install` / `go get`: does the package start with `@amplitude/`? If not, is it explicitly listed as a required peer dependency by the active integration skill (e.g. `@react-native-async-storage/async-storage` for React Native)? If neither, DO NOT install. If env-var wiring or build-config changes are needed, document the required change in the setup report and let the user decide. Sample EXAMPLE.md files under skills/integration may show `dotenv` etc. — those are reference snippets, not install instructions.",
 
   'NEVER use `sleep`, busy-wait loops, or polling Bash commands to wait for MCP servers, gateways, or services to "recover". If an MCP tool errors, retry AT MOST ONCE; then report and proceed. Long Bash sleeps idle the streaming connection and produce cascading "API Error: 400 terminated" failures — sleeps over a few seconds will be denied.',

@@ -195,3 +195,46 @@ describe('browser-only commandment gating', () => {
     expect(savedBytes).toBeGreaterThan(2000);
   });
 });
+
+/**
+ * Discovery parallelism — the cold-start tail of every wizard run was
+ * dominated by sequential probes (detect_package_manager → check_env_keys
+ * → Glob package.json → Read package.json), each costing a full LLM
+ * round-trip. The commandment tells the agent to fan out independent
+ * tools in ONE assistant message; the SDK runs them in parallel and we
+ * collapse 4 round-trips into 1. These tests pin the rule so future
+ * commandment edits can't quietly remove it.
+ */
+describe('discovery parallelism commandment', () => {
+  const text = getWizardCommandments();
+
+  it('mandates fanning out independent probes in one assistant message', () => {
+    // The verb "fan out" is the durable sentinel — short, distinctive,
+    // and unlikely to false-match anywhere else in the prompt.
+    expect(text).toContain('fan out');
+    expect(text).toMatch(/in[\s-]?ONE assistant message/i);
+  });
+
+  it('explicitly names the cold-start probes that must batch together', () => {
+    // The 3 probes the agent currently serializes on every run. If a
+    // future copy edit drops one of these names, the rule loses its
+    // teeth — the model needs concrete tool names to act on.
+    expect(text).toContain('mcp__wizard-tools__detect_package_manager');
+    expect(text).toContain('mcp__wizard-tools__check_env_keys');
+  });
+
+  it('still allows serializing dependent calls', () => {
+    // The optimization is parallelism for INDEPENDENT calls; we don't
+    // want the agent fanning out Read-after-Glob (where Read needs the
+    // glob's matches). The "depends on" carve-out keeps the rule honest.
+    expect(text).toMatch(/depend|dependent|depends on/i);
+  });
+
+  it('forbids fanning out write tools (shared-state risk)', () => {
+    // Edit / Write touch shared file state — running them in parallel
+    // is a correctness footgun (write/write races, Read-then-Edit
+    // chains breaking). Lock the negative case in.
+    expect(text).toContain('write tools');
+    expect(text).toMatch(/Edit|Write/);
+  });
+});
