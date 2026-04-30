@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.11.1](https://github.com/amplitude/wizard/compare/wizard-v1.11.0...wizard-v1.11.1) (2026-04-30)
+
+
+### Bug Fixes
+
+* **cli:** shadow benchmark/log env vars so --help survives strict mode ([#448](https://github.com/amplitude/wizard/issues/448)) ([86f42a0](https://github.com/amplitude/wizard/commit/86f42a0defb95f0253d2709ee4907ce53e088fe5))
+* **intro:** wire up redetector so "Change directory" stops hanging ([#441](https://github.com/amplitude/wizard/issues/441)) ([#447](https://github.com/amplitude/wizard/issues/447)) ([b3a6ed3](https://github.com/amplitude/wizard/commit/b3a6ed3bc4ba55b582a24a82937ff8234386d883))
+* stop calling broken Amplitude MCP write tools and skill menu ([#445](https://github.com/amplitude/wizard/issues/445)) ([7acfb8e](https://github.com/amplitude/wizard/commit/7acfb8e952b4fcfac32f4e6324ffcd0a994e0a65))
+* stop the wizard from telling users a 5-minute run is "unusually slow" ([#410](https://github.com/amplitude/wizard/issues/410)) ([3095afe](https://github.com/amplitude/wizard/commit/3095afeb7fe620066a9d89f3606f7865d83489d1))
+* stop wizard from creating the dashboard twice ([#446](https://github.com/amplitude/wizard/issues/446)) ([8f89ec9](https://github.com/amplitude/wizard/commit/8f89ec97a3e28a26d953e0d5f6080e64fa04e960))
+* strip SSE stream-event noise from CLI subprocess logs ([#450](https://github.com/amplitude/wizard/issues/450)) ([a0c1a97](https://github.com/amplitude/wizard/commit/a0c1a974fdc5f40ba9ac5a3bd7c41f70691938af))
+* **tui:** sync credentials.appId/projectApiKey on project switch ([#439](https://github.com/amplitude/wizard/issues/439)) ([247bdf9](https://github.com/amplitude/wizard/commit/247bdf953625ed1c6b4b872ad899e28b5b7994e8))
+
 ## [1.11.0](https://github.com/amplitude/wizard/compare/wizard-v1.10.0...wizard-v1.11.0) (2026-04-30)
 
 
