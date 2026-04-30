@@ -2,9 +2,15 @@ import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
 import { VercelEnvironmentProvider } from '../vercel';
 import * as fs from 'fs';
 import * as child_process from 'child_process';
+// `spawn` / `spawnSync` are imported from the cross-platform wrapper so
+// Windows users get `.cmd` shim resolution. Mock both the wrapper (where
+// `spawn`/`spawnSync` come from) and stock `child_process` (still used
+// for `execSync`).
+import * as crossPlatformSpawn from '../../../../utils/cross-platform-spawn';
 
 vi.mock('fs');
 vi.mock('child_process');
+vi.mock('../../../../utils/cross-platform-spawn');
 const { mockSpinner } = vi.hoisted(() => ({
   mockSpinner: { start: vi.fn(), stop: vi.fn() },
 }));
@@ -29,7 +35,7 @@ describe('VercelEnvironmentProvider', () => {
       if (p.endsWith('project.json')) return true;
       return false;
     });
-    (child_process.spawnSync as Mock).mockReturnValue({
+    (crossPlatformSpawn.spawnSync as Mock).mockReturnValue({
       stdout: 'testuser',
       stderr: '',
       status: 0,
@@ -54,7 +60,7 @@ describe('VercelEnvironmentProvider', () => {
   it('should return false if not authenticated', async () => {
     (child_process.execSync as Mock).mockReturnValue(undefined);
     (fs.existsSync as Mock).mockReturnValue(true);
-    (child_process.spawnSync as Mock).mockReturnValue({
+    (crossPlatformSpawn.spawnSync as Mock).mockReturnValue({
       stdout: 'Log in to Vercel',
       stderr: '',
       status: 0,
@@ -77,7 +83,7 @@ describe('VercelEnvironmentProvider', () => {
       }),
     };
 
-    (child_process.spawn as Mock).mockReturnValue({
+    (crossPlatformSpawn.spawn as Mock).mockReturnValue({
       stdin: stdinMock,
       on: onMock,
       stderr,
@@ -93,11 +99,11 @@ describe('VercelEnvironmentProvider', () => {
   });
 
   it('should attempt to upload environment variables', async () => {
-    (child_process.spawn as Mock).mockReturnValue({});
+    (crossPlatformSpawn.spawn as Mock).mockReturnValue({});
 
     await provider.uploadEnvVars({ FOO: 'bar' });
 
-    expect(child_process.spawn).toHaveBeenCalledWith(
+    expect(crossPlatformSpawn.spawn).toHaveBeenCalledWith(
       'vercel',
       ['env', 'add', 'FOO', 'production'],
       expect.objectContaining({ stdio: ['pipe', 'pipe', 'pipe'] }),

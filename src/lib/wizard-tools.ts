@@ -10,6 +10,7 @@
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import AdmZip from 'adm-zip';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
@@ -134,10 +135,14 @@ export async function fetchSkillMenu(
  *    skill manifest contained. Skills are only ever published by
  *    amplitude/context-hub via GitHub Releases, so we allowlist the
  *    GitHub-owned hosts and reject anything else.
- * 3. **Zip-slip** — `unzip -d skillDir` will follow `../../../etc/passwd`
+ * 3. **Zip-slip** — naive zip extractors will follow `../../../etc/passwd`
  *    entries straight out of the target dir. We extract into the scratch
  *    tmp dir first, then walk the result and reject any entry whose
  *    resolved real path escapes the scratch root.
+ *
+ * Cross-platform note: extraction goes through `adm-zip` rather than the
+ * `unzip` CLI so this works on Windows (which has no `unzip` by default).
+ * `adm-zip`'s API is sync, matching the rest of this function.
  */
 export function downloadSkill(
   skillEntry: SkillEntry,
@@ -179,9 +184,16 @@ export function downloadSkill(
     // Extract into the scratch dir, NOT directly into the target. This way
     // any zip-slip entry lands somewhere inside `extractDir` (or fails the
     // realpath check below), never inside the user's project.
-    execFileSync('unzip', ['-o', tmpFile, '-d', extractDir], {
-      timeout: 30000,
-    });
+    //
+    // We use `adm-zip` instead of shelling out to the `unzip` CLI because
+    // Windows has no `unzip` binary by default, and the previous shell-out
+    // ENOENT'd for every Windows user. `adm-zip` is pure JS, sync, and
+    // does its own internal zip-slip filtering — but the realpath walker
+    // below remains as defense-in-depth (different code, different bugs).
+    const zip = new AdmZip(tmpFile);
+    // `maintainEntryPath = true` preserves directory structure;
+    // `overwrite = true` matches the previous `unzip -o` semantics.
+    zip.extractAllTo(extractDir, /* overwrite */ true);
 
     // Defense-in-depth zip-slip check: walk every extracted entry and make
     // sure its real path stays inside extractDir. `unzip` is supposed to

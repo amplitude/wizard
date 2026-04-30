@@ -38,6 +38,9 @@ importers:
       '@sentry/node':
         specifier: 10.47.0
         version: 10.47.0
+      adm-zip:
+        specifier: ~0.5.17
+        version: 0.5.17
       axios:
         specifier: 1.13.5
         version: 1.13.5
@@ -50,6 +53,9 @@ importers:
       client-oauth2:
         specifier: 4.3.3
         version: 4.3.3
+      cross-spawn:
+        specifier: ^7.0.6
+        version: 7.0.6
       dotenv:
         specifier: 16.4.7
         version: 16.4.7
@@ -135,9 +141,15 @@ importers:
       '@eslint/js':
         specifier: 10.0.1
         version: 10.0.1(eslint@9.39.4)
+      '@types/adm-zip':
+        specifier: ~0.5.8
+        version: 0.5.8
       '@types/chai':
         specifier: 4.3.20
         version: 4.3.20
+      '@types/cross-spawn':
+        specifier: ^6.0.6
+        version: 6.0.6
       '@types/glob':
         specifier: 7.2.0
         version: 7.2.0
@@ -1434,6 +1446,9 @@ packages:
   '@tsconfig/node16@1.0.4':
     resolution: {integrity: sha512-vxhUy4J8lyeyinH7Azl1pdd43GJhZH/tP2weN8TntQblOY+A0XbT8DJk1/oCPuOOyg/Ja757rG0CgHcWC8OfMA==}
 
+  '@types/adm-zip@0.5.8':
+    resolution: {integrity: sha512-RVVH7QvZYbN+ihqZ4kX/dMiowf6o+Jk1fNwiSdx0NahBJLU787zkULhGhJM8mf/obmLGmgdMM0bXsQTmyfbR7Q==}
+
   '@types/cardinal@2.1.1':
     resolution: {integrity: sha512-/xCVwg8lWvahHsV2wXZt4i64H1sdL+sN1Uoq7fAc8/FA6uYHjuIveDwPwvGUYp4VZiv85dVl6J/Bum3NDAOm8g==}
 
@@ -1448,6 +1463,9 @@ packages:
 
   '@types/cookie@0.6.0':
     resolution: {integrity: sha512-4Kh9a6B2bQciAhf7FSuMRRkUWecJgJu9nPnx3yzpsfXX/c50REIqpHY4C82bXP90qrLtXtkDxTZosYO3UpOwlA==}
+
+  '@types/cross-spawn@6.0.6':
+    resolution: {integrity: sha512-fXRhhUkG4H3TQk5dBhQ7m/JDdSNHKwR2BBia62lhwEIq9xGiQKLxd6LymNhn47SjXhsUEPmxi+PKw2OkW4LLjA==}
 
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
@@ -1693,6 +1711,10 @@ packages:
     resolution: {integrity: sha512-UVJyE9MttOsBQIDKw1skb9nAwQuR5wuGD3+82K6JgJlm/Y+KI92oNsMNGZCYdDsVtRHSak0pcV5Dno5+4jh9sw==}
     engines: {node: '>=0.4.0'}
     hasBin: true
+
+  adm-zip@0.5.17:
+    resolution: {integrity: sha512-+Ut8d9LLqwEvHHJl1+PIHqoyDxFgVN847JTVM3Izi3xHDWPE4UtzzXysMZQs64DMcrJfBeS/uoEP4AD3HQHnQQ==}
+    engines: {node: '>=12.0'}
 
   ajv-formats@3.0.1:
     resolution: {integrity: sha512-8iUql50EUR+uUcdRQ3HDqa6EVyo3docL8g5WJ3FNcWmu62IbkGUue/pEyLBW8VGKKucTPgqeks4fIU1DA4yowQ==}
@@ -5111,6 +5133,10 @@ snapshots:
 
   '@tsconfig/node16@1.0.4': {}
 
+  '@types/adm-zip@0.5.8':
+    dependencies:
+      '@types/node': 20.19.37
+
   '@types/cardinal@2.1.1': {}
 
   '@types/chai@4.3.20': {}
@@ -5125,6 +5151,10 @@ snapshots:
       '@types/node': 20.19.37
 
   '@types/cookie@0.6.0': {}
+
+  '@types/cross-spawn@6.0.6':
+    dependencies:
+      '@types/node': 20.19.37
 
   '@types/deep-eql@4.0.2': {}
 
@@ -5443,6 +5473,8 @@ snapshots:
       acorn: 8.16.0
 
   acorn@8.16.0: {}
+
+  adm-zip@0.5.17: {}
 
   ajv-formats@3.0.1(ajv@8.18.0):
     optionalDependencies:
