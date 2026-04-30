@@ -683,8 +683,6 @@ export const defaultCommand: CommandModule = {
               );
               const { storeToken } = await import('../utils/ampli-settings.js');
 
-              const forceFresh = !ampliConfigExists(installDir);
-
               // Wait for the user to dismiss the welcome screen AND pick a
               // region before opening the OAuth URL. This ensures the logo
               // and intro are visible before the browser opens.
@@ -719,6 +717,15 @@ export const defaultCommand: CommandModule = {
                   }
                 });
               });
+              // Read the live installDir from the store after the intro
+              // wait — the user may have switched directories on the
+              // welcome screen, and `forceFresh` should reflect the
+              // ampli.json status of the directory we're actually
+              // about to instrument.
+              const forceFresh = !ampliConfigExists(
+                tui.store.session.installDir,
+              );
+
               const { resolveZone } = await import('../lib/zone-resolution.js');
               const zone = resolveZone(
                 tui.store.session,
@@ -1226,10 +1233,16 @@ export const defaultCommand: CommandModule = {
           // Before calling the AI agent, do a quick static check to see if
           // Amplitude is already installed in the project. If so, skip the
           // agent entirely and advance directly to MCP setup.
+          //
+          // Read the live installDir from the store — the user may have
+          // changed it via the IntroScreen "Change directory" picker
+          // since the local `installDir` was captured at startup.
           const { detectAmplitudeInProject } = await import(
             '../lib/detect-amplitude.js'
           );
-          const localDetection = detectAmplitudeInProject(installDir);
+          const localDetection = detectAmplitudeInProject(
+            tui.store.session.installDir,
+          );
 
           if (localDetection.confidence !== 'none') {
             const { logToFile: log } = await import('../utils/debug.js');

@@ -55,20 +55,24 @@ export async function runWizard(
     ...readEnvironment(),
   };
 
-  // Trust-boundary normalization. `--install-dir` (and the env-var
-  // shadow `AMPLITUDE_WIZARD_INSTALL_DIR`) can carry a leading `~` when
-  // the value is quoted at the shell or sourced from env — Node won't
-  // expand it for us, so naive `path.resolve()` would treat `~` as a
-  // literal directory name and join it onto cwd. See
-  // `src/utils/install-dir.ts`.
-  const resolvedInstallDir = resolveInstallDir(finalArgs.installDir);
-
-  // Build session if not provided (CI mode passes one pre-built)
+  // installDir precedence (highest wins):
+  //   1. TUI directory picker — already mutated session.installDir via
+  //      store.changeInstallDir() before runWizard is called.
+  //   2. --install-dir / AMPLITUDE_WIZARD_INSTALL_DIR — flowed into the
+  //      session at buildSession() time.
+  //   3. process.cwd() — buildSession's default.
+  //
+  // Trust the session as the single source of truth. Only the fresh-
+  // session path needs to resolve from CLI args — and buildSession does
+  // that via its zod schema (resolveInstallDir handles `~` expansion).
+  // The previous code unconditionally re-assigned session.installDir
+  // from finalArgs.installDir, which silently reverted any TUI
+  // directory change back to the original CLI value.
   if (!session) {
     session = buildSession({
       debug: finalArgs.debug,
       forceInstall: finalArgs.forceInstall,
-      installDir: resolvedInstallDir,
+      installDir: resolveInstallDir(finalArgs.installDir),
       ci: finalArgs.ci,
       signup: finalArgs.signup,
       signupEmail: finalArgs.signupEmail,
@@ -82,8 +86,6 @@ export async function runWizard(
       region: finalArgs.region,
     });
   }
-
-  session.installDir = resolvedInstallDir;
 
   getUI().intro(`Welcome to the Amplitude setup wizard`);
 

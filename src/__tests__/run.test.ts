@@ -147,4 +147,51 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
       expect.objectContaining({ signup: false }),
     );
   });
+
+  // The TUI's directory picker mutates session.installDir at runtime.
+  // runWizard MUST treat the passed-in session as the source of truth
+  // and not re-derive installDir from CLI argv — doing that silently
+  // reverts the user's directory change. See PR #485 follow-up.
+  describe('installDir precedence', () => {
+    it('preserves session.installDir when a session is passed in (TUI selection wins over argv)', async () => {
+      mockRunAgentWizard.mockResolvedValue(undefined);
+      const session = {
+        debug: false,
+        forceInstall: false,
+        installDir: '/picked/by/tui',
+        ci: false,
+        signup: false,
+        localMcp: false,
+        menu: false,
+        setupConfirmed: false,
+        integration: Integration.nextjs,
+        frameworkContext: {},
+        frameworkContextAnswerOrder: [],
+        typescript: false,
+        credentials: null,
+        serviceStatus: null,
+        outroData: null,
+        frameworkConfig: null,
+      } as unknown as Parameters<typeof runWizard>[1];
+
+      // argv carries a different --install-dir; the session value MUST win.
+      await runWizard({ installDir: '/from/argv' }, session);
+
+      expect(session.installDir).toBe('/picked/by/tui');
+      const passedSession = mockRunAgentWizard.mock.calls[0][1];
+      expect(passedSession.installDir).toBe('/picked/by/tui');
+    });
+
+    it('uses argv.installDir when no session is provided (fresh build)', async () => {
+      mockRunAgentWizard.mockResolvedValue(undefined);
+
+      await runWizard({
+        integration: Integration.nextjs,
+        installDir: '/from/argv',
+      });
+
+      const passedSession = mockRunAgentWizard.mock.calls[0][1];
+      expect(passedSession.installDir).toBe('/from/argv');
+    });
+  });
 });
