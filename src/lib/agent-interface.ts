@@ -477,6 +477,102 @@ export function partitionHookBridgeRace(data: string): {
 }
 
 /**
+ * Anthropic stream-event protocol shapes that leak through the CLI when
+ * verbose / stream-json output is enabled. The wizard never needs these —
+ * the SDK message stream provides the structured events we act on, while
+ * these raw protocol frames just bury real activity under thousands of
+ * `partial_json` deltas per turn (the in-app Logs tab quickly hits 10k+
+ * lines of noise). Used by both `runAgentLocally` (subprocess stdout) and
+ * the SDK path (subprocess stderr passthrough).
+ */
+const STREAM_EVENT_TYPES: ReadonlySet<string> = new Set([
+  'message_start',
+  'message_delta',
+  'message_stop',
+  'content_block_start',
+  'content_block_delta',
+  'content_block_stop',
+  'ping',
+  'stream_event',
+]);
+const STREAM_EVENT_JSON_PREFIXES: readonly string[] = Array.from(
+  STREAM_EVENT_TYPES,
+).map((t) => `{"type":"${t}"`);
+const STREAM_EVENT_SSE_EVENT_PREFIXES: readonly string[] = Array.from(
+  STREAM_EVENT_TYPES,
+).map((t) => `event: ${t}`);
+const STREAM_EVENT_SSE_DATA_PREFIXES: readonly string[] = Array.from(
+  STREAM_EVENT_TYPES,
+).map((t) => `data: {"type":"${t}"`);
+
+/**
+ * True if `line` is Anthropic stream-event protocol noise. Matches both
+ * bare JSON (`{"type":"content_block_delta",...}`) and raw SSE framing
+ * (`event: content_block_delta` / `data: {"type":"content_block_delta",...}`).
+ * `JSON.parse` only succeeds on complete lines, so the prefix check is the
+ * primary defense against partial-line chunks. Exported for unit tests.
+ */
+export function looksLikeStreamEventLine(line: string): boolean {
+  const trimmed = line.trimStart();
+  if (trimmed.length < 9) return false;
+  const first = trimmed[0];
+  if (first === '{') {
+    for (const prefix of STREAM_EVENT_JSON_PREFIXES) {
+      if (trimmed.startsWith(prefix)) return true;
+    }
+    try {
+      const obj = JSON.parse(trimmed) as { type?: unknown };
+      return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
+    } catch {
+      return false;
+    }
+  }
+  if (first === 'e') {
+    for (const prefix of STREAM_EVENT_SSE_EVENT_PREFIXES) {
+      if (trimmed.startsWith(prefix)) return true;
+    }
+  }
+  if (first === 'd') {
+    for (const prefix of STREAM_EVENT_SSE_DATA_PREFIXES) {
+      if (trimmed.startsWith(prefix)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Strip stream-event protocol lines from a raw chunk while preserving
+ * everything else (and the chunk's trailing-newline behavior). Mirrors
+ * `partitionHookBridgeRace`: chunk-level filtering would drop genuine
+ * errors that happened to ride alongside protocol noise in the same
+ * batched stderr write, so we split on `\n`, drop only matching lines,
+ * and reconstruct. Exported for unit tests.
+ */
+export function stripStreamEventNoise(data: string): {
+  suppressed: number;
+  passthrough: string;
+} {
+  if (data.length === 0) return { suppressed: 0, passthrough: '' };
+  const hadTrailingNewline = data.endsWith('\n');
+  const lines = data.split('\n');
+  if (hadTrailingNewline) lines.pop();
+  let suppressed = 0;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (looksLikeStreamEventLine(line)) {
+      suppressed++;
+      continue;
+    }
+    kept.push(line);
+  }
+  if (kept.length === 0) return { suppressed, passthrough: '' };
+  return {
+    suppressed,
+    passthrough: kept.join('\n') + (hadTrailingNewline ? '\n' : ''),
+  };
+}
+
+/**
  * Build a PreToolUse hook that enforces wizard Bash safety.
  *
  * Why this exists: the Claude Agent SDK runs with
@@ -1950,54 +2046,6 @@ export async function runAgentLocally(
     };
 
     /**
-     * Detect Anthropic stream-event protocol JSON. These lines
-     * (`{"type":"message_start",...}`, `{"type":"content_block_delta",...}`,
-     * etc.) leak into stdout when claude is invoked with a streaming output
-     * format. They're useful in the log file but pure garbage in the status
-     * pill — the user sees raw protocol noise and the long, unbounded JSON
-     * also pushes the progress counter past terminal width and folds the
-     * header layout (see RunScreen.tsx `truncateStatus`). Drop them from
-     * the user-facing status; they're already captured in the per-line log.
-     */
-    const STREAM_EVENT_TYPES = new Set([
-      'message_start',
-      'message_delta',
-      'message_stop',
-      'content_block_start',
-      'content_block_delta',
-      'content_block_stop',
-      'ping',
-      'stream_event',
-    ]);
-    /**
-     * Belt-and-braces signature match for partial / pre-buffer protocol
-     * JSON. `JSON.parse` only succeeds on complete lines, so a chunk that
-     * splits mid-payload (very common for `content_block_delta`, which
-     * carries large strings) would otherwise slip past the strict check
-     * and reach the status pill as truncated noise like
-     * `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delt…`.
-     * Anchor on the `{"type":"<known>"` prefix to catch those before they
-     * paint to the UI.
-     */
-    const STREAM_EVENT_PREFIXES = Array.from(STREAM_EVENT_TYPES).map(
-      (t) => `{"type":"${t}"`,
-    );
-    const looksLikeStreamEvent = (line: string): boolean => {
-      if (line.length < 9 || line[0] !== '{') return false;
-      // Fast path: signature match on the prefix. Survives partial lines.
-      for (const prefix of STREAM_EVENT_PREFIXES) {
-        if (line.startsWith(prefix)) return true;
-      }
-      // Slow path: full parse for completeness (handles odd whitespace).
-      try {
-        const obj = JSON.parse(line) as { type?: unknown };
-        return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
-      } catch {
-        return false;
-      }
-    };
-
-    /**
      * Line buffer for stdout. The OS pipes stdout in arbitrary-sized
      * chunks — a single `data` event may carry multiple lines, half a
      * line, or several lines plus a partial trailing one. Splitting each
@@ -2011,8 +2059,13 @@ export async function runAgentLocally(
      */
     let stdoutBuffer = '';
     const consumeLine = (line: string) => {
+      // Drop stream-event protocol lines before logging — under stream-json
+      // output a single agent turn produces hundreds of `content_block_delta`
+      // frames, and writing them all to the log file makes the Logs tab
+      // unreadable (thousands of partial_json deltas burying real status).
+      // The SDK message stream already gives us structured events.
+      if (looksLikeStreamEventLine(line)) return;
       logToFile('claude stdout:', line);
-      if (looksLikeStreamEvent(line)) return;
       pendingLine = line.slice(0, 80);
       if (pushTimer === null) {
         pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
@@ -2868,19 +2921,26 @@ export async function runAgent(
             tools: { type: 'preset', preset: 'claude_code' },
             // Capture stderr from CLI subprocess for debugging.
             //
-            // Known-benign hook-bridge-race lines (see HOOK_BRIDGE_RACE_RE)
-            // are partitioned out and counted; everything else passes
-            // through. Chunk-level matching would drop a genuine error
-            // riding alongside a race line in the same batched chunk —
-            // partitionHookBridgeRace splits before filtering so that
-            // can't happen. Summary count is logged at attempt boundary.
+            // Two filters run in sequence before anything reaches the log:
+            //   1. Known-benign hook-bridge-race lines (HOOK_BRIDGE_RACE_RE)
+            //      are partitioned out and counted; summary logged at
+            //      attempt boundary.
+            //   2. Anthropic stream-event protocol noise (event: ... /
+            //      data: {"type":"content_block_delta",...}) is dropped —
+            //      under verbose / stream-json output the CLI emits these
+            //      to stderr at hundreds of frames per turn, which makes
+            //      the in-app Logs tab unreadable.
+            // Chunk-level matching would drop genuine errors riding
+            // alongside noise in the same batched chunk — both helpers
+            // split line-by-line before filtering so that can't happen.
             stderr: (data: string) => {
-              const { suppressed, passthrough } = partitionHookBridgeRace(data);
-              hookBridgeRaceSuppressed += suppressed;
-              if (passthrough.length > 0) {
-                logToFile('CLI stderr:', passthrough);
+              const race = partitionHookBridgeRace(data);
+              hookBridgeRaceSuppressed += race.suppressed;
+              const stream = stripStreamEventNoise(race.passthrough);
+              if (stream.passthrough.length > 0) {
+                logToFile('CLI stderr:', stream.passthrough);
                 if (options.debug) {
-                  debug('CLI stderr:', passthrough);
+                  debug('CLI stderr:', stream.passthrough);
                 }
               }
             },
