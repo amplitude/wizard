@@ -234,10 +234,7 @@ export function _clearMcpSessionCacheForTesting(): void {
  */
 export function invalidateMcpSessionsForToken(accessToken: string): void {
   if (!accessToken) return;
-  const prefix = `${accessToken}|`;
-  for (const key of mcpSessionCache.keys()) {
-    if (key.startsWith(prefix)) mcpSessionCache.delete(key);
-  }
+  invalidateMcpSessionCache(accessToken);
 }
 
 /**
