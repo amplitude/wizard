@@ -746,6 +746,12 @@ async function runAgentWizardBody(
       agentSessionId: session.agentSessionId,
       targetsBrowser: config.metadata.targetsBrowser,
       mode: session.mode,
+      // Forward orchestrator-supplied context (from `--context-file`
+      // / `AMPLITUDE_WIZARD_CONTEXT`) so it lands in the cached
+      // system-prompt block alongside the commandments. Undefined when
+      // no context was provided — keeps the cached preset stable for
+      // every "no context" run.
+      orchestratorContext: session.orchestratorContext ?? undefined,
     },
     sessionToOptions(session),
   );

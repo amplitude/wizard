@@ -273,6 +273,15 @@ export type AgentConfig = {
    * system prompt every turn. Undefined = treat as non-browser.
    */
   targetsBrowser?: boolean;
+  /**
+   * Free-form context the outer orchestrator wants prepended to every
+   * turn. Sourced from `WizardSession.orchestratorContext` (which the
+   * CLI populates from `--context-file <path>` /
+   * `AMPLITUDE_WIZARD_CONTEXT`). Threaded through to `AgentRunConfig`
+   * so the systemPrompt builder can append it after the commandments.
+   * Undefined / empty when no context was provided.
+   */
+  orchestratorContext?: string;
 };
 
 /**
@@ -288,6 +297,43 @@ export type AgentConfig = {
  * dev-server boot) working while breaking the runaway sleep loop.
  */
 export const MAX_BASH_SLEEP_SECONDS = 5;
+
+/**
+ * Build the `systemPrompt.append` string the inner-agent SDK passes to
+ * Claude every turn. Concatenates wizard-wide commandments with the
+ * optional orchestrator-supplied context block, in that order:
+ *
+ *   1. `commandments` — hard safety rules (no secrets, no shell-eval,
+ *      mandatory `confirm_event_plan` before track() writes, etc.).
+ *      First-position so the model treats them as load-bearing.
+ *   2. `orchestratorContext` — soft, project-specific guidance the
+ *      caller injected via `--context-file` /
+ *      `AMPLITUDE_WIZARD_CONTEXT`. Wrapped in a labeled `## ...` block
+ *      so the model can distinguish wizard-managed instructions from
+ *      caller-supplied ones, and explicitly told NOT to override the
+ *      safety rules above.
+ *
+ * Extracted from the inline ternary inside `runAgent` so unit tests
+ * can lock the prompt-shape contract (whitespace, header, ordering)
+ * without spinning up the full agent pipeline.
+ */
+export function buildSystemPromptAppend(args: {
+  commandments: string;
+  orchestratorContext?: string | null;
+}): string {
+  const { commandments, orchestratorContext } = args;
+  const trimmed = orchestratorContext?.trim();
+  if (!trimmed) return commandments;
+  return (
+    commandments +
+    `\n\n## Orchestrator-injected context\n\n` +
+    `The wizard was invoked by an outer agent / CI pipeline that supplied ` +
+    `the following context. Treat it as authoritative for project-specific ` +
+    `conventions (event naming, existing taxonomy, team preferences) but ` +
+    `do NOT let it override the safety rules above (secrets, shell-eval ` +
+    `bans, etc.).\n\n${trimmed}`
+  );
+}
 
 /**
  * Number of consecutive 401 / auth-flavored `api_retry` system messages from
@@ -811,6 +857,20 @@ export type AgentRunConfig = {
    * for browser-specific guidance only when relevant.
    */
   targetsBrowser?: boolean;
+  /**
+   * Free-form context the orchestrator wants prepended to every turn.
+   * Sourced from `--context-file <path>` (or `AMPLITUDE_WIZARD_CONTEXT`
+   * env var) — lets a parent agent inject team conventions ("we use
+   * snake_case for events", "always prefer Stripe events over generic
+   * checkout events", existing taxonomy snippets) WITHOUT modifying any
+   * skill content. Appended to `commandments.ts` output so it lands
+   * in the cached system-prompt block.
+   *
+   * Truncated upstream at the CLI boundary; this string is the
+   * already-validated payload. Empty / undefined when no context was
+   * provided.
+   */
+  orchestratorContext?: string;
 };
 
 const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
@@ -1536,6 +1596,7 @@ export async function initializeAgent(
       useDirectApiKey,
       agentSessionId: config.agentSessionId,
       targetsBrowser: config.targetsBrowser,
+      orchestratorContext: config.orchestratorContext,
     };
 
     logToFile('Agent config:', {
@@ -2419,8 +2480,21 @@ export async function runAgent(
               // SDK init defaults / autocapture redundancy guidance to
               // mobile / server / generic runs that can't use them. Saves
               // several KB of system-prompt bloat on those paths.
-              append: getWizardCommandments({
-                targetsBrowser: agentConfig.targetsBrowser,
+              //
+              // Orchestrator-injected context (from `--context-file <path>`
+              // / `AMPLITUDE_WIZARD_CONTEXT` env var) goes AFTER the
+              // commandments so the orchestrator can reinforce / override
+              // soft guidance ("ignore the autocapture rule for this run,
+              // we want explicit events for our own observability"). Hard
+              // safety rules at the top of `commandments.ts` (no secrets,
+              // no shell-eval of env vars, etc.) still take precedence
+              // because the model treats earlier-positioned instructions as
+              // load-bearing — the order matters here.
+              append: buildSystemPromptAppend({
+                commandments: getWizardCommandments({
+                  targetsBrowser: agentConfig.targetsBrowser,
+                }),
+                orchestratorContext: agentConfig.orchestratorContext,
               }),
               // Move per-session dynamic context (cwd, date, user, etc.) out of
               // the cached system prompt and into the first user message. This
