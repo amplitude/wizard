@@ -991,7 +991,7 @@ export function persistEventPlan(
       return false;
     }
     // Write order matters for the mtime tiebreaker in
-    // `pickFreshestExisting(canonical, legacy)` (see agent-interface.ts).
+    // `pickFreshestExisting([canonical, legacy])` (see storage-paths.ts).
     // On filesystems with 1-second mtime granularity (older HFS+, ext4
     // without nanosec inode timestamps) both writes land in the same
     // second and both files share an mtime; the watcher walks the
