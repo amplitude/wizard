@@ -40,6 +40,7 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import path from 'node:path';
 import { getLogFile } from '../../../utils/storage-paths.js';
 import { getSessionStartMs } from '../../../lib/observability/index.js';
 
@@ -96,15 +97,18 @@ function extractCurrentFile(
   installDir?: string,
 ): string | null {
   if (fileWrites.length === 0) return null;
-  const path = fileWrites[fileWrites.length - 1].path;
+  const filePath = fileWrites[fileWrites.length - 1].path;
   if (
     installDir &&
-    path.startsWith(installDir) &&
-    (path.length === installDir.length || path[installDir.length] === '/')
+    filePath.startsWith(installDir) &&
+    (filePath.length === installDir.length ||
+      filePath[installDir.length] === '/' ||
+      filePath[installDir.length] === '\\')
   ) {
-    return path.slice(installDir.length).replace(/^\/+/, '') || path;
+    const rel = path.relative(installDir, filePath);
+    return rel === '' ? filePath : rel;
   }
-  return path;
+  return filePath;
 }
 
 interface RunScreenProps {
