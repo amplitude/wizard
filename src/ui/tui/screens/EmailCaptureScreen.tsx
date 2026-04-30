@@ -84,7 +84,7 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
         ) : (
           <TextInput
             key="name-input"
-            defaultValue=""
+            defaultValue={session.signupFullName ?? ''}
             placeholder="First Last"
             onSubmit={handleNameSubmit}
           />
