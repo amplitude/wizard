@@ -323,6 +323,82 @@ describe('callAmplitudeMcp', () => {
 
       expect(result).toBeNull();
     });
+
+    it('fails fast on HTTP 401 from initialize without invoking the agent', async () => {
+      mockFetch.mockResolvedValueOnce(makeFetchResponse('', {}, 401));
+
+      mockQuery.mockReturnValue(
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [{ type: 'text', text: 'this should never run' }],
+            },
+          };
+        })(),
+      );
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'expired-tok',
+        direct: async (callTool) => {
+          await callTool(1, 'noop', {});
+          return 'unreachable';
+        },
+        agentPrompt: 'agent should not run',
+        parseAgent: () => 'parsed',
+      });
+
+      // Returns null immediately — same auth failure would just repeat.
+      expect(result).toBeNull();
+      // The agent fallback (which would burn ~12s on the same access
+      // token and hit the same 401) is never started.
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it('fails fast on HTTP 403 from initialize without invoking the agent', async () => {
+      mockFetch.mockResolvedValueOnce(makeFetchResponse('', {}, 403));
+
+      mockQuery.mockReturnValue((async function* () {})());
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'forbidden-tok',
+        direct: async () => 'unreachable',
+        agentPrompt: 'agent should not run',
+        parseAgent: () => null,
+      });
+
+      expect(result).toBeNull();
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it('still uses agent fallback on HTTP 500 from initialize (transient)', async () => {
+      mockFetch.mockResolvedValueOnce(makeFetchResponse('', {}, 500));
+
+      mockQuery.mockReturnValue(
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [{ type: 'text', text: '{"recovered":true}' }],
+            },
+          };
+        })(),
+      );
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'tok',
+        direct: async () => null,
+        agentPrompt: 'fallback',
+        parseAgent: (text) => {
+          const m = text.match(/\{.*\}/s);
+          return m ? (JSON.parse(m[0]) as { recovered: boolean }) : null;
+        },
+      });
+
+      // Agent fallback IS invoked — 5xx is transient.
+      expect(mockQuery).toHaveBeenCalledOnce();
+      expect(result).toEqual({ recovered: true });
+    });
   });
 
   describe('both paths fail', () => {
