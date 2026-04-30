@@ -1603,6 +1603,83 @@ describe('AgentUI.promptEnvironmentSelection — pagination cap', () => {
     // Recommended must point to a value that survived the cap.
     expect(data.choices.some((c) => c.value === data.recommended)).toBe(true);
   });
+
+  it('auto-select fallback picks the same env as recommended for multi-org accounts', async () => {
+    // Regression: the auto-select fallback used to iterate `orgs` in
+    // input-array order while `recommended` derived from the sorted
+    // choices list. For multi-org accounts where orgs weren't
+    // alphabetically ordered, they could diverge.
+    const orgs = [
+      {
+        id: 'org-zebra',
+        name: 'Zebra Corp',
+        projects: [
+          {
+            id: 'proj-z',
+            name: 'ZProject',
+            environments: [
+              {
+                name: 'Production',
+                rank: 1,
+                app: { id: 'app-z', apiKey: 'key-z' },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'org-alpha',
+        name: 'Alpha Inc',
+        projects: [
+          {
+            id: 'proj-a',
+            name: 'AProject',
+            environments: [
+              {
+                name: 'Production',
+                rank: 1,
+                app: { id: 'app-a', apiKey: 'key-a' },
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const ui = new AgentUI();
+    const originalStdin = process.stdin;
+    Object.defineProperty(process, 'stdin', {
+      configurable: true,
+      value: { readable: false },
+    });
+    let autoSelected: { orgId: string; projectId: string; env: string };
+    try {
+      autoSelected = await ui.promptEnvironmentSelection(orgs);
+    } finally {
+      Object.defineProperty(process, 'stdin', {
+        configurable: true,
+        value: originalStdin,
+      });
+    }
+
+    const needsInputEvent = writes
+      .map((line) => JSON.parse(line.trim()) as NDJSONEvent)
+      .find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      recommended?: string;
+      choices: Array<{
+        value: string;
+        metadata: { orgId: string; envName: string };
+      }>;
+    };
+
+    const recommendedChoice = data.choices.find(
+      (c) => c.value === data.recommended,
+    );
+    expect(recommendedChoice).toBeDefined();
+    expect(autoSelected.orgId).toBe(recommendedChoice!.metadata.orgId);
+    expect(autoSelected.env).toBe(recommendedChoice!.metadata.envName);
+  });
 });
 
 describe('AgentUI.heartbeat', () => {

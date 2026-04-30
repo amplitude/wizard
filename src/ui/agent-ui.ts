@@ -1534,23 +1534,23 @@ export class AgentUI implements WizardUI {
       );
     }
 
-    // Fallback: auto-select the first environment
-    for (const org of orgs) {
-      for (const proj of org.projects) {
-        const env = (proj.environments ?? [])
-          .filter((e) => e.app?.apiKey)
-          .sort((a, b) => a.rank - b.rank)[0];
-        if (env) {
-          emit(
-            'log',
-            `Auto-selected environment: ${org.name} / ${proj.name} / ${env.name}`,
-            {
-              level: 'warn',
-            },
-          );
-          return { orgId: org.id, projectId: proj.id, env: env.name };
-        }
-      }
+    // Fallback: auto-select the first entry from sortedChoices so the
+    // pick is identical to `recommended` (both derive from the same
+    // (rank, orgName, projectName, envName) ordering).
+    const autoChoice = sortedChoices[0];
+    if (autoChoice) {
+      emit(
+        'log',
+        `Auto-selected environment: ${autoChoice.orgName} / ${autoChoice.projectName} / ${autoChoice.envName}`,
+        {
+          level: 'warn',
+        },
+      );
+      return {
+        orgId: autoChoice.orgId,
+        projectId: autoChoice.projectId,
+        env: autoChoice.envName,
+      };
     }
 
     throw new Error('No environments with API keys found');
