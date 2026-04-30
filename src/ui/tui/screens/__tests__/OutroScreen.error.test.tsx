@@ -26,6 +26,7 @@ import {
   renderSnapshot,
 } from '../../__tests__/snapshot-utils.js';
 import { OutroKind } from '../../session-constants.js';
+import { toWizardDashboardOpenUrl } from '../../../../utils/dashboard-open-url.js';
 
 const GATEWAY_DOWN_MESSAGE = `Amplitude LLM gateway unavailable
 
@@ -73,16 +74,18 @@ describe('OutroScreen — error variants', () => {
   });
 
   it('uses the dashboard-aware label when checklistDashboardUrl is set', () => {
+    const canonicalDashboard =
+      'https://app.amplitude.com/analytics/d/abc123';
     const store = makeStoreForSnapshot({
       outroData: {
         kind: OutroKind.Success,
         changes: ['Set up tracking plan'],
       },
-      checklistDashboardUrl: 'https://app.amplitude.com/analytics/d/abc123',
+      checklistDashboardUrl: canonicalDashboard,
     });
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
     expect(frame).toContain('Your dashboard is ready');
-    expect(frame).toContain('https://app.amplitude.com/analytics/d/abc123');
+    expect(frame).toContain(toWizardDashboardOpenUrl(canonicalDashboard));
     expect(frame).toContain('Open your analytics dashboard');
     expect(frame).not.toContain('Open Amplitude');
   });

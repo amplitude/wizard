@@ -27,6 +27,7 @@ import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
+import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
 
 // Belt-and-suspenders: bin.ts also installs these. Idempotent, so a
 // second call from this module covers test harnesses and any other
@@ -1104,8 +1105,9 @@ export class AgentUI implements WizardUI {
   }
 
   setDashboardUrl(url: string): void {
-    emit('result', `dashboard_created: ${url}`, {
-      data: { event: 'dashboard_created', dashboardUrl: url },
+    const openUrl = toWizardDashboardOpenUrl(url);
+    emit('result', `dashboard_created: ${openUrl}`, {
+      data: { event: 'dashboard_created', dashboardUrl: openUrl },
     });
     registerSetupComplete({ amplitude: { dashboardUrl: url } });
   }
