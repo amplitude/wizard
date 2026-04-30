@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
+// `codex` ships as `codex.cmd` when installed via npm on Windows; the
+// stock `spawnSync` does not consult PATHEXT and ENOENTs on the bare
+// name. `execSync` routes through `cmd.exe` and is fine.
+import { spawnSync } from '../../../utils/cross-platform-spawn.js';
 
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';

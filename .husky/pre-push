@@ -1,1 +1,23 @@
-pnpm test
+# Fast pre-push: lint + typecheck only.
+#
+# Rationale: a pre-push hook should catch the most common breakages without
+# being slower or more brittle than `git push` itself. The previous hook ran
+# the full vitest suite (`pnpm test`), which:
+#   - Took 130–180 s per push, locking the developer's terminal
+#   - Intermittently failed on time-mock tests under heavy parallel load
+#     (RunScreen.coaching tier-2, framework-detection, etc.) — these flakes
+#     reproduce on clean main and have nothing to do with most pushes
+#
+# Net effect: contributors learned to push with `--no-verify`, defeating the
+# entire purpose of the hook. Worse, every flake triggered a "is my change
+# actually broken?" investigation that almost always concluded "no, it was
+# the timer test again."
+#
+# Fix: run only the checks that are fast AND reliable:
+#   - lint (eslint cache, ~3–8 s)
+#   - typecheck (tsc --noEmit, ~8–15 s)
+#
+# CI runs the full vitest suite on every PR with dedicated hardware, so unit-
+# test regressions are caught at the gate before merge. The pre-push job is
+# now ~15 s of signal vs. ~180 s of noise.
+pnpm lint:eslint && pnpm exec tsc --noEmit

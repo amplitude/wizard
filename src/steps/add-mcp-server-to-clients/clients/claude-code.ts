@@ -2,7 +2,10 @@ import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
 import type { CloudRegion } from '../../../utils/types';
 import { z } from 'zod';
-import { spawnSync } from 'child_process';
+// On Windows, Claude Code ships as `claude.cmd` when installed via npm.
+// The stock `child_process.spawnSync` does not consult PATHEXT, so we
+// route through the cross-platform wrapper which handles the shim.
+import { spawnSync } from '../../../utils/cross-platform-spawn.js';
 import { analytics } from '../../../utils/analytics';
 import { debug } from '../../../utils/debug';
 import * as os from 'os';

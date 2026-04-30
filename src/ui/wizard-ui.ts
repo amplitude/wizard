@@ -310,5 +310,16 @@ export interface WizardUI {
     totalToolCalls?: number;
     totalMessages?: number;
     isError?: boolean;
+    /**
+     * Per-tool invocation counts. Lets orchestrators answer
+     * "where did the time/cost go?" without parsing every
+     * `progress: tool_call` event. Keys are the SDK's tool-name
+     * strings — built-in tools (`"Read"`, `"Edit"`, `"Bash"`,
+     * `"Grep"`, `"TodoWrite"`) and MCP tools (e.g.
+     * `"mcp__amplitude-wizard__check_env_keys"`). Values are
+     * integer counts. Omitted entirely (not `{}`) when the run
+     * had zero tool_use blocks (auth-required early-exits etc.).
+     */
+    toolCallsByTool?: Record<string, number>;
   }): void;
 }

@@ -104,6 +104,101 @@ describe('apply-lock', () => {
     }
   });
 
+  // ── Regression: TOCTOU race ────────────────────────────────────────────
+  //
+  // Pre-fix, `acquireApplyLock` was a read-then-write (with a stale-check
+  // delete in between). Two processes could both observe "no live lock"
+  // and both `atomicWriteJSON` — last-writer-wins, both believed they
+  // owned it. The post-fix path uses `O_CREAT|O_EXCL` (`'wx'`) so the OS
+  // serializes acquirers and the loser gets EEXIST. These tests pin the
+  // new contract.
+  it('regression: only one acquire wins when a lockfile already exists', () => {
+    // Simulate "another process already wrote a fresh lock" by planting
+    // one with a live pid (process.ppid, which is guaranteed alive while
+    // the test runs). Our acquire MUST refuse, not overwrite.
+    const lockFile = getApplyLockFile(tmpInstall);
+    fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+    const ppid = process.ppid;
+    const competitorPid = ppid && ppid !== process.pid ? ppid : 1;
+    fs.writeFileSync(
+      lockFile,
+      JSON.stringify({
+        pid: competitorPid,
+        startedAt: new Date().toISOString(),
+        planId: 'competitor',
+      }),
+    );
+
+    const result = acquireApplyLock(tmpInstall, 'plan-123');
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.holder.pid).toBe(competitorPid);
+      expect(result.reason).toBe('in_progress');
+    }
+    // File untouched — we didn't clobber the live holder.
+    const after = JSON.parse(fs.readFileSync(lockFile, 'utf-8')) as {
+      pid: number;
+    };
+    expect(after.pid).toBe(competitorPid);
+  });
+
+  it('regression: stale-steal races resolve to a single winner', () => {
+    // Plant a stale lockfile (pid that definitely doesn't exist), then
+    // acquire. The acquire should steal cleanly. Then plant the SAME
+    // stale lockfile again and call `acquireApplyLock` while we still
+    // hold the lock from the first acquire. The second call must NOT
+    // succeed — our live pid is in the file now, even though the old
+    // stale pid was stomped over it on disk.
+    const stale: ApplyLockHolder = {
+      pid: 999999, // non-existent pid (Linux/macOS pid space)
+      startedAt: new Date(0).toISOString(), // old enough to be stale by age too
+      planId: 'old',
+    };
+    const lockFile = getApplyLockFile(tmpInstall);
+    fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+    fs.writeFileSync(lockFile, JSON.stringify(stale));
+
+    const first = acquireApplyLock(tmpInstall, 'plan-A');
+    expect(first.ok).toBe(true);
+    // After steal, the file should hold OUR pid.
+    const afterFirst = JSON.parse(fs.readFileSync(lockFile, 'utf-8')) as {
+      pid: number;
+    };
+    expect(afterFirst.pid).toBe(process.pid);
+
+    // Now a "second acquirer" (still us, simulating a re-entry) tries to
+    // grab. It must refuse — our own pid is alive (it's literally us),
+    // so the lock is not stale.
+    const second = acquireApplyLock(tmpInstall, 'plan-B');
+    expect(second.ok).toBe(false);
+    if (!second.ok) {
+      expect(second.holder.pid).toBe(process.pid);
+    }
+  });
+
+  it('recovers when the lockfile is corrupt (truncated / non-JSON)', () => {
+    // The pre-fix path returned `{ ok: false }` here (readLockHolder
+    // returned null and the code fell through to "in_progress" using a
+    // stale `existing`). The post-fix path treats unparseable content as
+    // stale on first attempt and retries the open.
+    const lockFile = getApplyLockFile(tmpInstall);
+    fs.mkdirSync(path.dirname(lockFile), { recursive: true });
+    fs.writeFileSync(lockFile, '{not valid json');
+
+    const result = acquireApplyLock(tmpInstall, 'plan-recovery');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // We now own a freshly-written lock.
+      const after = JSON.parse(fs.readFileSync(lockFile, 'utf-8')) as {
+        pid: number;
+        planId: string;
+      };
+      expect(after.pid).toBe(process.pid);
+      expect(after.planId).toBe('plan-recovery');
+      result.release();
+    }
+  });
+
   it('release() is a no-op when the lock has already been stolen by another process', () => {
     // Acquire then mutate the file to point at a different pid (simulating
     // a stale-steal by a competitor). release() should NOT remove the

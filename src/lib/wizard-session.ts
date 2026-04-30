@@ -452,6 +452,24 @@ export interface WizardSession {
   /** OAuth access_token held during SUSI — used for Hydra-validated proxy auth. */
   pendingAuthAccessToken: string | null;
 
+  /**
+   * Set by `resolveCredentials` when the user passed a scope filter
+   * (`--app-id`, `--project-id`, etc.) that didn't match any known
+   * environment. Drives the structured `auth_required: env_selection_failed`
+   * emission in agent mode: the orchestrator gets back the bad value it
+   * passed AND the candidate list in one event, instead of having to
+   * re-discover environments after a silent fall-through to auto-select.
+   *
+   * `null` when no scope filters were specified (multi-env path) or
+   * filters matched cleanly (success path).
+   */
+  scopeFilterMismatch: {
+    flag: '--app-id' | '--project-id' | '--env' | '--org';
+    value: string;
+    /** Plain-language explanation: "no environment with appId=99999". */
+    reason: string;
+  } | null;
+
   /** Org selected during SUSI (written to ampli.json). */
   selectedOrgId: string | null;
   selectedOrgName: string | null;
@@ -846,6 +864,7 @@ export function buildSession(args: {
     pendingOrgs: null,
     pendingAuthIdToken: null,
     pendingAuthAccessToken: null,
+    scopeFilterMismatch: null,
     selectedOrgId: null,
     selectedOrgName: null,
     selectedProjectId: null,

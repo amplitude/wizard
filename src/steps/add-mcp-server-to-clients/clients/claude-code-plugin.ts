@@ -12,7 +12,10 @@
  * out of the install picker entirely while letting it surface in the
  * uninstall flow exclusively for affected users.
  */
-import { spawn, spawnSync } from 'child_process';
+// `claude` ships as `claude.cmd` on Windows when installed via npm —
+// stock `spawn`/`spawnSync` do not consult PATHEXT and ENOENT on the
+// bare name. Route through the cross-platform wrapper.
+import { spawn, spawnSync } from '../../../utils/cross-platform-spawn.js';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
