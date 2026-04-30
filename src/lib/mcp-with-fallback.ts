@@ -110,22 +110,39 @@ const MCP_FETCH_TIMEOUT_MS = 30_000;
 const MCP_NOTIFY_TIMEOUT_MS = 5_000;
 
 /**
- * `fetch` wrapped with a per-call timeout. Combines the caller's
- * external `AbortSignal` (if any) with an internal AbortController so
- * either source — caller cancellation OR timeout — tears down the
- * request immediately. Always cleans up the timer in the win path.
+ * `fetch` wrapped with a per-call timeout, covering both the request
+ * round-trip AND body consumption. Combines the caller's external
+ * `AbortSignal` (if any) with an internal `AbortController` so either
+ * source — caller cancellation OR timeout — tears the request down
+ * immediately.
+ *
+ * Body consumption (`res.text()`, `res.json()`, `res.body.cancel()`)
+ * MUST happen inside the `consume` callback. The timer and abort
+ * listener stay armed for the entire callback so a slow body read can
+ * still be cancelled. Cleanup runs unconditionally in `finally` — no
+ * leaked timers or listeners on the success path.
  *
  * Throws on timeout exactly the way `fetch` throws on caller-side
  * abort: an `AbortError` from the underlying controller. Callers that
  * already have `try/catch` on `fetch` need no changes; the existing
  * `[MCP] X failed: ...` log lines absorb the new error class.
+ *
+ * Why caller-supplied consume:
+ *   Returning a bare `Response` made it ambiguous whether the timer
+ *   covered the body read. Two prior implementations bounced between
+ *   "cleanup in finally before body read" (body unbounded) and
+ *   "cleanup only on error" (success-path leak). The callback shape
+ *   resolves both — the timer is alive exactly as long as the caller
+ *   is consuming the response, and dies the moment the consumer
+ *   returns or throws.
  */
-async function fetchWithTimeout(
+async function fetchWithTimeout<T>(
   url: string,
   init: Parameters<typeof fetch>[1],
   timeoutMs: number,
-  externalSignal?: AbortSignal,
-): Promise<Response> {
+  externalSignal: AbortSignal | undefined,
+  consume: (res: Response) => Promise<T>,
+): Promise<T> {
   // Bail immediately if the external signal is already aborted —
   // matches the standard `fetch` contract for already-aborted signals.
   if (externalSignal?.aborted) {
@@ -135,24 +152,15 @@ async function fetchWithTimeout(
     );
   }
   const controller = new AbortController();
-  const cleanup = (): void => {
+  const onExternalAbort = (): void => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return await consume(res);
+  } finally {
     clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onExternalAbort);
-  };
-  const onExternalAbort = (): void => {
-    controller.abort();
-    cleanup();
-  };
-  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
-  const timer = setTimeout(() => {
-    controller.abort('timeout');
-    cleanup();
-  }, timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } catch (err) {
-    cleanup();
-    throw err;
   }
 }
 const mcpSessionCache = new Map<
@@ -231,7 +239,9 @@ async function openMcpSessionInner(
 
   let sessionId: string | undefined;
   try {
-    const initRes = await fetchWithTimeout(
+    // Pull status + session id inside the consume callback so the body
+    // cancel happens while the timer + external abort are still armed.
+    const initOutcome = await fetchWithTimeout(
       mcpUrl,
       {
         method: 'POST',
@@ -249,26 +259,31 @@ async function openMcpSessionInner(
       },
       MCP_FETCH_TIMEOUT_MS,
       signal,
+      async (res) => {
+        const status = res.status;
+        const extractedSessionId =
+          res.headers.get('mcp-session-id') ?? undefined;
+        await res.body?.cancel().catch(() => undefined);
+        return { status, sessionId: extractedSessionId };
+      },
     );
     // 401/403 mean the access token is bad. The agent fallback uses the
     // same token, so it would just hit the same wall after a 12s setup —
     // fail fast instead. 5xx is transient (gateway hiccup); fall through.
-    if (initRes.status === 401 || initRes.status === 403) {
-      await initRes.body?.cancel().catch(() => undefined);
+    if (initOutcome.status === 401 || initOutcome.status === 403) {
       logToFile(
-        `[MCP] initialize rejected by gateway (HTTP ${initRes.status}) — skipping agent fallback`,
+        `[MCP] initialize rejected by gateway (HTTP ${initOutcome.status}) — skipping agent fallback`,
       );
-      addBreadcrumb('mcp', `Initialize rejected (HTTP ${initRes.status})`, {
-        status: initRes.status,
+      addBreadcrumb('mcp', `Initialize rejected (HTTP ${initOutcome.status})`, {
+        status: initOutcome.status,
       });
       return {
         ok: false,
         deterministic: true,
-        reason: `http-${initRes.status}`,
+        reason: `http-${initOutcome.status}`,
       };
     }
-    sessionId = initRes.headers.get('mcp-session-id') ?? undefined;
-    await initRes.body?.cancel().catch(() => undefined);
+    sessionId = initOutcome.sessionId;
   } catch (err) {
     logToFile(
       `[MCP] initialize failed: ${
@@ -283,7 +298,8 @@ async function openMcpSessionInner(
   }
 
   try {
-    const notifRes = await fetchWithTimeout(
+    // Fire-and-forget — body is cancelled inside the timeout window.
+    await fetchWithTimeout(
       mcpUrl,
       {
         method: 'POST',
@@ -295,8 +311,10 @@ async function openMcpSessionInner(
       },
       MCP_NOTIFY_TIMEOUT_MS,
       signal,
+      async (res) => {
+        await res.body?.cancel().catch(() => undefined);
+      },
     );
-    await notifRes.body?.cancel().catch(() => undefined);
   } catch {
     logToFile('[MCP] notifications/initialized failed (continuing)');
   }
@@ -312,7 +330,10 @@ async function openMcpSessionInner(
       { 'mcp.tool': name, 'mcp.session_id': sessionId },
       async () => {
         try {
-          const res = await fetchWithTimeout(
+          // Read the body inside the timeout window — a hung body read
+          // (gateway buffers the headers but stalls on data) would
+          // otherwise pin the call past `MCP_FETCH_TIMEOUT_MS`.
+          const body = await fetchWithTimeout(
             mcpUrl,
             {
               method: 'POST',
@@ -330,8 +351,8 @@ async function openMcpSessionInner(
             },
             MCP_FETCH_TIMEOUT_MS,
             signal,
+            async (res) => res.text(),
           );
-          const body = await res.text();
           const sseData = body.match(/^data: (.+)$/m)?.[1] ?? '';
           const rpc = JSON.parse(sseData) as {
             result?: { content?: Array<{ text?: string }> };
