@@ -9,6 +9,7 @@ import {
   parseEnvKeys,
   mergeEnvValues,
   persistEventPlan,
+  persistDashboard,
   cleanupIntegrationSkills,
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
@@ -373,6 +374,57 @@ describe('persistEventPlan', () => {
     expect(persistEventPlan(tmpDir, [])).toBe(true);
     expect(JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'))).toEqual([]);
     expect(JSON.parse(fs.readFileSync(legacy(tmpDir), 'utf8'))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// persistDashboard — backs the `record_dashboard` MCP tool
+// ---------------------------------------------------------------------------
+
+describe('persistDashboard', () => {
+  let tmpDir: string;
+  const canonical = (dir: string) =>
+    path.join(dir, '.amplitude', 'dashboard.json');
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('writes the canonical .amplitude/dashboard.json with the given payload', () => {
+    const payload = {
+      dashboardUrl: 'https://app.amplitude.com/123/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [
+        { id: 'c1', title: 'Onboarding Funnel', type: 'funnel' },
+        { id: 'c2', title: 'Daily Actives', type: 'line' },
+      ],
+    };
+    expect(persistDashboard(tmpDir, payload)).toBe(true);
+
+    const raw = fs.readFileSync(canonical(tmpDir), 'utf8');
+    expect(JSON.parse(raw)).toEqual(payload);
+  });
+
+  it('creates the .amplitude/ directory if it does not exist', () => {
+    // Pre-condition: .amplitude/ does NOT exist on a fresh project.
+    expect(fs.existsSync(path.join(tmpDir, '.amplitude'))).toBe(false);
+    persistDashboard(tmpDir, { dashboardUrl: 'https://x' });
+    expect(fs.existsSync(canonical(tmpDir))).toBe(true);
+  });
+
+  it('returns false when the working directory does not exist', () => {
+    const nonexistent = path.join(tmpDir, 'does', 'not', 'exist');
+    expect(persistDashboard(nonexistent, { dashboardUrl: 'https://x' })).toBe(
+      false,
+    );
+  });
+
+  it('overwrites a pre-existing dashboard file (idempotent re-record)', () => {
+    persistDashboard(tmpDir, { dashboardUrl: 'https://old' });
+    persistDashboard(tmpDir, { dashboardUrl: 'https://new', dashboardId: 'n' });
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect(parsed).toEqual({ dashboardUrl: 'https://new', dashboardId: 'n' });
   });
 });
 
@@ -793,6 +845,7 @@ describe('WIZARD_TOOL_NAMES', () => {
         'wizard-tools:choose',
         'wizard-tools:confirm_event_plan',
         'wizard-tools:report_status',
+        'wizard-tools:record_dashboard',
         'wizard-tools:wizard_feedback',
       ]),
     );

@@ -1742,6 +1742,121 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
   );
 
+  // -- record_dashboard -----------------------------------------------------
+  // Persists a dashboard the agent just created via the Amplitude MCP. This
+  // is the explicit hand-off from the in-loop agent (which does the actual
+  // chart/dashboard MCP calls during the "Open your dashboard" task) to the
+  // wizard's outro and post-agent step. Writes BOTH:
+  //   - canonical `.amplitude/dashboard.json` (via persistDashboard)
+  //   - legacy `.amplitude-dashboard.json` at the project root, for back-compat
+  //     with `createDashboardStep`'s readExistingDashboardFile path
+  //
+  // When this tool fires, `createDashboardStep` finds the file on its next
+  // pass and short-circuits to its reuse path — no 90s MCP+sub-agent fallback,
+  // no "Creating charts and dashboard in Amplitude…" spinner hang.
+  const recordDashboard = tool(
+    'record_dashboard',
+    `Record an Amplitude dashboard you just created via the Amplitude MCP server.
+Call this tool IMMEDIATELY after \`create_dashboard\` returns successfully — it persists the URL and chart metadata so the wizard's outro can link to it and the post-agent fallback step can short-circuit.
+Required: dashboardUrl. Optional but recommended: dashboardId, charts (id/title/type per chart).
+Returns: "ok" on successful persistence, an error string otherwise. Idempotent — safe to call again with updated values.`,
+    {
+      dashboardUrl: z
+        .string()
+        .url()
+        .describe(
+          'The full HTTPS URL to the created dashboard in Amplitude (e.g. https://app.amplitude.com/.../dashboard/abc123). Must be a valid URL — the outro renders this as a clickable link.',
+        ),
+      dashboardId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'The dashboard ID returned by the Amplitude MCP create_dashboard call. Optional but recommended for downstream tooling.',
+        ),
+      charts: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            title: z.string().optional(),
+            type: z.string().optional(),
+          }),
+        )
+        .optional()
+        .describe(
+          'Metadata for each chart on the dashboard. Used by the wizard outro and analytics. Pass at least the title and type per chart (e.g. funnel, line, retention).',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      dashboardUrl: string;
+      dashboardId?: string;
+      charts?: Array<{ id?: string; title?: string; type?: string }>;
+      reason: string;
+    }) => {
+      const payload: Record<string, unknown> = {
+        dashboardUrl: args.dashboardUrl,
+      };
+      if (args.dashboardId) payload.dashboardId = args.dashboardId;
+      if (args.charts) payload.charts = args.charts;
+
+      // 1. Canonical: <installDir>/.amplitude/dashboard.json (atomic).
+      const persistedCanonical = persistDashboard(workingDirectory, payload);
+      // 2. Legacy mirror: <installDir>/.amplitude-dashboard.json.
+      //    `createDashboardStep.readExistingDashboardFile` reads this path
+      //    today; the post-agent step will also gain a canonical-path read,
+      //    but the mirror keeps older skills/readers working.
+      let persistedLegacy = false;
+      try {
+        const legacyPath = path.join(
+          workingDirectory,
+          '.amplitude-dashboard.json',
+        );
+        atomicWriteJSON(legacyPath, payload);
+        persistedLegacy = true;
+      } catch (err) {
+        logToFile(
+          `record_dashboard: legacy mirror write failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      logToFile(
+        `record_dashboard: url=${args.dashboardUrl} charts=${
+          args.charts?.length ?? 0
+        } canonical=${persistedCanonical} legacy=${persistedLegacy}`,
+      );
+
+      // Surface the dashboard URL on the session immediately so the outro
+      // (and any soft-error abort path in agent-runner that probes
+      // `agentArtifactsLookComplete`) sees the success even if the rest of
+      // the agent run trips on a late-stage flush. The post-agent step also
+      // sets this, but doing it here makes the in-loop path self-contained.
+      try {
+        getUI().setDashboardUrl(args.dashboardUrl);
+      } catch (err) {
+        logToFile(
+          `record_dashboard: ui.setDashboardUrl failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      if (!persistedCanonical && !persistedLegacy) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'error: failed to persist dashboard to disk — see wizard log',
+            },
+          ],
+        };
+      }
+      return { content: [{ type: 'text' as const, text: 'ok' }] };
+    },
+  );
+
   // -- wizard_feedback ------------------------------------------------------
   // Structured agent-side feedback for blocked or stuck states. Distinct from
   // the user-facing /feedback slash command (`trackWizardFeedback`); this one
@@ -1833,6 +1948,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       choose,
       confirmEventPlan,
       reportStatus,
+      recordDashboard,
       wizardFeedback,
     ],
   });
@@ -1856,6 +1972,7 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
   `${SERVER_NAME}:report_status`,
+  `${SERVER_NAME}:record_dashboard`,
   `${SERVER_NAME}:wizard_feedback`,
 ];
 
