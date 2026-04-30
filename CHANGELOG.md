@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.13.3](https://github.com/amplitude/wizard/compare/wizard-v1.13.2...wizard-v1.13.3) (2026-04-30)
+
+
+### Bug Fixes
+
+* **tui:** expand ~ in --install-dir and add directory picker ([#485](https://github.com/amplitude/wizard/issues/485)) ([680db19](https://github.com/amplitude/wizard/commit/680db19362949af044a4070bf360b9fb43fbeca2))
+* **tui:** lock journey stepper to canonical 5 labels with monotonic progress ([#483](https://github.com/amplitude/wizard/issues/483)) ([c39cd29](https://github.com/amplitude/wizard/commit/c39cd2934dea7f146e674a6a8cc4e5b92ecc458d))
+
 ## [1.13.2](https://github.com/amplitude/wizard/compare/wizard-v1.13.1...wizard-v1.13.2) (2026-04-30)
 
 
