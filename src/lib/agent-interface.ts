@@ -40,7 +40,12 @@ import {
   type DualPathWatcherHandle,
 } from './dual-path-watcher';
 import { LINTING_TOOLS } from './safe-tools';
-import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
+import {
+  AgentState,
+  buildRecoveryNote,
+  buildRetryHint,
+  consumeSnapshot,
+} from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
 import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
@@ -855,6 +860,96 @@ export function createUserPromptSubmitHook(state: AgentState): HookCallback {
         additionalContext: note,
       },
     });
+  };
+}
+
+/**
+ * Replace a large Read tool output with a head + tail snippet so the
+ * model's history doesn't carry 30+ K tokens of file content forward
+ * for the rest of the run. Returns null when the tool isn't Read or
+ * the response is small enough to leave alone.
+ *
+ * Why deterministic instead of summarizing via Haiku: the agent already
+ * has the path on disk and can re-Read with `offset` / `limit` if it
+ * needs more. Paying a Haiku call to summarize content the model can
+ * fetch on demand is strictly worse than truncating with a hint.
+ */
+const READ_TOOL_NAMES = new Set(['Read']);
+const READ_TRUNCATE_THRESHOLD = 8 * 1024;
+const READ_HEAD_BYTES = 3 * 1024;
+const READ_TAIL_BYTES = 1 * 1024;
+function maybeTruncateLargeRead(input: Record<string, unknown>): {
+  updatedToolOutput: { type: 'text'; text: string }[];
+  /** Bytes the model is no longer carrying for the rest of the run. */
+  savedBytes: number;
+} | null {
+  const toolName =
+    typeof input.tool_name === 'string'
+      ? input.tool_name
+      : typeof input.toolName === 'string'
+      ? input.toolName
+      : '';
+  if (!READ_TOOL_NAMES.has(toolName)) return null;
+
+  // tool_response can be a string (legacy SDKs), an object with a
+  // `content` string, or an array of content blocks. Unwrap defensively
+  // — anything we can't recognize is left alone so the agent gets the
+  // original SDK output. tool_input is referenced for the file path so
+  // we can hint the model toward re-reading with offset/limit.
+  const response =
+    'tool_response' in input
+      ? input.tool_response
+      : (input as { toolResponse?: unknown }).toolResponse;
+
+  let text: string | null = null;
+  if (typeof response === 'string') {
+    text = response;
+  } else if (response && typeof response === 'object') {
+    const c = (response as { content?: unknown }).content;
+    if (typeof c === 'string') {
+      text = c;
+    } else if (Array.isArray(c)) {
+      const joined = c
+        .map((block) => {
+          if (block && typeof block === 'object') {
+            const t = (block as { text?: unknown }).text;
+            return typeof t === 'string' ? t : '';
+          }
+          return '';
+        })
+        .join('\n');
+      if (joined.length > 0) text = joined;
+    }
+  }
+  if (text === null || text.length <= READ_TRUNCATE_THRESHOLD) return null;
+
+  const toolInput =
+    'tool_input' in input
+      ? input.tool_input
+      : (input as { toolInput?: unknown }).toolInput;
+  const filePath =
+    toolInput && typeof toolInput === 'object'
+      ? typeof (toolInput as { file_path?: unknown }).file_path === 'string'
+        ? (toolInput as { file_path: string }).file_path
+        : typeof (toolInput as { path?: unknown }).path === 'string'
+        ? (toolInput as { path: string }).path
+        : null
+      : null;
+
+  const head = text.slice(0, READ_HEAD_BYTES);
+  const tail = text.slice(text.length - READ_TAIL_BYTES);
+  const middleBytes = text.length - head.length - tail.length;
+  const lineCount = text.split('\n').length;
+  const pathHint = filePath ? ` ${filePath}` : '';
+  const bridge =
+    `\n\n[… ${middleBytes.toLocaleString()} bytes omitted from middle. ` +
+    `Original file:${pathHint} (${lineCount.toLocaleString()} lines, ` +
+    `${text.length.toLocaleString()} bytes). ` +
+    `Re-read with Read({ offset, limit }) for any specific range. …]\n\n`;
+  const updatedText = head + bridge + tail;
+  return {
+    updatedToolOutput: [{ type: 'text', text: updatedText }],
+    savedBytes: text.length - updatedText.length,
   };
 }
 
@@ -2533,11 +2628,54 @@ export async function runAgent(
         signalDone = resolve;
       });
 
+      // Retry-recovery hint: when attempt > 0, prepend a small `<retry-recovery>`
+      // block listing the discoveries the prior attempt already made (package
+      // manager, env-key probes, which skill was loaded). The fresh attempt
+      // starts a new SDK conversation, so without this hint it redoes the
+      // same probes — typically 10–20s of avoidable wall time on cold
+      // discovery tool calls. Empty string on attempt 0 (no prior facts to
+      // share) and when the prior attempt died before any discovery
+      // captured anything (`buildRetryHint` returns ''); concatenation is
+      // a no-op in those cases.
+      const retryHint = attempt > 0 ? buildRetryHint(agentState) : '';
+      const attemptPrompt = retryHint ? `${prompt}\n\n${retryHint}` : prompt;
+      if (retryHint) {
+        logToFile(
+          `Retry hint: prepending ${
+            agentState.getDiscoveries().size
+          } prior-attempt discovery facts to attempt ${attempt + 1} prompt`,
+        );
+      }
+
       const createPromptStream = async function* () {
+        // The first user message contains the framework-specific
+        // integration prompt (~1.5 KB) plus any orchestrator context.
+        // It's identical across every turn in the run — cache it so
+        // turn 2+ pays 0.1× input cost for that prefix instead of full
+        // rate. The system prompt is auto-cached by the SDK; the first
+        // user message is treated as fresh tokens unless we mark it
+        // explicitly with `cache_control: ephemeral`. Without this we
+        // saw `cache_creation_input_tokens` rebuilt on every turn for
+        // a block that never changes.
         yield {
           type: 'user',
           session_id: '',
-          message: { role: 'user', content: prompt },
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                // `attemptPrompt` equals `prompt` on attempt 0 (cache stays
+                // hot across runs); on attempt N+1 it's `prompt + retry hint`,
+                // which is a fresh cache key — that's fine because the only
+                // time we trigger the retry path is when something already
+                // went wrong, and skipping ~3 probe tool calls beats a hot
+                // cache hit on the first turn.
+                text: attemptPrompt,
+                cache_control: { type: 'ephemeral' },
+              },
+            ],
+          },
           parent_tool_use_id: null,
         };
         await resultReceived;
@@ -2615,29 +2753,10 @@ export async function runAgent(
           options: {
             model: agentConfig.model,
             // Fallback model if primary is unavailable (e.g. Vertex outage).
-            //
-            // Attempts 0-1 fall back to the previous Sonnet (same family, same
-            // gateway pool) — it usually picks up trivial blips fast.
-            //
-            // Attempts 2+ fall back cross-tier to Haiku 4.5. When a Sonnet
-            // outage persists past two retries, the gateway pool is genuinely
-            // degraded and another Sonnet pick will fail the same way.
-            // Haiku is weaker for greenfield code-gen but absolutely capable
-            // of finishing an already-mostly-done instrumentation run, which
-            // is the realistic state by the third retry. Recovering with a
-            // weaker model beats giving up with WIZARD_GATEWAY_DOWN.
-            fallbackModel: (() => {
-              const directIds = {
-                sonnet: 'claude-sonnet-4-5-20250514',
-                haiku: 'claude-haiku-4-5-20251001',
-              };
-              const gatewayIds = {
-                sonnet: 'anthropic/claude-sonnet-4-5-20250514',
-                haiku: 'anthropic/claude-haiku-4-5-20251001',
-              };
-              const ids = agentConfig.useDirectApiKey ? directIds : gatewayIds;
-              return attempt >= 2 ? ids.haiku : ids.sonnet;
-            })(),
+            // Must be capable enough for code generation — haiku is too weak.
+            fallbackModel: agentConfig.useDirectApiKey
+              ? 'claude-sonnet-4-5-20250514'
+              : 'anthropic/claude-sonnet-4-5-20250514',
             // Stream text deltas as `stream_event` envelopes so we can
             // surface them in the status pill during long tool calls. The
             // for-await loop below extracts text_delta payloads and pushes
@@ -2817,7 +2936,38 @@ export async function runAgent(
                   recordPostToolUse(input, toolUseID, hookOpts),
                 );
                 const [, gateResult] = await Promise.all([observer, gate]);
-                return gateResult;
+
+                // Truncate the model's view of large Read responses so a
+                // single big file doesn't sit in conversation history at
+                // its full size for every subsequent turn. Defensive: if
+                // anything throws, fall through to the gate's original
+                // result so a malformed shape never breaks the agent.
+                let truncation: ReturnType<typeof maybeTruncateLargeRead> =
+                  null;
+                try {
+                  truncation = maybeTruncateLargeRead(input);
+                } catch (err) {
+                  logToFile('Read truncation pass threw:', err);
+                }
+                if (!truncation) return gateResult;
+
+                logToFile(
+                  `PostToolUse: truncated Read result, saved ${truncation.savedBytes.toLocaleString()} bytes from history`,
+                );
+                const existing = gateResult ?? {};
+                const existingHook =
+                  existing.hookSpecificOutput &&
+                  typeof existing.hookSpecificOutput === 'object'
+                    ? (existing.hookSpecificOutput as Record<string, unknown>)
+                    : {};
+                return {
+                  ...existing,
+                  hookSpecificOutput: {
+                    ...existingHook,
+                    hookEventName: 'PostToolUse',
+                    updatedToolOutput: truncation.updatedToolOutput,
+                  },
+                };
               };
 
               // PreCompact: record + persist AgentState for in-run recovery,
@@ -2937,6 +3087,21 @@ export async function runAgent(
             receivedSuccessResult,
             recentStatuses,
           );
+
+          // Sniff this message for discovery-shaped tool results (package
+          // manager, env-key probe, which skill loaded). Captured into
+          // agentState so a subsequent retry can prepend a `<retry-recovery>`
+          // hint that lets the model skip the same probes. No-op for
+          // non-discovery messages; failures are swallowed so a malformed
+          // tool_result never tanks the run.
+          try {
+            captureDiscoveryFromMessage(message, agentState);
+          } catch (err) {
+            logToFile(
+              'captureDiscoveryFromMessage threw (non-fatal):',
+              err instanceof Error ? err.message : String(err),
+            );
+          }
 
           try {
             middleware?.onMessage(message);
@@ -3271,7 +3436,17 @@ export async function runAgent(
       ? apiErrorMatch.join('\n')
       : 'Unknown API error';
 
-    if (outputText.includes('API Error: 429')) {
+    // Transport-level errors (RATE_LIMIT / API_ERROR / GATEWAY_DOWN) gate on
+    // !receivedSuccessResult: the Claude Agent SDK retries some upstream
+    // failures internally without tearing down the for-await stream. A
+    // single wizard attempt can witness a failed `result` (is_error: true,
+    // "API Error: 400 terminated"), then a fresh `system: init`, then a
+    // clean `result` (is_error: false) — both result texts accumulate in
+    // collectedText. If the inner retry succeeded, trust it instead of
+    // reclassifying based on the stale "API Error: …" fragment. Auth and
+    // structured/legacy [ERROR-…] markers above stay ungated because those
+    // represent real wizard-level errors that the SDK cannot retry away.
+    if (!receivedSuccessResult && outputText.includes('API Error: 429')) {
       logToFile('Agent error: RATE_LIMIT');
       spinner.stop('Rate limit exceeded');
       return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
@@ -3296,7 +3471,7 @@ export async function runAgent(
       };
     }
 
-    if (outputText.includes('API Error:')) {
+    if (!receivedSuccessResult && outputText.includes('API Error:')) {
       logToFile('Agent error: API_ERROR');
       spinner.stop('API error occurred');
       return { error: AgentErrorType.API_ERROR, message: apiErrorMessage };
@@ -3545,5 +3720,99 @@ function handleSDKMessage(
         debug(`Unhandled message type: ${message.type}`);
       }
       break;
+  }
+}
+
+/**
+ * Sniff a single SDK message for discovery-shaped tool calls / results
+ * (package manager probe, env-key probe, which skill loaded) and stash a
+ * compact summary into the supplied AgentState. The retry path reads
+ * those summaries via `buildRetryHint` to skip redundant probes on
+ * attempt N+1.
+ *
+ * Strategy:
+ *   - assistant.tool_use: bump per-tool counters (used for diagnostics).
+ *   - user.tool_result: extract the relevant signal for our cache list.
+ *
+ * The set of tools we care about is intentionally narrow — these are the
+ * cold-start probes that dominate the early seconds of a run. Adding more
+ * here grows the retry-hint block, which costs prompt tokens; bias toward
+ * "would skipping this tool call save more than the hint costs?".
+ *
+ * Exported for unit tests.
+ */
+export function captureDiscoveryFromMessage(
+  message: SDKMessage,
+  state: AgentState,
+): void {
+  if (message.type === 'assistant') {
+    const content = message.message?.content;
+    if (!Array.isArray(content)) return;
+    for (const block of content) {
+      if (
+        block?.type === 'tool_use' &&
+        typeof (block as { name?: unknown }).name === 'string'
+      ) {
+        const toolName = (block as { name: string }).name;
+        state.recordToolUse(toolName);
+        // Skill loads: capture the skill ID directly off the tool input
+        // (no wait for tool_result needed — the agent commits to the
+        // skill at the tool_use site).
+        if (toolName === 'Skill') {
+          const input = (block as { input?: unknown }).input;
+          if (input && typeof input === 'object') {
+            const skillId = (input as { skill?: unknown }).skill;
+            if (typeof skillId === 'string' && skillId.length <= 200) {
+              state.recordDiscovery('Skill loaded', skillId);
+            }
+          }
+        }
+      }
+    }
+    return;
+  }
+
+  if (message.type !== 'user') return;
+  const content = message.message?.content;
+  if (!Array.isArray(content)) return;
+  for (const block of content) {
+    if (block?.type !== 'tool_result') continue;
+    // SDKContentBlock's tool_result variant types `content` as
+    // (string | ContentBlock[]) — narrow defensively. Array shapes
+    // (multimodal tool replies) aren't useful for our discovery sniff.
+    const rawContent = (block as unknown as { content?: unknown }).content;
+    const text = typeof rawContent === 'string' ? rawContent : null;
+    if (!text) continue;
+
+    // Tool name isn't on the tool_result block itself — `tool_use_result`
+    // sits at the message root. The shape is the SDK's own envelope; we
+    // try a couple of lookup paths defensively.
+    const envelope = (
+      message as unknown as {
+        tool_use_result?: { commandName?: string; tool_name?: string };
+      }
+    ).tool_use_result;
+    const toolName =
+      envelope?.commandName ?? envelope?.tool_name ?? '<unknown>';
+
+    if (toolName === 'mcp__wizard-tools__detect_package_manager') {
+      // Result text has shape "Detected: pnpm (lockfile: pnpm-lock.yaml)…"
+      // or similar; just stash the first line so the next attempt can
+      // skip the probe and use the same install command.
+      const firstLine = text.split('\n')[0]?.trim();
+      if (firstLine) {
+        state.recordDiscovery('Package manager (already probed)', firstLine);
+      }
+    } else if (toolName === 'mcp__wizard-tools__check_env_keys') {
+      // Result lists which Amplitude env keys are present in .env files.
+      // Trim to the first 3 lines — full output can be hundreds of bytes.
+      const summary = text.split('\n').slice(0, 3).join(' | ').trim();
+      if (summary) {
+        state.recordDiscovery(
+          'Env keys (already probed)',
+          summary.slice(0, 200),
+        );
+      }
+    }
   }
 }

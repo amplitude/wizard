@@ -19,7 +19,23 @@ import {
   flushSentry,
   captureError as sentryCaptureError,
 } from '../lib/observability';
+import { ExitCode } from '../lib/exit-codes';
 import { suppressPipeAbort } from './pipe-errors';
+
+/**
+ * Map an exit code to the analytics shutdown status. We tell Amplitude
+ * what *kind* of run this was so the `'session ended'` event matches
+ * what actually happened — earlier code hardcoded `'success'` here,
+ * which silently mislabelled every Cancel (130) and Error (10) exit
+ * as success in the analytics dimension.
+ */
+function analyticsStatusFromExitCode(
+  exitCode: number,
+): 'success' | 'cancelled' | 'error' {
+  if (exitCode === ExitCode.SUCCESS) return 'success';
+  if (exitCode === ExitCode.USER_CANCELLED) return 'cancelled';
+  return 'error';
+}
 
 export class WizardError extends Error {
   constructor(
@@ -233,7 +249,7 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
   // analytics flush.
   await withExitDeadline(
     Promise.all([
-      analytics.shutdown('success'),
+      analytics.shutdown(analyticsStatusFromExitCode(exitCode)),
       flushSentry().catch(() => {
         /* Sentry flush failure is non-fatal */
       }),

@@ -18,7 +18,11 @@ vi.mock('../../utils/debug', () => ({
   logToFile: vi.fn(),
 }));
 
-import { AgentState, type SerializedAgentState } from '../agent-state';
+import {
+  AgentState,
+  buildRetryHint,
+  type SerializedAgentState,
+} from '../agent-state';
 import { CACHE_ROOT_OVERRIDE_ENV } from '../../utils/storage-paths';
 
 describe('AgentState', () => {
@@ -127,5 +131,54 @@ describe('AgentState', () => {
     expect(snap.modifiedFiles).toEqual([]);
     expect(snap.lastStatus).toBeNull();
     expect(snap.compactionCount).toBe(0);
+  });
+
+  it('preserves discovery facts across reset (so retries can skip prior probes)', () => {
+    state.recordDiscovery(
+      'Package manager (already probed)',
+      'pnpm (lockfile: pnpm-lock.yaml)',
+    );
+    state.recordDiscovery('Skill loaded', 'integration-nextjs-pages-router');
+    state.reset();
+    expect(state.getDiscoveries().size).toBe(2);
+    expect(state.getDiscoveries().get('Skill loaded')).toBe(
+      'integration-nextjs-pages-router',
+    );
+  });
+
+  it('clearDiscoveries does the hard reset', () => {
+    state.recordDiscovery('Package manager (already probed)', 'pnpm');
+    state.clearDiscoveries();
+    expect(state.getDiscoveries().size).toBe(0);
+  });
+
+  it('drops empty / oversized discovery summaries to keep the retry hint compact', () => {
+    state.recordDiscovery('empty', '   ');
+    state.recordDiscovery('big', 'x'.repeat(500));
+    state.recordDiscovery('ok', 'pnpm');
+    expect([...state.getDiscoveries().keys()]).toEqual(['ok']);
+  });
+
+  describe('buildRetryHint', () => {
+    it('returns empty string when no discoveries are recorded', () => {
+      expect(buildRetryHint(state)).toBe('');
+    });
+
+    it('renders a short hint block listing each discovery on its own line', () => {
+      state.recordDiscovery(
+        'Package manager (already probed)',
+        'pnpm (pnpm-lock.yaml)',
+      );
+      state.recordDiscovery('Skill loaded', 'integration-nextjs-pages-router');
+      const hint = buildRetryHint(state);
+      expect(hint).toContain('<retry-recovery>');
+      expect(hint).toContain('</retry-recovery>');
+      expect(hint).toContain(
+        '- Package manager (already probed): pnpm (pnpm-lock.yaml)',
+      );
+      expect(hint).toContain('- Skill loaded: integration-nextjs-pages-router');
+      // Bias toward terseness — the hint shouldn't bloat past a handful of lines.
+      expect(hint.split('\n').length).toBeLessThan(15);
+    });
   });
 });

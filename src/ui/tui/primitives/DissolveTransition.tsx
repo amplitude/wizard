@@ -18,6 +18,33 @@ const TICKS_PER_SHADE = 1;
 /** Total ticks a column needs to complete its shade cycle. */
 const SHADE_CYCLE_TICKS = SHADES.length * TICKS_PER_SHADE;
 
+/**
+ * Decide whether a transition should animate at all in the current
+ * environment. Returning false makes the component an instant
+ * pass-through — the user sees the new screen immediately with no
+ * column-sweep overlay.
+ *
+ * Animation costs scale with terminal area (each tick rebuilds
+ * `width × height` characters as JS strings then runs them through
+ * Yoga). On slow terminals, narrow windows, or CI runs the dissolve
+ * is the dominant "the wizard feels slow" sensation, so we skip it.
+ *
+ * Honors `AMPLITUDE_WIZARD_NO_TRANSITIONS=1` for users who want it
+ * off regardless of capability heuristics.
+ */
+function shouldAnimateTransition(width: number, height: number): boolean {
+  if (process.env.AMPLITUDE_WIZARD_NO_TRANSITIONS === '1') return false;
+  if (process.env.CI === '1' || process.env.CI === 'true') return false;
+  if (!process.stdout.isTTY) return false;
+  const term = process.env.TERM ?? '';
+  if (term === '' || term === 'dumb' || term === 'xterm-mono') return false;
+  // Tiny terminals can't render the sweep meaningfully — the column count
+  // is too low for the easing to look like motion. Threshold matches the
+  // narrowest commonly-supported width the rest of the TUI plans for.
+  if (width < 60 || height < 10) return false;
+  return true;
+}
+
 export type WipeDirection = 'left' | 'right';
 
 interface DissolveTransitionProps {
@@ -48,8 +75,16 @@ export const DissolveTransition = ({
   height,
   children,
   direction = 'left',
-  duration = 16,
+  duration = 12,
 }: DissolveTransitionProps) => {
+  // Decide once per render whether to animate at all. When the env
+  // doesn't support a smooth sweep, skip every state-machine path and
+  // render `children` directly — there's nothing for the user to see
+  // anyway, and the per-tick render cost on slow terminals is the
+  // primary "feels slow" sensation. Re-evaluated on each render so a
+  // resize from too-narrow to wide-enough lights the animation back up
+  // without a remount.
+  const animate = shouldAnimateTransition(width, height);
   const [phase, setPhase] = useState<TransitionPhase>(TransitionPhase.Idle);
   const [tick, setTick] = useState(0);
   const [activeDir, setActiveDir] = useState<WipeDirection>(direction);
@@ -61,6 +96,19 @@ export const DissolveTransition = ({
   const columnActivationTick = useRef<number[]>([]);
 
   useEffect(() => {
+    if (!animate) {
+      // Pass-through mode: any new children become the display directly,
+      // and any stuck phase/tick state from a prior animated run is
+      // reset so a switch back to animated mode starts clean.
+      prevKey.current = transitionKey;
+      pendingChildren.current = children;
+      setDisplayChildren(children);
+      if (phase !== TransitionPhase.Idle) {
+        setPhase(TransitionPhase.Idle);
+        setTick(0);
+      }
+      return;
+    }
     if (transitionKey !== prevKey.current) {
       prevKey.current = transitionKey;
       pendingChildren.current = children;
@@ -71,7 +119,7 @@ export const DissolveTransition = ({
     } else if (phase === TransitionPhase.Idle) {
       setDisplayChildren(children);
     }
-  }, [transitionKey, children, width, height, phase, direction]);
+  }, [transitionKey, children, width, height, phase, direction, animate]);
 
   useEffect(() => {
     if (phase === TransitionPhase.Idle) return;
@@ -103,7 +151,7 @@ export const DissolveTransition = ({
     }
   }, [tick, phase, maxTicks, width]);
 
-  if (phase === TransitionPhase.Idle) {
+  if (!animate || phase === TransitionPhase.Idle) {
     return <>{displayChildren}</>;
   }
 

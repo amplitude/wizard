@@ -32,6 +32,7 @@ import {
   checkCommandBlockedByRun,
   getWhoamiText,
   getDiagnosticsText,
+  isKnownCommand,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
@@ -427,7 +428,7 @@ export const ConsoleView = ({
   );
 
   const handleSubmit = (value: string) => {
-    const isSlashCommand = value.startsWith('/');
+    const isSlashCommand = isKnownCommand(value);
     analytics.wizardCapture('agent message sent', {
       'message length': value.length,
       'is slash command': isSlashCommand,

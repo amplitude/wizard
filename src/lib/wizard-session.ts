@@ -409,6 +409,18 @@ export interface WizardSession {
    */
   activationLevel: 'none' | 'partial' | 'full' | null;
 
+  /**
+   * True when the local pre-flight check (`isProjectFullyWired`) found a
+   * complete prior install — SDK in package.json, source import present,
+   * `ampli.json` with org/project scope, and a non-empty event plan on
+   * disk. Set alongside `activationLevel = 'full'` so the router's
+   * Setup/Run skip predicates fire, but DataIngestionCheck STILL polls
+   * (the user may have just re-run pre-deploy, with no remote events
+   * yet). Distinct from a remote-confirmed `'full'` activation, which
+   * skips the polling screen too.
+   */
+  localInstrumentationComplete: boolean;
+
   /** True once the user has responded to the ActivationOptions screen. */
   activationOptionsComplete: boolean;
 
@@ -865,6 +877,7 @@ export function buildSession(args: {
     detectionResults: null,
     projectHasData: null,
     activationLevel: null,
+    localInstrumentationComplete: false,
     activationOptionsComplete: false,
     snippetConfigured: false,
     // --region (alias: --zone) pre-populates region so non-TUI signup

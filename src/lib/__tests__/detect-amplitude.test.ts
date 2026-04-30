@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import {
   detectAmplitudeInProject,
   detectAmplitudeInProjectSource,
+  isProjectFullyWired,
 } from '../detect-amplitude.js';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -435,5 +436,107 @@ describe('detectAmplitudeInProjectSource — source-only', () => {
     );
     const result = detectAmplitudeInProjectSource(tmpDir);
     expect(result.confidence).toBe('none');
+  });
+});
+
+// ── isProjectFullyWired — Activation Check pre-flight ─────────────────────
+
+function writeAmpliConfig(scope: {
+  OrgId?: string;
+  ProjectId?: string;
+  Zone?: string;
+}) {
+  fs.writeFileSync(
+    path.join(tmpDir, 'ampli.json'),
+    JSON.stringify(scope),
+    'utf-8',
+  );
+}
+
+function writeEventPlan(
+  events: Array<{ name: string; description: string }>,
+  rel = '.amplitude/events.json',
+) {
+  const abs = path.join(tmpDir, rel);
+  fs.mkdirSync(path.dirname(abs), { recursive: true });
+  fs.writeFileSync(abs, JSON.stringify(events), 'utf-8');
+}
+
+describe('isProjectFullyWired — Activation pre-flight', () => {
+  it('returns true when all four signals are present (canonical event-plan path)', () => {
+    writePkg({ '@amplitude/unified': '^1.0.0' });
+    writeFile(
+      'src/lib/amplitude.ts',
+      `import { track } from '@amplitude/unified';\n`,
+    );
+    writeAmpliConfig({ OrgId: '36958', ProjectId: 'abc', Zone: 'us' });
+    writeEventPlan([{ name: 'Deploy Clicked', description: '...' }]);
+
+    const result = isProjectFullyWired(tmpDir);
+    expect(result.fullyWired).toBe(true);
+    expect(result.missing).toEqual([]);
+    expect(result.present.sort()).toEqual(
+      ['ampliConfig', 'dependency', 'eventPlan', 'sourceImport'].sort(),
+    );
+  });
+
+  it('accepts the legacy root-level .amplitude-events.json event-plan location', () => {
+    writePkg({ '@amplitude/unified': '^1.0.0' });
+    writeFile('src/index.ts', `import { track } from '@amplitude/unified';\n`);
+    writeAmpliConfig({ OrgId: 'o', ProjectId: 'p' });
+    writeEventPlan([{ name: 'X', description: 'y' }], '.amplitude-events.json');
+
+    expect(isProjectFullyWired(tmpDir).fullyWired).toBe(true);
+  });
+
+  it('returns false when ampli.json has only OrgId (missing ProjectId)', () => {
+    writePkg({ '@amplitude/unified': '^1.0.0' });
+    writeFile('src/index.ts', `import { track } from '@amplitude/unified';\n`);
+    writeAmpliConfig({ OrgId: 'o' }); // ProjectId missing
+    writeEventPlan([{ name: 'X', description: 'y' }]);
+
+    const result = isProjectFullyWired(tmpDir);
+    expect(result.fullyWired).toBe(false);
+    expect(result.missing).toContain('ampliConfig');
+  });
+
+  it('returns false when event plan is an empty array', () => {
+    writePkg({ '@amplitude/unified': '^1.0.0' });
+    writeFile('src/index.ts', `import { track } from '@amplitude/unified';\n`);
+    writeAmpliConfig({ OrgId: 'o', ProjectId: 'p' });
+    writeEventPlan([]); // empty
+
+    const result = isProjectFullyWired(tmpDir);
+    expect(result.fullyWired).toBe(false);
+    expect(result.missing).toContain('eventPlan');
+  });
+
+  it('returns false when package.json declares the dep but no source imports it', () => {
+    // Stale install — package.json has the dep but the SDK file was deleted.
+    // This is the same regression detectAmplitudeInProjectSource was added
+    // to catch; isProjectFullyWired must inherit that protection.
+    writePkg({ '@amplitude/unified': '^1.0.0' });
+    writeFile('src/index.ts', `console.log('hello');\n`); // no Amplitude import
+    writeAmpliConfig({ OrgId: 'o', ProjectId: 'p' });
+    writeEventPlan([{ name: 'X', description: 'y' }]);
+
+    const result = isProjectFullyWired(tmpDir);
+    expect(result.fullyWired).toBe(false);
+    expect(result.missing).toContain('sourceImport');
+  });
+
+  it('returns false on a brand-new project (no signals)', () => {
+    writePkg({});
+    const result = isProjectFullyWired(tmpDir);
+    expect(result.fullyWired).toBe(false);
+    expect(result.missing.sort()).toEqual(
+      ['ampliConfig', 'dependency', 'eventPlan', 'sourceImport'].sort(),
+    );
+  });
+
+  it('does not throw on malformed ampli.json', () => {
+    fs.writeFileSync(path.join(tmpDir, 'ampli.json'), '{not valid', 'utf-8');
+    expect(() => isProjectFullyWired(tmpDir)).not.toThrow();
+    expect(isProjectFullyWired(tmpDir).signals.ampliConfig).toBe(false);
   });
 });

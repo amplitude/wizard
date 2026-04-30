@@ -137,6 +137,14 @@ export const EVENT_DATA_VERSIONS = {
    */
   agent_metrics: 1,
   /**
+   * `needs_input` — structured prompt asking the orchestrator (or
+   * human) for one of N choices. Carries the question, choices,
+   * recommended pick, manual-entry hint, and pagination. The most
+   * orchestrator-facing event in the wire — without this `data_version`
+   * stamp consumers couldn't safely evolve schema for it.
+   */
+  needs_input: 1,
+  /**
    * `decision_auto` — emitted alongside a `needs_input` whenever the
    * wizard auto-resolves the prompt (under `--auto-approve` /
    * `--yes` / `--ci` / `--force`, OR the `--agent`-implies-autoApprove
@@ -714,6 +722,148 @@ export interface SetupCompleteData {
   followups?: {
     mcpServer?: { command: string[]; description: string };
     docsUrl?: string;
+  };
+}
+
+// ── Recoverable error hints ─────────────────────────────────────────
+//
+// Every NDJSON `error` event carries a `recoverable` discriminator and
+// an optional `suggestedAction` so consuming agents (Claude Code,
+// Cursor, custom orchestrators) know what to do next without parsing
+// the message string. Without these, every error looks the same — the
+// outer agent has to write its own ad-hoc remediation map per error
+// pattern. With them, "wizard failed; re-run with `--yes`" becomes a
+// machine-readable instruction.
+
+/**
+ * What an outer agent should do in response to this error.
+ *
+ *   - `retry`              — transient failure (network blip, gateway 5xx).
+ *                            Re-spawn the wizard with the same flags.
+ *   - `reinvoke_with_flag` — the call needs different args (auto-pick
+ *                            refused, missing required flag). Use
+ *                            `suggestedAction.command` as the new argv.
+ *   - `human_required`     — needs a human (auth expired, quota hit,
+ *                            permission denied). Surface to user.
+ *   - `fatal`              — internal wizard bug or unrecoverable state.
+ *                            Don't retry; route to bug report flow.
+ */
+export type RecoverableHint =
+  | 'retry'
+  | 'reinvoke_with_flag'
+  | 'human_required'
+  | 'fatal';
+
+/**
+ * Concrete next-step suggestion paired with a `recoverable` value. Both
+ * fields are optional so the emitter can give partial guidance when
+ * only one half is meaningful — `command` lists argv the orchestrator
+ * can spawn directly (no shell-quoting), `docsUrl` points at a
+ * remediation doc when the fix is contextual.
+ */
+export interface SuggestedAction {
+  /** argv array the orchestrator should run next (no shell quoting). */
+  command?: string[];
+  /** Doc URL to surface in the user-facing error path. */
+  docsUrl?: string;
+}
+
+/**
+ * Common shape on every NDJSON `error.data` payload. Specific error
+ * variants extend this with their own discriminator (`event` /
+ * `code`). Adding a field here is a `data_version` bump on every
+ * affected error event.
+ */
+export interface RecoverableErrorData {
+  recoverable: RecoverableHint;
+  suggestedAction?: SuggestedAction;
+}
+
+/**
+ * Best-effort classifier — maps an Error's name + message to the most
+ * specific `recoverable` hint we can derive. Used by `setRunError` so
+ * every uncaught run-aborting error carries a hint without the caller
+ * having to know which bucket it fell into.
+ *
+ * Patterns sourced from production Sentry traces and the audit doc.
+ * Pure (no side effects, no network) so it's safe to call in any
+ * emit path.
+ */
+export function classifyRunError(error: Error): {
+  recoverable: RecoverableHint;
+  suggestedAction?: SuggestedAction;
+} {
+  const msg = `${error.name}: ${error.message}`.toLowerCase();
+
+  // Auth / token expired — only the human can re-login. Pre-empt the
+  // generic-retry path so orchestrators don't burn budget retrying.
+  if (
+    msg.includes('authentication_error') ||
+    msg.includes('authentication_failed') ||
+    msg.includes('invalid or expired token') ||
+    msg.includes('401') ||
+    msg.includes('needs-auth')
+  ) {
+    return {
+      recoverable: 'human_required',
+      suggestedAction: {
+        command: ['amplitude-wizard', 'login'],
+        docsUrl: 'https://github.com/amplitude/wizard#login',
+      },
+    };
+  }
+
+  // Quota / forbidden — needs an admin or a billing change.
+  if (
+    msg.includes('quota_reached') ||
+    msg.includes('quota exceeded') ||
+    msg.includes('forbidden') ||
+    msg.includes('403')
+  ) {
+    return { recoverable: 'human_required' };
+  }
+
+  // Write refused — the agent needed write permission and didn't have it.
+  // Re-running with `--yes` is the canonical remediation.
+  if (
+    msg.includes('write_refused') ||
+    msg.includes('permission denied') ||
+    msg.includes('eacces')
+  ) {
+    return {
+      recoverable: 'reinvoke_with_flag',
+      suggestedAction: {
+        command: ['amplitude-wizard', '--yes'],
+      },
+    };
+  }
+
+  // Gateway / upstream blips — transient, safe to retry.
+  if (
+    msg.includes('gateway_down') ||
+    msg.includes('terminated') ||
+    msg.includes('502') ||
+    msg.includes('503') ||
+    msg.includes('504') ||
+    msg.includes('econnreset') ||
+    msg.includes('etimedout') ||
+    msg.includes('network')
+  ) {
+    return { recoverable: 'retry' };
+  }
+
+  // Rate limit — transient but the orchestrator should back off.
+  if (msg.includes('rate_limit') || msg.includes('429')) {
+    return { recoverable: 'retry' };
+  }
+
+  // Default: assume the wizard hit a bug. Don't loop on fatal errors —
+  // route to the bug report flow.
+  return {
+    recoverable: 'fatal',
+    suggestedAction: {
+      command: ['amplitude-wizard', 'feedback'],
+    },
   };
 }
 

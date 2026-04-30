@@ -16,7 +16,11 @@
  * #295.
  */
 
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import { z } from 'zod';
+import { getEventsFile } from '../utils/storage-paths.js';
+import { logToFile } from '../utils/debug.js';
 
 // The agent doesn't always use the same field casing in .amplitude-events.json
 // — observed in the wild: name, event, eventName, event_name (and the same
@@ -86,4 +90,75 @@ export function parseEventPlanContent(
       e.eventDescriptionAndReasoning ??
       '',
   }));
+}
+
+/**
+ * Read the agent-written event plan from a project's install dir.
+ *
+ * Tries the canonical path first (`<installDir>/.amplitude/events.json`),
+ * then the legacy dotfile (`<installDir>/.amplitude-events.json`) that
+ * older context-hub integration skills still emit. Returns whichever has
+ * the more recent mtime so a stale canonical from a previous run can't
+ * shadow a fresh legacy write — mirroring the `pickFreshestExisting`
+ * logic in `agent-interface.ts`.
+ *
+ * Returns `[]` for any non-fatal failure (file missing, malformed JSON,
+ * schema mismatch). Empty entries (no name) are dropped. Logs to the
+ * debug file so issues are recoverable post-mortem.
+ *
+ * Used by the Event Verification screen to render the planned tracking
+ * list inline so users can see what they need to trigger.
+ */
+export function readLocalEventPlan(
+  installDir: string,
+): Array<{ name: string; description: string }> {
+  const candidates = [
+    getEventsFile(installDir),
+    path.join(installDir, '.amplitude-events.json'),
+  ];
+
+  let winner: string | null = null;
+  let winnerMtime = -Infinity;
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.statSync(candidate);
+      const mtime = stat.mtimeMs;
+      if (mtime > winnerMtime) {
+        winner = candidate;
+        winnerMtime = mtime;
+      }
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        logToFile(
+          `[readLocalEventPlan] stat ${candidate} failed: ${
+            err.message ?? err
+          }`,
+        );
+      }
+    }
+  }
+
+  if (!winner) return [];
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(winner, 'utf8');
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    logToFile(
+      `[readLocalEventPlan] read ${winner} failed: ${err.message ?? err}`,
+    );
+    return [];
+  }
+
+  const parsed = parseEventPlanContent(raw);
+  if (parsed === null) {
+    logToFile(
+      `[readLocalEventPlan] ${winner} could not be parsed as an event plan`,
+    );
+    return [];
+  }
+
+  return parsed.filter((e) => e.name.trim().length > 0);
 }

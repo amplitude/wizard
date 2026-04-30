@@ -128,8 +128,16 @@ export const agentHooks: AgentHook[] = [
   },
 ];
 
+// Stop runs at the end of every agent turn AND at end of run; the model
+// uses it to write a reflection / drain the additional-feature queue
+// (Slack/MCP install opt-ins, etc). Production logs showed reflections
+// regularly burning the full 30s budget — perceived as "frozen" by the
+// user right at the moment of "we're done!". 8s is the empirical 95p
+// for the queue-drain happy path. If the model overruns we'd rather
+// abort the reflection than make the user wait through what looks like
+// a stalled outro.
 const HOOK_TIMEOUTS: Partial<Record<HookEvent, number>> = {
-  Stop: 30,
+  Stop: 8,
 };
 
 /**

@@ -131,15 +131,25 @@ describe('browser-only commandment gating', () => {
 
   // Regression — Excalidraw run review surfaced 6 instrumented files
   // importing `track` directly from `@amplitude/analytics-browser`
-  // instead of from the project's own `excalidraw-app/amplitude.ts`
-  // wrapper, leaving its re-export as dead code. The browser
-  // commandments block explicitly forbids the direct-import pattern.
-  it('forbids importing track directly from @amplitude/analytics-browser on browser runs', () => {
-    expect(browserText).toContain('@amplitude/analytics-browser');
-    // The commandment shows the WRONG pattern as a negative example
-    // and the RIGHT pattern as the project-local relative import.
-    expect(browserText).toContain('// ✗ WRONG');
+  // while the agent had also written an `amplitude.ts` re-export
+  // wrapper that nothing actually used. Reconciled with context-hub:
+  // every browser app under context-hub/basics/* uses init in the
+  // framework's natural entry file (instrumentation-client.ts /
+  // main.tsx / __root.tsx) plus direct namespace imports everywhere
+  // else — there is no project-local re-export wrapper. The browser
+  // commandments steer the agent at that pattern instead of mandating
+  // a wrapper, so the dead-code failure mode never gets started.
+  it('steers browser runs to entry-file init + direct namespace imports', () => {
+    // RIGHT pattern: namespace import straight from the SDK package.
     expect(browserText).toContain('// ✓ RIGHT');
+    expect(browserText).toContain('import * as amplitude from');
+    // WRONG pattern: building a re-export wrapper and routing
+    // callsites through it — the Excalidraw failure mode.
+    expect(browserText).toContain('// ✗ WRONG');
+    expect(browserText).toContain('re-export wrapper');
+    // The "dead code" framing is what makes the rule durable across
+    // copy edits; if it disappears the rule loses its teeth.
+    expect(browserText).toContain('dead code');
   });
 
   it('default (no options) treats run as non-browser — conservative', () => {

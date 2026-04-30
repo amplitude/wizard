@@ -136,7 +136,15 @@ export function saveCheckpoint(
   // write (a thrown emitter would leave the user without crash
   // recovery — strictly worse than a silent telemetry drop).
   try {
-    const bytes = Buffer.byteLength(JSON.stringify(checkpoint), 'utf8');
+    // Match the on-disk format `atomicWriteJSON` actually writes:
+    // `JSON.stringify(data, null, 2) + '\n'`. The previous compact-form
+    // computation under-reported by 2-3× because pretty-print + trailing
+    // newline expand the file substantially — orchestrators reading
+    // `bytes` for cost or policy would see a misleadingly small number.
+    const bytes = Buffer.byteLength(
+      JSON.stringify(checkpoint, null, 2) + '\n',
+      'utf8',
+    );
     getUI().emitCheckpointSaved?.({ path: filePath, bytes, phase });
   } catch {
     /* checkpoint persistence wins over telemetry */

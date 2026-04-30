@@ -22,7 +22,13 @@ import type {
   SetupContextData,
   SetupCompleteData,
 } from '../lib/agent-events';
-import { EVENT_DATA_VERSIONS, truncateLogMessage } from '../lib/agent-events';
+import {
+  EVENT_DATA_VERSIONS,
+  classifyRunError,
+  truncateLogMessage,
+  type RecoverableHint,
+  type SuggestedAction,
+} from '../lib/agent-events';
 import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
@@ -160,6 +166,22 @@ export function parseEnvSelectionStdinLine(line: string | null | undefined): {
   }
   return { parsed: result.data, rejectionMessage: null };
 }
+
+/**
+ * Wire-level cap on the number of environment choices we ship to an
+ * orchestrator on a single `needs_input: environment_selection` /
+ * `prompt: environment_selection` event. Dogfood accounts can carry
+ * 300+ environments — including all of them in the NDJSON envelope
+ * inflated a single line to ~600 KB and made the picker UX brittle in
+ * orchestrators that use a fixed-size buffer. 50 is comfortably
+ * larger than the 95th-percentile org's env count and small enough
+ * to render in a searchable picker without scrolling.
+ *
+ * Above-cap accounts get `pagination.total > pagination.returned`
+ * plus the `manualEntry` hint so an orchestrator can prompt the user
+ * for `--app-id <id>` directly.
+ */
+export const MAX_ENV_SELECTION_CHOICES = 50;
 
 // ── NDJSON event types ──────────────────────────────────────────────
 
@@ -431,12 +453,54 @@ export class AgentUI implements WizardUI {
     message: string;
     name?: string;
   }): void {
+    // Map each code to the canonical remediation. Lets a consuming
+    // agent (Claude Code, Cursor, etc.) build a user-facing prompt
+    // without writing its own switch statement on top of ours.
+    const hint = ((): {
+      recoverable: RecoverableHint;
+      suggestedAction?: SuggestedAction;
+    } => {
+      switch (data.code) {
+        case 'NAME_TAKEN':
+        case 'INVALID_REQUEST':
+          return {
+            recoverable: 'reinvoke_with_flag',
+            suggestedAction: {
+              command: ['amplitude-wizard', '--app-name', '<different-name>'],
+            },
+          };
+        case 'MISSING_NAME':
+          return {
+            recoverable: 'reinvoke_with_flag',
+            suggestedAction: {
+              command: ['amplitude-wizard', '--app-name', '<your-name>'],
+            },
+          };
+        case 'MISSING_ORG':
+          return {
+            recoverable: 'reinvoke_with_flag',
+            suggestedAction: {
+              command: ['amplitude-wizard', '--org', '<org-id>'],
+            },
+          };
+        case 'QUOTA_REACHED':
+        case 'FORBIDDEN':
+          return { recoverable: 'human_required' };
+        case 'INTERNAL':
+        default:
+          return { recoverable: 'retry' };
+      }
+    })();
     emit('error', data.message, {
       level: 'error',
       data: {
         event: 'project_create_error',
         code: data.code,
         name: data.name,
+        recoverable: hint.recoverable,
+        ...(hint.suggestedAction
+          ? { suggestedAction: hint.suggestedAction }
+          : {}),
       },
     });
   }
@@ -856,8 +920,19 @@ export class AgentUI implements WizardUI {
         .replace(/https?:\/\/[^\s]+/g, '[URL redacted]')
         .replace(/\/(?:Users|home|var|tmp)\/[^\s:]+/g, '[path redacted]');
     }
+    // Classify so consuming agents know whether to retry, re-invoke
+    // with flags, ask the human, or treat as fatal — without parsing
+    // the message string. Pure helper, see agent-events.ts for the
+    // pattern → hint mapping.
+    const hint = classifyRunError(error);
     emit('error', sanitized, {
-      data: { name: error.name },
+      data: {
+        name: error.name,
+        recoverable: hint.recoverable,
+        ...(hint.suggestedAction
+          ? { suggestedAction: hint.suggestedAction }
+          : {}),
+      },
     });
     return Promise.resolve(false);
   }
@@ -1327,7 +1402,7 @@ export class AgentUI implements WizardUI {
     // NDJSON envelope size on portfolios with many environments (322-env
     // dogfood went from ~250 KB to ~600 KB) — orchestrators that need a
     // tree can rebuild it from `choices` (group by orgId, then projectId).
-    const choices = orgs.flatMap((org) =>
+    const allChoices = orgs.flatMap((org) =>
       org.projects.flatMap((proj) =>
         (proj.environments ?? [])
           .filter((e) => e.app?.apiKey)
@@ -1344,6 +1419,27 @@ export class AgentUI implements WizardUI {
           })),
       ),
     );
+    // Cap the wire-level payload at MAX_ENV_SELECTION_CHOICES so a
+    // dogfood account with hundreds of environments doesn't ship a
+    // 600 KB needs_input envelope on every wizard run. Sorted by rank
+    // first (rank 1 = Production at most orgs) and then by org/proj
+    // name so the result is stable across runs — orchestrators that
+    // hash the payload for caching get a deterministic key.
+    //
+    // Above-cap users can either:
+    //   - search via the orchestrator's picker (the choices list is
+    //     itself searchable; the recommended env is included)
+    //   - re-run with `--app-id <id>` to pick a specific env that
+    //     fell outside the cap (the manualEntry hint surfaces this)
+    const sortedChoices = allChoices.slice().sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      const orgCmp = a.orgName.localeCompare(b.orgName);
+      if (orgCmp !== 0) return orgCmp;
+      const projCmp = a.projectName.localeCompare(b.projectName);
+      if (projCmp !== 0) return projCmp;
+      return a.envName.localeCompare(b.envName);
+    });
+    const choices = sortedChoices.slice(0, MAX_ENV_SELECTION_CHOICES);
 
     // Legacy `prompt` event: kept for backward compatibility with
     // orchestrators that key off `type === 'prompt'` and parse
@@ -1436,12 +1532,16 @@ export class AgentUI implements WizardUI {
         appId: 'string (required, from choices[].value)',
       },
       // Pagination is signalled even when all choices fit so outer agents
-      // can surface the total. `nextCommand` is omitted here because this
-      // prompt returns every choice up front — search-filtered re-fetches
-      // are exposed via `searchPlaceholder` + `wizard projects list --agent
-      // --query <q>` discoverability rather than as a stub command.
+      // can surface the total. When the wizard caps the payload at
+      // MAX_ENV_SELECTION_CHOICES (currently 50), `total` carries the
+      // pre-cap count and `returned` the post-cap count — so
+      // `total > returned` is the orchestrator's signal to surface the
+      // manualEntry hint or run a separate `wizard projects list` (when
+      // it lands). `nextCommand` is intentionally omitted: there's no
+      // dedicated "list more envs" subcommand yet, and stubbing one in
+      // the wire would lock us into a shape we haven't designed.
       pagination: {
-        total: choices.length,
+        total: sortedChoices.length,
         returned: needsInputChoices.length,
       },
       // Allow free-form `--app-id` entry when none of the listed choices fit
@@ -1467,7 +1567,12 @@ export class AgentUI implements WizardUI {
       emit('log', rejectionMessage, { level: 'warn' });
     }
 
-    const outcome = resolveEnvSelectionFromStdin(parsed, choices);
+    // Validate stdin against the PRE-CAP `sortedChoices`, not the capped
+    // `choices`. The wire contract advertises `allowManualEntry: true` with
+    // `pagination.total > pagination.returned`, telling orchestrators that
+    // above-cap entries are valid; rejecting an above-cap app-id forwarded
+    // on stdin would contradict the manualEntry contract.
+    const outcome = resolveEnvSelectionFromStdin(parsed, sortedChoices);
     for (const warning of outcome.warnings) {
       emit('log', warning, { level: 'warn' });
     }
@@ -1499,23 +1604,23 @@ export class AgentUI implements WizardUI {
       );
     }
 
-    // Fallback: auto-select the first environment
-    for (const org of orgs) {
-      for (const proj of org.projects) {
-        const env = (proj.environments ?? [])
-          .filter((e) => e.app?.apiKey)
-          .sort((a, b) => a.rank - b.rank)[0];
-        if (env) {
-          emit(
-            'log',
-            `Auto-selected environment: ${org.name} / ${proj.name} / ${env.name}`,
-            {
-              level: 'warn',
-            },
-          );
-          return { orgId: org.id, projectId: proj.id, env: env.name };
-        }
-      }
+    // Fallback: auto-select the first entry from sortedChoices so the
+    // pick is identical to `recommended` (both derive from the same
+    // (rank, orgName, projectName, envName) ordering).
+    const autoChoice = sortedChoices[0];
+    if (autoChoice) {
+      emit(
+        'log',
+        `Auto-selected environment: ${autoChoice.orgName} / ${autoChoice.projectName} / ${autoChoice.envName}`,
+        {
+          level: 'warn',
+        },
+      );
+      return {
+        orgId: autoChoice.orgId,
+        projectId: autoChoice.projectId,
+        env: autoChoice.envName,
+      };
     }
 
     throw new Error('No environments with API keys found');

@@ -1,5 +1,9 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { callAmplitudeMcp, AMPLITUDE_MCP_URL } from '../mcp-with-fallback';
+import {
+  callAmplitudeMcp,
+  AMPLITUDE_MCP_URL,
+  _clearMcpSessionCacheForTesting,
+} from '../mcp-with-fallback';
 
 vi.mock('../../utils/debug');
 
@@ -62,6 +66,10 @@ describe('callAmplitudeMcp', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     mockQuery.mockReset();
+    // Clear the in-process MCP session cache so a session opened by a
+    // previous test (different mockFetch sequence) doesn't get reused
+    // here. Real callers benefit from the cache; tests must isolate.
+    _clearMcpSessionCacheForTesting();
   });
 
   afterEach(() => {
