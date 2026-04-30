@@ -31,6 +31,7 @@ import {
   AgentErrorType,
   AUTH_RETRY_LIMIT,
   selectModel,
+  isStallNonProgressMessage,
 } from '../agent-interface';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -1158,6 +1159,71 @@ describe('runAgent', () => {
       // ui.log.error should NOT have been called (errors suppressed for user)
       expect(mockUIInstance.log.error).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('isStallNonProgressMessage', () => {
+  // The Claude Agent SDK emits this envelope right BEFORE it waits on
+  // the upstream — treating it as progress masks gateway hangs.
+  it('identifies the SDK status:requesting envelope as non-progress', () => {
+    expect(
+      isStallNonProgressMessage({
+        type: 'system',
+        subtype: 'status',
+        status: 'requesting',
+        uuid: 'abc',
+        session_id: 'sess',
+      }),
+    ).toBe(true);
+  });
+
+  it('does NOT classify other system subtypes as non-progress', () => {
+    // SDK retrying with backoff IS progress.
+    expect(
+      isStallNonProgressMessage({
+        type: 'system',
+        subtype: 'api_retry',
+        attempt: 1,
+      }),
+    ).toBe(false);
+    // Compaction event IS progress.
+    expect(
+      isStallNonProgressMessage({
+        type: 'system',
+        subtype: 'compact_boundary',
+      }),
+    ).toBe(false);
+    // Init event IS progress.
+    expect(isStallNonProgressMessage({ type: 'system', subtype: 'init' })).toBe(
+      false,
+    );
+  });
+
+  it('does NOT classify a future status:responding envelope as non-progress', () => {
+    // Defensive: if the SDK ever introduces a status: 'responding' or
+    // similar, treat it as progress unless it explicitly matches the
+    // pre-wait shape we know about.
+    expect(
+      isStallNonProgressMessage({
+        type: 'system',
+        subtype: 'status',
+        status: 'responding',
+      }),
+    ).toBe(false);
+  });
+
+  it('does NOT classify model/tool messages as non-progress', () => {
+    expect(isStallNonProgressMessage({ type: 'assistant' })).toBe(false);
+    expect(isStallNonProgressMessage({ type: 'user' })).toBe(false);
+    expect(isStallNonProgressMessage({ type: 'stream_event' })).toBe(false);
+  });
+
+  it('handles malformed inputs without throwing', () => {
+    expect(isStallNonProgressMessage(null)).toBe(false);
+    expect(isStallNonProgressMessage(undefined)).toBe(false);
+    expect(isStallNonProgressMessage('string')).toBe(false);
+    expect(isStallNonProgressMessage(42)).toBe(false);
+    expect(isStallNonProgressMessage({})).toBe(false);
   });
 });
 

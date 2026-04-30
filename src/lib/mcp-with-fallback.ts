@@ -68,7 +68,101 @@ type CallToolFnInternal = (
   name: string,
   args: unknown,
 ) => Promise<string | null>;
+
+/**
+ * Outcome of an MCP session open attempt.
+ *
+ * `deterministic: true` signals that retrying via the agent fallback would
+ * hit the same wall (e.g. HTTP 401/403 with the same access token), so the
+ * caller should fail fast instead of paying the multi-second agent
+ * subprocess cost. `deterministic: false` is the historical "transient
+ * failure" path — fallback may help.
+ */
+type SessionOpenResult =
+  | { ok: true; callTool: CallToolFnInternal }
+  | { ok: false; deterministic: boolean; reason: string };
 const MCP_SESSION_TTL_MS = 60_000;
+
+// ── Per-fetch timeouts ────────────────────────────────────────────────────────
+//
+// Without these caps, a hung MCP gateway pinned the wizard with no upper
+// bound: `openMcpSessionInner` and the bound `callTool` closure both
+// awaited bare `fetch(...)` calls relying solely on the caller's external
+// abort signal. In practice that meant a hang propagated all the way up
+// to the outer agent's stall timer (60s) before anything reacted,
+// burning the entire SDK turn for what was usually a single hung request.
+//
+// Matched against the rest of the wizard's network budget:
+//   - Token-refresh: 10s
+//   - Gateway-liveness probe: 8s
+//   - Agent fallback: 12s
+//   - SSE stream stall: 60s (active phase)
+// 30s for tool calls is generous (the Amplitude MCP server typically
+// responds in <2s; 30s suggests something is wrong) and 5s for the
+// fire-and-forget `notifications/initialized` is generous (we don't
+// even use the response). The fetch is still race-cancelled by the
+// caller's external signal — these caps are the upper bound, not a
+// floor.
+
+/** Tool-call + initialize round-trip cap. */
+const MCP_FETCH_TIMEOUT_MS = 30_000;
+/** Fire-and-forget `notifications/initialized` cap. */
+const MCP_NOTIFY_TIMEOUT_MS = 5_000;
+
+/**
+ * `fetch` wrapped with a per-call timeout, covering both the request
+ * round-trip AND body consumption. Combines the caller's external
+ * `AbortSignal` (if any) with an internal `AbortController` so either
+ * source — caller cancellation OR timeout — tears the request down
+ * immediately.
+ *
+ * Body consumption (`res.text()`, `res.json()`, `res.body.cancel()`)
+ * MUST happen inside the `consume` callback. The timer and abort
+ * listener stay armed for the entire callback so a slow body read can
+ * still be cancelled. Cleanup runs unconditionally in `finally` — no
+ * leaked timers or listeners on the success path.
+ *
+ * Throws on timeout exactly the way `fetch` throws on caller-side
+ * abort: an `AbortError` from the underlying controller. Callers that
+ * already have `try/catch` on `fetch` need no changes; the existing
+ * `[MCP] X failed: ...` log lines absorb the new error class.
+ *
+ * Why caller-supplied consume:
+ *   Returning a bare `Response` made it ambiguous whether the timer
+ *   covered the body read. Two prior implementations bounced between
+ *   "cleanup in finally before body read" (body unbounded) and
+ *   "cleanup only on error" (success-path leak). The callback shape
+ *   resolves both — the timer is alive exactly as long as the caller
+ *   is consuming the response, and dies the moment the consumer
+ *   returns or throws.
+ */
+async function fetchWithTimeout<T>(
+  url: string,
+  init: Parameters<typeof fetch>[1],
+  timeoutMs: number,
+  externalSignal: AbortSignal | undefined,
+  consume: (res: Response) => Promise<T>,
+): Promise<T> {
+  // Bail immediately if the external signal is already aborted —
+  // matches the standard `fetch` contract for already-aborted signals.
+  if (externalSignal?.aborted) {
+    throw new DOMException(
+      String(externalSignal.reason ?? 'aborted'),
+      'AbortError',
+    );
+  }
+  const controller = new AbortController();
+  const onExternalAbort = (): void => controller.abort();
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    return await consume(res);
+  } finally {
+    clearTimeout(timer);
+    externalSignal?.removeEventListener('abort', onExternalAbort);
+  }
+}
 const mcpSessionCache = new Map<
   string,
   { callTool: CallToolFnInternal; expiresAt: number }
@@ -121,18 +215,21 @@ export function invalidateMcpSessionsForToken(accessToken: string): void {
 
 /**
  * Open an MCP session and return a `callTool` helper bound to that session.
- * Returns null if the session cannot be established. Reuses a cached
- * session for the same `accessToken|mcpUrl` pair when it's still fresh.
+ * Returns a tagged result so callers can distinguish transient failures
+ * (worth falling back to the agent path) from deterministic ones (auth
+ * errors — agent fallback uses the same token and would just hit the
+ * same wall). Reuses a cached session for the same `accessToken|mcpUrl`
+ * pair when it's still fresh.
  */
 async function openMcpSession(
   accessToken: string,
   mcpUrl: string,
   signal?: AbortSignal,
-): Promise<CallToolFnInternal | null> {
+): Promise<SessionOpenResult> {
   const cached = getCachedMcpSession(accessToken, mcpUrl);
   if (cached) {
     logToFile('[MCP] reusing cached session');
-    return cached;
+    return { ok: true, callTool: cached };
   }
   return withWizardSpan(
     'mcp.session.init',
@@ -140,7 +237,7 @@ async function openMcpSession(
     { 'mcp.url': mcpUrl },
     async () => {
       const fresh = await openMcpSessionInner(accessToken, mcpUrl, signal);
-      if (fresh) cacheMcpSession(accessToken, mcpUrl, fresh);
+      if (fresh.ok) cacheMcpSession(accessToken, mcpUrl, fresh.callTool);
       return fresh;
     },
   );
@@ -150,7 +247,7 @@ async function openMcpSessionInner(
   accessToken: string,
   mcpUrl: string,
   signal?: AbortSignal,
-): Promise<CallToolFnInternal | null> {
+): Promise<SessionOpenResult> {
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
@@ -159,50 +256,87 @@ async function openMcpSessionInner(
 
   let sessionId: string | undefined;
   try {
-    const initRes = await fetch(mcpUrl, {
-      method: 'POST',
-      headers: { ...headers, Accept: 'application/json, text/event-stream' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 0,
-        method: 'initialize',
-        params: {
-          protocolVersion: '2024-11-05',
-          capabilities: {},
-          clientInfo: { name: 'amplitude-wizard', version: '1.0.0' },
-        },
-      }),
+    // Pull status + session id inside the consume callback so the body
+    // cancel happens while the timer + external abort are still armed.
+    const initOutcome = await fetchWithTimeout(
+      mcpUrl,
+      {
+        method: 'POST',
+        headers: { ...headers, Accept: 'application/json, text/event-stream' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 0,
+          method: 'initialize',
+          params: {
+            protocolVersion: '2024-11-05',
+            capabilities: {},
+            clientInfo: { name: 'amplitude-wizard', version: '1.0.0' },
+          },
+        }),
+      },
+      MCP_FETCH_TIMEOUT_MS,
       signal,
-    });
-    sessionId = initRes.headers.get('mcp-session-id') ?? undefined;
-    await initRes.body?.cancel().catch(() => undefined);
+      async (res) => {
+        const status = res.status;
+        const extractedSessionId =
+          res.headers.get('mcp-session-id') ?? undefined;
+        await res.body?.cancel().catch(() => undefined);
+        return { status, sessionId: extractedSessionId };
+      },
+    );
+    // 401/403 mean the access token is bad. The agent fallback uses the
+    // same token, so it would just hit the same wall after a 12s setup —
+    // fail fast instead. 5xx is transient (gateway hiccup); fall through.
+    if (initOutcome.status === 401 || initOutcome.status === 403) {
+      logToFile(
+        `[MCP] initialize rejected by gateway (HTTP ${initOutcome.status}) — skipping agent fallback`,
+      );
+      addBreadcrumb('mcp', `Initialize rejected (HTTP ${initOutcome.status})`, {
+        status: initOutcome.status,
+      });
+      return {
+        ok: false,
+        deterministic: true,
+        reason: `http-${initOutcome.status}`,
+      };
+    }
+    sessionId = initOutcome.sessionId;
   } catch (err) {
     logToFile(
       `[MCP] initialize failed: ${
         err instanceof Error ? err.message : String(err)
       }`,
     );
-    return null;
+    return { ok: false, deterministic: false, reason: 'init-error' };
   }
 
-  if (!sessionId) return null;
+  if (!sessionId) {
+    return { ok: false, deterministic: false, reason: 'no-session-id' };
+  }
 
   try {
-    const notifRes = await fetch(mcpUrl, {
-      method: 'POST',
-      headers: { ...headers, 'Mcp-Session-Id': sessionId },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'notifications/initialized',
-      }),
+    // Fire-and-forget — body is cancelled inside the timeout window.
+    await fetchWithTimeout(
+      mcpUrl,
+      {
+        method: 'POST',
+        headers: { ...headers, 'Mcp-Session-Id': sessionId },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'notifications/initialized',
+        }),
+      },
+      MCP_NOTIFY_TIMEOUT_MS,
       signal,
-    });
-    await notifRes.body?.cancel().catch(() => undefined);
+      async (res) => {
+        await res.body?.cancel().catch(() => undefined);
+      },
+    );
   } catch {
     logToFile('[MCP] notifications/initialized failed (continuing)');
   }
 
-  return async (
+  const callTool: CallToolFnInternal = async (
     id: number,
     name: string,
     args: unknown,
@@ -213,22 +347,29 @@ async function openMcpSessionInner(
       { 'mcp.tool': name, 'mcp.session_id': sessionId },
       async () => {
         try {
-          const res = await fetch(mcpUrl, {
-            method: 'POST',
-            headers: {
-              ...headers,
-              'Mcp-Session-Id': sessionId,
-              Accept: 'application/json, text/event-stream',
+          // Read the body inside the timeout window — a hung body read
+          // (gateway buffers the headers but stalls on data) would
+          // otherwise pin the call past `MCP_FETCH_TIMEOUT_MS`.
+          const body = await fetchWithTimeout(
+            mcpUrl,
+            {
+              method: 'POST',
+              headers: {
+                ...headers,
+                'Mcp-Session-Id': sessionId,
+                Accept: 'application/json, text/event-stream',
+              },
+              body: JSON.stringify({
+                jsonrpc: '2.0',
+                id,
+                method: 'tools/call',
+                params: { name, arguments: args },
+              }),
             },
-            body: JSON.stringify({
-              jsonrpc: '2.0',
-              id,
-              method: 'tools/call',
-              params: { name, arguments: args },
-            }),
+            MCP_FETCH_TIMEOUT_MS,
             signal,
-          });
-          const body = await res.text();
+            async (res) => res.text(),
+          );
           const sseData = body.match(/^data: (.+)$/m)?.[1] ?? '';
           const rpc = JSON.parse(sseData) as {
             result?: { content?: Array<{ text?: string }> };
@@ -256,6 +397,8 @@ async function openMcpSessionInner(
         }
       },
     );
+
+  return { ok: true, callTool };
 }
 
 // ── Agent fallback ────────────────────────────────────────────────────────────
@@ -457,10 +600,10 @@ async function callAmplitudeMcpInner<T>(
   let useFallback = false;
 
   if (direct) {
-    const callTool = await openMcpSession(accessToken, mcpUrl, abortSignal);
-    if (callTool) {
+    const session = await openMcpSession(accessToken, mcpUrl, abortSignal);
+    if (session.ok) {
       try {
-        directResult = await direct(callTool);
+        directResult = await direct(session.callTool);
         if (directResult === null) {
           logToFile(`[${label}] direct returned null — trying agent fallback`);
           useFallback = true;
@@ -473,8 +616,21 @@ async function callAmplitudeMcpInner<T>(
         );
         useFallback = true;
       }
+    } else if (session.deterministic) {
+      // Agent fallback uses the same access token, so the same auth
+      // failure would just repeat after a 12s subprocess spin-up.
+      // Surface the failure now and let the caller decide.
+      logToFile(
+        `[${label}] MCP session failed deterministically (${session.reason}) — skipping agent fallback`,
+      );
+      addBreadcrumb('mcp', `${label}: skipping fallback (deterministic)`, {
+        reason: session.reason,
+      });
+      return null;
     } else {
-      logToFile(`[${label}] MCP session failed — trying agent fallback`);
+      logToFile(
+        `[${label}] MCP session failed (${session.reason}) — trying agent fallback`,
+      );
       useFallback = true;
     }
   } else {

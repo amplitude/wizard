@@ -41,28 +41,9 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
 
   'Every wizard-tools MCP tool call (`mcp__wizard-tools__*`) MUST include a `reason` argument (≤25 words) explaining what you\'re trying to accomplish at this step. Captured in Agent Analytics. Write a real rationale tied to the immediate goal — not a paraphrase of the tool description, generic phrases like "calling tool", or the literal string "reason". When you\'re truly stuck (unresolvable error, missing prerequisite, ambiguous codebase shape), call `wizard_feedback` (severity="warn" if you can continue degraded, "error" if not) instead of silently continuing or repeating failed calls.',
 
-  'NEVER run Bash commands to verify env vars. Forbidden: `node -e "console.log(process.env...)"`, `node --eval`, `printenv`, `echo $VAR`, `cat .env*`, `grep AMPLITUDE .env`, `bash -c \'...\'` evals, or any shell incantation aimed at inspecting env-var presence/values. The bash allowlist denies all variants — silently rephrasing `node -e` as `node --eval` is the exact pattern this rule forbids. The ONLY sanctioned check: wizard-tools `check_env_keys` (reports presence without exposing values). If keys are missing, call `set_env_values`. Do not invent a "verify" phase that loops shell commands.',
+  'NEVER use Bash to verify env vars — `node -e`, `node --eval`, `printenv`, `echo $VAR`, `cat .env*`, `grep AMPLITUDE .env`, `bash -c "..."` are all denied by the allowlist. The ONLY sanctioned check is wizard-tools `check_env_keys` (reports presence without exposing values); if keys are missing, call `set_env_values`. Read the deny message for details — do not retry with a reworded variant.',
 
-  `Build / typecheck / lint verification — keep the shape SIMPLE. The bash allowlist accepts package-manager scripts (\`yarn test:typecheck\`, \`pnpm tsc --noEmit\`, \`npx eslint --fix src/file.ts\`, \`npx tsc --noEmit\`) and at most a single pipe to \`tail\` / \`head\` for output limiting. It does NOT allow:
-
-    ✗ \`yarn typecheck 2>&1 | grep -E "(error TS|...)" | head -30\`   ← parens trip the dangerous-operators rule
-    ✗ \`yarn lint | grep error | head\`                                ← multiple pipes
-    ✗ \`yarn build && yarn lint\`                                      ← && chaining
-    ✗ \`tsc --noEmit; yarn lint\`                                      ← semicolon chaining
-
-  The allowed shapes:
-
-    ✓ \`yarn test:typecheck\`                          ← full output, no pipe
-    ✓ \`yarn test:typecheck | tail -50\`               ← last 50 lines (single pipe to tail)
-    ✓ \`pnpm tsc --noEmit | head -30\`                 ← first 30 lines (single pipe to head)
-    ✓ \`npx tsc --noEmit\`                             ← direct invocation
-    ✓ \`npx eslint --fix src/init.ts\` then \`npx tsc --noEmit\`  ← sequential, two separate Bash calls
-
-  Note: these are SYNTAX shapes the allowlist permits. You must still scope lint/build to edited files only (see the scoping commandment below) — never run project-wide \`yarn lint\`, \`npm run build\`, etc.
-
-  When you need to filter output to a substring, use \`Grep\` (the dedicated tool) on the captured stdout — not a shell pipe. When the output is short enough to read in full, just don't pipe at all.
-
-  If the simple form gets denied (extremely rare — the allowlist covers all common build-tool sub-commands), DO NOT retry with progressively more shell composition. Note the limitation in the setup report (\`Could not run \\\`<command>\\\` automatically. Run it manually after install.\`) and move on. The retry-budget rule applies.`,
+  `Build/typecheck/lint verification — keep shell shapes SIMPLE. Allowed: package-manager scripts (\`yarn test:typecheck\`, \`npx tsc --noEmit\`, \`npx eslint --fix src/file.ts\`) optionally piped to a SINGLE \`| tail -50\` or \`| head -30\`. Denied: ✗ \`yarn typecheck | grep -E "..." | head -30\` (multiple pipes, parens), ✗ \`yarn build && yarn lint\` (\`&&\` chaining), ✗ \`tsc --noEmit; yarn lint\` (\`;\` chaining). Use \`Grep\` for substring filtering on captured stdout, not a shell pipe. Scope to edited files only (see scoping commandment below) — never run project-wide. On a deny, DO NOT retry with progressively more shell composition; note in the setup report and move on.`,
 
   'When installing packages, start the install as a background task and continue with other work. Do not block on installs unless explicitly instructed.',
 
@@ -76,7 +57,7 @@ Combine in the SAME message when none depend on each other (typical for the very
 
 Same rule for any later "I want to understand the project shape" batch: when you'd be calling several Read / Glob / Grep / wizard-tools probes whose results are independent, fire them together. DO serialize when one truly depends on another (Glob first, Read the matched paths second). If unsure, parallelism is the safer default — the wizard's status spinner stays responsive and the cache hit rate on the first user message stays hot.
 
-Don't fan out write tools (Edit / Write) the same way; those touch shared state and the model needs to see each result before continuing.`,
+Write tools (Edit / Write) — DO parallelize when each call targets a DIFFERENT file. Instrumenting an event across 5 files = 5 Edit calls in ONE assistant message; that's the single biggest wall-clock win in the "Wire up event tracking" phase. The Read-before-Write rule still applies (each file needs a prior Read), and you must NEVER fan out two writes to the SAME file in one message — those races corrupt content. When in doubt about file independence, serialize.`,
 
   "NEVER install non-Amplitude packages on the user's behalf. The wizard's job is to add Amplitude — not build tooling, env-var loaders, bundler plugins, polyfills, or other utilities. Out of scope: `dotenv` and variants, `webpack`, `vite`, `@types/*`, polyfill libraries, env-injection plugins. Hard test before any `npm install` / `pnpm add` / `yarn add` / `pip install` / `gem install` / `go get`: does the package start with `@amplitude/`? If not, is it explicitly listed as a required peer dependency by the active integration skill (e.g. `@react-native-async-storage/async-storage` for React Native)? If neither, DO NOT install. If env-var wiring or build-config changes are needed, document the required change in the setup report and let the user decide. Sample EXAMPLE.md files under skills/integration may show `dotenv` etc. — those are reference snippets, not install instructions.",
 
