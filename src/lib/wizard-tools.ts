@@ -587,8 +587,8 @@ export function ensureWizardArtifactsIgnored(installDir: string): void {
       existing.length === 0 || existing.endsWith('\n\n')
         ? ''
         : existing.endsWith('\n')
-        ? '\n'
-        : '\n\n';
+          ? '\n'
+          : '\n\n';
     fs.writeFileSync(
       gitignorePath,
       `${existing}${separator}${block}\n`,
@@ -769,9 +769,8 @@ interface ClaudeAgentSDK {
 let _sdkModule: ClaudeAgentSDK | null = null;
 async function getSDKModule(): Promise<ClaudeAgentSDK> {
   if (!_sdkModule) {
-    _sdkModule = (await import(
-      '@anthropic-ai/claude-agent-sdk'
-    )) as unknown as ClaudeAgentSDK;
+    _sdkModule =
+      (await import('@anthropic-ai/claude-agent-sdk')) as unknown as ClaudeAgentSDK;
   }
   return _sdkModule;
 }
@@ -1409,7 +1408,10 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         logToFile(`detect_package_manager: cache hit for ${workingDirectory}`);
       } else {
         logToFile(`detect_package_manager: scanning ${workingDirectory}`);
-        detectPMCache = detectPackageManager(workingDirectory);
+        detectPMCache = detectPackageManager(workingDirectory).catch((err) => {
+          detectPMCache = null;
+          throw err;
+        });
       }
 
       const result = await detectPMCache;
