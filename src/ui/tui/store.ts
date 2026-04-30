@@ -900,6 +900,19 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Mark this session as having a complete prior install detected on
+   * disk — set when the Activation pre-flight finds all four local
+   * signals (SDK dep, source import, ampli.json scope, event plan).
+   * Pairs with `activationLevel = 'full'` to short-circuit Setup + Run
+   * while keeping DataIngestionCheck running so the user can verify
+   * events arrive after a re-deploy.
+   */
+  setLocalInstrumentationComplete(value: boolean): void {
+    this.$session.setKey('localInstrumentationComplete', value);
+    this.emitChange();
+  }
+
   setSnippetConfigured(value: boolean): void {
     this.$session.setKey('snippetConfigured', value);
     this.emitChange();
@@ -1449,6 +1462,7 @@ export class WizardStore {
     this.$session.setKey('projectHasData', null);
     this.$session.setKey('activationLevel', 'none');
     this.$session.setKey('activationOptionsComplete', false);
+    this.$session.setKey('localInstrumentationComplete', false);
     this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { to: 'data-setup' });
     this.emitChange();
