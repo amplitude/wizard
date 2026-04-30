@@ -607,6 +607,10 @@ export async function refreshAccessToken(
   expiresAt: string;
 }> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
+  // Bound the refresh exchange — without this, a hung OAuth endpoint
+  // (corporate proxy, transient flake) freezes the wizard indefinitely
+  // because callers like `refreshTokenIfStale` block agent boot on it.
+  // 10s matches `token-refresh.ts`'s silent fetch path.
   const response = await axios.post(
     `${oAuthHost}/oauth2/token`,
     new URLSearchParams({
@@ -614,7 +618,10 @@ export async function refreshAccessToken(
       refresh_token: refreshToken,
       client_id: oAuthClientId,
     }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 10_000,
+    },
   );
   const parsed = OAuthTokenResponseSchema.parse(response.data);
   // Source `expiresAt` from the rotated id_token's `exp` claim — the
