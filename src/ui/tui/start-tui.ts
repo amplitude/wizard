@@ -53,7 +53,11 @@ export function startTUI(
   // — the safety net works even if this is never called (e.g.
   // agent / CI mode that never mounts the TUI).
   void import('../../utils/active-session.js').then(({ setActiveSession }) => {
-    setActiveSession(store.session);
+    // Pass a getter — not a snapshot — so the safety net always reads
+    // the LIVE session at fatal time. Otherwise progress accumulated
+    // after registration (region, org/project, framework selection)
+    // would be silently dropped from the recovery checkpoint.
+    setActiveSession(() => store.session);
   });
 
   // Swap in the InkUI

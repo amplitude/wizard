@@ -65,13 +65,6 @@ export function _resetSafetyNetForTests(): void {
 }
 
 /**
- * Test-only — observe whether a fatal is currently being handled.
- */
-export function _isHandlingFatalForTests(): boolean {
-  return _handlingFatal;
-}
-
-/**
  * Test seam — exposed so tests can drive the fatal path without spawning
  * a child process. Production callers should not invoke this directly.
  */

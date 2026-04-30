@@ -17,23 +17,43 @@
 // We type the slot as `unknown` to avoid pulling in the full
 // `WizardSession` type (and its transitive imports) into modules that
 // only need a best-effort handle. Consumers cast on read.
-let _activeSession: unknown = null;
+//
+// We store a *getter* (not a snapshot) so the safety-net always reads
+// the LIVE session at fatal time. If we stored `store.session` directly
+// at registration, the user's progress accumulated after registration
+// (region, org/project, framework) would be silently dropped when
+// `saveCheckpoint` runs from the fatal handler.
+type SessionGetter = () => unknown;
+let _getActiveSession: SessionGetter | null = null;
 
 /**
- * Register the live session. Called by the TUI startup once the store
- * is constructed. Idempotent — last write wins.
+ * Register a getter for the live session. Called by the TUI startup once
+ * the store is constructed. The getter is invoked every time
+ * `tryGetWizardStoreSession()` is called, so the safety-net always sees
+ * the user's latest progress, not the state at registration time.
+ *
+ * Idempotent — last write wins. Pass `null`/`undefined` to clear.
  */
-export function setActiveSession(session: unknown): void {
-  _activeSession = session ?? null;
+export function setActiveSession(
+  getter: SessionGetter | null | undefined,
+): void {
+  _getActiveSession = typeof getter === 'function' ? getter : null;
 }
 
 /**
  * Best-effort accessor for the active session. Returns null when no
  * session is registered (e.g. agent / CI mode, or a fatal during
- * pre-TUI bootstrap).
+ * pre-TUI bootstrap), or when the registered getter throws.
  */
 export function tryGetWizardStoreSession(): unknown {
-  return _activeSession;
+  if (!_getActiveSession) return null;
+  try {
+    return _getActiveSession() ?? null;
+  } catch {
+    // A throwing getter must not bring down the safety-net — fall back
+    // to "no session" so the abort path can still run.
+    return null;
+  }
 }
 
 /**
@@ -41,5 +61,5 @@ export function tryGetWizardStoreSession(): unknown {
  * exit at the end of `wizardAbort` and don't need this.
  */
 export function _resetActiveSessionForTests(): void {
-  _activeSession = null;
+  _getActiveSession = null;
 }

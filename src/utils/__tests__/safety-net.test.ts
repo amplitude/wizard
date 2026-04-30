@@ -114,12 +114,58 @@ describe('safety-net — uncaughtException / unhandledRejection handlers', () =>
 
   it('attempts saveCheckpoint when an active session is registered', async () => {
     const fakeSession = { installDir: '/tmp/proj', region: 'us' };
-    setActiveSession(fakeSession);
+    setActiveSession(() => fakeSession);
 
     await _handleFatalForTests('uncaughtException', new Error('save me'));
 
     expect(saveCheckpointMock).toHaveBeenCalledTimes(1);
     expect(saveCheckpointMock.mock.calls[0][0]).toBe(fakeSession);
+  });
+
+  // ── Bugbot fix #1: snapshot vs. live getter ───────────────────────────
+  //
+  // Regression coverage for the Bugbot review on PR #406. Previous
+  // implementation stored `store.session` at registration time, which
+  // meant any progress accumulated after `setActiveSession` ran (region
+  // pick, org/project select, framework detect) would be silently
+  // dropped from the recovery checkpoint when the safety net fired.
+  //
+  // The fix: store a getter and call it lazily at fatal time. This test
+  // proves the getter is read on each call by mutating the session
+  // *after* registration and asserting saveCheckpoint sees the new value.
+  it('reads the LIVE session via getter — mutations after register propagate to saveCheckpoint', async () => {
+    const liveSession: { installDir: string; region: string } = {
+      installDir: '/tmp/proj',
+      region: 'us',
+    };
+    setActiveSession(() => liveSession);
+
+    // User picks EU region AFTER setActiveSession has already run. With
+    // the old snapshot impl this mutation would not be visible to the
+    // safety net.
+    liveSession.region = 'eu';
+
+    await _handleFatalForTests('uncaughtException', new Error('mid-run crash'));
+
+    expect(saveCheckpointMock).toHaveBeenCalledTimes(1);
+    const passed = saveCheckpointMock.mock.calls[0][0] as { region: string };
+    expect(passed.region).toBe('eu');
+    // And it's literally the same reference the getter returned — not a
+    // copy — so any subsequent fields (framework, org) would also be
+    // included.
+    expect(passed).toBe(liveSession);
+  });
+
+  it('treats a throwing getter as "no session" rather than crashing the abort path', async () => {
+    setActiveSession(() => {
+      throw new Error('store ref is stale');
+    });
+
+    await _handleFatalForTests('uncaughtException', new Error('hi'));
+
+    // No save attempted — the getter blew up — but abort still runs.
+    expect(saveCheckpointMock).not.toHaveBeenCalled();
+    expect(wizardAbortMock).toHaveBeenCalledTimes(1);
   });
 
   it('skips saveCheckpoint cleanly when no session is registered', async () => {
@@ -148,7 +194,7 @@ describe('safety-net — uncaughtException / unhandledRejection handlers', () =>
   });
 
   it('saveCheckpoint failure does not block the abort path', async () => {
-    setActiveSession({ installDir: '/tmp/x' });
+    setActiveSession(() => ({ installDir: '/tmp/x' }));
     saveCheckpointMock.mockImplementationOnce(() => {
       throw new Error('disk full');
     });
