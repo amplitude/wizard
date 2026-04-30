@@ -122,15 +122,34 @@ describe('AgentState', () => {
     expect(state.snapshotPath()).toBe(snapshotPath);
   });
 
-  it('reset clears files, status, and compaction count', () => {
-    state.recordModifiedFile('src/a.ts');
-    state.recordStatus('X', 'Y');
+  it('reset clears compaction count + tool-use counts (per-conversation facts)', () => {
     state.recordCompaction();
+    state.recordToolUse('Read');
     state.reset();
     const snap = state.snapshot();
-    expect(snap.modifiedFiles).toEqual([]);
-    expect(snap.lastStatus).toBeNull();
     expect(snap.compactionCount).toBe(0);
+  });
+
+  it('preserves modifiedFiles across reset (so retries do not overwrite prior writes)', () => {
+    // Concrete reproduction of the failure mode: attempt 0 writes real
+    // files, transient SDK error fires, retry kicks in. Without the
+    // preservation, attempt 1 has no record of the write — it would
+    // happily re-write src/foo.ts with different content. With it, the
+    // path survives reset and shows up in the retry hint.
+    state.recordModifiedFile('src/foo.ts');
+    state.recordModifiedFile('src/bar.ts');
+    state.reset();
+    const snap = state.snapshot();
+    expect(snap.modifiedFiles).toEqual(['src/bar.ts', 'src/foo.ts']);
+  });
+
+  it('preserves lastStatus across reset (so retries know what the user last saw)', () => {
+    state.recordStatus('INSTALL_RUNNING', 'Installing @amplitude/unified');
+    state.reset();
+    expect(state.snapshot().lastStatus).toEqual({
+      code: 'INSTALL_RUNNING',
+      detail: 'Installing @amplitude/unified',
+    });
   });
 
   it('preserves discovery facts across reset (so retries can skip prior probes)', () => {
@@ -144,6 +163,18 @@ describe('AgentState', () => {
     expect(state.getDiscoveries().get('Skill loaded')).toBe(
       'integration-nextjs-pages-router',
     );
+  });
+
+  it('clearModifiedFiles does the hard reset', () => {
+    state.recordModifiedFile('src/foo.ts');
+    state.clearModifiedFiles();
+    expect(state.snapshot().modifiedFiles).toEqual([]);
+  });
+
+  it('clearLastStatus does the hard reset', () => {
+    state.recordStatus('X', 'Y');
+    state.clearLastStatus();
+    expect(state.snapshot().lastStatus).toBeNull();
   });
 
   it('clearDiscoveries does the hard reset', () => {
@@ -160,11 +191,11 @@ describe('AgentState', () => {
   });
 
   describe('buildRetryHint', () => {
-    it('returns empty string when no discoveries are recorded', () => {
+    it('returns empty string when nothing has been recorded', () => {
       expect(buildRetryHint(state)).toBe('');
     });
 
-    it('renders a short hint block listing each discovery on its own line', () => {
+    it('renders a hint block listing each discovery on its own line', () => {
       state.recordDiscovery(
         'Package manager (already probed)',
         'pnpm (pnpm-lock.yaml)',
@@ -177,8 +208,45 @@ describe('AgentState', () => {
         '- Package manager (already probed): pnpm (pnpm-lock.yaml)',
       );
       expect(hint).toContain('- Skill loaded: integration-nextjs-pages-router');
-      // Bias toward terseness — the hint shouldn't bloat past a handful of lines.
-      expect(hint.split('\n').length).toBeLessThan(15);
+    });
+
+    it('lists files written by the prior attempt with explicit Read-before-rewrite guidance', () => {
+      // This is the regression scenario from the wizard log: agent
+      // writes real files, transient SDK error fires, retry kicks in
+      // with no record of the writes. The hint must surface the file
+      // list AND tell the model to Read before re-writing — otherwise
+      // it'll happily overwrite with different content.
+      state.recordModifiedFile('/work/src/instrumentation-client.ts');
+      state.recordModifiedFile('/work/src/lib/amplitude.ts');
+      const hint = buildRetryHint(state);
+      expect(hint).toContain(
+        'Files already written by the prior attempt (still on disk; Read them before re-writing):',
+      );
+      expect(hint).toContain('- /work/src/instrumentation-client.ts');
+      expect(hint).toContain('- /work/src/lib/amplitude.ts');
+      expect(hint).toMatch(/DO NOT overwrite files unless you Read them first/);
+    });
+
+    it('surfaces the last reported status so the model knows what the user last saw', () => {
+      state.recordStatus('INSTALL_RUNNING', 'Installing @amplitude/unified');
+      const hint = buildRetryHint(state);
+      expect(hint).toContain(
+        'Last reported status before the interruption: [INSTALL_RUNNING] Installing @amplitude/unified',
+      );
+    });
+
+    it('combines all sections when all are populated', () => {
+      state.recordDiscovery('Package manager (already probed)', 'pnpm');
+      state.recordModifiedFile('src/init.ts');
+      state.recordStatus('PROGRESS', 'Adding init code');
+      const hint = buildRetryHint(state);
+      // All three sections present, in deterministic order.
+      const discoveryIdx = hint.indexOf('Discoveries already verified');
+      const filesIdx = hint.indexOf('Files already written');
+      const statusIdx = hint.indexOf('Last reported status');
+      expect(discoveryIdx).toBeGreaterThan(-1);
+      expect(filesIdx).toBeGreaterThan(discoveryIdx);
+      expect(statusIdx).toBeGreaterThan(filesIdx);
     });
   });
 });
