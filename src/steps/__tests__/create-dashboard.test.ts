@@ -12,7 +12,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { __test__, createDashboardStep } from '../create-dashboard';
+import {
+  __test__,
+  createDashboardStep,
+  describeAgentToolUse,
+} from '../create-dashboard';
 
 const { readEventsFromContent, parseAgentOutput, extractJsonContaining } =
   __test__;
@@ -328,5 +332,79 @@ describe('createDashboardStep — agent already created dashboard', () => {
     });
 
     expect(mockedCallAmplitudeMcp).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('describeAgentToolUse', () => {
+  // Translates inner-agent tool calls into status pill copy. The fallback
+  // runs invisibly without these — users would stare at "Creating charts and
+  // dashboard in Amplitude…" for the entire 90s budget. Read-only probes
+  // (list_*, search_*, get_*) deliberately return null so we don't churn
+  // the pill on agent browsing.
+  it('describes Amplitude MCP chart create with title', () => {
+    expect(
+      describeAgentToolUse('mcp__amplitude__create_chart', {
+        title: 'Funnel — Page Viewed → Sign Up',
+      }),
+    ).toBe('Creating chart in Amplitude: Funnel — Page Viewed → Sign Up…');
+  });
+
+  it('describes Amplitude MCP dashboard create', () => {
+    expect(
+      describeAgentToolUse('mcp__amplitude__create_dashboard', {
+        title: 'Foo Analytics',
+      }),
+    ).toBe('Assembling your dashboard in Amplitude: Foo Analytics…');
+  });
+
+  it('describes chart create without title', () => {
+    expect(describeAgentToolUse('mcp__amplitude__create_chart', {})).toBe(
+      'Creating chart in Amplitude…',
+    );
+  });
+
+  it('falls back to `name` field when `title` is missing', () => {
+    expect(
+      describeAgentToolUse('mcp__amplitude__create_chart', {
+        name: 'My Chart',
+      }),
+    ).toBe('Creating chart in Amplitude: My Chart…');
+  });
+
+  it('caps long titles to 60 chars and collapses whitespace', () => {
+    const long = 'a'.repeat(120);
+    const out = describeAgentToolUse('mcp__amplitude__create_chart', {
+      title: long,
+    });
+    expect(out).toBe(`Creating chart in Amplitude: ${'a'.repeat(60)}…`);
+
+    expect(
+      describeAgentToolUse('mcp__amplitude__create_chart', {
+        title: 'multi\n\tline   title',
+      }),
+    ).toBe('Creating chart in Amplitude: multi line title…');
+  });
+
+  it('skips read-only / unknown tools (no pill churn on noise)', () => {
+    expect(describeAgentToolUse('mcp__amplitude__list_charts', {})).toBeNull();
+    expect(
+      describeAgentToolUse('mcp__amplitude__search_events', {}),
+    ).toBeNull();
+    expect(describeAgentToolUse('Bash', { command: 'ls' })).toBeNull();
+  });
+
+  it('handles non-MCP tool names without crashing', () => {
+    expect(describeAgentToolUse('create_chart', { title: 'X' })).toBe(
+      'Creating chart in Amplitude: X…',
+    );
+  });
+
+  it('treats non-string title fields as missing', () => {
+    expect(
+      describeAgentToolUse('mcp__amplitude__create_chart', { title: 42 }),
+    ).toBe('Creating chart in Amplitude…');
+    expect(describeAgentToolUse('mcp__amplitude__create_chart', null)).toBe(
+      'Creating chart in Amplitude…',
+    );
   });
 });
