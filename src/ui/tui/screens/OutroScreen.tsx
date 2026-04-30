@@ -42,6 +42,8 @@ import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 import { getDashboardFile } from '../../../utils/storage-paths.js';
+import { retryFromCheckpoint } from '../../../lib/retry-from-checkpoint.js';
+import { isInteractiveOutro } from '../utils/outro-mode.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -114,6 +116,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     store.session.outroData?.kind === OutroKind.Success ||
     isFullActivationSuccess;
   const isError = store.session.outroData?.kind === OutroKind.Error;
+  const isCancel = store.session.outroData?.kind === OutroKind.Cancel;
+  // Auth failures must NOT advertise retry — re-running with the same
+  // (still-bad) credentials will fail the same way. agent-runner sets
+  // `promptLogin: true` on the OutroData when it routes through
+  // AUTH_ERROR; honor that as a single-flag opt-out.
+  const isAuthFailure =
+    isError && store.session.outroData?.promptLogin === true;
+  const canRetry = (isError || isCancel) && !isAuthFailure;
+  const showRetryHint = canRetry && isInteractiveOutro();
 
   // Any-key-to-exit for non-success states; success uses the picker.
   // Exceptions on error: 'l'/'L' opens the log in the OS-default handler,
@@ -137,6 +148,18 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           success: written !== null,
         });
         setBugReportPathState(written);
+        return;
+      }
+      // Press R to retry from checkpoint. Available on Error AND Cancel
+      // outros (the cancel path benefits too — user hit Esc, regretted it,
+      // wants back in). Disabled for auth failures: those will fail again
+      // with the same stored creds, so advertising retry there would be a
+      // misleading dead-end. The retry helper itself spawns a child wizard
+      // that picks up the existing checkpoint and waits for it to exit.
+      if (canRetry && (input === 'r' || input === 'R')) {
+        // Fire-and-forget — `retryFromCheckpoint` resolves only after the
+        // child exits, at which point it calls process.exit itself.
+        void retryFromCheckpoint(store);
         return;
       }
       // Signal dismissal first. When we got here via wizardAbort, that
@@ -444,6 +467,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               {Icons.arrowRight} Run the wizard again with{' '}
               <Text bold>--debug</Text> for more detail
             </Text>
+            {showRetryHint && (
+              <Text color={Colors.secondary}>
+                {Icons.arrowRight} Press <Text bold>R</Text> to retry from
+                where we left off
+              </Text>
+            )}
             <Text color={Colors.secondary}>
               {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>{' '}
               <Text color={Colors.muted}>(press L to open)</Text>
@@ -496,6 +525,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>{' '}
               in this directory anytime.
             </Text>
+            {showRetryHint && (
+              <Text color={Colors.secondary}>
+                {Icons.arrowRight} Or press <Text bold>R</Text> now to resume
+                immediately
+              </Text>
+            )}
           </Box>
           {outroData.docsUrl && (
             <Box marginTop={1}>
