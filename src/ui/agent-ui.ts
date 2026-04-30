@@ -336,6 +336,35 @@ export class AgentUI implements WizardUI {
     instruction: string;
     loginCommand: string[];
     resumeCommand?: string[];
+    /**
+     * When `reason === 'env_selection_failed'` and the failure was
+     * caused by a scope flag (`--app-id`, `--project-id`, `--env`,
+     * `--org`) that didn't match any known environment, this echoes
+     * the bad value back so the orchestrator can render a useful
+     * "you passed X, here are valid options" prompt without parsing
+     * the human-readable `instruction` string.
+     */
+    previousAttempt?: {
+      flag: '--app-id' | '--project-id' | '--env' | '--org';
+      value: string;
+      reason: string;
+    };
+    /**
+     * Candidate environments to retry against. Identical shape to
+     * the `choices` array in the `needs_input: environment_selection`
+     * event — orchestrators that already render that picker can reuse
+     * the same widget here without re-discovery. Empty / omitted when
+     * the failure isn't selection-related.
+     */
+    choices?: Array<{
+      orgId: string;
+      orgName: string;
+      projectId: string;
+      projectName: string;
+      appId: string | null;
+      envName: string;
+      label: string;
+    }>;
   }): void {
     emit('lifecycle', data.instruction, {
       level: 'error',
@@ -344,6 +373,10 @@ export class AgentUI implements WizardUI {
         reason: data.reason,
         loginCommand: data.loginCommand,
         resumeCommand: data.resumeCommand,
+        ...(data.previousAttempt
+          ? { previousAttempt: data.previousAttempt }
+          : {}),
+        ...(data.choices ? { choices: data.choices } : {}),
       },
     });
   }
