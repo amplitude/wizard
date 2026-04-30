@@ -124,6 +124,13 @@ vi.mock('../lib/registry', () => ({ FRAMEWORK_REGISTRY: {} }));
 vi.mock('../lib/constants', () => ({
   DETECTION_TIMEOUT_MS: 100,
   IS_DEV: true,
+  // Must be present (not just defaulted to undefined): commandments.ts
+  // reads `DEMO_MODE` at module load via a real ESM import, and Vitest's
+  // strict mocker throws "No DEMO_MODE export is defined on the mock" if
+  // the key is missing entirely. Loading agent-interface.ts (which
+  // transitively imports commandments) cascades that throw into
+  // unhandled-rejection territory and times out 4+ unrelated tests.
+  DEMO_MODE: false,
   DEFAULT_AMPLITUDE_ZONE: 'us',
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
   EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
