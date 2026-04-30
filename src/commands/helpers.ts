@@ -675,7 +675,10 @@ export const runDirectSignupIfRequested = async (
     );
     return;
   }
-  if (tokens === null || tokens === '') {
+  // Loose equality to also catch `undefined` — performSignupOrAuth's return
+  // type is `PerformSignupOrAuthResult | null`, but a defensive check covers
+  // both no-credentials sentinels.
+  if (tokens == null) {
     getUI().log.info(
       `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
     );
