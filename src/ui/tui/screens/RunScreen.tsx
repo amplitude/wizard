@@ -241,7 +241,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // The new signal concatenates three monotonically-increasing counters:
   //   - `completedDisplay` — high-water-marked completed task count
   //   - `store.statusMessages.length` — every [STATUS] line from the agent
-  //   - `store.fileWritesTotal` — every PreToolUse(Write|Edit) hit (monotonic;
+  //   - `store.fileWritesTotal` — every file write the agent initiates (monotonic;
   //     unlike `fileWrites.length`, it keeps climbing past the FIFO cap)
   // Any one of them ticking forward resets the coaching timer. True silence
   // (no status, no file write, no completion) for 90s now means the agent

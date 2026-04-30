@@ -114,7 +114,9 @@ export class WizardStore {
    */
   private $fileWrites = atom<FileWriteEntry[]>([]);
   /**
-   * Monotonic counter of every file write recorded by the agent.
+   * Monotonic counter of every file write initiated by the agent — incremented
+   * once per logical write when planned (PreToolUse) or, for synthesized
+   * entries only, when applied (PostToolUse without a prior planned event).
    * Unlike `$fileWrites.length` (which caps at MAX_FILE_WRITES), this keeps
    * climbing past the cap so coaching/heartbeat signals that key off it
    * don't stall after the 50th write.
@@ -1737,7 +1739,6 @@ export class WizardStore {
           bytes: data.bytes,
         };
         this.$fileWrites.set(updated);
-        this.$fileWritesTotal.set(this.$fileWritesTotal.get() + 1);
         this.emitChange();
         return;
       }
