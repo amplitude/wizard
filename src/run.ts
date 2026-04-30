@@ -2,8 +2,8 @@ import { type WizardSession, buildSession } from './lib/wizard-session';
 
 import { Integration, DETECTION_TIMEOUT_MS } from './lib/constants';
 import { readEnvironment } from './utils/environment';
+import { resolveInstallDir } from './utils/install-dir';
 import { getUI } from './ui';
-import path from 'path';
 import fs from 'node:fs/promises';
 import { FRAMEWORK_REGISTRY } from './lib/registry';
 import { analytics } from './utils/analytics';
@@ -55,16 +55,13 @@ export async function runWizard(
     ...readEnvironment(),
   };
 
-  let resolvedInstallDir: string;
-  if (finalArgs.installDir) {
-    if (path.isAbsolute(finalArgs.installDir)) {
-      resolvedInstallDir = finalArgs.installDir;
-    } else {
-      resolvedInstallDir = path.join(process.cwd(), finalArgs.installDir);
-    }
-  } else {
-    resolvedInstallDir = process.cwd();
-  }
+  // Trust-boundary normalization. `--install-dir` (and the env-var
+  // shadow `AMPLITUDE_WIZARD_INSTALL_DIR`) can carry a leading `~` when
+  // the value is quoted at the shell or sourced from env — Node won't
+  // expand it for us, so naive `path.resolve()` would treat `~` as a
+  // literal directory name and join it onto cwd. See
+  // `src/utils/install-dir.ts`.
+  const resolvedInstallDir = resolveInstallDir(finalArgs.installDir);
 
   // Build session if not provided (CI mode passes one pre-built)
   if (!session) {

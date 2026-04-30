@@ -21,13 +21,12 @@
 import { Box, Text } from 'ink';
 import { TextInput } from '@inkjs/ui';
 import { useState } from 'react';
-import { homedir } from 'node:os';
-import { resolve, isAbsolute } from 'node:path';
 import { statSync } from 'node:fs';
 
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors, Icons } from '../styles.js';
 import { shortenHomePath } from '../../../lib/workspace-analysis.js';
+import { resolveUserPath } from '../../../utils/install-dir.js';
 
 export interface PathInputProps {
   /** Path to seed the input with. Shown using `~` substitution. */
@@ -49,45 +48,17 @@ type ValidationResult =
   | { ok: true; absolutePath: string }
   | { ok: false; reason: string };
 
-/**
- * Resolve a user-typed path into an absolute path on disk.
- *
- * Steps:
- *   1. Trim whitespace (a copy-pasted path with a trailing newline is
- *      a real failure mode).
- *   2. Expand a leading `~` to the user's home directory. Both `~/foo`
- *      and `~\foo` are accepted — the backslash form matters on
- *      Windows because `shortenHomePath` produces paths separated by
- *      `path.sep` (a backslash). Without that branch, the seeded
- *      default value from `shortenHomePath(installDir)` would fail to
- *      round-trip: pressing Enter without editing would resolve
- *      `~\foo` against `cwd` as a relative path and the directory
- *      lookup would fail. We intentionally DON'T expand `$VAR` style
- *      env vars — that would surprise users who type a literal `$`
- *      in a directory name.
- *   3. Resolve relative paths against `cwd` so `./foo` and `../foo` work
- *      from wherever the wizard was launched.
- *
- * Exported for unit tests.
- */
-export function resolveUserPath(input: string): string {
-  const trimmed = input.trim();
-  let expanded = trimmed;
-  if (trimmed === '~') {
-    expanded = homedir();
-  } else if (trimmed.startsWith('~/') || trimmed.startsWith('~\\')) {
-    // Slice past the `~` only — keep the separator so `path.resolve`
-    // gets a properly-formed argument on either platform.
-    expanded = homedir() + trimmed.slice(1);
-  }
-  return isAbsolute(expanded) ? expanded : resolve(process.cwd(), expanded);
-}
+// Re-exported for backward compatibility (tests + callsites that still
+// import from `PathInput`). The canonical home for these helpers is
+// `src/utils/install-dir.ts`.
+export { resolveUserPath };
 
 /**
  * Validate a user-typed path. Returns a tagged union — the caller
  * renders different copy for each `reason`.
  *
- * Exported for unit tests.
+ * Wraps the shared resolver but uses `shortenHomePath` in error
+ * messages so the inline UI stays compact. Exported for unit tests.
  */
 export function validatePath(input: string): ValidationResult {
   if (!input.trim()) {
