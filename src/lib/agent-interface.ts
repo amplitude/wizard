@@ -299,6 +299,21 @@ export const MAX_BASH_SLEEP_SECONDS = 5;
  */
 export const AUTH_RETRY_LIMIT = 2;
 
+/**
+ * Hard ceiling on consecutive Bash denies before the circuit breaker trips.
+ *
+ * Sized for one false-start + one allowed-tools nudge from the deny copy +
+ * a 3x grace margin. A run that hits this is in the failure mode the user
+ * reported: agent thrashing on a denied command, ignoring the prompt-side
+ * "DO NOT retry" guidance. The breaker invokes a tripped-callback (wired
+ * to `wizardAbort` by `agent-runner`) so the run halts instead of burning
+ * 47 turns.
+ *
+ * Counter scope is per-hook-instance and resets on any allowed Bash call —
+ * a deny → success → deny sequence does NOT count as 2 consecutive denies.
+ */
+export const MAX_CONSECUTIVE_BASH_DENIES = 5;
+
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
 
@@ -407,8 +422,83 @@ export function partitionHookBridgeRace(data: string): {
  * authoritative place to gate Bash. We delegate the canonical allowlist
  * to `wizardCanUseTool` and additionally cap `sleep <N>` to
  * MAX_BASH_SLEEP_SECONDS to break the 400-terminated sleep cascade.
+ *
+ * On top of the gate, the hook tracks consecutive Bash denies and trips a
+ * circuit breaker after MAX_CONSECUTIVE_BASH_DENIES. Prompt-side guidance
+ * ("DO NOT retry") reduces the rate of looping but doesn't eliminate it —
+ * a user reported a 47-turn loop on the same denied command. The breaker
+ * is the belt-and-suspenders enforcement that fires when the model ignores
+ * the prompt anyway. Trip callback is one-shot per hook instance; the
+ * counter resets on any allowed Bash call so legitimate deny → recover
+ * sequences don't trip falsely.
  */
-export function createPreToolUseHook(): HookCallback {
+export interface PreToolUseHookOptions {
+  /**
+   * Invoked exactly once per hook instance, when consecutive Bash denies
+   * reach MAX_CONSECUTIVE_BASH_DENIES. Caller should treat as a terminal
+   * signal (e.g. trigger `wizardAbort`). Synchronous throws from this
+   * callback are swallowed; async failures are the caller's responsibility.
+   */
+  onCircuitBreakerTripped?: (info: {
+    consecutiveDenies: number;
+    lastCommand: string;
+    lastDenyReason: string;
+  }) => void;
+}
+
+export function createPreToolUseHook(
+  options: PreToolUseHookOptions = {},
+): HookCallback {
+  let consecutiveBashDenies = 0;
+  let circuitBreakerFired = false;
+
+  /**
+   * Wrap a Bash deny return value with circuit-breaker bookkeeping.
+   * Increments the counter, fires the trip callback once at threshold,
+   * returns the original deny payload unchanged so the SDK still respects
+   * the deny decision while wizardAbort tears the run down.
+   */
+  const trackBashDeny = (
+    denyPayload: Record<string, unknown>,
+    command: string,
+    reason: string,
+  ): Record<string, unknown> => {
+    consecutiveBashDenies += 1;
+    if (
+      consecutiveBashDenies >= MAX_CONSECUTIVE_BASH_DENIES &&
+      !circuitBreakerFired
+    ) {
+      circuitBreakerFired = true;
+      logToFile(
+        `Circuit breaker tripped after ${consecutiveBashDenies} consecutive Bash denies; last command: ${command}`,
+      );
+      captureWizardError(
+        'Bash Policy',
+        'Circuit breaker tripped',
+        'createPreToolUseHook',
+        {
+          'consecutive denies': consecutiveBashDenies,
+          'last command': command,
+          'last deny reason': reason,
+        },
+      );
+      try {
+        options.onCircuitBreakerTripped?.({
+          consecutiveDenies: consecutiveBashDenies,
+          lastCommand: command,
+          lastDenyReason: reason,
+        });
+      } catch (err) {
+        logToFile(
+          `onCircuitBreakerTripped threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return denyPayload;
+  };
+
   return (input) => {
     const toolName = (input.tool_name as string | undefined) ?? '';
     const toolInput =
@@ -453,27 +543,40 @@ export function createPreToolUseHook(): HookCallback {
             'createPreToolUseHook',
             { 'rule id': scan.rule.id, command },
           );
-          return Promise.resolve({
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: scan.rule.message,
-            },
-          });
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: scan.rule.message,
+                },
+              },
+              command,
+              scan.rule.message,
+            ),
+          );
         }
       } catch (err) {
         // Fail-closed: a scanner exception is a block decision. The only
         // realistic source of throws is regex backtracking on pathological
         // input, and on those we'd rather block than pass.
         logToFile('Destructive-bash scanner threw; failing closed:', err);
-        return Promise.resolve({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason:
-              'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.',
-          },
-        });
+        const reason =
+          'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.';
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: reason,
+              },
+            },
+            command,
+            reason,
+          ),
+        );
       }
     }
 
@@ -495,13 +598,20 @@ export function createPreToolUseHook(): HookCallback {
             'createPreToolUseHook',
             { 'sleep seconds': seconds, command },
           );
-          return Promise.resolve({
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`,
-            },
-          });
+          const reason = `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`;
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: reason,
+                },
+              },
+              command,
+              reason,
+            ),
+          );
         }
       }
     }
@@ -510,16 +620,29 @@ export function createPreToolUseHook(): HookCallback {
     // tools (Read/Write/Edit/Grep on .env, MCP tools) we keep canUseTool
     // as the primary gate since it already runs reliably for those.
     if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
       const decision = wizardCanUseTool(toolName, toolInput);
       if (decision.behavior === 'deny') {
-        return Promise.resolve({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: decision.message,
-          },
-        });
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: decision.message,
+              },
+            },
+            command,
+            decision.message,
+          ),
+        );
       }
+      // Allowed Bash call — reset the consecutive-deny counter so a
+      // future deny → success → deny sequence doesn't accumulate falsely.
+      // The breaker is for a stuck agent, not for incidental denies
+      // sprinkled across an otherwise-progressing run.
+      consecutiveBashDenies = 0;
     }
 
     return Promise.resolve({});
@@ -1870,6 +1993,18 @@ export async function runAgent(
      * hook factory — a throwing handler will not abort the compaction.
      */
     onPreCompact?: (input: { trigger: 'manual' | 'auto' }) => void;
+    /**
+     * Fires once per run when the PreToolUse circuit breaker trips —
+     * MAX_CONSECUTIVE_BASH_DENIES consecutive Bash denies have accumulated.
+     * Treat as a terminal signal: trigger graceful run halt
+     * (e.g. `wizardAbort`) so the agent doesn't keep burning turns on a
+     * command that will never be allowed.
+     */
+    onCircuitBreakerTripped?: (info: {
+      consecutiveDenies: number;
+      lastCommand: string;
+      lastDenyReason: string;
+    }) => void;
   },
   middleware?: {
     onMessage(message: SDKMessage): void;
@@ -2483,7 +2618,9 @@ export async function runAgent(
               // allowlist still runs for every tool call.
               const inner = createInnerLifecycleHooks({ phase: 'wizard' });
               const innerHooks = inner.hooks();
-              const gatedPreToolUse = createPreToolUseHook();
+              const gatedPreToolUse = createPreToolUseHook({
+                onCircuitBreakerTripped: config?.onCircuitBreakerTripped,
+              });
               const recordPostToolUse = createPostToolUseHook(agentState);
 
               // Compose: inner observer first (best-effort, never alters

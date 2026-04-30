@@ -22,6 +22,7 @@ import {
   parseEventPlanContent,
   pickFreshestExisting,
   MAX_BASH_SLEEP_SECONDS,
+  MAX_CONSECUTIVE_BASH_DENIES,
   isAuthErrorMessage,
   HOOK_BRIDGE_RACE_RE,
   partitionHookBridgeRace,
@@ -2406,6 +2407,168 @@ describe('createPreToolUseHook', () => {
       await callHook('Bash', { command: 'pnpm install foo' });
 
       expect(analytics.wizardCapture).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('circuit breaker', () => {
+    // Real-world repro: a wizard run burned 47 turns looping on
+    // `Hook PreToolUse:Bash denied this tool` while the agent tried
+    // `node -e ...` → `node --eval ...` → `cat .env` → ... in sequence.
+    // Prompt-side "DO NOT retry" guidance reduces the rate but doesn't
+    // eliminate it. The breaker is the belt-and-suspenders enforcement
+    // that fires after MAX_CONSECUTIVE_BASH_DENIES so the run halts
+    // cleanly instead of burning the rest of the turn budget.
+
+    const buildHook = (
+      onCircuitBreakerTripped?: (info: {
+        consecutiveDenies: number;
+        lastCommand: string;
+        lastDenyReason: string;
+      }) => void,
+    ) => {
+      const hook = createPreToolUseHook({ onCircuitBreakerTripped });
+      return (toolName: string, toolInput: Record<string, unknown>) =>
+        hook(
+          { tool_name: toolName, tool_input: toolInput },
+          'tool-use-id',
+          hookOpts,
+        );
+    };
+
+    it('does not fire below the consecutive-deny threshold', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).not.toHaveBeenCalled();
+    });
+
+    it('fires exactly once when consecutive denies hit the threshold', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).toHaveBeenCalledTimes(1);
+      expect(tripped).toHaveBeenCalledWith({
+        consecutiveDenies: MAX_CONSECUTIVE_BASH_DENIES,
+        lastCommand: 'curl example.com',
+        lastDenyReason: expect.stringContaining('Bash command'),
+      });
+    });
+
+    it('does not re-fire on subsequent denies in the same run (idempotent)', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      // Trip the breaker, then keep denying — callback stays at 1 call.
+      // The hook still returns deny payloads; only the trip side-effect
+      // is one-shot.
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES + 10; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets the counter on an allowed Bash call', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      // threshold-1 denies, then an allow, then another threshold-1 denies.
+      // Total denies = 2*(threshold-1) but they're not consecutive — counter
+      // resets on the allow, so the breaker MUST NOT fire.
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      const allowed = await call('Bash', { command: 'pnpm install' });
+      expect(allowed).toEqual({});
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).not.toHaveBeenCalled();
+    });
+
+    it('counts long-sleep denies toward the threshold', async () => {
+      // Sleep cap and allowlist denies are equivalent failure modes: both
+      // mean "this command will never run". The breaker counts them
+      // together so a sleep-then-curl-then-sleep sequence still trips after
+      // threshold consecutive denies, regardless of which deny path each
+      // one took.
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES; i++) {
+        await call('Bash', {
+          command: i % 2 === 0 ? 'sleep 60' : 'curl example.com',
+        });
+      }
+      expect(tripped).toHaveBeenCalledTimes(1);
+    });
+
+    it('non-Bash tool calls do not affect the counter', async () => {
+      // The hook only gates Bash. Read / Write / MCP calls pass through
+      // and must not perturb the consecutive-deny counter.
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      // Slip a non-Bash call in — counter must NOT reset, so the next Bash
+      // deny still trips the breaker.
+      await call('Read', { file_path: '/project/src/index.ts' });
+      await call('mcp__amplitude-wizard__get_events', { reason: 'verify' });
+      await call('TodoWrite', { todos: [] });
+      // One more Bash deny should hit the threshold.
+      await call('Bash', { command: 'curl example.com' });
+      expect(tripped).toHaveBeenCalledTimes(1);
+    });
+
+    it('still returns the deny payload at and after the trip', async () => {
+      // The breaker is a side-channel signal; the hook itself must keep
+      // returning deny payloads for every denied call. Otherwise the SDK
+      // might let a denied command execute while wizardAbort is still
+      // tearing the run down.
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      let lastResult: Record<string, unknown> = {};
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES + 2; i++) {
+        lastResult = await call('Bash', { command: 'curl example.com' });
+      }
+      expect(lastResult.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('swallows errors thrown by the trip callback', async () => {
+      // Hook callbacks return Promise<{}>; a throwing trip handler must
+      // not bubble up and break SDK control flow. Logged-and-suppressed.
+      const call = buildHook(() => {
+        throw new Error('handler bug');
+      });
+      let lastResult: Record<string, unknown> = {};
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES; i++) {
+        lastResult = await call('Bash', { command: 'curl example.com' });
+      }
+      // The deny payload still went through; no exception escaped.
+      expect(lastResult.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('default options (no callback) still works without throwing', async () => {
+      // createPreToolUseHook() is called with no args from many places.
+      // The breaker must be a pure side-effect when no callback is wired.
+      const hook = createPreToolUseHook();
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES + 5; i++) {
+        await expect(
+          hook(
+            {
+              tool_name: 'Bash',
+              tool_input: { command: 'curl example.com' },
+            },
+            'tool-use-id',
+            hookOpts,
+          ),
+        ).resolves.toBeDefined();
+      }
     });
   });
 });
