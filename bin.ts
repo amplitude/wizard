@@ -498,6 +498,34 @@ void yargs(hideBin(process.argv))
         'Force a needs_input app_selection prompt even when only one app matches',
       type: 'boolean',
     },
+    // AMPLITUDE_WIZARD_CONTEXT=<path> hands an orchestrator-context file to
+    // a spawned wizard child. `.env('AMPLITUDE_WIZARD')` auto-maps it to a
+    // `--context` arg, but the actual flag is `--context-file`, so without
+    // this hidden shadow `.strict()` crashes the wizard with
+    // "Unknown argument: context" — silently breaking the documented
+    // env-var fallback path used by orchestrators.
+    context: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_CONTEXT env-var passthrough',
+      type: 'string',
+    },
+    // The apply child receives the user's resolved decision/feedback through
+    // env vars (AMPLITUDE_WIZARD_EVENT_PLAN_DECISION /
+    // AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK). Without these shadows yargs
+    // strict mode rejects them, breaking the entire pre-resolved event-plan
+    // flow.
+    'event-plan-decision': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_EVENT_PLAN_DECISION env-var passthrough',
+      type: 'string',
+    },
+    'event-plan-feedback': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK env-var passthrough',
+      type: 'string',
+    },
   })
   .command(defaultCommand)
   .command(loginCommand)

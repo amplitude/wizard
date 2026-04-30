@@ -1009,7 +1009,17 @@ export const defaultCommand: CommandModule = {
             // back off until the user takes manual action (/login or
             // /region) — prevents hot-spinning OAuth attempts when the
             // new zone keeps rejecting.
-            let consecutiveFailures = 0;
+            //
+            // The outer loop waits for the next /region trigger; the inner
+            // loop retries OAuth itself when runReauthCycle throws. The
+            // earlier shape collapsed both into a single loop, which
+            // deadlocked: failures 1 and 2 hit the linear-backoff branch
+            // and looped back to `waitForSessionState(credentials !== null)`,
+            // but a failed runReauthCycle never sets credentials — so the
+            // wait blocked forever and the toast's "Retrying" promise was
+            // a lie. Splitting the loops makes retry a real retry and
+            // keeps the 3-strike circuit-breaker as the only place that
+            // hands control back to the user.
             while (true) {
               // Wait for credentials to populate (via initial authTask
               // or a previous SUSI completion).
@@ -1036,36 +1046,47 @@ export const defaultCommand: CommandModule = {
                   tui.store.session.outroData === null,
               );
 
-              try {
-                await runReauthCycle();
-                consecutiveFailures = 0;
-              } catch (err) {
-                consecutiveFailures += 1;
-                if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-                  console.error('Re-auth error:', err);
-                }
-                tui.store.setCommandFeedback(
-                  consecutiveFailures === 1
-                    ? "Authentication didn't complete. Retrying — use /login to retry manually."
-                    : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
-                  consecutiveFailures >= 3 ? 8000 : 4000,
-                );
-                if (consecutiveFailures >= 3) {
-                  // After 3 strikes, stop auto-retrying. The user can
-                  // resume via /login or /region; both clear credentials
-                  // and unblock the watcher.
-                  await waitForSessionState(
-                    () =>
-                      tui.store.currentScreen === Overlay.Login ||
-                      tui.store.session.regionForced,
+              // OAuth retry loop. Runs at least once; retries on transient
+              // failures up to the 3-strike circuit-breaker; success or
+              // manual /login both break out so the outer loop can wait
+              // for the next /region trigger.
+              let consecutiveFailures = 0;
+              while (true) {
+                try {
+                  await runReauthCycle();
+                  break;
+                } catch (err) {
+                  consecutiveFailures += 1;
+                  if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                    console.error('Re-auth error:', err);
+                  }
+                  tui.store.setCommandFeedback(
+                    consecutiveFailures === 1
+                      ? "Authentication didn't complete. Retrying — use /login to retry manually."
+                      : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
+                    consecutiveFailures >= 3 ? 8000 : 4000,
                   );
-                  consecutiveFailures = 0;
-                  continue;
+                  if (consecutiveFailures >= 3) {
+                    // After 3 strikes, stop auto-retrying. The user can
+                    // resume via /login or /region; both clear credentials
+                    // and unblock the watcher.
+                    await waitForSessionState(
+                      () =>
+                        tui.store.currentScreen === Overlay.Login ||
+                        tui.store.session.regionForced,
+                    );
+                    // /login takes over the auth flow itself; /region
+                    // restarts the outer loop. Either way reset the
+                    // failure count and exit the inner retry — the
+                    // outer loop's wait guards will pick up the next
+                    // signal.
+                    break;
+                  }
+                  // Linear backoff before retrying runReauthCycle directly.
+                  await new Promise<void>((r) =>
+                    setTimeout(r, 1500 * consecutiveFailures),
+                  );
                 }
-                // Linear backoff before next attempt.
-                await new Promise<void>((r) =>
-                  setTimeout(r, 1500 * consecutiveFailures),
-                );
               }
             }
           })();

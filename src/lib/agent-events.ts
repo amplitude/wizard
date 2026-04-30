@@ -137,6 +137,14 @@ export const EVENT_DATA_VERSIONS = {
    */
   agent_metrics: 1,
   /**
+   * `needs_input` — structured prompt asking the orchestrator (or
+   * human) for one of N choices. Carries the question, choices,
+   * recommended pick, manual-entry hint, and pagination. The most
+   * orchestrator-facing event in the wire — without this `data_version`
+   * stamp consumers couldn't safely evolve schema for it.
+   */
+  needs_input: 1,
+  /**
    * `decision_auto` — emitted alongside a `needs_input` whenever the
    * wizard auto-resolves the prompt (under `--auto-approve` /
    * `--yes` / `--ci` / `--force`, OR the `--agent`-implies-autoApprove

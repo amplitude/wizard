@@ -31,6 +31,8 @@ import {
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { toCredentialAppId } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
+import { ExitCode } from '../../../lib/exit-codes.js';
 
 const CREATE_ACTION = '__create__' as const;
 const RESTART_ACTION = '__restart__' as const;
@@ -564,7 +566,12 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         analytics.wizardCapture('auth cancelled by user', {
           'from screen': 'account-confirm',
         });
-        process.exit(0);
+        // Route through wizardSuccessExit so the analytics SDK gets a
+        // chance to flush before the process tears down — a bare
+        // process.exit(0) silently dropped the 'auth cancelled by user'
+        // event (the SDK queues on a timer and the queue dies with the
+        // process).
+        void wizardSuccessExit(ExitCode.USER_CANCELLED);
       }
     },
     { isActive: accountConfirm },

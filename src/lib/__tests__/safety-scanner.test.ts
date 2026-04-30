@@ -128,6 +128,12 @@ describe('scanBashCommandForDestructive', () => {
       ['rm -rf ./'],
       ['rm -rf ..'],
       ['rm -rf ../sibling'],
+      // Resolves to `..` after path-segment normalization — equally
+      // destructive. The earlier dot-path regex relied on `\.{1,2}\/`
+      // and would have flagged `./dist` too; the split form keeps these
+      // matches while letting `./dist` pass.
+      ['rm -rf ./..'],
+      ['rm -rf ./../parent'],
       ['rm -fr /'], // flag order swap
       ['rm -Rf .'], // capital R
     ])('matches destructive: %s', (cmd) => {
@@ -142,6 +148,12 @@ describe('scanBashCommandForDestructive', () => {
       ['rm -rf node_modules'],
       ['rm -rf .next'],
       ['rm -rf build/'],
+      // `./<name>` is the same as `<name>` — the leading `./` is just
+      // explicit relative-path syntax and shouldn't trigger the dot-path
+      // arm of the rule.
+      ['rm -rf ./dist'],
+      ['rm -rf ./node_modules'],
+      ['rm -rf ./build/cache'],
       // System tmp paths the rule explicitly allows. Build tools clean
       // these legitimately and we don't want to discourage that.
       ['rm -rf /tmp/wizard-cache'],

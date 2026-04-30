@@ -98,6 +98,13 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
 
   const [showReport, setShowReport] = useState(false);
   const [showChangedFiles, setShowChangedFiles] = useState(false);
+  // Once R fires off `retryFromCheckpoint`, every subsequent keystroke
+  // would otherwise drop into the dismissal path and call `process.exit`
+  // while the spawned retry child is still running — directly violating
+  // the "do NOT call `process.exit` while the child is still running"
+  // invariant in retry-from-checkpoint.ts. Guard the input handler with
+  // a ref so the second R is also a no-op (no duplicate child).
+  const [retryInProgress, setRetryInProgress] = useState(false);
   const [bugReportPathState, setBugReportPathState] = useState<string | null>(
     null,
   );
@@ -134,6 +141,9 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // 'c'/'C' writes a sanitized bug report to disk. Both keep the process
   // alive so the user can review the outro after the action completes.
   useScreenInput((input, key) => {
+    // The retry child has been spawned; swallow all further keystrokes
+    // until it exits (it will drive the exit itself).
+    if (retryInProgress) return;
     if (!isSuccess) {
       if (isError && (input === 'l' || input === 'L')) {
         analytics.wizardCapture('error outro log opened', {});
@@ -162,6 +172,10 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       if (canRetry && (input === 'r' || input === 'R')) {
         // Fire-and-forget — `retryFromCheckpoint` resolves only after the
         // child exits, at which point it calls process.exit itself.
+        // Lock further keystrokes so a second R doesn't spawn a duplicate
+        // child and unrelated keys don't race into `process.exit` while
+        // the child is still running.
+        setRetryInProgress(true);
         void retryFromCheckpoint(store);
         return;
       }

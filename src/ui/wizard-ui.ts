@@ -310,20 +310,6 @@ export interface WizardUI {
   }): void;
 
   /**
-   * Aggregated agent-run metrics — emitted by the observability
-   * middleware once per run at finalize time with token usage, tool
-   * call counts, and duration. Optional; AgentUI emits a `progress`
-   * NDJSON event so orchestrators can bill / cap / monitor cost.
-   * InkUI / LoggingUI no-op.
-   *
-   * Token counts come straight from the Claude Agent SDK's terminal
-   * `result` message — they're cumulative across the entire run
-   * (including any retries the runner performed). `costUsd` is the
-   * SDK's own cost estimate; the wizard doesn't apply its own rate
-   * card so the number stays consistent with the gateway's billing
-   * source of truth.
-   */
-  /**
    * Emitted whenever the wizard writes a session snapshot to disk.
    * Optional — only AgentUI implements (LoggingUI / InkUI no-op).
    * Lets an outer orchestrator know there's a recoverable state on
@@ -357,6 +343,20 @@ export interface WizardUI {
     reason: 'success' | 'manual' | 'logout';
   }): void;
 
+  /**
+   * Aggregated agent-run metrics — emitted by the observability
+   * middleware once per run at finalize time with token usage, tool
+   * call counts, and duration. Optional; AgentUI emits a `progress`
+   * NDJSON event so orchestrators can bill / cap / monitor cost.
+   * InkUI / LoggingUI no-op.
+   *
+   * Token counts come straight from the Claude Agent SDK's terminal
+   * `result` message — they're cumulative across the entire run
+   * (including any retries the runner performed). `costUsd` is the
+   * SDK's own cost estimate; the wizard doesn't apply its own rate
+   * card so the number stays consistent with the gateway's billing
+   * source of truth.
+   */
   emitAgentMetrics?(data: {
     durationMs: number;
     inputTokens?: number;
