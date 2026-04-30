@@ -547,6 +547,27 @@ void yargs(hideBin(process.argv))
         'internal: AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK env-var passthrough',
       type: 'string',
     },
+    // The benchmark middleware (src/lib/middleware/config.ts) reads these env
+    // vars directly. Without these shadows, `.env('AMPLITUDE_WIZARD')` auto-
+    // maps them to argv keys that `.strict()` then rejects — crashing every
+    // command (including `--help`) with "Unknown argument: benchmarkFile" the
+    // moment a developer has one of them exported in their shell.
+    'benchmark-file': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_BENCHMARK_FILE env-var passthrough',
+      type: 'string',
+    },
+    'benchmark-config': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_BENCHMARK_CONFIG env-var passthrough',
+      type: 'string',
+    },
+    'log-file': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_LOG_FILE env-var passthrough',
+      type: 'string',
+    },
   })
   .command(defaultCommand)
   .command(loginCommand)
