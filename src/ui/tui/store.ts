@@ -1480,7 +1480,9 @@ export class WizardStore {
     this.$session.setKey('selectedOrgName', null);
     this.$session.setKey('selectedProjectId', null);
     this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
     this.emitChange();
   }
 
