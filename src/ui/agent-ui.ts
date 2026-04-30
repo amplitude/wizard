@@ -355,6 +355,11 @@ export class AgentUI implements WizardUI {
      * event — orchestrators that already render that picker can reuse
      * the same widget here without re-discovery. Empty / omitted when
      * the failure isn't selection-related.
+     *
+     * MUST stay in sync with `EnvSelectionChoice` (above). When that
+     * canonical shape gains a field, mirror it here so orchestrators
+     * that reuse their env-selection widget don't see `undefined` on
+     * what should be a present property.
      */
     choices?: Array<{
       orgId: string;
@@ -363,6 +368,7 @@ export class AgentUI implements WizardUI {
       projectName: string;
       appId: string | null;
       envName: string;
+      rank: number;
       label: string;
     }>;
   }): void {

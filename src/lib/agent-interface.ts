@@ -26,7 +26,11 @@ import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
-import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
+import {
+  getDashboardFile,
+  getEventsFile,
+  pickFreshestExisting,
+} from '../utils/storage-paths';
 import {
   startDualPathWatcher,
   type DualPathWatcherHandle,
@@ -1196,30 +1200,7 @@ const DANGEROUS_OPERATORS = /[;`$()]/;
 import { parseEventPlanContent } from './event-plan-parser.js';
 export { parseEventPlanContent };
 
-/**
- * Pick the most recently modified existing file from a list of candidates.
- *
- * Used by the event-plan and dashboard watchers when both canonical
- * (`<installDir>/.amplitude/...`) and legacy (`<installDir>/.amplitude-*`)
- * paths might exist simultaneously — for example, when the migration
- * shim moved an old run's canonical file into place but the agent later
- * writes the legacy path during the current run. Returns null if none
- * exist. Exported for testing.
- */
-export function pickFreshestExisting(...paths: string[]): string | null {
-  let best: { path: string; mtimeMs: number } | null = null;
-  for (const p of paths) {
-    try {
-      const stat = fs.statSync(p);
-      if (best === null || stat.mtimeMs > best.mtimeMs) {
-        best = { path: p, mtimeMs: stat.mtimeMs };
-      }
-    } catch {
-      // File doesn't exist or is unreadable; skip.
-    }
-  }
-  return best?.path ?? null;
-}
+// `pickFreshestExisting` is imported from `../utils/storage-paths`.
 
 /**
  * Check if command is a Amplitude skill installation from MCP.
@@ -2275,7 +2256,7 @@ export async function runAgent(
       // would shadow the agent's fresh write to legacy) AND the
       // events.json case where `persistEventPlan` writes both paths
       // atomically.
-      const winner = pickFreshestExisting(eventPlanPath, legacyEventPlanPath);
+      const winner = pickFreshestExisting([eventPlanPath, legacyEventPlanPath]);
       if (!winner) return;
       try {
         const events = parseEventPlanContent(fs.readFileSync(winner, 'utf-8'));
@@ -2319,10 +2300,10 @@ export async function runAgent(
       // run — only the agent writes legacy, so a migrated stale
       // canonical from a prior run would otherwise shadow the agent's
       // fresh URL.
-      const winner = pickFreshestExisting(
+      const winner = pickFreshestExisting([
         dashboardFilePath,
         legacyDashboardFilePath,
-      );
+      ]);
       if (!winner) return;
       try {
         const content = fs.readFileSync(winner, 'utf-8');

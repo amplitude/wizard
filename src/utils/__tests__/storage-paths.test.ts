@@ -20,6 +20,7 @@ import {
   getStructuredLogFile,
   getUpdateCheckFile,
   LEGACY_PATHS,
+  pickFreshestExisting,
   projectHash,
 } from '../storage-paths.js';
 
@@ -206,6 +207,38 @@ describe('storage-paths', () => {
       const blocker = path.join(tmpRoot, 'blocker');
       fs.writeFileSync(blocker, '');
       expect(() => ensureDir(blocker)).not.toThrow();
+    });
+  });
+
+  describe('pickFreshestExisting', () => {
+    it('returns null when no candidate exists', () => {
+      const a = path.join(tmpRoot, 'a.json');
+      const b = path.join(tmpRoot, 'b.json');
+      expect(pickFreshestExisting([a, b])).toBeNull();
+    });
+
+    it('returns the only existing candidate', () => {
+      const a = path.join(tmpRoot, 'a.json');
+      const b = path.join(tmpRoot, 'b.json');
+      fs.writeFileSync(a, '{}');
+      expect(pickFreshestExisting([a, b])).toBe(a);
+    });
+
+    it('returns the candidate with the most recent mtime', () => {
+      const canonical = path.join(tmpRoot, 'canonical.json');
+      const legacy = path.join(tmpRoot, 'legacy.json');
+      fs.writeFileSync(legacy, '{}');
+      fs.writeFileSync(canonical, '{}');
+      // Force legacy to be older.
+      const past = new Date(Date.now() - 10_000);
+      fs.utimesSync(legacy, past, past);
+      expect(pickFreshestExisting([canonical, legacy])).toBe(canonical);
+    });
+
+    it('ignores directories that happen to exist at a candidate path', () => {
+      const dirPath = path.join(tmpRoot, 'subdir');
+      fs.mkdirSync(dirPath);
+      expect(pickFreshestExisting([dirPath])).toBeNull();
     });
   });
 

@@ -361,6 +361,12 @@ export const resolveNonInteractiveCredentials = async (
                 projectName: proj.name,
                 appId: e.app?.id ?? null,
                 envName: e.name,
+                // `rank` is part of the canonical `EnvSelectionChoice` —
+                // include it so orchestrators that reuse their
+                // env-selection widget against this auth_required envelope
+                // (as the JSDoc on emitAuthRequired encourages) don't see
+                // `undefined` when accessing `.rank`.
+                rank: e.rank,
                 label: `${org.name} / ${proj.name} / ${e.name}`,
               })),
           ),

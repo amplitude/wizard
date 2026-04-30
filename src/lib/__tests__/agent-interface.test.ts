@@ -20,7 +20,6 @@ import {
   WIZARD_SESSION_ID_HEADER,
   matchesAllowedPrefix,
   parseEventPlanContent,
-  pickFreshestExisting,
   MAX_BASH_SLEEP_SECONDS,
   MAX_CONSECUTIVE_BASH_DENIES,
   isAuthErrorMessage,
@@ -37,6 +36,7 @@ import {
   AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
 } from '../wizard-session';
+import { pickFreshestExisting } from '../../utils/storage-paths';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -1894,14 +1894,14 @@ describe('pickFreshestExisting', () => {
   it('returns null when no candidates exist', () => {
     const a = path.join(tmpDir, 'a');
     const b = path.join(tmpDir, 'b');
-    expect(pickFreshestExisting(a, b)).toBeNull();
+    expect(pickFreshestExisting([a, b])).toBeNull();
   });
 
   it('returns the only existing candidate', () => {
     const a = path.join(tmpDir, 'a');
     const b = path.join(tmpDir, 'b');
     fs.writeFileSync(b, '');
-    expect(pickFreshestExisting(a, b)).toBe(b);
+    expect(pickFreshestExisting([a, b])).toBe(b);
   });
 
   // Regression: bugbot caught the stale-canonical bug — the dashboard
@@ -1920,7 +1920,7 @@ describe('pickFreshestExisting', () => {
     fs.utimesSync(canonical, oldTime, oldTime);
     fs.writeFileSync(legacy, 'fresh');
 
-    expect(pickFreshestExisting(canonical, legacy)).toBe(legacy);
+    expect(pickFreshestExisting([canonical, legacy])).toBe(legacy);
   });
 
   it('returns the canonical when it is the freshest', () => {
@@ -1931,7 +1931,7 @@ describe('pickFreshestExisting', () => {
     fs.utimesSync(legacy, oldTime, oldTime);
     fs.writeFileSync(canonical, 'fresh');
 
-    expect(pickFreshestExisting(canonical, legacy)).toBe(canonical);
+    expect(pickFreshestExisting([canonical, legacy])).toBe(canonical);
   });
 });
 
