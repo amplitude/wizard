@@ -1,5 +1,67 @@
 # Changelog
 
+## [1.11.0](https://github.com/amplitude/wizard/compare/wizard-v1.10.0...wizard-v1.11.0) (2026-04-30)
+
+
+### Features
+
+* add ToS acceptance flow for --signup option ([#352](https://github.com/amplitude/wizard/issues/352)) ([dfc323b](https://github.com/amplitude/wizard/commit/dfc323b17f80855cb154b3573fd4691c7a5eae5e))
+* **agent:** cap env_selection NDJSON payload at 50 choices ([#420](https://github.com/amplitude/wizard/issues/420)) ([b4fe558](https://github.com/amplitude/wizard/commit/b4fe558b71a953cacdd9184052677ef5fb92d17b))
+* **agent:** circuit-breaker for repeated PreToolUse Bash denies ([#393](https://github.com/amplitude/wizard/issues/393)) ([b898fc3](https://github.com/amplitude/wizard/commit/b898fc3c17b7519f6d9800e645d24b599be74010))
+* **agent:** emit checkpoint events + add --resume flag ([#417](https://github.com/amplitude/wizard/issues/417)) ([0f07ab8](https://github.com/amplitude/wizard/commit/0f07ab8da12165377bcff920007ae181116b41ce))
+* **agent:** emit heartbeat NDJSON event on a fixed 10s cadence ([#415](https://github.com/amplitude/wizard/issues/415)) ([88d7b1a](https://github.com/amplitude/wizard/commit/88d7b1ab12830b3e129d0829ce7e7b85b97db5f7))
+* **agent:** inject orchestrator context via --context-file ([#414](https://github.com/amplitude/wizard/issues/414)) ([0baea5f](https://github.com/amplitude/wizard/commit/0baea5fcee94d1f51c6fafa08908636b395750e6))
+* **agent:** per-tool invocation counts in agent_metrics ([#396](https://github.com/amplitude/wizard/issues/396)) ([81ee19a](https://github.com/amplitude/wizard/commit/81ee19af4fd89d9869f8d87d22fb75840b5b8781))
+* **agent:** recoverable error tags + truncate large Read tool outputs ([#432](https://github.com/amplitude/wizard/issues/432)) ([576cbb6](https://github.com/amplitude/wizard/commit/576cbb6b2c5cd1f1365095631665cd71df40bffd))
+* **agent:** stream model text deltas into the status pill ([#426](https://github.com/amplitude/wizard/issues/426)) ([2fcdbca](https://github.com/amplitude/wizard/commit/2fcdbca13cb8cabce2a40b2b92604c21405efcd8))
+* **agent:** structured rejection on bad scope-flag in agent mode ([#391](https://github.com/amplitude/wizard/issues/391)) ([d755191](https://github.com/amplitude/wizard/commit/d755191a4e3ae558ca2e90ebb2d2e90494290432))
+* **intro:** welcome back returning users with project + activation context ([#400](https://github.com/amplitude/wizard/issues/400)) ([35c4f67](https://github.com/amplitude/wizard/commit/35c4f67f16611781a8eeea898d8ec2a3c7d7c878))
+* **outro:** press D to review changed files before exit ([#412](https://github.com/amplitude/wizard/issues/412)) ([cda7633](https://github.com/amplitude/wizard/commit/cda763373cb78f6239ee1411b13f8738555e40f3))
+* **outro:** press R to retry from checkpoint on error/cancel ([#413](https://github.com/amplitude/wizard/issues/413)) ([7ed246d](https://github.com/amplitude/wizard/commit/7ed246d38e14e1982386b794272bd5fde194b142))
+* **tui:** show tracking plan and live event arrivals at verification step ([#401](https://github.com/amplitude/wizard/issues/401)) ([b604deb](https://github.com/amplitude/wizard/commit/b604deb7ed5c48440b62e199bb1f1ba4f39e54c3))
+
+
+### Bug Fixes
+
+* **activation:** short-circuit agent on fully-wired re-runs ([#434](https://github.com/amplitude/wizard/issues/434)) ([d1eb1c4](https://github.com/amplitude/wizard/commit/d1eb1c423d17372f752ec63b5dee0ccba60cdf71))
+* address Cursor Bugbot findings from merged PRs ([#424](https://github.com/amplitude/wizard/issues/424)) ([e2d4344](https://github.com/amplitude/wizard/commit/e2d43448005736d82a4d80a141a25bb2c12bbfdb))
+* address Cursor Bugbot findings from recently merged PRs ([#419](https://github.com/amplitude/wizard/issues/419)) ([ea78975](https://github.com/amplitude/wizard/commit/ea789756aeb225a7ea80ffb4d5217ce4950dddae))
+* **agent:** cross-tier Haiku fallback at attempt &gt;= 3 for outage recovery ([#422](https://github.com/amplitude/wizard/issues/422)) ([c739d25](https://github.com/amplitude/wizard/commit/c739d2562c58462876db7110a8d74f88a398f8df))
+* **agent:** cut Stop hook timeout 30s → 8s so the outro never feels frozen ([#436](https://github.com/amplitude/wizard/issues/436)) ([7b486ea](https://github.com/amplitude/wizard/commit/7b486ea5f4c21b4b9a09c5387402b3285a9e6d9d))
+* **agent:** trust SDK internal-retry recovery in post-loop classifier ([#433](https://github.com/amplitude/wizard/issues/433)) ([d7cf4b0](https://github.com/amplitude/wizard/commit/d7cf4b0645ff0328be4d27d59cb2418495318536))
+* **auth:** probe other zone before failing with no-orgs error ([#402](https://github.com/amplitude/wizard/issues/402)) ([cfe7470](https://github.com/amplitude/wizard/commit/cfe74704f4ac6417a8b4afc46e6d790b470c8c1c))
+* **auth:** refresh OAuth token at post-run boundary so long agent runs don't break MCP/dashboard/ingestion ([#407](https://github.com/amplitude/wizard/issues/407)) ([ca4b111](https://github.com/amplitude/wizard/commit/ca4b11187f819247e299a820a3f470bab9216e71))
+* **auth:** restore mid-session re-auth watcher dropped in the bin.ts split ([#416](https://github.com/amplitude/wizard/issues/416)) ([be49207](https://github.com/amplitude/wizard/commit/be4920720002c6f834bfffaaa479daf81c5a6815))
+* avoid gitignoring committed env templates and protect CLAUDE.md ([#392](https://github.com/amplitude/wizard/issues/392)) ([1864e3d](https://github.com/amplitude/wizard/commit/1864e3df0e22d6923fad6fbe1c6dabf5025ed348))
+* **commandments:** align browser init pattern with context-hub (no wrapper re-export) ([#423](https://github.com/amplitude/wizard/issues/423)) ([9f71702](https://github.com/amplitude/wizard/commit/9f7170209bd5114d2edf9ad5d869374ace48626d))
+* **commandments:** make project-local amplitude.ts re-export load-bearing ([#408](https://github.com/amplitude/wizard/issues/408)) ([12088d4](https://github.com/amplitude/wizard/commit/12088d431345eeb9f58c89409b0f020b52e7ab93))
+* **commandments:** teach agent simple build/typecheck shapes that survive bash allowlist ([#411](https://github.com/amplitude/wizard/issues/411)) ([3ac3090](https://github.com/amplitude/wizard/commit/3ac30904434ebf488b355023c0efeea2c14c1bb7))
+* **deps:** drop release-age gate so SDK platform binaries install ([#438](https://github.com/amplitude/wizard/issues/438)) ([3a9bff4](https://github.com/amplitude/wizard/commit/3a9bff49e022d59ebbb539ee330bbfd0fc0cae8b))
+* **eu:** make MCP URL region-aware so EU users hit mcp.eu.amplitude.com ([#390](https://github.com/amplitude/wizard/issues/390)) ([74f6a96](https://github.com/amplitude/wizard/commit/74f6a9659bcb980cd7110f9f936356b5bdc3fbd7))
+* **outro:** honor outro kind in screen-initiated dismissal exit code ([#399](https://github.com/amplitude/wizard/issues/399)) ([827dcda](https://github.com/amplitude/wizard/commit/827dcdafa1f9812f179850007ec7c03ce72f8ef1))
+* **outro:** re-fork-on-every-keystroke + analytics dedup (Bugbot, PR [#412](https://github.com/amplitude/wizard/issues/412)) ([#418](https://github.com/amplitude/wizard/issues/418)) ([4bd1a91](https://github.com/amplitude/wizard/commit/4bd1a916cfe7f8ae70505e71bfa31b89b9a91352))
+* **planned-events:** short-circuit when Amplitude MCP has no create_events tool ([#385](https://github.com/amplitude/wizard/issues/385)) ([2f3ad12](https://github.com/amplitude/wizard/commit/2f3ad125cab708b5029eb02029a4cc349eea9bd1))
+* **recovery:** catch uncaught exceptions and route through wizardAbort ([#406](https://github.com/amplitude/wizard/issues/406)) ([7ff1300](https://github.com/amplitude/wizard/commit/7ff13005aef4fbc42f2e5fd4aed6d3b944b02151))
+* **safety:** apply-lock TOCTOU race + scanner false-positive tightening ([#395](https://github.com/amplitude/wizard/issues/395)) ([eee34ea](https://github.com/amplitude/wizard/commit/eee34ead060f87a0fc59794903b2c63aaef85959))
+* slash command menu only fires when input begins with a known command ([#351](https://github.com/amplitude/wizard/issues/351)) ([7dedba5](https://github.com/amplitude/wizard/commit/7dedba525c645703741a384d9402ae2458b23f8f))
+* three correctness/UX bugs from post-launch hunt ([#409](https://github.com/amplitude/wizard/issues/409)) ([2fa7c57](https://github.com/amplitude/wizard/commit/2fa7c57b51d3b8bab8344669cefcb1537667a88d))
+* **tui:** probe TTY before applying theme + reset on signal exits ([#429](https://github.com/amplitude/wizard/issues/429)) ([2edc2d4](https://github.com/amplitude/wizard/commit/2edc2d4f3b503c991143df95a45a3ec084704831))
+* **tui:** surface async effect errors and stop feedback-timer races ([#427](https://github.com/amplitude/wizard/issues/427)) ([316a528](https://github.com/amplitude/wizard/commit/316a5286ab47041334173da9335cd11e3b6ff591))
+* **windows:** resolve .cmd shims via cross-spawn + drop unzip CLI for adm-zip ([#397](https://github.com/amplitude/wizard/issues/397)) ([7119d65](https://github.com/amplitude/wizard/commit/7119d655401bdc059d66adf80cb1cf7d79076371))
+* **wizard:** seven correctness bugs across credential + ingestion paths ([#389](https://github.com/amplitude/wizard/issues/389)) ([ffe16f9](https://github.com/amplitude/wizard/commit/ffe16f90b14c4f636afbdcd427fa2b57632e78ab))
+
+
+### Performance Improvements
+
+* **agent:** cache the first user message so turn 2+ pays 0.1× input cost ([#431](https://github.com/amplitude/wizard/issues/431)) ([8cca212](https://github.com/amplitude/wizard/commit/8cca212e5e2e1833a797d52982d53ada2a407f51))
+* **agent:** parallelize PreToolUse/PostToolUse hook observers ([#421](https://github.com/amplitude/wizard/issues/421)) ([528723b](https://github.com/amplitude/wizard/commit/528723b2605a6a81b75e89b7a9db15d688e5c7f1))
+* extract deps-free helpers for framework detection cold path ([#404](https://github.com/amplitude/wizard/issues/404)) ([116b5e9](https://github.com/amplitude/wizard/commit/116b5e98694ed1aa5c4deaa2b6414a2a6590b5cf))
+* **mcp:** cache MCP session per token+url + cut fallback timeout 30s→12s ([#435](https://github.com/amplitude/wizard/issues/435)) ([682e3ae](https://github.com/amplitude/wizard/commit/682e3ae354176cd402f48ec9ad765fb3a4116d60))
+* **startup:** batch cold-start tail fixes (dotenv guard, sentinel, inline node check) ([#428](https://github.com/amplitude/wizard/issues/428)) ([531dea7](https://github.com/amplitude/wizard/commit/531dea71dec3da907b8def1d1933a6809f1b7898))
+* **startup:** lazy-load @sentry/node + drop zod from context.ts ([#398](https://github.com/amplitude/wizard/issues/398)) ([ac7828b](https://github.com/amplitude/wizard/commit/ac7828be201d1d9aced89679a84824d26ec3e515))
+* **startup:** lazy-load AgentUI in bin.ts (saves ~80–150 ms cold start) ([#425](https://github.com/amplitude/wizard/issues/425)) ([5cb5cbb](https://github.com/amplitude/wizard/commit/5cb5cbb7dcd52db3e6df76c851f6b1cf6a02fbec))
+* **tui:** gate DissolveTransition + slightly faster default tick ([#437](https://github.com/amplitude/wizard/issues/437)) ([b330781](https://github.com/amplitude/wizard/commit/b330781e731acc7883fff6c35ce486e82d3ef957))
+
 ## [1.10.0](https://github.com/amplitude/wizard/compare/wizard-v1.9.0...wizard-v1.10.0) (2026-04-30)
 
 
