@@ -401,11 +401,15 @@ describe('runAgent', () => {
     });
 
     it('should report RATE_LIMIT when agent output contains API Error 429', async () => {
+      // 429s arrive as `is_error: true` results in production — the SDK
+      // signals failure on the result envelope. Use the realistic shape so
+      // the post-loop classifier's success-short-circuit doesn't swallow
+      // the rate-limit signal.
       function* rateLimitGenerator() {
         yield {
           type: 'result',
           subtype: 'success',
-          is_error: false,
+          is_error: true,
           result: 'API Error: 429 Too Many Requests',
         };
       }
@@ -424,11 +428,12 @@ describe('runAgent', () => {
     });
 
     it('should report API_ERROR when agent output contains a non-429 API Error', async () => {
+      // Same realistic-shape rationale as the 429 test above.
       function* apiErrorGenerator() {
         yield {
           type: 'result',
           subtype: 'success',
-          is_error: false,
+          is_error: true,
           result: 'API Error: 500 Internal Server Error',
         };
       }
@@ -444,6 +449,57 @@ describe('runAgent', () => {
 
       expect(result.error).toBe(AgentErrorType.API_ERROR);
       expect(result.message).toContain('API Error: 500');
+    });
+
+    it('treats SDK-internal recovery (transient is_error result followed by a real success) as success', async () => {
+      // Regression test for production incident: the SDK emits a synthetic
+      // `is_error: true` result with text "API Error: 400 terminated" when
+      // Vertex/Anthropic kills a request mid-stream, then internally
+      // recompacts and continues the SAME session — eventually emitting a
+      // real successful result. Both result messages share the same
+      // session_id, so this is one stream, not the wizard's retry loop.
+      //
+      // The post-loop classifier used to scan the entire collectedText for
+      // "API Error:" and return API_ERROR even though `receivedSuccessResult`
+      // was true. Users saw "Setup cancelled — LLM gateway dropped the
+      // connection" with a recap-less outro after the agent had already
+      // written every file, instrumented every event, and created the
+      // dashboard.
+      function* sdkInternalRecoveryGenerator() {
+        yield {
+          type: 'system',
+          subtype: 'init',
+          model: 'claude-opus-4-5-20251101',
+          tools: [],
+          mcp_servers: [],
+        };
+        // Mid-stream transient failure — the SDK marks it `is_error: true`
+        // but keeps the session alive and recovers internally.
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: true,
+          result: 'API Error: 400 terminated',
+        };
+        // Real successful result that closes the stream.
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Integration complete.',
+        };
+      }
+
+      mockQuery.mockReturnValue(sdkInternalRecoveryGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBeUndefined();
     });
 
     it('should report AUTH_ERROR when result contains authentication_failed', async () => {

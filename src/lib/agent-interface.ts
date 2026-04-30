@@ -3160,6 +3160,18 @@ export async function runAgent(
       ? apiErrorMatch.join('\n')
       : 'Unknown API error';
 
+    // If the SDK emitted a final successful result, transient `API Error: ...`
+    // text in collectedText is a residual from a failure the SDK recovered
+    // from internally (e.g. Vertex 400 mid-stream, then compaction + retry
+    // continued the session and returned a real success). Honoring that
+    // residual would falsely surface "Setup cancelled" with a gateway
+    // bypass hint — even though every file was written, every event
+    // instrumented, and the dashboard was created. The catch-block path
+    // already short-circuits on `receivedSuccessResult`; mirror that here.
+    if (receivedSuccessResult) {
+      return completeWithSuccess();
+    }
+
     if (outputText.includes('API Error: 429')) {
       logToFile('Agent error: RATE_LIMIT');
       spinner.stop('Rate limit exceeded');
@@ -3170,11 +3182,7 @@ export async function runAgent(
     // never observed a successful result — the gateway is unhealthy,
     // not the wizard. Surface as GATEWAY_DOWN so the runner can show a
     // specific, actionable message (try ANTHROPIC_API_KEY bypass).
-    if (
-      attemptCount > 0 &&
-      upstreamGatewayFailures >= attemptCount &&
-      !receivedSuccessResult
-    ) {
+    if (attemptCount > 0 && upstreamGatewayFailures >= attemptCount) {
       logToFile(
         `Agent error: GATEWAY_DOWN (${upstreamGatewayFailures}/${attemptCount} attempts failed upstream)`,
       );
