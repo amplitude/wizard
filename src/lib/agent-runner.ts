@@ -357,9 +357,8 @@ export async function refreshTokenIfStale(
   label: string,
 ): Promise<string> {
   try {
-    const { getStoredToken, getStoredUser, storeToken } = await import(
-      '../utils/ampli-settings.js'
-    );
+    const { getStoredToken, getStoredUser, storeToken } =
+      await import('../utils/ampli-settings.js');
     const { refreshAccessToken } = await import('../utils/oauth.js');
     const { EXPIRY_BUFFER_MS } = await import('../utils/token-refresh.js');
     const user = getStoredUser();
@@ -507,9 +506,8 @@ export async function runAgentWizard(
   // process.exit. The success-path re-fires below catch the two failure
   // modes that bypass wizardAbort (non-throwing return false, raw
   // throw).
-  const { registerCleanup, registerPriorityCleanup } = await import(
-    '../utils/wizard-abort.js'
-  );
+  const { registerCleanup, registerPriorityCleanup } =
+    await import('../utils/wizard-abort.js');
   registerPriorityCleanup(() =>
     restoreSetupReportIfMissing(session.installDir),
   );
@@ -770,9 +768,8 @@ async function runAgentWizardBody(
   // skills are constants; the integration skill is resolved per framework
   // (with a sensible default fallback). When a skill is pre-staged we drop
   // the corresponding load_skill_menu / install_skill steps from the prompt.
-  const { preStageSkills, bundledSkillExists } = await import(
-    './wizard-tools.js'
-  );
+  const { preStageSkills, bundledSkillExists } =
+    await import('./wizard-tools.js');
   const integrationSkillId = config.metadata.getIntegrationSkillId
     ? config.metadata.getIntegrationSkillId(frameworkContext)
     : (() => {
@@ -1165,9 +1162,8 @@ async function runAgentWizardBody(
   // Upload environment variables to hosting providers (auto-accept)
   let uploadedEnvVars: string[] = [];
   if (config.environment.uploadToHosting) {
-    const { uploadEnvironmentVariablesStep } = await import(
-      '../steps/index.js'
-    );
+    const { uploadEnvironmentVariablesStep } =
+      await import('../steps/index.js');
     uploadedEnvVars = await uploadEnvironmentVariablesStep(envVars, {
       integration: config.metadata.integration,
       session,
@@ -1247,9 +1243,8 @@ async function runAgentWizardBody(
   // Amplitude MCP response can't hang the whole run. Gracefully degrades:
   // agent success is not affected by dashboard-step failure.
   try {
-    const { createDashboardStep } = await import(
-      '../steps/create-dashboard.js'
-    );
+    const { createDashboardStep } =
+      await import('../steps/create-dashboard.js');
     await createDashboardStep({
       session,
       accessToken,
@@ -1324,9 +1319,8 @@ async function pollForDataIngestion(
   accessToken: string,
   cloudRegion: string,
 ): Promise<void> {
-  const { fetchHasAnyEventsMcp, fetchAmplitudeUser } = await import(
-    '../lib/api.js'
-  );
+  const { fetchHasAnyEventsMcp, fetchAmplitudeUser } =
+    await import('../lib/api.js');
   const { logToFile } = await import('../utils/debug.js');
 
   const POLL_INTERVAL_MS = 30_000;
@@ -1770,9 +1764,9 @@ async function resolveAppIdViaUserApi(
   accessToken: string,
   cloudRegion: string,
 ): Promise<string | null> {
-  const { fetchAmplitudeUser } = await import('./api.js');
   for (let attempt = 1; attempt <= 2; attempt++) {
     try {
+      const { fetchAmplitudeUser } = await import('./api.js');
       const userInfo = await fetchAmplitudeUser(
         accessToken,
         cloudRegion as 'us' | 'eu',
