@@ -40,8 +40,8 @@ Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanosto
 | `store.ts` | `WizardStore`, `Screen`, `Overlay`, `Flow` — nanostore-backed reactive state |
 | `router.ts` | `WizardRouter` — resolves active screen from session state via flow pipeline; manages overlay stack |
 | `flows.ts` | Declarative flow pipelines (`Screen` + `Flow` enums, `FlowEntry` arrays) |
-| `screen-registry.tsx` | Maps all 23 screen/overlay names to React components |
-| `screens/` | 16 screen components (Auth, Run, Outro, MCP, Slack, etc.) |
+| `screen-registry.tsx` | Maps all 24 screen/overlay names (18 `Screen` + 6 `Overlay`) to React components |
+| `screens/` | 17 screen components (Auth, Run, Outro, MCP, Slack, etc.) — `Screen.Options` resolves to `null` and has no component file |
 | `components/` | `ConsoleView`, `JourneyStepper`, `HeaderBar`, `KeyHintBar`, `AmplitudeLogo`, `BrailleSpinner` |
 | `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useStdoutDimensions` |
 | `utils/` | `withTimeout`, `withRetry`, `classifyError`, `diagnostics` (flow evaluation + sanitized snapshots) |
@@ -67,7 +67,8 @@ Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses
 | `registry.ts` | `FRAMEWORK_REGISTRY` — maps `Integration` enum values to `FrameworkConfig` objects |
 | `constants.ts` | `Integration` enum (detection/display order matters), env flags, URLs |
 | `commandments.ts` | Wizard-wide system prompt rules always appended to the agent |
-| `wizard-tools.ts` | In-process MCP server providing `check_env_keys`, `set_env_values`, `detect_package_manager`, `confirm_event_plan` |
+| `wizard-tools.ts` | In-process MCP server consumed by the wizard's own internal Claude agent. Tools: `check_env_keys`, `set_env_values`, `detect_package_manager`, `confirm_event_plan`, `confirm`, `choose`, `report_status`, `wizard_feedback` (plus `load_skill_menu` / `install_skill`, currently disabled — see comment in `createWizardToolsServer`). Distinct from `wizard-mcp-server.ts` below |
+| `wizard-mcp-server.ts` | **External** stdio MCP server invoked via `amplitude-wizard mcp serve`. Read-only — wraps `agent-ops.ts` so third-party AI coding agents (Claude Code, Cursor, Codex) can call wizard ops as typed tools instead of parsing CLI stdout |
 | `mcp-with-fallback.ts` | `callAmplitudeMcp<T>` — resilient MCP helper. Tries a direct HTTP call to the Amplitude MCP server; if it returns null or throws (e.g. tool removed), falls back to a minimal Claude agent with only the Amplitude MCP configured. Accepts `abortSignal` for clean exit handling. Use this for any new MCP-based data fetching. |
 | `safe-tools.ts` | Allowlisted tools for the agent sandbox |
 | `middleware/` | Benchmark pipeline, message schemas |
@@ -104,6 +105,13 @@ Post-agent discrete steps: MCP server installation into editors, env var upload,
 ### Utilities (`src/utils/`)
 
 OAuth flow, analytics tracking, env var handling, API key storage, debug logging, URL construction, package manager detection, shell completions, Anthropic status checks, custom headers.
+
+**Logging — two distinct paths, don't confuse them:**
+
+- `src/lib/observability/logger.ts` — **structured runtime logger**. Use this for diagnostic / debug / lifecycle logs that need to land in the per-project log file with redaction, run IDs, and correlation. Entry point: `createLogger('my-module')`. This is the canonical logger for new code in `src/lib/`, `src/ui/`, and `src/utils/`. It never calls `console.log` directly (Ink owns stdout in TUI mode).
+- `src/utils/logging.ts` — **chalk-coloured terminal output**. Helpers (`green`, `red`, `dim`, `yellow`, `cyan`) for non-Ink CLI command UX (e.g. `amplitude-wizard login`, `whoami`). Calls `console.log` by design. Only appropriate in `src/commands/` and similar non-TUI command handlers.
+
+If a callsite is inside the TUI or runs during a wizard session, prefer `observability/logger.ts`. Bare `console.log` in production source paths is an anti-pattern.
 
 Key additions:
 - `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used by session checkpointing and config persistence.
@@ -149,7 +157,7 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 - **Screens are passive.** Screens observe session state and render accordingly. They do not own navigation logic — the router derives the active screen from session state.
 - **Session is the single source of truth.** All state lives in `WizardSession`. Screens and steps read from and write to the session; they do not communicate directly.
 - **Flows are declarative.** Each flow is a pipeline of `{ screen, show, isComplete }` entries. Navigation advances automatically when `isComplete` returns true.
-- **Overlays interrupt without breaking flow.** `OutageScreen` and `SettingsOverrideScreen` are pushed onto an overlay stack and popped when resolved, resuming the flow where it left off. Overlay enum: `Outage`, `SettingsOverride`, `Snake`, `Mcp`, `Slack`, `Logout`, `Login`.
+- **Overlays interrupt without breaking flow.** `OutageScreen` and other overlays are pushed onto an overlay stack and popped when resolved, resuming the flow where it left off. Overlay enum (`src/ui/tui/router.ts`): `Outage`, `Snake`, `Mcp`, `Slack`, `Logout`, `Login`.
 - **Slash commands are always available.** `/region`, `/login`, `/logout`, `/whoami`, `/create-project`, `/mcp`, `/slack`, `/feedback`, `/clear`, `/help`, `/debug`, `/diagnostics`, `/snake`, `/exit` must be interceptable at any point in the session. The canonical list lives in `src/ui/tui/console-commands.ts` — update both together.
 - **Framework configs are data-driven.** No switch statements or per-framework routing. Everything goes through `FrameworkConfig` + `FRAMEWORK_REGISTRY`. The universal runner handles all shared behavior.
 - **Agent commandments** (`src/lib/commandments.ts`) are always injected as system prompt. Key rules: never hardcode secrets, always use `wizard-tools` MCP for env vars and package manager detection, must call `confirm_event_plan` before writing `track()` calls.
@@ -195,7 +203,11 @@ GitHub Actions workflows in `.github/workflows/`:
 ## Key docs
 
 - [`docs/flows.md`](./docs/flows.md) — flow diagrams (source of truth for UX)
-- [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
+- [`docs/architecture.md`](./docs/architecture.md) — high-level architecture overview
 - [`docs/dual-mode-architecture.md`](./docs/dual-mode-architecture.md) — TUI + agent + CI mode architecture
+- [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
 - [`docs/critical-files.md`](./docs/critical-files.md) — files ranked by blast radius
 - [`docs/engineering-patterns.md`](./docs/engineering-patterns.md) — async safety, retry, error classification patterns
+- [`docs/external-services.md`](./docs/external-services.md) — third-party services the wizard talks to
+- [`docs/ux-improvements.md`](./docs/ux-improvements.md) — UX backlog and recently-shipped polish
+- [`docs/releasing.md`](./docs/releasing.md) — release process and versioning
