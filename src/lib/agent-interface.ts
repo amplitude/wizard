@@ -859,6 +859,96 @@ export function createUserPromptSubmitHook(state: AgentState): HookCallback {
 }
 
 /**
+ * Replace a large Read tool output with a head + tail snippet so the
+ * model's history doesn't carry 30+ K tokens of file content forward
+ * for the rest of the run. Returns null when the tool isn't Read or
+ * the response is small enough to leave alone.
+ *
+ * Why deterministic instead of summarizing via Haiku: the agent already
+ * has the path on disk and can re-Read with `offset` / `limit` if it
+ * needs more. Paying a Haiku call to summarize content the model can
+ * fetch on demand is strictly worse than truncating with a hint.
+ */
+const READ_TOOL_NAMES = new Set(['Read']);
+const READ_TRUNCATE_THRESHOLD = 8 * 1024;
+const READ_HEAD_BYTES = 3 * 1024;
+const READ_TAIL_BYTES = 1 * 1024;
+function maybeTruncateLargeRead(input: Record<string, unknown>): {
+  updatedToolOutput: { type: 'text'; text: string }[];
+  /** Bytes the model is no longer carrying for the rest of the run. */
+  savedBytes: number;
+} | null {
+  const toolName =
+    typeof input.tool_name === 'string'
+      ? input.tool_name
+      : typeof input.toolName === 'string'
+      ? input.toolName
+      : '';
+  if (!READ_TOOL_NAMES.has(toolName)) return null;
+
+  // tool_response can be a string (legacy SDKs), an object with a
+  // `content` string, or an array of content blocks. Unwrap defensively
+  // — anything we can't recognize is left alone so the agent gets the
+  // original SDK output. tool_input is referenced for the file path so
+  // we can hint the model toward re-reading with offset/limit.
+  const response =
+    'tool_response' in input
+      ? input.tool_response
+      : (input as { toolResponse?: unknown }).toolResponse;
+
+  let text: string | null = null;
+  if (typeof response === 'string') {
+    text = response;
+  } else if (response && typeof response === 'object') {
+    const c = (response as { content?: unknown }).content;
+    if (typeof c === 'string') {
+      text = c;
+    } else if (Array.isArray(c)) {
+      const joined = c
+        .map((block) => {
+          if (block && typeof block === 'object') {
+            const t = (block as { text?: unknown }).text;
+            return typeof t === 'string' ? t : '';
+          }
+          return '';
+        })
+        .join('\n');
+      if (joined.length > 0) text = joined;
+    }
+  }
+  if (text === null || text.length <= READ_TRUNCATE_THRESHOLD) return null;
+
+  const toolInput =
+    'tool_input' in input
+      ? input.tool_input
+      : (input as { toolInput?: unknown }).toolInput;
+  const filePath =
+    toolInput && typeof toolInput === 'object'
+      ? typeof (toolInput as { file_path?: unknown }).file_path === 'string'
+        ? (toolInput as { file_path: string }).file_path
+        : typeof (toolInput as { path?: unknown }).path === 'string'
+        ? (toolInput as { path: string }).path
+        : null
+      : null;
+
+  const head = text.slice(0, READ_HEAD_BYTES);
+  const tail = text.slice(text.length - READ_TAIL_BYTES);
+  const middleBytes = text.length - head.length - tail.length;
+  const lineCount = text.split('\n').length;
+  const pathHint = filePath ? ` ${filePath}` : '';
+  const bridge =
+    `\n\n[… ${middleBytes.toLocaleString()} bytes omitted from middle. ` +
+    `Original file:${pathHint} (${lineCount.toLocaleString()} lines, ` +
+    `${text.length.toLocaleString()} bytes). ` +
+    `Re-read with Read({ offset, limit }) for any specific range. …]\n\n`;
+  const updatedText = head + bridge + tail;
+  return {
+    updatedToolOutput: [{ type: 'text', text: updatedText }],
+    savedBytes: text.length - updatedText.length,
+  };
+}
+
+/**
  * Factory: PostToolUse hook — records the file path of every successful
  * write-tool call (Write / Edit / MultiEdit / NotebookEdit) into the
  * provided AgentState. The recovery snapshot persisted by `createPreCompactHook`
@@ -2817,7 +2907,38 @@ export async function runAgent(
                   recordPostToolUse(input, toolUseID, hookOpts),
                 );
                 const [, gateResult] = await Promise.all([observer, gate]);
-                return gateResult;
+
+                // Truncate the model's view of large Read responses so a
+                // single big file doesn't sit in conversation history at
+                // its full size for every subsequent turn. Defensive: if
+                // anything throws, fall through to the gate's original
+                // result so a malformed shape never breaks the agent.
+                let truncation: ReturnType<typeof maybeTruncateLargeRead> =
+                  null;
+                try {
+                  truncation = maybeTruncateLargeRead(input);
+                } catch (err) {
+                  logToFile('Read truncation pass threw:', err);
+                }
+                if (!truncation) return gateResult;
+
+                logToFile(
+                  `PostToolUse: truncated Read result, saved ${truncation.savedBytes.toLocaleString()} bytes from history`,
+                );
+                const existing = gateResult ?? {};
+                const existingHook =
+                  existing.hookSpecificOutput &&
+                  typeof existing.hookSpecificOutput === 'object'
+                    ? (existing.hookSpecificOutput as Record<string, unknown>)
+                    : {};
+                return {
+                  ...existing,
+                  hookSpecificOutput: {
+                    ...existingHook,
+                    hookEventName: 'PostToolUse',
+                    updatedToolOutput: truncation.updatedToolOutput,
+                  },
+                };
               };
 
               // PreCompact: record + persist AgentState for in-run recovery,
