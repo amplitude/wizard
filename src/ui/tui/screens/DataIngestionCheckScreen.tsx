@@ -222,6 +222,15 @@ export const DataIngestionCheckScreen = ({
   const [observedEventNames, setObservedEventNames] = useState<Set<string>>(
     () => new Set(),
   );
+  // Mirror state into a ref so the poll-driven `recordObservedEvents` —
+  // captured once by the mount-time `useEffect(() => {...}, [])` and
+  // reused by `setInterval` — sees the latest committed set instead of
+  // the initial empty one. Without this, every poll's diff was computed
+  // against the stale render-0 closure and `mutated` was always `true`.
+  const observedEventNamesRef = useRef(observedEventNames);
+  useEffect(() => {
+    observedEventNamesRef.current = observedEventNames;
+  }, [observedEventNames]);
 
   /**
    * One-shot guard against accidental Enter when the activation API is
@@ -248,18 +257,26 @@ export const DataIngestionCheckScreen = ({
    * and to trigger React state updates only when there's actually a
    * change — Set identity matters for `useEffect` deps elsewhere).
    *
-   * `mutated` MUST be computed synchronously against the committed
-   * snapshot — React's functional updater runs during the next render,
-   * so reading inside the setter and returning afterwards always
-   * yielded `false`. We compute the diff against the captured
-   * `observedEventNames` instead and only enqueue a state update when
-   * something actually changed.
+   * Two correctness invariants:
+   *
+   *   1. `mutated` is computed synchronously — React's functional
+   *      updater runs during the next render, so reading inside the
+   *      setter and returning afterwards always yielded `false`.
+   *
+   *   2. We read from `observedEventNamesRef.current`, not the
+   *      captured-by-render `observedEventNames`. This function is
+   *      called from `checkIngestion`, which is itself captured once
+   *      by the mount-time `useEffect(() => {...}, [])` and reused
+   *      by `setInterval` for the lifetime of the screen — closing
+   *      over the render-0 (always-empty) state would mean every poll
+   *      thinks all events are new.
    */
   function recordObservedEvents(names: readonly string[]): boolean {
     if (names.length === 0) return false;
+    const current = observedEventNamesRef.current;
     let mutated = false;
     for (const name of names) {
-      if (!observedEventNames.has(name)) {
+      if (!current.has(name)) {
         mutated = true;
         break;
       }
