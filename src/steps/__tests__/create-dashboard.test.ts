@@ -8,11 +8,43 @@
  *    embeds a `charts` array of objects).
  */
 
-import { describe, it, expect } from 'vitest';
-import { __test__ } from '../create-dashboard';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { __test__, createDashboardStep } from '../create-dashboard';
 
 const { readEventsFromContent, parseAgentOutput, extractJsonContaining } =
   __test__;
+
+vi.mock('../../lib/mcp-with-fallback', () => ({
+  callAmplitudeMcp: vi.fn(),
+}));
+vi.mock('../../lib/wizard-tools', () => ({
+  persistDashboard: vi.fn(() => true),
+}));
+vi.mock('../../utils/analytics', () => ({
+  analytics: { wizardCapture: vi.fn() },
+}));
+vi.mock('../../utils/debug', () => ({ logToFile: vi.fn() }));
+vi.mock('../../ui', () => {
+  const ui = {
+    pushStatus: vi.fn(),
+    setDashboardUrl: vi.fn(),
+    spinner: vi.fn(() => ({
+      start: vi.fn(),
+      stop: vi.fn(),
+    })),
+    log: { warn: vi.fn() },
+  };
+  return { getUI: () => ui, __ui: ui };
+});
+
+import { callAmplitudeMcp } from '../../lib/mcp-with-fallback';
+import { persistDashboard } from '../../lib/wizard-tools';
+import { analytics } from '../../utils/analytics';
+
+import * as uiModule from '../../ui';
 
 describe('readEventsFromContent', () => {
   it('accepts canonical `name` key with bare top-level array', () => {
@@ -191,5 +223,110 @@ describe('parseAgentOutput', () => {
   it('returns null when the URL is not a valid URL', () => {
     const text = `<<<WIZARD_DASHBOARD_RESULT>>>{"dashboardUrl":"not-a-url"}<<<END>>>`;
     expect(parseAgentOutput(text)).toBeNull();
+  });
+});
+
+// ── createDashboardStep — defensive skip when agent already created one ─────
+
+describe('createDashboardStep — agent already created dashboard', () => {
+  let installDir: string;
+
+  const mockedCallAmplitudeMcp = callAmplitudeMcp as any;
+
+  const mockedPersistDashboard = persistDashboard as any;
+
+  const mockedWizardCapture = analytics.wizardCapture as any;
+
+  const ui = (uiModule as any).__ui;
+
+  beforeEach(() => {
+    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-dashboard-'));
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude-events.json'),
+      JSON.stringify([{ name: 'Hello API Called' }]),
+    );
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    fs.rmSync(installDir, { recursive: true, force: true });
+  });
+
+  function makeSession(): {
+    installDir: string;
+    checklistDashboardUrl?: string;
+  } {
+    return { installDir };
+  }
+
+  it('reuses an already-written .amplitude-dashboard.json without calling the agent', async () => {
+    const dashboard = {
+      dashboardUrl:
+        'https://app.amplitude.com/analytics/amplitude/dashboard/y3qux0l8',
+      dashboardId: 'y3qux0l8',
+      charts: [{ id: 'c1', title: 'Top pages', type: 'line' }],
+    };
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude-dashboard.json'),
+      JSON.stringify(dashboard),
+    );
+    const session = makeSession();
+
+    await createDashboardStep({
+      session: session as any,
+      accessToken: 'token',
+
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    expect(mockedCallAmplitudeMcp).not.toHaveBeenCalled();
+    expect(session.checklistDashboardUrl).toBe(dashboard.dashboardUrl);
+    expect(ui.setDashboardUrl).toHaveBeenCalledWith(dashboard.dashboardUrl);
+    expect(ui.spinner).not.toHaveBeenCalled();
+    expect(mockedPersistDashboard).toHaveBeenCalledWith(installDir, dashboard);
+    expect(mockedWizardCapture).toHaveBeenCalledWith(
+      'dashboard created',
+      expect.objectContaining({
+        source: 'agent',
+        'chart count': 1,
+      }),
+    );
+  });
+
+  it('falls through to agent fallback when .amplitude-dashboard.json is malformed', async () => {
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude-dashboard.json'),
+      '{ not json',
+    );
+    mockedCallAmplitudeMcp.mockResolvedValue(null);
+    const session = makeSession();
+
+    await createDashboardStep({
+      session: session as any,
+      accessToken: 'token',
+
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    expect(mockedCallAmplitudeMcp).toHaveBeenCalledTimes(1);
+    expect(ui.spinner).toHaveBeenCalled();
+  });
+
+  it('falls through to agent fallback when dashboardUrl is missing', async () => {
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude-dashboard.json'),
+      JSON.stringify({ charts: [] }),
+    );
+    mockedCallAmplitudeMcp.mockResolvedValue(null);
+    const session = makeSession();
+
+    await createDashboardStep({
+      session: session as any,
+      accessToken: 'token',
+
+      integration: 'nextjs-pages-router' as any,
+    });
+
+    expect(mockedCallAmplitudeMcp).toHaveBeenCalledTimes(1);
   });
 });
