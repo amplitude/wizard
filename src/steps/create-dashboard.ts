@@ -139,10 +139,7 @@ export async function createDashboardStep(
       'duration ms': 0,
       source: 'agent',
     });
-    ui.setPostAgentStep(STEP_ID, {
-      status: 'skipped',
-      reason: 'agent already created dashboard',
-    });
+    ui.setPostAgentStep(STEP_ID, { status: 'completed' });
     return;
   }
 
