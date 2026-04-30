@@ -150,6 +150,18 @@ export const EVENT_DATA_VERSIONS = {
    * auto-resolution next on the same stream.
    */
   decision_auto: 1,
+  /**
+   * `heartbeat` — periodic liveness signal emitted every ~10s while
+   * the inner agent is running. Carries elapsed wall-clock time, the
+   * current retry attempt count, and the rolling tail of pushStatus
+   * messages so an orchestrator can render a "still working…" widget
+   * without going dark when a long tool call (Bash, MCP, file edit
+   * chain) eats 30+ seconds of silence. Always fires on the cadence,
+   * regardless of whether the agent has been chatty — absence of
+   * heartbeat events is the canonical signal that the wizard is
+   * stalled.
+   */
+  heartbeat: 1,
 } as const;
 
 /** All NDJSON event-level types. */

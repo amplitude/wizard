@@ -97,11 +97,20 @@ export class LoggingUI implements WizardUI {
     console.log(`◇  ${message}`);
   }
 
-  heartbeat(statuses: string[]): void {
-    if (statuses.length === 0) return;
+  heartbeat(data: {
+    statuses: string[];
+    elapsedMs: number;
+    attempt?: number;
+  }): void {
+    // Only paint when there's something to summarize — a beat with no
+    // recent statuses is a liveness signal for orchestrators (AgentUI
+    // surfaces it on NDJSON), not user-facing log noise.
+    if (data.statuses.length === 0) return;
+    const seconds = Math.round(data.elapsedMs / 1000);
     // End the current in-progress spinner line before printing
     process.stdout.write('\n');
-    for (const s of statuses) {
+    console.log(`│  Still working — ${seconds}s elapsed`);
+    for (const s of data.statuses) {
       console.log(`│  ${s}`);
     }
   }

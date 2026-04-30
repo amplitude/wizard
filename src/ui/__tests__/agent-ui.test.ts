@@ -1475,3 +1475,82 @@ describe('truncateLogMessage (log-spillover guard)', () => {
     expect(out.endsWith('[truncated; see verbose log]')).toBe(true);
   });
 });
+
+describe('AgentUI.heartbeat', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('always emits — even when the status tail is empty', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 12_345 });
+    // Single line, regardless of empty statuses — orchestrators rely
+    // on the cadence to detect a stalled wizard.
+    expect(writes.length).toBe(1);
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.data).toMatchObject({
+      event: 'heartbeat',
+      statuses: [],
+      elapsedMs: 12_345,
+    });
+  });
+
+  it('emits the structured progress event with elapsedMs and statuses', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({
+      statuses: ['Detecting framework', 'Installing SDK'],
+      elapsedMs: 27_500,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toMatch(/heartbeat \(28s, 2 recent\)/);
+    expect(event.data).toMatchObject({
+      event: 'heartbeat',
+      statuses: ['Detecting framework', 'Installing SDK'],
+      elapsedMs: 27_500,
+    });
+  });
+
+  it('includes attempt only when supplied (omitted on attempt 0 / undefined)', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000 });
+    expect(lastEvent().data?.attempt).toBeUndefined();
+
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000, attempt: 2 });
+    expect(lastEvent().data?.attempt).toBe(2);
+  });
+
+  it('uses a different summary string when the status tail is empty vs not', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 5_000 });
+    expect(lastEvent().message).toMatch(/heartbeat \(5s, idle\)/);
+    ui.heartbeat({ statuses: ['working'], elapsedMs: 5_000 });
+    expect(lastEvent().message).toMatch(/heartbeat \(5s, 1 recent\)/);
+  });
+
+  it('stamps data_version from the EVENT_DATA_VERSIONS registry', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000 });
+    const last = JSON.parse(writes[writes.length - 1].trim());
+    expect(last.data_version).toBe(1);
+  });
+});

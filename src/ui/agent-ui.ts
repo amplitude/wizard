@@ -666,10 +666,28 @@ export class AgentUI implements WizardUI {
     emit('status', message, { data: { kind: 'push' } });
   }
 
-  heartbeat(statuses: string[]): void {
-    if (statuses.length === 0) return;
-    emit('status', `heartbeat: ${statuses.length} active`, {
-      data: { kind: 'heartbeat', statuses },
+  heartbeat(data: {
+    statuses: string[];
+    elapsedMs: number;
+    attempt?: number;
+  }): void {
+    // Always fire — orchestrators rely on the cadence to detect a
+    // stalled wizard ("no heartbeat in 30s + no result event = the
+    // process hung"). Drops the prior empty-statuses gate which made
+    // long, quiet tool calls (Bash, MCP, file edit chains) look
+    // indistinguishable from a hang.
+    const seconds = Math.round(data.elapsedMs / 1000);
+    const summary =
+      data.statuses.length > 0
+        ? `heartbeat (${seconds}s, ${data.statuses.length} recent)`
+        : `heartbeat (${seconds}s, idle)`;
+    emit('progress', summary, {
+      data: {
+        event: 'heartbeat',
+        statuses: data.statuses,
+        elapsedMs: data.elapsedMs,
+        ...(data.attempt !== undefined ? { attempt: data.attempt } : {}),
+      },
     });
   }
 

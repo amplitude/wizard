@@ -2151,12 +2151,20 @@ export async function runAgent(
     return { plannedEvents: lastParsedEventPlan };
   };
 
-  // Heartbeat interval — every 10s print the last 3 STATUS messages so the
-  // user can see progress in the CLI without waiting for the next update.
+  // Heartbeat interval — fires unconditionally every 10s so AgentUI's
+  // `progress: heartbeat` NDJSON event lands on a fixed cadence even
+  // when the agent is mid-tool-call and nobody has called pushStatus
+  // recently. Orchestrators treat absence of heartbeat as "the wizard
+  // process hung"; gating on `recentStatuses.length > 0` (the prior
+  // behaviour) made long quiet tool calls look indistinguishable from
+  // a hang. LoggingUI / InkUI continue to short-circuit on an empty
+  // status tail so terminal output stays clean.
   const heartbeatInterval = setInterval(() => {
-    if (recentStatuses.length > 0) {
-      getUI().heartbeat([...recentStatuses]);
-    }
+    getUI().heartbeat({
+      statuses: [...recentStatuses],
+      elapsedMs: Date.now() - startTime,
+      attempt: attemptCount > 0 ? attemptCount : undefined,
+    });
   }, 10_000);
 
   // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
