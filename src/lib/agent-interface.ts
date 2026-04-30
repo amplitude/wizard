@@ -34,7 +34,7 @@ import {
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
-import { classifyWriteOperation } from './agent-events';
+import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
   createWizardToolsServer,
   persistDashboard,
@@ -203,6 +203,38 @@ export function resolveMaxTurns(
 // can route structured events back into the per-run state bag.
 let _activeStatusReporter: StatusReporter | undefined;
 
+/**
+ * Map a `WizardMode` to a Claude model alias. Internal — see
+ * `docs/internal/agent-mode-flag.md` for the full mapping and rationale.
+ *
+ * The Amplitude LLM gateway expects the `anthropic/<alias>` prefix; the
+ * direct Anthropic API expects the bare alias. The wizard's `fallbackModel`
+ * is a different model on a different routing path, so a tier the gateway
+ * doesn't currently vend silently degrades rather than failing the run.
+ *
+ * Exported so unit tests can pin the mapping without standing up the
+ * full agent runtime.
+ */
+export function selectModel(
+  mode: import('../utils/types').WizardMode,
+  useDirectApiKey: boolean,
+): string {
+  let alias: string;
+  switch (mode) {
+    case 'fast':
+      alias = 'claude-haiku-4-5';
+      break;
+    case 'thorough':
+      alias = 'claude-opus-4-7';
+      break;
+    case 'standard':
+    default:
+      alias = 'claude-sonnet-4-6';
+      break;
+  }
+  return useDirectApiKey ? alias : `anthropic/${alias}`;
+}
+
 export type AgentConfig = {
   workingDirectory: string;
   amplitudeMcpUrl: string;
@@ -218,6 +250,12 @@ export type AgentConfig = {
   skipAmplitudeMcp?: boolean;
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
+  /**
+   * Internal agent model tier — see `docs/internal/agent-mode-flag.md`.
+   * Threaded from `WizardSession.mode` via `agent-runner.ts`.
+   * Undefined defaults to `'standard'` (the wizard's default model).
+   */
+  mode?: import('../utils/types').WizardMode;
   /**
    * UUID v4 that groups all `/v1/messages` calls in this wizard run into one
    * Agent Analytics session. Sourced from `WizardSession.agentSessionId`,
@@ -250,6 +288,16 @@ export type AgentConfig = {
  * dev-server boot) working while breaking the runaway sleep loop.
  */
 export const MAX_BASH_SLEEP_SECONDS = 5;
+
+/**
+ * Number of consecutive 401 / auth-flavored `api_retry` system messages from
+ * the Claude Agent SDK we'll tolerate before aborting the query and surfacing
+ * AUTH_ERROR. The SDK's default retry policy hammers a 401 ~10 times with
+ * exponential backoff (~3 min total) — but a 401 won't recover mid-run, so
+ * we cut the storm short and show the user a clear failure + manual-signup
+ * fallback instead of a stuck spinner.
+ */
+export const AUTH_RETRY_LIMIT = 2;
 
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
@@ -1132,16 +1180,85 @@ export function wizardCanUseTool(
 ):
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
   | { behavior: 'deny'; message: string } {
-  // Block direct reads/writes of .env files — use wizard-tools MCP instead
-  if (toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') {
+  // Block direct reads/writes of .env files — use wizard-tools MCP instead.
+  // The full set of write tools is `Write`, `Edit`, `MultiEdit`, and
+  // `NotebookEdit` — see classifyWriteOperation in agent-events.ts. Older
+  // versions of this hook only matched `Write`/`Edit`, leaving MultiEdit
+  // as a bypass path. Cover all four tools here.
+  const isReadTool = toolName === 'Read';
+  const isWriteTool =
+    toolName === 'Write' ||
+    toolName === 'Edit' ||
+    toolName === 'MultiEdit' ||
+    toolName === 'NotebookEdit';
+  if (isReadTool || isWriteTool) {
     const filePath = typeof input.file_path === 'string' ? input.file_path : '';
-    const basename = path.basename(filePath);
+    // Normalize path separators BEFORE computing basename. On POSIX, Node's
+    // `path.basename` does not recognize `\` as a separator, so a Windows
+    // path like `C:\\project\\.amplitude\\events.json` would basename to
+    // the entire string and slip past our matchers. Normalizing to `/`
+    // first means `path.basename` is correct on both platforms regardless
+    // of which slash style the agent passed.
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const basename = path.basename(normalizedPath);
     if (basename.startsWith('.env')) {
       logToFile(`Denying ${toolName} on env file: ${filePath}`);
       return {
         behavior: 'deny',
         message: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
       };
+    }
+    // Block direct writes to the wizard-managed event-plan and dashboard
+    // artifacts. These files are owned by `confirm_event_plan` and the
+    // dashboard watcher — direct writes are the source of two recurring
+    // bugs: (1) the file already exists from a prior run and Write errors
+    // out (Write requires a prior Read of an existing file), forcing the
+    // agent into a confused "stale file" recovery loop; (2) the agent
+    // writes a different shape (event_name, file_path, etc.) than the
+    // wizard UI expects, so the manifest drifts from real track() calls.
+    // The integration skills owned by context-hub still instruct agents
+    // to write `.amplitude-events.json` directly — denying here is
+    // defense in depth that lands today, in advance of the upstream
+    // skill refresh.
+    if (isWriteTool) {
+      const lower = basename.toLowerCase();
+      const isEventsFile =
+        lower === '.amplitude-events.json' || lower === 'events.json';
+      const isDashboardFile =
+        lower === '.amplitude-dashboard.json' || lower === 'dashboard.json';
+      // For the bare `events.json` / `dashboard.json` cases, only deny
+      // when the path is inside `.amplitude/` (the wizard's metadata
+      // dir). A user codebase might legitimately have an unrelated
+      // `events.json` somewhere else. We use the already-normalized
+      // path (forward slashes) computed at the top of this branch so
+      // the substring check is consistent across POSIX and Windows.
+      const insideMetaDir = normalizedPath.includes('/.amplitude/');
+      const isLegacyDotfile =
+        lower === '.amplitude-events.json' ||
+        lower === '.amplitude-dashboard.json';
+      const isCanonicalInMetaDir =
+        (lower === 'events.json' || lower === 'dashboard.json') &&
+        insideMetaDir;
+      if (isLegacyDotfile || isCanonicalInMetaDir) {
+        const which = isEventsFile ? 'event plan' : 'dashboard';
+        const tool =
+          which === 'event plan'
+            ? 'mcp__wizard-tools__confirm_event_plan'
+            : 'the dashboard watcher (which mirrors writes from the Amplitude MCP `create_dashboard` call)';
+        logToFile(
+          `Denying ${toolName} on wizard-managed ${which} file: ${filePath}`,
+        );
+        return {
+          behavior: 'deny',
+          message: `Direct ${toolName} of ${basename} is not allowed. The ${which} file is owned by ${tool}. Call that tool with the proposed plan instead — it persists the file in the canonical shape the wizard UI expects, so the manifest never drifts from real track() calls. ${
+            isDashboardFile
+              ? ''
+              : 'If a stale ' +
+                basename +
+                ' is on disk from a prior run, ignore it and call confirm_event_plan; the wizard atomically replaces it.'
+          }`,
+        };
+      }
     }
     return { behavior: 'allow', updatedInput: input };
   }
@@ -1408,10 +1525,11 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
-      // Gateway expects 'anthropic/claude-sonnet-4-6'; direct Anthropic API expects 'claude-sonnet-4-6'
-      model: useDirectApiKey
-        ? 'claude-sonnet-4-6'
-        : 'anthropic/claude-sonnet-4-6',
+      // Mode → model alias. Default 'standard' = current behavior;
+      // see `docs/internal/agent-mode-flag.md` for the full mapping.
+      // Gateway expects the `anthropic/<alias>` prefix; direct API expects
+      // the bare alias — `selectModel` handles both.
+      model: selectModel(config.mode ?? 'standard', useDirectApiKey),
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,
@@ -1533,12 +1651,101 @@ export async function runAgentLocally(
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
 
+    // Rate-limit how often raw stdout chunks become user-visible status
+    // updates. Each pushStatus mutates the store and triggers a full TUI
+    // re-render; under stream-json output that fires hundreds of times a
+    // second and stalls the UI. We keep the most recent line (so the
+    // status reflects "now") but only forward it to the UI on a fixed
+    // cadence. Logging stays per-line for full fidelity in the log file.
+    const PUSH_INTERVAL_MS = 150;
+    let pendingLine: string | null = null;
+    let pushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushPending = () => {
+      pushTimer = null;
+      if (pendingLine === null) return;
+      const line = pendingLine;
+      pendingLine = null;
+      spinner.message(line);
+      getUI().pushStatus(line);
+    };
+
+    /**
+     * Detect Anthropic stream-event protocol JSON. These lines
+     * (`{"type":"message_start",...}`, `{"type":"content_block_delta",...}`,
+     * etc.) leak into stdout when claude is invoked with a streaming output
+     * format. They're useful in the log file but pure garbage in the status
+     * pill — the user sees raw protocol noise and the long, unbounded JSON
+     * also pushes the progress counter past terminal width and folds the
+     * header layout (see RunScreen.tsx `truncateStatus`). Drop them from
+     * the user-facing status; they're already captured in the per-line log.
+     */
+    const STREAM_EVENT_TYPES = new Set([
+      'message_start',
+      'message_delta',
+      'message_stop',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop',
+      'ping',
+      'stream_event',
+    ]);
+    /**
+     * Belt-and-braces signature match for partial / pre-buffer protocol
+     * JSON. `JSON.parse` only succeeds on complete lines, so a chunk that
+     * splits mid-payload (very common for `content_block_delta`, which
+     * carries large strings) would otherwise slip past the strict check
+     * and reach the status pill as truncated noise like
+     * `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delt…`.
+     * Anchor on the `{"type":"<known>"` prefix to catch those before they
+     * paint to the UI.
+     */
+    const STREAM_EVENT_PREFIXES = Array.from(STREAM_EVENT_TYPES).map(
+      (t) => `{"type":"${t}"`,
+    );
+    const looksLikeStreamEvent = (line: string): boolean => {
+      if (line.length < 9 || line[0] !== '{') return false;
+      // Fast path: signature match on the prefix. Survives partial lines.
+      for (const prefix of STREAM_EVENT_PREFIXES) {
+        if (line.startsWith(prefix)) return true;
+      }
+      // Slow path: full parse for completeness (handles odd whitespace).
+      try {
+        const obj = JSON.parse(line) as { type?: unknown };
+        return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
+      } catch {
+        return false;
+      }
+    };
+
+    /**
+     * Line buffer for stdout. The OS pipes stdout in arbitrary-sized
+     * chunks — a single `data` event may carry multiple lines, half a
+     * line, or several lines plus a partial trailing one. Splitting each
+     * raw chunk on `\n` and treating every result as a complete line was
+     * the root cause of `{"type":"content_block_delta",…` leaking past
+     * the filter: the trailing fragment couldn't `JSON.parse`, so the
+     * strict signature check missed it. Buffer until we see a newline,
+     * emit only complete lines, and stash the remainder for the next
+     * chunk. (The prefix match above is a second line of defense if a
+     * line is genuinely longer than the pipe buffer.)
+     */
+    let stdoutBuffer = '';
+    const consumeLine = (line: string) => {
+      logToFile('claude stdout:', line);
+      if (looksLikeStreamEvent(line)) return;
+      pendingLine = line.slice(0, 80);
+      if (pushTimer === null) {
+        pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
+      }
+    };
+
     proc.stdout.on('data', (chunk: string) => {
-      const lines = chunk.split('\n').filter((l) => l.trim());
-      for (const line of lines) {
-        logToFile('claude stdout:', line);
-        spinner.message(line.slice(0, 80));
-        getUI().pushStatus(line.slice(0, 80));
+      stdoutBuffer += chunk;
+      let nl: number;
+      while ((nl = stdoutBuffer.indexOf('\n')) !== -1) {
+        const line = stdoutBuffer.slice(0, nl);
+        stdoutBuffer = stdoutBuffer.slice(nl + 1);
+        if (line.trim()) consumeLine(line);
       }
     });
 
@@ -1547,6 +1754,18 @@ export async function runAgentLocally(
     });
 
     proc.on('close', (code) => {
+      // Flush any line still buffered without a trailing newline so the
+      // final partial line isn't dropped on close.
+      if (stdoutBuffer.trim()) {
+        consumeLine(stdoutBuffer);
+        stdoutBuffer = '';
+      }
+      // Flush any pending status update so the very last line the user
+      // sees reflects what actually happened just before exit.
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        flushPending();
+      }
       if (code === 0) {
         spinner.stop(successMessage);
         resolve({});
@@ -1557,6 +1776,11 @@ export async function runAgentLocally(
     });
 
     proc.on('error', (err) => {
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        pushTimer = null;
+        pendingLine = null;
+      }
       spinner.stop(errorMessage);
       reject(err);
     });
@@ -1711,6 +1935,16 @@ export async function runAgent(
   // outer function scope so both error-emit paths can see them.
   let attemptCount = 0;
   let upstreamGatewayFailures = 0;
+  // Auth tracking — hoisted to function scope so the outer catch can branch
+  // on authErrorDetected. Reset per-attempt inside the retry loop.
+  // - authErrorDetected: a 401 / auth-error result or repeated auth retries
+  //   were observed; route to AUTH_ERROR outro instead of generic API_ERROR.
+  // - authRetryCount: consecutive `api_retry` system messages with
+  //   error_status 401 (or auth-error patterns). When this hits
+  //   AUTH_RETRY_LIMIT we abort the SDK query early so the user isn't
+  //   stuck waiting through ~3 minutes of futile retries.
+  let authErrorDetected = false;
+  let authRetryCount = 0;
 
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
@@ -1926,9 +2160,8 @@ export async function runAgent(
     // 20-min fetch timeout).
     const STALL_TIMEOUT_MS = 120_000;
 
-    // Tracks whether an authentication failure was detected in the current attempt.
-    // Passed to createStopHook so it can skip reflection when auth is broken.
-    let authErrorDetected = false;
+    // (Auth tracking declared at outer function scope — see above the try
+    // block — so the outer catch can also branch on authErrorDetected.)
 
     // Tracks whether a post-stream retry banner is currently shown to the user.
     // Mirrors the pattern in src/lib/middleware/retry.ts: set true when we
@@ -2035,6 +2268,7 @@ export async function runAgent(
         collectedText.length = 0;
         recentStatuses.length = 0;
         authErrorDetected = false;
+        authRetryCount = 0;
         reportedError = null;
         // Reset the agent recovery bag too — without this, modifiedFiles /
         // lastStatus / compactionCount accumulated by a stalled attempt
@@ -2398,6 +2632,39 @@ export async function runAgent(
             logToFile('Auth error detected in result message');
           }
 
+          // Short-circuit the SDK's 401 retry storm. The SDK retries 401s up
+          // to 10 times with exponential backoff (~3 minutes total) — but a
+          // 401 is a credential problem that won't recover within the run.
+          // After AUTH_RETRY_LIMIT consecutive auth-flavored api_retry
+          // messages, abort the SDK query and route to the AUTH_ERROR outro
+          // so the user sees a clear failure + manual-signup fallback
+          // instead of a stuck spinner.
+          if (
+            message.type === 'system' &&
+            message.subtype === 'api_retry' &&
+            ((message as unknown as { error_status?: number }).error_status ===
+              401 ||
+              isAuthErrorMessage(JSON.stringify(message)))
+          ) {
+            authRetryCount++;
+            logToFile(
+              `Auth retry observed (${authRetryCount}/${AUTH_RETRY_LIMIT})`,
+            );
+            if (authRetryCount >= AUTH_RETRY_LIMIT) {
+              authErrorDetected = true;
+              logToFile(
+                'Auth retries exceeded threshold — aborting agent query',
+              );
+              analytics.wizardCapture('agent auth retry aborted', {
+                'retry count': authRetryCount,
+                attempt: attempt + 1,
+              });
+              if (!controller.signal.aborted) {
+                controller.abort('auth_failed');
+              }
+            }
+          }
+
           if (message.type === 'system' && message.subtype === 'init') {
             for (const server of (
               message as unknown as {
@@ -2512,6 +2779,16 @@ export async function runAgent(
         if (wizardSignal.aborted) {
           logToFile('Agent loop exiting: wizard signal aborted');
           throw innerError;
+        }
+
+        // Auth-aborted — do not retry. The early-detect block in the message
+        // loop fired controller.abort('auth_failed') after AUTH_RETRY_LIMIT
+        // consecutive 401 retries; falling into the stall-retry branch would
+        // re-run the same broken credentials. Break to the post-loop AUTH_ERROR
+        // path instead.
+        if (authErrorDetected) {
+          logToFile('Agent loop exiting: auth error detected, not retrying');
+          break;
         }
 
         // Stall-aborted or API error with retries remaining — try again
@@ -2695,6 +2972,17 @@ export async function runAgent(
     // Signal done to unblock the async generator
     signalDone();
 
+    // Auth-aborted while the SDK was still streaming — the early-detect path
+    // fired controller.abort('auth_failed') and the resulting AbortError
+    // bubbled up. Surface AUTH_ERROR so agent-runner shows the friendly
+    // re-auth / manual-signup outro instead of a generic API_ERROR.
+    if (authErrorDetected) {
+      logToFile('Agent error (caught): AUTH_ERROR');
+      spinner.stop('Authentication failed');
+      _activeStatusReporter = undefined;
+      return { error: AgentErrorType.AUTH_ERROR };
+    }
+
     // If we already received a successful result, the error is from SDK cleanup
     // This happens due to a race condition: the SDK tries to send a cleanup command
     // after the prompt stream closes, but streaming mode is still active.
@@ -2855,10 +3143,20 @@ function handleSDKMessage(
         // Only show errors to user if we haven't already succeeded.
         // Post-success errors are SDK cleanup noise (telemetry failures, streaming
         // mode race conditions). Full message already logged above via JSON dump.
+        //
+        // Cap the user-visible message at 2KB at the SOURCE — Anthropic
+        // SDK exceptions sometimes include the entire failing SSE stream
+        // (40-50KB of model id, signature blobs, partial JSON deltas)
+        // serialized into a single string. Past sessions surfaced 50KB
+        // `log.message` strings that polluted orchestrator context.
+        // `truncateLogMessage` is the same helper the NDJSON emit layer
+        // uses; capping here keeps the on-disk verbose log bounded too.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       } else if (message.subtype === 'success') {
@@ -2869,11 +3167,16 @@ function handleSDKMessage(
       } else {
         logToFile('Agent result with error:', message.result);
         // Error result - only show to user if we haven't already succeeded.
-        // Full message already logged above via JSON dump.
+        // Full message already logged above via JSON dump. Cap each
+        // error string at 2KB at the source (same rationale as the
+        // `is_error` branch above): Anthropic SDK exceptions sometimes
+        // serialize the entire failing SSE stream into the error text.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       }

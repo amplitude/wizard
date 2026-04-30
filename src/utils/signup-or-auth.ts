@@ -243,10 +243,18 @@ export async function performSignupOrAuth(
       zone: input.zone,
     };
   }
+  // Mark ToS as accepted for signup flow (the user went through the ToS
+  // screen or --signup was used, which implies acceptance)
+  const userWithTos: StoredUser = {
+    ...user,
+    tosAccepted: true,
+    tosAcceptedAt: new Date().toISOString(),
+  };
+
   // Persist BEFORE telemetry: a disk/permission failure must propagate to
   // the outer catch so `wrapper_exception` is the sole event — emitting
   // success or user_fetch_failed first would double-count the attempt.
-  replaceStoredUser(user, tokens);
+  replaceStoredUser(userWithTos, tokens);
   if (fetchResult.ok) {
     trackSignupAttempt({
       status: 'success',

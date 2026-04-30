@@ -36,6 +36,7 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
+import { clearApiKey } from '../../utils/api-key-store.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -527,6 +528,52 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSignupEmail(email: string): void {
+    this.$session.setKey('signupEmail', email);
+    analytics.wizardCapture('signup email captured', { 'has email': !!email });
+    this.emitChange();
+  }
+
+  setSignupFullName(fullName: string): void {
+    this.$session.setKey('signupFullName', fullName);
+    analytics.wizardCapture('signup full name captured', {
+      'has name': !!fullName,
+    });
+    this.emitChange();
+  }
+
+  markEmailCaptureComplete(): void {
+    this.$session.setKey('emailCaptureComplete', true);
+    analytics.wizardCapture('email capture complete');
+    this.emitChange();
+  }
+
+  acceptTermsOfService(): void {
+    this.$session.setKey('tosAccepted', true);
+    analytics.wizardCapture('terms of service accepted');
+    this.emitChange();
+  }
+
+  resetEmailCapture(): void {
+    this.$session.setKey('emailCaptureComplete', false);
+    analytics.wizardCapture('back navigation', { to: 'email-capture' });
+    this.emitChange();
+  }
+
+  resetToS(): void {
+    this.$session.setKey('tosAccepted', null);
+    analytics.wizardCapture('back navigation', { to: 'tos' });
+    this.emitChange();
+  }
+
+  cancelWizard(reason: string): void {
+    this.setOutroData({
+      kind: 'cancel' as const,
+      message: reason,
+    });
+    this.emitChange();
+  }
+
   /**
    * Force the RegionSelect screen to re-appear (/region command).
    *
@@ -874,6 +921,11 @@ export class WizardStore {
     cloudRegion: CloudRegion | null;
     orgs: WizardSession['pendingOrgs'];
   }): void {
+    // Wipe any cached project API key for this install dir before the
+    // AuthScreen resolution runs. Without this, a stale key from a prior
+    // run in a different org silently wins over the freshly-fetched env
+    // key in `data.orgs`, and the agent inlines the wrong key.
+    clearApiKey(this.session.installDir);
     this.$session.setKey('pendingAuthAccessToken', data.accessToken);
     this.$session.setKey('pendingAuthIdToken', data.idToken);
     this.$session.setKey('pendingOrgs', data.orgs);
@@ -1319,6 +1371,41 @@ export class WizardStore {
     this.$session.setKey('projectHasData', null);
     this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
+    this.emitChange();
+  }
+
+  /**
+   * Confirm the silently-resolved org/project on a returning run.
+   * Clears `requiresAccountConfirmation` so the Auth flow gate advances.
+   */
+  confirmAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    analytics.wizardCapture('account confirmed', {
+      'from screen': 'auth',
+      'org id': this.session.selectedOrgId,
+      'project id': this.session.selectedProjectId,
+    });
+    this.emitChange();
+  }
+
+  /**
+   * Reject the silently-resolved org/project on a returning run and drop
+   * back to the SUSI picker. Drops the cached selection AND credentials
+   * so AuthScreen re-runs the OAuth-to-picker pipeline; the cached idToken
+   * is still used (no fresh browser round-trip required) but the user can
+   * pick a different org / project / environment this time.
+   */
+  rejectStoredAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    analytics.wizardCapture('account rejected', { 'from screen': 'auth' });
     this.emitChange();
   }
 

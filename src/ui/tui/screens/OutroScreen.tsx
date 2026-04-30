@@ -26,9 +26,13 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
-import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
+import {
+  isWizardAbortInProgress,
+  wizardSuccessExit,
+} from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
+import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -89,15 +93,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         setBugReportPathState(written);
         return;
       }
-      // Signal dismissal instead of process.exit(0) directly. The
-      // wizardAbort caller is awaiting this — when it resolves, abort
-      // proceeds to its analytics flush + process.exit with the real
-      // exit code (NETWORK / AGENT_FAILED / etc.). Calling process.exit
-      // here would: (1) force exitCode 0 on every error, hiding real
-      // failures from CI; (2) skip the analytics shutdown that
-      // wizardAbort runs after cancel; (3) race with the success path
-      // below which already routes through process.exit.
+      // Signal dismissal first. When we got here via wizardAbort, that
+      // caller is awaiting this signal — once it resolves, abort runs
+      // its own analytics flush and `process.exit` with the real exit
+      // code (NETWORK / AGENT_FAILED / etc.). Don't double-exit in that
+      // case: a bare `process.exit(0)` here would (1) force exitCode 0
+      // on every error, hiding real failures from CI; (2) skip the
+      // analytics shutdown wizardAbort runs after cancel.
       store.signalOutroDismissed();
+      // BUT — several screens (DataIngestionCheckScreen `q`, IntroScreen
+      // resume-cancel, SetupScreen back-out, ActivationOptionsScreen
+      // 'exit') navigate to the cancel outro via `setOutroData` without
+      // going through wizardAbort. In that path nobody is awaiting
+      // outroDismissed, so the dismissal signal resolves a promise no
+      // one is listening to and the process hangs forever — only Ctrl+C
+      // escapes. Detect "no abort in flight" and drive the exit
+      // ourselves so any-key really does exit.
+      if (!isWizardAbortInProgress()) {
+        void wizardSuccessExit(0);
+      }
       return;
     }
     if (showReport && key.escape) setShowReport(false);
@@ -105,6 +119,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
 
   const outroData = store.session.outroData;
   const visibleEvents = store.eventPlan.filter((e) => e.name.trim().length > 0);
+
+  /** Browser link with sign-in / refresh gate — see `toWizardDashboardOpenUrl`. */
+  const dashboardCanonicalUrl = store.session.checklistDashboardUrl;
+  const dashboardOpenUrl = dashboardCanonicalUrl
+    ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
+    : null;
 
   if (!outroData) {
     return (
@@ -201,16 +221,14 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               a dashboard during the conclude phase; surface it as a clickable
               link with a clear "this is your next step" framing so users
               don't bounce out of the terminal wondering "what now?". */}
-          {store.session.checklistDashboardUrl && (
+          {dashboardOpenUrl && (
             <Box marginTop={1} flexDirection="column">
               <Text color={Colors.accent} bold>
                 {Icons.diamond} Your dashboard is ready
               </Text>
               <Box marginLeft={2}>
                 <Text color={Colors.body}>
-                  <TerminalLink url={store.session.checklistDashboardUrl}>
-                    {store.session.checklistDashboardUrl}
-                  </TerminalLink>
+                  <TerminalLink url={dashboardOpenUrl}>{dashboardOpenUrl}</TerminalLink>
                 </Text>
               </Box>
               <Box marginLeft={2}>
@@ -335,7 +353,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             // Without the existsSync gate, the option would point at a stale
             // report from a previous run (e.g. against a different workspace).
             options={(() => {
-              const dashboardUrl = store.session.checklistDashboardUrl;
+              const dashboardUrl = dashboardOpenUrl;
               return [
                 {
                   label: dashboardUrl
@@ -371,8 +389,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   },
                 );
                 const url =
-                  store.session.checklistDashboardUrl ??
-                  OUTBOUND_URLS.overview[zone];
+                  dashboardOpenUrl ?? OUTBOUND_URLS.overview[zone];
                 opn(url, { wait: false }).catch(() => {
                   /* fire-and-forget */
                 });

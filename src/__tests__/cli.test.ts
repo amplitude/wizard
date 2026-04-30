@@ -107,6 +107,8 @@ vi.mock('../ui/tui/start-tui', () => ({
 vi.mock('../lib/wizard-session', () => ({
   // Real buildSession includes region: null and credentials: null by default;
   // mirror that so the auth-task checks behave correctly in tests.
+  // Also mirrors the schema's `acceptTos → tosAccepted` translation so
+  // runDirectSignupIfRequested's missing-flags gate sees the right value.
   buildSession: (args: Record<string, unknown>) => ({
     region: null,
     credentials: null,
@@ -114,6 +116,7 @@ vi.mock('../lib/wizard-session', () => ({
     frameworkContextAnswerOrder: [],
     apiKeyNotice: null,
     ...args,
+    tosAccepted: args.acceptTos === true ? true : null,
   }),
   DiscoveredFeature: { Stripe: 'stripe', LLM: 'llm' },
 }));
@@ -124,6 +127,7 @@ vi.mock('../lib/constants', () => ({
   DEFAULT_AMPLITUDE_ZONE: 'us',
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
   EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  TERMS_OF_SERVICE_URL: 'https://amplitude.com/terms',
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
@@ -137,10 +141,22 @@ vi.mock('../utils/ampli-settings', () => ({
   getStoredToken: mockGetStoredToken,
   clearStoredCredentials: vi.fn(),
 }));
-vi.mock('../lib/ampli-config', () => ({
-  ampliConfigExists: mockAmpliConfigExists,
-  readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
-}));
+vi.mock('../lib/ampli-config', async () => {
+  // The reset and logout commands now call `clearAuthFieldsInAmpliConfig`
+  // to strip auth-scoped fields from `ampli.json` on sign-out / project
+  // reset. The reset test fixture writes a real `ampli.json` with
+  // `OrgId` + `SourceId` and asserts the auth field is gone afterward,
+  // so we can't fully mock this module — defer to the real
+  // implementation but keep the few helpers that earlier tests stub.
+  const actual = await vi.importActual<typeof import('../lib/ampli-config')>(
+    '../lib/ampli-config',
+  );
+  return {
+    ...actual,
+    ampliConfigExists: mockAmpliConfigExists,
+    readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
+  };
+});
 vi.mock('../utils/api-key-store', () => ({
   readApiKeyWithSource: vi.fn().mockReturnValue(null),
   persistApiKey: vi.fn().mockReturnValue('env'),
@@ -348,6 +364,37 @@ describe('CI mode validation', { timeout: 20_000 }, () => {
     const initialSession = mockStartTUI.mock.calls[0][2];
     expect(initialSession).toBeDefined();
     expect(initialSession?.installDir).toBe('/tmp/test-app');
+  });
+
+  // Internal `--mode` flag — see `docs/internal/agent-mode-flag.md`.
+  // We pin (a) the default and (b) that a non-default value threads
+  // through to the session, but deliberately do NOT enumerate the
+  // non-default tiers in test names or stderr-style messaging. The flag
+  // is hidden from `--help` and shouldn't be advertised in test output
+  // either.
+  test('--mode defaults to "standard" so existing users are unaffected', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    await runCLI([]);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession?.mode).toBe('standard');
+  });
+
+  test('--mode threads through to the initial session when set', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    // Pick the cheapest non-default tier to exercise threading. We do
+    // NOT test the high-capability tier here — see the internal doc for
+    // why that path is left to manual verification.
+    await runCLI(['--mode', 'fast']);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession?.mode).toBe('fast');
   });
 });
 
@@ -714,6 +761,131 @@ describe('logout command', () => {
       expect.stringContaining('No active session'),
     );
   });
+
+  // logout deliberately does NOT touch project-scoped artifacts —
+  // `wizard reset` is the gesture for that. This test guards the
+  // separation: a debug-time logout should NEVER nuke the user's
+  // setup report.
+  test('default logout preserves wizard artifacts', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-keep-test-'),
+    );
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    mockGetStoredUser.mockReturnValue({ email: 'jane@example.com' });
+
+    await runCLI(['logout', '--install-dir', projectDir]);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      true,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(true);
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+});
+
+// ── reset command ──────────────────────────────────────────────────────────────
+
+describe('reset command', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+    consoleSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    vi.resetModules();
+  });
+
+  test('removes all wizard artifacts and emits a JSON result', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-test-'),
+    );
+    fs.mkdirSync(path.join(projectDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.amplitude', 'events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    fs.writeFileSync(
+      path.join(projectDir, 'ampli.json'),
+      JSON.stringify({ OrgId: 'org-1', SourceId: 'keep' }),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    // All wizard-managed targets gone:
+    expect(fs.existsSync(path.join(projectDir, '.amplitude'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(false);
+    // ampli.json: auth-scoped fields stripped, tracking-plan fields preserved.
+    const ampli = JSON.parse(
+      fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8'),
+    ) as Record<string, string>;
+    expect(ampli.OrgId).toBeUndefined();
+    expect(ampli.SourceId).toBe('keep');
+
+    // JSON result line emitted to stdout:
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(3);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test('is a no-op (with friendly note) when there are no artifacts', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-empty-'),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(0);
+      expect(parsed.data.skipped.length).toBe(4);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
 });
 
 // ── whoami command ─────────────────────────────────────────────────────────────
@@ -744,7 +916,11 @@ describe('whoami command', () => {
     vi.resetModules();
   });
 
-  test('shows user name and email when logged in', async () => {
+  // Pass `--human` so the test exercises the chalk-formatted UI output
+  // (`getUI().log.info` → console.log) instead of the agent-friendly
+  // JSON path that fires by default when stdout is non-TTY (e.g. inside
+  // vitest). The JSON shape is covered by the dedicated test below.
+  test('shows user name and email when logged in (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-1',
       firstName: 'Jane',
@@ -754,7 +930,7 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -765,11 +941,11 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('shows not-logged-in message when no token', async () => {
+  test('shows not-logged-in message when no token (--human)', async () => {
     mockGetStoredUser.mockReturnValue(null);
     mockGetStoredToken.mockReturnValue(null);
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -784,7 +960,7 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('prints zone for EU users', async () => {
+  test('prints zone for EU users (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-2',
       firstName: 'Jean',
@@ -794,13 +970,85 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/eu/);
+  });
+
+  // Agent-mode contract: `whoami --json` emits a single NDJSON line on
+  // stdout carrying `{ event: 'whoami', loggedIn, email, region, ... }`.
+  // The skill reads this to render "you're logged in as X (Org Y)" in
+  // one line before any other action.
+  test('emits structured JSON when logged in', async () => {
+    mockGetStoredUser.mockReturnValue({
+      id: 'user-3',
+      firstName: 'Sam',
+      lastName: 'Cooper',
+      email: 'sam@example.com',
+      zone: 'us',
+    });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'token',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+
+    // JSON emission goes through process.stdout.write, not console.log,
+    // so spy on the underlying writer.
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    // Find the line that's our whoami payload (other modules may write
+    // unrelated lines during bin.ts startup; filter to ours).
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.type).toBe('result');
+    expect(payload.data.event).toBe('whoami');
+    expect(payload.data.loggedIn).toBe(true);
+    expect(payload.data.email).toBe('sam@example.com');
+    expect(payload.data.firstName).toBe('Sam');
+    expect(payload.data.lastName).toBe('Cooper');
+    expect(payload.data.region).toBe('us');
+    expect(payload.data.tokenExpiresAt).toBe('2099-01-01T00:00:00Z');
+
+    stdoutSpy.mockRestore();
+  });
+
+  test('emits structured JSON with loginCommand when logged out', async () => {
+    mockGetStoredUser.mockReturnValue(null);
+    mockGetStoredToken.mockReturnValue(null);
+
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.data.loggedIn).toBe(false);
+    expect(Array.isArray(payload.data.loginCommand)).toBe(true);
+    expect(payload.data.loginCommand).toContain('login');
+
+    stdoutSpy.mockRestore();
   });
 });
 
@@ -955,6 +1203,9 @@ describe('--email and --full-name flags', () => {
       'ada@example.com',
       '--full-name',
       'Ada Lovelace',
+      '--accept-tos',
+      '--region',
+      'us',
       '--install-dir',
       '/tmp/test',
     ]);
@@ -968,6 +1219,7 @@ describe('--email and --full-name flags', () => {
       expect.objectContaining({
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
+        tosAccepted: true,
       }),
       expect.any(Function),
     );
@@ -986,12 +1238,10 @@ describe('--email and --full-name flags', () => {
       'ada@example.com',
       '--full-name',
       'Ada Lovelace',
-      // `--region` is required in non-TUI modes now — without it,
-      // `tryResolveZone` returns null and `process.exit` fires before
-      // `performSignupOrAuth` is ever called. In test, `process.exit`
-      // is a no-op so the assertion would pass for the wrong reason
-      // (execution falling through with `zone: null`). Pass a real
-      // region so the production control flow is exercised.
+      '--accept-tos',
+      // `--region` is required in non-TUI modes — without it, the missing-flags
+      // gate in `runDirectSignupIfRequested` exits via INVALID_ARGS before
+      // `performSignupOrAuth` is ever called.
       '--region',
       'us',
       '--install-dir',
@@ -1010,6 +1260,109 @@ describe('--email and --full-name flags', () => {
         status: 'wrapper_exception',
         zone: expect.any(String),
       }),
+    );
+  });
+
+  test('--ci --signup without --accept-tos exits INVALID_ARGS', async () => {
+    // `vi.clearAllMocks()` clears call data but not stored implementations,
+    // so prior login-suite tests' `mockReturnValue` calls leak. Reset here.
+    mockGetStoredUser.mockReturnValue(undefined);
+    // Direct override instead of vi.spyOn — vitest's stderr capture
+    // intercepts writes before the spy sees them.
+    const stderrCalls: string[] = [];
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown) => {
+      stderrCalls.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+
+    try {
+      await runCLI([
+        '--signup',
+        '--ci',
+        '--email',
+        'ada@example.com',
+        '--full-name',
+        'Ada Lovelace',
+        '--region',
+        'us',
+        '--install-dir',
+        '/tmp/test',
+      ]);
+
+      await waitFor(
+        () => (process.exit as unknown as Mock).mock.calls.length > 0,
+      );
+    } finally {
+      process.stderr.write = origStderrWrite;
+    }
+
+    // Exits with INVALID_ARGS (2) and prints a missing-flags error.
+    // (Don't assert mockRunWizard was not called — process.exit is a no-op
+    // in tests, so execution falls through to lazyRunWizard. In production
+    // the real exit prevents that.)
+    expect(process.exit).toHaveBeenCalledWith(2);
+    expect(stderrCalls.join('')).toMatch(/--accept-tos/);
+  });
+
+  test('--agent --signup with no other flags emits signup_input_required and exits INPUT_REQUIRED', async () => {
+    // Reset stored-user implementation leaked from earlier login tests so
+    // tryResolveZone returns null (otherwise zone resolves from a prior
+    // test's `mockGetStoredUser.mockReturnValue({ zone: 'us', ... })` and
+    // --region wouldn't appear in the missing[] list).
+    mockGetStoredUser.mockReturnValue(undefined);
+    // Direct stdout override — AgentUI emits NDJSON via process.stdout.write
+    // which goes through `safePipeWrite` (a non-spy-friendly path).
+    const stdoutCalls: string[] = [];
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: unknown) => {
+      stdoutCalls.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
+
+    try {
+      await runCLI(['--signup', '--agent', '--install-dir', '/tmp/test']);
+
+      await waitFor(
+        () => (process.exit as unknown as Mock).mock.calls.length > 0,
+      );
+    } finally {
+      process.stdout.write = origStdoutWrite;
+    }
+
+    // Exits with INPUT_REQUIRED (12).
+    expect(process.exit).toHaveBeenCalledWith(12);
+
+    // stdout received an NDJSON line with event: 'signup_input_required'
+    // listing all four missing flags.
+    const events = stdoutCalls
+      .join('')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (e): e is { type: string; data?: { event?: string } } => e !== null,
+      );
+    const signupEvent = events.find(
+      (e) => e.data?.event === 'signup_input_required',
+    );
+    expect(signupEvent).toBeDefined();
+    const missingFlags = (
+      signupEvent?.data as { missing?: Array<{ flag: string }> } | undefined
+    )?.missing?.map((m) => m.flag);
+    expect(missingFlags).toEqual(
+      expect.arrayContaining([
+        '--region',
+        '--email',
+        '--full-name',
+        '--accept-tos',
+      ]),
     );
   });
 });

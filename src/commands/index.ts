@@ -5,6 +5,7 @@
 export { defaultCommand } from './default';
 export { loginCommand } from './login';
 export { logoutCommand } from './logout';
+export { resetCommand } from './reset';
 export { whoamiCommand } from './whoami';
 export { feedbackCommand } from './feedback';
 export { slackCommand } from './slack';

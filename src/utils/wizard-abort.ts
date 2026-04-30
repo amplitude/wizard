@@ -142,6 +142,74 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
       /* cleanup should not prevent exit */
     }
   }
+  // Emit the terminal `setup_complete` NDJSON event BEFORE
+  // `run_completed` so an orchestrator subscribing to
+  // outcome-class events sees the artifact list (appId, dashboard
+  // URL, files, env vars) on the same stream as the success
+  // signal. Best-effort: if no payload was registered (e.g. a
+  // login-only command), we skip emission.
+  try {
+    const { consumeSetupComplete, dashboardIdFromUrl } = await import(
+      '../lib/setup-complete-registry.js'
+    );
+    const setupComplete = consumeSetupComplete();
+    if (setupComplete) {
+      // Auto-derive `dashboardId` from `dashboardUrl` when the
+      // caller didn't fill it in explicitly. Cheap convenience —
+      // every Amplitude dashboard URL embeds the id as its last
+      // path segment, so the orchestrator shouldn't have to parse
+      // it out for follow-up MCP queries.
+      if (
+        setupComplete.amplitude.dashboardUrl &&
+        !setupComplete.amplitude.dashboardId
+      ) {
+        const id = dashboardIdFromUrl(setupComplete.amplitude.dashboardUrl);
+        if (id) setupComplete.amplitude.dashboardId = id;
+      }
+      // Stamp wall-clock duration from the same source as
+      // `run_completed` so downstream tooling can correlate the two.
+      if (setupComplete.durationMs === undefined) {
+        setupComplete.durationMs = computeRunDurationMs();
+      }
+      getUI().emitSetupComplete?.(setupComplete);
+
+      // Persist the canonical scope into ampli.json so a future
+      // agent session in the same codebase can recover the
+      // appId / dashboardUrl without re-running setup. Best-effort:
+      // a failed write here must never prevent exit.
+      try {
+        const { readAmpliConfig, writeAmpliConfig, mergeAmpliConfig } =
+          await import('../lib/ampli-config.js');
+        // Resolve the install dir from process.env if the spawn
+        // injected one (`apply` does this); otherwise default to
+        // cwd. The wizard's own runtime always lives in the
+        // install dir, so cwd is correct for non-spawned runs.
+        const installDir =
+          process.env.AMPLITUDE_WIZARD_INSTALL_DIR &&
+          process.env.AMPLITUDE_WIZARD_INSTALL_DIR.length > 0
+            ? process.env.AMPLITUDE_WIZARD_INSTALL_DIR
+            : process.cwd();
+        const existing = readAmpliConfig(installDir);
+        const base = existing.ok ? existing.config : {};
+        const a = setupComplete.amplitude;
+        const next = mergeAmpliConfig(base, {
+          ...(a.orgId ? { OrgId: a.orgId } : {}),
+          ...(a.projectId ? { ProjectId: a.projectId } : {}),
+          ...(a.region ? { Zone: a.region } : {}),
+          ...(a.appId ? { AppId: a.appId } : {}),
+          ...(a.appName ? { AppName: a.appName } : {}),
+          ...(a.envName ? { EnvName: a.envName } : {}),
+          ...(a.dashboardUrl ? { DashboardUrl: a.dashboardUrl } : {}),
+          ...(a.dashboardId ? { DashboardId: a.dashboardId } : {}),
+        });
+        writeAmpliConfig(installDir, next);
+      } catch {
+        /* ampli.json persistence is best-effort */
+      }
+    }
+  } catch {
+    /* setup-complete emission must never block exit */
+  }
   // Emit the terminal `run_completed` NDJSON event BEFORE shutting
   // analytics down. AgentUI is the only UI that implements this; for
   // InkUI / LoggingUI it's a no-op. The event has to land on stdout
@@ -255,9 +323,44 @@ export function resetWizardAbortController(): void {
   _wizardAbortController = null;
 }
 
+/**
+ * Tracks whether a `wizardAbort()` is currently in flight (between entry
+ * and `process.exit`). The OutroScreen dismissal handler reads this to
+ * decide whether to drive the exit itself.
+ *
+ * Why this exists: screens like DataIngestionCheckScreen, IntroScreen,
+ * SetupScreen, and ActivationOptionsScreen navigate to the cancel outro
+ * via `store.setOutroData({ kind: OutroKind.Cancel, ... })` — a UI-only
+ * navigation that does NOT go through `wizardAbort`. When the user
+ * pressed a key on that outro, `signalOutroDismissed` resolved a promise
+ * that nobody awaited, no analytics flush ran, no `process.exit` fired,
+ * and the wizard hung silently until Ctrl+C. By exporting this flag the
+ * outro can detect the "no awaiter" case and route through
+ * `wizardSuccessExit` to actually tear down the process.
+ *
+ * Why not always exit from the outro: when `wizardAbort` IS the caller,
+ * it owns the exit code (NETWORK / AGENT_FAILED / etc.) and runs its
+ * own analytics flush. A second `process.exit(0)` from the outro would
+ * race that path and either lose the real exit code or skip telemetry.
+ */
+let _wizardAbortInProgress = false;
+export function isWizardAbortInProgress(): boolean {
+  return _wizardAbortInProgress;
+}
+/**
+ * Test-only — production runs are one-shot processes that exit at the
+ * end of `wizardAbort`, so the flag never needs to be reset. Tests that
+ * mock `process.exit` (so `wizardAbort` returns instead of terminating)
+ * must call this between cases or the flag leaks across the suite.
+ */
+export function _resetWizardAbortInProgressForTests(): void {
+  _wizardAbortInProgress = false;
+}
+
 export async function wizardAbort(
   options?: WizardAbortOptions,
 ): Promise<never> {
+  _wizardAbortInProgress = true;
   const {
     message = 'Wizard setup cancelled.',
     error,
@@ -270,6 +373,20 @@ export async function wizardAbort(
   // caller's intended exit code with 130. Same fix as
   // `wizardSuccessExit`. Bugbot finding (Medium).
   suppressPipeAbort();
+
+  // Discard any partial setup_complete payload — a failed run must
+  // never emit a terminal artifact event; the orchestrator's signal
+  // for "setup landed" is presence of `setup_complete` followed by
+  // `run_completed: success`. Leaving stale data behind would leak
+  // into the next run inside the same process (test harnesses).
+  try {
+    const { resetSetupComplete } = await import(
+      '../lib/setup-complete-registry.js'
+    );
+    resetSetupComplete();
+  } catch {
+    /* registry reset must never block abort */
+  }
 
   // 1. Run registered cleanup functions
   for (const fn of cleanupFns) {

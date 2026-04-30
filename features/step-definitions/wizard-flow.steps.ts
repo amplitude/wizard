@@ -186,6 +186,31 @@ When('the wizard launches', function () {
   // session.projectHasData remains null (not yet checked)
 });
 
+When('the wizard launches with {string}', function (flags: string) {
+  // Parse flags and apply them to the session
+  if (flags.includes('--signup')) {
+    session.signup = true;
+  }
+  if (flags.includes('--signup-email')) {
+    const match = flags.match(/--signup-email\s+(\S+)/);
+    if (match) {
+      session.signupEmail = match[1];
+    }
+  }
+  // Check if valid credentials are stored (same as above)
+  const sharedConfigPath = (this as Record<string, unknown>).tempConfigPath as
+    | string
+    | undefined;
+  if (sharedConfigPath) {
+    const { getStoredToken } = require('../../src/utils/ampli-settings.js');
+    const token = getStoredToken(undefined, 'us', sharedConfigPath);
+    if (token) {
+      session.credentials = mockCredentials();
+      ensureIdentityNames(session);
+    }
+  }
+});
+
 // ── Intro screen ───────────────────────────────────────────────────────────────
 
 Then('I should see the IntroScreen', function () {
@@ -217,6 +242,63 @@ When('I pick "Change region" on the intro', function () {
   s.projectHasData = null;
   s.introConcluded = true;
 });
+
+// ── Signup flow (email capture + ToS) ─────────────────────────────────────────
+
+When('I enter my email address', function () {
+  session.signupEmail = 'test@example.com';
+  session.emailCaptureComplete = true;
+});
+
+When('I am on the ToSScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.ToS,
+    `Expected ToS screen but got ${screen}`,
+  );
+});
+
+When('I accept the Terms of Service', function () {
+  session.tosAccepted = true;
+});
+
+When('I decline the Terms of Service', function () {
+  session.tosAccepted = false;
+  session.outroData = {
+    kind: OutroKind.Cancel,
+    message: 'Terms of Service not accepted',
+  };
+});
+
+Then('I should be on the EmailCaptureScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.EmailCapture,
+    `Expected EmailCapture screen but got ${screen}`,
+  );
+});
+
+Then('I should be on the ToSScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.ToS,
+    `Expected ToS screen but got ${screen}`,
+  );
+});
+
+Then(
+  'the email field should be pre-filled with {string}',
+  function (email: string) {
+    assert.strictEqual(
+      session.signupEmail,
+      email,
+      `Expected email to be ${email} but got ${session.signupEmail}`,
+    );
+  },
+);
 
 // ── Then ──────────────────────────────────────────────────────────────────────
 

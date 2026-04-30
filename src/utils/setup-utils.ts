@@ -538,6 +538,15 @@ async function askForWizardLogin(
     forceFresh: opts.forceFresh,
   });
 
+  // Wipe any cached project API key for this install dir — a stale key
+  // from a prior login in a different org would otherwise win over the
+  // freshly-resolved env key in step 4 below (`readApiKeyWithSource` in
+  // `askForAmplitudeApiKey` returns first).
+  if (opts.installDir) {
+    const { clearApiKey } = await import('./api-key-store.js');
+    clearApiKey(opts.installDir);
+  }
+
   // ── 2. Detect actual cloud region (EU users auth via US endpoint but
   //       their data lives on EU servers — detectRegionFromToken probes both) ──
   let cloudRegion: CloudRegion = 'us';

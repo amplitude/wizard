@@ -25,6 +25,8 @@ export enum Screen {
   Auth = 'auth',
   CreateProject = 'create-project',
   RegionSelect = 'region-select',
+  EmailCapture = 'email-capture',
+  ToS = 'tos',
   DataSetup = 'data-setup',
   Options = 'options',
   ActivationOptions = 'activation-options',
@@ -109,6 +111,28 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetAuthForRegionChange();
       },
     },
+    // 2a. Email capture — shown only during --signup flow before ToS.
+    {
+      screen: Screen.EmailCapture,
+      show: (s) => s.signup && !s.emailCaptureComplete,
+      isComplete: (s) => !s.signup || s.emailCaptureComplete,
+      revert: (store) => {
+        // No-op when signup is false (screen was never shown)
+        if (!store.session.signup) return false;
+        store.resetEmailCapture();
+      },
+    },
+    // 2b. Terms of Service — shown only during --signup flow after email capture.
+    {
+      screen: Screen.ToS,
+      show: (s) => s.signup && s.emailCaptureComplete && s.tosAccepted !== true,
+      isComplete: (s) => !s.signup || s.tosAccepted === true,
+      revert: (store) => {
+        // No-op when signup is false (screen was never shown)
+        if (!store.session.signup) return false;
+        store.resetToS();
+      },
+    },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
     //
@@ -130,7 +154,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       isComplete: (s) =>
         s.credentials !== null &&
         (s.selectedOrgName !== null || s.selectedOrgId !== null) &&
-        (s.selectedProjectName !== null || s.selectedProjectId !== null),
+        (s.selectedProjectName !== null || s.selectedProjectId !== null) &&
+        // Returning-user account confirmation. Blocks the gate until the
+        // user explicitly confirms (or changes) the org/project that was
+        // resolved silently from disk. Set in bin.ts when resolveCredentials
+        // populates the session without going through the SUSI picker.
+        !s.requiresAccountConfirmation,
       // Back from DataSetup — drop the picked org/project/env so the
       // Auth screen re-renders the picker. Credentials stay so we don't
       // force a fresh OAuth round-trip.

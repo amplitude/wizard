@@ -23,6 +23,7 @@ import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
 import { wrapMcpServerWithSentry } from './observability/index';
+import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
 
 // Allow-listed hosts for remote skill downloads. The wizard ships skills
 // from amplitude/context-hub via GitHub Releases; nothing else should ever
@@ -1120,7 +1121,9 @@ export function buildFallbackReport(ctx: FallbackReportContext): string {
   lines.push('## Analytics dashboard');
   lines.push('');
   if (ctx.dashboardUrl) {
-    lines.push(`Open your dashboard: ${ctx.dashboardUrl}`);
+    lines.push(
+      `Open your dashboard: ${toWizardDashboardOpenUrl(ctx.dashboardUrl)}`,
+    );
   } else {
     lines.push(
       "_The wizard didn't capture a dashboard URL. You can build one from your events at https://app.amplitude.com._",

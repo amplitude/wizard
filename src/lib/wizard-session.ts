@@ -116,6 +116,9 @@ export const CliArgsSchema = z.object({
   localMcp: z.boolean().default(false),
   menu: z.boolean().default(false),
   benchmark: z.boolean().default(false),
+  // Agent model tier. See `src/utils/types.ts:WizardMode` for the mapping.
+  // Default 'standard' = current behavior (no change for existing users).
+  mode: z.enum(['fast', 'standard', 'thorough']).default('standard'),
   apiKey: z.string().optional(),
   integration: z.string().optional(),
   appName: z.string().optional(),
@@ -126,6 +129,7 @@ export const CliArgsSchema = z.object({
     .optional()
     .default(null),
   signupFullName: z.string().nullable().optional().default(null),
+  acceptTos: z.boolean().default(false),
   region: z.enum(['us', 'eu']).nullable().optional().default(null),
 });
 
@@ -310,6 +314,8 @@ export interface WizardSession {
   apiKey?: string;
   menu: boolean;
   benchmark: boolean;
+  /** Agent model tier — 'fast' / 'standard' / 'thorough'. See WizardMode. */
+  mode: import('../utils/types').WizardMode;
 
   /**
    * UUID v4 generated once per wizard run. Forwarded to the Amplitude LLM
@@ -514,6 +520,23 @@ export interface WizardSession {
   introConcluded: boolean;
 
   /**
+   * Set to `true` when credentials were resolved silently from disk on a
+   * returning run (stored OAuth + persisted API key + ampli.json), instead
+   * of being chosen by the user in the SUSI picker this session.
+   *
+   * The Auth flow gate refuses to advance while this is true — AuthScreen
+   * shows a one-shot confirmation step ("continue with org X / project Y,
+   * or change") so the user is never silently routed against a project
+   * they didn't intend to target. Cleared once they confirm or pick a
+   * different project.
+   *
+   * Forced false in non-interactive modes (`ci` / `agent`) where there is
+   * no human to confirm. Those modes already accept the stored selection
+   * (or fail loudly via `auth_required: env_selection_failed`).
+   */
+  requiresAccountConfirmation: boolean;
+
+  /**
    * True from the moment the user invokes `/logout` until the logout flow
    * completes (or is cancelled). Used by the bin.ts re-auth watcher to skip
    * the auto-OAuth retry that would otherwise fire during the brief window
@@ -597,6 +620,20 @@ export interface WizardSession {
    * instead of the normal detection flow.
    */
   _restoredFromCheckpoint: boolean;
+
+  /**
+   * Terms of Service acceptance state for --signup flow.
+   * null = not yet shown/needed (default)
+   * false = shown but not yet accepted
+   * true = accepted by user
+   */
+  tosAccepted: boolean | null;
+
+  /**
+   * True once the email capture step is complete in the --signup flow.
+   * Email is required before showing ToS.
+   */
+  emailCaptureComplete: boolean;
 
   /**
    * Create-project flow state.
@@ -714,12 +751,22 @@ export function buildSession(args: {
   menu?: boolean;
   integration?: Integration;
   benchmark?: boolean;
+  /** Agent model tier — 'fast' / 'standard' / 'thorough'. Defaults to 'standard'. */
+  mode?: import('../utils/types').WizardMode;
   /** From --app-id / --project-id CLI flag. */
   appId?: string;
   /** From --app-name / --project-name CLI flag — pre-fills CreateAppScreen. */
   appName?: string;
   signupEmail?: string;
   signupFullName?: string;
+  /**
+   * From --accept-tos CLI flag. Explicit consent to the Amplitude Terms of
+   * Service. Required (alongside --email / --full-name / --region) when
+   * --signup is used in --ci or --agent modes; in TUI mode the ToSScreen
+   * still owns the consent UI, so this flag pre-accepts and skips that
+   * screen. Pre-populates `session.tosAccepted = true` when passed.
+   */
+  acceptTos?: boolean;
   /**
    * From --region CLI flag (--zone is accepted as an alias). Lets non-TUI
    * modes (agent/CI/classic) pick the data center for direct signup, since
@@ -759,6 +806,7 @@ export function buildSession(args: {
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
     benchmark: validated.benchmark ?? false,
+    mode: validated.mode ?? 'standard',
     appId: parsed.success ? parsed.data.appId : parseAppIdArg(args.appId),
 
     // Stable across the entire wizard run; forwarded to the LLM gateway as
@@ -811,6 +859,7 @@ export function buildSession(args: {
     retryState: null,
     outroData: null,
     introConcluded: false,
+    requiresAccountConfirmation: false,
     additionalFeatureQueue: [],
     additionalFeatureCurrent: null,
     additionalFeatureCompleted: [],
@@ -824,6 +873,12 @@ export function buildSession(args: {
 
     userEmail: null,
     _restoredFromCheckpoint: false,
+
+    // --accept-tos pre-accepts ToS for non-TUI signup; in TUI mode the
+    // ToSScreen still owns the UX but its `isComplete` check sees `true`
+    // and skips. Email capture is independently flagged below.
+    tosAccepted: validated.acceptTos === true ? true : null,
+    emailCaptureComplete: false,
 
     createProject: {
       pending: false,

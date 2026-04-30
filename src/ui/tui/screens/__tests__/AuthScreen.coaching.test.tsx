@@ -3,9 +3,9 @@
  *
  * The OAuth waiting state has been the worst stuck-spinner offender: on
  * SSH or codespace where opn() can't open a browser, users would stare at
- * a spinner for 120s before the OAuth call timed out. These tests verify
- * the 60s coaching tier surfaces [R]/[M]/[Esc] actions and that [M]
- * routes the user into the existing manual API-key entry path.
+ * a spinner for 120s before the OAuth call timed out. We now surface
+ * [R]/[M]/[Esc] from t=0 (whenever a loginUrl exists) and layer a tier-1
+ * "still waiting…" coaching message at 15s.
  */
 
 import React from 'react';
@@ -28,7 +28,7 @@ describe('AuthScreen — browser-fallback coaching', () => {
     vi.useRealTimers();
   });
 
-  it('does not show fallback hints in the first 30s', () => {
+  it('renders the always-on quick-exit hints from t=0 when a loginUrl exists', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
@@ -38,10 +38,31 @@ describe('AuthScreen — browser-fallback coaching', () => {
     const { lastFrame } = render(<AuthScreen store={store} />);
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Waiting for authentication');
-    expect(frame).not.toContain('Retry browser launch');
+    // [R] only renders once we have a loginUrl — and we do here.
+    expect(frame).toContain('Retry browser');
+    expect(frame).toContain('Enter API key manually');
+    expect(frame).toContain('Cancel');
+    // Tier-1 emphatic coaching is silent before 15s.
+    expect(frame).not.toContain('Still waiting');
   });
 
-  it('surfaces [R]/[M]/[Esc] hints after 60s of waiting', async () => {
+  it('hides [R] until a loginUrl is generated, but always offers [M] and [Esc]', () => {
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      loginUrl: null,
+      pendingOrgs: null,
+    });
+    const { lastFrame } = render(<AuthScreen store={store} />);
+    const frame = lastFrame() ?? '';
+    // Placeholder copy keeps the URL slot non-empty.
+    expect(frame).toContain('Preparing your sign-in link');
+    expect(frame).not.toContain('Retry browser');
+    expect(frame).toContain('Enter API key manually');
+    expect(frame).toContain('Cancel');
+  });
+
+  it('layers an emphatic "Still waiting…" coaching line at 15s', async () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
@@ -49,16 +70,16 @@ describe('AuthScreen — browser-fallback coaching', () => {
       pendingOrgs: null,
     });
     const { lastFrame } = render(<AuthScreen store={store} />);
-    await vi.advanceTimersByTimeAsync(65_000);
+    await vi.advanceTimersByTimeAsync(16_000);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Retry browser launch');
-    expect(frame).toContain('Enter API key manually');
-    expect(frame).toContain('Cancel');
-    // The login URL must remain visible so [M] and "paste in browser" both work.
+    expect(frame).toContain('Still waiting');
+    // The login URL must remain visible.
     expect(frame).toContain('app.amplitude.com/oauth');
+    // Quick exits stay visible too.
+    expect(frame).toContain('Enter API key manually');
   });
 
-  it('opens the manual API-key entry view when [M] is pressed', async () => {
+  it('opens the manual API-key entry view when [M] is pressed (no waiting)', async () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
@@ -66,8 +87,6 @@ describe('AuthScreen — browser-fallback coaching', () => {
       pendingOrgs: null,
     });
     const { lastFrame, stdin } = render(<AuthScreen store={store} />);
-    await vi.advanceTimersByTimeAsync(65_000);
-    expect(lastFrame() ?? '').toContain('Retry browser launch');
 
     stdin.write('m');
     await vi.advanceTimersByTimeAsync(50);
@@ -78,7 +97,7 @@ describe('AuthScreen — browser-fallback coaching', () => {
     expect(frame).toContain('Or finish browser sign-in at:');
   });
 
-  it('invokes opn again when [R] is pressed', async () => {
+  it('invokes opn when [R] is pressed and a loginUrl is set (no waiting)', async () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
@@ -89,7 +108,6 @@ describe('AuthScreen — browser-fallback coaching', () => {
     const opnDefault = opnModule.default as unknown as ReturnType<typeof vi.fn>;
 
     const { stdin } = render(<AuthScreen store={store} />);
-    await vi.advanceTimersByTimeAsync(65_000);
 
     stdin.write('r');
     await vi.advanceTimersByTimeAsync(50);

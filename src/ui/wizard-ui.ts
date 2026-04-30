@@ -8,7 +8,7 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
-import type { RetryState } from '../lib/wizard-session';
+import type { OutroData, RetryState } from '../lib/wizard-session';
 
 /** Result returned by the confirm_event_plan tool to the agent. */
 export type EventPlanDecision =
@@ -46,6 +46,14 @@ export interface WizardUI {
    *     render and no user to interact with the message.
    */
   cancel(message: string, options?: { docsUrl?: string }): Promise<void>;
+
+  /**
+   * Set the OutroScreen state reactively. Use from business logic that needs
+   * to render an Error or Success outro before calling `cancel()` — direct
+   * mutation of `session.outroData` doesn't notify subscribers, so the
+   * OutroScreen would not re-render and the user would miss the message.
+   */
+  setOutroData(data: OutroData): void;
 
   // ── Logging ───────────────────────────────────────────────────────
   log: {
@@ -218,6 +226,63 @@ export interface WizardUI {
     exitCode: number;
     durationMs: number;
     reason?: string;
+  }): void;
+
+  /**
+   * Emit a `setup_context` event carrying the resolved Amplitude scope
+   * (region, org, project, app, env) at a known phase boundary.
+   * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI
+   * no-op, since their UI already shows the equivalent context.
+   *
+   * Skill rule: the outer agent SHOULD show this scope to the user
+   * BEFORE asking them to approve the run, so they know which
+   * Amplitude app the wizard is about to write to.
+   */
+  emitSetupContext?(data: {
+    phase: 'plan' | 'apply_started' | 'whoami';
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+    };
+    sources?: Record<string, 'auto' | 'flag' | 'saved' | 'recommended'>;
+    requiresConfirmation?: boolean;
+    resumeFlags?: { changeApp: string[] };
+  }): void;
+
+  /**
+   * Emit a terminal `setup_complete` event once per successful run,
+   * just before `run_completed`. Carries the canonical artifact list
+   * (app id, dashboard URL, files, env vars, events) the outer agent
+   * needs to drive follow-up MCP calls into the right project.
+   * Optional; only AgentUI implements.
+   */
+  emitSetupComplete?(data: {
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+      dashboardUrl?: string;
+      dashboardId?: string;
+    };
+    files?: { written: string[]; modified: string[] };
+    envVars?: { added: string[]; modified: string[] };
+    events?: Array<{ name: string; description?: string; file?: string }>;
+    durationMs?: number;
+    followups?: {
+      mcpServer?: { command: string[]; description: string };
+      docsUrl?: string;
+    };
   }): void;
 
   /**

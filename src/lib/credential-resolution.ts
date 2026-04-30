@@ -254,9 +254,34 @@ export async function resolveCredentials(
         }
       } else {
         // Fetch user data to check how many environments are available.
+        // Bound the call with a timeout — a stale idToken from an older wizard
+        // version can cause the API to hang or take many seconds to respond,
+        // and the AuthScreen has nothing to show until this resolves. Treat
+        // a timeout as a fetch failure so the caller drops to AuthScreen and
+        // forces a fresh OAuth round-trip via the bin-level probe.
         const { fetchAmplitudeUser } = await import('./api.js');
+        const RESOLVE_PROBE_MS = 8_000;
+        const probeUser = async () => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            return await Promise.race([
+              fetchAmplitudeUser(storedToken.idToken, zone),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                  const err = new Error(
+                    `fetchAmplitudeUser timed out after ${RESOLVE_PROBE_MS}ms`,
+                  );
+                  err.name = 'TimeoutError';
+                  reject(err);
+                }, RESOLVE_PROBE_MS);
+              }),
+            ]);
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
+          }
+        };
         try {
-          const userInfo = await fetchAmplitudeUser(storedToken.idToken, zone);
+          const userInfo = await probeUser();
           analytics.setDistinctId(userInfo.email);
           analytics.identifyUser({ email: userInfo.email });
           const projectId = session.selectedProjectId ?? undefined;
@@ -367,8 +392,19 @@ export async function resolveCredentials(
               session.pendingAuthIdToken = storedToken.idToken;
               session.pendingAuthAccessToken = storedToken.accessToken;
             }
-          } else if (envsWithKey.length === 1) {
-            // Single environment — auto-select
+          } else if (
+            envsWithKey.length === 1 &&
+            !process.env.AMPLITUDE_WIZARD_CONFIRM_APP
+          ) {
+            // Single environment — auto-select. Skipped when
+            // `--confirm-app` (env-var bridge:
+            // `AMPLITUDE_WIZARD_CONFIRM_APP=1`) is set; in that mode
+            // we DEFER to the caller's env picker so the wizard
+            // emits a `needs_input: environment_selection` even
+            // when there's only one match. The skill always passes
+            // `--confirm-app` so the user is asked "is this the
+            // right app?" before any writes happen — fixes the
+            // "wizard wrote to the wrong project" class of bug.
             const selectedEnv = envsWithKey[0];
             const apiKey = selectedEnv.app!.apiKey!;
             const selectedAppId = selectedEnv.app?.id ?? null;
@@ -407,10 +443,22 @@ export async function resolveCredentials(
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
-          } else if (envsWithKey.length > 1) {
-            // Multiple environments — defer to caller for selection
+          } else if (
+            envsWithKey.length > 1 ||
+            (envsWithKey.length === 1 &&
+              process.env.AMPLITUDE_WIZARD_CONFIRM_APP)
+          ) {
+            // Multiple environments OR a single match while
+            // `--confirm-app` is forcing an explicit confirmation —
+            // defer to caller for selection so the wizard emits a
+            // structured `needs_input` and the user gets to choose
+            // (or confirm) before any writes happen.
             logToFile(
-              `[credential-resolution] ${envsWithKey.length} environments found — deferring to project picker`,
+              `[credential-resolution] ${
+                envsWithKey.length
+              } environments found — deferring to project picker (confirm-app=${
+                process.env.AMPLITUDE_WIZARD_CONFIRM_APP ? 'on' : 'off'
+              })`,
             );
             session.pendingOrgs = userInfo.orgs;
             session.pendingAuthIdToken = storedToken.idToken;
