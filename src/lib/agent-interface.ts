@@ -341,9 +341,32 @@ export const MAX_BASH_SLEEP_SECONDS = 5;
 export function isStallNonProgressMessage(rawMessage: unknown): boolean {
   if (!rawMessage || typeof rawMessage !== 'object') return false;
   const msg = rawMessage as Record<string, unknown>;
-  if (msg.type !== 'system') return false;
-  if (msg.subtype !== 'status') return false;
-  return msg.status === 'requesting';
+
+  // Class 1 — SDK status envelopes. The SDK type union is
+  //   SDKStatus = 'compacting' | 'requesting' | null
+  // 'compacting' is the only one that means "real work is happening";
+  // everything else (current 'requesting' / null, plus any future
+  // shape we don't recognize yet) is conservatively non-progress.
+  if (msg.type === 'system' && msg.subtype === 'status') {
+    return msg.status !== 'compacting';
+  }
+
+  // Class 2 — stream_event book-keeping frames. Under
+  // `includePartialMessages: true`, the SDK emits six stream_event
+  // subtypes; only `content_block_delta` carries real model output
+  // (text deltas, input_json deltas, thinking deltas). The other
+  // five (message_start / message_delta / message_stop /
+  // content_block_start / content_block_stop) are framing that flanks
+  // real deltas by milliseconds in the happy path — treating them as
+  // non-progress tightens the timer's signal-to-noise without risking
+  // false stalls during legitimate generation.
+  if (msg.type === 'stream_event') {
+    const event = msg.event;
+    if (event === null || typeof event !== 'object') return true;
+    return (event as Record<string, unknown>).type !== 'content_block_delta';
+  }
+
+  return false;
 }
 
 /**
