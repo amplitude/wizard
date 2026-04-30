@@ -111,7 +111,7 @@ import { cleanupShellCompletionLine } from './src/utils/cleanup-shell-rc';
 cleanupShellCompletionLine();
 import { analytics } from './src/utils/analytics';
 import { detectNestedAgent } from './src/lib/detect-nested-agent';
-import { AgentUI } from './src/ui/agent-ui';
+import type { AgentUI as AgentUIType } from './src/ui/agent-ui';
 import {
   initLogger,
   initCorrelation,
@@ -245,12 +245,21 @@ import {
       `Detected nested agent invocation via ${nested.envVar}=${nested.envValue}. ` +
       `Inherited outer-agent env vars were sanitized; the setup agent will run normally.`;
     if (mode === 'agent') {
-      new AgentUI().emitNestedAgent({
-        signal: nested.signal,
-        envVar: nested.envVar,
-        instruction: detail,
-        bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
-      });
+      // Lazy-load AgentUI: in non-agent modes the entire NDJSON-emit module
+      // (and its zod / readline / dashboard-url deps) is dead code — keeping
+      // the import at module scope was paying ~80–150ms of cold-start tax for
+      // every TUI/CI launch. Fire-and-forget: emitNestedAgent is a single
+      // safePipeWrite to stdout, callers don't observe completion.
+      void import('./src/ui/agent-ui.js')
+        .then((mod: { AgentUI: new () => AgentUIType }) => {
+          new mod.AgentUI().emitNestedAgent({
+            signal: nested.signal,
+            envVar: nested.envVar,
+            instruction: detail,
+            bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+          });
+        })
+        .catch(() => {});
     } else {
       // Surface a soft breadcrumb for interactive + CI users too, not just
       // --debug. If sanitization ever regresses, this is the only signal a
