@@ -14,13 +14,38 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { vi } from 'vitest';
 import {
   agentArtifactsLookComplete,
   agentEventsInstrumented,
   classifyApiErrorSubtype,
+  refreshTokenIfStale,
 } from '../agent-runner.js';
 import { AgentErrorType } from '../agent-interface.js';
 import { buildSession } from '../wizard-session.js';
+
+// Mock the analytics module up here (shared across describe blocks below)
+// so refreshTokenIfStale's `analytics.wizardCapture` call doesn't try to
+// hit a real backend when a test triggers the refresh path.
+vi.mock('../../utils/analytics', () => ({
+  analytics: {
+    wizardCapture: vi.fn(),
+    captureException: vi.fn(),
+    setSessionProperty: vi.fn(),
+    getAllFlagsForWizard: vi.fn().mockResolvedValue({}),
+  },
+  captureWizardError: vi.fn(),
+}));
+
+vi.mock('../../utils/ampli-settings', () => ({
+  getStoredUser: vi.fn(),
+  getStoredToken: vi.fn(),
+  storeToken: vi.fn(),
+}));
+
+vi.mock('../../utils/oauth', () => ({
+  refreshAccessToken: vi.fn(),
+}));
 
 describe('classifyApiErrorSubtype', () => {
   // Each subtype tag maps to a distinct user-facing message and
@@ -243,5 +268,123 @@ describe('agentEventsInstrumented', () => {
       installDir: '/dev/null/does-not-exist',
     });
     expect(agentEventsInstrumented(session)).toBe(false);
+  });
+});
+
+// ── refreshTokenIfStale ──────────────────────────────────────────────
+//
+// The post-run-token-staleness regression guard.
+//
+// User-visible failure mode pre-fix: a 14-minute Excalidraw run finishes
+// the agent loop with a fully-instrumented project, then the post-run
+// path hits "Authentication failed while trying to fetch Amplitude user
+// data" on `commitPlannedEventsStep`, `createDashboardStep`, and
+// `pollForDataIngestion`. The OAuth token was already past its 1-hour
+// expiry by the time those steps fired. This test locks down the
+// "refresh-near-expiry, even within the 5-minute pre-buffer" behaviour.
+
+describe('refreshTokenIfStale', () => {
+  let mockGetStoredUser: ReturnType<typeof vi.fn>;
+  let mockGetStoredToken: ReturnType<typeof vi.fn>;
+  let mockStoreToken: ReturnType<typeof vi.fn>;
+  let mockRefreshAccessToken: ReturnType<typeof vi.fn>;
+
+  beforeEach(async () => {
+    const ampli = await import('../../utils/ampli-settings');
+    const oauth = await import('../../utils/oauth');
+    mockGetStoredUser = vi.mocked(ampli.getStoredUser);
+    mockGetStoredToken = vi.mocked(ampli.getStoredToken);
+    mockStoreToken = vi.mocked(ampli.storeToken);
+    mockRefreshAccessToken = vi.mocked(oauth.refreshAccessToken);
+
+    mockGetStoredUser.mockReset();
+    mockGetStoredToken.mockReset();
+    mockStoreToken.mockReset();
+    mockRefreshAccessToken.mockReset();
+  });
+
+  it('returns the fallback when no stored user / token is found', async () => {
+    mockGetStoredUser.mockReturnValue(undefined);
+    mockGetStoredToken.mockReturnValue(undefined);
+    expect(await refreshTokenIfStale('fallback-tok', 'test')).toBe(
+      'fallback-tok',
+    );
+    expect(mockRefreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('returns the stored access token unchanged when expiry is far in the future', async () => {
+    mockGetStoredUser.mockReturnValue({ id: 'u1', zone: 'us' });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'fresh-token',
+      idToken: 'id',
+      refreshToken: 'rt',
+      // 1 hour out — well past the 5-minute pre-expiry buffer.
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    expect(await refreshTokenIfStale('fallback', 'test')).toBe('fresh-token');
+    expect(mockRefreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  // The exact regression: token is "still valid" by a strict expiry check
+  // (>now), but within the 5-minute buffer the post-run path needs the
+  // refresh anyway because the agent run will push it past expiry before
+  // the downstream MCP / data-API call lands.
+  it('refreshes a token whose expiry is within the 5-minute pre-expiry buffer', async () => {
+    mockGetStoredUser.mockReturnValue({ id: 'u1', zone: 'us' });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'about-to-expire',
+      idToken: 'id',
+      refreshToken: 'rt',
+      // 2 minutes from now — within the 5-minute buffer.
+      expiresAt: new Date(Date.now() + 2 * 60 * 1000).toISOString(),
+    });
+    mockRefreshAccessToken.mockResolvedValue({
+      accessToken: 'newly-refreshed',
+      idToken: 'new-id',
+      refreshToken: 'new-rt',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    expect(await refreshTokenIfStale('fallback', 'post-run')).toBe(
+      'newly-refreshed',
+    );
+    expect(mockStoreToken).toHaveBeenCalledOnce();
+  });
+
+  it('passes the user zone to refreshAccessToken (EU regression)', async () => {
+    // PR #348 fixed the in-run path's missing zone arg. The post-run
+    // helper needs the same treatment so EU users' refresh tokens get
+    // posted to auth.eu.amplitude.com instead of auth.amplitude.com.
+    mockGetStoredUser.mockReturnValue({ id: 'u1', zone: 'eu' });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'eu-token',
+      idToken: 'id',
+      refreshToken: 'eu-rt',
+      // Already expired.
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    mockRefreshAccessToken.mockResolvedValue({
+      accessToken: 'eu-refreshed',
+      idToken: 'new-id',
+      refreshToken: 'new-eu-rt',
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+    });
+    await refreshTokenIfStale('fallback', 'post-run');
+    expect(mockRefreshAccessToken).toHaveBeenCalledWith('eu-rt', 'eu');
+  });
+
+  it('returns the stored access token (not the fallback) when refresh throws', async () => {
+    // If the refresh itself fails (network blip, revoked refresh token),
+    // we still want to hand BACK whatever stored access token we found —
+    // it might be live for another minute or two. Returning the
+    // module-level fallback would discard that value.
+    mockGetStoredUser.mockReturnValue({ id: 'u1', zone: 'us' });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'stored',
+      idToken: 'id',
+      refreshToken: 'rt',
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    mockRefreshAccessToken.mockRejectedValue(new Error('network'));
+    expect(await refreshTokenIfStale('fallback', 'post-run')).toBe('stored');
   });
 });
