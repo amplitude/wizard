@@ -204,6 +204,21 @@ These options are ONLY valid for the browser / unified SDK. Do NOT pass autocapt
   - Backend SDKs in other languages (Python, Java, Go, Ruby, .NET) — server-side, no autocapture surface.
 
 When in doubt, consult the per-SDK README. Inventing an option name (or copying browser keys onto a non-browser SDK) causes runtime errors or silent no-ops. See https://amplitude.com/docs/sdks/client-side-vs-server-side for which SDK applies where.`,
+
+  `One init file owns the SDK; every track call imports from THAT file. The SDK init code you generate goes into a single project-local module — \`amplitude.ts\`, \`amplitude.js\`, \`lib/amplitude.ts\`, \`utils/amplitude.ts\`, or wherever the project's existing module convention puts it. That module:
+  1. Calls \`initAll(...)\` (or \`init(...)\` for the standalone analytics-browser SDK) once, at module scope, as a side effect of being imported.
+  2. Re-exports the surface the rest of the codebase needs: \`export { track, setUserId, identify, Identify } from "@amplitude/analytics-browser"\` (or \`from "@amplitude/unified"\`).
+
+Then EVERY track / identify / setUserId call in the project's source code MUST import from the project-local module — NOT from \`@amplitude/analytics-browser\` / \`@amplitude/unified\` directly:
+
+  // ✗ WRONG — bypasses the project's wrapper, the re-export becomes dead code
+  import { track } from "@amplitude/analytics-browser";
+
+  // ✓ RIGHT — relative path to the project's own amplitude module
+  import { track } from "../amplitude";
+  import { track } from "@/lib/amplitude";
+
+Why this matters: the project-local module is the user's hook for adding logging, opt-out logic, env-var swaps, mocking in tests, or future SDK swaps. If half the project imports from the SDK directly and half from the wrapper, refactoring the wrapper does nothing for half the callsites and becomes a footgun. Pick the wrapper path and use it everywhere — including in files that already had a stray direct import before this run; rewrite those too.`,
 ];
 
 const DEMO_MODE_COMMANDMENTS: string[] = DEMO_MODE
