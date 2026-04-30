@@ -22,7 +22,13 @@ import type {
   SetupContextData,
   SetupCompleteData,
 } from '../lib/agent-events';
-import { EVENT_DATA_VERSIONS, truncateLogMessage } from '../lib/agent-events';
+import {
+  EVENT_DATA_VERSIONS,
+  classifyRunError,
+  truncateLogMessage,
+  type RecoverableHint,
+  type SuggestedAction,
+} from '../lib/agent-events';
 import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
@@ -431,12 +437,54 @@ export class AgentUI implements WizardUI {
     message: string;
     name?: string;
   }): void {
+    // Map each code to the canonical remediation. Lets a consuming
+    // agent (Claude Code, Cursor, etc.) build a user-facing prompt
+    // without writing its own switch statement on top of ours.
+    const hint = ((): {
+      recoverable: RecoverableHint;
+      suggestedAction?: SuggestedAction;
+    } => {
+      switch (data.code) {
+        case 'NAME_TAKEN':
+        case 'INVALID_REQUEST':
+          return {
+            recoverable: 'reinvoke_with_flag',
+            suggestedAction: {
+              command: ['amplitude-wizard', '--app-name', '<different-name>'],
+            },
+          };
+        case 'MISSING_NAME':
+          return {
+            recoverable: 'reinvoke_with_flag',
+            suggestedAction: {
+              command: ['amplitude-wizard', '--app-name', '<your-name>'],
+            },
+          };
+        case 'MISSING_ORG':
+          return {
+            recoverable: 'reinvoke_with_flag',
+            suggestedAction: {
+              command: ['amplitude-wizard', '--org', '<org-id>'],
+            },
+          };
+        case 'QUOTA_REACHED':
+        case 'FORBIDDEN':
+          return { recoverable: 'human_required' };
+        case 'INTERNAL':
+        default:
+          return { recoverable: 'retry' };
+      }
+    })();
     emit('error', data.message, {
       level: 'error',
       data: {
         event: 'project_create_error',
         code: data.code,
         name: data.name,
+        recoverable: hint.recoverable,
+        ...(hint.suggestedAction
+          ? { suggestedAction: hint.suggestedAction }
+          : {}),
       },
     });
   }
@@ -856,8 +904,19 @@ export class AgentUI implements WizardUI {
         .replace(/https?:\/\/[^\s]+/g, '[URL redacted]')
         .replace(/\/(?:Users|home|var|tmp)\/[^\s:]+/g, '[path redacted]');
     }
+    // Classify so consuming agents know whether to retry, re-invoke
+    // with flags, ask the human, or treat as fatal — without parsing
+    // the message string. Pure helper, see agent-events.ts for the
+    // pattern → hint mapping.
+    const hint = classifyRunError(error);
     emit('error', sanitized, {
-      data: { name: error.name },
+      data: {
+        name: error.name,
+        recoverable: hint.recoverable,
+        ...(hint.suggestedAction
+          ? { suggestedAction: hint.suggestedAction }
+          : {}),
+      },
     });
     return Promise.resolve(false);
   }
