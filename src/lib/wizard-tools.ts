@@ -587,8 +587,8 @@ export function ensureWizardArtifactsIgnored(installDir: string): void {
       existing.length === 0 || existing.endsWith('\n\n')
         ? ''
         : existing.endsWith('\n')
-          ? '\n'
-          : '\n\n';
+        ? '\n'
+        : '\n\n';
     fs.writeFileSync(
       gitignorePath,
       `${existing}${separator}${block}\n`,
@@ -769,8 +769,9 @@ interface ClaudeAgentSDK {
 let _sdkModule: ClaudeAgentSDK | null = null;
 async function getSDKModule(): Promise<ClaudeAgentSDK> {
   if (!_sdkModule) {
-    _sdkModule =
-      (await import('@anthropic-ai/claude-agent-sdk')) as unknown as ClaudeAgentSDK;
+    _sdkModule = (await import(
+      '@anthropic-ai/claude-agent-sdk'
+    )) as unknown as ClaudeAgentSDK;
   }
   return _sdkModule;
 }
