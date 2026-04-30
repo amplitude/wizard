@@ -40,6 +40,9 @@ import {
   getInstallationErrorLogFile,
   getRunDir,
 } from './storage-paths';
+// Re-exported below for backward compatibility — detection cold paths should
+// import directly from `./package-json-light` instead.
+import { tryGetPackageJson as tryGetPackageJsonLight } from './package-json-light';
 
 interface ProjectData {
   projectApiKey: string;
@@ -298,20 +301,15 @@ export async function getPackageDotJson({
 /**
  * Try to get package.json, returning null if it doesn't exist.
  * Use this for detection purposes where missing package.json is expected (e.g., Python projects).
+ *
+ * Re-exported from `./package-json-light` so that callers who import this
+ * symbol from `setup-utils` keep working, while framework `detect()` paths
+ * can import it from the light module to avoid pulling the rest of
+ * `setup-utils` (chalk, OAuth, analytics, …) into the cold-start graph.
  */
-export async function tryGetPackageJson({
-  installDir,
-}: Pick<WizardOptions, 'installDir'>): Promise<PackageDotJson | null> {
-  try {
-    const packageJsonFileContents = await fs.promises.readFile(
-      join(installDir, 'package.json'),
-      'utf8',
-    );
-    return JSON.parse(packageJsonFileContents) as PackageDotJson;
-  } catch {
-    return null;
-  }
-}
+export const tryGetPackageJson: (
+  options: Pick<WizardOptions, 'installDir'>,
+) => Promise<PackageDotJson | null> = tryGetPackageJsonLight;
 
 export async function updatePackageDotJson(
   packageDotJson: PackageDotJson,

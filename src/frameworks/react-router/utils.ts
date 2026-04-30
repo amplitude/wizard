@@ -1,6 +1,6 @@
 import { major } from 'semver';
 import fg from 'fast-glob';
-import { tryGetPackageJson } from '../../utils/setup-utils';
+import { tryGetPackageJson } from '../../utils/package-json-light';
 import type { WizardOptions } from '../../utils/types';
 import { getPackageVersion } from '../../utils/package-json';
 import { createVersionBucket } from '../../utils/semver';
