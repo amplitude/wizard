@@ -33,6 +33,8 @@ import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
+import { FinalizingPanel } from '../components/FinalizingPanel.js';
+import { PostAgentStepStatus } from '../session-constants.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
@@ -421,6 +423,14 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
           </Box>
         )}
 
+        {/* Post-agent steps (commit events, create dashboard, …).
+            Rendered as its own panel below the agent task list — keeps
+            the "main agent work done" milestone intact while still
+            surfacing the work happening between agent completion and
+            the MCP/Verify screens. Empty until agent-runner seeds the
+            queue, so it's a no-op during the agent run itself. */}
+        <FinalizingPanel steps={store.session.postAgentSteps} />
+
         {/* Inline event plan */}
         <InlineEventPlan store={store} />
 
@@ -442,10 +452,22 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
   useScreenHints(RUN_HINTS);
 
+  // Footer status: when a post-agent step is in_progress, drive the
+  // footer line from the step's `activeForm` so the visible task and
+  // the spinner footer always agree (single source of truth). Without
+  // this, the agent's last pushStatus("Creating charts and dashboard…")
+  // sits frozen beneath the FinalizingPanel and the message can lag
+  // the actual step state. Falls back to the agent's last status when
+  // no post-agent step is active (during the run, before seeding, or
+  // after all steps finish).
+  const activePostAgentStep = store.session.postAgentSteps.find(
+    (s) => s.status === PostAgentStepStatus.InProgress,
+  );
   const lastStatus =
-    store.statusMessages.length > 0
+    activePostAgentStep?.activeForm ??
+    (store.statusMessages.length > 0
       ? store.statusMessages[store.statusMessages.length - 1]
-      : undefined;
+      : undefined);
 
   const hasEvents = store.eventPlan.length > 0;
 

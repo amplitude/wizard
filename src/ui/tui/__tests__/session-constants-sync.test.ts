@@ -13,6 +13,12 @@ describe('session-constants sync', () => {
     expect(tui.RunPhase).toStrictEqual(canonical.RunPhase);
   });
 
+  it('PostAgentStepStatus values match wizard-session', () => {
+    expect(tui.PostAgentStepStatus).toStrictEqual(
+      canonical.PostAgentStepStatus,
+    );
+  });
+
   it('McpOutcome values match wizard-session', () => {
     expect(tui.McpOutcome).toStrictEqual(canonical.McpOutcome);
   });

@@ -12,7 +12,7 @@ import type {
   EventPlanDecision,
 } from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
-import type { RetryState } from '../../lib/wizard-session.js';
+import type { RetryState, PostAgentStep } from '../../lib/wizard-session.js';
 import { toCredentialAppId } from '../../lib/wizard-session.js';
 import { Overlay } from './router.js';
 import { RunPhase, OutroKind } from './session-constants.js';
@@ -202,6 +202,17 @@ export class InkUI implements WizardUI {
         if (msg) this.store.pushStatus(msg);
       },
     };
+  }
+
+  seedPostAgentSteps(steps: PostAgentStep[]): void {
+    this.store.seedPostAgentSteps(steps);
+  }
+
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStep['status']; reason?: string },
+  ): void {
+    this.store.setPostAgentStep(id, patch);
   }
 
   pushStatus(message: string): void {
