@@ -26,7 +26,10 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import opn from 'opn';
 import path from 'path';
 import { analytics } from '../../../utils/analytics.js';
-import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
+import {
+  isWizardAbortInProgress,
+  wizardSuccessExit,
+} from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 
@@ -38,6 +41,18 @@ interface OutroScreenProps {
 
 export const OutroScreen = ({ store }: OutroScreenProps) => {
   useWizardStore(store);
+
+  // Defensive: if the slash console was active when the wizard transitioned
+  // to the outro (e.g. user typed `/feedback`, then an MCP call errored
+  // before the input deactivated), `commandMode` stays true and
+  // `useScreenInput` remains gated off — meaning every keypress on the
+  // outro is silently swallowed by the dormant text input and "Press any
+  // key to exit" appears broken. Force-deactivate on mount so the outro
+  // always owns input. Safe to clobber: the run is over, so any in-flight
+  // slash-prompt input is meaningless past this point.
+  useEffect(() => {
+    store.setCommandMode(false);
+  }, [store]);
 
   const [showReport, setShowReport] = useState(false);
   const [bugReportPathState, setBugReportPathState] = useState<string | null>(
@@ -77,15 +92,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         setBugReportPathState(written);
         return;
       }
-      // Signal dismissal instead of process.exit(0) directly. The
-      // wizardAbort caller is awaiting this — when it resolves, abort
-      // proceeds to its analytics flush + process.exit with the real
-      // exit code (NETWORK / AGENT_FAILED / etc.). Calling process.exit
-      // here would: (1) force exitCode 0 on every error, hiding real
-      // failures from CI; (2) skip the analytics shutdown that
-      // wizardAbort runs after cancel; (3) race with the success path
-      // below which already routes through process.exit.
+      // Signal dismissal first. When we got here via wizardAbort, that
+      // caller is awaiting this signal — once it resolves, abort runs
+      // its own analytics flush and `process.exit` with the real exit
+      // code (NETWORK / AGENT_FAILED / etc.). Don't double-exit in that
+      // case: a bare `process.exit(0)` here would (1) force exitCode 0
+      // on every error, hiding real failures from CI; (2) skip the
+      // analytics shutdown wizardAbort runs after cancel.
       store.signalOutroDismissed();
+      // BUT — several screens (DataIngestionCheckScreen `q`, IntroScreen
+      // resume-cancel, SetupScreen back-out, ActivationOptionsScreen
+      // 'exit') navigate to the cancel outro via `setOutroData` without
+      // going through wizardAbort. In that path nobody is awaiting
+      // outroDismissed, so the dismissal signal resolves a promise no
+      // one is listening to and the process hangs forever — only Ctrl+C
+      // escapes. Detect "no abort in flight" and drive the exit
+      // ourselves so any-key really does exit.
+      if (!isWizardAbortInProgress()) {
+        void wizardSuccessExit(0);
+      }
       return;
     }
     if (showReport && key.escape) setShowReport(false);

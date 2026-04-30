@@ -8,11 +8,34 @@
  *
  * We use vitest fake timers to fast-forward past the 15s timeout instead
  * of waiting in real time — see https://vitest.dev/api/vi.html#vi-usefaketimers.
+ *
+ * Why module-level imports instead of dynamic imports inside the test:
+ * the prior shape (`await import(...)` inside the `it` body, after
+ * `vi.useFakeTimers()` had already activated) flaked under parallel-test
+ * load. ESM module resolution uses internal microtasks/timers; once fake
+ * timers are active, those internals don't make progress until the test
+ * explicitly advances the clock, which can cause the import promise to
+ * never settle within the 5 s test timeout. Hoisting the imports loads
+ * the module ONCE at file load (real timers), then each test just renders
+ * against an already-resolved module graph.
  */
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render } from 'ink-testing-library';
+
+// refreshToken inside DataIngestionCheckScreen pulls these via dynamic
+// import; with fake timers the ESM resolver can stall waiting on the
+// real disk read inside getStoredUser/getStoredToken. Mock both so the
+// chain reaches the catalog-fallback branch we actually want to exercise.
+vi.mock('../../../../utils/ampli-settings.js', () => ({
+  getStoredUser: () => undefined,
+  getStoredToken: () => undefined,
+  storeToken: () => {},
+}));
+vi.mock('../../../../utils/oauth.js', () => ({
+  refreshAccessToken: () => Promise.resolve(null),
+}));
 
 vi.mock('../../../../lib/api.js', async (importActual) => {
   const actual = await importActual<typeof import('../../../../lib/api.js')>();
@@ -27,7 +50,7 @@ vi.mock('../../../../lib/api.js', async (importActual) => {
       .fn()
       .mockResolvedValue({ hasEvents: false, activeEventNames: [] }),
     // Catalog fetch never resolves — this is the hang we're guarding against.
-    fetchWorkspaceEventTypes: vi
+    fetchProjectEventTypes: vi
       .fn()
       .mockImplementation(() => new Promise(() => {})),
     // Lazy resolve path — return a stable user shape so we don't hit the
@@ -43,28 +66,27 @@ vi.mock('../../../../lib/api.js', async (importActual) => {
   };
 });
 
+import { DataIngestionCheckScreen } from '../DataIngestionCheckScreen.js';
+import { makeStoreForSnapshot } from '../../__tests__/snapshot-utils.js';
+
 describe('DataIngestionCheckScreen catalog hang', () => {
   beforeEach(() => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
+    // Pure fake timers — no `shouldAdvanceTime: true`. The dual-time
+    // mode interacts unpredictably with `advanceTimersByTimeAsync`
+    // under heavy parallel test load.
+    vi.useFakeTimers();
   });
   afterEach(() => {
     vi.useRealTimers();
   });
 
   it('falls through to setEventTypes([]) when the catalog fetch hangs past 15s', async () => {
-    const { DataIngestionCheckScreen } = await import(
-      '../DataIngestionCheckScreen.js'
-    );
-    const { makeStoreForSnapshot } = await import(
-      '../../__tests__/snapshot-utils.js'
-    );
-
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
       activationLevel: 'none',
       selectedOrgId: 'org-1',
-      selectedWorkspaceId: 'ws-1' as unknown as never, // branded WorkspaceId
+      selectedProjectId: 'ws-1',
       selectedAppId: '12345',
       credentials: {
         accessToken: 'access',
@@ -81,7 +103,7 @@ describe('DataIngestionCheckScreen catalog hang', () => {
 
     // Drain microtasks so the chain
     //   checkIngestion → fetchProjectActivationStatus.reject
-    //   → withTimeout(fetchWorkspaceEventTypes, 15s)
+    //   → withTimeout(fetchProjectEventTypes, 15s)
     // is in flight, then advance 16s so the timeout rejects.
     for (let i = 0; i < 5; i++) {
       await Promise.resolve();

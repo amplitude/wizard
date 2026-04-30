@@ -4,6 +4,7 @@ import {
   registerCleanup,
   registerPriorityCleanup,
   clearCleanup,
+  _resetWizardAbortInProgressForTests,
 } from '../utils/wizard-abort';
 import { analytics } from '../utils/analytics';
 import { type Mocked } from 'vitest';
@@ -14,6 +15,12 @@ vi.mock('../ui', () => ({
   getUI: vi.fn().mockReturnValue({
     outro: vi.fn(),
     cancel: vi.fn(),
+    // Optional terminal-event emitter — only AgentUI implements it for
+    // real, but the mock needs a no-op stub so wizardAbort can
+    // unconditionally call `getUI().emitRunCompleted?.(...)` without
+    // tripping on undefined. The tests below assert on .toHaveBeenCalledWith.
+    emitRunCompleted: vi.fn(),
+    getRunStartedAtMs: vi.fn().mockReturnValue(null),
   }),
 }));
 
@@ -24,6 +31,12 @@ describe('wizardAbort', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearCleanup();
+    // Production wizardAbort calls process.exit at the end, so the
+    // in-progress flag never needs reset. These tests mock process.exit
+    // (so wizardAbort returns instead of terminating); without this
+    // reset the flag leaks across cases and isWizardAbortInProgress()
+    // would falsely report true at the start of the next test.
+    _resetWizardAbortInProgressForTests();
 
     mockAnalytics.captureException = vi.fn();
     mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);
@@ -239,12 +252,109 @@ describe('wizardAbort', () => {
 
     expect(mockAnalytics.shutdown).toHaveBeenCalledWith('cancelled');
   });
+
+  // ── Hard exit deadline ────────────────────────────────────────────────
+  //
+  // Regression test for the "Press any key to exit doesn't work" bug.
+  //
+  // `analytics.shutdown` (Amplitude SDK flush) has no internal timeout —
+  // when the network is dead (often the same condition that triggered
+  // the abort), it awaits a promise that never resolves. Without a hard
+  // deadline in `wizardAbort`, the user pressed a key on the OutroScreen,
+  // dismissal fired, but `process.exit` never ran and the wizard sat
+  // silent until Ctrl+C. Lock in the deadline so a wedged shutdown can
+  // never block exit again.
+  describe('exit deadline', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('exits even when analytics.shutdown never resolves', async () => {
+      // Simulate the dead-network condition: shutdown returns a promise
+      // that hangs forever. Pre-fix, this would block process.exit.
+      mockAnalytics.shutdown.mockImplementation(
+        () => new Promise<void>(() => {}),
+      );
+
+      const aborted = wizardAbort();
+      // Catch the synthesized 'process.exit called' rejection so the
+      // dangling promise doesn't crash the test.
+      const aborted$ = aborted.catch(() => undefined);
+
+      // Drain microtasks + advance past the 3s deadline. process.exit
+      // must be called within that window.
+      await vi.advanceTimersByTimeAsync(3500);
+      await aborted$;
+
+      expect(process.exit).toHaveBeenCalledWith(1);
+    });
+
+    it('exits promptly (before the deadline) when shutdown resolves quickly', async () => {
+      // Sanity: the fast path should NOT wait the full 3s. shutdown
+      // resolves immediately, so process.exit should fire on the next
+      // microtask without needing the timer to advance.
+      mockAnalytics.shutdown.mockResolvedValue(undefined);
+
+      const aborted = wizardAbort();
+      const aborted$ = aborted.catch(() => undefined);
+
+      // Drain microtasks only — no timer advance.
+      await vi.advanceTimersByTimeAsync(0);
+      await aborted$;
+
+      expect(process.exit).toHaveBeenCalledWith(1);
+    });
+  });
+
+  // ── isWizardAbortInProgress flag ───────────────────────────────────────
+  //
+  // Regression test for the "Press any key to exit hangs after q on
+  // DataIngestionCheckScreen" bug. Several screens navigate to the cancel
+  // outro via `setOutroData` without going through wizardAbort; the
+  // OutroScreen dismissal handler reads this flag to decide whether to
+  // drive the exit itself. If the flag is wrong (stale-true after an
+  // earlier real abort, or never-set during one) the exit decision goes
+  // to the wrong branch and either double-exits or hangs.
+  describe('isWizardAbortInProgress', () => {
+    it('is false before any wizardAbort call', async () => {
+      const { isWizardAbortInProgress } = await import('../utils/wizard-abort');
+      expect(isWizardAbortInProgress()).toBe(false);
+    });
+
+    it('flips true once wizardAbort starts and stays true through process.exit', async () => {
+      const { isWizardAbortInProgress } = await import('../utils/wizard-abort');
+      expect(isWizardAbortInProgress()).toBe(false);
+
+      // Capture the flag value at the moment getUI().cancel() is called —
+      // i.e. while the OutroScreen is mounted and a keypress could fire.
+      // This is the load-bearing window: OutroScreen reads the flag to
+      // decide whether to drive its own exit.
+      let flagDuringCancel: boolean | null = null;
+      getUI().cancel.mockImplementation(() => {
+        flagDuringCancel = isWizardAbortInProgress();
+      });
+
+      await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+      expect(flagDuringCancel).toBe(true);
+    });
+  });
 });
 
 describe('abort() delegates to wizardAbort()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearCleanup();
+    // Production wizardAbort calls process.exit at the end, so the
+    // in-progress flag never needs reset. These tests mock process.exit
+    // (so wizardAbort returns instead of terminating); without this
+    // reset the flag leaks across cases and isWizardAbortInProgress()
+    // would falsely report true at the start of the next test.
+    _resetWizardAbortInProgressForTests();
 
     mockAnalytics.captureException = vi.fn();
     mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);
@@ -277,5 +387,91 @@ describe('abort() delegates to wizardAbort()', () => {
       undefined,
     );
     expect(process.exit).toHaveBeenCalledWith(1);
+  });
+
+  // ── Terminal `run_completed` emission ───────────────────────────
+  //
+  // wizardAbort and wizardSuccessExit are the singular exit funnels.
+  // Every non-error exit must emit a structured `run_completed` event
+  // before the process actually exits — orchestrators rely on its
+  // presence (vs absence) to distinguish a clean run from a crash.
+
+  it('emits run_completed with outcome=cancelled when no error provided', async () => {
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    expect(getUI().emitRunCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'cancelled',
+        exitCode: 1,
+        durationMs: 0,
+      }),
+    );
+  });
+
+  it('emits run_completed with outcome=error when an error is provided', async () => {
+    const err = new WizardError('something broke');
+    await expect(wizardAbort({ error: err, exitCode: 10 })).rejects.toThrow(
+      'process.exit called',
+    );
+
+    expect(getUI().emitRunCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'error',
+        exitCode: 10,
+      }),
+    );
+  });
+
+  it('redacts paths in the reason field of run_completed', async () => {
+    // The RunCompletedData docstring promises path/URL redaction so the
+    // event never leaks `/Users/<name>/...` or query-string secrets.
+    await expect(
+      wizardAbort({
+        message: 'Failed reading /Users/alice/secret-project/config',
+        exitCode: 1,
+      }),
+    ).rejects.toThrow('process.exit called');
+
+    const calls = (getUI().emitRunCompleted as ReturnType<typeof vi.fn>).mock
+      .calls;
+    expect(calls.length).toBeGreaterThan(0);
+    const lastCall = calls[calls.length - 1][0] as { reason?: string };
+    expect(lastCall.reason).not.toContain('/Users/alice');
+    expect(lastCall.reason).toContain('[path redacted]');
+  });
+
+  it('run_completed fires BEFORE analytics.shutdown so it lands on stdout in time', async () => {
+    // Critical ordering: the NDJSON event has to be written before the
+    // process exit fires. Putting it after the analytics flush would
+    // be safer for analytics but risks the exit interrupting stdout.
+    const callOrder: string[] = [];
+    mockAnalytics.shutdown.mockImplementation(async () => {
+      callOrder.push('shutdown');
+    });
+    (getUI().emitRunCompleted as ReturnType<typeof vi.fn>).mockImplementation(
+      () => {
+        callOrder.push('emitRunCompleted');
+      },
+    );
+
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+    const emitIdx = callOrder.indexOf('emitRunCompleted');
+    const shutdownIdx = callOrder.indexOf('shutdown');
+    expect(emitIdx).toBeGreaterThan(-1);
+    expect(shutdownIdx).toBeGreaterThan(-1);
+    expect(emitIdx).toBeLessThan(shutdownIdx);
+  });
+
+  it('does not throw if emitRunCompleted itself throws — exit must still happen', async () => {
+    (getUI().emitRunCompleted as ReturnType<typeof vi.fn>).mockImplementation(
+      () => {
+        throw new Error('emitter blew up');
+      },
+    );
+
+    // Exit still happens; the emitter throwing is swallowed.
+    await expect(wizardAbort()).rejects.toThrow('process.exit called');
+    expect(process.exit).toHaveBeenCalled();
   });
 });

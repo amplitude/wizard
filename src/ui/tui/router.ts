@@ -26,7 +26,6 @@ export type { FlowEntry };
 /** Screens that interrupt flows as overlays */
 export enum Overlay {
   Outage = 'outage',
-  SettingsOverride = 'settings-override',
   Snake = 'snake',
   Mcp = 'mcp-overlay',
   Slack = 'slack-overlay',

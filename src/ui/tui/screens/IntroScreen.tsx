@@ -11,16 +11,17 @@
  * Calls store.concludeIntro() to advance past this screen.
  */
 
-import path from 'path';
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
+import { analyzeWorkspace } from '../../../lib/workspace-analysis.js';
 import { PickerMenu } from '../primitives/index.js';
+import { PathInput } from '../components/PathInput.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
@@ -69,11 +70,25 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
   const [pickingFramework, setPickingFramework] = useState(false);
   const [manuallySelected, setManuallySelected] = useState(false);
+  // True while the user is typing a new install directory in the inline
+  // PathInput. Suppresses the picker + spinner so the input gets the
+  // full screen, then flips back to false when the user hits Enter or
+  // Esc. The actual re-detection runs through the store action — this
+  // local flag is purely UI-state.
+  const [changingDirectory, setChangingDirectory] = useState(false);
   const [showResume, setShowResume] = useState(
     () => store.session._restoredFromCheckpoint,
   );
 
   const { session } = store;
+
+  // Workspace analysis runs once per installDir change. The checks are
+  // sync filesystem reads — fine to do during render, and memoizing keeps
+  // them off the hot path on every re-render.
+  const workspace = useMemo(
+    () => analyzeWorkspace(session.installDir),
+    [session.installDir],
+  );
   const config = session.frameworkConfig;
   const frameworkLabel =
     session.detectedFrameworkLabel ?? config?.metadata.name;
@@ -216,134 +231,323 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         )}
       </Box>
 
-      {/* Detection spinner */}
-      {detecting && (
+      {/*
+        Inline path-input takes over the screen when the user picks
+        "Change directory". Everything else (target summary, spinner,
+        picker) is hidden until they submit or cancel. That single
+        focus point matters — typing a path into a screen that's
+        also showing a picker is confusing.
+      */}
+      {changingDirectory && (
+        <Box marginY={1} flexDirection="column" alignItems="flex-start">
+          <PathInput
+            initialValue={session.installDir}
+            onSubmit={(absolutePath) => {
+              analytics.wizardCapture('install dir change submitted', {
+                'detected framework': session.detectedFrameworkLabel,
+              });
+              setChangingDirectory(false);
+              // Reset framework selection state so the spinner re-runs
+              // cleanly against the new tree.
+              setManuallySelected(false);
+              store.changeInstallDir(absolutePath);
+            }}
+            onCancel={() => {
+              analytics.wizardCapture('install dir change cancelled', {});
+              setChangingDirectory(false);
+            }}
+          />
+        </Box>
+      )}
+
+      {/*
+        Target summary block — visible BOTH during detection and after.
+        Showing it during the spinner is critical: if the user is staring
+        at "Detecting project framework…" against the wrong directory,
+        they need to be able to spot it before detection finishes. Hidden
+        only when the user is mid-edit on a new path or the framework
+        picker is open.
+      */}
+      {!changingDirectory && !pickingFramework && (
+        <TargetSummary
+          displayPath={workspace.displayPath}
+          frameworkLabel={frameworkLabel ?? null}
+          frameworkGlyph={config?.metadata.glyph}
+          frameworkGlyphColor={config?.metadata.glyphColor}
+          frameworkBeta={config?.metadata.beta ?? false}
+          frameworkSuffix={
+            !detecting
+              ? getFrameworkLabelSuffix({ manuallySelected, autoFallback })
+              : ''
+          }
+          region={session.region}
+          detecting={detecting}
+        />
+      )}
+
+      {/* Detection spinner — sits below the target so the user sees
+          which directory we're scanning while it spins. */}
+      {detecting && !changingDirectory && (
         <Box marginY={1} gap={1}>
           <BrailleSpinner />
           <Text color={Colors.secondary}>
-            Detecting project framework{Icons.ellipsis}
+            Scanning {workspace.displayPath}
+            {Icons.ellipsis}
           </Text>
         </Box>
       )}
 
-      {/* Pre-run notice from framework config */}
-      {config?.metadata.preRunNotice && (
-        <Box marginBottom={1}>
-          <Text color={Colors.warning}>{config.metadata.preRunNotice}</Text>
-        </Box>
-      )}
-
-      {/* Framework picker (when auto-detection fails or user requests change) */}
-      {(pickingFramework || (session.menu && needsFrameworkPick)) && (
-        <FrameworkPicker
-          store={store}
-          onComplete={(selected) => {
-            setPickingFramework(false);
-            if (selected) {
-              setManuallySelected(true);
-            }
-          }}
+      {/* Workspace ambiguity warnings — shown alongside the picker so
+          the user has full context before choosing. Hidden during the
+          spinner (we don't know the framework yet, no point worrying
+          the user) and during inline path input. */}
+      {!detecting && !changingDirectory && !pickingFramework && (
+        <WorkspaceWarnings
+          hasManifest={workspace.hasManifest}
+          isMonorepo={workspace.isMonorepo}
+          workspaceGlobs={workspace.workspaceGlobs}
         />
       )}
 
-      {/* Detection results + continue menu */}
-      {!detecting && !pickingFramework && (
-        <Box flexDirection="column" alignItems="flex-start">
-          <Box>
-            <Text color={Colors.body}>Directory </Text>
-            <Text color={Colors.secondary}>
-              /{path.basename(session.installDir)}
-            </Text>
-            <Text color={Colors.success}> {Icons.checkmark}</Text>
+      {/* Pre-run notice from framework config */}
+      {config?.metadata.preRunNotice &&
+        !detecting &&
+        !changingDirectory &&
+        !pickingFramework && (
+          <Box marginBottom={1}>
+            <Text color={Colors.warning}>{config.metadata.preRunNotice}</Text>
           </Box>
+        )}
 
-          {frameworkLabel && !autoFallback && (
-            <Box>
-              <Text color={Colors.body}>Framework </Text>
-              {config?.metadata.glyph && (
-                <Text color={config.metadata.glyphColor}>
-                  {config.metadata.glyph}{' '}
-                </Text>
-              )}
-              <Text color={Colors.secondary}>
-                {frameworkLabel}
-                {getFrameworkLabelSuffix({ manuallySelected, autoFallback })}
-                {config?.metadata.beta && ' [BETA]'}
-              </Text>
-              <Text color={Colors.success}> {Icons.checkmark}</Text>
-            </Box>
-          )}
-
-          {autoFallback && (
-            <Box marginTop={1}>
-              <Text color={Colors.muted}>
-                No framework detected. Continue with the generic guide or pick
-                one below.
-              </Text>
-            </Box>
-          )}
-
-          {session.region && (
-            <Text>
-              <Text color={Colors.body}>Region </Text>
-              <Text color={Colors.secondary}>
-                {session.region.toUpperCase()}
-              </Text>
-              <Text color={Colors.success}> {Icons.checkmark}</Text>
+      {/* Generic-fallback explainer — shown when auto-detection found
+          nothing usable. Pairs with the manual picker option below. */}
+      {autoFallback &&
+        !detecting &&
+        !changingDirectory &&
+        !pickingFramework && (
+          <Box marginTop={1}>
+            <Text color={Colors.muted}>
+              No framework detected. Continue with the generic guide or pick one
+              below.
             </Text>
-          )}
+          </Box>
+        )}
 
-          {showContinue && (
-            <Box marginTop={compact ? 0 : 1}>
-              <PickerMenu
-                options={[
-                  { label: 'Continue', value: 'continue' },
-                  {
-                    label: 'Change framework',
-                    value: 'framework',
-                    ...(narrow ? {} : { hint: 'pick manually' }),
-                  },
-                  ...(session.region
-                    ? [
-                        {
-                          label: 'Change region',
-                          value: 'region',
-                          ...(narrow ? {} : { hint: 'pick US or EU' }),
-                        },
-                      ]
-                    : []),
-                  {
-                    label: 'Cancel',
-                    value: 'cancel',
-                    ...(narrow ? {} : { hint: 'exit wizard' }),
-                  },
-                ]}
-                onSelect={(value) => {
-                  const choice = Array.isArray(value) ? value[0] : value;
-                  analytics.wizardCapture('intro action', {
-                    action: choice,
-                    integration: session.integration,
-                    'detected framework': session.detectedFrameworkLabel,
-                  });
-                  if (choice === 'cancel') {
-                    store.setOutroData({
-                      kind: OutroKind.Cancel,
-                      message: 'Setup cancelled.',
-                    });
-                  } else if (choice === 'framework') {
-                    setPickingFramework(true);
-                  } else if (choice === 'region') {
-                    // Force RegionSelect to appear after Continue. Must
-                    // conclude the intro so the main flow advances past it
-                    // into the (now re-shown) RegionSelect screen.
-                    store.setRegionForced();
-                    store.concludeIntro();
-                  } else {
-                    store.concludeIntro();
-                  }
-                }}
-              />
-            </Box>
+      {/* Framework picker (when auto-detection fails or user requests change) */}
+      {(pickingFramework || (session.menu && needsFrameworkPick)) &&
+        !changingDirectory && (
+          <FrameworkPicker
+            store={store}
+            onComplete={(selected) => {
+              setPickingFramework(false);
+              if (selected) {
+                setManuallySelected(true);
+              }
+            }}
+          />
+        )}
+
+      {/* Action picker — Continue is always first; the rest are escape
+          hatches grouped together so a hurried user with the wrong
+          directory doesn't have to scan past meaningless options
+          (region, framework) to find the way out. */}
+      {showContinue && !changingDirectory && (
+        <Box marginTop={compact ? 0 : 1}>
+          <PickerMenu
+            options={[
+              { label: 'Continue', value: 'continue' },
+              {
+                label: 'Change framework',
+                value: 'framework',
+                ...(narrow ? {} : { hint: 'pick manually' }),
+              },
+              ...(session.region
+                ? [
+                    {
+                      label: 'Change region',
+                      value: 'region',
+                      ...(narrow ? {} : { hint: 'pick US or EU' }),
+                    },
+                  ]
+                : []),
+              {
+                label: 'Change directory',
+                value: 'directory',
+                ...(narrow ? {} : { hint: 'point at another project' }),
+              },
+              {
+                label: 'Cancel',
+                value: 'cancel',
+                ...(narrow ? {} : { hint: 'exit wizard' }),
+              },
+            ]}
+            onSelect={(value) => {
+              const choice = Array.isArray(value) ? value[0] : value;
+              analytics.wizardCapture('intro action', {
+                action: choice,
+                integration: session.integration,
+                'detected framework': session.detectedFrameworkLabel,
+                'has manifest': workspace.hasManifest,
+                'is monorepo': workspace.isMonorepo,
+              });
+              if (choice === 'cancel') {
+                store.setOutroData({
+                  kind: OutroKind.Cancel,
+                  message: 'Setup cancelled.',
+                });
+              } else if (choice === 'directory') {
+                setChangingDirectory(true);
+              } else if (choice === 'framework') {
+                setPickingFramework(true);
+              } else if (choice === 'region') {
+                // Force RegionSelect to appear after Continue. Must
+                // conclude the intro so the main flow advances past it
+                // into the (now re-shown) RegionSelect screen.
+                store.setRegionForced();
+                store.concludeIntro();
+              } else {
+                store.concludeIntro();
+              }
+            }}
+          />
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+/**
+ * Labels-first summary of the current target. Renders a compact 2-3
+ * line block:
+ *
+ *   Target      ~/projects/my-app
+ *   Framework   ▲  Next.js  (detected)
+ *   Region      US
+ *
+ * Always shows the Target line — even during detection — so the user
+ * can spot a wrong directory before the wizard finishes scanning it.
+ * Framework / Region only appear once they're known. We keep the label
+ * column at a fixed width so values align on a 9-character grid.
+ */
+const LABEL_WIDTH = 11;
+
+function padLabel(label: string): string {
+  if (label.length >= LABEL_WIDTH) return label;
+  return label + ' '.repeat(LABEL_WIDTH - label.length);
+}
+
+interface TargetSummaryProps {
+  displayPath: string;
+  frameworkLabel: string | null;
+  frameworkGlyph: string | undefined;
+  frameworkGlyphColor: string | undefined;
+  frameworkBeta: boolean;
+  frameworkSuffix: string;
+  region: string | null;
+  detecting: boolean;
+}
+
+const TargetSummary = ({
+  displayPath,
+  frameworkLabel,
+  frameworkGlyph,
+  frameworkGlyphColor,
+  frameworkBeta,
+  frameworkSuffix,
+  region,
+  detecting,
+}: TargetSummaryProps) => {
+  return (
+    <Box flexDirection="column" alignItems="flex-start">
+      <Box>
+        <Text color={Colors.muted}>{padLabel('Target')}</Text>
+        <Text color={Colors.heading}>{displayPath}</Text>
+      </Box>
+
+      {/* Framework only renders once detection is done — during the
+          spinner the row would show a stale value or empty slot. */}
+      {!detecting && frameworkLabel && (
+        <Box>
+          <Text color={Colors.muted}>{padLabel('Framework')}</Text>
+          {frameworkGlyph && (
+            <Text color={frameworkGlyphColor}>{frameworkGlyph} </Text>
+          )}
+          <Text color={Colors.body}>
+            {frameworkLabel}
+            {frameworkSuffix}
+            {frameworkBeta && ' [BETA]'}
+          </Text>
+        </Box>
+      )}
+
+      {region && (
+        <Box>
+          <Text color={Colors.muted}>{padLabel('Region')}</Text>
+          <Text color={Colors.body}>{region.toUpperCase()}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+};
+
+/**
+ * Workspace ambiguity warnings — surfaced before the user hits
+ * Continue so they can bail out without ever touching the agent run.
+ *
+ * Two distinct cases:
+ *   - No project manifest at all → likely the wrong directory entirely.
+ *     We don't list every accepted manifest type here (that was noise
+ *     in the v1 of this screen). The "Change directory" picker option
+ *     is the resolution; we don't repeat that hint inside the warning.
+ *   - Monorepo root → instrumentation almost always belongs inside a
+ *     specific workspace, not at the root. We surface up to three
+ *     detected workspace globs so the user has a hint for which
+ *     direction to go.
+ *
+ * No "tip" line: the picker directly below this warning already offers
+ * Continue / Change framework / Change directory / Cancel, which covers
+ * every reasonable next step. An earlier version pointed users at the
+ * `wizard plan` CLI command for a no-write preview, but that's
+ * misleading inside the TUI — the user is already in an interactive
+ * session, and `npx @amplitude/wizard plan` isn't always reachable from
+ * the same environment they invoked the wizard from. The picker is the
+ * answer; the tip was noise.
+ */
+interface WorkspaceWarningsProps {
+  hasManifest: boolean;
+  isMonorepo: boolean;
+  workspaceGlobs: string[];
+}
+
+const WorkspaceWarnings = ({
+  hasManifest,
+  isMonorepo,
+  workspaceGlobs,
+}: WorkspaceWarningsProps) => {
+  const showAny = !hasManifest || isMonorepo;
+  if (!showAny) return null;
+
+  return (
+    <Box marginTop={1} flexDirection="column" alignItems="flex-start">
+      {!hasManifest && (
+        <Text color={Colors.warning}>
+          {Icons.warning} No project manifest found here. This may not be the
+          project you meant.
+        </Text>
+      )}
+
+      {isMonorepo && (
+        <Box flexDirection="column">
+          <Text color={Colors.warning}>
+            {Icons.warning} This looks like a monorepo root. Pick a workspace
+            instead of instrumenting the whole tree.
+          </Text>
+          {workspaceGlobs.length > 0 && (
+            <Text color={Colors.muted}>
+              {' '}
+              Workspaces: {workspaceGlobs.slice(0, 3).join(', ')}
+              {workspaceGlobs.length > 3 ? ', …' : ''}
+            </Text>
           )}
         </Box>
       )}

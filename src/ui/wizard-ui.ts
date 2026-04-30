@@ -123,12 +123,6 @@ export interface WizardUI {
    */
   setRetryState(state: RetryState | null): void;
 
-  /** Warn that .claude/settings.json overrides blocking env vars (pushes blocking overlay in TUI). */
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void>;
-
   // ── Display state ──────────────────────────────────────────────────
   /** Set the detected framework label (e.g., "Django with Wagtail CMS") */
   setDetectedFramework(label: string): void;
@@ -171,6 +165,35 @@ export interface WizardUI {
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void;
 
+  // ── Real-time file write activity from inner-agent hooks ──────────
+  /**
+   * The inner agent has requested a file write (Edit / Write / MultiEdit /
+   * NotebookEdit) at PreToolUse. The change has not yet been applied. The
+   * TUI surfaces this as a spinning row in the FileWritesPanel; agent mode
+   * emits the existing `file_change_planned` NDJSON event.
+   *
+   * `path` is the raw absolute path the inner agent passed to the tool; the
+   * TUI relativizes it for display, the NDJSON contract leaves it untouched
+   * for outer-agent compatibility (schema v:1).
+   */
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void;
+
+  /**
+   * The inner-agent's write tool succeeded at PostToolUse. Pairs with the
+   * preceding `recordFileChangePlanned` for the same path. `bytes` is
+   * present when the inner agent's tool input carried `content` (Write); it
+   * may be undefined for Edit / MultiEdit where the SDK doesn't surface the
+   * resulting file size to the hook.
+   */
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void;
+
   // ── Event plan from .amplitude-events.json ────────────────────
   setEventPlan(events: Array<{ name: string; description: string }>): void;
 
@@ -185,4 +208,107 @@ export interface WizardUI {
    * ChecklistScreen so users can open the dashboard immediately.
    */
   setDashboardUrl(url: string): void;
+
+  // ── Terminal lifecycle ─────────────────────────────────────────
+  /**
+   * Emitted exactly once per run, immediately before the process exits
+   * via `wizardSuccessExit` / `wizardAbort`. Optional because the TUI
+   * (InkUI) and CI logger (LoggingUI) don't need a structured terminal
+   * event — their UI semantics already imply the run boundary. AgentUI
+   * implements this to emit a `run_completed` NDJSON event so
+   * orchestrators can distinguish "wizard finished cleanly" from
+   * "wizard crashed mid-stream and tore the pipe down". Absence of
+   * this event before stream EOF means crash; presence with
+   * `outcome: "success"` is the only signal of a clean run.
+   */
+  emitRunCompleted?(data: {
+    outcome: 'success' | 'error' | 'cancelled';
+    exitCode: number;
+    durationMs: number;
+    reason?: string;
+  }): void;
+
+  /**
+   * Emit a `setup_context` event carrying the resolved Amplitude scope
+   * (region, org, project, app, env) at a known phase boundary.
+   * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI
+   * no-op, since their UI already shows the equivalent context.
+   *
+   * Skill rule: the outer agent SHOULD show this scope to the user
+   * BEFORE asking them to approve the run, so they know which
+   * Amplitude app the wizard is about to write to.
+   */
+  emitSetupContext?(data: {
+    phase: 'plan' | 'apply_started' | 'whoami';
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+    };
+    sources?: Record<string, 'auto' | 'flag' | 'saved' | 'recommended'>;
+    requiresConfirmation?: boolean;
+    resumeFlags?: { changeApp: string[] };
+  }): void;
+
+  /**
+   * Emit a terminal `setup_complete` event once per successful run,
+   * just before `run_completed`. Carries the canonical artifact list
+   * (app id, dashboard URL, files, env vars, events) the outer agent
+   * needs to drive follow-up MCP calls into the right project.
+   * Optional; only AgentUI implements.
+   */
+  emitSetupComplete?(data: {
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+      dashboardUrl?: string;
+      dashboardId?: string;
+    };
+    files?: { written: string[]; modified: string[] };
+    envVars?: { added: string[]; modified: string[] };
+    events?: Array<{ name: string; description?: string; file?: string }>;
+    durationMs?: number;
+    followups?: {
+      mcpServer?: { command: string[]; description: string };
+      docsUrl?: string;
+    };
+  }): void;
+
+  /**
+   * Aggregated agent-run metrics — emitted by the observability
+   * middleware once per run at finalize time with token usage, tool
+   * call counts, and duration. Optional; AgentUI emits a `progress`
+   * NDJSON event so orchestrators can bill / cap / monitor cost.
+   * InkUI / LoggingUI no-op.
+   *
+   * Token counts come straight from the Claude Agent SDK's terminal
+   * `result` message — they're cumulative across the entire run
+   * (including any retries the runner performed). `costUsd` is the
+   * SDK's own cost estimate; the wizard doesn't apply its own rate
+   * card so the number stays consistent with the gateway's billing
+   * source of truth.
+   */
+  emitAgentMetrics?(data: {
+    durationMs: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    costUsd?: number;
+    numTurns?: number;
+    totalToolCalls?: number;
+    totalMessages?: number;
+    isError?: boolean;
+  }): void;
 }

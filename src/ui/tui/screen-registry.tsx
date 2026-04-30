@@ -7,7 +7,6 @@ import type { WizardStore } from './store.js';
 import { Screen, Overlay, type ScreenName } from './router.js';
 
 import { OutageScreen } from './screens/OutageScreen.js';
-import { SettingsOverrideScreen } from './screens/SettingsOverrideScreen.js';
 import { IntroScreen } from './screens/IntroScreen.js';
 import { SetupScreen } from './screens/SetupScreen.js';
 import { AuthScreen } from './screens/AuthScreen.js';
@@ -45,7 +44,6 @@ export function createScreens(
   return {
     // Overlays
     [Overlay.Outage]: <OutageScreen store={store} />,
-    [Overlay.SettingsOverride]: <SettingsOverrideScreen store={store} />,
     [Overlay.Snake]: (
       <SnakeGame onExit={() => store.hideSnakeOverlay()} music={false} />
     ),

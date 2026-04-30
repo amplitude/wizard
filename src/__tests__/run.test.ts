@@ -51,7 +51,6 @@ vi.mock('../ui', () => ({
     syncTodos: vi.fn(),
     setLoginUrl: vi.fn(),
     showServiceStatus: vi.fn(),
-    showSettingsOverride: vi.fn(),
     startRun: vi.fn(),
     setRunError: vi.fn(),
   }),
@@ -63,7 +62,14 @@ const mockRunAgentWizard = runAgentWizard as MockedFunction<
 >;
 const mockAnalytics = analytics as vi.Mocked<typeof analytics>;
 
-describe('runWizard error handling', () => {
+// Bump the per-test timeout for this suite. Each test runs in <1.5s in
+// isolation, but under the cold-cache parallel pressure of `pnpm test`
+// (which spins up 156 test files concurrently) module loading for
+// `../run` plus its transitive imports — TUI, agent-runner, observability,
+// nanostores — pushes past vitest's default 5s timeout intermittently.
+// 30s is generous enough that we never hit it on a healthy machine and
+// keep the suite green under load. Real bugs would fail well below 30s.
+describe('runWizard error handling', { timeout: 30_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
 

@@ -24,8 +24,133 @@
  * stay in sync.
  */
 
-/** Wire-format version. Bump on any breaking shape change. */
+/**
+ * Envelope (top-level) wire-format version. Bump on any breaking change
+ * to the FRAME shape — i.e. the keys directly on the JSON line itself
+ * (`v`, `@timestamp`, `type`, `message`, `session_id`, `run_id`,
+ * `level`, `data`, `data_version`).
+ *
+ * Per-event `data` shapes get their own version on the envelope via
+ * `data_version` (see below). Bumping `v` is for the framing layer
+ * only.
+ */
 export const AGENT_EVENT_WIRE_VERSION = 1 as const;
+
+/**
+ * Per-event-type data-shape version. The key insight from orchestrator
+ * feedback: pinning to envelope `v: 1` doesn't protect orchestrators
+ * from breaking changes inside `data`. Adding/renaming a field on
+ * (say) `event_plan_proposed` keeps envelope v=1 stable but silently
+ * shifts the contract for that one event.
+ *
+ * Solution: every event whose `data` shape is part of the public API
+ * carries a `data_version` integer on the envelope. Orchestrators
+ * should branch on `(type, data?.event, data_version)` rather than
+ * envelope `v` alone. The default for events without a registered
+ * version is 1 — adding `data_version` to an event for the first time
+ * is itself the v=1 baseline. Bump to 2 on the first breaking change.
+ *
+ * Why a flat number per event-type+discriminator instead of one global
+ * counter: a global counter forces every orchestrator to upgrade in
+ * lockstep when any event changes. Per-event versions let one event's
+ * shape evolve without invalidating an orchestrator that only cares
+ * about (e.g.) `tool_call` and `dashboard_created`.
+ *
+ * Registry: see `EVENT_DATA_VERSIONS` below — single source of truth.
+ * To bump a version, update that map AND add a regression test pinning
+ * the new shape.
+ */
+export const EVENT_DATA_VERSIONS = {
+  // Lifecycle
+  start_run: 1,
+  /**
+   * Terminal lifecycle event — emitted exactly once per run, immediately
+   * before the process exits via `wizardSuccessExit` / `wizardAbort`.
+   * Carries the structured outcome (`success` / `error` / `cancelled`),
+   * the exit code the process is about to return, and the run duration.
+   * Orchestrators should treat absence of `run_completed` as
+   * "wizard crashed mid-stream" — distinct from a clean failure exit.
+   */
+  run_completed: 1,
+  intro: 1,
+  outro: 1,
+  cancel: 1,
+  auth_required: 1,
+  nested_agent: 1,
+  inner_agent_started: 1,
+  // Project create. Discriminators must match the actual `data.event`
+  // strings emitted by AgentUI — bugbot caught a previous mismatch
+  // (`project_created` vs the emitted `project_create_success`) that
+  // silently dropped the data_version stamp from those events.
+  project_create_start: 1,
+  project_create_success: 1,
+  project_create_error: 1,
+  // Tool / file changes
+  tool_call: 1,
+  file_change_planned: 1,
+  file_change_applied: 1,
+  // Event plan
+  event_plan_proposed: 1,
+  event_plan_confirmed: 1,
+  event_plan: 1,
+  event_plan_set: 1,
+  // Verification
+  verification_started: 1,
+  verification_result: 1,
+  // Other results
+  events_detected: 1,
+  dashboard_created: 1,
+  /**
+   * `setup_context` — emitted by `plan` (in the JSON envelope) and at
+   * `apply_started`, before any work happens. Carries the resolved
+   * Amplitude scope (region, org, project, app, env) so the outer
+   * agent can SHOW the user exactly what's about to be modified before
+   * asking them to approve. Without this, an outer agent has no
+   * authoritative handle on which Amplitude app the wizard will write
+   * to and may render data from a stale project for follow-up queries.
+   *
+   * Each scope field carries a `source` discriminator (`auto` /
+   * `flag` / `saved` / `recommended`) so the orchestrator can decide
+   * whether a re-confirm is warranted (e.g. `auto` from a single-match
+   * still benefits from a "look right?" prompt).
+   */
+  setup_context: 1,
+  /**
+   * `setup_complete` — terminal artifact event emitted exactly once
+   * per successful `apply` run, immediately before `run_completed`.
+   * Single source of truth for the artifacts the outer agent needs
+   * for follow-up work: which app to query, which files were
+   * written, which env vars were set, which dashboard URL to render.
+   *
+   * Skill rule: after this event fires, the outer agent MUST replace
+   * any cached Amplitude project context with `amplitude.appId` —
+   * otherwise follow-up MCP queries (charts, dashboards, events) hit
+   * the wrong project.
+   */
+  setup_complete: 1,
+  /**
+   * `agent_metrics` — emitted once per agent run at finalize time
+   * with aggregated token usage, tool call counts, and run duration.
+   * Lets orchestrators bill / cap / monitor cost without re-parsing
+   * the full event stream. Token counts come straight from the
+   * Claude Agent SDK's terminal `result` message.
+   */
+  agent_metrics: 1,
+  /**
+   * `decision_auto` — emitted alongside a `needs_input` whenever the
+   * wizard auto-resolves the prompt (under `--auto-approve` /
+   * `--yes` / `--ci` / `--force`, OR the `--agent`-implies-autoApprove
+   * back-compat path). Lets orchestrators distinguish "you should
+   * surface this question to a human" from "FYI, I auto-picked the
+   * recommended value." Without it, a strict orchestrator subscribing
+   * to `needs_input` would race the wizard's auto-resolve.
+   *
+   * Fires AFTER the corresponding `needs_input` so a single-event
+   * subscriber that sees `needs_input` first is guaranteed to see the
+   * auto-resolution next on the same stream.
+   */
+  decision_auto: 1,
+} as const;
 
 /** All NDJSON event-level types. */
 export type AgentEventType =
@@ -49,6 +174,14 @@ export interface AgentEventEnvelope<TData = unknown> {
   session_id?: string;
   run_id?: string;
   level?: 'info' | 'warn' | 'error' | 'success' | 'step';
+  /**
+   * Per-event-type data-shape version. Optional because not every
+   * event's `data` is part of the orchestrator-facing contract (e.g.
+   * `log`, `status`, `progress` carry free-form payloads). When
+   * present, orchestrators should branch on this value to handle
+   * breaking changes to `data`.
+   */
+  data_version?: number;
   data?: TData;
 }
 
@@ -255,6 +388,47 @@ export interface InnerAgentStartedData {
 }
 
 /**
+ * `run_completed` — terminal lifecycle event emitted exactly once per
+ * run, immediately before the process calls `process.exit()`.
+ *
+ * Why this event exists: prior to this, an orchestrator parsing NDJSON
+ * had no way to distinguish "wizard finished cleanly and closed
+ * stdout" from "wizard crashed mid-stream and Node tore the pipe
+ * down." Both look identical (stream EOF) to the consumer.
+ *
+ * Contract: orchestrators MUST treat absence of `run_completed` before
+ * the stream ends as "wizard crashed" and surface a generic failure to
+ * their caller. The presence of `run_completed` with `outcome:
+ * "success"` and `exitCode: 0` is the only signal of a clean run.
+ *
+ * The event is wired into the singular exit funnels in
+ * `src/utils/wizard-abort.ts` (`wizardSuccessExit` and `wizardAbort`).
+ * Anything that calls `process.exit()` directly bypasses this event,
+ * which is by design — direct exits are bugs and should be migrated.
+ */
+export interface RunCompletedData {
+  event: 'run_completed';
+  /**
+   * High-level outcome. Distinct from `exitCode` because two different
+   * exit codes can map to the same outcome (e.g. AGENT_FAILED and
+   * INTERNAL_ERROR are both `error`), and orchestrators frequently
+   * just want a tri-state for log-line color / dashboard rollups.
+   */
+  outcome: 'success' | 'error' | 'cancelled';
+  /** Numeric exit code the process is about to return. */
+  exitCode: number;
+  /** Wall-clock duration of the run, in milliseconds. */
+  durationMs: number;
+  /**
+   * Optional reason string when `outcome !== 'success'`. Sanitized via
+   * the same redactor used by `setRunError` — paths / URLs scrubbed.
+   * Free-form, intended for orchestrator log lines, not for
+   * programmatic branching (use `exitCode` for that).
+   */
+  reason?: string;
+}
+
+/**
  * `tool_call` — emitted at PreToolUse for every tool the inner agent calls.
  * Carries a sanitized summary so secrets / large prompts don't leak.
  */
@@ -401,6 +575,151 @@ export function summarizeToolInput(
       }
     }
   }
+}
+
+// ── Setup context / completion ──────────────────────────────────────
+//
+// The two events below bracket the wizard's actual work. `setup_context`
+// fires BEFORE any decisions / writes happen so the outer agent can show
+// the user exactly which Amplitude scope they're about to modify.
+// `setup_complete` fires ONCE on a successful run with the canonical
+// artifact list — it's the contract the outer agent reads to drive
+// follow-up MCP calls into the right project.
+
+/**
+ * Provenance for a resolved scope field. Lets orchestrators decide
+ * whether to re-confirm with the user (e.g. always confirm `auto`
+ * resolutions even when there's a single match).
+ */
+export type SetupContextSource =
+  | 'auto' // resolved by single-match / sole-org auto-pick
+  | 'flag' // came from an explicit CLI flag (--app-id, --integration, ...)
+  | 'saved' // restored from a prior session (~/.ampli config / token store)
+  | 'recommended'; // wizard's recommended pick from a >1 list (not yet selected)
+
+/**
+ * Resolved Amplitude scope at the moment the event fires. Every field
+ * is optional because not every phase has every value: `plan` emits
+ * the org/region but may not have an appId yet; `apply_started`
+ * emits everything once the env picker has run. Skill instructs the
+ * agent to surface whatever fields are present and ask the user to
+ * confirm the ones that aren't.
+ */
+export interface SetupContextAmplitudeScope {
+  region?: 'us' | 'eu';
+  orgId?: string;
+  orgName?: string;
+  projectId?: string;
+  projectName?: string;
+  /**
+   * Numeric Amplitude app id (a.k.a. project id in the Amplitude UI).
+   * Stringified so JS bigint-y values round-trip cleanly through
+   * orchestrator stores. Always parseable back to a positive integer.
+   */
+  appId?: string;
+  appName?: string;
+  envName?: string;
+}
+
+/**
+ * Wire shape of `setup_context.data`. Per-field provenance lets the
+ * orchestrator render badges like "auto-detected" or "from flag".
+ * `phase` discriminates which command emitted it — useful when the
+ * orchestrator is multiplexing multiple wizard runs.
+ */
+export interface SetupContextData {
+  event: 'setup_context';
+  phase: 'plan' | 'apply_started' | 'whoami';
+  amplitude: SetupContextAmplitudeScope;
+  sources?: Partial<
+    Record<keyof SetupContextAmplitudeScope, SetupContextSource>
+  >;
+  /**
+   * When `true`, the orchestrator MUST surface this scope to the user
+   * before proceeding. Set by `--confirm-app` and on any `auto`
+   * resolution where multiple choices were possible.
+   */
+  requiresConfirmation?: boolean;
+  /**
+   * argv to re-invoke if the user wants to pick a different app
+   * instead of the auto-resolved one. Always uses `--app-id` as the
+   * canonical scope flag.
+   */
+  resumeFlags?: { changeApp: string[] };
+}
+
+/** Single planned analytics event written by the wizard. */
+export interface SetupCompleteEvent {
+  name: string;
+  description?: string;
+  /** Source file the track() call landed in (relative to installDir). */
+  file?: string;
+}
+
+/** Wire shape of `setup_complete.data`. */
+export interface SetupCompleteData {
+  event: 'setup_complete';
+  /** Resolved Amplitude scope — the source of truth for follow-up queries. */
+  amplitude: SetupContextAmplitudeScope & {
+    /** Public dashboard URL when the wizard created one. */
+    dashboardUrl?: string;
+    /** Dashboard id (last segment of dashboardUrl) — convenience for MCP. */
+    dashboardId?: string;
+  };
+  /** Files the inner agent created or modified, relative to `installDir`. */
+  files?: { written: string[]; modified: string[] };
+  /** Env-var names the wizard added/changed (values intentionally omitted). */
+  envVars?: { added: string[]; modified: string[] };
+  /** Final approved event plan. */
+  events?: SetupCompleteEvent[];
+  /** Wall-clock duration of the run in ms. */
+  durationMs?: number;
+  /** Hint for follow-up tooling. Skill reads `mcpServer` to wire MCP context. */
+  followups?: {
+    mcpServer?: { command: string[]; description: string };
+    docsUrl?: string;
+  };
+}
+
+// ── Log truncation ──────────────────────────────────────────────────
+//
+// Inner-agent errors can include the entire failing SSE response body
+// (model id, signature blobs, cache token counts, partial JSON
+// deltas — kilobytes of internals). Past sessions surfaced 50KB+
+// `log.message` strings that polluted orchestrator context, leaked
+// internal model identifiers, and rendered as walls of unreadable text.
+// We truncate in the emitter so a single misbehaving caller can't blow
+// up downstream parsers regardless of where the noise originated.
+
+/**
+ * Maximum length of a `log.message` string in NDJSON output. Spillover
+ * is dropped from the wire and pointed at the on-disk verbose log so
+ * orchestrators see a readable status line and the operator still has
+ * the full payload for debugging.
+ */
+export const MAX_LOG_MESSAGE_LENGTH = 2048;
+
+/**
+ * Truncate a log message for inclusion in NDJSON output. Idempotent
+ * (already-short strings pass through unchanged) and stable (the
+ * suffix is appended exactly once even on double-truncation).
+ *
+ *   - `<= MAX_LOG_MESSAGE_LENGTH` → returned verbatim
+ *   - otherwise                  → `<head>… [truncated …; see verbose log]`
+ *
+ * Pure for unit testing.
+ */
+export function truncateLogMessage(
+  message: string,
+  max = MAX_LOG_MESSAGE_LENGTH,
+): string {
+  if (message.length <= max) return message;
+  const suffix = '… [truncated; see verbose log]';
+  // Reserve room for the suffix so the final string is always exactly
+  // `max` bytes long (or shorter when `max` itself is too small for
+  // the suffix — defensive, never happens in practice).
+  const headroom = Math.max(0, max - suffix.length);
+  return message.slice(0, headroom) + suffix;
 }
 
 /**

@@ -200,8 +200,16 @@ export async function performDirectSignup(
     };
   }
 
+  // Source `expiresAt` from id_token's exp claim (id_token TTL is the
+  // binding constraint for API calls). Falls back to `expires_in` and
+  // then to a 1-hour default if either is unusable. See
+  // `src/utils/jwt-exp.ts` for rationale.
+  const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
   const expiresAt = new Date(
-    Date.now() + parsedTokens.data.expires_in * 1000,
+    resolveStoredExpiryMs({
+      idToken: parsedTokens.data.id_token,
+      expiresInSeconds: parsedTokens.data.expires_in,
+    }),
   ).toISOString();
   return {
     kind: 'success',

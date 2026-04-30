@@ -53,6 +53,19 @@ vi.mock('../../../utils/api-key-store.js', () => ({
   persistApiKey: vi.fn(),
   readApiKeyWithSource: vi.fn(),
 }));
+// Stub `getStoredUser` so the Wizard flow's RegionSelect gate (which calls
+// `tryResolveZone`) doesn't pick up the developer's real ~/.ampli.json.
+// `readAmpliConfig` is left un-mocked because store.test.ts already
+// exercises real reads/writes against per-test tmpdirs.
+vi.mock('../../../utils/ampli-settings.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../../utils/ampli-settings.js')
+  >();
+  return {
+    ...actual,
+    getStoredUser: vi.fn(() => undefined),
+  };
+});
 
 // Redirect fs-touching setters (setRegion, setOrgAndWorkspace) away from
 // the repo root so tests don't pollute the wizard's own ampli.json. Every
@@ -89,12 +102,26 @@ describe('WizardStore', () => {
       expect(store.version).toBe('');
       expect(store.statusMessages).toEqual([]);
       expect(store.tasks).toEqual([]);
-      // installDir is overridden by the test helper — compare the rest.
-      const { installDir: storeInstallDir, ...rest } = store.session;
-      const { installDir: defaultInstallDir, ...defaults } = buildSession({});
+      // installDir is overridden by the test helper, and agentSessionId is a
+      // freshly-generated UUID per call to buildSession — compare the rest.
+      const {
+        installDir: storeInstallDir,
+        agentSessionId: storeAgentSessionId,
+        ...rest
+      } = store.session;
+      const {
+        installDir: defaultInstallDir,
+        agentSessionId: defaultAgentSessionId,
+        ...defaults
+      } = buildSession({});
       expect(rest).toEqual(defaults);
       expect(storeInstallDir).toMatch(/wizard-store-test-/);
       expect(defaultInstallDir).toBeDefined();
+      // Both should be valid UUIDs but won't match (generated independently).
+      const UUID_RE =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      expect(storeAgentSessionId).toMatch(UUID_RE);
+      expect(defaultAgentSessionId).toMatch(UUID_RE);
     });
 
     it('defaults to Wizard flow', () => {
@@ -1681,6 +1708,320 @@ describe('WizardStore', () => {
       const store = createStore();
       const popped = store.popLastFrameworkContextAnswer();
       expect(popped).toBe(false);
+    });
+  });
+
+  // ── Inline directory change ──────────────────────────────────────
+  //
+  // The IntroScreen "Change directory" flow runs through
+  // `store.changeInstallDir` + `store.setFrameworkRedetector`. These
+  // tests pin the store-side contract: state reset is correct, the
+  // re-detector is invoked, and a new call cancels the previous one.
+  describe('changeInstallDir', () => {
+    function seedDetectionState(store: WizardStore): void {
+      // Mimic the post-detection state the IntroScreen would observe
+      // before the user opted to change directories.
+      store.setFrameworkConfig(Integration.nextjs, {
+        metadata: {
+          integration: Integration.nextjs,
+          name: 'Next.js',
+        },
+      } as unknown as Parameters<typeof store.setFrameworkConfig>[1]);
+      store.setDetectedFramework('Next.js');
+      store.setFrameworkContext('appRouter', true);
+      store.setDetectionComplete();
+    }
+
+    it('resets detection state and updates installDir', () => {
+      const store = createStore();
+      seedDetectionState(store);
+      expect(store.session.detectionComplete).toBe(true);
+      expect(store.session.integration).toBe(Integration.nextjs);
+
+      store.changeInstallDir('/tmp/another-project');
+
+      expect(store.session.installDir).toBe('/tmp/another-project');
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.detectedFrameworkLabel).toBeNull();
+      expect(store.session.detectionComplete).toBe(false);
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.detectionResults).toEqual([]);
+      expect(store.session.discoveredFeatures).toEqual([]);
+    });
+
+    it('clears the checkpoint-restore flag — directory change invalidates resume', () => {
+      const store = createStore();
+      // Mimic a user who opted to "Resume where you left off" but then
+      // realized the wizard was pointed at the wrong tree.
+      store.session = { ...store.session, _restoredFromCheckpoint: true };
+
+      store.changeInstallDir('/tmp/different-tree');
+
+      expect(store.session._restoredFromCheckpoint).toBe(false);
+    });
+
+    it('invokes the registered redetector with the new directory', () => {
+      const store = createStore();
+      const redetect = vi.fn().mockResolvedValue(undefined);
+      store.setFrameworkRedetector(redetect);
+
+      store.changeInstallDir('/tmp/new-target');
+
+      expect(redetect).toHaveBeenCalledTimes(1);
+      const [path, signal] = redetect.mock.calls[0];
+      expect(path).toBe('/tmp/new-target');
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal.aborted).toBe(false);
+    });
+
+    it('aborts the previous detection when a second change fires', () => {
+      const store = createStore();
+      const redetect = vi.fn().mockResolvedValue(undefined);
+      store.setFrameworkRedetector(redetect);
+
+      store.changeInstallDir('/tmp/first');
+      const firstSignal = redetect.mock.calls[0][1] as AbortSignal;
+      expect(firstSignal.aborted).toBe(false);
+
+      store.changeInstallDir('/tmp/second');
+      // The first run's signal is now aborted — its detection should
+      // bail out rather than stomp on state for the new directory.
+      expect(firstSignal.aborted).toBe(true);
+
+      const secondSignal = redetect.mock.calls[1][1] as AbortSignal;
+      expect(secondSignal.aborted).toBe(false);
+    });
+
+    it('is a no-op for the redetector when none is registered', () => {
+      const store = createStore();
+      // No setFrameworkRedetector call — simulates classic-mode or test
+      // entry points where bin.ts hasn't wired up the helper.
+      expect(() => store.changeInstallDir('/tmp/foo')).not.toThrow();
+      expect(store.session.installDir).toBe('/tmp/foo');
+      expect(store.session.detectionComplete).toBe(false);
+    });
+
+    it('tolerates redetector rejections (errors are non-fatal)', async () => {
+      const store = createStore();
+      const failing = vi.fn().mockRejectedValue(new Error('boom'));
+      store.setFrameworkRedetector(failing);
+
+      // Should not throw synchronously.
+      expect(() => store.changeInstallDir('/tmp/will-fail')).not.toThrow();
+      // Give the rejected promise a tick to settle without bubbling.
+      await new Promise((r) => setImmediate(r));
+      expect(failing).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: bugbot Issue #2.
+    //
+    // Before this fix, only the IntroScreen-driven re-detection calls
+    // registered an AbortController as the active detection. The
+    // INITIAL detection from bin.ts had no controller registered, so a
+    // `changeInstallDir` fired before the first scan completed would
+    // skip the abort path entirely. The original detection's
+    // `setDetectionComplete` could then fire AFTER the reset, briefly
+    // flashing stale framework results from the old tree.
+    it('aborts a controller registered via registerActiveDetection', () => {
+      const store = createStore();
+      const initialController = new AbortController();
+      store.registerActiveDetection(initialController);
+
+      expect(initialController.signal.aborted).toBe(false);
+      store.changeInstallDir('/tmp/swap-during-initial-scan');
+      expect(initialController.signal.aborted).toBe(true);
+    });
+
+    // Regression: bugbot Issue #4.
+    //
+    // `discoveredFeatures` reset alone wasn't enough — the opt-in
+    // flags derived from those features (llmOptIn, sessionReplayOptIn,
+    // engagementOptIn) and the `additionalFeatureQueue` /
+    // `optInFeaturesComplete` markers also need to clear. Otherwise a
+    // user who points the wizard at a Python AI repo (LLM analytics
+    // discovered, llmOptIn=true, additionalFeatureQueue=[LLM]) and
+    // then changes directory to a vanilla Next.js app would have the
+    // agent set up LLM analytics in a project that has no LLM SDK.
+    it('resets every opt-in flag derived from the old discovery, not just the list', () => {
+      const store = createStore();
+      // Mimic post-discovery state for the OLD project.
+      store.session = {
+        ...store.session,
+        llmOptIn: true,
+        sessionReplayOptIn: true,
+        engagementOptIn: true,
+        optInFeaturesComplete: true,
+        additionalFeatureQueue: [
+          AdditionalFeature.LLM,
+          AdditionalFeature.SessionReplay,
+        ],
+      };
+
+      store.changeInstallDir('/tmp/clean-tree');
+
+      expect(store.session.llmOptIn).toBe(false);
+      expect(store.session.sessionReplayOptIn).toBe(false);
+      expect(store.session.engagementOptIn).toBe(false);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.discoveredFeatures).toEqual([]);
+    });
+
+    // Regression: bugbot Issue #8.
+    //
+    // `frameworkContext` was reset to `{}` but
+    // `frameworkContextAnswerOrder` (the per-key answer log used by
+    // back-navigation) wasn't. After a directory change, stale keys
+    // stayed in the answer-order array. `popLastFrameworkContextAnswer`
+    // would then "successfully" pop a key that no longer existed in
+    // `frameworkContext`, creating phantom back-nav steps that did
+    // nothing visible.
+    it('resets frameworkContextAnswerOrder so back-nav has nothing stale to pop', () => {
+      const store = createStore();
+      store.setFrameworkContext('appRouter', true);
+      store.setFrameworkContext('typescript', true);
+      expect(store.session.frameworkContextAnswerOrder.length).toBeGreaterThan(
+        0,
+      );
+
+      store.changeInstallDir('/tmp/new-tree');
+
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.frameworkContextAnswerOrder).toEqual([]);
+      // popLastFrameworkContextAnswer now correctly reports "nothing
+      // to pop" — no phantom back-nav steps.
+      expect(store.popLastFrameworkContextAnswer()).toBe(false);
+    });
+
+    it('emits a telemetry event with whether a redetector was registered', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.changeInstallDir('/tmp/no-redetector');
+      const noRedetectorCall = wizardCapture.mock.calls.find(
+        (call) => call[0] === 'install dir changed',
+      );
+      expect(noRedetectorCall?.[1]['has redetector']).toBe(false);
+
+      store.setFrameworkRedetector(vi.fn().mockResolvedValue(undefined));
+      store.changeInstallDir('/tmp/with-redetector');
+      const withRedetectorCall = wizardCapture.mock.calls
+        .filter((call) => call[0] === 'install dir changed')
+        .pop();
+      expect(withRedetectorCall?.[1]['has redetector']).toBe(true);
+    });
+  });
+
+  describe('recordFileChangePlanned / recordFileChangeApplied', () => {
+    it('appends a planned row, then flips it to applied with bytes + duration', () => {
+      const store = createStore();
+      expect(store.fileWrites).toEqual([]);
+
+      store.recordFileChangePlanned({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        status: 'planned',
+      });
+      expect(store.fileWrites[0].startedAt).toBeGreaterThan(0);
+      expect(store.fileWrites[0].completedAt).toBeUndefined();
+
+      store.recordFileChangeApplied({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        bytes: 512,
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        status: 'applied',
+        bytes: 512,
+      });
+      expect(store.fileWrites[0].completedAt).toBeGreaterThanOrEqual(
+        store.fileWrites[0].startedAt,
+      );
+    });
+
+    it('synthesizes an applied entry when no matching planned event arrived', () => {
+      // Edit / MultiEdit hooks can technically fire PostToolUse without a
+      // matching PreToolUse if the SDK reorders or drops a hook (rare but
+      // observed). Surface the write rather than silently dropping it.
+      const store = createStore();
+      store.recordFileChangeApplied({
+        path: '/proj/src/orphan.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/orphan.ts',
+        operation: 'modify',
+        status: 'applied',
+      });
+    });
+
+    it('collapses a back-to-back duplicate planned event for the same path', () => {
+      // Defensive: PreToolUse can fire twice for the same path during a
+      // retry loop. The user should see one in-progress row, not two.
+      const store = createStore();
+      store.recordFileChangePlanned({
+        path: '/proj/src/dup.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangePlanned({
+        path: '/proj/src/dup.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+    });
+
+    it('caps the list at MAX_FILE_WRITES with FIFO eviction', () => {
+      // A long-running run that touches hundreds of files (skill installs,
+      // lint fix-ups) shouldn't blow up the TUI. Oldest rows fall off.
+      const store = createStore();
+      for (let i = 0; i < WizardStore.MAX_FILE_WRITES + 5; i++) {
+        store.recordFileChangePlanned({
+          path: `/proj/file-${i}.ts`,
+          operation: 'create',
+        });
+      }
+      expect(store.fileWrites).toHaveLength(WizardStore.MAX_FILE_WRITES);
+      // First five rows should have been evicted.
+      expect(store.fileWrites[0].path).toBe('/proj/file-5.ts');
+    });
+
+    it('matches the most recent planned row when the same file is rewritten', () => {
+      // Common during multi-pass refactors. Apply the second planned row,
+      // not the first — otherwise the duration on the second row would
+      // count from the first plan, not the second.
+      const store = createStore();
+      store.recordFileChangePlanned({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangeApplied({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangePlanned({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      // At this point row 0 is applied, row 1 is planned.
+      expect(store.fileWrites[0].status).toBe('applied');
+      expect(store.fileWrites[1].status).toBe('planned');
+      store.recordFileChangeApplied({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites[0].status).toBe('applied');
+      expect(store.fileWrites[1].status).toBe('applied');
     });
   });
 });

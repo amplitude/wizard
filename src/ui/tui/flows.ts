@@ -14,6 +14,7 @@ import type { WizardSession } from '../../lib/wizard-session.js';
 // (PR 301 — Esc-based back navigation).
 import type { WizardStore } from './store.js';
 import { RunPhase } from './session-constants.js';
+import { tryResolveZone } from '../../lib/zone-resolution.js';
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
@@ -92,12 +93,17 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       isComplete: (s) => s.introConcluded,
     },
     // 2. Region selection — must know US vs EU before opening OAuth URL.
-    //    Skipped for returning users (region pre-populated from ~/.ampli.json).
+    //    Skipped for returning users (zone resolvable from ampli.json or
+    //    stored user). `session.region` represents this-run user intent and
+    //    is intentionally NOT populated from disk by resolveCredentials —
+    //    so we use `tryResolveZone` here to consult Tier 2/3 (ampli.json
+    //    Zone, stored user zone) and skip the picker when a returning user
+    //    already has a zone on disk.
     //    Re-shown when /region slash command sets regionForced.
     {
       screen: Screen.RegionSelect,
-      show: (s) => s.region === null || s.regionForced,
-      isComplete: (s) => s.region !== null && !s.regionForced,
+      show: (s) => tryResolveZone(s) === null || s.regionForced,
+      isComplete: (s) => tryResolveZone(s) !== null && !s.regionForced,
       // Back from Auth — re-show the region picker. Region affects OAuth
       // host, so we also have to drop pending tokens / org list / credentials
       // so the next pass actually re-authenticates against the new region.
@@ -148,7 +154,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       isComplete: (s) =>
         s.credentials !== null &&
         (s.selectedOrgName !== null || s.selectedOrgId !== null) &&
-        (s.selectedProjectName !== null || s.selectedProjectId !== null),
+        (s.selectedProjectName !== null || s.selectedProjectId !== null) &&
+        // Returning-user account confirmation. Blocks the gate until the
+        // user explicitly confirms (or changes) the org/project that was
+        // resolved silently from disk. Set in bin.ts when resolveCredentials
+        // populates the session without going through the SUSI picker.
+        !s.requiresAccountConfirmation,
       // Back from DataSetup — drop the picked org/project/env so the
       // Auth screen re-renders the picker. Credentials stay so we don't
       // force a fresh OAuth round-trip.

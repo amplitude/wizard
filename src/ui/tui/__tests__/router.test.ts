@@ -1,4 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+// Stub disk-backed zone signals so tests don't pick up the developer's
+// real ~/.ampli.json. The Wizard flow's RegionSelect gate calls
+// `tryResolveZone(s)`, which reads ampli.json + stored user as Tier 2/3.
+// Without these mocks, a `region: null` session in tests would still
+// resolve to a non-null zone via disk, skipping RegionSelect.
+vi.mock('../../../utils/ampli-settings.js', () => ({
+  getStoredUser: vi.fn(() => undefined),
+}));
+vi.mock('../../../lib/ampli-config.js', () => ({
+  readAmpliConfig: vi.fn(() => ({ ok: false, error: 'not_found' })),
+}));
+
 import { WizardRouter, Overlay, Screen, Flow } from '../router.js';
 import { FLOWS } from '../flows.js';
 import {
@@ -214,6 +227,31 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
+    it('RegionSelect skips for returning users with a stored zone (session.region null)', async () => {
+      // Repro for the user-reported bug: after `wizard login`, the next
+      // run still prompted for region. session.region is intentionally
+      // NOT populated from disk by resolveCredentials (it represents
+      // user intent for *this* run), so the gate must consult Tier 2/3
+      // via tryResolveZone — the stored user zone or ampli.json Zone.
+      const { getStoredUser } = await import(
+        '../../../utils/ampli-settings.js'
+      );
+      vi.mocked(getStoredUser).mockReturnValueOnce({
+        id: 'user-123',
+        email: 'kelson@example.com',
+        firstName: 'Kelson',
+        lastName: 'Warner',
+        zone: 'us',
+      });
+      const router = new WizardRouter();
+      const session = sessionWith({
+        introConcluded: true,
+        region: null,
+        regionForced: false,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+    });
+
     it('routes to CreateProject when createProject.pending is true', () => {
       const router = new WizardRouter();
       const session = sessionWith({
@@ -403,13 +441,13 @@ describe('WizardRouter', () => {
     it('multiple overlays stack correctly (LIFO)', () => {
       const router = new WizardRouter();
       router.pushOverlay(Overlay.Outage);
-      router.pushOverlay(Overlay.SettingsOverride);
+      router.pushOverlay(Overlay.Mcp);
       router.pushOverlay(Overlay.Snake);
 
       expect(router.resolve(fresh())).toBe(Overlay.Snake);
 
       router.popOverlay();
-      expect(router.resolve(fresh())).toBe(Overlay.SettingsOverride);
+      expect(router.resolve(fresh())).toBe(Overlay.Mcp);
 
       router.popOverlay();
       expect(router.resolve(fresh())).toBe(Overlay.Outage);

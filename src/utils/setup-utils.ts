@@ -22,6 +22,7 @@ import {
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
+import { resolveStoredExpiryMs } from './jwt-exp';
 import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
 import { type AppId, toCredentialAppId } from '../lib/wizard-session';
 import { storeToken } from './ampli-settings';
@@ -361,7 +362,7 @@ export function isUsingTypeScript({
 
 /**
  * Best-effort credentials for `--ci` when `--api-key` / AMPLITUDE_WIZARD_API_KEY
- * is not set: project-local key (.env.local / keychain), then OAuth id token from
+ * is not set: locally stored key (.env.local / per-user cache), then OAuth id token from
  * ~/.ampli.json plus org/project from ampli.json (same resolution as interactive bootstrap).
  */
 export async function tryResolveCredentialsForCi(installDir: string): Promise<{
@@ -487,7 +488,7 @@ export async function getOrAskForProjectData(
 
       getUI().log.error(
         chalk.red(
-          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local / keychain), or ensure ~/.ampli.json has a valid OAuth session (and ampli.json includes ProjectId if needed).',
+          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local) or run the wizard interactively once to populate the per-user cache, or ensure ~/.ampli.json has a valid OAuth session (and ampli.json includes ProjectId if needed).',
         ),
       );
       await wizardAbort({
@@ -587,7 +588,11 @@ async function askForWizardLogin(
         accessToken: auth.accessToken,
         idToken: auth.idToken,
         refreshToken: auth.refreshToken,
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        // Stored `expiresAt` tracks id_token TTL (binding constraint
+        // for API calls) — see `src/utils/jwt-exp.ts`.
+        expiresAt: new Date(
+          resolveStoredExpiryMs({ idToken: auth.idToken }),
+        ).toISOString(),
       },
     );
 
@@ -704,8 +709,8 @@ async function askForWizardLogin(
       const source = persistApiKey(projectApiKey, opts.installDir);
       getUI().log.success(
         chalk.dim(
-          source === 'keychain'
-            ? 'API key saved to system keychain'
+          source === 'cache'
+            ? 'API key saved'
             : 'API key saved to .env.local (added to .gitignore)',
         ),
       );
@@ -738,8 +743,8 @@ async function askForAmplitudeApiKey(installDir?: string): Promise<string> {
     if (result) {
       getUI().log.success(
         chalk.dim(
-          result.source === 'keychain'
-            ? 'Using saved Amplitude API key from system keychain'
+          result.source === 'cache'
+            ? 'Using saved Amplitude API key'
             : 'Using saved Amplitude API key from .env.local',
         ),
       );
@@ -770,8 +775,8 @@ async function askForAmplitudeApiKey(installDir?: string): Promise<string> {
     const source = persistApiKey(trimmed, installDir);
     getUI().log.success(
       chalk.dim(
-        source === 'keychain'
-          ? 'API key saved to system keychain'
+        source === 'cache'
+          ? 'API key saved'
           : 'API key saved to .env.local (added to .gitignore)',
       ),
     );

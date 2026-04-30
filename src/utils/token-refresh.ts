@@ -41,6 +41,19 @@ export async function tryRefreshToken(
   accessToken: string;
   expiresAt: number;
   refreshToken?: string;
+  /**
+   * Refreshed OIDC id_token, when the OAuth server returns one.
+   * Ory issues a new id_token on every refresh as long as the original
+   * authorization included the `openid` scope. The wizard's API client
+   * authenticates with the id_token (not the access token) for every
+   * `fetchAmplitudeUser` / `getAPIKey` call, so persisting it is what
+   * keeps long-lived sessions working — without it the access token
+   * gets refreshed but the next `fetchAmplitudeUser` 401s on a stale
+   * id_token, the catch block falls through to `apiKeyNotice`, and
+   * the run dies as `auth_required: no_stored_credentials` even
+   * though the refresh succeeded.
+   */
+  idToken?: string;
 } | null> {
   // 1. Check whether the token actually needs refreshing
   const now = Date.now();
@@ -83,6 +96,7 @@ async function tryRefreshTokenInner(
   accessToken: string;
   expiresAt: number;
   refreshToken?: string;
+  idToken?: string;
 } | null> {
   // Exchange the refresh token for a new access token
   try {
@@ -138,7 +152,25 @@ async function tryRefreshTokenInner(
       return null;
     }
 
-    const expiresAt = now + expiresIn * 1000;
+    // Pull the rotated id_token. Ory returns one on every refresh when the
+    // original auth included `openid` scope (we always do). The id_token's
+    // `exp` is shorter than the access token's, so without persisting it,
+    // long-lived sessions break: the refreshed access token would be valid,
+    // but the still-stale id_token would 401 every API call that uses it.
+    const newIdToken =
+      typeof data.id_token === 'string' ? data.id_token : undefined;
+
+    // `expiresAt` controls when `tryRefreshToken` next fires. Source it
+    // from the rotated id_token's `exp` claim so the trigger aligns to
+    // the binding constraint (id_token TTL), not access_token TTL. Falls
+    // back to `expires_in` if the JWT isn't decodable. See
+    // `src/utils/jwt-exp.ts`.
+    const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
+    const expiresAt = resolveStoredExpiryMs({
+      idToken: newIdToken,
+      expiresInSeconds: expiresIn,
+      now,
+    });
 
     // Persist rotated refresh token if the server issued a new one
     const newRefreshToken =
@@ -147,12 +179,19 @@ async function tryRefreshTokenInner(
     logToFile('[token-refresh] silent refresh succeeded', {
       expiresAt: new Date(expiresAt).toISOString(),
       rotatedRefreshToken: !!newRefreshToken,
+      rotatedIdToken: !!newIdToken,
     });
     addBreadcrumb('auth', 'Silent refresh succeeded', {
       rotated_refresh_token: !!newRefreshToken,
+      rotated_id_token: !!newIdToken,
     });
 
-    return { accessToken, expiresAt, refreshToken: newRefreshToken };
+    return {
+      accessToken,
+      expiresAt,
+      refreshToken: newRefreshToken,
+      idToken: newIdToken,
+    };
   } catch (err) {
     // Distinguish abort/timeout (controller aborted the fetch) from other
     // failures so it's easy to triage stuck startups in the log file.

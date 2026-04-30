@@ -114,7 +114,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentEntry | null>(null);
   const [apiKeyError, setApiKeyError] = useState('');
   const [savedKeySource, setSavedKeySource] = useState<
-    'keychain' | 'env' | null
+    'cache' | 'env' | null
   >(null);
   const [pickerNotice, setPickerNotice] = useState<string | null>(null);
   const completedStepsRef = useRef<DOMElement>(null);
@@ -475,12 +475,22 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // ─── OAuth wait-state coaching ────────────────────────────────────────
   // While step 1 is rendering (pendingOrgs === null), the user is waiting
   // for the browser callback. On SSH / codespace / locked-down envs the
-  // browser may never open — without coaching the spinner ticks until the
-  // 120s OAuth timeout. After 60s we surface [R]/[M]/[Esc] actions inline
-  // so the user can self-rescue.
+  // browser may never open — and even on local machines a stale stored
+  // token can leave the wizard probing the API for several seconds before
+  // it falls through to opening the browser. Without coaching the user
+  // sees a blank spinner with no actions and assumes the wizard is broken.
+  //
+  // Two-tier strategy:
+  //   - Always-on: [M] manual API key + [Esc] cancel are surfaced from t=0
+  //     so the user is never stuck on a screen with no exit. Cheap UI cost,
+  //     huge resilience win.
+  //   - Tier-1 (15s): emphatic "Still waiting…" coaching with [R] retry
+  //     surfaces if we still don't have a login URL or org list. The old
+  //     60s threshold was longer than the user reported putting up with
+  //     before quitting and re-running.
   const oauthWaiting = pendingOrgs === null && !manualFallbackOpen;
   const { tier: oauthCoachingTier } = useTimedCoaching({
-    thresholds: [60],
+    thresholds: [15],
     progressSignal: oauthWaiting ? 'waiting' : 'resolved',
   });
   const showOauthFallbackHints = oauthWaiting && oauthCoachingTier >= 1;
@@ -506,9 +516,12 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
 
   useScreenInput(
     (input, key) => {
-      if (!showOauthFallbackHints) return;
+      if (!oauthWaiting) return;
       const ch = input.toLowerCase();
-      if (ch === 'r') {
+      // [R] only does something once we have a URL to relaunch — gate it
+      // on that, not on the coaching tier, so the same key works whether
+      // the user notices the URL at t=2s or at t=20s.
+      if (ch === 'r' && session.loginUrl) {
         void retryBrowser();
         return;
       }
@@ -526,7 +539,35 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         process.exit(0);
       }
     },
-    { isActive: showOauthFallbackHints },
+    { isActive: oauthWaiting },
+  );
+
+  // ─── Account confirmation (returning user) ────────────────────────────
+  // When the wizard resolves credentials silently from disk on a returning
+  // run, the user gets a one-shot confirm step before we route them to a
+  // project they didn't explicitly choose. Renders as the only Auth-screen
+  // content while active — every other step is suppressed below.
+  const accountConfirm = session.requiresAccountConfirmation;
+  useScreenInput(
+    (input, key) => {
+      if (!accountConfirm) return;
+      const ch = input.toLowerCase();
+      if (key.return || ch === 'y') {
+        store.confirmAccount();
+        return;
+      }
+      if (ch === 'c' || ch === 'n') {
+        store.rejectStoredAccount();
+        return;
+      }
+      if (key.escape) {
+        analytics.wizardCapture('auth cancelled by user', {
+          'from screen': 'account-confirm',
+        });
+        process.exit(0);
+      }
+    },
+    { isActive: accountConfirm },
   );
 
   // Completed-step indicators shown above the active step
@@ -546,6 +587,73 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     completedSteps.push({ label: `Environment: ${selectedEnv.name}` });
   }
 
+  // While the confirm step is active, render ONLY that — all other steps
+  // are suppressed below by short-circuiting on `accountConfirm`.
+  if (accountConfirm) {
+    const orgLabel = session.selectedOrgName ?? session.selectedOrgId ?? '—';
+    const projectLabel =
+      session.selectedProjectName ?? session.selectedProjectId ?? '—';
+    const envLabel = session.selectedEnvName ?? null;
+    return (
+      <Box flexDirection="column" flexGrow={1} gap={1}>
+        <Box flexDirection="column">
+          <Text bold color={Colors.heading}>
+            Continue with this Amplitude project?
+          </Text>
+          <Text color={Colors.muted}>
+            We picked up your previous selection from this machine. Confirm
+            it's still right before we run the wizard against it.
+          </Text>
+        </Box>
+        <Box flexDirection="column">
+          <Text>
+            <Text color={Colors.muted}>Organization: </Text>
+            <Text color={Colors.body}>{orgLabel}</Text>
+          </Text>
+          <Text>
+            <Text color={Colors.muted}>Project: </Text>
+            <Text color={Colors.body}>{projectLabel}</Text>
+          </Text>
+          {envLabel && (
+            <Text>
+              <Text color={Colors.muted}>Environment: </Text>
+              <Text color={Colors.body}>{envLabel}</Text>
+            </Text>
+          )}
+          {session.userEmail && (
+            <Text>
+              <Text color={Colors.muted}>Signed in as: </Text>
+              <Text color={Colors.body}>{session.userEmail}</Text>
+            </Text>
+          )}
+        </Box>
+        <Box gap={2}>
+          <Box>
+            <Text color={Colors.muted}>[</Text>
+            <Text bold color={Colors.body}>
+              Enter
+            </Text>
+            <Text color={Colors.muted}>] Continue</Text>
+          </Box>
+          <Box>
+            <Text color={Colors.muted}>[</Text>
+            <Text bold color={Colors.body}>
+              C
+            </Text>
+            <Text color={Colors.muted}>] Change project</Text>
+          </Box>
+          <Box>
+            <Text color={Colors.muted}>[</Text>
+            <Text bold color={Colors.body}>
+              Esc
+            </Text>
+            <Text color={Colors.muted}>] Cancel</Text>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
+
   return (
     <Box flexDirection="column" flexGrow={1}>
       {/* Completed steps */}
@@ -561,7 +669,12 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         </Box>
       )}
 
-      {/* Step 1: waiting for OAuth browser redirect */}
+      {/* Step 1: waiting for OAuth browser redirect.
+          The URL slot is rendered unconditionally — when loginUrl isn't ready
+          yet we show a placeholder so the screen is never just a spinner with
+          nothing actionable. Always-on hints surface [M]anual key entry and
+          [Esc]ape from t=0 so a returning user with a stale token never lands
+          on a dead-end screen while we fall through to fresh OAuth. */}
       {pendingOrgs === null && !manualFallbackOpen && (
         <Box flexDirection="column">
           <Box gap={1}>
@@ -570,49 +683,60 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               Waiting for authentication{Icons.ellipsis}
             </Text>
           </Box>
-          {session.loginUrl && (
-            <Box marginTop={1} flexDirection="column">
+          <Box marginTop={1} flexDirection="column">
+            {session.loginUrl ? (
+              <>
+                <Text color={Colors.muted}>
+                  If the browser didn't open, copy and paste this URL:
+                </Text>
+                <TerminalLink url={session.loginUrl}>
+                  {session.loginUrl}
+                </TerminalLink>
+              </>
+            ) : (
               <Text color={Colors.muted}>
-                If the browser didn't open, copy and paste this URL:
+                Preparing your sign-in link{Icons.ellipsis} (this normally
+                takes a few seconds)
               </Text>
-              <TerminalLink url={session.loginUrl}>
-                {session.loginUrl}
-              </TerminalLink>
-            </Box>
-          )}
-          {/* Tier-1 coaching: at 60s the browser likely didn't open. Surface
-              actionable single-key fallbacks. The login URL above stays
-              visible so [M] and [R] both work without a flash of empty
-              chrome. */}
-          {showOauthFallbackHints && (
-            <Box marginTop={1} flexDirection="column">
-              <Text color={Colors.muted}>
-                Still waiting{Icons.ellipsis} If the browser didn't open, you
-                can:
-              </Text>
-              <Box marginTop={1} gap={2}>
-                <Box>
-                  <Text color={Colors.muted}>[</Text>
-                  <Text bold color={Colors.body}>
-                    R
-                  </Text>
-                  <Text color={Colors.muted}>] Retry browser launch</Text>
-                </Box>
-                <Box>
-                  <Text color={Colors.muted}>[</Text>
-                  <Text bold color={Colors.body}>
-                    M
-                  </Text>
-                  <Text color={Colors.muted}>] Enter API key manually</Text>
-                </Box>
-                <Box>
-                  <Text color={Colors.muted}>[</Text>
-                  <Text bold color={Colors.body}>
-                    Esc
-                  </Text>
-                  <Text color={Colors.muted}>] Cancel</Text>
-                </Box>
+            )}
+          </Box>
+          {/* Always-on quick exits: [M] manual key entry, [Esc] cancel.
+              [R] only renders once we have a URL to retry. Single muted line
+              so the happy path stays uncluttered. */}
+          <Box marginTop={1} gap={2}>
+            {session.loginUrl && (
+              <Box>
+                <Text color={Colors.muted}>[</Text>
+                <Text bold color={Colors.body}>
+                  R
+                </Text>
+                <Text color={Colors.muted}>] Retry browser</Text>
               </Box>
+            )}
+            <Box>
+              <Text color={Colors.muted}>[</Text>
+              <Text bold color={Colors.body}>
+                M
+              </Text>
+              <Text color={Colors.muted}>] Enter API key manually</Text>
+            </Box>
+            <Box>
+              <Text color={Colors.muted}>[</Text>
+              <Text bold color={Colors.body}>
+                Esc
+              </Text>
+              <Text color={Colors.muted}>] Cancel</Text>
+            </Box>
+          </Box>
+          {/* Tier-1 coaching at 15s: the wizard is taking longer than expected.
+              Surface an explicit "Still waiting…" line above the always-on
+              hints so the user knows we noticed. */}
+          {showOauthFallbackHints && (
+            <Box marginTop={1}>
+              <Text color={Colors.warning}>
+                Still waiting{Icons.ellipsis} If your browser didn't open or
+                you'd rather not wait, use one of the actions above.
+              </Text>
             </Box>
           )}
         </Box>
@@ -812,8 +936,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           {savedKeySource && (
             <Text color={Colors.success}>
               {Icons.checkmark}{' '}
-              {savedKeySource === 'keychain'
-                ? 'API key saved to system keychain'
+              {savedKeySource === 'cache'
+                ? 'API key saved'
                 : 'API key saved to .env.local'}
             </Text>
           )}

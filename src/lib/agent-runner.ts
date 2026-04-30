@@ -25,9 +25,6 @@ import {
   runAgent,
   AgentErrorType,
   buildWizardMetadata,
-  checkClaudeSettingsOverrides,
-  backupAndFixClaudeSettings,
-  restoreClaudeSettings,
 } from './agent-interface';
 import { getLlmGatewayUrlFromHost } from '../utils/urls';
 import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
@@ -488,15 +485,17 @@ async function runAgentWizardBody(
   // Setup phase — informational only, no prompts
   // Beta notice, pre-run notice, and welcome label are all derivable
   // from session.frameworkConfig — IntroScreen reads them directly.
-
-  // Check for blocking env overrides in .claude/settings.json before login.
-  // These keys block the Wizard from accessing the Amplitude LLM Gateway.
-  const blockingOverrideKeys = checkClaudeSettingsOverrides(session.installDir);
-  if (blockingOverrideKeys.length > 0) {
-    await getUI().showSettingsOverride(blockingOverrideKeys, () =>
-      backupAndFixClaudeSettings(session.installDir),
-    );
-  }
+  //
+  // The wizard used to interrupt here with a SettingsOverrideScreen if
+  // `.claude/settings.json` declared `ANTHROPIC_BASE_URL` or
+  // `ANTHROPIC_AUTH_TOKEN` (e.g. for LiteLLM, corporate proxy, Claude
+  // Pro/Max OAuth) — and offered to back the file up so the SDK wouldn't
+  // load it. That was destructive (any non-graceful exit could lose the
+  // file) and hostile to the typical Claude Code user. We now scope our
+  // gateway env to `.claude/settings.local.json` instead, which the SDK
+  // loads at higher precedence than the project file. The user's
+  // checked-in settings.json is never touched. See
+  // `claude-settings-scope.ts` and `agent-interface.ts:applyScopedSettings`.
 
   // Disclosure text is static — IntroScreen renders it directly.
 
@@ -708,8 +707,12 @@ async function runAgentWizardBody(
   const skillsBaseUrl =
     process.env.SKILLS_URL || getLlmGatewayUrlFromHost(host) + '/skills';
 
-  const restoreSettings = () => restoreClaudeSettings(session.installDir);
-  getUI().onEnterScreen('outro', restoreSettings);
+  // The previous restore-on-outro hook was paired with the destructive
+  // `backupAndFixClaudeSettings` flow. The new scoping (writing our env
+  // into `.claude/settings.local.json`) registers its own restore via
+  // `registerCleanup` from inside `applyScopedSettings`, so the file
+  // returns to its pre-wizard state on every exit path — no separate
+  // outro hook needed.
   getUI().startRun();
 
   const agent = await getAgent(
@@ -725,6 +728,9 @@ async function runAgentWizardBody(
       wizardMetadata,
       skipAmplitudeMcp,
       skillsBaseUrl,
+      agentSessionId: session.agentSessionId,
+      targetsBrowser: config.metadata.targetsBrowser,
+      mode: session.mode,
     },
     sessionToOptions(session),
   );
@@ -1016,6 +1022,26 @@ async function runAgentWizardBody(
     session,
     cloudRegion,
   );
+
+  // Post-agent dashboard creation — bounded by its own timeout so a slow
+  // Amplitude MCP response can't hang the whole run. Gracefully degrades:
+  // agent success is not affected by dashboard-step failure.
+  try {
+    const { createDashboardStep } = await import(
+      '../steps/create-dashboard.js'
+    );
+    await createDashboardStep({
+      session,
+      accessToken,
+      integration: config.metadata.integration,
+    });
+  } catch (err) {
+    logToFile(
+      `[agent-runner] createDashboardStep threw: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 
   // MCP installation is handled by McpScreen — no prompt here
 

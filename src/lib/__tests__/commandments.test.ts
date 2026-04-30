@@ -71,3 +71,84 @@ describe('TodoWrite user-journey commandment', () => {
     expect(text).not.toContain('every high-level area of work');
   });
 });
+
+/**
+ * Browser-only commandment gating.
+ *
+ * Browser SDK init defaults (autocapture options table, init-code
+ * templates) are only valid for `@amplitude/unified` /
+ * `@amplitude/analytics-browser`. Shipping that block to mobile, server,
+ * or generic runs is pure system-prompt bloat (several KB on every turn)
+ * and risks the model copying browser keys onto a non-browser SDK.
+ *
+ * These tests pin: when `targetsBrowser` is true, the browser block is
+ * present; when it's false (or omitted), it's gone — but every universal
+ * rule still ships.
+ */
+describe('browser-only commandment gating', () => {
+  const browserText = getWizardCommandments({ targetsBrowser: true });
+  const nonBrowserText = getWizardCommandments({ targetsBrowser: false });
+  const defaultText = getWizardCommandments();
+
+  it('includes browser SDK init defaults only on browser runs', () => {
+    // The marker phrase is the heading of the browser SDK init defaults
+    // block. Conservative sentinel — short enough to be stable across
+    // future copy edits, distinctive enough not to false-match.
+    const browserMarker = 'Browser SDK init defaults';
+    expect(browserText).toContain(browserMarker);
+    expect(nonBrowserText).not.toContain(browserMarker);
+  });
+
+  it('omits browser-only autocapture details from non-browser runs', () => {
+    // The full autocapture options table and the unified-SDK initAll
+    // example are the bulkiest items in the browser block. Asserting
+    // both confirms the omission isn't accidentally partial.
+    expect(nonBrowserText).not.toContain('frustrationInteractions');
+    expect(nonBrowserText).not.toContain('initAll(API_KEY');
+    expect(browserText).toContain('frustrationInteractions');
+    expect(browserText).toContain('initAll(API_KEY');
+  });
+
+  it('default (no options) treats run as non-browser — conservative', () => {
+    // If we don't know the platform, ship the lean prompt. Mobile,
+    // server, and generic frameworks must never carry browser-only
+    // guidance just because someone forgot to pass `targetsBrowser`.
+    expect(defaultText).toBe(nonBrowserText);
+  });
+
+  it('keeps every universal rule on both paths', () => {
+    // Sample a few rules that must appear on every run regardless of
+    // platform: the package-manager tool requirement, the retry budget,
+    // the Read-before-Write rule, and the post-instrumentation events
+    // file write (which the wizard's post-agent dashboard step depends
+    // on). If any of these silently moves into the browser-only block,
+    // this test fails and the omission is caught before it ships.
+    const universalSentinels = [
+      'detect_package_manager',
+      'Retry budget for ANY tool failure',
+      'Before writing to any file',
+      '.amplitude-events.json',
+      'amplitude-setup-report.md',
+    ];
+    for (const phrase of universalSentinels) {
+      expect(
+        browserText,
+        `"${phrase}" should be in every run's commandments (browser).`,
+      ).toContain(phrase);
+      expect(
+        nonBrowserText,
+        `"${phrase}" should be in every run's commandments (non-browser).`,
+      ).toContain(phrase);
+    }
+  });
+
+  it('non-browser run is meaningfully smaller than browser run', () => {
+    // The whole point of the gating is system-prompt size. If the
+    // savings ever drop below ~2KB, either the browser block has been
+    // gutted (in which case it should be deleted entirely, not gated)
+    // or a future merge has accidentally moved its content into the
+    // universal section. Either way, we want a test failure on regress.
+    const savedBytes = browserText.length - nonBrowserText.length;
+    expect(savedBytes).toBeGreaterThan(2000);
+  });
+});

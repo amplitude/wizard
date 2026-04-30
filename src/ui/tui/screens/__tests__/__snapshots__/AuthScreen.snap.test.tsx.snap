@@ -4,5 +4,7 @@ exports[`AuthScreen snapshots > renders the OAuth waiting state with spinner and
 "⠋ Waiting for authentication…
 
 If the browser didn't open, copy and paste this URL:
-https://app.amplitude.com/oauth?response_type=code&client_id=wizard"
+https://app.amplitude.com/oauth?response_type=code&client_id=wizard
+
+[R] Retry browser  [M] Enter API key manually  [Esc] Cancel"
 `;

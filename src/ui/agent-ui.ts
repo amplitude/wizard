@@ -19,7 +19,11 @@ import type {
   EventPlanConfirmedData,
   VerificationStartedData,
   VerificationResultData,
+  SetupContextData,
+  SetupCompleteData,
 } from '../lib/agent-events';
+import { EVENT_DATA_VERSIONS, truncateLogMessage } from '../lib/agent-events';
+import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
@@ -165,6 +169,13 @@ interface NDJSONEvent {
   message: string;
   session_id?: string;
   run_id?: string;
+  /**
+   * Per-event-type data-shape version. See `EVENT_DATA_VERSIONS` in
+   * `src/lib/agent-events.ts` — orchestrators branch on this to
+   * handle breaking changes to `data` without forcing a global
+   * envelope-version bump on every change.
+   */
+  data_version?: number;
   data?: unknown;
   level?: string;
 }
@@ -191,20 +202,85 @@ function getCorrelationIds(): { session_id: string; run_id: string } {
   return { session_id: _getSessionId(), run_id: _getRunId!() };
 }
 
+/**
+ * Look up the per-event-type data-shape version from the registry,
+ * keyed off the `data.event` discriminator. Returns `undefined` for
+ * events whose `data` shape isn't part of the orchestrator-facing
+ * contract (free-form `log`, `status`, `progress` payloads). Caller
+ * can override by passing `dataVersion` explicitly via `extra`.
+ */
+function lookupDataVersion(
+  data: unknown,
+  explicit: number | undefined,
+): number | undefined {
+  if (explicit !== undefined) return explicit;
+  if (typeof data !== 'object' || data === null) return undefined;
+  const eventKey = (data as { event?: unknown }).event;
+  if (typeof eventKey !== 'string') return undefined;
+  const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
+  return registry[eventKey];
+}
+
+/**
+ * Emit a `decision_auto` companion event after a `needs_input` whose
+ * caller auto-resolved the prompt. Lets orchestrators distinguish
+ * "this awaits a human answer" (needs_input alone) from "the wizard
+ * already picked one for you" (needs_input + decision_auto).
+ *
+ * The `reason` field is forward-looking: today we always emit
+ * `auto_approve` because every prompt path auto-resolves. Future
+ * wiring (when we honor `--auto-approve` strictly) will add
+ * `back_compat` (the `--agent` implies-autoApprove path) so
+ * orchestrators can detect and migrate away from the implicit grant.
+ */
+function emitDecisionAuto(data: {
+  code: string;
+  value: unknown;
+  reason: 'auto_approve' | 'back_compat';
+}): void {
+  emit('lifecycle', `decision_auto: ${data.code}=${String(data.value)}`, {
+    data: {
+      event: 'decision_auto',
+      code: data.code,
+      value: data.value,
+      reason: data.reason,
+    },
+  });
+}
+
 function emit(
   type: AgentEventType,
   message: string,
   extra?: Omit<NDJSONEvent, 'v' | '@timestamp' | 'type' | 'message'>,
 ): void {
   const { session_id, run_id } = getCorrelationIds();
+  const data_version = lookupDataVersion(extra?.data, extra?.data_version);
+  // Truncate `log` and `error` messages so a misbehaving caller can't
+  // blow up orchestrator parsers with a multi-KB SSE-body dump. Both
+  // types can carry exception text from the inner Claude SDK (whose
+  // failure paths sometimes serialize the entire failing SSE stream
+  // into a single string). Other event types (lifecycle / status /
+  // progress / result / etc.) carry bounded human-readable summaries
+  // by construction; capping them would risk losing semantic content.
+  // The cap is generous (2KB) to preserve readable error context while
+  // preventing the worst-case 50KB+ inner-agent error payloads observed
+  // in agent transcripts.
+  const shouldTruncate = type === 'log' || type === 'error';
+  const safeMessage = shouldTruncate ? truncateLogMessage(message) : message;
   const event: NDJSONEvent = {
     v: 1,
     '@timestamp': new Date().toISOString(),
     type,
-    message,
+    message: safeMessage,
     session_id,
     run_id,
     ...extra,
+    // Stamp data_version AFTER spreading `extra` so the lookup result
+    // wins over any (unintentional) undefined in `extra`. Drop the
+    // key entirely when undefined so events without a registered
+    // shape don't ship `"data_version": undefined` (which JSON.stringify
+    // omits anyway, but keeping the key absent is clearer in tests).
+    ...(data_version !== undefined ? { data_version } : {}),
   };
   // safePipeWrite swallows EPIPE-class errors so a closed receiver
   // doesn't crash the wizard mid-run. The data is silently dropped —
@@ -292,7 +368,7 @@ export class AgentUI implements WizardUI {
     orgId: string;
   }): void {
     // SECURITY: apiKey intentionally omitted from NDJSON. The orchestrator
-    // can read it from the project-local .env.local / keychain if needed.
+    // can read it from .env.local / the per-user credentials cache if needed.
     emit('result', `project_created: ${data.name}`, {
       data: {
         event: 'project_create_success',
@@ -462,6 +538,31 @@ export class AgentUI implements WizardUI {
     emit('result', `file_change_applied: ${data.operation} ${data.path}`, {
       data: { event: 'file_change_applied', ...data },
     });
+    // Mirror into the setup_complete registry so the terminal
+    // event lists every file the wizard touched. `create` lands
+    // in `written`, `modify` in `modified`, `delete` is dropped
+    // (deletes don't produce a follow-up artifact). Path is the
+    // raw absolute path the inner agent passed; the orchestrator
+    // can relativize against `installDir` if it cares about
+    // shorter labels.
+    if (data.operation === 'create') {
+      registerSetupComplete({ files: { written: [data.path], modified: [] } });
+    } else if (data.operation === 'modify') {
+      registerSetupComplete({ files: { written: [], modified: [data.path] } });
+    }
+  }
+
+  // WizardUI-shaped aliases (see wizard-ui.ts). Inner-lifecycle calls these
+  // via the abstract interface so InkUI can also receive file_change events
+  // for the TUI panel; AgentUI just delegates to its existing NDJSON
+  // emitters above. The schema-v:1 envelope on stdout is unchanged so outer
+  // agents that already parse `file_change_planned` / `file_change_applied`
+  // keep working.
+  recordFileChangePlanned(data: Omit<FileChangePlannedData, 'event'>): void {
+    this.emitFileChangePlanned(data);
+  }
+  recordFileChangeApplied(data: Omit<FileChangeAppliedData, 'event'>): void {
+    this.emitFileChangeApplied(data);
   }
 
   /**
@@ -564,8 +665,97 @@ export class AgentUI implements WizardUI {
 
   // ── Session state ───────────────────────────────────────────────────
 
+  /**
+   * Run-start timestamp (epoch ms). Captured by `startRun()` — read by
+   * `emitRunCompleted` to compute `durationMs`. `null` until the run
+   * actually begins so duration is reported accurately even when the
+   * wizard exits before reaching the inner agent (e.g.
+   * `auth_required`, `INPUT_REQUIRED`). In those early-exit cases
+   * `emitRunCompleted` reports `durationMs: 0` — orchestrators
+   * shouldn't read significance into a zero duration; the structured
+   * `outcome` + `exitCode` are the contract.
+   */
+  private _runStartedAtMs: number | null = null;
+
   startRun(): void {
+    this._runStartedAtMs = Date.now();
     emit('lifecycle', 'run_started', { data: { event: 'start_run' } });
+  }
+
+  /**
+   * Terminal lifecycle event. Emitted exactly once per run, immediately
+   * before the process exits via `wizardSuccessExit` / `wizardAbort`.
+   * See `RunCompletedData` in `agent-events.ts` for the contract.
+   */
+  emitRunCompleted(data: {
+    outcome: 'success' | 'error' | 'cancelled';
+    exitCode: number;
+    durationMs: number;
+    reason?: string;
+  }): void {
+    // Caller (`wizard-abort.ts`) computes durationMs from
+    // `_runStartedAtMs`. Pass-through with no transformation — keeps
+    // the AgentUI side a thin emitter.
+    emit('lifecycle', `run_completed: ${data.outcome}`, {
+      level:
+        data.outcome === 'error'
+          ? 'error'
+          : data.outcome === 'cancelled'
+          ? 'warn'
+          : 'success',
+      data: {
+        event: 'run_completed',
+        outcome: data.outcome,
+        exitCode: data.exitCode,
+        durationMs: data.durationMs,
+        ...(data.reason ? { reason: data.reason } : {}),
+      },
+    });
+  }
+
+  /**
+   * Read-only accessor for the run-start timestamp. Used by
+   * `wizard-abort.ts` to compute `durationMs` without exposing the
+   * private field. Returns `null` if `startRun()` was never called
+   * (early-exit paths like `auth_required` / `INPUT_REQUIRED`).
+   */
+  getRunStartedAtMs(): number | null {
+    return this._runStartedAtMs;
+  }
+
+  /**
+   * Emit aggregated agent-run metrics at finalize time. See
+   * `WizardUI.emitAgentMetrics` for the contract.
+   *
+   * Lands on the `progress` event type (not `lifecycle` /
+   * `result`) because metrics are observability data — orchestrators
+   * subscribing to operational telemetry will key on `progress`-type
+   * events; subscribers caring only about run outcomes (success /
+   * failure) won't be flooded with one-off cost data.
+   */
+  emitAgentMetrics(data: {
+    durationMs: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadInputTokens?: number;
+    cacheCreationInputTokens?: number;
+    costUsd?: number;
+    numTurns?: number;
+    totalToolCalls?: number;
+    totalMessages?: number;
+    isError?: boolean;
+  }): void {
+    // Drop undefined fields rather than ship `"costUsd": undefined`,
+    // which JSON.stringify omits but leaves the schema unclear in
+    // tests / docs. Output is a tight, dense object with only what
+    // the SDK actually reported.
+    const entries: Array<[string, unknown]> = Object.entries(data).filter(
+      ([, v]) => v !== undefined,
+    );
+    const payload = Object.fromEntries(entries);
+    emit('progress', `agent_metrics: ${data.durationMs}ms`, {
+      data: { event: 'agent_metrics', ...payload },
+    });
   }
 
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
@@ -615,12 +805,36 @@ export class AgentUI implements WizardUI {
         envName: credentials.envName ?? null,
       },
     });
+    // Mirror the Amplitude scope into the setup_complete registry
+    // so the terminal `setup_complete` event carries the right
+    // appId / orgId / projectId without forcing the agent-runner
+    // to plumb session state through a second channel. `appId` of
+    // 0 is a sentinel for "not yet resolved" — skip it so the
+    // orchestrator doesn't see `appId: "0"` (a real-looking value
+    // that would mis-route follow-up MCP queries).
+    registerSetupComplete({
+      amplitude: {
+        ...(credentials.appId && credentials.appId !== 0
+          ? { appId: String(credentials.appId) }
+          : {}),
+        ...(credentials.orgId ? { orgId: credentials.orgId } : {}),
+        ...(credentials.orgName ? { orgName: credentials.orgName } : {}),
+        ...(credentials.projectId ? { projectId: credentials.projectId } : {}),
+        ...(credentials.projectName
+          ? { projectName: credentials.projectName }
+          : {}),
+        ...(credentials.envName ? { envName: credentials.envName } : {}),
+      },
+    });
   }
 
   setRegion(region: string): void {
     emit('session_state', `region: ${region}`, {
       data: { field: 'region', value: region },
     });
+    if (region === 'us' || region === 'eu') {
+      registerSetupComplete({ amplitude: { region } });
+    }
   }
 
   setProjectHasData(value: boolean): void {
@@ -675,17 +889,6 @@ export class AgentUI implements WizardUI {
     }
   }
 
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    backupAndFix();
-    emit('status', 'settings_override auto-fixed', {
-      data: { kind: 'settings_override', keys },
-    });
-    return Promise.resolve();
-  }
-
   // ── Prompts (auto-approve) ──────────────────────────────────────────
 
   promptConfirm(message: string): Promise<boolean> {
@@ -711,6 +914,16 @@ export class AgentUI implements WizardUI {
       ],
       recommended: 'yes',
     });
+    // Then emit a `decision_auto` companion so orchestrators that
+    // subscribe to `needs_input` can tell "this was auto-resolved"
+    // from "this is awaiting an answer". Order matters: needs_input
+    // first, decision_auto after, both before the promise resolves
+    // (and before any subsequent control flow advances).
+    emitDecisionAuto({
+      code: 'confirm',
+      value: 'yes',
+      reason: 'auto_approve',
+    });
     return Promise.resolve(true);
   }
 
@@ -735,14 +948,124 @@ export class AgentUI implements WizardUI {
       choices: options.map((opt) => ({ value: opt, label: opt })),
       recommended: selected,
     });
+    emitDecisionAuto({
+      code: 'choice',
+      value: selected,
+      reason: 'auto_approve',
+    });
     return Promise.resolve(selected);
   }
 
   promptEventPlan(
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision> {
+    // Honor a pre-resolved decision injected by the parent `apply`
+    // process via env vars BEFORE we emit `needs_input`. The parent
+    // command (`bin.ts apply`) forwards `--approve-events` /
+    // `--skip-events` / `--revise-events` as
+    // `AMPLITUDE_WIZARD_EVENT_PLAN_DECISION` on the spawned child's
+    // env. If we emitted `needs_input` first, an outer skill watching
+    // the stream would (correctly) STOP and re-prompt the user — even
+    // though the user's answer was already passed in via the resume
+    // flag. The skill would re-prompt for an answer it already has,
+    // and the wizard would block forever on stdin. Short-circuit here
+    // so the contract is: "needs_input fires only when we actually
+    // need input; flag-driven decisions skip the prompt entirely."
+    const preResolved = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    const preFeedback = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK ?? '';
+    if (
+      preResolved === 'approved' ||
+      preResolved === 'skipped' ||
+      preResolved === 'revised'
+    ) {
+      // Back-compat: keep the legacy `result` emit so existing
+      // orchestrators that key off `event: event_plan` continue to
+      // work unchanged. Tag the message with the decision instead
+      // of "auto-approved" so a transcript is honest.
+      emit('result', `event_plan ${preResolved} (via flag)`, {
+        data: { event: 'event_plan', events, decision: preResolved },
+      });
+      // No `needs_input` and no `decision_auto` — the decision came
+      // from a user-driven flag, not the wizard's recommended pick.
+      // The contract that lets orchestrators distinguish
+      // "auto-resolved" from "user told me what to do" is the
+      // ABSENCE of `needs_input + decision_auto` for the same code.
+      if (preResolved === 'revised') {
+        return Promise.resolve({ decision: 'revised', feedback: preFeedback });
+      }
+      return Promise.resolve({ decision: preResolved });
+    }
+
+    // No pre-resolution — emit a structured `needs_input` so the
+    // contract holds: every `decision_auto` MUST follow a
+    // `needs_input` for the same `code`. Bugbot flagged that the
+    // previous shape emitted `decision_auto` orphaned (after a
+    // `result` event, with no preceding needs_input), which
+    // contradicted the docstring on `EVENT_DATA_VERSIONS.decision_auto`.
+    // Choices are flat strings so orchestrators can `resumeFlags`
+    // their way into a different decision if a human is in the loop.
+    this.emitNeedsInput<'approved' | 'skipped' | 'revised'>({
+      code: 'event_plan',
+      message: `Approve ${events.length} proposed events?`,
+      ui: {
+        component: 'confirmation',
+        priority: 'required',
+        title: 'Approve instrumentation plan',
+        description: `${events.length} events proposed. Review the list and approve, skip, or send revision feedback.`,
+      },
+      choices: [
+        {
+          value: 'approved',
+          label: 'Approve and instrument',
+          resumeFlags: [
+            'apply',
+            '--plan-id',
+            '<id>',
+            '--approve-events',
+            '--yes',
+          ],
+        },
+        {
+          value: 'skipped',
+          label: 'Skip event tracking for this run',
+          resumeFlags: ['apply', '--plan-id', '<id>', '--skip-events', '--yes'],
+        },
+        {
+          value: 'revised',
+          label: 'Send revision feedback',
+          resumeFlags: [
+            'apply',
+            '--plan-id',
+            '<id>',
+            '--revise-events',
+            '<feedback>',
+            '--yes',
+          ],
+        },
+      ],
+      recommended: 'approved',
+    });
+
+    // The full event list is carried on the legacy `result` emit
+    // below — orchestrators rendering the plan inline read it from
+    // there. We don't shadow the events on `needs_input.metadata`
+    // because that field is constrained to primitives.
+
+    // Back-compat: keep the legacy `result` emit so existing
+    // orchestrators that key off `event: event_plan` continue to
+    // work unchanged.
     emit('result', 'event_plan auto-approved', {
       data: { event: 'event_plan', events },
+    });
+
+    // Companion `decision_auto` for the needs_input above. Orchestrators
+    // subscribed to needs_input → decision_auto pairs can tell that
+    // the wizard auto-resolved this prompt rather than awaiting a
+    // human answer.
+    emitDecisionAuto({
+      code: 'event_plan',
+      value: 'approved',
+      reason: 'auto_approve',
     });
     return Promise.resolve({ decision: 'approved' });
   }
@@ -763,6 +1086,15 @@ export class AgentUI implements WizardUI {
     emit('result', `event_plan: ${events.length} events`, {
       data: { event: 'event_plan_set', events },
     });
+    // Capture the final approved event plan for `setup_complete`.
+    // Last writer wins — the canonical `event_plan_set` lands at
+    // confirmation time, after any feedback-loop revisions.
+    registerSetupComplete({
+      events: events.map((e) => ({
+        name: e.name,
+        description: e.description,
+      })),
+    });
   }
 
   setEventIngestionDetected(eventNames: string[]): void {
@@ -774,6 +1106,99 @@ export class AgentUI implements WizardUI {
   setDashboardUrl(url: string): void {
     emit('result', `dashboard_created: ${url}`, {
       data: { event: 'dashboard_created', dashboardUrl: url },
+    });
+    registerSetupComplete({ amplitude: { dashboardUrl: url } });
+  }
+
+  /**
+   * Emit a `setup_context` event so the outer agent can show the user
+   * exactly which Amplitude scope is about to be modified BEFORE any
+   * writes happen. Drops keys with `undefined` values from the wire
+   * payload so the orchestrator doesn't have to filter them.
+   *
+   * Called from:
+   *   - `wizard plan` (phase: 'plan') — initial detection
+   *   - `wizard apply` (phase: 'apply_started') — after env resolution
+   *   - `wizard whoami` (phase: 'whoami') — auth probe
+   */
+  emitSetupContext(data: {
+    phase: SetupContextData['phase'];
+    amplitude: SetupContextData['amplitude'];
+    sources?: SetupContextData['sources'];
+    requiresConfirmation?: boolean;
+    resumeFlags?: SetupContextData['resumeFlags'];
+  }): void {
+    // Build the scope object dropping any undefined fields. JSON.stringify
+    // would already omit them, but keeping the wire object lean makes
+    // schema tests + orchestrator parsers easier to reason about.
+    const amplitude: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data.amplitude)) {
+      if (v !== undefined && v !== null && v !== '') {
+        amplitude[k] = v;
+      }
+    }
+    const wire: SetupContextData = {
+      event: 'setup_context',
+      phase: data.phase,
+      amplitude: amplitude as SetupContextData['amplitude'],
+      ...(data.sources ? { sources: data.sources } : {}),
+      ...(data.requiresConfirmation !== undefined
+        ? { requiresConfirmation: data.requiresConfirmation }
+        : {}),
+      ...(data.resumeFlags ? { resumeFlags: data.resumeFlags } : {}),
+    };
+    // Re-narrow for the summary builder so optional-property reads land
+    // on the typed surface (the loop above used a string-keyed record
+    // to silence the dynamic-assignment warning). Pure cast — no
+    // runtime cost.
+    const a = amplitude as SetupContextData['amplitude'];
+    const summary = [a.orgName, a.projectName, a.appName ?? a.appId, a.envName]
+      .filter(Boolean)
+      .join(' / ');
+    emit(
+      'lifecycle',
+      summary
+        ? `setup_context (${data.phase}): ${summary}`
+        : `setup_context (${data.phase})`,
+      { data: wire },
+    );
+  }
+
+  /**
+   * Emit the terminal `setup_complete` event. Called exactly once per
+   * successful `apply` run, immediately before `run_completed`. The
+   * outer agent reads this to lock its project context on `appId` for
+   * any follow-up MCP queries. Routed through the `result` event type
+   * so orchestrators subscribed to outcome streams pick it up
+   * naturally.
+   */
+  emitSetupComplete(data: Omit<SetupCompleteData, 'event'>): void {
+    // Drop empty optional sub-objects to keep the wire shape tight.
+    const cleanAmplitudeRecord: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(data.amplitude)) {
+      if (v !== undefined && v !== null && v !== '') {
+        cleanAmplitudeRecord[k] = v;
+      }
+    }
+    const cleanAmplitude =
+      cleanAmplitudeRecord as SetupCompleteData['amplitude'];
+    const wire: SetupCompleteData = {
+      event: 'setup_complete',
+      amplitude: cleanAmplitude,
+      ...(data.files ? { files: data.files } : {}),
+      ...(data.envVars ? { envVars: data.envVars } : {}),
+      ...(data.events ? { events: data.events } : {}),
+      ...(data.durationMs !== undefined ? { durationMs: data.durationMs } : {}),
+      ...(data.followups ? { followups: data.followups } : {}),
+    };
+    const appLabel = cleanAmplitude.appName
+      ? `${cleanAmplitude.appName}${
+          cleanAmplitude.appId ? ` (${cleanAmplitude.appId})` : ''
+        }`
+      : cleanAmplitude.appId ?? 'unknown';
+    emit('result', `setup_complete: app ${appLabel}`, {
+      level: 'success',
+      data: wire,
     });
   }
 
@@ -809,30 +1234,14 @@ export class AgentUI implements WizardUI {
       }>;
     }>,
   ): Promise<{ orgId: string; projectId: string; env: string }> {
-    // Build a sanitized, tree view of orgs -> projects -> environments.
-    // API keys are never emitted (they'd leak on stdout to the orchestrator).
-    const sanitizedOrgs = orgs.map((org) => ({
-      id: org.id,
-      name: org.name,
-      projects: org.projects.map((proj) => ({
-        id: proj.id,
-        name: proj.name,
-        environments: (proj.environments ?? [])
-          .filter((e) => e.app?.apiKey)
-          .sort((a, b) => a.rank - b.rank)
-          .map((e) => ({
-            name: e.name,
-            rank: e.rank,
-            appId: e.app?.id ?? null,
-            hasApiKey: Boolean(e.app?.apiKey),
-          })),
-      })),
-    }));
-
-    // Also emit a flat list of every selectable env so agents can pick
-    // without traversing the tree. Each entry is unique by
-    // (orgId, projectId, envName) and carries the numeric appId
-    // that callers can pass as --app-id for unambiguous selection.
+    // Emit a flat list of every selectable env so agents can pick without
+    // traversing a nested tree. Each entry is unique by (orgId, projectId,
+    // envName) and carries the numeric appId that callers can pass as
+    // --app-id for unambiguous selection. The previous `orgs` tree view
+    // was strictly redundant with this list and roughly doubled the
+    // NDJSON envelope size on portfolios with many environments (322-env
+    // dogfood went from ~250 KB to ~600 KB) — orchestrators that need a
+    // tree can rebuild it from `choices` (group by orgId, then projectId).
     const choices = orgs.flatMap((org) =>
       org.projects.flatMap((proj) =>
         (proj.environments ?? [])
@@ -851,6 +1260,10 @@ export class AgentUI implements WizardUI {
       ),
     );
 
+    // Legacy `prompt` event: kept for backward compatibility with
+    // orchestrators that key off `type === 'prompt'` and parse
+    // `data.choices` / `data.resumeFlags` directly. Newer orchestrators
+    // should consume the structured `needs_input` event emitted below.
     emit(
       'prompt',
       `Multiple Amplitude environments available — select one of ${choices.length}.`,
@@ -863,7 +1276,6 @@ export class AgentUI implements WizardUI {
           // unambiguous selector.
           hierarchy: ['org', 'project', 'app', 'environment'],
           choices,
-          orgs: sanitizedOrgs,
           // Agents should reply on stdin with one JSON line matching this shape:
           responseSchema: {
             appId: 'string (required, from choices[].appId)',
@@ -979,6 +1391,27 @@ export class AgentUI implements WizardUI {
     }
     if (outcome.kind === 'mismatch') {
       throw new Error(outcome.reason);
+    }
+
+    // `--confirm-app` (env-var bridge: AMPLITUDE_WIZARD_CONFIRM_APP=1) means
+    // the caller demanded an explicit app selection. If we got here without a
+    // stdin answer, the orchestrator either timed out or didn't know to
+    // respond — either way, refusing to auto-select is the safer behavior.
+    // The needs_input event has already been emitted above; throwing here
+    // bubbles up through the wizard's normal abort path, which routes the
+    // exit through `wizardAbort` and produces a clean `run_completed` with
+    // a non-zero exit code. The orchestrator can branch on `needs_input`
+    // (was emitted) + non-success exit. This is the contract that prevents
+    // the "wizard wrote to the wrong project" class of failure.
+    if (process.env.AMPLITUDE_WIZARD_CONFIRM_APP) {
+      emit(
+        'log',
+        'Refusing to auto-select an environment because --confirm-app is set. Re-invoke with --app-id <id> after the user picks one.',
+        { level: 'warn' },
+      );
+      throw new Error(
+        '--confirm-app set: refusing to auto-select an environment. Re-invoke with --app-id <id>.',
+      );
     }
 
     // Fallback: auto-select the first environment

@@ -20,7 +20,10 @@ import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
-import { detectAmplitudeInProject } from '../../../lib/detect-amplitude.js';
+import {
+  detectAmplitudeInProject,
+  detectAmplitudeInProjectSource,
+} from '../../../lib/detect-amplitude.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { withTimeout } from '../utils/with-timeout.js';
 import { logToFile } from '../../../utils/debug.js';
@@ -108,7 +111,26 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
             status.hasPageViewedEvent &&
             status.hasSessionStartEvent &&
             status.hasSessionEndEvent;
-          store.setActivationLevel(isFull ? 'full' : 'partial');
+          // Cross-check the LOCAL project: the Amplitude project may have
+          // events from a previous install that has since been deleted from
+          // disk. If no source file actually imports an Amplitude SDK, the
+          // remote "full" verdict is a stale ghost — rerun setup. We use the
+          // source-only grep (not detectAmplitudeInProject) so a leftover
+          // dependency entry in package.json doesn't paper over a deleted
+          // initializer file. Without this guard, deleting amplitude.js but
+          // keeping the package.json dep silently skipped Setup.
+          if (
+            isFull &&
+            detectAmplitudeInProjectSource(store.session.installDir)
+              .confidence === 'none'
+          ) {
+            logToFile(
+              '[DataSetup] remote says full but no source imports — downgrading to partial',
+            );
+            store.setActivationLevel('partial');
+          } else {
+            store.setActivationLevel(isFull ? 'full' : 'partial');
+          }
         } else if (status.hasDetSource) {
           // SDK installed but no events yet
           store.setActivationLevel('partial');

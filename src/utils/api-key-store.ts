@@ -2,15 +2,30 @@
  * api-key-store — Persist and retrieve the Amplitude project API key.
  *
  * Storage strategy (tried in order):
- *   1. macOS Keychain  — `security` CLI, no extra deps
- *   2. Linux keyring   — `secret-tool` CLI (gnome-keyring / KWallet)
- *   3. .env.local file — fallback; file is added to .gitignore automatically
+ *   1. Per-user cache file — `~/.amplitude/wizard/credentials.json`
+ *      (see `credentials-file.ts` for the full why; mode `0o600`,
+ *      keyed by hashed install dir, no OS keychain prompts).
+ *   2. `.env.local` fallback — written to the project root and added
+ *      to the project's `.gitignore` automatically. Used when (and
+ *      only when) the per-user cache write fails (read-only home dir,
+ *      EACCES on the cache root, etc.).
  *
- * The key is scoped to the project directory so that different projects
- * can have different API keys on the same machine.
+ * Migration note for existing users: the previous implementation stored
+ * keys in the macOS Keychain / Linux libsecret. Old entries are left in
+ * place untouched (deleting them might re-prompt the user, the very
+ * thing this refactor exists to eliminate). On the next launch the
+ * standard credential resolution flow re-fetches the key from the
+ * authenticated Amplitude API and writes it to the new cache file.
+ * Net effect: a single silent "first launch after upgrade" with no
+ * user-visible action required, and zero keychain prompts ever again.
+ *
+ * Why not the keychain? See the header of `credentials-file.ts` — short
+ * version: the project API key is a public ingestion key shipped in
+ * every client SDK bundle, so file-on-disk at `0o600` matches its true
+ * sensitivity (same precedent as the OAuth tokens already living in
+ * `~/.ampli.json`).
  */
 
-import { execFileSync } from 'node:child_process';
 import {
   existsSync,
   readFileSync,
@@ -19,7 +34,12 @@ import {
   chmodSync,
 } from 'node:fs';
 import { join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { logToFile } from './debug.js';
+import {
+  readCredential,
+  writeCredential,
+  clearCredential,
+} from './credentials-file.js';
 
 // `.env.local` holds the project's Amplitude API key, which is treated as
 // a secret. We constrain it to 0o600 (owner read/write only) on every
@@ -44,91 +64,27 @@ function tightenEnvMode(envPath: string): void {
   }
 }
 
-const KEYCHAIN_SERVICE = 'amplitude-wizard';
 const ENV_KEY_NAME = 'AMPLITUDE_API_KEY';
 
-/** A short stable identifier for the project directory (used as keychain account). */
-function projectHandle(installDir: string): string {
-  return createHash('sha1').update(installDir).digest('hex').slice(0, 12);
+// ── Test-only helpers ─────────────────────────────────────────────────
+//
+// These were used by the old keychain implementation to fake out binary
+// discovery and headless-Linux detection. The current implementation
+// has neither concept, so the helpers are kept as no-ops to avoid
+// breaking unit tests that import them. Drop after one release once
+// every test file has been updated.
+
+/** @deprecated No-op since the keychain backend was removed. */
+export function __setBinaryAvailableForTests(
+  _name: string,
+  _available: boolean | undefined,
+): void {
+  // Intentionally empty — preserved for test back-compat only.
 }
 
-// ── macOS Keychain ────────────────────────────────────────────────────────────
-
-function keychainRead(account: string): string | null {
-  try {
-    return execFileSync(
-      'security',
-      ['find-generic-password', '-a', account, '-s', KEYCHAIN_SERVICE, '-w'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    ).trim();
-  } catch {
-    return null;
-  }
-}
-
-function keychainWrite(account: string, key: string): boolean {
-  try {
-    // NOTE: The key is passed as a command-line argument to `-w`. This means it
-    // is briefly visible in `ps` output. macOS `security` does not support
-    // reading the password from stdin, so there is no way to avoid this with
-    // the current CLI interface. Using `execFileSync` (not a shell) prevents
-    // shell-history and metacharacter issues but does not hide the argument
-    // from the process table.
-    execFileSync(
-      'security',
-      [
-        'add-generic-password',
-        '-U',
-        '-a',
-        account,
-        '-s',
-        KEYCHAIN_SERVICE,
-        '-w',
-        key,
-      ],
-      { stdio: 'ignore' },
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-// ── Linux secret-tool ─────────────────────────────────────────────────────────
-
-function secretToolRead(account: string): string | null {
-  try {
-    return execFileSync(
-      'secret-tool',
-      ['lookup', 'service', KEYCHAIN_SERVICE, 'account', account],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    ).trim();
-  } catch {
-    return null;
-  }
-}
-
-function secretToolWrite(account: string, key: string): boolean {
-  try {
-    // secret-tool reads the password from stdin. Pipe the key via `input`
-    // rather than building a shell pipeline — that way we can't hit shell
-    // metacharacter issues if the key contains quotes, backticks, etc.
-    execFileSync(
-      'secret-tool',
-      [
-        'store',
-        '--label=Amplitude API Key',
-        'service',
-        KEYCHAIN_SERVICE,
-        'account',
-        account,
-      ],
-      { input: key, stdio: ['pipe', 'ignore', 'ignore'] },
-    );
-    return true;
-  } catch {
-    return false;
-  }
+/** @deprecated No-op since the keychain backend was removed. */
+export function __resetHeadlessCacheForTests(): void {
+  // Intentionally empty — preserved for test back-compat only.
 }
 
 // ── .env.local fallback ───────────────────────────────────────────────────────
@@ -176,6 +132,20 @@ function envWrite(installDir: string, key: string): void {
   ensureGitignored(installDir, '.env.local');
 }
 
+function envClear(installDir: string): void {
+  const envPath = join(installDir, '.env.local');
+  if (!existsSync(envPath)) return;
+  const contents = readFileSync(envPath, 'utf8');
+  if (!contents.includes(`${ENV_KEY_NAME}=`)) return;
+  // Strip the key from .env.local without deleting the file — users may
+  // have other env vars there.
+  const stripped = contents
+    .replace(new RegExp(`^${ENV_KEY_NAME}=.*\\r?\\n?`, 'm'), '')
+    .replace(/\n{3,}/g, '\n\n');
+  writeFileSync(envPath, stripped, { encoding: 'utf8', mode: ENV_FILE_MODE });
+  tightenEnvMode(envPath);
+}
+
 function ensureGitignored(installDir: string, pattern: string): void {
   const gitignorePath = join(installDir, '.gitignore');
   if (existsSync(gitignorePath)) {
@@ -190,73 +160,63 @@ function ensureGitignored(installDir: string, pattern: string): void {
 // ── Public API ────────────────────────────────────────────────────────────────
 
 /**
- * Persist the Amplitude project API key for this project directory.
- * Tries keychain first, falls back to .env.local.
- * Returns which storage was used: 'keychain' | 'env'
+ * Source of a stored API key.
+ *
+ *   - `cache` — per-user `~/.amplitude/wizard/credentials.json`. The
+ *     normal storage location; silent and shared across CLI invocations
+ *     from the same install dir.
+ *   - `env`   — project-local `.env.local`. Used only when the per-user
+ *     cache write failed (read-only home, etc.) or when a previous
+ *     wizard version persisted there.
+ *
+ * (Renamed from the legacy `'keychain'` value, which was a misnomer —
+ * the wizard never actually stored anything in any OS keychain after
+ * this refactor. Telemetry dashboards filtering on `'keychain'` should
+ * be updated to `'cache'`.)
  */
-export function persistApiKey(
-  key: string,
-  installDir: string,
-): 'keychain' | 'env' {
-  const account = projectHandle(installDir);
+export type ApiKeySource = 'cache' | 'env';
 
-  if (process.platform === 'darwin' && keychainWrite(account, key)) {
-    return 'keychain';
+/**
+ * Persist the Amplitude project API key for this project directory.
+ * Tries the per-user cache file first, falls back to `.env.local`.
+ */
+export function persistApiKey(key: string, installDir: string): ApiKeySource {
+  try {
+    writeCredential(installDir, key);
+    return 'cache';
+  } catch (err) {
+    // Most likely cause: read-only $HOME or EACCES on `~/.amplitude/`.
+    // Fall back to project-local `.env.local` so the wizard still works
+    // on locked-down hosts (CI runners, ephemeral containers, etc.).
+    logToFile(
+      `[api-key-store] cache write failed, falling back to .env.local: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    envWrite(installDir, key);
+    return 'env';
   }
-
-  if (process.platform === 'linux' && secretToolWrite(account, key)) {
-    return 'keychain';
-  }
-
-  envWrite(installDir, key);
-  return 'env';
 }
 
 /**
- * Remove the stored API key for this project directory from the system
- * keychain (macOS / Linux) AND from .env.local. Has no effect if no key
- * is stored. Clears every storage backend because readApiKeyWithSource
- * falls through them in order — leaving one populated would silently
- * re-use the previous login's key on the next run.
+ * Remove the stored API key for this project directory from BOTH the
+ * per-user cache AND `.env.local`. Has no effect if no key is stored.
+ *
+ * Cleared from every backend because `readApiKeyWithSource` falls
+ * through them in order — leaving one populated would silently re-use
+ * the previous login's key on the next run.
+ *
+ * NOTE: Old keychain / secret-tool entries from the pre-refactor
+ * implementation are intentionally NOT cleared here. Calling
+ * `security delete-generic-password` may still trigger a Keychain
+ * Services unlock prompt on macOS, which defeats the whole point of
+ * removing the keychain backend. Orphaned entries are harmless (nothing
+ * reads them anymore) and users can clean them up via Keychain Access
+ * if they want. Drop after one release.
  */
 export function clearApiKey(installDir: string): void {
-  const account = projectHandle(installDir);
-
-  if (process.platform === 'darwin') {
-    try {
-      execFileSync(
-        'security',
-        ['delete-generic-password', '-a', account, '-s', KEYCHAIN_SERVICE],
-        { stdio: 'ignore' },
-      );
-    } catch {
-      // Key wasn't in keychain — ignore
-    }
-  }
-
-  if (process.platform === 'linux') {
-    try {
-      execFileSync(
-        'secret-tool',
-        ['clear', 'service', KEYCHAIN_SERVICE, 'account', account],
-        { stdio: 'ignore' },
-      );
-    } catch {
-      // Key wasn't in keyring — ignore
-    }
-  }
-
-  // Strip the key from .env.local without deleting the file — users may
-  // have other env vars there.
-  const envPath = join(installDir, '.env.local');
-  if (!existsSync(envPath)) return;
-  const contents = readFileSync(envPath, 'utf8');
-  if (!contents.includes(`${ENV_KEY_NAME}=`)) return;
-  const stripped = contents
-    .replace(new RegExp(`^${ENV_KEY_NAME}=.*\\r?\\n?`, 'm'), '')
-    .replace(/\n{3,}/g, '\n\n');
-  writeFileSync(envPath, stripped, { encoding: 'utf8', mode: ENV_FILE_MODE });
-  tightenEnvMode(envPath);
+  clearCredential(installDir);
+  envClear(installDir);
 }
 
 /**
@@ -273,18 +233,9 @@ export function readApiKey(installDir: string): string | null {
  */
 export function readApiKeyWithSource(
   installDir: string,
-): { key: string; source: 'keychain' | 'env' } | null {
-  const account = projectHandle(installDir);
-
-  if (process.platform === 'darwin') {
-    const key = keychainRead(account);
-    if (key) return { key, source: 'keychain' };
-  }
-
-  if (process.platform === 'linux') {
-    const key = secretToolRead(account);
-    if (key) return { key, source: 'keychain' };
-  }
+): { key: string; source: ApiKeySource } | null {
+  const cacheKey = readCredential(installDir);
+  if (cacheKey) return { key: cacheKey, source: 'cache' };
 
   // .env.local in the project directory (project-scoped, safe)
   const envKey = envRead(installDir);

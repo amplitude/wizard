@@ -34,7 +34,7 @@ import {
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
-import { classifyWriteOperation } from './agent-events';
+import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
   createWizardToolsServer,
   persistDashboard,
@@ -44,6 +44,11 @@ import {
 } from './wizard-tools';
 import { getWizardCommandments } from './commandments';
 import { sanitizeNestedClaudeEnv } from './sanitize-claude-env';
+import { applyScopedSettings } from './claude-settings-scope';
+import {
+  scanBashCommandForDestructive,
+  scanWriteContentForSecrets,
+} from './safety-scanner';
 import type { PackageManagerDetector } from './package-manager-detection';
 
 import { z } from 'zod';
@@ -95,6 +100,13 @@ type SDKQueryOptions = {
   abortSignal?: AbortSignal;
   maxTurns?: number;
   thinking?: SDKThinkingConfig;
+  /**
+   * Anthropic API beta headers. Used to opt into the 1M context window via
+   * `'context-1m-2025-08-07'`. The SDK's own `Options.betas` is typed as
+   * `SdkBeta[]`; we accept plain strings here to avoid a hard import of an
+   * SDK-internal type.
+   */
+  betas?: string[];
 };
 
 type SDKQueryFn = (params: {
@@ -163,8 +175,6 @@ export enum AgentErrorType {
   GATEWAY_DOWN = 'WIZARD_GATEWAY_DOWN',
 }
 
-const BLOCKING_ENV_KEYS = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_AUTH_TOKEN'];
-
 const DEFAULT_MAX_TURNS = 200;
 /**
  * Upper sanity bound on AMPLITUDE_WIZARD_MAX_TURNS. A real run almost never
@@ -194,87 +204,35 @@ export function resolveMaxTurns(
 let _activeStatusReporter: StatusReporter | undefined;
 
 /**
- * Check if .claude/settings.json in the project directory contains env
- * overrides for blocking keys that block the Wizard from accessing the Amplitude LLM Gateway.
- * Returns the list of matched key names, or an empty array if none found.
+ * Map a `WizardMode` to a Claude model alias. Internal — see
+ * `docs/internal/agent-mode-flag.md` for the full mapping and rationale.
+ *
+ * The Amplitude LLM gateway expects the `anthropic/<alias>` prefix; the
+ * direct Anthropic API expects the bare alias. The wizard's `fallbackModel`
+ * is a different model on a different routing path, so a tier the gateway
+ * doesn't currently vend silently degrades rather than failing the run.
+ *
+ * Exported so unit tests can pin the mapping without standing up the
+ * full agent runtime.
  */
-export function checkClaudeSettingsOverrides(
-  workingDirectory: string,
-): string[] {
-  const candidates = [
-    path.join(workingDirectory, '.claude', 'settings.json'),
-    path.join(workingDirectory, '.claude', 'settings'),
-  ];
-
-  const claudeSettingsSchema = z.object({
-    env: z.record(z.string(), z.unknown()),
-  });
-
-  for (const filePath of candidates) {
-    try {
-      const raw = fs.readFileSync(filePath, 'utf-8');
-      const result = claudeSettingsSchema.safeParse(JSON.parse(raw));
-      if (result.success) {
-        return BLOCKING_ENV_KEYS.filter((key) => key in result.data.env);
-      }
-    } catch {
-      // File doesn't exist or isn't valid JSON — skip
-    }
+export function selectModel(
+  mode: import('../utils/types').WizardMode,
+  useDirectApiKey: boolean,
+): string {
+  let alias: string;
+  switch (mode) {
+    case 'fast':
+      alias = 'claude-haiku-4-5';
+      break;
+    case 'thorough':
+      alias = 'claude-opus-4-7';
+      break;
+    case 'standard':
+    default:
+      alias = 'claude-sonnet-4-6';
+      break;
   }
-
-  return [];
-}
-
-/**
- * Copy .claude/settings.json to .wizard-backup (overwriting if it exists),
- * then remove the original so the SDK doesn't load the blocking overrides.
- */
-export function backupAndFixClaudeSettings(workingDirectory: string): boolean {
-  for (const name of ['settings.json', 'settings']) {
-    const filePath = path.join(workingDirectory, '.claude', name);
-    const backupPath = `${filePath}.wizard-backup`;
-    analytics.wizardCapture('claude settings backed up');
-    try {
-      fs.copyFileSync(filePath, backupPath);
-      fs.unlinkSync(filePath);
-      registerCleanup(() => {
-        try {
-          restoreClaudeSettings(workingDirectory);
-        } catch (error) {
-          analytics.captureException(
-            error instanceof Error ? error : new Error(String(error)),
-          );
-        }
-      });
-      return true;
-    } catch {
-      // File doesn't exist — try next candidate
-    }
-  }
-  return false;
-}
-
-/**
- * Restore .claude/settings.json from .wizard-backup.
- * Copies (not moves) so the backup is preserved.
- */
-export function restoreClaudeSettings(workingDirectory: string): void {
-  for (const name of ['settings.json', 'settings']) {
-    const backup = path.join(
-      workingDirectory,
-      '.claude',
-      `${name}.wizard-backup`,
-    );
-    try {
-      fs.copyFileSync(backup, path.join(workingDirectory, '.claude', name));
-      analytics.wizardCapture('claude settings restored');
-      return;
-    } catch (error) {
-      analytics.captureException(
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    }
-  }
+  return useDirectApiKey ? alias : `anthropic/${alias}`;
 }
 
 export type AgentConfig = {
@@ -292,6 +250,29 @@ export type AgentConfig = {
   skipAmplitudeMcp?: boolean;
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
+  /**
+   * Internal agent model tier — see `docs/internal/agent-mode-flag.md`.
+   * Threaded from `WizardSession.mode` via `agent-runner.ts`.
+   * Undefined defaults to `'standard'` (the wizard's default model).
+   */
+  mode?: import('../utils/types').WizardMode;
+  /**
+   * UUID v4 that groups all `/v1/messages` calls in this wizard run into one
+   * Agent Analytics session. Sourced from `WizardSession.agentSessionId`,
+   * forwarded to the Amplitude LLM gateway as the `x-amp-wizard-session-id`
+   * header (via `ANTHROPIC_CUSTOM_HEADERS`). Without this, the proxy falls back
+   * to a per-token-hash session ID, which collapses every wizard run a user
+   * ever does into a single session.
+   */
+  agentSessionId?: string;
+  /**
+   * Whether the active framework targets the browser. Mirrors
+   * `FrameworkConfig.metadata.targetsBrowser`. Used to gate browser-only
+   * commandment blocks (autocapture defaults, browser SDK init template)
+   * so mobile/server/generic runs don't carry that content in their
+   * system prompt every turn. Undefined = treat as non-browser.
+   */
+  targetsBrowser?: boolean;
 };
 
 /**
@@ -432,6 +413,69 @@ export function createPreToolUseHook(): HookCallback {
     const toolName = (input.tool_name as string | undefined) ?? '';
     const toolInput =
       (input.tool_input as Record<string, unknown> | undefined) ?? {};
+
+    // Surface the agent's intent on every wizard-tools MCP call. The
+    // `reason` field is required by every wizard-tools schema (see
+    // wizard-tools.ts) — capturing it here gives us instant visibility in
+    // our existing dashboards alongside Agent Analytics' track_tool_call().
+    // Tools without `reason` (Bash, Read, Edit, plus other MCP servers)
+    // are skipped so we don't pollute the event with empty fields.
+    if (toolName.startsWith('mcp__wizard-tools__')) {
+      const reason = toolInput.reason;
+      if (typeof reason === 'string' && reason.length > 0) {
+        const shortName = toolName.slice('mcp__wizard-tools__'.length);
+        analytics.wizardCapture('tool invoked', {
+          'tool name': shortName,
+          reason,
+        });
+      }
+    }
+
+    // Run the explicit destructive-command blocklist BEFORE the canonical
+    // allowlist check. Both deny these commands, but the allowlist deny
+    // message is generic ("command not in allowlist") which invites the
+    // model to retry rephrased variants of the same destructive intent.
+    // The scanner emits a specific "this is destructive policy, abandon
+    // this path" message that breaks the retry loop. Fail-closed on
+    // scanner exception (the catch returns deny).
+    if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
+      try {
+        const scan = scanBashCommandForDestructive(command);
+        if (scan.matched && scan.rule) {
+          logToFile(
+            `Denying destructive bash command (rule: ${scan.rule.label}): ${command}`,
+          );
+          captureWizardError(
+            'Bash Policy',
+            `Destructive command blocked: ${scan.rule.label}`,
+            'createPreToolUseHook',
+            { 'rule id': scan.rule.id, command },
+          );
+          return Promise.resolve({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: scan.rule.message,
+            },
+          });
+        }
+      } catch (err) {
+        // Fail-closed: a scanner exception is a block decision. The only
+        // realistic source of throws is regex backtracking on pathological
+        // input, and on those we'd rather block than pass.
+        logToFile('Destructive-bash scanner threw; failing closed:', err);
+        return Promise.resolve({
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason:
+              'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.',
+          },
+        });
+      }
+    }
 
     // Cap long sleeps before the canonical allowlist check, so the
     // diagnostic message is specific instead of "command not in allowlist".
@@ -640,6 +684,7 @@ export function createUserPromptSubmitHook(state: AgentState): HookCallback {
  */
 export function createPostToolUseHook(state: AgentState): HookCallback {
   return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    let secretWarning: string | null = null;
     try {
       const toolName =
         typeof input.tool_name === 'string'
@@ -669,8 +714,74 @@ export function createPostToolUseHook(state: AgentState): HookCallback {
         state.recordModifiedFile(path);
         logToFile(`PostToolUse: recorded modified file ${path} (${toolName})`);
       }
+
+      // Scan the written content for hardcoded secrets (Amplitude API keys,
+      // JWT bearers). The write has already happened — we can't undo it
+      // here — but we can return `additionalContext` to the model so the
+      // next turn reverts and switches to an env-var pattern. This is
+      // strictly additive to the existing path-recording above.
+      //
+      // Content shape varies by tool:
+      //   Write       → `content` is the full new file body
+      //   Edit        → `new_string` is the replacement substring
+      //   MultiEdit   → `edits[].new_string`
+      //   NotebookEdit → `new_source` is the cell body
+      // Falling back across these covers every wizard-relevant write.
+      const candidates: string[] = [];
+      if (typeof obj.content === 'string') candidates.push(obj.content);
+      if (typeof obj.new_string === 'string') candidates.push(obj.new_string);
+      if (typeof obj.new_source === 'string') candidates.push(obj.new_source);
+      if (Array.isArray(obj.edits)) {
+        for (const edit of obj.edits) {
+          if (
+            edit &&
+            typeof edit === 'object' &&
+            typeof (edit as { new_string?: unknown }).new_string === 'string'
+          ) {
+            candidates.push((edit as { new_string: string }).new_string);
+          }
+        }
+      }
+      for (const text of candidates) {
+        const scan = scanWriteContentForSecrets(text);
+        if (scan.matched && scan.rule) {
+          logToFile(
+            `PostToolUse: hardcoded-secret rule matched (rule: ${
+              scan.rule.label
+            }, file: ${path ?? '<unknown>'}, tool: ${toolName})`,
+          );
+          captureWizardError(
+            'Safety Scanner',
+            `Hardcoded secret detected: ${scan.rule.label}`,
+            'createPostToolUseHook',
+            {
+              'rule id': scan.rule.id,
+              'tool name': toolName,
+              'file path': path ?? null,
+            },
+          );
+          // Build a single, focused remediation message keyed to the file
+          // path (so the model knows exactly which file to revert).
+          const ref = path ? ` at ${path}` : '';
+          secretWarning = `Safety scanner: a hardcoded secret was detected in the file you just wrote${ref}. ${scan.rule.message}`;
+          break;
+        }
+      }
     } catch (err) {
+      // Path recording / scanning errors are non-fatal — they must never
+      // break the agent loop. Logged for ops review.
       logToFile('PostToolUse handler threw:', err);
+    }
+    if (secretWarning) {
+      // `additionalContext` is forwarded to the model on its next turn,
+      // letting it self-correct. Returning a structured payload (not a
+      // bare string) per the SDK's hook protocol.
+      return Promise.resolve({
+        hookSpecificOutput: {
+          hookEventName: 'PostToolUse',
+          additionalContext: secretWarning,
+        },
+      });
     }
     return Promise.resolve({});
   };
@@ -689,6 +800,17 @@ export type AgentRunConfig = {
   useLocalClaude?: boolean;
   /** When true, ANTHROPIC_API_KEY is passed through to the SDK instead of the gateway. */
   useDirectApiKey?: boolean;
+  /**
+   * Per-wizard-run UUID forwarded to the gateway as `x-amp-wizard-session-id`.
+   * Groups all `/v1/messages` calls in this run into one Agent Analytics session.
+   */
+  agentSessionId?: string;
+  /**
+   * Whether the active framework targets the browser. Threaded from
+   * `AgentConfig.targetsBrowser` so `runAgent` can ask `commandments.ts`
+   * for browser-specific guidance only when relevant.
+   */
+  targetsBrowser?: boolean;
 };
 
 const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
@@ -725,11 +847,26 @@ export function buildWizardMetadata(
 }
 
 /**
- * Build env for the SDK subprocess: process.env plus ANTHROPIC_CUSTOM_HEADERS from wizard metadata/flags.
+ * Header forwarded to the Amplitude LLM gateway to group all `/v1/messages`
+ * calls from a single wizard run into one Agent Analytics session.
+ *
+ * The proxy (thunder/wizard-proxy) reads this header and uses it as the
+ * `agentSessionId`. Without it, the proxy falls back to a deterministic
+ * session ID derived from the auth token hash — which collapses every
+ * wizard run a user ever does into the same session.
  */
-function buildAgentEnv(
+export const WIZARD_SESSION_ID_HEADER = 'x-amp-wizard-session-id';
+
+/**
+ * Build env for the SDK subprocess: process.env plus ANTHROPIC_CUSTOM_HEADERS
+ * from wizard metadata, feature flags, and the per-run session ID.
+ *
+ * Exported for unit testing.
+ */
+export function buildAgentEnv(
   wizardMetadata: Record<string, string>,
   wizardFlags: Record<string, string>,
+  agentSessionId?: string,
 ): string {
   const headers = createCustomHeaders();
   for (const [key, value] of Object.entries(wizardMetadata)) {
@@ -743,6 +880,9 @@ function buildAgentEnv(
   for (const [flagKey, variant] of Object.entries(wizardFlags)) {
     if (!flagKey.toLowerCase().startsWith('wizard')) continue;
     headers.addFlag(flagKey, variant);
+  }
+  if (agentSessionId) {
+    headers.add(WIZARD_SESSION_ID_HEADER, agentSessionId);
   }
   const encoded = headers.encode();
   logToFile('ANTHROPIC_CUSTOM_HEADERS', encoded);
@@ -1040,16 +1180,85 @@ export function wizardCanUseTool(
 ):
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
   | { behavior: 'deny'; message: string } {
-  // Block direct reads/writes of .env files — use wizard-tools MCP instead
-  if (toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') {
+  // Block direct reads/writes of .env files — use wizard-tools MCP instead.
+  // The full set of write tools is `Write`, `Edit`, `MultiEdit`, and
+  // `NotebookEdit` — see classifyWriteOperation in agent-events.ts. Older
+  // versions of this hook only matched `Write`/`Edit`, leaving MultiEdit
+  // as a bypass path. Cover all four tools here.
+  const isReadTool = toolName === 'Read';
+  const isWriteTool =
+    toolName === 'Write' ||
+    toolName === 'Edit' ||
+    toolName === 'MultiEdit' ||
+    toolName === 'NotebookEdit';
+  if (isReadTool || isWriteTool) {
     const filePath = typeof input.file_path === 'string' ? input.file_path : '';
-    const basename = path.basename(filePath);
+    // Normalize path separators BEFORE computing basename. On POSIX, Node's
+    // `path.basename` does not recognize `\` as a separator, so a Windows
+    // path like `C:\\project\\.amplitude\\events.json` would basename to
+    // the entire string and slip past our matchers. Normalizing to `/`
+    // first means `path.basename` is correct on both platforms regardless
+    // of which slash style the agent passed.
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const basename = path.basename(normalizedPath);
     if (basename.startsWith('.env')) {
       logToFile(`Denying ${toolName} on env file: ${filePath}`);
       return {
         behavior: 'deny',
         message: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
       };
+    }
+    // Block direct writes to the wizard-managed event-plan and dashboard
+    // artifacts. These files are owned by `confirm_event_plan` and the
+    // dashboard watcher — direct writes are the source of two recurring
+    // bugs: (1) the file already exists from a prior run and Write errors
+    // out (Write requires a prior Read of an existing file), forcing the
+    // agent into a confused "stale file" recovery loop; (2) the agent
+    // writes a different shape (event_name, file_path, etc.) than the
+    // wizard UI expects, so the manifest drifts from real track() calls.
+    // The integration skills owned by context-hub still instruct agents
+    // to write `.amplitude-events.json` directly — denying here is
+    // defense in depth that lands today, in advance of the upstream
+    // skill refresh.
+    if (isWriteTool) {
+      const lower = basename.toLowerCase();
+      const isEventsFile =
+        lower === '.amplitude-events.json' || lower === 'events.json';
+      const isDashboardFile =
+        lower === '.amplitude-dashboard.json' || lower === 'dashboard.json';
+      // For the bare `events.json` / `dashboard.json` cases, only deny
+      // when the path is inside `.amplitude/` (the wizard's metadata
+      // dir). A user codebase might legitimately have an unrelated
+      // `events.json` somewhere else. We use the already-normalized
+      // path (forward slashes) computed at the top of this branch so
+      // the substring check is consistent across POSIX and Windows.
+      const insideMetaDir = normalizedPath.includes('/.amplitude/');
+      const isLegacyDotfile =
+        lower === '.amplitude-events.json' ||
+        lower === '.amplitude-dashboard.json';
+      const isCanonicalInMetaDir =
+        (lower === 'events.json' || lower === 'dashboard.json') &&
+        insideMetaDir;
+      if (isLegacyDotfile || isCanonicalInMetaDir) {
+        const which = isEventsFile ? 'event plan' : 'dashboard';
+        const tool =
+          which === 'event plan'
+            ? 'mcp__wizard-tools__confirm_event_plan'
+            : 'the dashboard watcher (which mirrors writes from the Amplitude MCP `create_dashboard` call)';
+        logToFile(
+          `Denying ${toolName} on wizard-managed ${which} file: ${filePath}`,
+        );
+        return {
+          behavior: 'deny',
+          message: `Direct ${toolName} of ${basename} is not allowed. The ${which} file is owned by ${tool}. Call that tool with the proposed plan instead — it persists the file in the canonical shape the wizard UI expects, so the manifest never drifts from real track() calls. ${
+            isDashboardFile
+              ? ''
+              : 'If a stale ' +
+                basename +
+                ' is on disk from a prior run, ignore it and call confirm_event_plan; the wizard atomically replaces it.'
+          }`,
+        };
+      }
     }
     return { behavior: 'allow', updatedInput: input };
   }
@@ -1262,6 +1471,25 @@ export async function initializeAgent(
         url: gatewayUrl,
         betaHeadersEnabledInEnv,
       });
+
+      // Project-layer `.claude/settings.json` (env block) wins over the
+      // env we pass to the SDK — that's how the SDK's settings precedence
+      // works. For users with a custom `ANTHROPIC_BASE_URL` (LiteLLM,
+      // corporate proxy, Claude Pro/Max OAuth, etc.) checked into their
+      // repo, that silently re-routes the wizard's traffic away from the
+      // Amplitude gateway and the run breaks.
+      //
+      // Fix: write our gateway env into the LOCAL settings layer
+      // (`.claude/settings.local.json`, machine-local + gitignored). Local
+      // beats project in the SDK precedence chain (see `_F6` in the
+      // bundled cli.js: `["localSettings", "projectSettings", "userSettings"]`),
+      // so the wizard's values win without ever modifying the user's
+      // checked-in config. We also register a cleanup that restores the
+      // file's pre-wizard state on every exit (success / cancel / crash).
+      const scoped = applyScopedSettings(config.workingDirectory);
+      if (scoped) {
+        registerCleanup(() => scoped.restore());
+      }
     }
 
     // Configure MCP servers
@@ -1297,14 +1525,17 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
-      // Gateway expects 'anthropic/claude-sonnet-4-6'; direct Anthropic API expects 'claude-sonnet-4-6'
-      model: useDirectApiKey
-        ? 'claude-sonnet-4-6'
-        : 'anthropic/claude-sonnet-4-6',
+      // Mode → model alias. Default 'standard' = current behavior;
+      // see `docs/internal/agent-mode-flag.md` for the full mapping.
+      // Gateway expects the `anthropic/<alias>` prefix; direct API expects
+      // the bare alias — `selectModel` handles both.
+      model: selectModel(config.mode ?? 'standard', useDirectApiKey),
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,
       useDirectApiKey,
+      agentSessionId: config.agentSessionId,
+      targetsBrowser: config.targetsBrowser,
     };
 
     logToFile('Agent config:', {
@@ -1420,12 +1651,101 @@ export async function runAgentLocally(
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
 
+    // Rate-limit how often raw stdout chunks become user-visible status
+    // updates. Each pushStatus mutates the store and triggers a full TUI
+    // re-render; under stream-json output that fires hundreds of times a
+    // second and stalls the UI. We keep the most recent line (so the
+    // status reflects "now") but only forward it to the UI on a fixed
+    // cadence. Logging stays per-line for full fidelity in the log file.
+    const PUSH_INTERVAL_MS = 150;
+    let pendingLine: string | null = null;
+    let pushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushPending = () => {
+      pushTimer = null;
+      if (pendingLine === null) return;
+      const line = pendingLine;
+      pendingLine = null;
+      spinner.message(line);
+      getUI().pushStatus(line);
+    };
+
+    /**
+     * Detect Anthropic stream-event protocol JSON. These lines
+     * (`{"type":"message_start",...}`, `{"type":"content_block_delta",...}`,
+     * etc.) leak into stdout when claude is invoked with a streaming output
+     * format. They're useful in the log file but pure garbage in the status
+     * pill — the user sees raw protocol noise and the long, unbounded JSON
+     * also pushes the progress counter past terminal width and folds the
+     * header layout (see RunScreen.tsx `truncateStatus`). Drop them from
+     * the user-facing status; they're already captured in the per-line log.
+     */
+    const STREAM_EVENT_TYPES = new Set([
+      'message_start',
+      'message_delta',
+      'message_stop',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop',
+      'ping',
+      'stream_event',
+    ]);
+    /**
+     * Belt-and-braces signature match for partial / pre-buffer protocol
+     * JSON. `JSON.parse` only succeeds on complete lines, so a chunk that
+     * splits mid-payload (very common for `content_block_delta`, which
+     * carries large strings) would otherwise slip past the strict check
+     * and reach the status pill as truncated noise like
+     * `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delt…`.
+     * Anchor on the `{"type":"<known>"` prefix to catch those before they
+     * paint to the UI.
+     */
+    const STREAM_EVENT_PREFIXES = Array.from(STREAM_EVENT_TYPES).map(
+      (t) => `{"type":"${t}"`,
+    );
+    const looksLikeStreamEvent = (line: string): boolean => {
+      if (line.length < 9 || line[0] !== '{') return false;
+      // Fast path: signature match on the prefix. Survives partial lines.
+      for (const prefix of STREAM_EVENT_PREFIXES) {
+        if (line.startsWith(prefix)) return true;
+      }
+      // Slow path: full parse for completeness (handles odd whitespace).
+      try {
+        const obj = JSON.parse(line) as { type?: unknown };
+        return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
+      } catch {
+        return false;
+      }
+    };
+
+    /**
+     * Line buffer for stdout. The OS pipes stdout in arbitrary-sized
+     * chunks — a single `data` event may carry multiple lines, half a
+     * line, or several lines plus a partial trailing one. Splitting each
+     * raw chunk on `\n` and treating every result as a complete line was
+     * the root cause of `{"type":"content_block_delta",…` leaking past
+     * the filter: the trailing fragment couldn't `JSON.parse`, so the
+     * strict signature check missed it. Buffer until we see a newline,
+     * emit only complete lines, and stash the remainder for the next
+     * chunk. (The prefix match above is a second line of defense if a
+     * line is genuinely longer than the pipe buffer.)
+     */
+    let stdoutBuffer = '';
+    const consumeLine = (line: string) => {
+      logToFile('claude stdout:', line);
+      if (looksLikeStreamEvent(line)) return;
+      pendingLine = line.slice(0, 80);
+      if (pushTimer === null) {
+        pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
+      }
+    };
+
     proc.stdout.on('data', (chunk: string) => {
-      const lines = chunk.split('\n').filter((l) => l.trim());
-      for (const line of lines) {
-        logToFile('claude stdout:', line);
-        spinner.message(line.slice(0, 80));
-        getUI().pushStatus(line.slice(0, 80));
+      stdoutBuffer += chunk;
+      let nl: number;
+      while ((nl = stdoutBuffer.indexOf('\n')) !== -1) {
+        const line = stdoutBuffer.slice(0, nl);
+        stdoutBuffer = stdoutBuffer.slice(nl + 1);
+        if (line.trim()) consumeLine(line);
       }
     });
 
@@ -1434,6 +1754,18 @@ export async function runAgentLocally(
     });
 
     proc.on('close', (code) => {
+      // Flush any line still buffered without a trailing newline so the
+      // final partial line isn't dropped on close.
+      if (stdoutBuffer.trim()) {
+        consumeLine(stdoutBuffer);
+        stdoutBuffer = '';
+      }
+      // Flush any pending status update so the very last line the user
+      // sees reflects what actually happened just before exit.
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        flushPending();
+      }
       if (code === 0) {
         spinner.stop(successMessage);
         resolve({});
@@ -1444,6 +1776,11 @@ export async function runAgentLocally(
     });
 
     proc.on('error', (err) => {
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        pushTimer = null;
+        pendingLine = null;
+      }
       spinner.stop(errorMessage);
       reject(err);
     });
@@ -2030,6 +2367,12 @@ export async function runAgent(
             fallbackModel: agentConfig.useDirectApiKey
               ? 'claude-sonnet-4-5-20250514'
               : 'anthropic/claude-sonnet-4-5-20250514',
+            // Opt into the 1M context window so long instrumentation runs
+            // (commandments + skills + accumulated tool results) don't trip
+            // compaction mid-flow. Compactions cause the long mid-run pauses
+            // users perceive as "the agent froze". Safe to leave on — falls
+            // back to 200K if the backing model doesn't support it.
+            betas: ['context-1m-2025-08-07'],
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
@@ -2053,8 +2396,14 @@ export async function runAgent(
             // Re-enable per-step (not globally) if a future phase truly
             // needs deliberation. See `commandments.ts` for the
             // instructions that obviate per-turn reasoning.
-            // Load skills from project's .claude/skills/ directory
-            settingSources: ['project'],
+            // Load skills + agents + commands from the project's `.claude/`
+            // directory, AND the local-layer settings we wrote in
+            // `applyScopedSettings`. The SDK merges with `local` winning
+            // over `project`, so our wizard-managed env (gateway URL +
+            // bearer) overrides anything the user's checked-in
+            // `.claude/settings.json` declares. See `claude-settings-scope.ts`
+            // for the rationale and the precedence reference.
+            settingSources: ['project', 'local'],
             // Explicitly enable required tools including Skill
             allowedTools,
             systemPrompt: {
@@ -2062,7 +2411,13 @@ export async function runAgent(
               preset: 'claude_code',
               // Append wizard-wide commandments (from YAML) rather than replacing
               // the preset so we keep default Claude Code behaviors.
-              append: getWizardCommandments(),
+              // Pass `targetsBrowser` so we don't ship browser-specific
+              // SDK init defaults / autocapture redundancy guidance to
+              // mobile / server / generic runs that can't use them. Saves
+              // several KB of system-prompt bloat on those paths.
+              append: getWizardCommandments({
+                targetsBrowser: agentConfig.targetsBrowser,
+              }),
               // Move per-session dynamic context (cwd, date, user, etc.) out of
               // the cached system prompt and into the first user message. This
               // lets the static preset + our commandments be cached across runs
@@ -2082,7 +2437,15 @@ export async function runAgent(
               ANTHROPIC_CUSTOM_HEADERS: buildAgentEnv(
                 agentConfig.wizardMetadata ?? {},
                 agentConfig.wizardFlags ?? {},
+                agentConfig.agentSessionId,
               ),
+              // Defer MCP tool schemas until the model actually needs them
+              // instead of stuffing every tool's JSONSchema into the system
+              // prompt up front. Our Amplitude MCP exposes 50+ tools;
+              // loading all schemas eagerly bloats every turn. The 'auto:0'
+              // value lets the SDK decide when to fetch schemas — observed
+              // savings on the order of ~100K tokens per turn on full runs.
+              ENABLE_TOOL_SEARCH: 'auto:0',
             },
             canUseTool: (toolName: string, input: unknown) => {
               logToFile('canUseTool called:', { toolName, input });
@@ -2534,7 +2897,13 @@ export async function runAgent(
       }
       // Unknown structured error code — log it, let the regex-driven API-error
       // path below still run (API errors aren't reported via report_status).
-      logToFile(`Unhandled structured error code: ${code}`);
+      // `String()` coerce: control-flow narrowing reduces `code` to `never`
+      // here in the type system, but `StatusReport.code` is typed `string` at
+      // the source, so emitters can legitimately produce future codes the
+      // narrowing doesn't know about. Coerce to string to satisfy
+      // `@typescript-eslint/restrict-template-expressions` while preserving
+      // the defensive log.
+      logToFile(`Unhandled structured error code: ${String(code)}`);
     }
 
     // Backwards-compat: bundled skills (skills/integration/**) still emit
@@ -2774,10 +3143,20 @@ function handleSDKMessage(
         // Only show errors to user if we haven't already succeeded.
         // Post-success errors are SDK cleanup noise (telemetry failures, streaming
         // mode race conditions). Full message already logged above via JSON dump.
+        //
+        // Cap the user-visible message at 2KB at the SOURCE — Anthropic
+        // SDK exceptions sometimes include the entire failing SSE stream
+        // (40-50KB of model id, signature blobs, partial JSON deltas)
+        // serialized into a single string. Past sessions surfaced 50KB
+        // `log.message` strings that polluted orchestrator context.
+        // `truncateLogMessage` is the same helper the NDJSON emit layer
+        // uses; capping here keeps the on-disk verbose log bounded too.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       } else if (message.subtype === 'success') {
@@ -2788,11 +3167,16 @@ function handleSDKMessage(
       } else {
         logToFile('Agent result with error:', message.result);
         // Error result - only show to user if we haven't already succeeded.
-        // Full message already logged above via JSON dump.
+        // Full message already logged above via JSON dump. Cap each
+        // error string at 2KB at the source (same rationale as the
+        // `is_error` branch above): Anthropic SDK exceptions sometimes
+        // serialize the entire failing SSE stream into the error text.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       }

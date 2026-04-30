@@ -32,6 +32,7 @@ import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
+import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
@@ -56,6 +57,19 @@ function formatElapsed(seconds: number): string {
   const s = seconds % 60;
   if (m === 0) return `${s}s`;
   return `${m}m ${s}s`;
+}
+
+/**
+ * Cap a status string for inline display. Belt-and-braces against unbounded
+ * streamed content (e.g. raw stream-event JSON forwarded by runAgentLocally
+ * before its filter stripped them). Yoga's `truncate-end` is the primary
+ * defense once the row is flex-shrinkable, but a JS cap keeps the header
+ * sane regardless of layout context.
+ */
+const STATUS_MAX_LEN = 80;
+function truncateStatus(s: string): string {
+  if (s.length <= STATUS_MAX_LEN) return s;
+  return s.slice(0, STATUS_MAX_LEN - 1) + '…';
 }
 
 /** Extract a file path from the most recent status message, if any. */
@@ -223,6 +237,21 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     progressSignal: total,
   });
 
+  // Cold-start UX: until the agent finishes its first task the counter sits
+  // at "0 done · N to go" with the timer climbing — every screenshot the
+  // wizard's collected of users Ctrl+C-ing during Setup has been in this
+  // exact gap. The agent IS working (its [STATUS] shows up at the bottom),
+  // but the user's eye lands on the spinner header and the header looks
+  // dead. Surface the latest status next to the counter, and after 30s of
+  // zero completed tasks add an explanatory hint so a slow first response
+  // doesn't read as a hung wizard.
+  const lastStatus =
+    store.statusMessages.length > 0
+      ? store.statusMessages[store.statusMessages.length - 1]
+      : undefined;
+  const showColdStartHint =
+    completedDisplay === 0 && total > 0 && elapsed >= 30;
+
   return (
     <Box flexDirection="row" flexGrow={1}>
       {/* Left: tasks and status (takes all remaining width) */}
@@ -230,34 +259,56 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {/* Header bar: progress count + elapsed + (transient retry hint) +
             currently editing. Retry status renders inline as a muted chip
             after a 3s grace period — see RetryStatusChip. */}
-        <Box marginBottom={1} justifyContent="space-between">
-          <Box gap={1}>
-            <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
-            <Text color={Colors.body} bold>
-              {total > 0
-                ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
-                  // mid-run, which makes the progress bar look like it's
-                  // going backwards (6 tasks → 9 tasks). Show absolute
-                  // counts instead so the user sees forward motion.
-                  // `completedDisplay` is a high-water mark, so the "done"
-                  // count never regresses if new tasks appear after the
-                  // user already saw earlier ones finish.
-                  pending + inProgress > 0
-                  ? `${completedDisplay} done · ${inProgress + pending} to go`
-                  : `${completedDisplay} tasks complete`
-                : 'Agent running'}
-            </Text>
-            <Text color={Colors.muted}>
-              {Icons.dot} {formatElapsed(elapsed)}
-            </Text>
-            <RetryStatusChip
-              retryState={store.session.retryState}
-              now={Date.now()}
-            />
+        <Box marginBottom={1} flexDirection="column">
+          <Box justifyContent="space-between">
+            <Box gap={1}>
+              <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
+              <Text color={Colors.body} bold>
+                {total > 0
+                  ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                    // mid-run, which makes the progress bar look like it's
+                    // going backwards (6 tasks → 9 tasks). Show absolute
+                    // counts instead so the user sees forward motion.
+                    // `completedDisplay` is a high-water mark, so the "done"
+                    // count never regresses if new tasks appear after the
+                    // user already saw earlier ones finish.
+                    pending + inProgress > 0
+                    ? `${completedDisplay} done · ${inProgress + pending} to go`
+                    : `${completedDisplay} tasks complete`
+                  : 'Agent running'}
+              </Text>
+              <Text color={Colors.muted}>
+                {Icons.dot} {formatElapsed(elapsed)}
+              </Text>
+              <RetryStatusChip
+                retryState={store.session.retryState}
+                now={Date.now()}
+              />
+            </Box>
+            {currentFile && (
+              <Text color={Colors.muted} wrap="truncate-end">
+                {currentFile}
+              </Text>
+            )}
           </Box>
-          {currentFile && (
+          {/* Show the latest agent status on its own row while nothing is
+              finished yet. Stays below the counter (not inline) — long
+              status strings used to push the counter siblings to wrap onto
+              the next line. Truncated in JS as a belt-and-braces guard
+              against unbounded streamed content (e.g. raw stream-event
+              JSON from `runAgentLocally`). Once the first task lands, the
+              regular status pill below the tabs takes over and we don't
+              need to duplicate it in the header. */}
+          {completedDisplay === 0 && lastStatus && (
             <Text color={Colors.muted} wrap="truncate-end">
-              {currentFile}
+              {Icons.dot} {truncateStatus(lastStatus)}
+            </Text>
+          )}
+          {showColdStartHint && (
+            <Text color={Colors.muted}>
+              {Icons.dot} Still on the agent's first response — cold start can
+              take 30–60s while it loads skills and reads your project. The
+              status above shows it's working, not stuck.
             </Text>
           )}
         </Box>
@@ -265,16 +316,31 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {/* Tasks — the hero */}
         <ProgressList items={progressItems} title="Tasks" />
 
+        {/* Live per-file activity from the inner agent's write hooks.
+            Hidden until the first PreToolUse fires so it doesn't reserve
+            blank space during planning. The panel shares the spinner
+            frame so its in-progress rows tick in lockstep with the
+            header braille spinner. */}
+        <FileWritesPanel
+          entries={store.fileWrites}
+          installDir={store.session.installDir}
+          spinnerFrame={spinnerFrame}
+        />
+
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
             The spinner stays — this is a *secondary* line that gives the
             user something to do (open Logs, cancel) instead of staring
-            at a frozen indicator. Resets when a new task appears. */}
+            at a frozen indicator. Resets when a new task appears.
+
+            NB: tabs switch with ← / → (or number keys); the Tab key is
+            wired to opening the slash-command input in ConsoleView. The
+            old copy said "(Tab)" and led users to the wrong key. */}
         {coachingTier >= 1 && (
           <Box marginTop={1}>
             <Text color={Colors.muted}>
               {coachingTier >= 2
-                ? "This is unusually slow. The Logs tab (Tab) may show what's stuck — or Ctrl+C to cancel."
-                : "Still working — switch to the Logs tab (Tab) to see what's happening, or Ctrl+C to cancel."}
+                ? "This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
+                : "Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
             </Text>
           </Box>
         )}

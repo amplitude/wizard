@@ -106,13 +106,6 @@ export class InkUI implements WizardUI {
     this.store.setRetryState(state);
   }
 
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    return this.store.showSettingsOverride(keys, backupAndFix);
-  }
-
   startRun(): void {
     this.store.setRunPhase(RunPhase.Running);
   }
@@ -237,6 +230,21 @@ export class InkUI implements WizardUI {
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
     this.store.syncTodos(todos);
+  }
+
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    this.store.recordFileChangePlanned(data);
+  }
+
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    this.store.recordFileChangeApplied(data);
   }
 
   setEventPlan(events: Array<{ name: string; description: string }>): void {

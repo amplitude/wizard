@@ -47,7 +47,14 @@ function ensureIdentityNames(s: WizardSession): void {
 Before(function () {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-wizard-flow-test-'));
   router = new WizardRouter(Flow.Wizard);
-  session = buildSession({});
+  // Pin installDir to a fresh temp dir so `tryResolveZone` doesn't pick
+  // up the wizard repo's own `ampli.json` (which carries `Zone: "us"`)
+  // when BDD runs from the repo root. Without this, the RegionSelect
+  // gate's `tryResolveZone(s) === null` predicate sees a non-null Tier
+  // 2 zone signal and silently skips the picker — breaking flow
+  // assertions that expect new / returning users to land on
+  // RegionSelect.
+  session = buildSession({ installDir: tempDir });
   // Expose via World so wizard-overlays.steps.ts can access the same instances
   (this as Record<string, unknown>).wizardRouter = router;
   (this as Record<string, unknown>).wizardSession = session;

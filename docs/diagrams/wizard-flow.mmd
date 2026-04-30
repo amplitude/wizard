@@ -2,6 +2,9 @@
 title: Wizard flow
 ---
 flowchart TD
+    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected · user confirms or exits)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
+    INTRO --> REGION_SELECT
+
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
     REGION_SELECT --> AUTH
 
@@ -9,30 +12,46 @@ flowchart TD
         SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]
     end
 
-    AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — auto-advances for now)"]
-    DATA_SETUP --> DATA_CHECK{Project has data?}
+    AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — sets activationLevel: none / partial / full)"]
+    DATA_SETUP --> DATA_CHECK{activationLevel?}
 
-    DATA_CHECK -->|no| FRAMEWORK["See: Framework Detection flow"]
-    DATA_CHECK -->|yes| OPTIONS["Options: open overview / chart / dashboard / taxonomy agent"]
+    DATA_CHECK -->|partial — SDK installed, few events| ACTIVATION_OPTIONS["ActivationOptionsScreen<br/>(help me test / I'm blocked / exit)"]
+    DATA_CHECK -->|full — 50+ events| MCP_SCREEN
+    DATA_CHECK -->|none — no SDK, no events| SETUP_Q
 
-    OPTIONS --> RUN
-    FRAMEWORK --> RUN
+    ACTIVATION_OPTIONS -->|test locally or blocked| SETUP_Q
+    ACTIVATION_OPTIONS -->|exit| OUTRO
+
+    SETUP_Q{Unresolved setup questions?}
+    SETUP_Q -->|no| FEATURE_OPTIN
+    SETUP_Q -->|yes| SETUP["SetupScreen<br/>(per-framework questions)"]
+    SETUP --> FEATURE_OPTIN
+
+    FEATURE_OPTIN{Opt-in features discovered?}
+    FEATURE_OPTIN -->|none, or CI/agent mode| RUN
+    FEATURE_OPTIN -->|one or more| OPTIN_SCREEN["FeatureOptInScreen<br/>(multi-select picklist · all on by default · ESC skips)"]
+    OPTIN_SCREEN --> RUN
 
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
 
-    subgraph AGENT_RUN ["Agent Run"]
+    subgraph AGENT_RUN ["Agent Run (RunScreen)"]
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
-        AGENT --> FEATURES{Features discovered?}
-        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
-        FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
-        FEATURES -->|none| OUTCOME
+        AGENT --> SDK_INSTALL["1. Install SDK + add initialization code"]
+        SDK_INSTALL --> INSTRUMENT["2. Instrument events from approved plan"]
+        INSTRUMENT --> ADDITIONAL["3. Drain additional feature queue<br/>(LLM, Session Replay shown as tasks)"]
+        ADDITIONAL --> FEATURES{Stripe detected?}
+        FEATURES -->|yes| STRIPE_TIP["Show Stripe doc-link tip"] --> OUTCOME
+        FEATURES -->|no| OUTCOME
         AGENT --> OUTCOME{Outcome?}
         OUTCOME -->|success| POST["Upload env vars to hosting"]
         OUTCOME -->|error| ERR["Set error state"]
     end
 
-    POST --> OUTRO["See: Outro flow"]
-    ERR --> OUTRO
+    POST --> MCP_SCREEN["McpScreen<br/>(install MCP server · skipped on error)"]
+    ERR --> OUTRO["See: Outro flow"]
+    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls MCP first, then activation API every 30s · full users pass immediately · user can exit and resume later)<br/>BrailleSpinner + coaching tips while waiting · celebration with event preview on success<br/>press Enter to continue"]
+    DATA_INGESTION --> CHECKLIST["ChecklistScreen<br/>(first chart · first dashboard · taxonomy @todo)<br/>dashboard unlocks after chart · user can skip any item"]
+    CHECKLIST --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
+    SLACK_SCREEN --> OUTRO
 
     SUSI -. overlay .-> OUTAGE["OutageScreen"]
-    SUSI -. overlay .-> SETTINGS_OVR["SettingsOverrideScreen"]

@@ -46,6 +46,11 @@ const ALLOWED_DIRECT_READS = new Set<string>([
   // gates the "Change region" picker option on whether a region is set.
   // Both are intent-display, not zone resolution.
   'src/ui/tui/screens/IntroScreen.tsx',
+  // flows.ts: the standalone Flow.RegionSelect entry (used by the /region
+  // slash command) checks `session.region` directly to mark the picker
+  // complete after the user selects. The Wizard flow's RegionSelect gate
+  // uses `tryResolveZone` so returning users with a stored zone skip it.
+  'src/ui/tui/flows.ts',
   'src/lib/console-query.ts',
   // Intent persistence — checkpoint stores raw user intent, not the
   // resolved effective zone. Restore must round-trip intent exactly.
@@ -65,6 +70,12 @@ const ALLOWED_DIRECT_READS = new Set<string>([
   'src/lib/credential-resolution.ts',
   // bin.ts: pre-OAuth RegionSelect gate checks + a verbose-log display.
   'bin.ts',
+  // src/commands/default.ts: same pre-OAuth RegionSelect gate + verbose-log
+  // display that used to live in bin.ts before the per-command split.
+  'src/commands/default.ts',
+  // src/commands/helpers.ts: prose comment in resolveNonInteractiveCredentials
+  // referencing `session.region`; no runtime read.
+  'src/commands/helpers.ts',
 ]);
 
 /** Zone-fallback against session.region — e.g. `session.region ?? 'us'`. */

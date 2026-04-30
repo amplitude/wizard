@@ -3,8 +3,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { render } from 'ink-testing-library';
 import { LogViewer } from '../LogViewer.js';
+import {
+  renderInkFrame,
+  type RenderInkFrameOptions,
+} from '../../__tests__/ink-stdin.js';
 
 vi.mock('../../hooks/useStdoutDimensions.js', () => ({
   useStdoutDimensions: () => [80, 24] as const,
@@ -40,24 +43,19 @@ describe('LogViewer snapshots', () => {
     return filePath;
   }
 
-  function renderFrame(
+  // Wraps the shared `renderInkFrame` helper for this component's
+  // specific element + ANSI sanitization. The helper handles the
+  // stdin-timing race between `setTimeout(0)` and React commit on
+  // Node 20 — see `ink-stdin.tsx` for the gory details.
+  async function renderFrame(
     filePath: string,
-    interact?: (
-      stdin: ReturnType<typeof render>['stdin'],
-      waitForFrame: () => Promise<void>,
-    ) => Promise<void> | void,
+    interact?: RenderInkFrameOptions['interact'],
   ): Promise<string> {
-    return (async () => {
-      const view = render(<LogViewer filePath={filePath} height={10} />);
-      const waitForFrame = () =>
-        new Promise<void>((resolve) => setTimeout(resolve, 0));
-      await waitForFrame();
-      await interact?.(view.stdin, waitForFrame);
-      await waitForFrame();
-      const frame = sanitize(view.lastFrame() ?? '');
-      view.unmount();
-      return frame;
-    })();
+    const raw = await renderInkFrame(
+      <LogViewer filePath={filePath} height={10} />,
+      interact ? { interact } : {},
+    );
+    return sanitize(raw);
   }
 
   it('renders the live follow tail view', async () => {

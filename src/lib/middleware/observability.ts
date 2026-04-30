@@ -24,6 +24,7 @@ import {
 } from '../observability/sentry';
 import { rotateRunId } from '../observability/correlation';
 import { analytics } from '../../utils/analytics';
+import { getUI } from '../../ui';
 
 const log = createLogger('agent');
 
@@ -193,6 +194,31 @@ export function createObservabilityMiddleware(): Middleware {
         'is error': isError,
         'num turns': resultMessage.num_turns,
       });
+
+      // Surface aggregated metrics on the NDJSON stream for
+      // orchestrators (cost / token / tool-call accounting).
+      // AgentUI implements `emitAgentMetrics`; InkUI / LoggingUI
+      // are no-ops. Wrapped in try/catch so any UI hiccup doesn't
+      // disturb the rest of finalize. Token counts come straight
+      // from the SDK's terminal `result` message — `usage` and
+      // `total_cost_usd` are populated when the SDK reports them.
+      try {
+        const usage = resultMessage.usage;
+        getUI().emitAgentMetrics?.({
+          durationMs: totalDurationMs,
+          inputTokens: usage?.input_tokens,
+          outputTokens: usage?.output_tokens,
+          cacheReadInputTokens: usage?.cache_read_input_tokens,
+          cacheCreationInputTokens: usage?.cache_creation_input_tokens,
+          costUsd: resultMessage.total_cost_usd,
+          numTurns: resultMessage.num_turns,
+          totalToolCalls,
+          totalMessages,
+          isError,
+        });
+      } catch {
+        /* metrics emission must not disturb finalize */
+      }
 
       // Close the final phase span (if any) + the run span.
       if (currentPhaseTiming) {

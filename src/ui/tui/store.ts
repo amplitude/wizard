@@ -64,6 +64,28 @@ export interface PlannedEvent {
   description: string;
 }
 
+/**
+ * One row of the FileWritesPanel — bound to a single
+ * `recordFileChangePlanned` → `recordFileChangeApplied` pair from the
+ * inner agent. `path` is keyed on the absolute path the inner agent
+ * passed; relativization for display happens at render time so the
+ * panel renders correctly even if the same path comes through twice
+ * (Edit + verify pass).
+ */
+export interface FileWriteEntry {
+  /** Absolute path, as the inner agent's tool received it. */
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  /** 'planned' once PreToolUse fires; flips to 'applied' or 'failed' on PostToolUse. */
+  status: 'planned' | 'applied' | 'failed';
+  /** Wall-clock ms when the planned event arrived. Drives the elapsed timer. */
+  startedAt: number;
+  /** Wall-clock ms when the applied/failed event arrived. */
+  completedAt?: number;
+  /** Byte size from the inner agent's tool input, when available (Write only). */
+  bytes?: number;
+}
+
 export type PendingPrompt =
   | { kind: 'confirm'; message: string; resolve: (value: boolean) => void }
   | {
@@ -84,6 +106,13 @@ export class WizardStore {
   private $statusMessages = atom<string[]>([]);
   private $tasks = atom<TaskItem[]>([]);
   private $eventPlan = atom<PlannedEvent[]>([]);
+  /**
+   * Live list of file writes the inner agent has issued during the run.
+   * Bounded to the most recent MAX_FILE_WRITES entries (FIFO eviction)
+   * so a runaway inner agent that touches hundreds of files doesn't blow
+   * up the TUI's render budget.
+   */
+  private $fileWrites = atom<FileWriteEntry[]>([]);
   private $version = atom(0);
 
   /** True while the user is typing a slash command in the command bar. */
@@ -118,10 +147,6 @@ export class WizardStore {
   readonly setupComplete: Promise<void> = new Promise((resolve) => {
     this._resolveSetup = resolve;
   });
-
-  /** Blocks agent execution until the settings-override overlay is dismissed. */
-  private _resolveSettingsOverride: (() => void) | null = null;
-  private _backupAndFixSettings: (() => boolean) | null = null;
 
   /** Pending confirmation or choice prompt from the agent. */
   private $pendingPrompt = atom<PendingPrompt | null>(null);
@@ -176,6 +201,10 @@ export class WizardStore {
 
   get eventPlan(): PlannedEvent[] {
     return this.$eventPlan.get();
+  }
+
+  get fileWrites(): FileWriteEntry[] {
+    return this.$fileWrites.get();
   }
 
   get pendingPrompt(): PendingPrompt | null {
@@ -287,9 +316,157 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Mirror the full per-framework detection table onto the session.
+   * Used by `/diagnostics` so users filing bug reports can see exactly
+   * which detector returned what — even for frameworks that didn't
+   * win. Set BEFORE `setDetectionComplete` so the screen never sees a
+   * stale `[]` after the spinner flips off.
+   */
+  setDetectionResults(results: WizardSession['detectionResults']): void {
+    this.$session.setKey('detectionResults', results);
+    this.emitChange();
+  }
+
   setDetectedFramework(label: string): void {
     this.$session.setKey('detectedFrameworkLabel', label);
     this.emitChange();
+  }
+
+  // ── Inline directory change ─────────────────────────────────────
+  //
+  // The IntroScreen's "Change directory" flow needs to do three things
+  // atomically:
+  //   1. Validate the new path is a real directory (caller's job).
+  //   2. Reset every detection-related session field so the spinner
+  //      reappears and the workspace-analysis warnings re-render.
+  //   3. Kick off `runFrameworkDetection` against the new directory,
+  //      cancelling any in-flight detection from the previous path.
+  //
+  // The detection runner itself lives in `lib/framework-detection.ts`
+  // — bin.ts wires it into the store at startup via
+  // `setFrameworkRedetector`. That keeps this file from depending on
+  // the framework registry (which would invert the import graph and
+  // break the test surface).
+
+  /**
+   * Re-detection callback registered by bin.ts. Returning `null` from
+   * `changeInstallDir` would cause it to no-op when the detector
+   * isn't wired up (e.g. tests, classic mode), which we want — the
+   * directory change still applies, we just skip the redetect.
+   */
+  private _redetect:
+    | ((installDir: string, signal: AbortSignal) => Promise<unknown>)
+    | null = null;
+
+  /** AbortController for the active detection run, if any. */
+  private _activeDetectionAbort: AbortController | null = null;
+
+  /**
+   * Register the framework re-detection callback. Called once by
+   * bin.ts during TUI bootstrap. Calling it more than once replaces
+   * the previous callback (used by tests).
+   */
+  setFrameworkRedetector(
+    redetect: (installDir: string, signal: AbortSignal) => Promise<unknown>,
+  ): void {
+    this._redetect = redetect;
+  }
+
+  /**
+   * Register an in-flight detection's AbortController so a subsequent
+   * `changeInstallDir` can cancel it. bin.ts calls this once at boot
+   * with the controller it created for the INITIAL detection — that
+   * way a user who picks "Change directory" while the first
+   * `Scanning…` spinner is still running cancels the initial run too,
+   * not just later re-runs.
+   *
+   * Without this hook the initial detection's terminal
+   * `setDetectionComplete()` could fire AFTER the directory swap has
+   * reset state, briefly flashing stale framework results from the
+   * old tree.
+   */
+  registerActiveDetection(controller: AbortController): void {
+    this._activeDetectionAbort = controller;
+  }
+
+  /**
+   * Swap the install directory and re-run framework detection.
+   *
+   * `newInstallDir` MUST be a resolved, existing absolute path —
+   * the caller (PathInput in IntroScreen) handles `~` expansion and
+   * validation so this method can stay pure-state-mutation.
+   *
+   * Effects:
+   *   - cancels any in-flight detection
+   *   - clears `frameworkConfig`, `integration`, `detectedFrameworkLabel`,
+   *     `frameworkContext`, `detectionResults`, `discoveredFeatures`
+   *   - flips `detectionComplete` back to false (spinner reappears)
+   *   - clears the checkpoint-restore flag — checkpoint was for the
+   *     OLD directory; resuming into a different tree would be wrong
+   *   - kicks off a new detection run against the new directory
+   */
+  changeInstallDir(newInstallDir: string): void {
+    // Cancel any active detection. The runner short-circuits on the
+    // signal so a stale run can't fire `setDetectionComplete()` after
+    // we've reset state for the new directory.
+    if (this._activeDetectionAbort) {
+      this._activeDetectionAbort.abort();
+    }
+
+    this.$session.setKey('installDir', newInstallDir);
+    this.$session.setKey('frameworkConfig', null);
+    this.$session.setKey('integration', null);
+    this.$session.setKey('detectedFrameworkLabel', null);
+    this.$session.setKey('frameworkContext', {});
+    // The answer-order array tracks which framework-setup question
+    // keys the user answered, in order, so back-navigation can pop the
+    // most recent one. Without this reset, stale keys from the OLD
+    // directory's gatherContext stay in the array and
+    // `popLastFrameworkContextAnswer` returns `true` for phantom pops
+    // (the keys it claims to remove no longer exist in
+    // `frameworkContext`), creating dead back-navigation steps.
+    this.$session.setKey('frameworkContextAnswerOrder', []);
+    this.$session.setKey('detectionResults', []);
+    this.$session.setKey('detectionComplete', false);
+    // Reset BOTH the discovered-features list AND every opt-in flag /
+    // queue derived from it. These are computed from the OLD project's
+    // package.json (Stripe, LLM SDK presence, etc.) and have zero
+    // meaning in the new tree — letting them carry over would cause
+    // the agent to set up irrelevant addons (e.g. LLM analytics for a
+    // Python AI repo we already navigated away from).
+    this.$session.setKey('discoveredFeatures', []);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('llmOptIn', false);
+    this.$session.setKey('sessionReplayOptIn', false);
+    this.$session.setKey('engagementOptIn', false);
+    this.$session.setKey('optInFeaturesComplete', false);
+    // Checkpoint resume is invalid across directories — different tree
+    // means different ampli.json, different events.json, different
+    // framework. Treat the change as a "Start fresh".
+    this.$session.setKey('_restoredFromCheckpoint', false);
+
+    analytics.wizardCapture('install dir changed', {
+      // Don't capture the path itself — could be PII / contain
+      // employer-internal repo names. Capture only the SHAPE of the
+      // event so we know how often this exit hatch is used.
+      'has redetector': this._redetect !== null,
+    });
+
+    this.emitChange();
+
+    if (this._redetect) {
+      const controller = new AbortController();
+      this._activeDetectionAbort = controller;
+      const target = newInstallDir;
+      // Fire-and-forget: detection mirrors its results into the store
+      // as it goes, so callers don't await this. Errors are swallowed
+      // — detection failures fall back to the generic framework, and
+      // the runner already logs internally.
+      void this._redetect(target, controller.signal).catch(() => {
+        /* detection errors are non-fatal; the generic fallback handles them */
+      });
+    }
   }
 
   setLoginUrl(url: string | null): void {
@@ -887,37 +1064,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  /**
-   * Push the settings-override overlay and return a promise that blocks
-   * until the user dismisses it via backupAndFixSettingsOverride().
-   */
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    this.$session.setKey('settingsOverrideKeys', keys);
-    this._backupAndFixSettings = backupAndFix;
-    this.pushOverlay(Overlay.SettingsOverride);
-    return new Promise((resolve) => {
-      this._resolveSettingsOverride = resolve;
-    });
-  }
-
-  /**
-   * Back up .claude/settings.json. Dismisses the overlay on success.
-   */
-  backupAndFixSettingsOverride(): boolean {
-    const ok = this._backupAndFixSettings?.() ?? false;
-    if (ok) {
-      this.$session.setKey('settingsOverrideKeys', null);
-      this.popOverlay();
-      this._resolveSettingsOverride?.();
-      this._resolveSettingsOverride = null;
-      this._backupAndFixSettings = null;
-    }
-    return ok;
-  }
-
   addDiscoveredFeature(feature: DiscoveredFeature): void {
     if (!this.session.discoveredFeatures.includes(feature)) {
       this.$session.setKey('discoveredFeatures', [
@@ -1229,6 +1375,41 @@ export class WizardStore {
   }
 
   /**
+   * Confirm the silently-resolved org/project on a returning run.
+   * Clears `requiresAccountConfirmation` so the Auth flow gate advances.
+   */
+  confirmAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    analytics.wizardCapture('account confirmed', {
+      'from screen': 'auth',
+      'org id': this.session.selectedOrgId,
+      'project id': this.session.selectedProjectId,
+    });
+    this.emitChange();
+  }
+
+  /**
+   * Reject the silently-resolved org/project on a returning run and drop
+   * back to the SUSI picker. Drops the cached selection AND credentials
+   * so AuthScreen re-runs the OAuth-to-picker pipeline; the cached idToken
+   * is still used (no fresh browser round-trip required) but the user can
+   * pick a different org / project / environment this time.
+   */
+  rejectStoredAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    analytics.wizardCapture('account rejected', { 'from screen': 'auth' });
+    this.emitChange();
+  }
+
+  /**
    * Revert past the Auth step back into the org/workspace picker. Keeps
    * credentials so we don't force a fresh OAuth round-trip — only the
    * picked identity is cleared.
@@ -1444,6 +1625,97 @@ export class WizardStore {
 
   setEventPlan(events: PlannedEvent[]): void {
     this.$eventPlan.set(events);
+    this.emitChange();
+  }
+
+  /**
+   * Cap on how many file-write rows we retain before evicting the oldest.
+   * The inner agent occasionally touches dozens of files (skill installs,
+   * lint passes, multi-step refactors) — keeping all of them alive in
+   * the TUI would blow our render budget on small terminals. Recent
+   * writes are the user-relevant signal; keep the tail.
+   */
+  static readonly MAX_FILE_WRITES = 50;
+
+  /**
+   * Append (or restart) a file write row from a `recordFileChangePlanned`
+   * call. If the same absolute path is already in `'planned'` state, we
+   * collapse the duplicate (MultiEdit fans out per file but the agent's
+   * PreToolUse fires once per tool invocation — defensive).
+   */
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    const now = Date.now();
+    const next: FileWriteEntry = {
+      path: data.path,
+      operation: data.operation,
+      status: 'planned',
+      startedAt: now,
+    };
+    const existing = this.$fileWrites.get();
+    // Collapse a back-to-back duplicate (same path, still planned). Otherwise
+    // append. Eviction at MAX_FILE_WRITES keeps the array bounded.
+    const dedupedTail =
+      existing.length > 0 &&
+      existing[existing.length - 1].path === data.path &&
+      existing[existing.length - 1].status === 'planned'
+        ? existing.slice(0, -1)
+        : existing;
+    const appended = [...dedupedTail, next];
+    const bounded =
+      appended.length > WizardStore.MAX_FILE_WRITES
+        ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
+        : appended;
+    this.$fileWrites.set(bounded);
+    this.emitChange();
+  }
+
+  /**
+   * Mark the most recent matching planned row as applied. We match the
+   * most recent occurrence (in case the same file is rewritten later in
+   * the run). If no planned row exists (the planned event was lost or the
+   * applied event arrived first), append a synthesized row that's
+   * already-completed — better to surface the write than silently drop
+   * it.
+   */
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    const now = Date.now();
+    const existing = this.$fileWrites.get();
+    for (let i = existing.length - 1; i >= 0; i--) {
+      if (existing[i].path === data.path && existing[i].status === 'planned') {
+        const updated = [...existing];
+        updated[i] = {
+          ...existing[i],
+          status: 'applied',
+          completedAt: now,
+          bytes: data.bytes,
+        };
+        this.$fileWrites.set(updated);
+        this.emitChange();
+        return;
+      }
+    }
+    // No matching planned row — synthesize a completed entry.
+    const synthesized: FileWriteEntry = {
+      path: data.path,
+      operation: data.operation,
+      status: 'applied',
+      startedAt: now,
+      completedAt: now,
+      bytes: data.bytes,
+    };
+    const appended = [...existing, synthesized];
+    const bounded =
+      appended.length > WizardStore.MAX_FILE_WRITES
+        ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
+        : appended;
+    this.$fileWrites.set(bounded);
     this.emitChange();
   }
 
