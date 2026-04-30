@@ -18,10 +18,25 @@
 
 import React from 'react';
 import * as fs from 'node:fs';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+} from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+// Default to "interactive" so the retry hint renders by default. Tests
+// that exercise the non-interactive path override this mock per case.
+vi.mock('../../utils/outro-mode.js', () => ({
+  isInteractiveOutro: vi.fn(() => true),
+}));
+import { isInteractiveOutro } from '../../utils/outro-mode.js';
+
 import { OutroScreen, exitCodeForOutroKind } from '../OutroScreen.js';
 import {
   makeStoreForSnapshot,
@@ -288,6 +303,83 @@ describe('OutroScreen — error variants', () => {
     } finally {
       resetSetupComplete();
     }
+  });
+
+  // ── Retry hotkey ─────────────────────────────────────────────────────
+  //
+  // The retry hint turns errors into a one-keystroke recovery instead of
+  // forcing a full re-run from scratch. The wizard's checkpoint already
+  // preserves region / org / project / framework selections, so a retry
+  // resumes where the failure happened. Auth failures are intentionally
+  // excluded because the same stored creds will fail again.
+
+  describe('retry hotkey hint', () => {
+    beforeEach(() => {
+      // Reset to interactive default per test.
+      vi.mocked(isInteractiveOutro).mockReturnValue(true);
+    });
+
+    it('renders the "Press R to retry" hint on error outros', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('renders the retry hint on cancel outros too', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Cancel, message: 'Setup cancelled.' },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toMatch(/press\s+R\s+now to resume/i);
+    });
+
+    it('does NOT render the retry hint when running in non-interactive mode', () => {
+      vi.mocked(isInteractiveOutro).mockReturnValue(false);
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('Setup failed');
+      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('does NOT render the retry hint on auth-failure error outros', () => {
+      // promptLogin: true is how agent-runner marks AUTH_ERROR outros.
+      // Re-running with the same bad credentials will fail the same way,
+      // so advertising retry would be a misleading dead-end.
+      const store = makeStoreForSnapshot({
+        outroData: {
+          kind: OutroKind.Error,
+          message: 'Authentication failed.',
+          promptLogin: true,
+        },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('Setup failed');
+      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('renders the retry hint on non-auth error outros (promptLogin missing)', () => {
+      const store = makeStoreForSnapshot({
+        outroData: {
+          kind: OutroKind.Error,
+          message: 'Some non-auth failure.',
+        },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+    });
+
+    it('does NOT render the retry hint on success outros', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('Amplitude is live');
+      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+    });
   });
 
   it('shows event count + env name in success summary when events were planned', () => {
