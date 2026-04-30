@@ -1,5 +1,6 @@
 import type { CommandModule } from 'yargs';
 import { getUI, ExitCode } from './helpers';
+import { resolveInstallDir } from '../utils/install-dir';
 
 export const verifyCommand: CommandModule = {
   command: 'verify',
@@ -14,8 +15,9 @@ export const verifyCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
+      const installDir = resolveInstallDir(
+        argv['install-dir'] as string | undefined,
+      );
       const { resolveMode } = await import('../lib/mode-config.js');
       const { jsonOutput } = resolveMode({
         json: argv.json as boolean | undefined,

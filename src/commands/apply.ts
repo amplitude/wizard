@@ -1,6 +1,7 @@
 import type { CommandModule } from 'yargs';
 import { getUI, ExitCode } from './helpers';
 import { CLI_INVOCATION } from './context';
+import { resolveInstallDir } from '../utils/install-dir';
 
 export const applyCommand: CommandModule = {
   command: 'apply',
@@ -66,13 +67,15 @@ export const applyCommand: CommandModule = {
       //      `plan` and `apply` doesn't run wizard against the wrong dir)
       //   3. process.cwd() fallback
       // The plan stores the directory it was generated against; honoring it
-      // is what makes `plan` → `apply` work across cwd shifts.
+      // is what makes `plan` → `apply` work across cwd shifts. Each source
+      // is funneled through `resolveInstallDir` so a `~`-relative value
+      // (from a quoted CLI flag, env var, or older plan file) is expanded
+      // before any downstream consumer touches it.
       const planInstallDir =
         result.kind === 'ok' ? result.plan.installDir : undefined;
-      const installDir =
-        (argv['install-dir'] as string | undefined) ??
-        planInstallDir ??
-        process.cwd();
+      const installDir = resolveInstallDir(
+        (argv['install-dir'] as string | undefined) ?? planInstallDir,
+      );
 
       // Refuse to apply from $HOME, the filesystem root, or a directory
       // with no project marker. Mirrors the guard in `plan` — both

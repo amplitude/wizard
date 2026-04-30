@@ -200,11 +200,13 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
         // injected one (`apply` does this); otherwise default to
         // cwd. The wizard's own runtime always lives in the
         // install dir, so cwd is correct for non-spawned runs.
-        const installDir =
-          process.env.AMPLITUDE_WIZARD_INSTALL_DIR &&
-          process.env.AMPLITUDE_WIZARD_INSTALL_DIR.length > 0
-            ? process.env.AMPLITUDE_WIZARD_INSTALL_DIR
-            : process.cwd();
+        // Funnel through `resolveInstallDir` so a `~`-relative env
+        // var (e.g. set by an outer shell that didn't expand it) is
+        // expanded before any downstream consumer touches it.
+        const { resolveInstallDir } = await import('./install-dir.js');
+        const installDir = resolveInstallDir(
+          process.env.AMPLITUDE_WIZARD_INSTALL_DIR,
+        );
         const existing = readAmpliConfig(installDir);
         const base = existing.ok ? existing.config : {};
         const a = setupComplete.amplitude;

@@ -2,6 +2,7 @@ import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
 import { getUI, ExitCode } from './helpers';
 import { CLI_INVOCATION } from './context';
+import { resolveInstallDir } from '../utils/install-dir';
 
 export const statusCommand: CommandModule = {
   command: 'status',
@@ -16,8 +17,9 @@ export const statusCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
+      const installDir = resolveInstallDir(
+        argv['install-dir'] as string | undefined,
+      );
       const { resolveMode } = await import('../lib/mode-config.js');
       const { jsonOutput } = resolveMode({
         json: argv.json as boolean | undefined,

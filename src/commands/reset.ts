@@ -1,5 +1,6 @@
 import type { CommandModule } from 'yargs';
 import { getUI } from './helpers';
+import { resolveInstallDir } from '../utils/install-dir';
 
 export const resetCommand: CommandModule = {
   command: 'reset',
@@ -14,8 +15,9 @@ export const resetCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
+      const installDir = resolveInstallDir(
+        argv['install-dir'] as string | undefined,
+      );
       const fs = await import('node:fs');
       const path = await import('node:path');
       const { clearAuthFieldsInAmpliConfig } = await import(
