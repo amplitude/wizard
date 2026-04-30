@@ -16,14 +16,13 @@
 
 import { describe, it, expect } from 'vitest';
 import { getWizardCommandments } from '../commandments';
+import { CANONICAL_LABELS } from '../canonical-tasks';
 
-const REQUIRED_TODOS = [
-  'Detect your project setup',
-  'Install Amplitude',
-  'Plan and approve events to track',
-  'Wire up event tracking',
-  'Build your starter dashboard',
-] as const;
+// Single source of truth: the labels the agent must use in TodoWrite
+// live in `canonical-tasks.ts` and are consumed both by the store
+// (which renders them) and by these tests (which lock the system
+// prompt to them).
+const REQUIRED_TODOS = CANONICAL_LABELS;
 
 describe('TodoWrite user-journey commandment', () => {
   const text = getWizardCommandments();
