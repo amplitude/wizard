@@ -135,14 +135,24 @@ async function fetchWithTimeout(
     );
   }
   const controller = new AbortController();
-  const onExternalAbort = (): void => controller.abort();
-  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
-  const timer = setTimeout(() => controller.abort('timeout'), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
+  const cleanup = (): void => {
     clearTimeout(timer);
     externalSignal?.removeEventListener('abort', onExternalAbort);
+  };
+  const onExternalAbort = (): void => {
+    controller.abort();
+    cleanup();
+  };
+  externalSignal?.addEventListener('abort', onExternalAbort, { once: true });
+  const timer = setTimeout(() => {
+    controller.abort('timeout');
+    cleanup();
+  }, timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    cleanup();
+    throw err;
   }
 }
 const mcpSessionCache = new Map<
