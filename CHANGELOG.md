@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.12.0](https://github.com/amplitude/wizard/compare/wizard-v1.11.1...wizard-v1.12.0) (2026-04-30)
+
+
+### Features
+
+* **tui:** scope Logs tab to current session by default; press a for full history ([#452](https://github.com/amplitude/wizard/issues/452)) ([82031c2](https://github.com/amplitude/wizard/commit/82031c2b0a624df97fbbf4796b29b3e7aa978d3d))
+
 ## [1.11.1](https://github.com/amplitude/wizard/compare/wizard-v1.11.0...wizard-v1.11.1) (2026-04-30)
 
 
