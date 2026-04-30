@@ -16,6 +16,7 @@ import {
   writeFallbackReportIfMissing,
   archiveSetupReportFile,
   restoreSetupReportIfMissing,
+  normalizeEventName,
   PREVIOUS_SETUP_REPORT_FILENAME,
   WIZARD_GITIGNORE_PATTERNS,
   WIZARD_TOOL_NAMES,
@@ -298,6 +299,68 @@ describe('cleanupIntegrationSkills', () => {
 
     expect(skillExists('instrumentation-events')).toBe(true);
     expect(skillExists('taxonomy-quickstart')).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// normalizeEventName
+// ---------------------------------------------------------------------------
+//
+// Soft format gate for `confirm_event_plan`. Pre-PR, the system prompt
+// said "Title Case" but the tool's input schema description said
+// "lowercase" — agents emitted both. The normalizer guarantees the
+// persisted event plan and the user-facing prompt both match the
+// canonical Title Case shape regardless of which guidance the model
+// followed.
+
+describe('normalizeEventName', () => {
+  it('leaves correctly-shaped Title Case names unchanged', () => {
+    expect(normalizeEventName('User Signed Up')).toBe('User Signed Up');
+    expect(normalizeEventName('Product Added To Cart')).toBe(
+      'Product Added To Cart',
+    );
+  });
+
+  it('converts snake_case to Title Case', () => {
+    expect(normalizeEventName('user_signed_up')).toBe('User Signed Up');
+    expect(normalizeEventName('product_added_to_cart')).toBe(
+      'Product Added To Cart',
+    );
+  });
+
+  it('converts kebab-case to Title Case', () => {
+    expect(normalizeEventName('checkout-started')).toBe('Checkout Started');
+  });
+
+  it('converts camelCase / PascalCase to Title Case', () => {
+    expect(normalizeEventName('userSignedUp')).toBe('User Signed Up');
+    expect(normalizeEventName('SearchPerformed')).toBe('Search Performed');
+  });
+
+  it('converts all-lowercase with spaces to Title Case', () => {
+    expect(normalizeEventName('user signed up')).toBe('User Signed Up');
+  });
+
+  it('preserves short ALL-CAPS acronyms', () => {
+    expect(normalizeEventName('api request sent')).toBe('Api Request Sent');
+    expect(normalizeEventName('API Request Sent')).toBe('API Request Sent');
+    expect(normalizeEventName('SDK Initialized')).toBe('SDK Initialized');
+  });
+
+  it('truncates names over 50 chars with an ellipsis', () => {
+    const long = 'A'.repeat(60);
+    const out = normalizeEventName(long);
+    expect(out.length).toBeLessThanOrEqual(50);
+    expect(out.endsWith('…')).toBe(true);
+  });
+
+  it('returns the input unchanged when empty after trim', () => {
+    expect(normalizeEventName('   ')).toBe('');
+  });
+
+  it('collapses multiple separators', () => {
+    expect(normalizeEventName('user__signed___up')).toBe('User Signed Up');
+    expect(normalizeEventName('user.signed.up')).toBe('User Signed Up');
   });
 });
 

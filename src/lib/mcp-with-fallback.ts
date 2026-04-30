@@ -224,6 +224,20 @@ export function _clearMcpSessionCacheForTesting(): void {
 }
 
 /**
+ * Drop every cached MCP session bound to `accessToken`. Call after
+ * silently refreshing the OAuth token so the next `callAmplitudeMcp`
+ * doesn't reuse a `callTool` closure carrying the now-expired bearer
+ * (which would 401 on the upstream and force the slower agent fallback
+ * for ~12s, even though we already have a fresh token in hand).
+ *
+ * Idempotent — no-op when no entries match.
+ */
+export function invalidateMcpSessionsForToken(accessToken: string): void {
+  if (!accessToken) return;
+  invalidateMcpSessionCache(accessToken);
+}
+
+/**
  * Open an MCP session and return a `callTool` helper bound to that session.
  * Returns a tagged result so callers can distinguish transient failures
  * (worth falling back to the agent path) from deterministic ones (auth
