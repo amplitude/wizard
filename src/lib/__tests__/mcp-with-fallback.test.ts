@@ -3,6 +3,7 @@ import {
   callAmplitudeMcp,
   AMPLITUDE_MCP_URL,
   _clearMcpSessionCacheForTesting,
+  invalidateMcpSessionCache,
 } from '../mcp-with-fallback';
 
 vi.mock('../../utils/debug');
@@ -664,6 +665,69 @@ describe('callAmplitudeMcp', () => {
       // ran with no agent output -> overall null. The point is that
       // 31s of fake time settled the call, instead of hanging forever.
       expect(result).toBeNull();
+    });
+  });
+
+  // -- Session-cache invalidation -------------------------------------------
+  describe('invalidateMcpSessionCache', () => {
+    /**
+     * Drive a session into the cache by completing one successful direct
+     * call, then return how many fetch calls that took. A second call with
+     * the same token should consume strictly fewer fetches (it skips the
+     * `initialize` + `notifications/initialized` handshake).
+     */
+    async function primeCacheAndCount(token: string): Promise<number> {
+      const before = mockFetch.mock.calls.length;
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(
+        makeFetchResponse(sseResult({ ok: true })),
+      );
+      await callAmplitudeMcp({
+        accessToken: token,
+        direct: async (callTool) => callTool(1, 'noop', {}),
+        agentPrompt: 'unused',
+        parseAgent: () => null,
+      });
+      return mockFetch.mock.calls.length - before;
+    }
+
+    it('a cached session is reused on the next call (no extra handshake)', async () => {
+      const firstCallFetches = await primeCacheAndCount('tok-A');
+      // Direct path with a fresh handshake = 3 fetches (init, notif, tool).
+      expect(firstCallFetches).toBe(3);
+
+      // Second call with the same token should reuse the cached session
+      // and only fetch once (the tool call itself).
+      const secondCallFetches = await primeCacheAndCount('tok-A');
+      expect(secondCallFetches).toBe(1);
+    });
+
+    it('clears every entry when called with no argument', async () => {
+      await primeCacheAndCount('tok-A');
+      await primeCacheAndCount('tok-B');
+
+      invalidateMcpSessionCache();
+
+      // Both tokens should now require a fresh handshake.
+      const aFetches = await primeCacheAndCount('tok-A');
+      const bFetches = await primeCacheAndCount('tok-B');
+      expect(aFetches).toBe(3);
+      expect(bFetches).toBe(3);
+    });
+
+    it('clears only the matching token when one is provided', async () => {
+      await primeCacheAndCount('tok-A');
+      await primeCacheAndCount('tok-B');
+
+      invalidateMcpSessionCache('tok-A');
+
+      // tok-A is gone — fresh handshake required.
+      const aFetches = await primeCacheAndCount('tok-A');
+      expect(aFetches).toBe(3);
+
+      // tok-B is still cached.
+      const bFetches = await primeCacheAndCount('tok-B');
+      expect(bFetches).toBe(1);
     });
   });
 });

@@ -89,11 +89,18 @@ export async function tryRefreshToken(
     'auth.token_refresh',
     'auth.token_refresh',
     { zone },
-    async () => tryRefreshTokenInner(storedEntry.refreshToken!, zone, now),
+    async () =>
+      tryRefreshTokenInner(
+        storedEntry.accessToken,
+        storedEntry.refreshToken!,
+        zone,
+        now,
+      ),
   );
 }
 
 async function tryRefreshTokenInner(
+  oldAccessToken: string,
   refreshToken: string,
   zone: AmplitudeZone,
   now: number,
@@ -190,6 +197,23 @@ async function tryRefreshTokenInner(
       rotated_refresh_token: !!newRefreshToken,
       rotated_id_token: !!newIdToken,
     });
+
+    // Drop any cached MCP sessions still keyed on the old access token —
+    // future `callAmplitudeMcp` calls would otherwise reuse a session
+    // whose `Authorization: Bearer ...` header is about to be rejected
+    // by the gateway. Importing lazily keeps this utility free of the
+    // MCP module on the hot path of token-still-valid runs.
+    try {
+      const { invalidateMcpSessionCache } = await import(
+        '../lib/mcp-with-fallback.js'
+      );
+      invalidateMcpSessionCache(oldAccessToken);
+    } catch (importErr) {
+      logToFile(
+        '[token-refresh] could not invalidate MCP cache after refresh',
+        importErr instanceof Error ? importErr.message : 'unknown error',
+      );
+    }
 
     return {
       accessToken,
