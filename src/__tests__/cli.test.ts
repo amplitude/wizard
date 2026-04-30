@@ -539,6 +539,86 @@ describe('TUI auth task: region determines OAuth zone', () => {
     expect(mockPerformAmplitudeAuth).toHaveBeenCalledTimes(1);
   });
 
+  test(
+    'mid-session re-auth watcher fires OAuth on /region even when initial SUSI never completed',
+    { timeout: 20_000 },
+    async () => {
+      // Regression: the watcher's outer wait used to gate on
+      // `credentials !== null`, which never became true when /region was
+      // invoked DURING the AuthScreen SUSI step (initial OAuth completed,
+      // pendingOrgs set, but the user hadn't picked an org/project yet).
+      // setRegionForced cleared pendingOrgs and AuthScreen sat blank with
+      // no second performAmplitudeAuth call. Gating on the regionForced
+      // cycle (true → false) instead fires OAuth on every /region.
+      const subscribers: Array<() => void> = [];
+      (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
+        subscribers.push(cb);
+        return vi.fn();
+      });
+      const fireAll = () => subscribers.slice().forEach((cb) => cb());
+
+      const cliPromise = runCLI([]);
+
+      // Step 1: drive the initial auth flow to completion. authTask waits
+      // on (introConcluded && region !== null && !regionForced); satisfy
+      // it so performAmplitudeAuth fires the first time, setOAuthComplete
+      // is called, and authTask resolves — which unblocks the watcher's
+      // `await authTask`. outroData and loggingOut must be set here (not
+      // before runCLI) because default.ts line 560 reassigns
+      // `tui.store.session = session` after startTUI, which would clobber
+      // any pre-populated keys.
+      await new Promise((r) => setTimeout(r, 20));
+      mockStore.session = {
+        ...mockStore.session,
+        region: 'us',
+        introConcluded: true,
+        regionForced: false,
+        outroData: null,
+        loggingOut: false,
+      };
+      fireAll();
+
+      await cliPromise;
+      await waitFor(() => mockStore.setOAuthComplete.mock.calls.length > 0);
+      expect(mockPerformAmplitudeAuth).toHaveBeenCalledTimes(1);
+      expect(mockPerformAmplitudeAuth).toHaveBeenLastCalledWith(
+        expect.objectContaining({ zone: 'us' }),
+      );
+
+      // Step 2: simulate /region invoked while still on AuthScreen SUSI —
+      // setRegionForced sets regionForced=true and clears credentials +
+      // pendingOrgs. Critically, credentials was never set in this
+      // scenario (SUSI never completed), so the OLD watcher gate
+      // (`credentials !== null`) would never have fired.
+      mockStore.session = {
+        ...mockStore.session,
+        regionForced: true,
+        credentials: null,
+      };
+      fireAll();
+
+      // Yield to the event loop so the watcher's first wait can resolve
+      // and its second wait can subscribe before we flip regionForced
+      // back off.
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Step 3: user picks 'eu' on RegionSelect — setRegion clears
+      // regionForced and sets region='eu'. The watcher should now fire a
+      // second performAmplitudeAuth at the new zone.
+      mockStore.session = {
+        ...mockStore.session,
+        region: 'eu',
+        regionForced: false,
+      };
+      fireAll();
+
+      await waitFor(() => mockPerformAmplitudeAuth.mock.calls.length >= 2);
+      expect(mockPerformAmplitudeAuth).toHaveBeenLastCalledWith(
+        expect.objectContaining({ zone: 'eu' }),
+      );
+    },
+  );
+
   test('forceFresh is false when ampli.json exists (returning user)', async () => {
     mockAmpliConfigExists.mockReturnValue(true);
     simulateRegionSelect('us');
