@@ -131,6 +131,15 @@ export class WizardStore {
   /** Last screen seen — used to detect screen transitions for analytics. */
   private _lastScreen: ScreenName | null = null;
 
+  /**
+   * Active timer for `setCommandFeedback`. Tracked on the instance so a
+   * second feedback call (e.g. `/feedback` after `/whoami`) can cancel
+   * the prior timer before scheduling its own — without the ref, the
+   * older long timer can wipe a fresh feedback message and the user sees
+   * the wrong text disappear.
+   */
+  private _feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
   /** Hooks run when transitioning onto a screen. */
   private _enterScreenHooks = new Map<ScreenName, (() => void)[]>();
 
@@ -866,9 +875,14 @@ export class WizardStore {
 
   /** Show a transient feedback message in the command bar. Clears after ms. */
   setCommandFeedback(message: string, ms = 3000): void {
+    if (this._feedbackTimer !== null) {
+      clearTimeout(this._feedbackTimer);
+      this._feedbackTimer = null;
+    }
     this.$commandFeedback.set(message);
     this.$version.set(this.$version.get() + 1);
-    setTimeout(() => {
+    this._feedbackTimer = setTimeout(() => {
+      this._feedbackTimer = null;
       this.$commandFeedback.set(null);
       this.$version.set(this.$version.get() + 1);
     }, ms);
