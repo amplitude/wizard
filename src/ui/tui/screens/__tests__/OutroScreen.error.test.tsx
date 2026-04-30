@@ -17,7 +17,9 @@
  */
 
 import React from 'react';
-import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { OutroScreen } from '../OutroScreen.js';
@@ -201,5 +203,180 @@ describe('OutroScreen — error variants', () => {
     expect(frame).toContain('2 events instrumented in Production');
     expect(frame).toContain('signup_started');
     expect(frame).toContain('signup_completed');
+  });
+});
+
+// ── Full-activation re-runs (returning users with a healthy project) ──
+//
+// When a user re-runs the wizard against a project that's already
+// ingesting events, `activationLevel === 'full'` causes the flow to
+// skip Run + DataIngestionCheck. The agent never executes, which means
+// `outroData` is null AND the in-process dashboard-URL watcher never
+// fires. The OutroScreen has to handle this case directly: synthesize a
+// success state, read the persisted dashboard URL from disk, and
+// surface it prominently — otherwise the user lands on a mute
+// "Finishing up…" placeholder forever.
+describe('OutroScreen — full-activation re-runs', () => {
+  let installDir: string;
+
+  beforeEach(() => {
+    installDir = mkdtempSync(join(tmpdir(), 'outro-full-test-'));
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(installDir, { recursive: true, force: true });
+    } catch {
+      // best-effort cleanup
+    }
+  });
+
+  it('renders a calm "project is healthy" success when activationLevel is full and outroData is null', () => {
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      selectedProjectName: 'Acme Analytics',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your Amplitude project is healthy');
+    expect(frame).toContain('Acme Analytics is already ingesting events');
+    // The "live!" celebration is for fresh installs only — it would feel
+    // false to a returning user whose project was already healthy when
+    // they ran the wizard.
+    expect(frame).not.toContain('Amplitude is live');
+    // Must NOT fall through to "Finishing up…" — that was the bug.
+    expect(frame).not.toContain('Finishing up');
+  });
+
+  it('surfaces the dashboard URL read from .amplitude/dashboard.json on disk', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({
+        dashboardUrl: 'https://app.amplitude.com/analytics/d/persisted-1',
+      }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      selectedProjectName: 'Acme Analytics',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your dashboard is ready');
+    // Use a unique substring of the dashboard ID — the full URL gets
+    // line-wrapped at 80 cols, so toContain on the entire URL fails.
+    expect(frame).toContain('persisted-1');
+    // The wrapped URL flows through the same toWizardDashboardOpenUrl
+    // helper; verify the redirect host is present rather than the whole
+    // URL.
+    expect(frame).toContain('app.amplitude.com/login');
+    // Returning-user copy on the dashboard hero — fresh-install copy
+    // would mention "first charts populate" and feel weird to a user
+    // who's been collecting data for months.
+    expect(frame).toContain('see what your users are up to today');
+    expect(frame).not.toContain('first charts populate');
+  });
+
+  it('reads the legacy .amplitude-dashboard.json when canonical is absent', () => {
+    fs.writeFileSync(
+      join(installDir, '.amplitude-dashboard.json'),
+      JSON.stringify({
+        dashboardUrl: 'https://app.amplitude.com/analytics/d/legacy-2',
+      }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your dashboard is ready');
+    expect(frame).toContain('legacy-2');
+  });
+
+  it('falls back gracefully to "Open Amplitude" when no dashboard file exists', () => {
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    // Heading still renders — the user is not stranded.
+    expect(frame).toContain('Your Amplitude project is healthy');
+    // No dashboard hero block, but the picker still offers a way out.
+    expect(frame).not.toContain('Your dashboard is ready');
+    expect(frame).toContain('Open Amplitude');
+  });
+
+  it('silently skips a malformed dashboard.json without crashing', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      'this is not valid json {{',
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    expect(() =>
+      renderSnapshot(<OutroScreen store={store} />, store),
+    ).not.toThrow();
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your Amplitude project is healthy');
+    expect(frame).not.toContain('Your dashboard is ready');
+  });
+
+  it('rejects a non-https dashboardUrl as suspect / hand-edited', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({ dashboardUrl: 'javascript:alert(1)' }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'full',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).not.toContain('Your dashboard is ready');
+    expect(frame).not.toContain('javascript:');
+  });
+
+  it('does not synthesize success for partial activation (those users still saw Run)', () => {
+    const store = makeStoreForSnapshot({
+      outroData: null,
+      activationLevel: 'partial',
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    // Partial users go through Run; if they reach Outro with no data
+    // it's a different bug — render the placeholder so we don't mask it.
+    expect(frame).toContain('Finishing up');
+  });
+
+  it('prefers session.checklistDashboardUrl over the on-disk file', () => {
+    fs.mkdirSync(join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      join(installDir, '.amplitude', 'dashboard.json'),
+      JSON.stringify({
+        dashboardUrl: 'https://app.amplitude.com/analytics/d/from-disk',
+      }),
+    );
+
+    const store = makeStoreForSnapshot({
+      outroData: { kind: OutroKind.Success, changes: [] },
+      activationLevel: 'full',
+      checklistDashboardUrl: 'https://app.amplitude.com/analytics/d/from-session',
+      installDir,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('from-session');
+    expect(frame).not.toContain('from-disk');
   });
 });
