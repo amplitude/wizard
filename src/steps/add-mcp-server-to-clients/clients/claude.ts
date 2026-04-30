@@ -2,6 +2,7 @@ import { DefaultMCPClient } from '../MCPClient';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClientConfig } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 import { z } from 'zod';
 
 export const ClaudeMCPConfig = DefaultMCPClientConfig;
@@ -55,6 +56,7 @@ export class ClaudeMCPClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     // Claude Desktop config uses stdio transport, so we need mcp-remote
     // to bridge to the remote streamable-http server. Use 'streamable-http'
@@ -64,6 +66,7 @@ export class ClaudeMCPClient extends DefaultMCPClient {
       'streamable-http',
       selectedFeatures,
       local,
+      zone,
     );
   }
 }

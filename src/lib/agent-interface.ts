@@ -24,7 +24,11 @@ import {
 } from './wizard-session';
 import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
-import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
+import {
+  getHostFromRegion,
+  getLlmGatewayUrlFromHost,
+  getMcpUrlFromZone,
+} from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
 import {
   getDashboardFile,
@@ -1745,7 +1749,10 @@ function buildDefaultAgentConfig(): AgentConfig {
       : DEFAULT_AMPLITUDE_ZONE;
   const storedToken = getStoredToken(storedUser?.id, zone)?.accessToken ?? '';
   const host = getHostFromRegion(zone);
-  const mcpUrl = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
+  // Region-aware MCP URL: an EU stored user must talk to the EU MCP host,
+  // not US. The MCP_URL env override (test/dev) is honored inside the
+  // helper.
+  const mcpUrl = getMcpUrlFromZone(zone);
   return {
     workingDirectory: process.cwd(),
     amplitudeMcpUrl: mcpUrl,
@@ -2553,10 +2560,29 @@ export async function runAgent(
           options: {
             model: agentConfig.model,
             // Fallback model if primary is unavailable (e.g. Vertex outage).
-            // Must be capable enough for code generation — haiku is too weak.
-            fallbackModel: agentConfig.useDirectApiKey
-              ? 'claude-sonnet-4-5-20250514'
-              : 'anthropic/claude-sonnet-4-5-20250514',
+            //
+            // Attempts 0-1 fall back to the previous Sonnet (same family, same
+            // gateway pool) — it usually picks up trivial blips fast.
+            //
+            // Attempts 2+ fall back cross-tier to Haiku 4.5. When a Sonnet
+            // outage persists past two retries, the gateway pool is genuinely
+            // degraded and another Sonnet pick will fail the same way.
+            // Haiku is weaker for greenfield code-gen but absolutely capable
+            // of finishing an already-mostly-done instrumentation run, which
+            // is the realistic state by the third retry. Recovering with a
+            // weaker model beats giving up with WIZARD_GATEWAY_DOWN.
+            fallbackModel: (() => {
+              const directIds = {
+                sonnet: 'claude-sonnet-4-5-20250514',
+                haiku: 'claude-haiku-4-5-20251001',
+              };
+              const gatewayIds = {
+                sonnet: 'anthropic/claude-sonnet-4-5-20250514',
+                haiku: 'anthropic/claude-haiku-4-5-20251001',
+              };
+              const ids = agentConfig.useDirectApiKey ? directIds : gatewayIds;
+              return attempt >= 2 ? ids.haiku : ids.sonnet;
+            })(),
             // Opt into the 1M context window so long instrumentation runs
             // (commandments + skills + accumulated tool results) don't trip
             // compaction mid-flow. Compactions cause the long mid-run pauses
@@ -2691,21 +2717,29 @@ export async function runAgent(
               });
               const recordPostToolUse = createPostToolUseHook(agentState);
 
-              // Compose: inner observer first (best-effort, never alters
-              // decision), then the authoritative gate. If the gate denies,
-              // the SDK respects the deny regardless of the observer's
-              // earlier resolved value.
+              // Compose: inner observer + authoritative gate run concurrently.
+              // The observer is decision-neutral (emits NDJSON for outer-agent
+              // telemetry only) so its return value is discarded; the gate's
+              // value is what the SDK acts on. Both must complete before we
+              // return so the NDJSON tool_call event lands on stdout before
+              // the SDK starts the tool — preserving emit ordering for the
+              // outer orchestrator. Observer errors are swallowed to file so a
+              // broken NDJSON sink can never alter a deny decision.
               const preToolUse: HookCallback = async (
                 input,
                 toolUseID,
                 hookOpts,
               ) => {
-                try {
-                  await innerHooks.PreToolUse(input, toolUseID, hookOpts);
-                } catch (err) {
-                  logToFile('inner PreToolUse observer threw:', err);
-                }
-                return gatedPreToolUse(input, toolUseID, hookOpts);
+                const observer = innerHooks
+                  .PreToolUse(input, toolUseID, hookOpts)
+                  .catch((err: unknown) => {
+                    logToFile('inner PreToolUse observer threw:', err);
+                  });
+                const gate = Promise.resolve(
+                  gatedPreToolUse(input, toolUseID, hookOpts),
+                );
+                const [, gateResult] = await Promise.all([observer, gate]);
+                return gateResult;
               };
 
               const postToolUse: HookCallback = async (
@@ -2713,12 +2747,16 @@ export async function runAgent(
                 toolUseID,
                 hookOpts,
               ) => {
-                try {
-                  await innerHooks.PostToolUse(input, toolUseID, hookOpts);
-                } catch (err) {
-                  logToFile('inner PostToolUse observer threw:', err);
-                }
-                return recordPostToolUse(input, toolUseID, hookOpts);
+                const observer = innerHooks
+                  .PostToolUse(input, toolUseID, hookOpts)
+                  .catch((err: unknown) => {
+                    logToFile('inner PostToolUse observer threw:', err);
+                  });
+                const gate = Promise.resolve(
+                  recordPostToolUse(input, toolUseID, hookOpts),
+                );
+                const [, gateResult] = await Promise.all([observer, gate]);
+                return gateResult;
               };
 
               // PreCompact: record + persist AgentState for in-run recovery,

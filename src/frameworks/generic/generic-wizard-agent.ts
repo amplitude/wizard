@@ -1,7 +1,7 @@
 /* Generic fallback wizard — used when no framework is auto-detected */
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { BrandColors } from '../../lib/brand-colors';
 
 export const GENERIC_AGENT_CONFIG: FrameworkConfig = {

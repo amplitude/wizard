@@ -1,5 +1,6 @@
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 import { z } from 'zod';
 // On Windows, Claude Code ships as `claude.cmd` when installed via npm.
 // The stock `child_process.spawnSync` does not consult PATHEXT, so we
@@ -122,6 +123,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     const binary = this.findClaudeBinary();
     if (!binary) {
@@ -129,7 +131,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
     }
 
     const serverName = local ? 'amplitude-local' : 'amplitude';
-    const url = buildMCPUrl('streamable-http', selectedFeatures, local);
+    const url = buildMCPUrl('streamable-http', selectedFeatures, local, zone);
 
     // Build args array — no shell interpolation, no injection risk
     const addArgs = ['mcp', 'add', '--transport', 'http', serverName, url];

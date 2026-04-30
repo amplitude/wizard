@@ -70,6 +70,26 @@ describe('TodoWrite user-journey commandment', () => {
     // negative test so a sloppy re-merge can't bring it back.
     expect(text).not.toContain('every high-level area of work');
   });
+
+  // Regression — the Excalidraw run review surfaced two bash denies
+  // when the agent went straight to a complex `grep -E "(error TS|...)"
+  // | head -30` form to filter typecheck output (parens trip
+  // DANGEROUS_OPERATORS, multi-pipe trips the single-pipe-only rule).
+  // The setup report claimed "TypeScript type-checking could not be
+  // run with pipe operators" — misleading; the simple form would have
+  // worked. Lock the simple-form examples in.
+  it('shows simple build/typecheck shapes that survive the bash allowlist', () => {
+    // Direct invocation — no pipe, no chaining
+    expect(text).toContain('yarn test:typecheck');
+    expect(text).toContain('npx tsc --noEmit');
+    // Single-pipe-to-tail/head allowance
+    expect(text).toContain('| tail -50');
+    expect(text).toContain('| head -30');
+    // Negative examples flagged with ✗
+    expect(text).toContain('✗');
+    expect(text).toContain('grep -E');
+    expect(text).toContain('multiple pipes');
+  });
 });
 
 /**
@@ -107,6 +127,19 @@ describe('browser-only commandment gating', () => {
     expect(nonBrowserText).not.toContain('initAll(API_KEY');
     expect(browserText).toContain('frustrationInteractions');
     expect(browserText).toContain('initAll(API_KEY');
+  });
+
+  // Regression — Excalidraw run review surfaced 6 instrumented files
+  // importing `track` directly from `@amplitude/analytics-browser`
+  // instead of from the project's own `excalidraw-app/amplitude.ts`
+  // wrapper, leaving its re-export as dead code. The browser
+  // commandments block explicitly forbids the direct-import pattern.
+  it('forbids importing track directly from @amplitude/analytics-browser on browser runs', () => {
+    expect(browserText).toContain('@amplitude/analytics-browser');
+    // The commandment shows the WRONG pattern as a negative example
+    // and the RIGHT pattern as the project-local relative import.
+    expect(browserText).toContain('// ✗ WRONG');
+    expect(browserText).toContain('// ✓ RIGHT');
   });
 
   it('default (no options) treats run as non-browser — conservative', () => {

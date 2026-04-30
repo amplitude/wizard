@@ -80,22 +80,25 @@ export function buildChangedFileList(
  */
 export function readGitDiff(cwd: string, path: string): string {
   try {
-    const raw = execFileSync('git', ['diff', '--no-color', 'HEAD', '--', path], {
-      cwd,
-      encoding: 'utf-8',
-      // Cap stdout so a runaway diff can't OOM the wizard. Anything
-      // beyond the cap is dropped by Node and we surface our own
-      // truncation footer below.
-      maxBuffer: MAX_DIFF_CHARS * 2,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
+    const raw = execFileSync(
+      'git',
+      ['diff', '--no-color', 'HEAD', '--', path],
+      {
+        cwd,
+        encoding: 'utf-8',
+        // Cap stdout so a runaway diff can't OOM the wizard. Anything
+        // beyond the cap is dropped by Node and we surface our own
+        // truncation footer below.
+        maxBuffer: MAX_DIFF_CHARS * 2,
+        stdio: ['ignore', 'pipe', 'ignore'],
+      },
+    );
     if (!raw || raw.trim().length === 0) {
       return '(no git diff available — file may be new)';
     }
     if (raw.length > MAX_DIFF_CHARS) {
       return (
-        raw.slice(0, MAX_DIFF_CHARS) +
-        '\n\n(diff truncated, see file directly)'
+        raw.slice(0, MAX_DIFF_CHARS) + '\n\n(diff truncated, see file directly)'
       );
     }
     return raw;
@@ -118,13 +121,19 @@ export const ChangedFilesView = ({
 
   const open = openIndex !== null ? files[openIndex] : null;
 
-  // Compute the diff lazily once per opened file. Memoizing on path keeps
-  // arrow-key navigation in the diff pane O(1) — we don't want to fork
-  // git on every keypress.
+  // Compute the diff lazily once per opened file. Memoizing on the file
+  // PATH (a stable string) keeps arrow-key navigation in the diff pane
+  // O(1) — we don't want to fork git on every keypress. Earlier the dep
+  // was `open`, but `files` is recomputed in the parent's render body so
+  // `files[openIndex]` returns a fresh `ChangedFile` reference each render
+  // — that defeated the memo and re-shelled `git diff` on every j/k.
+  // Path strings are referentially stable, so `[open?.path, cwd]` is the
+  // correct dep set even if a new array is passed each render.
+  const openPath = open?.path ?? null;
   const diffLines = useMemo(() => {
-    if (!open) return [] as string[];
-    return readGitDiff(cwd, open.path).split('\n');
-  }, [open, cwd]);
+    if (!openPath) return [] as string[];
+    return readGitDiff(cwd, openPath).split('\n');
+  }, [openPath, cwd]);
 
   const maxOffset = Math.max(0, diffLines.length - visibleLines);
 
@@ -213,7 +222,11 @@ export const ChangedFilesView = ({
         </Box>
         <Box flexDirection="column" height={visibleLines}>
           {visible.map((line, i) => (
-            <Text key={diffOffset + i} color={diffLineColor(line)} wrap="truncate">
+            <Text
+              key={diffOffset + i}
+              color={diffLineColor(line)}
+              wrap="truncate"
+            >
               {line || ' '}
             </Text>
           ))}
@@ -253,7 +266,9 @@ export const ChangedFilesView = ({
               </Text>
               <Text
                 color={
-                  file.kind === 'create' ? Colors.success : Colors.accentSecondary
+                  file.kind === 'create'
+                    ? Colors.success
+                    : Colors.accentSecondary
                 }
                 bold
               >
@@ -278,6 +293,7 @@ function diffLineColor(line: string): string {
   if (line.startsWith('@@')) return Colors.accentSecondary;
   if (line.startsWith('+')) return Colors.success;
   if (line.startsWith('-')) return Colors.error;
-  if (line.startsWith('diff ') || line.startsWith('index ')) return Colors.muted;
+  if (line.startsWith('diff ') || line.startsWith('index '))
+    return Colors.muted;
   return Colors.body;
 }

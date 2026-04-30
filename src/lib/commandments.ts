@@ -43,6 +43,27 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
 
   'NEVER run Bash commands to verify env vars. Forbidden: `node -e "console.log(process.env...)"`, `node --eval`, `printenv`, `echo $VAR`, `cat .env*`, `grep AMPLITUDE .env`, `bash -c \'...\'` evals, or any shell incantation aimed at inspecting env-var presence/values. The bash allowlist denies all variants — silently rephrasing `node -e` as `node --eval` is the exact pattern this rule forbids. The ONLY sanctioned check: wizard-tools `check_env_keys` (reports presence without exposing values). If keys are missing, call `set_env_values`. Do not invent a "verify" phase that loops shell commands.',
 
+  `Build / typecheck / lint verification — keep the shape SIMPLE. The bash allowlist accepts package-manager scripts (\`yarn test:typecheck\`, \`pnpm tsc --noEmit\`, \`npx eslint --fix src/file.ts\`, \`npx tsc --noEmit\`) and at most a single pipe to \`tail\` / \`head\` for output limiting. It does NOT allow:
+
+    ✗ \`yarn typecheck 2>&1 | grep -E "(error TS|...)" | head -30\`   ← parens trip the dangerous-operators rule
+    ✗ \`yarn lint | grep error | head\`                                ← multiple pipes
+    ✗ \`yarn build && yarn lint\`                                      ← && chaining
+    ✗ \`tsc --noEmit; yarn lint\`                                      ← semicolon chaining
+
+  The allowed shapes:
+
+    ✓ \`yarn test:typecheck\`                          ← full output, no pipe
+    ✓ \`yarn test:typecheck | tail -50\`               ← last 50 lines (single pipe to tail)
+    ✓ \`pnpm tsc --noEmit | head -30\`                 ← first 30 lines (single pipe to head)
+    ✓ \`npx tsc --noEmit\`                             ← direct invocation
+    ✓ \`npx eslint --fix src/init.ts\` then \`npx tsc --noEmit\`  ← sequential, two separate Bash calls
+
+  Note: these are SYNTAX shapes the allowlist permits. You must still scope lint/build to edited files only (see the scoping commandment below) — never run project-wide \`yarn lint\`, \`npm run build\`, etc.
+
+  When you need to filter output to a substring, use \`Grep\` (the dedicated tool) on the captured stdout — not a shell pipe. When the output is short enough to read in full, just don't pipe at all.
+
+  If the simple form gets denied (extremely rare — the allowlist covers all common build-tool sub-commands), DO NOT retry with progressively more shell composition. Note the limitation in the setup report (\`Could not run \\\`<command>\\\` automatically. Run it manually after install.\`) and move on. The retry-budget rule applies.`,
+
   'When installing packages, start the install as a background task and continue with other work. Do not block on installs unless explicitly instructed.',
 
   "NEVER install non-Amplitude packages on the user's behalf. The wizard's job is to add Amplitude — not build tooling, env-var loaders, bundler plugins, polyfills, or other utilities. Out of scope: `dotenv` and variants, `webpack`, `vite`, `@types/*`, polyfill libraries, env-injection plugins. Hard test before any `npm install` / `pnpm add` / `yarn add` / `pip install` / `gem install` / `go get`: does the package start with `@amplitude/`? If not, is it explicitly listed as a required peer dependency by the active integration skill (e.g. `@react-native-async-storage/async-storage` for React Native)? If neither, DO NOT install. If env-var wiring or build-config changes are needed, document the required change in the setup report and let the user decide. Sample EXAMPLE.md files under skills/integration may show `dotenv` etc. — those are reference snippets, not install instructions.",
@@ -204,6 +225,21 @@ These options are ONLY valid for the browser / unified SDK. Do NOT pass autocapt
   - Backend SDKs in other languages (Python, Java, Go, Ruby, .NET) — server-side, no autocapture surface.
 
 When in doubt, consult the per-SDK README. Inventing an option name (or copying browser keys onto a non-browser SDK) causes runtime errors or silent no-ops. See https://amplitude.com/docs/sdks/client-side-vs-server-side for which SDK applies where.`,
+
+  `One init file owns the SDK; every track call imports from THAT file. The SDK init code you generate goes into a single project-local module — \`amplitude.ts\`, \`amplitude.js\`, \`lib/amplitude.ts\`, \`utils/amplitude.ts\`, or wherever the project's existing module convention puts it. That module:
+  1. Calls \`initAll(...)\` (or \`init(...)\` for the standalone analytics-browser SDK) once, at module scope, as a side effect of being imported.
+  2. Re-exports the surface the rest of the codebase needs: \`export { track, setUserId, identify, Identify } from "@amplitude/analytics-browser"\` (or \`from "@amplitude/unified"\`).
+
+Then EVERY track / identify / setUserId call in the project's source code MUST import from the project-local module — NOT from \`@amplitude/analytics-browser\` / \`@amplitude/unified\` directly:
+
+  // ✗ WRONG — bypasses the project's wrapper, the re-export becomes dead code
+  import { track } from "@amplitude/analytics-browser";
+
+  // ✓ RIGHT — relative path to the project's own amplitude module
+  import { track } from "../amplitude";
+  import { track } from "@/lib/amplitude";
+
+Why this matters: the project-local module is the user's hook for adding logging, opt-out logic, env-var swaps, mocking in tests, or future SDK swaps. If half the project imports from the SDK directly and half from the wrapper, refactoring the wrapper does nothing for half the callsites and becomes a footgun. Pick the wrapper path and use it everywhere — including in files that already had a stray direct import before this run; rewrite those too.`,
 ];
 
 const DEMO_MODE_COMMANDMENTS: string[] = DEMO_MODE

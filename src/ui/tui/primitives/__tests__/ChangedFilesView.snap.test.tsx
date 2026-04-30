@@ -11,10 +11,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import {
-  buildChangedFileList,
-  MAX_DIFF_CHARS,
-} from '../ChangedFilesView.js';
+import { buildChangedFileList, MAX_DIFF_CHARS } from '../ChangedFilesView.js';
 
 // Stub `child_process.execFileSync` so the component's diff-fetch path
 // is hermetic. The fixture diff covers each color-classified prefix
@@ -98,5 +95,69 @@ describe('MAX_DIFF_CHARS', () => {
     // than landing silently. 10k chars ≈ 200 lines of diff which is
     // plenty for the average wizard run.
     expect(MAX_DIFF_CHARS).toBe(10_000);
+  });
+});
+
+// ── useMemo regression (Bugbot, PR #412) ──────────────────────────────
+//
+// `OutroScreen` recomputes its `changedFiles` array on every render, so
+// `files[openIndex]` returns a fresh `ChangedFile` reference each time.
+// The diff `useMemo` in `ChangedFilesView` originally keyed on `open`
+// (the object) which meant the cache missed every render and `git diff`
+// re-shelled on every j/k keypress — exactly the perf hazard the inline
+// comment claimed to avoid. Fix is to key on `open.path` (a stable
+// string) instead. This test pins that behavior: scrolling a diff must
+// not re-fork git.
+
+describe('ChangedFilesView diff memoization', () => {
+  it('reads git diff once per opened file even when parent re-renders', async () => {
+    const { execFileSync } = await import('node:child_process');
+    const mocked = vi.mocked(execFileSync);
+
+    // ink-testing-library lets us drive stdin and re-render with a new
+    // `files` array prop — that's the failure shape: parent passes a
+    // freshly-built `ChangedFile[]` on every keystroke.
+    const { render } = await import('ink-testing-library');
+
+    const buildFiles = () =>
+      buildChangedFileList(['src/instrument.ts'], ['src/App.tsx']);
+
+    mocked.mockClear();
+    const { stdin, rerender, unmount } = render(
+      <ChangedFilesView files={buildFiles()} cwd="/tmp" onClose={() => {}} />,
+    );
+
+    // Wait one frame so the list view mounts.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // Open the first file.
+    stdin.write('\r');
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    // Sanity: opening a file MUST shell out exactly once.
+    const callsAfterOpen = mocked.mock.calls.length;
+    expect(callsAfterOpen).toBe(1);
+
+    // Now simulate the parent re-rendering with a freshly-built file
+    // list (new object identities, same path strings) — this is what
+    // OutroScreen's render body does every commit. Then scroll. Each
+    // scroll triggers a re-render of ChangedFilesView too. With the
+    // previous `[open, cwd]` deps this re-shelled git on every j/k.
+    for (let i = 0; i < 5; i++) {
+      rerender(
+        <ChangedFilesView files={buildFiles()} cwd="/tmp" onClose={() => {}} />,
+      );
+      stdin.write('j');
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+    }
+
+    // No additional git invocations — useMemo on `[open?.path, cwd]`
+    // should hit on every subsequent render.
+    expect(mocked.mock.calls.length).toBe(callsAfterOpen);
+
+    unmount();
   });
 });
