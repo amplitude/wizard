@@ -1239,8 +1239,15 @@ async function runAgentWizardBody(
 
   // Build outro data and store it for OutroScreen
   const continueUrl = session.signup
-    ? OUTBOUND_URLS.products(cloudRegion)
+    ? session.signupMagicLinkUrl ?? OUTBOUND_URLS.products(cloudRegion)
     : undefined;
+
+  if (session.agent && !session.ci && session.signupMagicLinkUrl) {
+    const { default: opn } = await import('opn');
+    void opn(session.signupMagicLinkUrl, { wait: false }).catch(() => {
+      /* fire-and-forget */
+    });
+  }
 
   const changes = [
     ...config.ui.getOutroChanges(frameworkContext),

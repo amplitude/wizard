@@ -270,12 +270,27 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     if (url) setDiskDashboardUrl(url);
   }, [installDir, store.session.checklistDashboardUrl]);
 
-  /** Browser link with sign-in / refresh gate — see `toWizardDashboardOpenUrl`. */
+  /**
+   * Resolve the canonical dashboard URL: in-session value (set by
+   * agent-interface's watcher during a fresh run) wins, then the
+   * disk-resident value (full-activation re-runs where the agent skips).
+   */
   const dashboardCanonicalUrl =
     store.session.checklistDashboardUrl ?? diskDashboardUrl;
-  const dashboardOpenUrl = dashboardCanonicalUrl
-    ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
-    : null;
+  /**
+   * Provisioning magic link wins over the checklist's wizard-gated open
+   * URL because it ALREADY authenticates the user end-to-end (JS
+   * #108967), skipping the sign-in / refresh-token bounce
+   * `toWizardDashboardOpenUrl` would otherwise add. Falls through to the
+   * gated URL when no magic link is on the session, which covers the
+   * non-signup happy path and full-activation re-runs alike.
+   */
+  const signupMagicLinkUrl = store.session.signupMagicLinkUrl;
+  const dashboardOpenUrl = signupMagicLinkUrl
+    ? signupMagicLinkUrl
+    : dashboardCanonicalUrl
+      ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
+      : null;
 
   if (!outroData) {
     return (

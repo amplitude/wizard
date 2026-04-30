@@ -104,6 +104,24 @@ describe('OutroScreen — error variants', () => {
     expect(frame).not.toContain('Open Amplitude');
   });
 
+  it('prefers signupMagicLinkUrl over checklist dashboard open URL', () => {
+    const canonicalDashboard =
+      'https://app.amplitude.com/analytics/d/abc123';
+    const magic = 'https://app.amplitude.com/provision/magic?token=test';
+    const store = makeStoreForSnapshot({
+      outroData: {
+        kind: OutroKind.Success,
+        changes: ['Set up tracking plan'],
+      },
+      checklistDashboardUrl: canonicalDashboard,
+      signupMagicLinkUrl: magic,
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Your dashboard is ready');
+    expect(frame).toContain(magic);
+    expect(frame).not.toContain(toWizardDashboardOpenUrl(canonicalDashboard));
+  });
+
   it('uses the generic Open Amplitude label when no dashboard URL is set', () => {
     const store = makeStoreForSnapshot({
       outroData: { kind: OutroKind.Success, changes: ['x'] },

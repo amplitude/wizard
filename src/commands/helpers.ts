@@ -675,13 +675,14 @@ export const runDirectSignupIfRequested = async (
     );
     return;
   }
-  if (tokens === null) {
+  if (tokens == null) {
     getUI().log.info(
       `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
     );
     return;
   }
   getUI().log.info('Direct signup succeeded; using newly created account.');
+  session.signupMagicLinkUrl = tokens.dashboardUrl ?? null;
   if (onSuccess) {
     try {
       await onSuccess();

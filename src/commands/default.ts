@@ -766,6 +766,9 @@ export const defaultCommand: CommandModule = {
                     auth = signupResult;
                     signupUserInfo = signupResult.userInfo;
                     signupTokensObtained = true;
+                    tui.store.setSignupMagicLinkUrl(
+                      signupResult.dashboardUrl ?? null,
+                    );
                     getUI().log.info(
                       'Direct signup succeeded; using newly created account.',
                     );

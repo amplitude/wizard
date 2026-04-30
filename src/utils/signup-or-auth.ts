@@ -138,6 +138,11 @@ export interface SignupOrAuthInput {
  */
 export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
   userInfo: AmplitudeUserInfo | null;
+  /**
+   * Provisioning `dashboard_url` (browser magic link). May contain secrets —
+   * do not log or emit on NDJSON.
+   */
+  dashboardUrl: string | null;
 };
 
 /**
@@ -276,5 +281,6 @@ export async function performSignupOrAuth(
     refreshToken: tokens.refreshToken,
     zone: result.tokens.zone,
     userInfo,
+    dashboardUrl: result.dashboardUrl ?? null,
   };
 }

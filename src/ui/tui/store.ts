@@ -632,6 +632,7 @@ export class WizardStore {
     this.$session.setKey('activationLevel', null);
     this.$session.setKey('activationOptionsComplete', false);
     this.$session.setKey('dataIngestionConfirmed', false);
+    this.$session.setKey('signupMagicLinkUrl', null);
     this.$session.setKey('mcpComplete', false);
     this.$session.setKey('mcpOutcome', null);
     this.$session.setKey('mcpInstalledClients', []);
@@ -943,6 +944,11 @@ export class WizardStore {
 
   setChecklistDashboardUrl(url: string): void {
     this.$session.setKey('checklistDashboardUrl', url);
+    this.emitChange();
+  }
+
+  setSignupMagicLinkUrl(url: string | null): void {
+    this.$session.setKey('signupMagicLinkUrl', url);
     this.emitChange();
   }
 

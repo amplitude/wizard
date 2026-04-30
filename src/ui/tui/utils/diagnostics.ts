@@ -73,6 +73,7 @@ export function createDiagnosticSnapshot(
       slack_complete: session.slackComplete,
       data_ingestion_confirmed: session.dataIngestionConfirmed,
       checklist_dashboard_url: session.checklistDashboardUrl !== null,
+      signup_magic_link_available: session.signupMagicLinkUrl !== null,
       discovered_features: session.discoveredFeatures,
       additional_feature_queue: session.additionalFeatureQueue,
       amplitude_pre_detected: session.amplitudePreDetected,
