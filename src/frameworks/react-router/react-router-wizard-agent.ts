@@ -1,14 +1,14 @@
 /* React Router wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { Integration } from '../../lib/constants';
 import {
   getPackageVersion,
   hasPackageInstalled,
   type PackageDotJson,
 } from '../../utils/package-json';
-import { tryGetPackageJson } from '../../utils/setup-utils';
+import { tryGetPackageJson } from '../../utils/package-json-light';
 import { getUI } from '../../ui';
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import {

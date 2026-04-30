@@ -2,8 +2,8 @@
 import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
 import { hasPackageInstalled } from '../../utils/package-json';
-import { tryGetPackageJson } from '../../utils/setup-utils';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { tryGetPackageJson } from '../../utils/package-json-light';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { FRAMEWORK_PACKAGES } from '../javascript-web/utils';
 
 type JavaScriptNodeContext = Record<string, unknown>;
