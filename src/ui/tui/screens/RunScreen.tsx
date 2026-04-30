@@ -241,13 +241,14 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // The new signal concatenates three monotonically-increasing counters:
   //   - `completedDisplay` — high-water-marked completed task count
   //   - `store.statusMessages.length` — every [STATUS] line from the agent
-  //   - `store.fileWrites.length` — every PreToolUse(Write|Edit) hit
+  //   - `store.fileWritesTotal` — every PreToolUse(Write|Edit) hit (monotonic;
+  //     unlike `fileWrites.length`, it keeps climbing past the FIFO cap)
   // Any one of them ticking forward resets the coaching timer. True silence
   // (no status, no file write, no completion) for 90s now means the agent
   // really is on a long thought, and the coaching copy is honest.
   // Tiers fire at 90s (calm reassurance) and 5min (escalated suggestion).
   // RUN_COACHING_TIER_T1_S=90, RUN_COACHING_TIER_T2_S=300.
-  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${store.fileWrites.length}`;
+  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${store.fileWritesTotal}`;
   const { tier: coachingTier } = useTimedCoaching({
     thresholds: [90, 300],
     progressSignal,

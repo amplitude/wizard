@@ -113,6 +113,13 @@ export class WizardStore {
    * up the TUI's render budget.
    */
   private $fileWrites = atom<FileWriteEntry[]>([]);
+  /**
+   * Monotonic counter of every file write recorded by the agent.
+   * Unlike `$fileWrites.length` (which caps at MAX_FILE_WRITES), this keeps
+   * climbing past the cap so coaching/heartbeat signals that key off it
+   * don't stall after the 50th write.
+   */
+  private $fileWritesTotal = atom(0);
   private $version = atom(0);
 
   /** True while the user is typing a slash command in the command bar. */
@@ -214,6 +221,10 @@ export class WizardStore {
 
   get fileWrites(): FileWriteEntry[] {
     return this.$fileWrites.get();
+  }
+
+  get fileWritesTotal(): number {
+    return this.$fileWritesTotal.get();
   }
 
   get pendingPrompt(): PendingPrompt | null {
@@ -1697,6 +1708,7 @@ export class WizardStore {
         ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
         : appended;
     this.$fileWrites.set(bounded);
+    this.$fileWritesTotal.set(this.$fileWritesTotal.get() + 1);
     this.emitChange();
   }
 
@@ -1725,6 +1737,7 @@ export class WizardStore {
           bytes: data.bytes,
         };
         this.$fileWrites.set(updated);
+        this.$fileWritesTotal.set(this.$fileWritesTotal.get() + 1);
         this.emitChange();
         return;
       }
@@ -1744,6 +1757,7 @@ export class WizardStore {
         ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
         : appended;
     this.$fileWrites.set(bounded);
+    this.$fileWritesTotal.set(this.$fileWritesTotal.get() + 1);
     this.emitChange();
   }
 
