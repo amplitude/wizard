@@ -301,6 +301,7 @@ export const AUTH_RETRY_LIMIT = 2;
 
 /**
  * Hard ceiling on consecutive Bash denies before the circuit breaker trips.
+ * See `createPreToolUseHook` for behavior.
  *
  * Sized for one false-start + one allowed-tools nudge from the deny copy +
  * a 3x grace margin. A run that hits this is in the failure mode the user
