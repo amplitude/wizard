@@ -1996,6 +1996,24 @@ describe('WizardStore', () => {
       expect(store.fileWrites[0].path).toBe('/proj/file-5.ts');
     });
 
+    it('keeps fileWritesTotal climbing past MAX_FILE_WRITES', () => {
+      // The coaching signal in RunScreen keys off `fileWritesTotal`, not
+      // `fileWrites.length`. After the FIFO cap kicks in, the array length
+      // plateaus at 50 — but the agent might still be hammering away at
+      // file writes with no [STATUS] messages. The monotonic counter is
+      // what keeps the coaching timer from prematurely firing tier-1.
+      const store = createStore();
+      const N = WizardStore.MAX_FILE_WRITES + 7;
+      for (let i = 0; i < N; i++) {
+        store.recordFileChangePlanned({
+          path: `/proj/file-${i}.ts`,
+          operation: 'create',
+        });
+      }
+      expect(store.fileWrites).toHaveLength(WizardStore.MAX_FILE_WRITES);
+      expect(store.fileWritesTotal).toBe(N);
+    });
+
     it('matches the most recent planned row when the same file is rewritten', () => {
       // Common during multi-pass refactors. Apply the second planned row,
       // not the first — otherwise the duration on the second row would
