@@ -89,6 +89,34 @@ AI coding agents can drive the wizard end-to-end. Point your agent at the
 CLI and it will detect the framework, check project state, and report back
 as JSON — no prompt parsing required.
 
+### Claude Code (recommended)
+
+The wizard ships a Claude Code skill at `.claude/skills/amplitude-setup/`
+inside the published npm package. Once `@amplitude/wizard` is available
+(via `npx` or `npm install`), Claude Code will discover the skill when
+the user asks to set up Amplitude. The skill drives the right commands
+in the right order, surfaces every important moment to the user (which
+Amplitude app, which events, which files are about to be written), and
+never silently auto-approves.
+
+What the skill enforces:
+
+- Always runs `apply` in the foreground so NDJSON streams in real time.
+- Always passes `--confirm-app` so the user gets to confirm which
+  Amplitude app the wizard will write events into.
+- Always surfaces the proposed `event_plan` to the user and re-invokes
+  with `--approve-events` / `--skip-events` / `--revise-events`
+  based on the user's answer.
+- After `setup_complete` it pins the project context to `amplitude.appId`
+  for follow-up Amplitude MCP queries — no more "wrong project" charts.
+
+If your project doesn't pick up the skill automatically, copy it once:
+
+```bash
+mkdir -p .claude/skills
+cp -R "$(npm root)/@amplitude/wizard/.claude/skills/amplitude-setup" .claude/skills/
+```
+
 **Kick it off from your agent:**
 
 ```

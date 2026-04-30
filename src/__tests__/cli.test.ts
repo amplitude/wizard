@@ -137,10 +137,22 @@ vi.mock('../utils/ampli-settings', () => ({
   getStoredToken: mockGetStoredToken,
   clearStoredCredentials: vi.fn(),
 }));
-vi.mock('../lib/ampli-config', () => ({
-  ampliConfigExists: mockAmpliConfigExists,
-  readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
-}));
+vi.mock('../lib/ampli-config', async () => {
+  // The reset and logout commands now call `clearAuthFieldsInAmpliConfig`
+  // to strip auth-scoped fields from `ampli.json` on sign-out / project
+  // reset. The reset test fixture writes a real `ampli.json` with
+  // `OrgId` + `SourceId` and asserts the auth field is gone afterward,
+  // so we can't fully mock this module — defer to the real
+  // implementation but keep the few helpers that earlier tests stub.
+  const actual = await vi.importActual<typeof import('../lib/ampli-config')>(
+    '../lib/ampli-config',
+  );
+  return {
+    ...actual,
+    ampliConfigExists: mockAmpliConfigExists,
+    readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
+  };
+});
 vi.mock('../utils/api-key-store', () => ({
   readApiKeyWithSource: vi.fn().mockReturnValue(null),
   persistApiKey: vi.fn().mockReturnValue('env'),
@@ -714,6 +726,131 @@ describe('logout command', () => {
       expect.stringContaining('No active session'),
     );
   });
+
+  // logout deliberately does NOT touch project-scoped artifacts —
+  // `wizard reset` is the gesture for that. This test guards the
+  // separation: a debug-time logout should NEVER nuke the user's
+  // setup report.
+  test('default logout preserves wizard artifacts', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-keep-test-'),
+    );
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    mockGetStoredUser.mockReturnValue({ email: 'jane@example.com' });
+
+    await runCLI(['logout', '--install-dir', projectDir]);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      true,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(true);
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+});
+
+// ── reset command ──────────────────────────────────────────────────────────────
+
+describe('reset command', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+    consoleSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    vi.resetModules();
+  });
+
+  test('removes all wizard artifacts and emits a JSON result', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-test-'),
+    );
+    fs.mkdirSync(path.join(projectDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.amplitude', 'events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    fs.writeFileSync(
+      path.join(projectDir, 'ampli.json'),
+      JSON.stringify({ OrgId: 'org-1', SourceId: 'keep' }),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    // All wizard-managed targets gone:
+    expect(fs.existsSync(path.join(projectDir, '.amplitude'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(false);
+    // ampli.json: auth-scoped fields stripped, tracking-plan fields preserved.
+    const ampli = JSON.parse(
+      fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8'),
+    ) as Record<string, string>;
+    expect(ampli.OrgId).toBeUndefined();
+    expect(ampli.SourceId).toBe('keep');
+
+    // JSON result line emitted to stdout:
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(3);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test('is a no-op (with friendly note) when there are no artifacts', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-empty-'),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(0);
+      expect(parsed.data.skipped.length).toBe(4);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
 });
 
 // ── whoami command ─────────────────────────────────────────────────────────────
@@ -744,7 +881,11 @@ describe('whoami command', () => {
     vi.resetModules();
   });
 
-  test('shows user name and email when logged in', async () => {
+  // Pass `--human` so the test exercises the chalk-formatted UI output
+  // (`getUI().log.info` → console.log) instead of the agent-friendly
+  // JSON path that fires by default when stdout is non-TTY (e.g. inside
+  // vitest). The JSON shape is covered by the dedicated test below.
+  test('shows user name and email when logged in (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-1',
       firstName: 'Jane',
@@ -754,7 +895,7 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -765,11 +906,11 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('shows not-logged-in message when no token', async () => {
+  test('shows not-logged-in message when no token (--human)', async () => {
     mockGetStoredUser.mockReturnValue(null);
     mockGetStoredToken.mockReturnValue(null);
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -784,7 +925,7 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('prints zone for EU users', async () => {
+  test('prints zone for EU users (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-2',
       firstName: 'Jean',
@@ -794,13 +935,85 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/eu/);
+  });
+
+  // Agent-mode contract: `whoami --json` emits a single NDJSON line on
+  // stdout carrying `{ event: 'whoami', loggedIn, email, region, ... }`.
+  // The skill reads this to render "you're logged in as X (Org Y)" in
+  // one line before any other action.
+  test('emits structured JSON when logged in', async () => {
+    mockGetStoredUser.mockReturnValue({
+      id: 'user-3',
+      firstName: 'Sam',
+      lastName: 'Cooper',
+      email: 'sam@example.com',
+      zone: 'us',
+    });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'token',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+
+    // JSON emission goes through process.stdout.write, not console.log,
+    // so spy on the underlying writer.
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    // Find the line that's our whoami payload (other modules may write
+    // unrelated lines during bin.ts startup; filter to ours).
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.type).toBe('result');
+    expect(payload.data.event).toBe('whoami');
+    expect(payload.data.loggedIn).toBe(true);
+    expect(payload.data.email).toBe('sam@example.com');
+    expect(payload.data.firstName).toBe('Sam');
+    expect(payload.data.lastName).toBe('Cooper');
+    expect(payload.data.region).toBe('us');
+    expect(payload.data.tokenExpiresAt).toBe('2099-01-01T00:00:00Z');
+
+    stdoutSpy.mockRestore();
+  });
+
+  test('emits structured JSON with loginCommand when logged out', async () => {
+    mockGetStoredUser.mockReturnValue(null);
+    mockGetStoredToken.mockReturnValue(null);
+
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.data.loggedIn).toBe(false);
+    expect(Array.isArray(payload.data.loginCommand)).toBe(true);
+    expect(payload.data.loginCommand).toContain('login');
+
+    stdoutSpy.mockRestore();
   });
 });
 

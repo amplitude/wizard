@@ -1102,6 +1102,129 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
   });
 });
 
+describe('AgentUI.promptEventPlan — pre-resolved decision short-circuits needs_input', () => {
+  // The wizard's `apply` command forwards the user's event-plan decision
+  // (--approve-events / --skip-events / --revise-events) to the spawned
+  // child as `AMPLITUDE_WIZARD_EVENT_PLAN_DECISION`. The child must NOT
+  // emit `needs_input` for that prompt — if it did, the outer skill
+  // (which STOPs on every needs_input by contract) would re-prompt the
+  // user for an answer they already gave, and the wizard would block
+  // forever on stdin. Locked in here so the launch-blocker regression
+  // can't come back.
+
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+  const originalDecisionEnv = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+  const originalFeedbackEnv = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+    if (originalDecisionEnv === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    } else {
+      process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = originalDecisionEnv;
+    }
+    if (originalFeedbackEnv === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+    } else {
+      process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK = originalFeedbackEnv;
+    }
+  });
+
+  const events = [{ name: 'Event A', description: 'fires' }];
+
+  const writtenEvents = (): NDJSONEvent[] =>
+    writes
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0)
+      .map((w) => JSON.parse(w) as NDJSONEvent);
+
+  it('approved env var: emits result(via flag), no needs_input, no decision_auto', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'approved';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    const wire = writtenEvents();
+    expect(wire.some((e) => e.type === 'needs_input')).toBe(false);
+    expect(
+      wire.some(
+        (e) =>
+          e.type === 'result' &&
+          (e.data as { event?: string } | undefined)?.event === 'event_plan' &&
+          (e.data as { decision?: string } | undefined)?.decision ===
+            'approved',
+      ),
+    ).toBe(true);
+    expect(
+      wire.some(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event === 'decision_auto',
+      ),
+    ).toBe(false);
+  });
+
+  it('skipped env var: returns skipped without emitting needs_input', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'skipped';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'skipped' });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(false);
+  });
+
+  it('revised env var: returns revised + feedback without emitting needs_input', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'revised';
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK =
+      'add a Cart Cleared event';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({
+      decision: 'revised',
+      feedback: 'add a Cart Cleared event',
+    });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(false);
+  });
+
+  it('no env var: emits needs_input + result + decision_auto (the auto-approve path)', async () => {
+    delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    const wire = writtenEvents();
+    expect(
+      wire.some(
+        (e) =>
+          e.type === 'needs_input' &&
+          (e.data as { code?: string } | undefined)?.code === 'event_plan',
+      ),
+    ).toBe(true);
+    expect(
+      wire.some(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event === 'decision_auto',
+      ),
+    ).toBe(true);
+  });
+
+  it('invalid env var value: falls through to auto-approve path (defensive)', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'bogus';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(true);
+  });
+});
+
 describe('AgentUI.startRun + getRunStartedAtMs', () => {
   it('captures start timestamp on startRun() so duration can be computed', () => {
     const before = Date.now();
@@ -1121,5 +1244,170 @@ describe('AgentUI.startRun + getRunStartedAtMs', () => {
     // null and reports 0 in that case.
     const ui = new AgentUI();
     expect(ui.getRunStartedAtMs()).toBeNull();
+  });
+});
+
+describe('AgentUI.emitSetupContext', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent =>
+    JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+
+  it('emits a lifecycle event with event: "setup_context" and the requested phase', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'plan',
+      amplitude: { region: 'us', orgId: 'org-1', orgName: 'Acme' },
+      sources: { region: 'saved', orgId: 'saved' },
+      requiresConfirmation: true,
+    });
+    const ev = lastEvent();
+    expect(ev.type).toBe('lifecycle');
+    expect(ev.data).toMatchObject({
+      event: 'setup_context',
+      phase: 'plan',
+      amplitude: { region: 'us', orgId: 'org-1', orgName: 'Acme' },
+      sources: { region: 'saved', orgId: 'saved' },
+      requiresConfirmation: true,
+    });
+  });
+
+  it('drops undefined / null / empty-string scope fields from the wire payload', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'apply_started',
+      amplitude: {
+        region: 'us',
+        orgId: 'org-1',
+        // Mix of empty / null / undefined that should be dropped:
+        orgName: '',
+        projectId: undefined,
+        appId: 'app-7',
+        envName: undefined,
+      },
+    });
+    const ev = lastEvent();
+    const amp = (ev.data as { amplitude: Record<string, unknown> }).amplitude;
+    expect(Object.keys(amp).sort()).toEqual(['appId', 'orgId', 'region']);
+  });
+
+  it('builds a human-readable summary in the message field when scope is rich', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'apply_started',
+      amplitude: {
+        orgName: 'Acme',
+        projectName: 'Marketing',
+        appName: 'TodoMVC',
+        appId: 'app-7',
+        envName: 'Production',
+      },
+    });
+    const ev = lastEvent();
+    expect(ev.message).toContain('Acme / Marketing / TodoMVC / Production');
+  });
+
+  it('omits the summary when no scope fields are present', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({ phase: 'whoami', amplitude: {} });
+    const ev = lastEvent();
+    expect(ev.message).toBe('setup_context (whoami)');
+  });
+});
+
+describe('AgentUI.emitSetupComplete', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent =>
+    JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+
+  it('emits a result event with event: "setup_complete" and level: "success"', () => {
+    const ui = new AgentUI();
+    ui.emitSetupComplete({
+      amplitude: {
+        appId: 'app-7',
+        appName: 'TodoMVC',
+        orgId: 'org-1',
+        envName: 'Production',
+        dashboardUrl: 'https://app.amplitude.com/analytics/acme/dashboard/abc',
+        dashboardId: 'abc',
+      },
+      files: { written: ['src/amplitude.js'], modified: ['src/index.js'] },
+      events: [{ name: 'Todo Created', description: 'User adds a todo.' }],
+      durationMs: 60_000,
+    });
+    const ev = lastEvent();
+    expect(ev.type).toBe('result');
+    expect(ev.level).toBe('success');
+    expect(ev.data).toMatchObject({
+      event: 'setup_complete',
+      amplitude: { appId: 'app-7', dashboardId: 'abc' },
+      files: { written: ['src/amplitude.js'], modified: ['src/index.js'] },
+      durationMs: 60_000,
+    });
+    expect(ev.message).toContain('app TodoMVC');
+  });
+
+  it('omits empty optional sub-objects from the wire payload', () => {
+    const ui = new AgentUI();
+    ui.emitSetupComplete({
+      amplitude: { appId: 'app-7' },
+    });
+    const ev = lastEvent();
+    expect(ev.data).not.toHaveProperty('files');
+    expect(ev.data).not.toHaveProperty('envVars');
+    expect(ev.data).not.toHaveProperty('events');
+    expect(ev.data).not.toHaveProperty('durationMs');
+  });
+});
+
+describe('truncateLogMessage (log-spillover guard)', () => {
+  it('passes short messages through unchanged', async () => {
+    const { truncateLogMessage, MAX_LOG_MESSAGE_LENGTH } = await import(
+      '../../lib/agent-events.js'
+    );
+    expect(truncateLogMessage('hello')).toBe('hello');
+    const exact = 'a'.repeat(MAX_LOG_MESSAGE_LENGTH);
+    expect(truncateLogMessage(exact)).toBe(exact);
+  });
+
+  it('truncates oversized messages and appends a [truncated …] suffix', async () => {
+    const { truncateLogMessage, MAX_LOG_MESSAGE_LENGTH } = await import(
+      '../../lib/agent-events.js'
+    );
+    const oversized = 'x'.repeat(MAX_LOG_MESSAGE_LENGTH + 5_000);
+    const out = truncateLogMessage(oversized);
+    expect(out.length).toBe(MAX_LOG_MESSAGE_LENGTH);
+    expect(out.endsWith('[truncated; see verbose log]')).toBe(true);
   });
 });

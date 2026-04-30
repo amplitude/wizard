@@ -115,6 +115,19 @@ export function getInstallationErrorLogFile(installDir: string): string {
   return join(getRunDir(installDir), `installation-error-${Date.now()}.log`);
 }
 
+/**
+ * Per-project apply lockfile. Carries the pid + start timestamp of an
+ * in-flight `wizard apply` so a second concurrent invocation can detect
+ * it and refuse cleanly. Lives under the per-project run dir so two
+ * applies in DIFFERENT projects don't collide. The skill rule alone
+ * ("never spawn a second apply") isn't enforceable on the agent side —
+ * this binary-side guard catches it regardless of which orchestrator
+ * is driving the wizard.
+ */
+export function getApplyLockFile(installDir: string): string {
+  return join(getRunDir(installDir), 'apply.lock');
+}
+
 // ── Per-user files (no installDir scope) ──────────────────────────────
 
 /** Plans dir (`<cacheRoot>/plans/`). One JSON file per plan ID. */
