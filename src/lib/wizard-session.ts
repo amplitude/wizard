@@ -10,13 +10,13 @@
  * Business logic reads from the session. Never calls a prompt.
  */
 
-import * as path from 'path';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
+import { resolveInstallDir } from '../utils/install-dir';
 
 // ── Branded ID types ─────────────────────────────────────────────────────
 //
@@ -106,7 +106,11 @@ export const CliArgsSchema = z.object({
   installDir: z
     .string()
     .default(() => process.cwd())
-    .transform((p) => path.resolve(p)),
+    // `resolveInstallDir` expands a leading `~` before resolving — bare
+    // `path.resolve('~/foo')` does NOT expand `~` (Node treats it as a
+    // literal directory name and joins onto cwd). Without this,
+    // `--install-dir="~/foo"` from `~/bar` produces `~/bar/~/foo`.
+    .transform((p) => resolveInstallDir(p)),
   debug: z.boolean().default(false),
   verbose: z.boolean().default(false),
   ci: z.boolean().default(false),
@@ -903,7 +907,7 @@ export function buildSession(args: {
     debug: validated.debug ?? false,
     verbose: validated.verbose ?? false,
     forceInstall: validated.forceInstall ?? false,
-    installDir: path.resolve(validated.installDir ?? process.cwd()),
+    installDir: resolveInstallDir(validated.installDir),
     ci: validated.ci ?? false,
     agent: false,
     signup: validated.signup ?? false,

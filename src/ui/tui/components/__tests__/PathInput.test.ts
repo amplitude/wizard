@@ -1,19 +1,29 @@
 /**
- * PathInput unit tests — pin the path-resolution + validation logic.
+ * PathInput unit tests — pin the path-resolution + validation logic
+ * AND the completion helpers used by the controlled input.
  *
- * The component itself is hard to test in isolation (Ink + @inkjs/ui
- * TextInput render through fakes), but the meat of the logic lives in
- * the exported `resolveUserPath` and `validatePath` helpers. Those
- * are pure functions of input + filesystem state.
+ * The Ink component itself is hard to test in isolation (cursor /
+ * candidate rendering), so we extract the meat as pure helpers and
+ * test those: stem splitting, completion-dir resolution, candidate
+ * computation against a real tmp filesystem, longest-common-prefix,
+ * and `applyCompletion` string substitution.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
-import { resolveUserPath, validatePath } from '../PathInput.js';
+import {
+  resolveUserPath,
+  validatePath,
+  splitStem,
+  resolveCompletionDir,
+  computeCompletions,
+  longestCommonPrefix,
+  applyCompletion,
+} from '../PathInput.js';
 
 let dir: string;
 
@@ -45,27 +55,13 @@ describe('resolveUserPath', () => {
   });
 
   it('does NOT expand ~user (only the bare ~ form)', () => {
-    // We intentionally don't try to look up other users' home dirs —
-    // `~someone` falls through and resolves as a literal directory name.
     const result = resolveUserPath('~someone/foo');
     expect(result).toContain('~someone');
   });
 
   // Regression: bugbot Issue #3.
-  //
-  // `shortenHomePath` produces paths separated by `path.sep`, which is
-  // a backslash on Windows. The PathInput seeds its default value via
-  // `shortenHomePath(installDir)`, so on Windows the seeded value
-  // looks like `~\projects\my-app`. Before this fix, `resolveUserPath`
-  // only recognized `~/` (forward slash) — a Windows user pressing
-  // Enter without editing the default got "no directory" because the
-  // tilde never expanded.
   it('expands a Windows-style ~\\ prefix the same as ~/', () => {
     expect(resolveUserPath('~\\projects\\foo')).toBe(
-      // The home + backslash + rest. We don't normalize separators
-      // because Node's path APIs accept either on Windows and we want
-      // the underlying `path.resolve` (or `statSync`) to handle the
-      // platform-specific separator.
       homedir() + '\\projects\\foo',
     );
   });
@@ -116,10 +112,169 @@ describe('validatePath', () => {
   });
 
   it('expands ~ before validating', () => {
-    // This relies on $HOME being a real directory, which it always is
-    // in any environment that runs vitest.
     const result = validatePath('~');
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.absolutePath).toBe(homedir());
+  });
+});
+
+describe('splitStem', () => {
+  it('returns empty stem and the whole input as partial when no slash', () => {
+    expect(splitStem('myfolder')).toEqual({ stem: '', partial: 'myfolder' });
+  });
+
+  it('handles the empty string', () => {
+    expect(splitStem('')).toEqual({ stem: '', partial: '' });
+  });
+
+  it('splits on the LAST slash', () => {
+    expect(splitStem('~/projects/my-')).toEqual({
+      stem: '~/projects/',
+      partial: 'my-',
+    });
+  });
+
+  it('preserves a trailing slash with empty partial', () => {
+    expect(splitStem('~/')).toEqual({ stem: '~/', partial: '' });
+    expect(splitStem('/usr/local/')).toEqual({
+      stem: '/usr/local/',
+      partial: '',
+    });
+  });
+
+  it('handles a bare slash', () => {
+    expect(splitStem('/etc')).toEqual({ stem: '/', partial: 'etc' });
+  });
+});
+
+describe('resolveCompletionDir', () => {
+  it('returns cwd for an empty stem', () => {
+    expect(resolveCompletionDir('', '/tmp/cwd')).toBe('/tmp/cwd');
+  });
+
+  it('returns root for a bare-slash stem', () => {
+    expect(resolveCompletionDir('/', '/tmp/cwd')).toBe('/');
+  });
+
+  it('expands a tilde-rooted stem to the home directory', () => {
+    expect(resolveCompletionDir('~/', '/tmp/cwd')).toBe(homedir());
+  });
+
+  it('expands a tilde-rooted stem with subpath', () => {
+    expect(resolveCompletionDir('~/projects/', '/tmp/cwd')).toBe(
+      homedir() + '/projects',
+    );
+  });
+
+  it('resolves an absolute stem unchanged (sans trailing slash)', () => {
+    expect(resolveCompletionDir('/usr/local/', '/tmp/cwd')).toBe('/usr/local');
+  });
+
+  it('joins relative stems against cwd', () => {
+    expect(resolveCompletionDir('projects/', '/tmp/cwd')).toBe(
+      '/tmp/cwd/projects',
+    );
+  });
+});
+
+describe('computeCompletions', () => {
+  it('returns directories whose names start with the partial', () => {
+    mkdirSync(join(dir, 'projects'));
+    mkdirSync(join(dir, 'project-x'));
+    mkdirSync(join(dir, 'photos'));
+    mkdirSync(join(dir, 'docs'));
+
+    const result = computeCompletions('proj', dir);
+    expect(result.partial).toBe('proj');
+    expect(result.candidates.map((c) => c.name).sort()).toEqual([
+      'project-x',
+      'projects',
+    ]);
+  });
+
+  it('skips files', () => {
+    mkdirSync(join(dir, 'projects'));
+    writeFileSync(join(dir, 'project.md'), 'hi');
+
+    const result = computeCompletions('proj', dir);
+    expect(result.candidates.map((c) => c.name)).toEqual(['projects']);
+  });
+
+  it('hides dotfiles unless the partial starts with a dot', () => {
+    mkdirSync(join(dir, '.git'));
+    mkdirSync(join(dir, '.cache'));
+    mkdirSync(join(dir, 'visible'));
+
+    const noDot = computeCompletions('', dir);
+    expect(noDot.candidates.map((c) => c.name)).toEqual(['visible']);
+
+    const withDot = computeCompletions('.', dir);
+    expect(withDot.candidates.map((c) => c.name).sort()).toEqual([
+      '.cache',
+      '.git',
+    ]);
+  });
+
+  it('returns empty candidates when the partial matches nothing', () => {
+    mkdirSync(join(dir, 'alpha'));
+    const result = computeCompletions('zzz', dir);
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('returns empty candidates when the directory does not exist', () => {
+    const result = computeCompletions('foo', join(dir, 'missing'));
+    expect(result.candidates).toEqual([]);
+  });
+
+  it('completes against an absolute stem', () => {
+    mkdirSync(join(dir, 'foo'));
+    mkdirSync(join(dir, 'foobar'));
+    // Use the tmp dir as the absolute stem to test absolute resolution.
+    const input = `${dir}/foo`;
+    const result = computeCompletions(input, '/should-not-be-used');
+    expect(result.candidates.map((c) => c.name).sort()).toEqual([
+      'foo',
+      'foobar',
+    ]);
+  });
+});
+
+describe('longestCommonPrefix', () => {
+  it('returns an empty string for an empty list', () => {
+    expect(longestCommonPrefix([])).toBe('');
+  });
+
+  it('returns the only item for a singleton list', () => {
+    expect(longestCommonPrefix(['hello'])).toBe('hello');
+  });
+
+  it('returns the shared prefix across all items', () => {
+    expect(longestCommonPrefix(['project-x', 'projects', 'projection'])).toBe(
+      'project',
+    );
+  });
+
+  it('returns empty when items diverge from the first character', () => {
+    expect(longestCommonPrefix(['alpha', 'beta'])).toBe('');
+  });
+});
+
+describe('applyCompletion', () => {
+  it('replaces the trailing partial with the candidate name', () => {
+    expect(applyCompletion('~/proj', 'projects')).toBe('~/projects');
+  });
+
+  it('appends a separator when requested', () => {
+    expect(applyCompletion('~/proj', 'projects', true)).toBe('~/projects/');
+  });
+
+  it('handles an empty stem (no slash in input yet)', () => {
+    expect(applyCompletion('my', 'myfolder', true)).toBe('myfolder/');
+  });
+
+  it('preserves the stem exactly', () => {
+    expect(applyCompletion('/usr/local/sh', 'share', true)).toBe(
+      '/usr/local/share/',
+    );
   });
 });

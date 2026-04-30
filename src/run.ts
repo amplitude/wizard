@@ -2,8 +2,8 @@ import { type WizardSession, buildSession } from './lib/wizard-session';
 
 import { Integration, DETECTION_TIMEOUT_MS } from './lib/constants';
 import { readEnvironment } from './utils/environment';
+import { resolveInstallDir } from './utils/install-dir';
 import { getUI } from './ui';
-import path from 'path';
 import fs from 'node:fs/promises';
 import { FRAMEWORK_REGISTRY } from './lib/registry';
 import { analytics } from './utils/analytics';
@@ -55,23 +55,24 @@ export async function runWizard(
     ...readEnvironment(),
   };
 
-  let resolvedInstallDir: string;
-  if (finalArgs.installDir) {
-    if (path.isAbsolute(finalArgs.installDir)) {
-      resolvedInstallDir = finalArgs.installDir;
-    } else {
-      resolvedInstallDir = path.join(process.cwd(), finalArgs.installDir);
-    }
-  } else {
-    resolvedInstallDir = process.cwd();
-  }
-
-  // Build session if not provided (CI mode passes one pre-built)
+  // installDir precedence (highest wins):
+  //   1. TUI directory picker — already mutated session.installDir via
+  //      store.changeInstallDir() before runWizard is called.
+  //   2. --install-dir / AMPLITUDE_WIZARD_INSTALL_DIR — flowed into the
+  //      session at buildSession() time.
+  //   3. process.cwd() — buildSession's default.
+  //
+  // Trust the session as the single source of truth. Only the fresh-
+  // session path needs to resolve from CLI args — and buildSession does
+  // that via its zod schema (resolveInstallDir handles `~` expansion).
+  // The previous code unconditionally re-assigned session.installDir
+  // from finalArgs.installDir, which silently reverted any TUI
+  // directory change back to the original CLI value.
   if (!session) {
     session = buildSession({
       debug: finalArgs.debug,
       forceInstall: finalArgs.forceInstall,
-      installDir: resolvedInstallDir,
+      installDir: resolveInstallDir(finalArgs.installDir),
       ci: finalArgs.ci,
       signup: finalArgs.signup,
       signupEmail: finalArgs.signupEmail,
@@ -85,8 +86,6 @@ export async function runWizard(
       region: finalArgs.region,
     });
   }
-
-  session.installDir = resolvedInstallDir;
 
   getUI().intro(`Welcome to the Amplitude setup wizard`);
 

@@ -496,15 +496,17 @@ const WelcomeBackPanel = ({
       ? `${projectName} · ${region.toUpperCase()}`
       : projectName
     : region
-      ? region.toUpperCase()
-      : null;
+    ? region.toUpperCase()
+    : null;
 
   // Events line: only show when we know something concrete. "0 events
   // instrumented" by itself is misleading — it usually means the events
   // file just hasn't been written yet, not that the user did zero work.
   const eventsLine =
     eventCount > 0 && lastRunAt
-      ? `${eventCount} event${eventCount === 1 ? '' : 's'} instrumented · last run ${humanizeAge(lastRunAt)}`
+      ? `${eventCount} event${
+          eventCount === 1 ? '' : 's'
+        } instrumented · last run ${humanizeAge(lastRunAt)}`
       : null;
 
   return (
@@ -515,9 +517,7 @@ const WelcomeBackPanel = ({
       {!compact && projectLine && (
         <Text color={Colors.secondary}>{projectLine}</Text>
       )}
-      {!compact && eventsLine && (
-        <Text color={Colors.muted}>{eventsLine}</Text>
-      )}
+      {!compact && eventsLine && <Text color={Colors.muted}>{eventsLine}</Text>}
     </>
   );
 };
