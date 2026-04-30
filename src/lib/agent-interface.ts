@@ -3410,7 +3410,17 @@ export async function runAgent(
       ? apiErrorMatch.join('\n')
       : 'Unknown API error';
 
-    if (outputText.includes('API Error: 429')) {
+    // Transport-level errors (RATE_LIMIT / API_ERROR / GATEWAY_DOWN) gate on
+    // !receivedSuccessResult: the Claude Agent SDK retries some upstream
+    // failures internally without tearing down the for-await stream. A
+    // single wizard attempt can witness a failed `result` (is_error: true,
+    // "API Error: 400 terminated"), then a fresh `system: init`, then a
+    // clean `result` (is_error: false) — both result texts accumulate in
+    // collectedText. If the inner retry succeeded, trust it instead of
+    // reclassifying based on the stale "API Error: …" fragment. Auth and
+    // structured/legacy [ERROR-…] markers above stay ungated because those
+    // represent real wizard-level errors that the SDK cannot retry away.
+    if (!receivedSuccessResult && outputText.includes('API Error: 429')) {
       logToFile('Agent error: RATE_LIMIT');
       spinner.stop('Rate limit exceeded');
       return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
@@ -3435,7 +3445,7 @@ export async function runAgent(
       };
     }
 
-    if (outputText.includes('API Error:')) {
+    if (!receivedSuccessResult && outputText.includes('API Error:')) {
       logToFile('Agent error: API_ERROR');
       spinner.stop('API error occurred');
       return { error: AgentErrorType.API_ERROR, message: apiErrorMessage };
