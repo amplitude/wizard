@@ -115,20 +115,30 @@ export async function resolveCredentials(
       : getStoredToken(undefined, zone);
 
     if (storedToken) {
-      // Apply env-var access token override (AMPLITUDE_TOKEN), if any.
-      // Only overrides the access token; idToken/refreshToken stay from
-      // storage because fetchAmplitudeUser needs a valid idToken.
-      if (options?.accessTokenOverride) {
-        storedToken.accessToken = options.accessTokenOverride;
-      }
+      // Work on a local copy of the stored token. The object returned by
+      // `getStoredToken` is parsed fresh today, but we shouldn't rely on
+      // that contract — mutating the caller's reference here would silently
+      // leak per-run overrides (AMPLITUDE_TOKEN env var, refreshed token
+      // values) to other call sites that share a cached reference, and
+      // would make this function non-idempotent. Spreading once at the top
+      // localizes every subsequent mutation to this run.
+      const tokenForRun: typeof storedToken = {
+        ...storedToken,
+        // Apply env-var access token override (AMPLITUDE_TOKEN), if any.
+        // Only overrides the access token; idToken/refreshToken stay from
+        // storage because fetchAmplitudeUser needs a valid idToken.
+        ...(options?.accessTokenOverride
+          ? { accessToken: options.accessTokenOverride }
+          : {}),
+      };
 
       // Silent token refresh
       const { tryRefreshToken } = await import('../utils/token-refresh.js');
-      const expiresAtMs = new Date(storedToken.expiresAt).getTime();
+      const expiresAtMs = new Date(tokenForRun.expiresAt).getTime();
       const refreshResult = await tryRefreshToken(
         {
-          accessToken: storedToken.accessToken,
-          refreshToken: storedToken.refreshToken,
+          accessToken: tokenForRun.accessToken,
+          refreshToken: tokenForRun.refreshToken,
           expiresAt: expiresAtMs,
         },
         zone,
@@ -137,7 +147,7 @@ export async function resolveCredentials(
         const { storeToken } = await import('../utils/ampli-settings.js');
         if (realUser) {
           storeToken(realUser, {
-            ...storedToken,
+            ...tokenForRun,
             accessToken: refreshResult.accessToken,
             expiresAt: new Date(refreshResult.expiresAt).toISOString(),
             // Persist rotated refresh token if the server issued one
@@ -154,12 +164,12 @@ export async function resolveCredentials(
               : {}),
           });
         }
-        storedToken.accessToken = refreshResult.accessToken;
+        tokenForRun.accessToken = refreshResult.accessToken;
         if (refreshResult.refreshToken) {
-          storedToken.refreshToken = refreshResult.refreshToken;
+          tokenForRun.refreshToken = refreshResult.refreshToken;
         }
         if (refreshResult.idToken) {
-          storedToken.idToken = refreshResult.idToken;
+          tokenForRun.idToken = refreshResult.idToken;
         }
         logToFile(
           '[credential-resolution] silently refreshed expired access token',
@@ -174,8 +184,8 @@ export async function resolveCredentials(
       if (localKey) {
         logToFile('[credential-resolution] using locally stored API key');
         session.credentials = {
-          accessToken: storedToken.accessToken,
-          idToken: storedToken.idToken,
+          accessToken: tokenForRun.accessToken,
+          idToken: tokenForRun.idToken,
           projectApiKey: localKey.key,
           host: getHostFromRegion(zone),
           appId: 0,
@@ -200,7 +210,7 @@ export async function resolveCredentials(
           try {
             const { fetchAmplitudeUser } = await import('./api.js');
             const userInfo = await fetchAmplitudeUser(
-              storedToken.idToken,
+              tokenForRun.idToken,
               zone,
             );
             if (!session.userEmail && userInfo.email) {
@@ -265,7 +275,7 @@ export async function resolveCredentials(
           let timer: ReturnType<typeof setTimeout> | undefined;
           try {
             return await Promise.race([
-              fetchAmplitudeUser(storedToken.idToken, zone),
+              fetchAmplitudeUser(tokenForRun.idToken, zone),
               new Promise<never>((_, reject) => {
                 timer = setTimeout(() => {
                   const err = new Error(
@@ -362,8 +372,8 @@ export async function resolveCredentials(
                   );
                   persistApiKey(apiKey, installDir);
                   session.credentials = {
-                    accessToken: storedToken.accessToken,
-                    idToken: storedToken.idToken,
+                    accessToken: tokenForRun.accessToken,
+                    idToken: tokenForRun.idToken,
                     projectApiKey: apiKey,
                     host: getHostFromRegion(zone),
                     appId: toCredentialAppId(matchedEnv.app.id),
@@ -389,8 +399,8 @@ export async function resolveCredentials(
               // instead of the misleading `no_stored_credentials` path.
               // The user IS signed in — their filters just didn't match.
               session.pendingOrgs = userInfo.orgs;
-              session.pendingAuthIdToken = storedToken.idToken;
-              session.pendingAuthAccessToken = storedToken.accessToken;
+              session.pendingAuthIdToken = tokenForRun.idToken;
+              session.pendingAuthAccessToken = tokenForRun.accessToken;
             }
           } else if (
             envsWithKey.length === 1 &&
@@ -435,8 +445,8 @@ export async function resolveCredentials(
             );
             persistApiKey(apiKey, installDir);
             session.credentials = {
-              accessToken: storedToken.accessToken,
-              idToken: storedToken.idToken,
+              accessToken: tokenForRun.accessToken,
+              idToken: tokenForRun.idToken,
               projectApiKey: apiKey,
               host: getHostFromRegion(zone),
               appId: toCredentialAppId(selectedAppId),
@@ -461,8 +471,8 @@ export async function resolveCredentials(
               })`,
             );
             session.pendingOrgs = userInfo.orgs;
-            session.pendingAuthIdToken = storedToken.idToken;
-            session.pendingAuthAccessToken = storedToken.accessToken;
+            session.pendingAuthIdToken = tokenForRun.idToken;
+            session.pendingAuthAccessToken = tokenForRun.accessToken;
           } else {
             logToFile(
               '[credential-resolution] no environments with API keys — showing apiKeyNotice',
@@ -481,15 +491,15 @@ export async function resolveCredentials(
           // Fall back to getAPIKey for backward compatibility
           const projectApiKey = await getAPIKey({
             installDir,
-            idToken: storedToken.idToken,
+            idToken: tokenForRun.idToken,
             zone: zone,
             projectId: session.selectedProjectId ?? undefined,
           });
           if (projectApiKey) {
             persistApiKey(projectApiKey, installDir);
             session.credentials = {
-              accessToken: storedToken.accessToken,
-              idToken: storedToken.idToken,
+              accessToken: tokenForRun.accessToken,
+              idToken: tokenForRun.idToken,
               projectApiKey,
               host: getHostFromRegion(zone),
               appId: toCredentialAppId(session.selectedAppId),
