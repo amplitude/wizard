@@ -332,7 +332,7 @@ export async function resolveCredentials(
             : options?.org?.toLowerCase();
           const projectIdFilter = appIdFilter ? undefined : options?.projectId;
           const hasSpecificFilter = Boolean(
-            appIdFilter || envMatch || projectIdFilter,
+            appIdFilter || envMatch || projectIdFilter || orgFilter,
           );
           if (hasSpecificFilter) {
             for (const org of userInfo.orgs) {

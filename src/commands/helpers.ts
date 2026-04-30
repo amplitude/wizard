@@ -365,11 +365,19 @@ export const resolveNonInteractiveCredentials = async (
               })),
           ),
         );
+        const choicesField =
+          mismatch.flag === '--project-id'
+            ? 'projectId'
+            : mismatch.flag === '--env'
+            ? 'envName'
+            : mismatch.flag === '--org'
+            ? 'orgName'
+            : 'appId';
         agentUI.emitAuthRequired({
           reason: 'env_selection_failed',
           instruction:
             `${mismatch.reason} Re-run ${CLI_INVOCATION} with ` +
-            `${mismatch.flag} set to a value from data.choices[].appId ` +
+            `${mismatch.flag} set to a value from data.choices[].${choicesField} ` +
             `(or another scope flag from data.choices[]).`,
           loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
           previousAttempt: mismatch,
