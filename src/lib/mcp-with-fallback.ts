@@ -59,9 +59,19 @@ function getClaudeCodeExecutablePath(): string {
  * calls hit the same server with the same token.
  *
  * Keyed on `accessToken|mcpUrl` so a token rotation or zone switch
- * forces a fresh handshake, but otherwise we reuse the cached session
- * for a soft TTL window. Failures fall through to the agent fallback
- * exactly like before — caching only short-circuits the happy path.
+ * naturally creates a fresh cache entry; we also expose
+ * {@link invalidateMcpSessionCache} so callers can drop stale entries
+ * explicitly when they know an auth change has happened (token refresh,
+ * logout) instead of waiting for TTL expiry.
+ *
+ * TTL was originally 60s — a tight bound that meant most wizard runs
+ * paid the full handshake cost on every MCP call (the wizard's MCP
+ * traffic is bursty: one call to fetch config, then several minutes of
+ * agent work, then more MCP calls during data-ingestion check). 5 min
+ * matches the Amplitude gateway's session-expiry buffer while keeping
+ * stale-token risk bounded. Failures still fall through to the agent
+ * fallback exactly like before — caching only short-circuits the
+ * happy path.
  */
 type CallToolFnInternal = (
   id: number,
@@ -81,7 +91,7 @@ type CallToolFnInternal = (
 type SessionOpenResult =
   | { ok: true; callTool: CallToolFnInternal }
   | { ok: false; deterministic: boolean; reason: string };
-const MCP_SESSION_TTL_MS = 60_000;
+const MCP_SESSION_TTL_MS = 5 * 60_000;
 
 // ── Per-fetch timeouts ────────────────────────────────────────────────────────
 //
@@ -190,6 +200,23 @@ function cacheMcpSession(
     callTool,
     expiresAt: Date.now() + MCP_SESSION_TTL_MS,
   });
+}
+/**
+ * Drop cached MCP sessions. Pass an `accessToken` to invalidate only
+ * that token's entries (e.g. on token refresh); omit to clear every
+ * cached session (e.g. on logout). The auth/token-refresh path should
+ * call this so the next `callAmplitudeMcp` rehandshakes with the new
+ * token instead of failing on a stale `Authorization: Bearer` header.
+ */
+export function invalidateMcpSessionCache(accessToken?: string): void {
+  if (accessToken === undefined) {
+    mcpSessionCache.clear();
+    return;
+  }
+  const prefix = `${accessToken}|`;
+  for (const key of mcpSessionCache.keys()) {
+    if (key.startsWith(prefix)) mcpSessionCache.delete(key);
+  }
 }
 /** Test-only: clear the cache between unit-test cases. */
 export function _clearMcpSessionCacheForTesting(): void {

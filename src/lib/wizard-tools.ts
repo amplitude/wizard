@@ -1434,6 +1434,20 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   );
 
   // -- detect_package_manager -----------------------------------------------
+  //
+  // The agent typically calls this 2–3 times during a run (before
+  // installing the SDK, before running typecheck, sometimes again before
+  // verification). Each call previously paid a fresh disk scan of the
+  // working directory and any framework-specific lockfile probes —
+  // observably 50–250ms in dev, longer on a slow FS. The package manager
+  // can't change mid-run, so memoize the first scan for the lifetime of
+  // this tools server (one server per wizard run).
+  //
+  // The cache is a Promise so concurrent calls share the same in-flight
+  // scan instead of racing.
+  let detectPMCache: Promise<
+    Awaited<ReturnType<typeof detectPackageManager>>
+  > | null = null;
 
   const detectPM = tool(
     'detect_package_manager',
@@ -1442,9 +1456,17 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       reason: reasonField,
     },
     async (_args: { reason: string }) => {
-      logToFile(`detect_package_manager: scanning ${workingDirectory}`);
+      if (detectPMCache) {
+        logToFile(`detect_package_manager: cache hit for ${workingDirectory}`);
+      } else {
+        logToFile(`detect_package_manager: scanning ${workingDirectory}`);
+        detectPMCache = detectPackageManager(workingDirectory).catch((err) => {
+          detectPMCache = null;
+          throw err;
+        });
+      }
 
-      const result = await detectPackageManager(workingDirectory);
+      const result = await detectPMCache;
 
       logToFile(
         `detect_package_manager: detected ${result.detected.length} package manager(s)`,
