@@ -950,6 +950,57 @@ export function mergeEnvValues(
 }
 
 // ---------------------------------------------------------------------------
+// Event-name normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize an event name to the canonical Title Case shape mandated by
+ * the wizard commandments ("[Noun] [Past-Tense Verb]", 2–5 words, ≤50
+ * chars).
+ *
+ * The system prompt asks the model for Title Case, but the
+ * `confirm_event_plan` tool schema historically said "lowercase". When
+ * the agent saw both, it sometimes emitted snake_case or all-lowercase
+ * names, which then rendered as ugly bullets in the Event Plan viewer
+ * and broke chart legends downstream. Rather than reject and force a
+ * second prompt round-trip, normalize forgivingly here so the contract
+ * is always met regardless of which guidance the model believed.
+ *
+ * Soft normalization — never throws, never rejects. Returns the name
+ * unchanged if it's already correctly shaped; converts snake_case,
+ * kebab-case, camelCase, and ALL-LOWERCASE inputs into Title Case.
+ *
+ * Exported for unit testing.
+ */
+export function normalizeEventName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  // Convert separators (underscore, hyphen, dot) to spaces.
+  let working = trimmed.replace(/[_\-.]+/g, ' ');
+  // Split camelCase / PascalCase boundaries: insert a space before any
+  // uppercase letter that follows a lowercase letter or digit. ASCII-only
+  // — event names are English by convention; non-ASCII is left alone so
+  // we don't munge intentional UTF-8 in pathological cases.
+  working = working.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  // Collapse runs of whitespace.
+  working = working.replace(/\s+/g, ' ').trim();
+  if (!working) return trimmed;
+  // Title-case each word. Preserve fully-uppercase tokens of length ≤4
+  // (acronyms like "API", "URL", "SDK"); otherwise capitalize first
+  // letter and lowercase the rest.
+  const titled = working
+    .split(' ')
+    .map((word) => {
+      if (!word) return word;
+      if (word.length <= 4 && /^[A-Z]+$/.test(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+  // Cap at 50 chars to match the wizard's truncation rule.
+  return titled.length > 50 ? titled.slice(0, 45) + '…' : titled;
+}
+
+// ---------------------------------------------------------------------------
 // Event plan persistence
 // ---------------------------------------------------------------------------
 
@@ -1606,7 +1657,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
             name: z
               .string()
               .describe(
-                'Short lowercase event name using spaces for separators, e.g. "user signed up", "product added to cart", "search performed". This is displayed as a bold label — keep it concise (2-5 words). Do NOT put descriptions or file paths here.',
+                'Title Case event name, [Noun] [Past-Tense Verb], 2-5 words. Examples: "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started". NOT snake_case ("user_signed_up"), camelCase ("userSignedUp"), or lowercase ("user signed up"). Do NOT put descriptions or file paths here.',
               ),
             description: z
               .string()
@@ -1624,15 +1675,27 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       reason: string;
     }) => {
       const { DEMO_MODE } = await import('./constants.js');
-      // Light normalization — truncate overly long names but don't try to
-      // extract names from descriptions.
-      const normalizedEvents = args.events.map((e) => ({
-        name:
-          e.name.trim().length > 50
-            ? e.name.trim().slice(0, 45) + '…'
-            : e.name.trim(),
-        description: e.description?.trim() || '',
-      }));
+      // Soft-gate the name format. Agents historically saw conflicting
+      // guidance (commandments said Title Case, the tool schema said
+      // lowercase) and emitted mixed shapes. Normalize forgivingly here
+      // so the persisted plan AND the user-facing prompt always match
+      // the canonical Title Case shape — no second prompt round-trip
+      // needed when the model gets it slightly wrong.
+      let normalizationCount = 0;
+      const normalizedEvents = args.events.map((e) => {
+        const original = e.name.trim();
+        const normalized = normalizeEventName(original);
+        if (normalized !== original) normalizationCount += 1;
+        return {
+          name: normalized,
+          description: e.description?.trim() || '',
+        };
+      });
+      if (normalizationCount > 0) {
+        logToFile(
+          `confirm_event_plan: normalized ${normalizationCount}/${args.events.length} event name(s) to Title Case`,
+        );
+      }
       const events =
         DEMO_MODE && normalizedEvents.length > 5
           ? normalizedEvents.slice(0, 5)

@@ -190,6 +190,33 @@ export function agentEventsInstrumented(session: WizardSession): boolean {
 }
 
 /**
+ * Single decision point for whether a late-stage agent error should be
+ * treated as a soft fall-through (continue to MCP / Slack / Outro) or a
+ * hard abort. Was previously inlined twice in `runAgentWizardBody` with
+ * subtly different rules between the MCP-error and API-error branches —
+ * a rate limit during dashboard creation would hard-abort even when
+ * events were instrumented, while the same situation under MCP_MISSING
+ * fell through softly. This function is the single source of truth.
+ *
+ * Soft if EITHER the dashboard URL is set on the session OR the event
+ * plan was persisted to disk (`.amplitude/events.json` or its legacy
+ * mirror). Hard otherwise.
+ */
+export function classifyAgentOutcome(session: WizardSession): {
+  severity: 'soft' | 'hard';
+  dashboardComplete: boolean;
+  eventsInstrumented: boolean;
+} {
+  const dashboardComplete = agentArtifactsLookComplete(session);
+  const eventsInstrumented = agentEventsInstrumented(session);
+  return {
+    severity: dashboardComplete || eventsInstrumented ? 'soft' : 'hard',
+    dashboardComplete,
+    eventsInstrumented,
+  };
+}
+
+/**
  * Hard-error abort for `API_ERROR` / `RATE_LIMIT` agent failures.
  * Extracted from the runAgentWizardBody inline branch so the soft-error
  * path can early-return without duplicating this logic.
@@ -332,7 +359,18 @@ export async function refreshTokenIfStale(
     const needsRefresh =
       user &&
       Date.now() + EXPIRY_BUFFER_MS > new Date(stored.expiresAt).getTime();
-    if (!needsRefresh) return stored.accessToken;
+    if (!needsRefresh) {
+      // If the on-disk token differs from the caller's in-memory one,
+      // a previous refresh rotated it — drop any MCP sessions bound to
+      // the stale value before handing it back. Cheap & idempotent.
+      if (stored.accessToken !== fallback) {
+        const { invalidateMcpSessionsForToken } = await import(
+          './mcp-with-fallback.js'
+        );
+        invalidateMcpSessionsForToken(fallback);
+      }
+      return stored.accessToken;
+    }
     const startedAt = Date.now();
     try {
       // CRITICAL: pass the user's zone — without it `refreshAccessToken`
@@ -348,6 +386,17 @@ export async function refreshTokenIfStale(
         refreshToken: refreshed.refreshToken,
         expiresAt: refreshed.expiresAt,
       });
+      // Drop cached MCP sessions keyed on the now-stale token so the
+      // next callAmplitudeMcp opens a fresh session with the rotated
+      // bearer instead of 401-ing and falling through to the 12s agent
+      // fallback.
+      const { invalidateMcpSessionsForToken } = await import(
+        './mcp-with-fallback.js'
+      );
+      invalidateMcpSessionsForToken(fallback);
+      if (stored.accessToken !== fallback) {
+        invalidateMcpSessionsForToken(stored.accessToken);
+      }
       analytics.wizardCapture('auth refreshed silently', {
         label,
         'duration ms': Date.now() - startedAt,
@@ -964,10 +1013,10 @@ async function runAgentWizardBody(
     // so we can disambiguate which server failed.
     const errorType = agentResult.error;
     const detail = agentResult.message ?? null;
-    const dashboardComplete = agentArtifactsLookComplete(session);
-    const eventsInstrumented = agentEventsInstrumented(session);
+    const { severity, dashboardComplete, eventsInstrumented } =
+      classifyAgentOutcome(session);
 
-    if (dashboardComplete || eventsInstrumented) {
+    if (severity === 'soft') {
       logToFile(
         `[agent-runner] Soft ${errorType} after agent did meaningful work (dashboard=${dashboardComplete}, events=${eventsInstrumented}): ${
           detail ?? '(no detail)'
@@ -1056,27 +1105,33 @@ async function runAgentWizardBody(
   ) {
     const rawMessage = agentResult.message ?? '';
 
-    // Soft-error path: if the agent's actual work artifacts exist on
-    // the session (dashboard URL set), the API failure was on a
-    // tail-end call (often the last token flush, an observability
-    // ping, or a hook closing the stream after the agent already
-    // wrote the setup report and created the dashboard). Hard-aborting
-    // here would skip MCP / Slack / Outro and exit with a network
-    // error code, even though the user's project is in a fully-set-up
-    // state. Continue past this branch so the user gets their
-    // dashboard link, the MCP install offer, and a normal Outro.
-    if (agentArtifactsLookComplete(session)) {
+    // Soft-error path: if the agent already left the project in a
+    // usable state (dashboard URL set OR event plan persisted), the
+    // API failure was on a tail-end call — often the last token flush,
+    // an observability ping, or a hook closing the stream after the
+    // agent already wrote the setup report. Hard-aborting here would
+    // skip MCP / Slack / Outro and exit with a network error code,
+    // even though the user's project is in a fully-set-up state.
+    //
+    // Aligned with the MCP_MISSING branch above via classifyAgentOutcome
+    // so a rate-limit during dashboard creation doesn't hard-abort while
+    // an MCP_MISSING in the same spot would have soft-fallen-through.
+    const { severity, dashboardComplete, eventsInstrumented } =
+      classifyAgentOutcome(session);
+    if (severity === 'soft') {
       const errorSubtype = classifyApiErrorSubtype({
         errorType: agentResult.error,
         message: rawMessage,
       });
       logToFile(
-        `[agent-runner] Soft API error after work completed (${errorSubtype}): ${rawMessage}. Continuing to MCP / outro.`,
+        `[agent-runner] Soft API error after work completed (${errorSubtype}, dashboard=${dashboardComplete}, events=${eventsInstrumented}): ${rawMessage}. Continuing to MCP / outro.`,
       );
       analytics.wizardCapture('agent soft error', {
         integration: config.metadata.integration,
         'error type': agentResult.error,
         'error subtype': errorSubtype,
+        'dashboard complete': dashboardComplete,
+        'events instrumented': eventsInstrumented,
       });
       // Surface a non-fatal warning in the status ticker so the user
       // sees something happened on the way out, but don't abort.
