@@ -69,6 +69,7 @@ export function cleanupShellCompletionLine(): void {
 
   // Try each file independently so a failure on one (e.g. read-only
   // permissions on .zshrc) doesn't skip cleanup of the others.
+  let anyFailed = false;
   for (const file of candidates) {
     try {
       if (!fs.existsSync(file)) continue;
@@ -79,7 +80,7 @@ export function cleanupShellCompletionLine(): void {
         fs.writeFileSync(file, cleaned, 'utf-8');
       }
     } catch {
-      // Best-effort cleanup; never surface errors.
+      anyFailed = true;
     }
   }
 
@@ -88,9 +89,9 @@ export function cleanupShellCompletionLine(): void {
   // the next run retries automatically. Best-effort: if the cache dir
   // can't be created (locked-down volume, weird home directory), accept
   // the small per-run cost rather than crashing.
-  if (sentinelPath) {
+  if (sentinelPath && !anyFailed) {
     try {
-      fs.mkdirSync(cacheRoot, { recursive: true });
+      fs.mkdirSync(cacheRoot, { recursive: true, mode: 0o700 });
       fs.writeFileSync(sentinelPath, '', 'utf-8');
     } catch {
       // Sentinel write failed — next run re-walks the rc files. No-op.
