@@ -93,6 +93,7 @@ describe('buildSession signup profile fields', () => {
     const s = buildSession({});
     expect(s.signupEmail).toBeNull();
     expect(s.signupFullName).toBeNull();
+    expect(s.signupMagicLinkUrl).toBeNull();
   });
 
   it('accepts signupEmail and signupFullName from options', () => {

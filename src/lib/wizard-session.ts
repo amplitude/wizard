@@ -726,6 +726,12 @@ export interface WizardSession {
    */
   dashboardFallbackPhase: 'in_progress' | 'completed' | null;
 
+  /**
+   * Browser magic-link URL from `--signup` provisioning (`dashboard_url` on
+   * the agentic signup API). Never log or NDJSON (query may contain secrets).
+   */
+  signupMagicLinkUrl: string | null;
+
   /** Email address of the authenticated user (from ~/.ampli.json stored profile). */
   userEmail: string | null;
 
@@ -994,6 +1000,7 @@ export function buildSession(args: {
     dataIngestionConfirmed: false,
     checklistDashboardUrl: null,
     dashboardFallbackPhase: null,
+    signupMagicLinkUrl: null,
 
     userEmail: null,
     _restoredFromCheckpoint: false,

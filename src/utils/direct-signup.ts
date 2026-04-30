@@ -15,9 +15,14 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
 
 // Discriminated union response schemas from the provisioning endpoint.
-const OAuthCodeSchema = z.object({
+// `dashboard_url` — optional magic-link URL (amplitude/javascript PR #108967).
+const OAuthProvisioningSchema = z.object({
   type: z.literal('oauth'),
   oauth: z.object({ code: z.string().min(1) }),
+  // `.nullish()` (no `min(1)`): a metadata field with strict validation
+  // would fail-closed the entire signup whenever the API returns an empty
+  // string or null. Treat empty as null at the read site.
+  dashboard_url: z.string().nullish(),
 });
 
 const RedirectSchema = z.object({
@@ -69,6 +74,8 @@ export type DirectSignupResult =
         expiresAt: string;
         zone: AmplitudeZone;
       };
+      /** From `dashboard_url`; may contain secrets — never log or NDJSON. */
+      dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
   | { kind: 'error'; message: string };
@@ -122,7 +129,7 @@ export async function performDirectSignup(
     return { kind: 'error', message: parsedError.data.error.message };
   }
 
-  const parsedCode = OAuthCodeSchema.safeParse(response.data);
+  const parsedCode = OAuthProvisioningSchema.safeParse(response.data);
   if (!parsedCode.success) {
     if (response.status === 429) {
       log.warn('[direct-signup] provisioning rate limited');
@@ -220,5 +227,9 @@ export async function performDirectSignup(
       expiresAt,
       zone: input.zone,
     },
+    // Coerce empty-string to null so downstream code (which displays the
+    // URL or short-circuits on missing) doesn't have to handle "" as a
+    // distinct third case.
+    dashboardUrl: parsedCode.data.dashboard_url || null,
   };
 }

@@ -194,8 +194,43 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(result).not.toBeNull();
-    expect(result).toMatchObject({ accessToken: 'direct-access' });
+    expect(result).toMatchObject({
+      accessToken: 'direct-access',
+      dashboardUrl: null,
+    });
     expect(replaceStoredUser).toHaveBeenCalledOnce();
+  });
+
+  it('forwards dashboardUrl from performDirectSignup on success', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    const magic = 'https://app.amplitude.com/magic?x=1';
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+      dashboardUrl: magic,
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+
+    const result = await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(result).toMatchObject({ dashboardUrl: magic });
   });
 
   it('emits agentic signup attempted with status=success on the success path', async () => {
