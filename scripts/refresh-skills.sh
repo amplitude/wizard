@@ -41,6 +41,21 @@ else
   use_local=false
 fi
 
+# Reference files we strip on every refresh — these are full HTML scrapes
+# of Amplitude doc pages (200–270 KB each) shipped under
+# `references/` in every integration skill. The agent's workflow files
+# tell it to "Read them now" alongside EXAMPLE.md, so the cost lands on
+# every cold-start run with that variant. EXAMPLE.md (clean Markdown,
+# ~20 KB) covers the practical init/track patterns; the HTML scrapes
+# add HTML head, navigation, and footer noise that the model has to
+# tokenize anyway. Until context-hub stops shipping them, strip here
+# defensively so a refresh can't reintroduce token bloat.
+SKILL_EXCLUDE_PATTERNS=(
+  'references/browser-sdk-2.md'
+  'references/browser-unified-sdk.md'
+  'references/amplitude-quickstart.md'
+)
+
 extract_zip() {
   local zip="$1"
   local skill_id
@@ -68,7 +83,22 @@ extract_zip() {
   fi
 
   mkdir -p "$dest"
-  unzip -q -o "$zip" -d "$dest"
+  unzip -q -o "$zip" -d "$dest" -x "${SKILL_EXCLUDE_PATTERNS[@]}"
+
+  # Drop dangling reference list entries in SKILL.md that point at the
+  # files we just excluded — without this, the agent loads SKILL.md, sees
+  # `- references/browser-sdk-2.md ...`, then tries to Read a missing
+  # file and either burns a tool call on the failure or stalls. Sed
+  # is portable across macOS / Linux when we keep the pattern simple.
+  if [[ -f "$dest/SKILL.md" ]]; then
+    sed -i.bak \
+      -e '/`references\/browser-sdk-2\.md`/d' \
+      -e '/`references\/browser-unified-sdk\.md`/d' \
+      -e '/`references\/amplitude-quickstart\.md`/d' \
+      "$dest/SKILL.md"
+    rm -f "$dest/SKILL.md.bak"
+  fi
+
   echo "  extracted $skill_id"
 }
 
