@@ -108,6 +108,10 @@ export class AgentState {
     return this.discoveries;
   }
 
+  getToolUseCounts(): ReadonlyMap<string, number> {
+    return this.toolUseCounts;
+  }
+
   snapshot(): SerializedAgentState {
     return {
       schemaVersion: 'amplitude-wizard-agent-state/1',
@@ -177,7 +181,8 @@ export class AgentState {
  */
 export function buildRetryHint(state: AgentState): string {
   const discoveries = state.getDiscoveries();
-  if (discoveries.size === 0) return '';
+  const toolUseCounts = state.getToolUseCounts();
+  if (discoveries.size === 0 && toolUseCounts.size === 0) return '';
   const lines: string[] = [
     '<retry-recovery>',
     'A prior attempt was interrupted by a transient upstream error and the wizard is retrying. The discoveries below were verified by tool calls in the prior attempt — trust them and SKIP the corresponding tool calls so this attempt can pick up from where the prior one left off:',
@@ -185,6 +190,13 @@ export function buildRetryHint(state: AgentState): string {
   ];
   for (const [key, summary] of discoveries) {
     lines.push(`- ${key}: ${summary}`);
+  }
+  const repeated = [...toolUseCounts.entries()].filter(([, n]) => n > 1);
+  if (repeated.length > 0) {
+    lines.push('', 'Tool call counts from the prior attempt:');
+    for (const [tool, count] of repeated) {
+      lines.push(`- ${tool}: called ${count} times`);
+    }
   }
   lines.push('</retry-recovery>', '');
   return lines.join('\n');
