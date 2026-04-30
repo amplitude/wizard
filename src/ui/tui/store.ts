@@ -40,6 +40,10 @@ import {
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
 import { clearApiKey } from '../../utils/api-key-store.js';
+import {
+  CANONICAL_STEPS,
+  matchCanonicalStep,
+} from '../../lib/canonical-tasks.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -270,6 +274,20 @@ export class WizardStore {
     // unmounts inactive tabs).
     if (phase === RunPhase.Running && prevPhase !== RunPhase.Running) {
       this.$session.setKey('runStartedAt', Date.now());
+      // Pre-populate the canonical 5 tasks so the user sees "0 done · 5
+      // to go" from frame 1, not an empty list while the agent loads.
+      // Skip if the list is already populated (re-entry into Running, or
+      // a test that pre-seeded tasks via setTasks).
+      if (this.$tasks.get().length === 0) {
+        this.$tasks.set(
+          CANONICAL_STEPS.map((step) => ({
+            label: step.label,
+            activeForm: step.defaultActiveForm,
+            status: TaskStatus.Pending,
+            done: false,
+          })),
+        );
+      }
     }
     this.emitChange();
   }
@@ -1847,41 +1865,103 @@ export class WizardStore {
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
-    // Index the previous task list by label so we can preserve
-    // already-completed work across re-plans. Common scenario: an SDK
-    // retry (HTTP 400 / 429) causes the agent to re-emit its TodoWrite
-    // with stale state — tasks that were already ✓ get demoted back to
-    // ◐ or ○. The user sees their progress visibly un-check. We force
-    // monotonic progress: once a task with a given label is completed,
-    // it stays completed even if a later TodoWrite says otherwise.
-    const previousByLabel = new Map(this.$tasks.get().map((t) => [t.label, t]));
+    // The user-visible list is locked to the five CANONICAL_STEPS.
+    // TodoWrite output is treated as a stream of updates against that
+    // fixed list: each incoming todo is matched to a canonical step by
+    // exact label (case-insensitive) and anything that doesn't match is
+    // dropped. The agent commandment is the contract — drift in wording
+    // is a prompt bug to fix in commandments.ts, not paper over here.
+    //
+    // Three invariants enforced after the per-step status is resolved:
+    //   1. Monotonic — once a step has been completed, no later sync can
+    //      demote it. Catches retry-induced regression where the agent
+    //      re-emits stale TodoWrite state after an HTTP 400 / 429.
+    //   2. Single in_progress — the canonical journey is sequential. If
+    //      multiple steps are simultaneously in_progress, only the
+    //      latest stays active.
+    //   3. Sequential ordering — when the agent skips ahead (marks a
+    //      later step in_progress while an earlier one is still
+    //      pending), the earlier steps roll up to completed.
 
-    const incoming = todos.map((t) => {
-      const prev = previousByLabel.get(t.content);
-      let status = (t.status as TaskStatus) || TaskStatus.Pending;
-      let done = status === TaskStatus.Completed;
-      if (prev?.done && !done) {
-        status = TaskStatus.Completed;
-        done = true;
+    // Start from existing tasks (pre-populated in setRunPhase). Defensive
+    // fallback when the list is empty (test-only or unusual entry).
+    const current = this.$tasks.get();
+    const base: TaskItem[] =
+      current.length === CANONICAL_STEPS.length
+        ? current.map((t) => ({ ...t }))
+        : CANONICAL_STEPS.map((step) => ({
+            label: step.label,
+            activeForm: step.defaultActiveForm,
+            status: TaskStatus.Pending,
+            done: false,
+          }));
+
+    // Bucket each incoming todo and aggregate per step.
+    const sawInProgress: boolean[] = base.map(() => false);
+    const sawCompleted: boolean[] = base.map(
+      (t) => t.status === TaskStatus.Completed,
+    );
+
+    for (const todo of todos) {
+      const idx = matchCanonicalStep(todo.content);
+      if (idx < 0) continue;
+      const incomingStatus = (todo.status as TaskStatus) || TaskStatus.Pending;
+      if (incomingStatus === TaskStatus.Completed) sawCompleted[idx] = true;
+      if (incomingStatus === TaskStatus.InProgress) sawInProgress[idx] = true;
+      // Latest non-empty activeForm wins so the user sees current work
+      // ("Installing project dependencies"). Falls back to the canonical
+      // default when the step flips to in_progress without one.
+      if (todo.activeForm && todo.activeForm.trim()) {
+        base[idx].activeForm = todo.activeForm;
       }
-      return {
-        label: t.content,
-        activeForm: t.activeForm,
-        status,
-        done,
-      };
-    });
+    }
 
-    // Trust the agent's TodoWrite list as authoritative for *which* tasks
-    // exist. We previously retained "orphaned" completed tasks (done but
-    // missing from the new list) on the theory that Claude Code might
-    // compact away history — in practice the agent keeps completed items
-    // and *renames* in-progress ones, and the retention logic surfaced
-    // zombie labels like "Set up env" alongside its renamed successor
-    // "Set up env and install SDK". Trusting the incoming list eliminates
-    // the duplicate; the monotonic guard above protects against the
-    // retry-induced regression case.
-    this.$tasks.set(incoming);
+    // Resolve each step's status with monotonic guard.
+    for (let i = 0; i < base.length; i++) {
+      if (sawCompleted[i]) {
+        base[i].status = TaskStatus.Completed;
+        base[i].done = true;
+      } else if (base[i].status === TaskStatus.Completed || base[i].done) {
+        base[i].status = TaskStatus.Completed;
+        base[i].done = true;
+      } else if (sawInProgress[i]) {
+        base[i].status = TaskStatus.InProgress;
+        base[i].done = false;
+      }
+    }
+
+    // Enforce single-in-progress + ordering.
+    let lastInProgressIdx = -1;
+    let lastCompletedIdx = -1;
+    for (let i = 0; i < base.length; i++) {
+      if (base[i].status === TaskStatus.InProgress) lastInProgressIdx = i;
+      if (base[i].status === TaskStatus.Completed) lastCompletedIdx = i;
+    }
+    const frontier = Math.max(lastInProgressIdx, lastCompletedIdx);
+    for (let i = 0; i < frontier; i++) {
+      if (base[i].status !== TaskStatus.Completed) {
+        base[i].status = TaskStatus.Completed;
+        base[i].done = true;
+      }
+    }
+    if (lastInProgressIdx >= 0) {
+      for (let i = 0; i < base.length; i++) {
+        if (
+          i !== lastInProgressIdx &&
+          base[i].status === TaskStatus.InProgress
+        ) {
+          if (i < lastInProgressIdx) {
+            base[i].status = TaskStatus.Completed;
+            base[i].done = true;
+          } else {
+            base[i].status = TaskStatus.Pending;
+            base[i].done = false;
+          }
+        }
+      }
+    }
+
+    this.$tasks.set(base);
     this.emitChange();
   }
 
