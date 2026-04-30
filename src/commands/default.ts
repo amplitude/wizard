@@ -11,6 +11,7 @@ import {
   runDirectSignupIfRequested,
   gateCiSignupAcceptToS,
   gateAgentSignupArguments,
+  isAuthTaskGateReady,
 } from './helpers';
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
@@ -697,21 +698,21 @@ export const defaultCommand: CommandModule = {
               // the user is still picking the new one on RegionSelect.
               // setRegion() flips regionForced back to false once the new
               // region is chosen, releasing the wait against the right zone.
+              //
+              // For --signup, also wait for ToS acceptance. Otherwise the
+              // auth task races past EmailCapture / ToS and opens the OAuth
+              // browser before the user has filled in their email or
+              // accepted the terms — which is the entire point of the
+              // signup flow. See `isAuthTaskGateReady` for the full
+              // predicate (kept testable, since the inline version
+              // silently regressed when its conditions drifted).
               await new Promise<void>((resolve) => {
-                if (
-                  tui.store.session.introConcluded &&
-                  tui.store.session.region !== null &&
-                  !tui.store.session.regionForced
-                ) {
+                if (isAuthTaskGateReady(tui.store.session)) {
                   resolve();
                   return;
                 }
                 const unsub = tui.store.subscribe(() => {
-                  if (
-                    tui.store.session.introConcluded &&
-                    tui.store.session.region !== null &&
-                    !tui.store.session.regionForced
-                  ) {
+                  if (isAuthTaskGateReady(tui.store.session)) {
                     unsub();
                     resolve();
                   }
