@@ -31,6 +31,7 @@ import { Box, Text } from 'ink';
 import { useState, useMemo, useRef, useEffect } from 'react';
 import { readdirSync, type Dirent } from 'node:fs';
 import { homedir } from 'node:os';
+import { isAbsolute as pathIsAbsolute, resolve as pathResolve } from 'node:path';
 
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors, Icons } from '../styles.js';
@@ -148,14 +149,14 @@ export function resolveCompletionDir(stem: string, cwd: string): string {
   if (withoutTrailingSlash === '') return '/';
   if (withoutTrailingSlash === '~') return homedir();
   const expanded = expandTilde(withoutTrailingSlash);
-  // Absolute paths pass through; relative paths resolve from cwd.
-  if (expanded.startsWith('/')) return expanded;
-  // We deliberately DON'T import `path.resolve` here for this case
-  // — it would make this helper depend on cwd transitions. Callers
-  // pass cwd explicitly so tests stay pure.
-  return cwd.endsWith('/')
-    ? cwd + expanded
-    : cwd + '/' + expanded;
+  // Absolute paths pass through. Use `path.isAbsolute` (not a `/`
+  // prefix check) so Windows drive-letter paths like `C:\Users\...`
+  // — which `expandTilde('~')` produces on win32 — are handled.
+  if (pathIsAbsolute(expanded)) return expanded;
+  // Relative paths resolve against the explicit cwd argument. Using
+  // `path.resolve` here keeps the helper deterministic in tests
+  // (callers pass `cwd`) while doing the right thing on every OS.
+  return pathResolve(cwd, expanded);
 }
 
 /**
@@ -372,8 +373,17 @@ export const PathInput = ({
       return;
     }
 
+    // When `cycleIndex` is -1 (Tab populated candidates but the user
+    // hasn't cycled yet) the modulo math `(-1 + -1 + n) % n` lands on
+    // `n - 2`, which silently skips the last candidate. Treat -1 as
+    // "no selection" and seed the same way the priming branch above
+    // does: ↓ goes to the first item, ↑ goes to the last.
     const nextIdx =
-      (cycleIndex + direction + candidates.length) % candidates.length;
+      cycleIndex === -1
+        ? direction === 1
+          ? 0
+          : candidates.length - 1
+        : (cycleIndex + direction + candidates.length) % candidates.length;
     const previewed = applyCompletion(
       baselineRef.current,
       candidates[nextIdx].name,
