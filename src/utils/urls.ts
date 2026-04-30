@@ -87,3 +87,51 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
 
   return 'https://core.amplitude.com/wizard';
 };
+
+/**
+ * Resolve the Amplitude MCP server base host for a given region.
+ *
+ * Returns the bare origin (no path); callers append `/mcp`, `/sse`, etc.
+ * Both endpoints are real and live: `mcp.amplitude.com` and
+ * `mcp.eu.amplitude.com` both authenticate and route to the regional
+ * data center. Routing an EU user's session through the US MCP host
+ * sends their queries through US infrastructure — a compliance issue,
+ * not just a UX issue.
+ */
+export const getMcpHostFromRegion = (region: CloudRegion): string => {
+  if (region === 'eu') {
+    return 'https://mcp.eu.amplitude.com';
+  }
+  return 'https://mcp.amplitude.com';
+};
+
+/**
+ * Build the streamable-HTTP MCP endpoint URL for a region.
+ *
+ * Resolution order (first match wins):
+ *   1. `MCP_URL` env override — primarily for tests / dev pointing at a
+ *      staging or local server. Honored regardless of region.
+ *   2. `local: true` — `http://localhost:8787/mcp`. Used by `--local-mcp`
+ *      and the `mcp add --local` developer flag.
+ *   3. Region-aware production: `mcp.amplitude.com/mcp` (US) or
+ *      `mcp.eu.amplitude.com/mcp` (EU).
+ *
+ * Pass the user's resolved zone — never assume US. The returned URL gets
+ * baked into editor configs (Claude Code, Cursor, VS Code, etc.) so the
+ * value persists past the wizard run; getting this wrong sticks the user
+ * with a wrong-region MCP forever.
+ */
+export const getMcpUrlFromZone = (
+  region: CloudRegion,
+  options: { local?: boolean; path?: 'mcp' | 'sse' } = {},
+): string => {
+  const { local = false, path = 'mcp' } = options;
+  const envOverride = process.env.MCP_URL?.trim();
+  if (envOverride) {
+    return envOverride;
+  }
+  if (local) {
+    return `http://localhost:8787/${path}`;
+  }
+  return `${getMcpHostFromRegion(region)}/${path}`;
+};
