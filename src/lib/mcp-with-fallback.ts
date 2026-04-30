@@ -53,21 +53,79 @@ function getClaudeCodeExecutablePath(): string {
 // ── MCP session helpers ───────────────────────────────────────────────────────
 
 /**
+ * Process-scoped MCP session cache. Without this, every `callAmplitudeMcp`
+ * call paid one full `initialize` + `notifications/initialized` HTTP
+ * round-trip (~50–200 ms each) — one per call, even when consecutive
+ * calls hit the same server with the same token.
+ *
+ * Keyed on `accessToken|mcpUrl` so a token rotation or zone switch
+ * forces a fresh handshake, but otherwise we reuse the cached session
+ * for a soft TTL window. Failures fall through to the agent fallback
+ * exactly like before — caching only short-circuits the happy path.
+ */
+type CallToolFnInternal = (
+  id: number,
+  name: string,
+  args: unknown,
+) => Promise<string | null>;
+const MCP_SESSION_TTL_MS = 60_000;
+const mcpSessionCache = new Map<
+  string,
+  { callTool: CallToolFnInternal; expiresAt: number }
+>();
+function getCachedMcpSession(
+  accessToken: string,
+  mcpUrl: string,
+): CallToolFnInternal | null {
+  const key = `${accessToken}|${mcpUrl}`;
+  const entry = mcpSessionCache.get(key);
+  if (!entry) return null;
+  if (entry.expiresAt <= Date.now()) {
+    mcpSessionCache.delete(key);
+    return null;
+  }
+  return entry.callTool;
+}
+function cacheMcpSession(
+  accessToken: string,
+  mcpUrl: string,
+  callTool: CallToolFnInternal,
+): void {
+  const key = `${accessToken}|${mcpUrl}`;
+  mcpSessionCache.set(key, {
+    callTool,
+    expiresAt: Date.now() + MCP_SESSION_TTL_MS,
+  });
+}
+/** Test-only: clear the cache between unit-test cases. */
+export function _clearMcpSessionCacheForTesting(): void {
+  mcpSessionCache.clear();
+}
+
+/**
  * Open an MCP session and return a `callTool` helper bound to that session.
- * Returns null if the session cannot be established.
+ * Returns null if the session cannot be established. Reuses a cached
+ * session for the same `accessToken|mcpUrl` pair when it's still fresh.
  */
 async function openMcpSession(
   accessToken: string,
   mcpUrl: string,
   signal?: AbortSignal,
-): Promise<
-  ((id: number, name: string, args: unknown) => Promise<string | null>) | null
-> {
+): Promise<CallToolFnInternal | null> {
+  const cached = getCachedMcpSession(accessToken, mcpUrl);
+  if (cached) {
+    logToFile('[MCP] reusing cached session');
+    return cached;
+  }
   return withWizardSpan(
     'mcp.session.init',
     'mcp.session',
     { 'mcp.url': mcpUrl },
-    async () => openMcpSessionInner(accessToken, mcpUrl, signal),
+    async () => {
+      const fresh = await openMcpSessionInner(accessToken, mcpUrl, signal);
+      if (fresh) cacheMcpSession(accessToken, mcpUrl, fresh);
+      return fresh;
+    },
   );
 }
 
@@ -75,9 +133,7 @@ async function openMcpSessionInner(
   accessToken: string,
   mcpUrl: string,
   signal?: AbortSignal,
-): Promise<
-  ((id: number, name: string, args: unknown) => Promise<string | null>) | null
-> {
+): Promise<CallToolFnInternal | null> {
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
@@ -187,7 +243,12 @@ async function openMcpSessionInner(
 
 // ── Agent fallback ────────────────────────────────────────────────────────────
 
-const AGENT_FALLBACK_TIMEOUT_MS = 30_000;
+// Cap how long we'll burn before giving up on the agent fallback. Was
+// 30s historically — that's long enough to make a stuck Amplitude MCP
+// look like the wizard is hung. 12s still covers a slow-but-recovering
+// upstream (typical recovery is under 5s) while bounding the worst case
+// to a fraction of the original.
+const AGENT_FALLBACK_TIMEOUT_MS = 12_000;
 
 async function runAgentFallback(
   accessToken: string,

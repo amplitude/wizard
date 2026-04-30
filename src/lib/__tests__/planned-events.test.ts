@@ -1,5 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { commitPlannedEvents } from '../planned-events';
+import { _clearMcpSessionCacheForTesting } from '../mcp-with-fallback';
 
 vi.mock('../../utils/debug');
 
@@ -47,6 +48,9 @@ describe('commitPlannedEvents', () => {
   beforeEach(() => {
     mockFetch.mockReset();
     mockQuery.mockReset();
+    // Clear the mcp-with-fallback session cache so a session opened by
+    // a prior test (different mockFetch sequence) doesn't get reused.
+    _clearMcpSessionCacheForTesting();
   });
 
   afterEach(() => {
@@ -124,11 +128,9 @@ describe('commitPlannedEvents', () => {
         }),
       ),
     );
-    // update_event session (new session opened per call)
-    mockFetch.mockResolvedValueOnce(
-      makeFetchResponse('', { 'mcp-session-id': SESSION_ID }),
-    );
-    mockFetch.mockResolvedValueOnce(makeFetchResponse(''));
+    // update_event reuses the cached session opened above (no second
+    // initialize round-trip thanks to the in-process MCP session
+    // cache). Just queue the tools/call response.
     mockFetch.mockResolvedValueOnce(
       makeFetchResponse(sseResult({ success: true })),
     );
