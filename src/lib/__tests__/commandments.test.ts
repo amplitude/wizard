@@ -230,11 +230,15 @@ describe('discovery parallelism commandment', () => {
     expect(text).toMatch(/depend|dependent|depends on/i);
   });
 
-  it('forbids fanning out write tools (shared-state risk)', () => {
-    // Edit / Write touch shared file state — running them in parallel
-    // is a correctness footgun (write/write races, Read-then-Edit
-    // chains breaking). Lock the negative case in.
-    expect(text).toContain('write tools');
-    expect(text).toContain('(Edit / Write)');
+  it('allows multi-file Edit/Write parallelism but forbids same-file fanout', () => {
+    // Updated policy (perf): independent-file Edits in one assistant
+    // message are the single biggest wall-clock win during the "Wire up
+    // event tracking" phase. Same-file fanout is still a correctness
+    // footgun (write/write races) and must remain forbidden. Lock both
+    // halves of the policy in.
+    expect(text).toContain('Write tools (Edit / Write)');
+    expect(text).toMatch(/different file/i);
+    expect(text).toMatch(/same file/i);
+    expect(text).toMatch(/Read-before-Write/);
   });
 });

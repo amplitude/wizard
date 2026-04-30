@@ -286,13 +286,17 @@ async function runCreateDashboard(args: {
   session: WizardSession;
 }): Promise<DashboardResult | null> {
   const { accessToken, events, session } = args;
-  // Region-aware MCP URL: an EU user's dashboard / chart MCP calls must
-  // route to mcp.eu.amplitude.com so the dashboard lands in the right
-  // data center. readDisk: true — create-dashboard runs post-agent and
-  // can be reached from non-TUI paths (CI, agent mode) where the
-  // RegionSelect tier-1 invariant isn't guaranteed.
-  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
-  const mcpUrl = getMcpUrlFromZone(zone, { local: session.localMcp });
+  // MCP host follows the bearer's account zone, not the env data zone.
+  // EU MCP 401s any US-issued bearer (and vice versa) — so a US-account
+  // user picking an EU env still needs to talk to US MCP. The env's
+  // data still lands in EU because the appId carries that routing
+  // server-side.
+  const { decodeJwtZone } = await import('../utils/jwt-exp.js');
+  const envZone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+    readDisk: true,
+  });
+  const accountZone = decodeJwtZone(accessToken) ?? envZone;
+  const mcpUrl = getMcpUrlFromZone(accountZone, { local: session.localMcp });
 
   const agentPrompt = buildAgentPrompt(events, session);
 

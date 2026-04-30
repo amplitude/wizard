@@ -68,6 +68,19 @@ type CallToolFnInternal = (
   name: string,
   args: unknown,
 ) => Promise<string | null>;
+
+/**
+ * Outcome of an MCP session open attempt.
+ *
+ * `deterministic: true` signals that retrying via the agent fallback would
+ * hit the same wall (e.g. HTTP 401/403 with the same access token), so the
+ * caller should fail fast instead of paying the multi-second agent
+ * subprocess cost. `deterministic: false` is the historical "transient
+ * failure" path — fallback may help.
+ */
+type SessionOpenResult =
+  | { ok: true; callTool: CallToolFnInternal }
+  | { ok: false; deterministic: boolean; reason: string };
 const MCP_SESSION_TTL_MS = 60_000;
 const mcpSessionCache = new Map<
   string,
@@ -104,18 +117,21 @@ export function _clearMcpSessionCacheForTesting(): void {
 
 /**
  * Open an MCP session and return a `callTool` helper bound to that session.
- * Returns null if the session cannot be established. Reuses a cached
- * session for the same `accessToken|mcpUrl` pair when it's still fresh.
+ * Returns a tagged result so callers can distinguish transient failures
+ * (worth falling back to the agent path) from deterministic ones (auth
+ * errors — agent fallback uses the same token and would just hit the
+ * same wall). Reuses a cached session for the same `accessToken|mcpUrl`
+ * pair when it's still fresh.
  */
 async function openMcpSession(
   accessToken: string,
   mcpUrl: string,
   signal?: AbortSignal,
-): Promise<CallToolFnInternal | null> {
+): Promise<SessionOpenResult> {
   const cached = getCachedMcpSession(accessToken, mcpUrl);
   if (cached) {
     logToFile('[MCP] reusing cached session');
-    return cached;
+    return { ok: true, callTool: cached };
   }
   return withWizardSpan(
     'mcp.session.init',
@@ -123,7 +139,7 @@ async function openMcpSession(
     { 'mcp.url': mcpUrl },
     async () => {
       const fresh = await openMcpSessionInner(accessToken, mcpUrl, signal);
-      if (fresh) cacheMcpSession(accessToken, mcpUrl, fresh);
+      if (fresh.ok) cacheMcpSession(accessToken, mcpUrl, fresh.callTool);
       return fresh;
     },
   );
@@ -133,7 +149,7 @@ async function openMcpSessionInner(
   accessToken: string,
   mcpUrl: string,
   signal?: AbortSignal,
-): Promise<CallToolFnInternal | null> {
+): Promise<SessionOpenResult> {
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     'Content-Type': 'application/json',
@@ -157,6 +173,23 @@ async function openMcpSessionInner(
       }),
       signal,
     });
+    // 401/403 mean the access token is bad. The agent fallback uses the
+    // same token, so it would just hit the same wall after a 12s setup —
+    // fail fast instead. 5xx is transient (gateway hiccup); fall through.
+    if (initRes.status === 401 || initRes.status === 403) {
+      await initRes.body?.cancel().catch(() => undefined);
+      logToFile(
+        `[MCP] initialize rejected by gateway (HTTP ${initRes.status}) — skipping agent fallback`,
+      );
+      addBreadcrumb('mcp', `Initialize rejected (HTTP ${initRes.status})`, {
+        status: initRes.status,
+      });
+      return {
+        ok: false,
+        deterministic: true,
+        reason: `http-${initRes.status}`,
+      };
+    }
     sessionId = initRes.headers.get('mcp-session-id') ?? undefined;
     await initRes.body?.cancel().catch(() => undefined);
   } catch (err) {
@@ -165,10 +198,12 @@ async function openMcpSessionInner(
         err instanceof Error ? err.message : String(err)
       }`,
     );
-    return null;
+    return { ok: false, deterministic: false, reason: 'init-error' };
   }
 
-  if (!sessionId) return null;
+  if (!sessionId) {
+    return { ok: false, deterministic: false, reason: 'no-session-id' };
+  }
 
   try {
     const notifRes = await fetch(mcpUrl, {
@@ -185,7 +220,7 @@ async function openMcpSessionInner(
     logToFile('[MCP] notifications/initialized failed (continuing)');
   }
 
-  return async (
+  const callTool: CallToolFnInternal = async (
     id: number,
     name: string,
     args: unknown,
@@ -239,6 +274,8 @@ async function openMcpSessionInner(
         }
       },
     );
+
+  return { ok: true, callTool };
 }
 
 // ── Agent fallback ────────────────────────────────────────────────────────────
@@ -440,10 +477,10 @@ async function callAmplitudeMcpInner<T>(
   let useFallback = false;
 
   if (direct) {
-    const callTool = await openMcpSession(accessToken, mcpUrl, abortSignal);
-    if (callTool) {
+    const session = await openMcpSession(accessToken, mcpUrl, abortSignal);
+    if (session.ok) {
       try {
-        directResult = await direct(callTool);
+        directResult = await direct(session.callTool);
         if (directResult === null) {
           logToFile(`[${label}] direct returned null — trying agent fallback`);
           useFallback = true;
@@ -456,8 +493,21 @@ async function callAmplitudeMcpInner<T>(
         );
         useFallback = true;
       }
+    } else if (session.deterministic) {
+      // Agent fallback uses the same access token, so the same auth
+      // failure would just repeat after a 12s subprocess spin-up.
+      // Surface the failure now and let the caller decide.
+      logToFile(
+        `[${label}] MCP session failed deterministically (${session.reason}) — skipping agent fallback`,
+      );
+      addBreadcrumb('mcp', `${label}: skipping fallback (deterministic)`, {
+        reason: session.reason,
+      });
+      return null;
     } else {
-      logToFile(`[${label}] MCP session failed — trying agent fallback`);
+      logToFile(
+        `[${label}] MCP session failed (${session.reason}) — trying agent fallback`,
+      );
       useFallback = true;
     }
   } else {

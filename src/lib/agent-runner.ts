@@ -749,11 +749,29 @@ async function runAgentWizardBody(
   const wizardFlags = await analytics.getAllFlagsForWizard();
   const wizardMetadata = buildWizardMetadata(wizardFlags);
 
-  // Determine MCP URL: CLI flag > env var > region-aware production default.
-  // Routing an EU user through the US MCP host runs their session against
-  // US infrastructure even though their data lives in EU — both a UX bug
-  // (wrong project, no events) and a compliance bug.
-  const mcpUrl = getMcpUrlFromZone(cloudRegion, { local: session.localMcp });
+  // Determine MCP URL.
+  //
+  // The MCP host has to match the bearer's issuer — `mcp.eu.amplitude.com`
+  // 401s any US-issued token with `invalid_token`, and the inverse holds.
+  // The bearer's zone is determined by which OAuth host minted it, NOT by
+  // the env's data region. A US-account user picking an EU env still has a
+  // US-issued bearer, so they need to talk to the US MCP regardless of
+  // where the env's data lives. Routing MCP off resolveZone (the env's
+  // zone) used to AUTH_ERROR every cross-region setup at agent init.
+  //
+  // Other regional URLs (api host for SDK init, app links for dashboards)
+  // continue to use `cloudRegion` because they DO follow the env's data
+  // zone — the wizard only conflates account/data zones for MCP.
+  const { decodeJwtZone } = await import('../utils/jwt-exp.js');
+  const accountZone = decodeJwtZone(accessToken) ?? cloudRegion;
+  const mcpUrl = getMcpUrlFromZone(accountZone, { local: session.localMcp });
+  if (accountZone !== cloudRegion) {
+    logToFile('[mcp] account zone differs from env data zone', {
+      accountZone,
+      envZone: cloudRegion,
+      mcpUrl,
+    });
+  }
 
   // Skills URL: derived from the same host as the LLM proxy.
   // Always tries remote first; falls back to bundled if fetch fails.
