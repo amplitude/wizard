@@ -7,6 +7,7 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { commitPlannedEvents } from '../planned-events';
+import { _clearMcpSessionCacheForTesting } from '../mcp-with-fallback';
 
 vi.mock('../../utils/debug');
 
@@ -69,6 +70,7 @@ describe('commitPlannedEvents', () => {
     mockAxiosPost.mockReset();
     mockFetch.mockReset();
     mockQuery.mockReset();
+    _clearMcpSessionCacheForTesting();
     mockAxiosPost.mockResolvedValue({
       status: 200,
       data: {
