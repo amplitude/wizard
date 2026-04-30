@@ -22,7 +22,7 @@ const REQUIRED_TODOS = [
   'Install Amplitude',
   'Plan and approve events to track',
   'Wire up event tracking',
-  'Open your dashboard',
+  'Build your starter dashboard',
 ] as const;
 
 describe('TodoWrite user-journey commandment', () => {

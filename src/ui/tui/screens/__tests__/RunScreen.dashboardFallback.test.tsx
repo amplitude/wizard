@@ -37,7 +37,7 @@ function seedFiveCompletedTasks() {
     { label: 'Install Amplitude', activeForm: 'Installing...', status: TaskStatus.Completed, done: true },
     { label: 'Plan and approve events to track', activeForm: 'Planning...', status: TaskStatus.Completed, done: true },
     { label: 'Wire up event tracking', activeForm: 'Wiring...', status: TaskStatus.Completed, done: true },
-    { label: 'Open your dashboard', activeForm: 'Opening...', status: TaskStatus.Completed, done: true },
+    { label: 'Build your starter dashboard', activeForm: 'Building...', status: TaskStatus.Completed, done: true },
   ]);
   return store;
 }

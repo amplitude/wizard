@@ -233,7 +233,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   }
 
   // Synthetic 6th task for the post-agent dashboard fallback. The agent's
-  // 5-task TodoWrite list is locked at five and "Open your dashboard"
+  // 5-task TodoWrite list is locked at five and "Build your starter dashboard"
   // covers the agent-side dashboard work. When the agent didn't actually
   // create the dashboard (skill drift, retry exhaustion, abort), the
   // post-agent `createDashboardStep` runs as a slow fallback and sets

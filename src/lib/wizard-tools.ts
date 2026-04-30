@@ -1808,7 +1808,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
   // -- record_dashboard -----------------------------------------------------
   // Persists a dashboard the agent just created via the Amplitude MCP. This
   // is the explicit hand-off from the in-loop agent (which does the actual
-  // chart/dashboard MCP calls during the "Open your dashboard" task) to the
+  // chart/dashboard MCP calls during the "Build your starter dashboard" task) to the
   // wizard's outro and post-agent step. Writes BOTH:
   //   - canonical `.amplitude/dashboard.json` (via persistDashboard)
   //   - legacy `.amplitude-dashboard.json` at the project root, for back-compat
