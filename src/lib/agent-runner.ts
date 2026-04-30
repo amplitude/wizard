@@ -34,6 +34,7 @@ import { getVersionCheckInfo, getVersionWarning } from './version-check';
 import * as fsSync from 'fs';
 import path from 'path';
 import { saveCheckpoint } from './session-checkpoint.js';
+import { getEventsFile } from '../utils/storage-paths.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { getLogFilePath } from './observability/index.js';
 import { createObservabilityMiddleware } from './middleware/observability';
@@ -140,9 +141,11 @@ export function agentArtifactsLookComplete(session: WizardSession): boolean {
  * events, even if it didn't reach the dashboard creation step?
  *
  * The wizard's `confirm_event_plan` MCP tool persists the approved
- * event plan to `<installDir>/.amplitude-events.json` (see
- * `persistEventPlan` in `wizard-tools.ts`). That file's presence with
- * non-empty content is a hard signal that:
+ * event plan to `<installDir>/.amplitude/events.json` (canonical) and
+ * mirrors it to `<installDir>/.amplitude-events.json` (legacy, kept
+ * during the rollout window for older skills — see `persistEventPlan`
+ * in `wizard-tools.ts`). The presence of either file with non-empty
+ * content is a hard signal that:
  *
  *   - The user approved an instrumentation plan
  *   - The agent reached the post-confirmation phase
@@ -163,15 +166,27 @@ export function agentArtifactsLookComplete(session: WizardSession): boolean {
  * app.amplitude.com.
  */
 export function agentEventsInstrumented(session: WizardSession): boolean {
-  try {
-    const eventsPath = path.join(session.installDir, '.amplitude-events.json');
-    if (!fsSync.existsSync(eventsPath)) return false;
-    const raw = fsSync.readFileSync(eventsPath, 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0;
-  } catch {
-    return false;
+  // Try canonical location first, then fall back to the legacy mirror.
+  // `persistEventPlan` writes both, but the legacy write is best-effort
+  // and is planned to be dropped — reading only the legacy path (the
+  // pre-fix behavior) means a successful canonical write with a failed
+  // legacy mirror would falsely report "not instrumented" and trigger
+  // the soft-error abort path on an already-instrumented project.
+  const candidates = [
+    getEventsFile(session.installDir),
+    path.join(session.installDir, '.amplitude-events.json'),
+  ];
+  for (const eventsPath of candidates) {
+    try {
+      if (!fsSync.existsSync(eventsPath)) continue;
+      const raw = fsSync.readFileSync(eventsPath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return true;
+    } catch {
+      // Try the next candidate; only return false once both miss.
+    }
   }
+  return false;
 }
 
 /**

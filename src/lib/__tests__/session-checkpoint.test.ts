@@ -128,5 +128,32 @@ describe(
       const loaded = await loadCheckpoint(installDir);
       expect(loaded?.detectedFrameworkLabel).toBe('Made Up');
     });
+
+    // Regression: pre-fix the schema's transform fell back
+    // `selectedEnvName ?? selectedProjectName ?? null`, silently using the
+    // project name as the environment name on resume. That broke HeaderBar /
+    // `/whoami` and any code path that filters environments by name.
+    it('does NOT fall back from selectedProjectName to selectedEnvName', async () => {
+      filePath = writeCheckpoint(installDir, {
+        selectedProjectId: 'proj-1',
+        selectedProjectName: 'My Project',
+        selectedEnvName: null,
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded?.selectedProjectName).toBe('My Project');
+      // Critical: env name stays null, NOT 'My Project'.
+      expect(loaded?.selectedEnvName).toBeNull();
+    });
+
+    it('preserves an explicit selectedEnvName across reload', async () => {
+      filePath = writeCheckpoint(installDir, {
+        selectedProjectName: 'My Project',
+        selectedEnvName: 'Production',
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded?.selectedEnvName).toBe('Production');
+    });
   },
 );
