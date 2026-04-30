@@ -143,4 +143,85 @@ describe('observability middleware → emitAgentMetrics', () => {
     };
     expect(() => m.onFinalize?.(result, 100, stubCtx, stubStore)).not.toThrow();
   });
+
+  it('reports per-tool invocation counts in toolCallsByTool', () => {
+    // Three Read calls + two Edit calls + one Bash call across two
+    // assistant messages should land as { Read: 3, Edit: 2, Bash: 1 }
+    // on the finalize emit, alongside totalToolCalls=6.
+    const m = createObservabilityMiddleware();
+    m.onInit?.();
+    const assistantMessage = (toolNames: string[]): SDKMessage =>
+      ({
+        type: 'assistant',
+        message: {
+          content: toolNames.map((name) => ({ type: 'tool_use', name })),
+        },
+      } as unknown as SDKMessage);
+
+    m.onMessage?.(
+      assistantMessage(['Read', 'Read', 'Edit']),
+      stubCtx,
+      stubStore,
+    );
+    m.onMessage?.(
+      assistantMessage(['Read', 'Edit', 'Bash']),
+      stubCtx,
+      stubStore,
+    );
+
+    const result: SDKMessage = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+    };
+    m.onFinalize?.(result, 1000, stubCtx, stubStore);
+
+    expect(emitAgentMetricsMock).toHaveBeenCalledTimes(1);
+    const arg = emitAgentMetricsMock.mock.calls[0][0];
+    expect(arg.totalToolCalls).toBe(6);
+    expect(arg.toolCallsByTool).toEqual({ Read: 3, Edit: 2, Bash: 1 });
+  });
+
+  it('omits toolCallsByTool entirely when no tools fired (avoids `{}` in NDJSON)', () => {
+    // Auth-required / no-op runs that exit before the inner agent
+    // hits any tool_use blocks should land WITHOUT the field —
+    // shipping `toolCallsByTool: {}` would just bloat the envelope
+    // for a signal-free run.
+    const m = createObservabilityMiddleware();
+    m.onInit?.();
+    const result: SDKMessage = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+    };
+    m.onFinalize?.(result, 100, stubCtx, stubStore);
+
+    const arg = emitAgentMetricsMock.mock.calls[0][0];
+    expect(arg).not.toHaveProperty('toolCallsByTool');
+  });
+
+  it('resets toolCallsByTool on a fresh onInit (state does not leak across runs)', () => {
+    const m = createObservabilityMiddleware();
+    m.onInit?.();
+    m.onMessage?.(
+      {
+        type: 'assistant',
+        message: { content: [{ type: 'tool_use', name: 'Read' }] },
+      } as unknown as SDKMessage,
+      stubCtx,
+      stubStore,
+    );
+    // Second run: counters should have been zeroed.
+    m.onInit?.();
+    const result: SDKMessage = {
+      type: 'result',
+      subtype: 'success',
+      is_error: false,
+    };
+    m.onFinalize?.(result, 100, stubCtx, stubStore);
+
+    const lastCall = emitAgentMetricsMock.mock.calls[0][0];
+    expect(lastCall.totalToolCalls).toBe(0);
+    expect(lastCall).not.toHaveProperty('toolCallsByTool');
+  });
 });
