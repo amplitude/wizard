@@ -5,6 +5,7 @@ import * as os from 'os';
 import {
   resolveEnvPath,
   ensureGitignoreCoverage,
+  shouldSkipAutoGitignoreForEnvBasename,
   parseEnvKeys,
   mergeEnvValues,
   persistEventPlan,
@@ -20,6 +21,7 @@ import {
   WIZARD_TOOL_NAMES,
   WIZARD_TOOLS_SERVER_NAME,
 } from '../wizard-tools';
+import { toWizardDashboardOpenUrl } from '../../utils/dashboard-open-url';
 
 function makeTmpDir(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-tools-'));
@@ -200,9 +202,29 @@ describe('ensureGitignoreCoverage', () => {
 
   it('appends with newline if .gitignore lacks trailing newline', () => {
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules');
-    ensureGitignoreCoverage(tmpDir, '.env');
+    ensureGitignoreCoverage(tmpDir, '.env.secrets');
     const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
-    expect(content).toBe('node_modules\n.env\n');
+    expect(content).toBe('node_modules\n.env.secrets\n');
+  });
+
+  it('does not modify .gitignore for shared committed env template basenames', () => {
+    fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules\n');
+    ensureGitignoreCoverage(tmpDir, '.env.development');
+    ensureGitignoreCoverage(tmpDir, '.env.production');
+    const content = fs.readFileSync(path.join(tmpDir, '.gitignore'), 'utf8');
+    expect(content).toBe('node_modules\n');
+  });
+
+  it('does not create .gitignore when only skipped basenames would be covered', () => {
+    ensureGitignoreCoverage(tmpDir, '.env');
+    expect(fs.existsSync(path.join(tmpDir, '.gitignore'))).toBe(false);
+  });
+
+  it('shouldSkipAutoGitignoreForEnvBasename matches shared template set', () => {
+    expect(shouldSkipAutoGitignoreForEnvBasename('.env.development')).toBe(
+      true,
+    );
+    expect(shouldSkipAutoGitignoreForEnvBasename('.env.local')).toBe(false);
   });
 
   it('does not duplicate an existing entry', () => {
@@ -837,14 +859,15 @@ describe('buildFallbackReport', () => {
     expect(md).toContain('Body with \\| pipe in description');
   });
 
-  it('renders the dashboard URL when present', () => {
+  it('renders the wizard dashboard open URL when present', () => {
+    const canonical =
+      'https://app.amplitude.com/analytics/test/dashboard/abc123';
     const md = buildFallbackReport({
       installDir: tmpDir,
-      dashboardUrl: 'https://app.amplitude.com/analytics/test/dashboard/abc123',
+      dashboardUrl: canonical,
     });
-    expect(md).toContain(
-      'https://app.amplitude.com/analytics/test/dashboard/abc123',
-    );
+    expect(md).toContain(toWizardDashboardOpenUrl(canonical));
+    expect(md).not.toContain(`Open your dashboard: ${canonical}`);
   });
 
   it('falls back to a generic Amplitude link when no dashboard URL is captured', () => {
@@ -911,10 +934,11 @@ describe('writeFallbackReportIfMissing', () => {
       { name: 'User Signed Up', description: 'After signup form submit' },
     ]);
 
+    const canonical = 'https://app.amplitude.com/analytics/x/dashboard/foo';
     const result = writeFallbackReportIfMissing({
       installDir: tmpDir,
       integration: 'nextjs',
-      dashboardUrl: 'https://app.amplitude.com/analytics/x/dashboard/foo',
+      dashboardUrl: canonical,
       workspaceName: 'Acme',
       envName: 'production',
     });
@@ -922,9 +946,7 @@ describe('writeFallbackReportIfMissing', () => {
 
     const written = fs.readFileSync(reportPathFor(tmpDir), 'utf8');
     expect(written).toContain('User Signed Up');
-    expect(written).toContain(
-      'https://app.amplitude.com/analytics/x/dashboard/foo',
-    );
+    expect(written).toContain(toWizardDashboardOpenUrl(canonical));
     expect(written).toContain('nextjs');
     expect(written).toContain('Acme');
   });

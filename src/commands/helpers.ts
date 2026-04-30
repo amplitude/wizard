@@ -3,10 +3,12 @@
 // own builder/handler.
 
 import { getUI, setUI } from '../ui';
+import type { AgentUI } from '../ui/agent-ui';
 import { LoggingUI } from '../ui/logging-ui';
 import { ExitCode } from '../lib/exit-codes';
 import { analytics } from '../utils/analytics';
 import type { AmplitudeZone } from '../lib/constants';
+import { TERMS_OF_SERVICE_URL } from '../lib/constants.js';
 import { setProjectLogFile } from '../lib/observability';
 import { runMigrationShim } from '../utils/storage-migration';
 import { CLI_INVOCATION } from './context';
@@ -75,6 +77,9 @@ export const buildSessionFromOptions = async (
     menu: options.menu as boolean | undefined,
     signupEmail: options.email as string | undefined,
     signupFullName: options['full-name'] as string | undefined,
+    acceptTos:
+      options.acceptTos === true ||
+      (options['accept-tos'] as boolean | undefined) === true,
     // --region is canonical; --zone is a yargs alias, so `options.region`
     // is populated by either flag.
     region: options.region as AmplitudeZone | undefined,
@@ -82,6 +87,7 @@ export const buildSessionFromOptions = async (
       typeof buildSession
     >[0]['integration'],
     benchmark: options.benchmark as boolean | undefined,
+    mode: options.mode as 'fast' | 'standard' | 'thorough' | undefined,
     // --app-id is the canonical flag; --project-id is now a separate flag that
     // refers to the Amplitude project (formerly workspace), not the app.
     appId: options.appId as string | undefined,
@@ -329,6 +335,63 @@ export const resolveNonInteractiveCredentials = async (
         }
       }
     } else if (agentUI) {
+      // Agent mode short-circuit: if the orchestrator passed a scope
+      // flag (`--app-id`, `--project-id`, etc.) that didn't match any
+      // known environment, refuse to fall through to auto-select —
+      // that would silently write to a different project than the
+      // orchestrator asked for. Emit a structured rejection carrying
+      // both the bad value AND the candidate list so the orchestrator
+      // can re-prompt the human with one round-trip instead of doing
+      // a fresh discovery cycle. Without this short-circuit,
+      // `promptEnvironmentSelection` would emit `needs_input` and then
+      // (with a non-interactive stdin) auto-select the first env in
+      // `pendingOrgs` — exactly the data-integrity failure mode the
+      // confirm-app gate elsewhere in this codebase exists to prevent.
+      if (session.scopeFilterMismatch) {
+        const mismatch = session.scopeFilterMismatch;
+        const choices = session.pendingOrgs.flatMap((org) =>
+          org.projects.flatMap((proj) =>
+            (proj.environments ?? [])
+              .filter((e) => e.app?.apiKey)
+              .sort((a, b) => a.rank - b.rank)
+              .map((e) => ({
+                orgId: org.id,
+                orgName: org.name,
+                projectId: proj.id,
+                projectName: proj.name,
+                appId: e.app?.id ?? null,
+                envName: e.name,
+                // `rank` is part of the canonical `EnvSelectionChoice` —
+                // include it so orchestrators that reuse their
+                // env-selection widget against this auth_required envelope
+                // (as the JSDoc on emitAuthRequired encourages) don't see
+                // `undefined` when accessing `.rank`.
+                rank: e.rank,
+                label: `${org.name} / ${proj.name} / ${e.name}`,
+              })),
+          ),
+        );
+        const choicesField =
+          mismatch.flag === '--project-id'
+            ? 'projectId'
+            : mismatch.flag === '--env'
+            ? 'envName'
+            : mismatch.flag === '--org'
+            ? 'orgName'
+            : 'appId';
+        agentUI.emitAuthRequired({
+          reason: 'env_selection_failed',
+          instruction:
+            `${mismatch.reason} Re-run ${CLI_INVOCATION} with ` +
+            `${mismatch.flag} set to a value from data.choices[].${choicesField} ` +
+            `(or another scope flag from data.choices[]).`,
+          loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
+          previousAttempt: mismatch,
+          choices,
+        });
+        process.exit(ExitCode.AUTH_REQUIRED);
+      }
+
       // Agent mode: emit a structured prompt event with the full
       // org/project/app/env hierarchy. The orchestrator can either
       // reply on stdin with { appId } or re-invoke with --app-id (globally
@@ -461,6 +524,100 @@ export const resolveNonInteractiveCredentials = async (
     }
   }
 };
+
+/**
+ * `@returns` false when signup cannot proceed (--agent mode: emitted
+ * `signup_input_required`; tests mock `process.exit` — see caller).
+ */
+export function gateAgentSignupArguments(
+  session: import('../lib/wizard-session').WizardSession,
+  agentUI: AgentUI,
+): boolean {
+  if (!session.signup || !session.agent) return true;
+
+  type MissingFlag = {
+    flag: string;
+    description: string;
+    url?: string;
+  };
+  const missing: MissingFlag[] = [];
+  if (session.region == null) {
+    missing.push({
+      flag: '--region',
+      description: 'Amplitude data center (us or eu)',
+    });
+  }
+  if (!session.signupEmail) {
+    missing.push({
+      flag: '--email',
+      description: 'Email address for the new Amplitude account',
+    });
+  }
+  if (!session.signupFullName) {
+    missing.push({
+      flag: '--full-name',
+      description: 'Full name on the Amplitude account',
+    });
+  }
+  if (session.tosAccepted !== true) {
+    missing.push({
+      flag: '--accept-tos',
+      description:
+        'Agree to the Amplitude Terms of Service (' +
+        TERMS_OF_SERVICE_URL +
+        ')',
+      url: TERMS_OF_SERVICE_URL,
+    });
+  }
+  if (missing.length === 0) return true;
+
+  const invocationParts = /\s/.test(CLI_INVOCATION)
+    ? CLI_INVOCATION.split(' ')
+    : [CLI_INVOCATION];
+
+  agentUI.emitSignupInputsRequired({
+    missing,
+    resumeCommand: [
+      ...invocationParts,
+      '--signup',
+      '--agent',
+      '--install-dir',
+      session.installDir,
+    ],
+  });
+  process.exit(ExitCode.INPUT_REQUIRED);
+  return false;
+}
+
+/**
+ * CI signup with `--email`, `--full-name`, and `--region` requires `--accept-tos`.
+ *
+ * `@returns` false after invalid-args exit (caller must early-return — tests mock
+ * `process.exit`).
+ */
+export function gateCiSignupAcceptToS(
+  session: import('../lib/wizard-session').WizardSession,
+): boolean {
+  if (
+    !session.ci ||
+    !session.signup ||
+    !session.signupEmail ||
+    !session.signupFullName ||
+    session.region == null
+  ) {
+    return true;
+  }
+  if (session.tosAccepted !== true) {
+    process.stderr.write(
+      `${CLI_INVOCATION}: --signup in non-interactive mode requires agreeing ` +
+        `to the Amplitude Terms of Service (${TERMS_OF_SERVICE_URL}). ` +
+        `Pass --accept-tos alongside --region, --email, and --full-name.\n`,
+    );
+    process.exit(ExitCode.INVALID_ARGS);
+    return false;
+  }
+  return true;
+}
 
 /**
  * Run the direct-signup wrapper for agent / CI / classic modes.

@@ -301,10 +301,22 @@ export const DataIngestionCheckScreen = ({
         '../../../utils/ampli-settings.js'
       );
       const { refreshAccessToken } = await import('../../../utils/oauth.js');
+      const { EXPIRY_BUFFER_MS } = await import(
+        '../../../utils/token-refresh.js'
+      );
       const user = getStoredUser();
       const stored = getStoredToken(user?.id, user?.zone);
       if (!stored || !user) return false;
-      if (!force && new Date() <= new Date(stored.expiresAt)) return false;
+      // Apply the same 5-minute skew buffer that `tryRefreshToken` uses.
+      // Prior to this, the comparison was a raw `now <= expiresAt`, which
+      // meant a laptop clock even a few seconds behind would skip refresh
+      // and the immediately-following App API call would 401 without retry.
+      if (
+        !force &&
+        new Date(stored.expiresAt).getTime() - Date.now() > EXPIRY_BUFFER_MS
+      ) {
+        return false;
+      }
       logToFile(`[DataIngestionCheck] refreshing token (force=${force})`);
       const refreshed = await refreshAccessToken(
         stored.refreshToken,
@@ -338,8 +350,24 @@ export const DataIngestionCheckScreen = ({
       setApiUnavailable(true);
       return;
     }
-    const appId = currentCredentials.appId || currentSession.selectedProjectId;
-    if (!appId) {
+    // Bail early only if we have no way to identify either the project
+    // (via numeric Amplitude app ID — required by both the MCP and App
+    // API checks below) OR its org (so the lazy-resolution path below
+    // can populate one from /user). Without either, nothing can succeed.
+    //
+    // CRITICAL: do NOT fall back to selectedProjectId. selectedProjectId
+    // is a project UUID, not an app ID; passing a UUID where the App API
+    // expects a numeric app ID produces a query that never matches a
+    // real app and silently returns zero events forever — leaving users
+    // on freshly-typed API keys (where credentials.appId === 0) stuck on
+    // this screen until the polling cap. (Pre-fix this was the dominant
+    // failure mode for manual key entry.)
+    if (
+      !currentCredentials.appId &&
+      !currentSession.selectedAppId &&
+      !resolvedAppIdRef.current &&
+      !currentSession.selectedOrgId
+    ) {
       setApiUnavailable(true);
       return;
     }
@@ -365,8 +393,27 @@ export const DataIngestionCheckScreen = ({
     //
     // selectedAppId may be null if the startup fire-and-forget fetchAmplitudeUser
     // failed (e.g. due to an expired token). Resolve lazily using the now-fresh token.
+    //
+    // `currentCredentials.appId` is the third source: the `--api-key`
+    // + `--app-id` CLI path stamps the numeric app ID directly into
+    // credentials and short-circuits OAuth-based resolution, so neither
+    // `selectedAppId` nor the lazy `fetchAmplitudeUser` path will populate
+    // it. Without this fallback, those users would always hit
+    // `setApiUnavailable(true)` despite passing a valid app ID. The
+    // bail-out condition above (`!credentials.appId && !selectedAppId
+    // && !resolvedAppIdRef.current && !selectedOrgId`) already mirrors
+    // this set; keep them in sync so what gets us past the bail-out is
+    // the same thing the API call below uses.
+    //
+    // `credentials.appId` is `AppId | 0` (0 = sentinel for "unknown"),
+    // so explicitly check truthiness before stringifying.
+    const credentialsAppId = currentCredentials.appId
+      ? String(currentCredentials.appId)
+      : null;
     let effectiveAppId =
-      currentSession.selectedAppId ?? resolvedAppIdRef.current;
+      currentSession.selectedAppId ??
+      resolvedAppIdRef.current ??
+      credentialsAppId;
     if (!effectiveAppId) {
       const tryResolve = async () => {
         const userInfo = await fetchAmplitudeUser(
@@ -477,7 +524,10 @@ export const DataIngestionCheckScreen = ({
     }
 
     // Step 2: Try activation status via App API (org-scoped, autocapture events only).
-    if (!currentSession.selectedOrgId) {
+    // Both an orgId and a numeric app ID are required — without the app ID,
+    // the call would either 400 or, worse, "succeed" against a wrong identifier
+    // and silently return zero events (the pre-fix UUID-as-appId failure mode).
+    if (!currentSession.selectedOrgId || !effectiveAppId) {
       setApiUnavailable(true);
       return;
     }
@@ -486,7 +536,7 @@ export const DataIngestionCheckScreen = ({
       const status = await fetchProjectActivationStatus({
         accessToken: currentCredentials.accessToken,
         zone,
-        appId,
+        appId: effectiveAppId,
         orgId: currentSession.selectedOrgId,
       });
       setLastChecked(Date.now());

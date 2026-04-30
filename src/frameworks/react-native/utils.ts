@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { hasPackageInstalled } from '../../utils/package-json';
-import { tryGetPackageJson } from '../../utils/setup-utils';
+import { tryGetPackageJson } from '../../utils/package-json-light';
 import type { WizardOptions } from '../../utils/types';
 
 /**

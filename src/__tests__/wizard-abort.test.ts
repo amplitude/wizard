@@ -4,6 +4,7 @@ import {
   registerCleanup,
   registerPriorityCleanup,
   clearCleanup,
+  _resetWizardAbortInProgressForTests,
 } from '../utils/wizard-abort';
 import { analytics } from '../utils/analytics';
 import { type Mocked } from 'vitest';
@@ -30,6 +31,12 @@ describe('wizardAbort', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearCleanup();
+    // Production wizardAbort calls process.exit at the end, so the
+    // in-progress flag never needs reset. These tests mock process.exit
+    // (so wizardAbort returns instead of terminating); without this
+    // reset the flag leaks across cases and isWizardAbortInProgress()
+    // would falsely report true at the start of the next test.
+    _resetWizardAbortInProgressForTests();
 
     mockAnalytics.captureException = vi.fn();
     mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);
@@ -302,12 +309,52 @@ describe('wizardAbort', () => {
       expect(process.exit).toHaveBeenCalledWith(1);
     });
   });
+
+  // ── isWizardAbortInProgress flag ───────────────────────────────────────
+  //
+  // Regression test for the "Press any key to exit hangs after q on
+  // DataIngestionCheckScreen" bug. Several screens navigate to the cancel
+  // outro via `setOutroData` without going through wizardAbort; the
+  // OutroScreen dismissal handler reads this flag to decide whether to
+  // drive the exit itself. If the flag is wrong (stale-true after an
+  // earlier real abort, or never-set during one) the exit decision goes
+  // to the wrong branch and either double-exits or hangs.
+  describe('isWizardAbortInProgress', () => {
+    it('is false before any wizardAbort call', async () => {
+      const { isWizardAbortInProgress } = await import('../utils/wizard-abort');
+      expect(isWizardAbortInProgress()).toBe(false);
+    });
+
+    it('flips true once wizardAbort starts and stays true through process.exit', async () => {
+      const { isWizardAbortInProgress } = await import('../utils/wizard-abort');
+      expect(isWizardAbortInProgress()).toBe(false);
+
+      // Capture the flag value at the moment getUI().cancel() is called —
+      // i.e. while the OutroScreen is mounted and a keypress could fire.
+      // This is the load-bearing window: OutroScreen reads the flag to
+      // decide whether to drive its own exit.
+      let flagDuringCancel: boolean | null = null;
+      getUI().cancel.mockImplementation(() => {
+        flagDuringCancel = isWizardAbortInProgress();
+      });
+
+      await expect(wizardAbort()).rejects.toThrow('process.exit called');
+
+      expect(flagDuringCancel).toBe(true);
+    });
+  });
 });
 
 describe('abort() delegates to wizardAbort()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     clearCleanup();
+    // Production wizardAbort calls process.exit at the end, so the
+    // in-progress flag never needs reset. These tests mock process.exit
+    // (so wizardAbort returns instead of terminating); without this
+    // reset the flag leaks across cases and isWizardAbortInProgress()
+    // would falsely report true at the start of the next test.
+    _resetWizardAbortInProgressForTests();
 
     mockAnalytics.captureException = vi.fn();
     mockAnalytics.shutdown = vi.fn().mockResolvedValue(undefined);

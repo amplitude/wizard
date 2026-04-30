@@ -22,6 +22,43 @@ Feature: Wizard flow
     Then the US region should be stored in my session
     And I should go through the SUSI flow
 
+  Scenario: Signup flow requires email capture before ToS
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--signup"
+    And I continue past the intro
+    And I select the "US" region
+    Then I should be on the EmailCaptureScreen
+    When I enter my email address
+    Then I should be on the ToSScreen
+
+  Scenario: Signup flow requires explicit ToS acceptance
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--signup"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter my email address
+    Then I should be on the ToSScreen
+    When I accept the Terms of Service
+    Then I should go through the SUSI flow
+
+  Scenario: Signup flow can be cancelled from ToS screen
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--signup"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter my email address
+    And I am on the ToSScreen
+    When I decline the Terms of Service
+    Then I should be taken to the Outro with a cancel state
+
+  Scenario: Email is pre-filled from --signup-email flag
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--signup --signup-email test@example.com"
+    And I continue past the intro
+    And I select the "US" region
+    Then I should be on the EmailCaptureScreen
+    And the email field should be pre-filled with "test@example.com"
+
   Scenario: After SUSI completes — wizard advances to Data Setup then Agent Run
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches

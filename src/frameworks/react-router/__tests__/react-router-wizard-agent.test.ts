@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockTryGetPackageJson = vi.fn();
 const mockGetPackageVersion = vi.fn();
 
-vi.mock('../../../utils/setup-utils', () => ({
+vi.mock('../../../utils/package-json-light', () => ({
   tryGetPackageJson: mockTryGetPackageJson,
 }));
 

@@ -8,7 +8,7 @@
  * Session-mutating methods trigger reactive screen resolution in the TUI.
  */
 
-import type { RetryState } from '../lib/wizard-session';
+import type { OutroData, RetryState } from '../lib/wizard-session';
 
 /** Result returned by the confirm_event_plan tool to the agent. */
 export type EventPlanDecision =
@@ -47,6 +47,14 @@ export interface WizardUI {
    */
   cancel(message: string, options?: { docsUrl?: string }): Promise<void>;
 
+  /**
+   * Set the OutroScreen state reactively. Use from business logic that needs
+   * to render an Error or Success outro before calling `cancel()` — direct
+   * mutation of `session.outroData` doesn't notify subscribers, so the
+   * OutroScreen would not re-render and the user would miss the message.
+   */
+  setOutroData(data: OutroData): void;
+
   // ── Logging ───────────────────────────────────────────────────────
   log: {
     info(message: string): void;
@@ -60,11 +68,35 @@ export interface WizardUI {
   pushStatus(message: string): void;
 
   /**
-   * Print a periodic "still running" summary of the last N status messages.
-   * Called by the agent runner every ~10 seconds while the agent is active.
-   * LoggingUI prints to stdout; InkUI is a no-op (TUI already shows live updates).
+   * Periodic "still alive" beat emitted every ~10s while the agent is
+   * running. Three implementations diverge:
+   *
+   *   - InkUI:     no-op — the TUI already renders status messages
+   *                reactively as `pushStatus()` fires.
+   *   - LoggingUI: prints the rolling tail of statuses (and only the
+   *                tail) so a CI log shows "still working…" without
+   *                going dark on long tool calls.
+   *   - AgentUI:   emits a structured `progress: heartbeat` NDJSON
+   *                event carrying elapsed time + retry attempt + the
+   *                rolling status tail. Always fires on the cadence —
+   *                absence of heartbeat is the canonical orchestrator
+   *                signal that the wizard process has stalled.
+   *
+   * `statuses` is the rolling last-N (3) `pushStatus()` messages —
+   * may be empty if no status was pushed since the last beat.
    */
-  heartbeat(statuses: string[]): void;
+  heartbeat(data: {
+    statuses: string[];
+    /** Milliseconds since `runAgent()` started. Monotonic. */
+    elapsedMs: number;
+    /**
+     * 1-indexed retry attempt the runner is on. Lets a stalled-agent
+     * heuristic distinguish "still on attempt 1, just slow" from
+     * "we're churning through retries" without re-parsing the
+     * `progress: agent_retry` events.
+     */
+    attempt?: number;
+  }): void;
 
   // ── Spinner ───────────────────────────────────────────────────────
   spinner(): SpinnerHandle;
@@ -221,6 +253,63 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emit a `setup_context` event carrying the resolved Amplitude scope
+   * (region, org, project, app, env) at a known phase boundary.
+   * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI
+   * no-op, since their UI already shows the equivalent context.
+   *
+   * Skill rule: the outer agent SHOULD show this scope to the user
+   * BEFORE asking them to approve the run, so they know which
+   * Amplitude app the wizard is about to write to.
+   */
+  emitSetupContext?(data: {
+    phase: 'plan' | 'apply_started' | 'whoami';
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+    };
+    sources?: Record<string, 'auto' | 'flag' | 'saved' | 'recommended'>;
+    requiresConfirmation?: boolean;
+    resumeFlags?: { changeApp: string[] };
+  }): void;
+
+  /**
+   * Emit a terminal `setup_complete` event once per successful run,
+   * just before `run_completed`. Carries the canonical artifact list
+   * (app id, dashboard URL, files, env vars, events) the outer agent
+   * needs to drive follow-up MCP calls into the right project.
+   * Optional; only AgentUI implements.
+   */
+  emitSetupComplete?(data: {
+    amplitude: {
+      region?: 'us' | 'eu';
+      orgId?: string;
+      orgName?: string;
+      projectId?: string;
+      projectName?: string;
+      appId?: string;
+      appName?: string;
+      envName?: string;
+      dashboardUrl?: string;
+      dashboardId?: string;
+    };
+    files?: { written: string[]; modified: string[] };
+    envVars?: { added: string[]; modified: string[] };
+    events?: Array<{ name: string; description?: string; file?: string }>;
+    durationMs?: number;
+    followups?: {
+      mcpServer?: { command: string[]; description: string };
+      docsUrl?: string;
+    };
+  }): void;
+
+  /**
    * Aggregated agent-run metrics — emitted by the observability
    * middleware once per run at finalize time with token usage, tool
    * call counts, and duration. Optional; AgentUI emits a `progress`
@@ -234,6 +323,40 @@ export interface WizardUI {
    * card so the number stays consistent with the gateway's billing
    * source of truth.
    */
+  /**
+   * Emitted whenever the wizard writes a session snapshot to disk.
+   * Optional — only AgentUI implements (LoggingUI / InkUI no-op).
+   * Lets an outer orchestrator know there's a recoverable state on
+   * disk so it can advertise `--resume` to the user on a retry.
+   *
+   * `phase` is a free-form label of the trigger ("pre_compact",
+   * "screen_run", "screen_data_setup", etc.) so an orchestrator can
+   * distinguish "we hit a checkpoint inside the integration loop"
+   * from "the agent just blew through a phase boundary".
+   */
+  emitCheckpointSaved?(data: {
+    path: string;
+    bytes: number;
+    phase: string;
+  }): void;
+
+  /**
+   * Emitted at startup in agent / CI mode when `--resume` finds a
+   * fresh, schema-valid checkpoint and restores the session from it.
+   * Optional — only AgentUI implements.
+   */
+  emitCheckpointLoaded?(data: { path: string; ageSeconds: number }): void;
+
+  /**
+   * Emitted when the wizard removes a saved checkpoint. Reason
+   * discriminator: `success` (clean run), `manual` (user invoked a
+   * clear-state action), `logout`. Optional — only AgentUI implements.
+   */
+  emitCheckpointCleared?(data: {
+    path: string;
+    reason: 'success' | 'manual' | 'logout';
+  }): void;
+
   emitAgentMetrics?(data: {
     durationMs: number;
     inputTokens?: number;
@@ -245,5 +368,16 @@ export interface WizardUI {
     totalToolCalls?: number;
     totalMessages?: number;
     isError?: boolean;
+    /**
+     * Per-tool invocation counts. Lets orchestrators answer
+     * "where did the time/cost go?" without parsing every
+     * `progress: tool_call` event. Keys are the SDK's tool-name
+     * strings — built-in tools (`"Read"`, `"Edit"`, `"Bash"`,
+     * `"Grep"`, `"TodoWrite"`) and MCP tools (e.g.
+     * `"mcp__amplitude-wizard__check_env_keys"`). Values are
+     * integer counts. Omitted entirely (not `{}`) when the run
+     * had zero tool_use blocks (auth-required early-exits etc.).
+     */
+    toolCallsByTool?: Record<string, number>;
   }): void;
 }

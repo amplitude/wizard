@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { z } from 'zod';
-import { detectAllPackageManagers } from '../../utils/package-manager';
+import { detectNodePackageManagersLight } from '../../lib/package-manager-detection-light';
 import type { WizardOptions } from '../../utils/types';
 
 export type JavaScriptContext = {
@@ -65,16 +65,16 @@ export const FRAMEWORK_PACKAGES = [
 
 /**
  * Detect the JS package manager for the project by checking lockfiles.
- * Reuses the existing package manager detection infrastructure.
+ *
+ * Uses the lightweight detector to keep this file out of the cold-start
+ * import graph for `setup-utils` / analytics — the framework `detect()`
+ * path imports this module transitively.
  */
-export function detectJsPackageManager(
+export async function detectJsPackageManager(
   options: Pick<WizardOptions, 'installDir'>,
-): string {
-  const detected = detectAllPackageManagers(options);
-  if (detected.length > 0) {
-    return detected[0].label;
-  }
-  return 'unknown';
+): Promise<string> {
+  const result = await detectNodePackageManagersLight(options.installDir);
+  return result.primary?.label ?? 'unknown';
 }
 
 /**

@@ -10,6 +10,7 @@
 import path from 'path';
 import fs from 'fs';
 import os from 'os';
+import AdmZip from 'adm-zip';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
@@ -23,6 +24,7 @@ import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
 import { wrapMcpServerWithSentry } from './observability/index';
+import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
 
 // Allow-listed hosts for remote skill downloads. The wizard ships skills
 // from amplitude/context-hub via GitHub Releases; nothing else should ever
@@ -133,10 +135,14 @@ export async function fetchSkillMenu(
  *    skill manifest contained. Skills are only ever published by
  *    amplitude/context-hub via GitHub Releases, so we allowlist the
  *    GitHub-owned hosts and reject anything else.
- * 3. **Zip-slip** — `unzip -d skillDir` will follow `../../../etc/passwd`
+ * 3. **Zip-slip** — naive zip extractors will follow `../../../etc/passwd`
  *    entries straight out of the target dir. We extract into the scratch
  *    tmp dir first, then walk the result and reject any entry whose
  *    resolved real path escapes the scratch root.
+ *
+ * Cross-platform note: extraction goes through `adm-zip` rather than the
+ * `unzip` CLI so this works on Windows (which has no `unzip` by default).
+ * `adm-zip`'s API is sync, matching the rest of this function.
  */
 export function downloadSkill(
   skillEntry: SkillEntry,
@@ -178,9 +184,16 @@ export function downloadSkill(
     // Extract into the scratch dir, NOT directly into the target. This way
     // any zip-slip entry lands somewhere inside `extractDir` (or fails the
     // realpath check below), never inside the user's project.
-    execFileSync('unzip', ['-o', tmpFile, '-d', extractDir], {
-      timeout: 30000,
-    });
+    //
+    // We use `adm-zip` instead of shelling out to the `unzip` CLI because
+    // Windows has no `unzip` binary by default, and the previous shell-out
+    // ENOENT'd for every Windows user. `adm-zip` is pure JS, sync, and
+    // does its own internal zip-slip filtering — but the realpath walker
+    // below remains as defense-in-depth (different code, different bugs).
+    const zip = new AdmZip(tmpFile);
+    // `maintainEntryPath = true` preserves directory structure;
+    // `overwrite = true` matches the previous `unzip -o` semantics.
+    zip.extractAllTo(extractDir, /* overwrite */ true);
 
     // Defense-in-depth zip-slip check: walk every extracted entry and make
     // sure its real path stays inside extractDir. `unzip` is supposed to
@@ -835,13 +848,42 @@ export function resolveEnvPath(
 }
 
 /**
+ * Env file basenames that are often **committed** as shared defaults (Vite,
+ * CRA, monorepos). Auto-appending them to `.gitignore` after `set_env_values`
+ * breaks those workflows and encourages putting API keys in tracked files.
+ * Browser Amplitude keys should live in `*.local` siblings instead.
+ */
+export const SHARED_COMMITTED_ENV_BASENAMES: ReadonlySet<string> = new Set([
+  '.env',
+  '.env.development',
+  '.env.production',
+  '.env.test',
+  '.env.staging',
+  '.env.defaults',
+  '.env.example',
+]);
+
+export function shouldSkipAutoGitignoreForEnvBasename(
+  envBasename: string,
+): boolean {
+  return SHARED_COMMITTED_ENV_BASENAMES.has(envBasename);
+}
+
+/**
  * Ensure the given env file basename is covered by .gitignore in the working directory.
  * Creates .gitignore if it doesn't exist; appends the entry if missing.
+ *
+ * Skips shared template names (see {@link SHARED_COMMITTED_ENV_BASENAMES}) so
+ * we never gitignore files many repos intentionally track.
  */
 export function ensureGitignoreCoverage(
   workingDirectory: string,
   envFileName: string,
 ): void {
+  if (shouldSkipAutoGitignoreForEnvBasename(envFileName)) {
+    return;
+  }
+
   const gitignorePath = path.join(workingDirectory, '.gitignore');
 
   if (fs.existsSync(gitignorePath)) {
@@ -949,7 +991,7 @@ export function persistEventPlan(
       return false;
     }
     // Write order matters for the mtime tiebreaker in
-    // `pickFreshestExisting(canonical, legacy)` (see agent-interface.ts).
+    // `pickFreshestExisting([canonical, legacy])` (see storage-paths.ts).
     // On filesystems with 1-second mtime granularity (older HFS+, ext4
     // without nanosec inode timestamps) both writes land in the same
     // second and both files share an mtime; the watcher walks the
@@ -1120,7 +1162,9 @@ export function buildFallbackReport(ctx: FallbackReportContext): string {
   lines.push('## Analytics dashboard');
   lines.push('');
   if (ctx.dashboardUrl) {
-    lines.push(`Open your dashboard: ${ctx.dashboardUrl}`);
+    lines.push(
+      `Open your dashboard: ${toWizardDashboardOpenUrl(ctx.dashboardUrl)}`,
+    );
   } else {
     lines.push(
       "_The wizard didn't capture a dashboard URL. You can build one from your events at https://app.amplitude.com._",
@@ -1274,7 +1318,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
 
   const setEnvValues = tool(
     'set_env_values',
-    'Create or update environment variable keys in a .env file. Creates the file if it does not exist. Ensures .gitignore coverage.',
+    'Create or update environment variable keys in a .env file. Creates the file if it does not exist. Ensures .gitignore coverage for secret-local files (e.g. .env.local). For Vite and similar stacks, prefer `.env.development.local` / `.env.production.local` when the repo already tracks `.env.development` / `.env.production` — never rely on auto-gitignore for those tracked template names.',
     {
       filePath: z
         .string()
@@ -1309,9 +1353,14 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
 
       fs.writeFileSync(resolved, content, 'utf8');
 
-      // Ensure .gitignore coverage for this env file
+      // Ensure .gitignore coverage for this env file (skipped for shared
+      // committed templates like .env.development — see ensureGitignoreCoverage).
       const envFileName = path.basename(resolved);
       ensureGitignoreCoverage(workingDirectory, envFileName);
+
+      const skipNote = shouldSkipAutoGitignoreForEnvBasename(envFileName)
+        ? ' Note: this filename is often a committed env template; use a `.local` sibling for values that must stay untracked.'
+        : '';
 
       return {
         content: [
@@ -1319,7 +1368,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
             type: 'text' as const,
             text: `Updated ${Object.keys(args.values).length} key(s) in ${
               args.filePath
-            }`,
+            }.${skipNote}`,
           },
         ],
       };

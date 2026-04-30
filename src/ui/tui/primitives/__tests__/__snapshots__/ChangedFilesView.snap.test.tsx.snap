@@ -1,0 +1,20 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ChangedFilesView snapshots > renders the empty state when no files changed 1`] = `
+"
+  Files changed (Esc to go back)
+
+  No file changes were tracked for this run.
+"
+`;
+
+exports[`ChangedFilesView snapshots > renders the list view with mixed create/modify entries 1`] = `
+"
+  Files changed
+  3 files · ↑↓ to move · Enter to view diff · Esc to go back
+
+  › ~ modify src/App.tsx
+    ＋ new   src/components/Login.tsx
+    ＋ new   src/instrument.ts
+"
+`;

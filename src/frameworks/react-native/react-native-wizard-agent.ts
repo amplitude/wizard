@@ -1,7 +1,7 @@
 /* React Native wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { Integration } from '../../lib/constants';
 import { detectReactNativeProject, detectExpo } from './utils';
 

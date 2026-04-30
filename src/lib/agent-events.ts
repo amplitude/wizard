@@ -101,6 +101,34 @@ export const EVENT_DATA_VERSIONS = {
   events_detected: 1,
   dashboard_created: 1,
   /**
+   * `setup_context` — emitted by `plan` (in the JSON envelope) and at
+   * `apply_started`, before any work happens. Carries the resolved
+   * Amplitude scope (region, org, project, app, env) so the outer
+   * agent can SHOW the user exactly what's about to be modified before
+   * asking them to approve. Without this, an outer agent has no
+   * authoritative handle on which Amplitude app the wizard will write
+   * to and may render data from a stale project for follow-up queries.
+   *
+   * Each scope field carries a `source` discriminator (`auto` /
+   * `flag` / `saved` / `recommended`) so the orchestrator can decide
+   * whether a re-confirm is warranted (e.g. `auto` from a single-match
+   * still benefits from a "look right?" prompt).
+   */
+  setup_context: 1,
+  /**
+   * `setup_complete` — terminal artifact event emitted exactly once
+   * per successful `apply` run, immediately before `run_completed`.
+   * Single source of truth for the artifacts the outer agent needs
+   * for follow-up work: which app to query, which files were
+   * written, which env vars were set, which dashboard URL to render.
+   *
+   * Skill rule: after this event fires, the outer agent MUST replace
+   * any cached Amplitude project context with `amplitude.appId` —
+   * otherwise follow-up MCP queries (charts, dashboards, events) hit
+   * the wrong project.
+   */
+  setup_complete: 1,
+  /**
    * `agent_metrics` — emitted once per agent run at finalize time
    * with aggregated token usage, tool call counts, and run duration.
    * Lets orchestrators bill / cap / monitor cost without re-parsing
@@ -122,6 +150,42 @@ export const EVENT_DATA_VERSIONS = {
    * auto-resolution next on the same stream.
    */
   decision_auto: 1,
+  /**
+   * `heartbeat` — periodic liveness signal emitted every ~10s while
+   * the inner agent is running. Carries elapsed wall-clock time, the
+   * current retry attempt count, and the rolling tail of pushStatus
+   * messages so an orchestrator can render a "still working…" widget
+   * without going dark when a long tool call (Bash, MCP, file edit
+   * chain) eats 30+ seconds of silence. Always fires on the cadence,
+   * regardless of whether the agent has been chatty — absence of
+   * heartbeat events is the canonical signal that the wizard is
+   * stalled.
+   */
+  heartbeat: 1,
+  /**
+   * `checkpoint_saved` — emitted whenever the wizard writes a session
+   * snapshot to `~/.amplitude/wizard/runs/<sha>/checkpoint.json`.
+   * Lets orchestrators know there's a recoverable state on disk so
+   * a rerun can pass `--resume` to skip already-completed steps
+   * (region pick, OAuth, framework detection, etc.).
+   */
+  checkpoint_saved: 1,
+  /**
+   * `checkpoint_loaded` — emitted at startup in agent / CI mode when
+   * `--resume` finds a fresh, schema-valid checkpoint and restores
+   * the session from it. Carries the file age so an orchestrator can
+   * decide whether the checkpoint is too stale to trust ("you saved
+   * this 22h ago, are you sure you want to keep going?").
+   */
+  checkpoint_loaded: 1,
+  /**
+   * `checkpoint_cleared` — emitted when the wizard removes a saved
+   * checkpoint. The `reason` discriminator covers the three legitimate
+   * triggers (`success` after a clean run, `manual` from a slash
+   * command, `logout` after sign-out). Lets orchestrators avoid
+   * showing a "resume?" prompt once the underlying state is gone.
+   */
+  checkpoint_cleared: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -547,6 +611,151 @@ export function summarizeToolInput(
       }
     }
   }
+}
+
+// ── Setup context / completion ──────────────────────────────────────
+//
+// The two events below bracket the wizard's actual work. `setup_context`
+// fires BEFORE any decisions / writes happen so the outer agent can show
+// the user exactly which Amplitude scope they're about to modify.
+// `setup_complete` fires ONCE on a successful run with the canonical
+// artifact list — it's the contract the outer agent reads to drive
+// follow-up MCP calls into the right project.
+
+/**
+ * Provenance for a resolved scope field. Lets orchestrators decide
+ * whether to re-confirm with the user (e.g. always confirm `auto`
+ * resolutions even when there's a single match).
+ */
+export type SetupContextSource =
+  | 'auto' // resolved by single-match / sole-org auto-pick
+  | 'flag' // came from an explicit CLI flag (--app-id, --integration, ...)
+  | 'saved' // restored from a prior session (~/.ampli config / token store)
+  | 'recommended'; // wizard's recommended pick from a >1 list (not yet selected)
+
+/**
+ * Resolved Amplitude scope at the moment the event fires. Every field
+ * is optional because not every phase has every value: `plan` emits
+ * the org/region but may not have an appId yet; `apply_started`
+ * emits everything once the env picker has run. Skill instructs the
+ * agent to surface whatever fields are present and ask the user to
+ * confirm the ones that aren't.
+ */
+export interface SetupContextAmplitudeScope {
+  region?: 'us' | 'eu';
+  orgId?: string;
+  orgName?: string;
+  projectId?: string;
+  projectName?: string;
+  /**
+   * Numeric Amplitude app id (a.k.a. project id in the Amplitude UI).
+   * Stringified so JS bigint-y values round-trip cleanly through
+   * orchestrator stores. Always parseable back to a positive integer.
+   */
+  appId?: string;
+  appName?: string;
+  envName?: string;
+}
+
+/**
+ * Wire shape of `setup_context.data`. Per-field provenance lets the
+ * orchestrator render badges like "auto-detected" or "from flag".
+ * `phase` discriminates which command emitted it — useful when the
+ * orchestrator is multiplexing multiple wizard runs.
+ */
+export interface SetupContextData {
+  event: 'setup_context';
+  phase: 'plan' | 'apply_started' | 'whoami';
+  amplitude: SetupContextAmplitudeScope;
+  sources?: Partial<
+    Record<keyof SetupContextAmplitudeScope, SetupContextSource>
+  >;
+  /**
+   * When `true`, the orchestrator MUST surface this scope to the user
+   * before proceeding. Set by `--confirm-app` and on any `auto`
+   * resolution where multiple choices were possible.
+   */
+  requiresConfirmation?: boolean;
+  /**
+   * argv to re-invoke if the user wants to pick a different app
+   * instead of the auto-resolved one. Always uses `--app-id` as the
+   * canonical scope flag.
+   */
+  resumeFlags?: { changeApp: string[] };
+}
+
+/** Single planned analytics event written by the wizard. */
+export interface SetupCompleteEvent {
+  name: string;
+  description?: string;
+  /** Source file the track() call landed in (relative to installDir). */
+  file?: string;
+}
+
+/** Wire shape of `setup_complete.data`. */
+export interface SetupCompleteData {
+  event: 'setup_complete';
+  /** Resolved Amplitude scope — the source of truth for follow-up queries. */
+  amplitude: SetupContextAmplitudeScope & {
+    /** Public dashboard URL when the wizard created one. */
+    dashboardUrl?: string;
+    /** Dashboard id (last segment of dashboardUrl) — convenience for MCP. */
+    dashboardId?: string;
+  };
+  /** Files the inner agent created or modified, relative to `installDir`. */
+  files?: { written: string[]; modified: string[] };
+  /** Env-var names the wizard added/changed (values intentionally omitted). */
+  envVars?: { added: string[]; modified: string[] };
+  /** Final approved event plan. */
+  events?: SetupCompleteEvent[];
+  /** Wall-clock duration of the run in ms. */
+  durationMs?: number;
+  /** Hint for follow-up tooling. Skill reads `mcpServer` to wire MCP context. */
+  followups?: {
+    mcpServer?: { command: string[]; description: string };
+    docsUrl?: string;
+  };
+}
+
+// ── Log truncation ──────────────────────────────────────────────────
+//
+// Inner-agent errors can include the entire failing SSE response body
+// (model id, signature blobs, cache token counts, partial JSON
+// deltas — kilobytes of internals). Past sessions surfaced 50KB+
+// `log.message` strings that polluted orchestrator context, leaked
+// internal model identifiers, and rendered as walls of unreadable text.
+// We truncate in the emitter so a single misbehaving caller can't blow
+// up downstream parsers regardless of where the noise originated.
+
+/**
+ * Maximum length of a `log.message` string in NDJSON output. Spillover
+ * is dropped from the wire and pointed at the on-disk verbose log so
+ * orchestrators see a readable status line and the operator still has
+ * the full payload for debugging.
+ */
+export const MAX_LOG_MESSAGE_LENGTH = 2048;
+
+/**
+ * Truncate a log message for inclusion in NDJSON output. Idempotent
+ * (already-short strings pass through unchanged) and stable (the
+ * suffix is appended exactly once even on double-truncation).
+ *
+ *   - `<= MAX_LOG_MESSAGE_LENGTH` → returned verbatim
+ *   - otherwise                  → `<head>… [truncated …; see verbose log]`
+ *
+ * Pure for unit testing.
+ */
+export function truncateLogMessage(
+  message: string,
+  max = MAX_LOG_MESSAGE_LENGTH,
+): string {
+  if (message.length <= max) return message;
+  const suffix = '… [truncated; see verbose log]';
+  // Reserve room for the suffix so the final string is always exactly
+  // `max` bytes long (or shorter when `max` itself is too small for
+  // the suffix — defensive, never happens in practice).
+  const headroom = Math.max(0, max - suffix.length);
+  return message.slice(0, headroom) + suffix;
 }
 
 /**

@@ -30,7 +30,7 @@ const UNIVERSAL_COMMANDMENTS: string[] = [
 1. Server-side / private secrets — server-side write keys for backend SDKs (\`@amplitude/analytics-node\`, \`amplitude-analytics\` Python, etc.), OAuth client secrets, service-role tokens. Store in env vars and read via \`process.env\` / \`os.getenv\` / equivalent. Use the wizard-tools MCP (\`check_env_keys\` / \`set_env_values\`) to manage \`.env\` / \`.env.local\` files. Never write these into source.
 
 2. Browser-side / public Amplitude API keys (anything bundled into the user's browser via \`@amplitude/unified\`, \`@amplitude/analytics-browser\`, etc.) — Amplitude treats browser keys as public; tenant isolation is enforced server-side. Two acceptable patterns:
-   a. If the framework has a built-in env-var convention that surfaces \`.env\` values to client code WITHOUT modifying any build config, use it. Allowed: Vite \`import.meta.env.VITE_AMPLITUDE_API_KEY\`, Next.js \`process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY\`, CRA \`process.env.REACT_APP_AMPLITUDE_API_KEY\`, Astro \`import.meta.env.PUBLIC_AMPLITUDE_API_KEY\`, Nuxt \`useRuntimeConfig().public.amplitudeApiKey\`, SvelteKit \`PUBLIC_AMPLITUDE_API_KEY\` from \`$env/static/public\`, Expo \`Constants.expoConfig?.extra?.amplitudeApiKey\`, Angular \`environment.amplitudeApiKey\`, React Native bare with \`react-native-config\` (only if already installed). Verify the framework actually applies before using its convention.
+   a. If the framework has a built-in env-var convention that surfaces \`.env\` values to client code WITHOUT modifying any build config, use it. Allowed: Vite \`import.meta.env.VITE_AMPLITUDE_API_KEY\`, Next.js \`process.env.NEXT_PUBLIC_AMPLITUDE_API_KEY\`, CRA \`process.env.REACT_APP_AMPLITUDE_API_KEY\`, Astro \`import.meta.env.PUBLIC_AMPLITUDE_API_KEY\`, Nuxt \`useRuntimeConfig().public.amplitudeApiKey\`, SvelteKit \`PUBLIC_AMPLITUDE_API_KEY\` from \`$env/static/public\`, Expo \`Constants.expoConfig?.extra?.amplitudeApiKey\`, Angular \`environment.amplitudeApiKey\`, React Native bare with \`react-native-config\` (only if already installed). Verify the framework actually applies before using its convention. **Vite / monorepos:** many repos commit \`.env.development\` / \`.env.production\` as non-secret templates. Put \`VITE_*\` keys in \`.env.development.local\` / \`.env.production.local\` (or \`.env.local\`) via \`set_env_values\` — never append keys to tracked template files just because they already exist.
    b. Otherwise, INLINE the API key directly in the SDK init call (\`amplitude.init('abc123', {...})\`). Correct fallback for plain webpack, custom Rollup, vanilla HTML+JS, unfamiliar build tools, or anything not on the list above.
 
 NEVER modify build configs to bridge env vars into client code. Off-limits: \`webpack.config.*\`, \`rollup.config.*\`, \`vite.config.*\` (beyond the framework convention), \`next.config.*\` (beyond declared \`env\` / \`runtimeConfig\`), \`babel.config.*\`, \`craco.config.*\`, \`vue.config.*\`, custom build scripts. Adding \`webpack.DefinePlugin\`, \`process.env\` aliases, or \`.env\` loader plumbing is forbidden — even if it would technically work. Don't install third-party glue (\`dotenv-webpack\` etc.) to make it work either.
@@ -42,6 +42,27 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
   'Every wizard-tools MCP tool call (`mcp__wizard-tools__*`) MUST include a `reason` argument (≤25 words) explaining what you\'re trying to accomplish at this step. Captured in Agent Analytics. Write a real rationale tied to the immediate goal — not a paraphrase of the tool description, generic phrases like "calling tool", or the literal string "reason". When you\'re truly stuck (unresolvable error, missing prerequisite, ambiguous codebase shape), call `wizard_feedback` (severity="warn" if you can continue degraded, "error" if not) instead of silently continuing or repeating failed calls.',
 
   'NEVER run Bash commands to verify env vars. Forbidden: `node -e "console.log(process.env...)"`, `node --eval`, `printenv`, `echo $VAR`, `cat .env*`, `grep AMPLITUDE .env`, `bash -c \'...\'` evals, or any shell incantation aimed at inspecting env-var presence/values. The bash allowlist denies all variants — silently rephrasing `node -e` as `node --eval` is the exact pattern this rule forbids. The ONLY sanctioned check: wizard-tools `check_env_keys` (reports presence without exposing values). If keys are missing, call `set_env_values`. Do not invent a "verify" phase that loops shell commands.',
+
+  `Build / typecheck / lint verification — keep the shape SIMPLE. The bash allowlist accepts package-manager scripts (\`yarn test:typecheck\`, \`pnpm tsc --noEmit\`, \`npx eslint --fix src/file.ts\`, \`npx tsc --noEmit\`) and at most a single pipe to \`tail\` / \`head\` for output limiting. It does NOT allow:
+
+    ✗ \`yarn typecheck 2>&1 | grep -E "(error TS|...)" | head -30\`   ← parens trip the dangerous-operators rule
+    ✗ \`yarn lint | grep error | head\`                                ← multiple pipes
+    ✗ \`yarn build && yarn lint\`                                      ← && chaining
+    ✗ \`tsc --noEmit; yarn lint\`                                      ← semicolon chaining
+
+  The allowed shapes:
+
+    ✓ \`yarn test:typecheck\`                          ← full output, no pipe
+    ✓ \`yarn test:typecheck | tail -50\`               ← last 50 lines (single pipe to tail)
+    ✓ \`pnpm tsc --noEmit | head -30\`                 ← first 30 lines (single pipe to head)
+    ✓ \`npx tsc --noEmit\`                             ← direct invocation
+    ✓ \`npx eslint --fix src/init.ts\` then \`npx tsc --noEmit\`  ← sequential, two separate Bash calls
+
+  Note: these are SYNTAX shapes the allowlist permits. You must still scope lint/build to edited files only (see the scoping commandment below) — never run project-wide \`yarn lint\`, \`npm run build\`, etc.
+
+  When you need to filter output to a substring, use \`Grep\` (the dedicated tool) on the captured stdout — not a shell pipe. When the output is short enough to read in full, just don't pipe at all.
+
+  If the simple form gets denied (extremely rare — the allowlist covers all common build-tool sub-commands), DO NOT retry with progressively more shell composition. Note the limitation in the setup report (\`Could not run \\\`<command>\\\` automatically. Run it manually after install.\`) and move on. The retry-budget rule applies.`,
 
   'When installing packages, start the install as a background task and continue with other work. Do not block on installs unless explicitly instructed.',
 
@@ -56,6 +77,8 @@ When in doubt, inline. A working integration with a hardcoded public key beats a
   'Treat feature flags, custom properties, and event names as part of an analytics contract. Prefer reusing existing names and patterns. When introducing new ones, make them clear, descriptive, and consistent with project conventions; avoid scattering the same flag/property across unrelated callsites. For instrumentation runs, load the **amplitude-quickstart-taxonomy-agent** skill (taxonomy category via wizard-tools) and align with its starter-kit rules (business-outcome naming, small property sets, no redundant pageview events, funnel-friendly linkage).',
 
   'Prefer minimal, targeted edits that achieve the requested behavior while preserving existing structure and style. Avoid large refactors, broad reformatting, or unrelated changes unless explicitly requested.',
+
+  'Never replace wholesale, reset-to-template, or substantially rewrite a project\'s root-level AI or contributor guidance files (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `CONTRIBUTING.md`, `.github/copilot-instructions.md`, or similar). Those belong to the repository maintainers — do not "onboard" the repo by authoring a fresh CLAUDE.md from scratch. If a tiny inline hint helps, append at most one `## Amplitude (wizard)` section pointing at `amplitude-setup-report.md`; otherwise rely on the setup report only.',
 
   'Do not spawn subagents unless explicitly instructed.',
 
@@ -202,6 +225,21 @@ These options are ONLY valid for the browser / unified SDK. Do NOT pass autocapt
   - Backend SDKs in other languages (Python, Java, Go, Ruby, .NET) — server-side, no autocapture surface.
 
 When in doubt, consult the per-SDK README. Inventing an option name (or copying browser keys onto a non-browser SDK) causes runtime errors or silent no-ops. See https://amplitude.com/docs/sdks/client-side-vs-server-side for which SDK applies where.`,
+
+  `One init file owns the SDK; every track call imports from THAT file. The SDK init code you generate goes into a single project-local module — \`amplitude.ts\`, \`amplitude.js\`, \`lib/amplitude.ts\`, \`utils/amplitude.ts\`, or wherever the project's existing module convention puts it. That module:
+  1. Calls \`initAll(...)\` (or \`init(...)\` for the standalone analytics-browser SDK) once, at module scope, as a side effect of being imported.
+  2. Re-exports the surface the rest of the codebase needs: \`export { track, setUserId, identify, Identify } from "@amplitude/analytics-browser"\` (or \`from "@amplitude/unified"\`).
+
+Then EVERY track / identify / setUserId call in the project's source code MUST import from the project-local module — NOT from \`@amplitude/analytics-browser\` / \`@amplitude/unified\` directly:
+
+  // ✗ WRONG — bypasses the project's wrapper, the re-export becomes dead code
+  import { track } from "@amplitude/analytics-browser";
+
+  // ✓ RIGHT — relative path to the project's own amplitude module
+  import { track } from "../amplitude";
+  import { track } from "@/lib/amplitude";
+
+Why this matters: the project-local module is the user's hook for adding logging, opt-out logic, env-var swaps, mocking in tests, or future SDK swaps. If half the project imports from the SDK directly and half from the wrapper, refactoring the wrapper does nothing for half the callsites and becomes a footgun. Pick the wrapper path and use it everywhere — including in files that already had a stray direct import before this run; rewrite those too.`,
 ];
 
 const DEMO_MODE_COMMANDMENTS: string[] = DEMO_MODE

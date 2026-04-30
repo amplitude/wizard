@@ -59,6 +59,19 @@ function formatElapsed(seconds: number): string {
   return `${m}m ${s}s`;
 }
 
+/**
+ * Cap a status string for inline display. Belt-and-braces against unbounded
+ * streamed content (e.g. raw stream-event JSON forwarded by runAgentLocally
+ * before its filter stripped them). Yoga's `truncate-end` is the primary
+ * defense once the row is flex-shrinkable, but a JS cap keeps the header
+ * sane regardless of layout context.
+ */
+const STATUS_MAX_LEN = 80;
+function truncateStatus(s: string): string {
+  if (s.length <= STATUS_MAX_LEN) return s;
+  return s.slice(0, STATUS_MAX_LEN - 1) + '…';
+}
+
 /** Extract a file path from the most recent status message, if any. */
 function extractCurrentFile(messages: string[]): string | null {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -267,15 +280,6 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
               <Text color={Colors.muted}>
                 {Icons.dot} {formatElapsed(elapsed)}
               </Text>
-              {/* Show the latest agent status inline while nothing is
-                  finished yet. Once the first task lands, the regular
-                  status pill below the tabs takes over and we don't need
-                  to duplicate it in the header. */}
-              {completedDisplay === 0 && lastStatus && (
-                <Text color={Colors.muted} wrap="truncate-end">
-                  {Icons.dot} {lastStatus}
-                </Text>
-              )}
               <RetryStatusChip
                 retryState={store.session.retryState}
                 now={Date.now()}
@@ -287,6 +291,19 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
               </Text>
             )}
           </Box>
+          {/* Show the latest agent status on its own row while nothing is
+              finished yet. Stays below the counter (not inline) — long
+              status strings used to push the counter siblings to wrap onto
+              the next line. Truncated in JS as a belt-and-braces guard
+              against unbounded streamed content (e.g. raw stream-event
+              JSON from `runAgentLocally`). Once the first task lands, the
+              regular status pill below the tabs takes over and we don't
+              need to duplicate it in the header. */}
+          {completedDisplay === 0 && lastStatus && (
+            <Text color={Colors.muted} wrap="truncate-end">
+              {Icons.dot} {truncateStatus(lastStatus)}
+            </Text>
+          )}
           {showColdStartHint && (
             <Text color={Colors.muted}>
               {Icons.dot} Still on the agent's first response — cold start can
@@ -313,13 +330,17 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
             The spinner stays — this is a *secondary* line that gives the
             user something to do (open Logs, cancel) instead of staring
-            at a frozen indicator. Resets when a new task appears. */}
+            at a frozen indicator. Resets when a new task appears.
+
+            NB: tabs switch with ← / → (or number keys); the Tab key is
+            wired to opening the slash-command input in ConsoleView. The
+            old copy said "(Tab)" and led users to the wrong key. */}
         {coachingTier >= 1 && (
           <Box marginTop={1}>
             <Text color={Colors.muted}>
               {coachingTier >= 2
-                ? "This is unusually slow. The Logs tab (Tab) may show what's stuck — or Ctrl+C to cancel."
-                : "Still working — switch to the Logs tab (Tab) to see what's happening, or Ctrl+C to cancel."}
+                ? "This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
+                : "Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
             </Text>
           </Box>
         )}

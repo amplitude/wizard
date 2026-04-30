@@ -116,6 +116,10 @@ export class InkUI implements WizardUI {
     return true;
   }
 
+  setOutroData(data: import('../../lib/wizard-session.js').OutroData): void {
+    this.store.setOutroData(data);
+  }
+
   async cancel(message: string, options?: { docsUrl?: string }): Promise<void> {
     this.store.pushStatus(stripAnsi(message));
 
@@ -125,6 +129,12 @@ export class InkUI implements WizardUI {
         message: stripAnsi(message),
         docsUrl: options?.docsUrl,
       });
+    } else {
+      // Re-emit existing outroData so subscribers (OutroScreen) re-render.
+      // Business-logic callers that direct-mutate `session.outroData` don't
+      // fire change events, so without this the OutroScreen could miss the
+      // updated state when cancel() is called immediately after.
+      this.store.setOutroData(this.store.session.outroData);
     }
 
     // Advance past Run screen (RunPhase.Error also skips MCP screen)
@@ -198,7 +208,11 @@ export class InkUI implements WizardUI {
     this.store.pushStatus(message);
   }
 
-  heartbeat(_statuses: string[]): void {
+  heartbeat(_data: {
+    statuses: string[];
+    elapsedMs: number;
+    attempt?: number;
+  }): void {
     // TUI already shows live status updates reactively via pushStatus — no-op
   }
 

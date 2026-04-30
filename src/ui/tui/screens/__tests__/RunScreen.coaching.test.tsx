@@ -58,7 +58,11 @@ function seedRunScreenStore() {
 // stretch past 30s. Keep the ceiling generous so CI doesn't
 // false-positive on machine load that has nothing to do with the
 // behaviour being tested.
-const SLOW_TEST_TIMEOUT_MS = 60_000;
+// 120s headroom — the prior 60s value was reproducibly tripping the
+// pre-push hook even though every test passes when run in isolation.
+// Solo, this file finishes in ~4s; the cost of bumping is 0 on healthy
+// runs (the timeout is only consulted when a test actually hangs).
+const SLOW_TEST_TIMEOUT_MS = 120_000;
 
 describe('RunScreen — timeout coaching', () => {
   beforeEach(() => {

@@ -26,7 +26,7 @@ import {
   AgentErrorType,
   buildWizardMetadata,
 } from './agent-interface';
-import { getLlmGatewayUrlFromHost } from '../utils/urls';
+import { getLlmGatewayUrlFromHost, getMcpUrlFromZone } from '../utils/urls';
 import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
@@ -34,6 +34,7 @@ import { getVersionCheckInfo, getVersionWarning } from './version-check';
 import * as fsSync from 'fs';
 import path from 'path';
 import { saveCheckpoint } from './session-checkpoint.js';
+import { getEventsFile } from '../utils/storage-paths.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { getLogFilePath } from './observability/index.js';
 import { createObservabilityMiddleware } from './middleware/observability';
@@ -140,9 +141,11 @@ export function agentArtifactsLookComplete(session: WizardSession): boolean {
  * events, even if it didn't reach the dashboard creation step?
  *
  * The wizard's `confirm_event_plan` MCP tool persists the approved
- * event plan to `<installDir>/.amplitude-events.json` (see
- * `persistEventPlan` in `wizard-tools.ts`). That file's presence with
- * non-empty content is a hard signal that:
+ * event plan to `<installDir>/.amplitude/events.json` (canonical) and
+ * mirrors it to `<installDir>/.amplitude-events.json` (legacy, kept
+ * during the rollout window for older skills — see `persistEventPlan`
+ * in `wizard-tools.ts`). The presence of either file with non-empty
+ * content is a hard signal that:
  *
  *   - The user approved an instrumentation plan
  *   - The agent reached the post-confirmation phase
@@ -163,15 +166,27 @@ export function agentArtifactsLookComplete(session: WizardSession): boolean {
  * app.amplitude.com.
  */
 export function agentEventsInstrumented(session: WizardSession): boolean {
-  try {
-    const eventsPath = path.join(session.installDir, '.amplitude-events.json');
-    if (!fsSync.existsSync(eventsPath)) return false;
-    const raw = fsSync.readFileSync(eventsPath, 'utf8');
-    const parsed: unknown = JSON.parse(raw);
-    return Array.isArray(parsed) && parsed.length > 0;
-  } catch {
-    return false;
+  // Try canonical location first, then fall back to the legacy mirror.
+  // `persistEventPlan` writes both, but the legacy write is best-effort
+  // and is planned to be dropped — reading only the legacy path (the
+  // pre-fix behavior) means a successful canonical write with a failed
+  // legacy mirror would falsely report "not instrumented" and trigger
+  // the soft-error abort path on an already-instrumented project.
+  const candidates = [
+    getEventsFile(session.installDir),
+    path.join(session.installDir, '.amplitude-events.json'),
+  ];
+  for (const eventsPath of candidates) {
+    try {
+      if (!fsSync.existsSync(eventsPath)) continue;
+      const raw = fsSync.readFileSync(eventsPath, 'utf8');
+      const parsed: unknown = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) return true;
+    } catch {
+      // Try the next candidate; only return false once both miss.
+    }
   }
+  return false;
 }
 
 /**
@@ -696,10 +711,11 @@ async function runAgentWizardBody(
   const wizardFlags = await analytics.getAllFlagsForWizard();
   const wizardMetadata = buildWizardMetadata(wizardFlags);
 
-  // Determine MCP URL: CLI flag > env var > production default
-  const mcpUrl = session.localMcp
-    ? 'http://localhost:8787/mcp'
-    : process.env.MCP_URL || 'https://mcp.amplitude.com/mcp';
+  // Determine MCP URL: CLI flag > env var > region-aware production default.
+  // Routing an EU user through the US MCP host runs their session against
+  // US infrastructure even though their data lives in EU — both a UX bug
+  // (wrong project, no events) and a compliance bug.
+  const mcpUrl = getMcpUrlFromZone(cloudRegion, { local: session.localMcp });
 
   // Skills URL: derived from the same host as the LLM proxy.
   // Always tries remote first; falls back to bundled if fetch fails.
@@ -730,6 +746,13 @@ async function runAgentWizardBody(
       skillsBaseUrl,
       agentSessionId: session.agentSessionId,
       targetsBrowser: config.metadata.targetsBrowser,
+      mode: session.mode,
+      // Forward orchestrator-supplied context (from `--context-file`
+      // / `AMPLITUDE_WIZARD_CONTEXT`) so it lands in the cached
+      // system-prompt block alongside the commandments. Undefined when
+      // no context was provided — keeps the cached preset stable for
+      // every "no context" run.
+      orchestratorContext: session.orchestratorContext ?? undefined,
     },
     sessionToOptions(session),
   );
@@ -768,7 +791,7 @@ async function runAgentWizardBody(
       // state, and capture an analytics breadcrumb for cost/quality analysis.
       onPreCompact: ({ trigger }) => {
         try {
-          saveCheckpoint(session);
+          saveCheckpoint(session, 'pre_compact');
         } catch (err) {
           logToFile('PreCompact: saveCheckpoint failed', err);
         }
@@ -776,6 +799,40 @@ async function runAgentWizardBody(
           trigger,
           integration: session.integration ?? null,
           'detected framework': session.detectedFrameworkLabel ?? null,
+        });
+      },
+      // Fires once when MAX_CONSECUTIVE_BASH_DENIES consecutive Bash denies
+      // accumulate — the agent is thrashing on a command that will never
+      // be allowed (real-world repro: 47-turn loop verifying env vars via
+      // `node -e` / `printenv` / `cat .env`). Trigger graceful halt so the
+      // remaining turn budget isn't burned on the same denied call.
+      // Fire-and-forget: wizardAbort returns Promise<never> and exits the
+      // process, but the hook callback can't await it. Subsequent denied
+      // calls between this and process.exit re-hit the deny path and
+      // return without further side effects (the breaker is one-shot).
+      onCircuitBreakerTripped: ({ consecutiveDenies, lastCommand }) => {
+        analytics.wizardCapture('bash deny circuit breaker tripped', {
+          'consecutive denies': consecutiveDenies,
+          'last command': lastCommand.slice(0, 200),
+          integration: session.integration ?? null,
+          'detected framework': session.detectedFrameworkLabel ?? null,
+        });
+        const abortMessage = `Setup halted: the agent kept trying Bash commands the wizard does not permit (${consecutiveDenies} in a row). This usually means the agent was looping on env-var verification or a similar denied operation. Re-run the wizard; if it happens again, file an issue with the log file path shown below.`;
+        session.outroData = {
+          kind: OutroKind.Error,
+          message: abortMessage,
+          canRestart: true,
+        };
+        // Fire and forget — wizardAbort tears down the process. We
+        // intentionally don't await so we don't deadlock the hook return.
+        void wizardAbort({
+          message: abortMessage,
+          error: new WizardError('Bash deny circuit breaker tripped', {
+            'consecutive denies': consecutiveDenies,
+            'last command': lastCommand,
+            integration: session.integration,
+          }),
+          exitCode: ExitCode.AGENT_FAILED,
         });
       },
     },
@@ -790,14 +847,29 @@ async function runAgentWizardBody(
       'agent-runner',
       { integration: config.metadata.integration },
     );
-    const authMessage = `Authentication failed\n\nYour Amplitude session has expired. Please run the wizard again to log in.`;
-    session.credentials = null;
-    session.outroData = {
+    const signupUrl = `${OUTBOUND_URLS.overview[cloudRegion]}/signup`;
+    const authMessage =
+      `Authentication failed\n\n` +
+      `We couldn't authenticate your Amplitude session with our service. ` +
+      `This can happen if your account was just created and isn't fully provisioned yet.\n\n` +
+      `Try one of the following:\n` +
+      `  • Re-run the wizard in a minute and log in again\n` +
+      `  • Sign up manually at ${signupUrl}, then re-run the wizard`;
+    // Set outroData via the UI so the OutroScreen reliably re-renders before
+    // wizardAbort awaits user dismissal. Direct mutation of session.outroData
+    // doesn't notify nanostore subscribers and would make the outro miss the
+    // updated state — the user would not see the auth-failure confirmation
+    // before being routed back to login on the next run.
+    getUI().setOutroData({
       kind: OutroKind.Error,
       message: authMessage,
       promptLogin: true,
       canRestart: true,
-    };
+    });
+    // Also push a status so the failure is visibly announced even if the
+    // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).
+    getUI().pushStatus('Authentication failed — see details below.');
+    session.credentials = null;
     await wizardAbort({
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {

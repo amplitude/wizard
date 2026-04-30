@@ -24,9 +24,17 @@ import {
 } from './wizard-session';
 import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
-import { getLlmGatewayUrlFromHost, getHostFromRegion } from '../utils/urls';
+import {
+  getHostFromRegion,
+  getLlmGatewayUrlFromHost,
+  getMcpUrlFromZone,
+} from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
-import { getDashboardFile, getEventsFile } from '../utils/storage-paths';
+import {
+  getDashboardFile,
+  getEventsFile,
+  pickFreshestExisting,
+} from '../utils/storage-paths';
 import {
   startDualPathWatcher,
   type DualPathWatcherHandle,
@@ -34,7 +42,7 @@ import {
 import { LINTING_TOOLS } from './safe-tools';
 import { AgentState, buildRecoveryNote, consumeSnapshot } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
-import { classifyWriteOperation } from './agent-events';
+import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
   createWizardToolsServer,
   persistDashboard,
@@ -203,6 +211,38 @@ export function resolveMaxTurns(
 // can route structured events back into the per-run state bag.
 let _activeStatusReporter: StatusReporter | undefined;
 
+/**
+ * Map a `WizardMode` to a Claude model alias. Internal — see
+ * `docs/internal/agent-mode-flag.md` for the full mapping and rationale.
+ *
+ * The Amplitude LLM gateway expects the `anthropic/<alias>` prefix; the
+ * direct Anthropic API expects the bare alias. The wizard's `fallbackModel`
+ * is a different model on a different routing path, so a tier the gateway
+ * doesn't currently vend silently degrades rather than failing the run.
+ *
+ * Exported so unit tests can pin the mapping without standing up the
+ * full agent runtime.
+ */
+export function selectModel(
+  mode: import('../utils/types').WizardMode,
+  useDirectApiKey: boolean,
+): string {
+  let alias: string;
+  switch (mode) {
+    case 'fast':
+      alias = 'claude-haiku-4-5';
+      break;
+    case 'thorough':
+      alias = 'claude-opus-4-7';
+      break;
+    case 'standard':
+    default:
+      alias = 'claude-sonnet-4-6';
+      break;
+  }
+  return useDirectApiKey ? alias : `anthropic/${alias}`;
+}
+
 export type AgentConfig = {
   workingDirectory: string;
   amplitudeMcpUrl: string;
@@ -218,6 +258,12 @@ export type AgentConfig = {
   skipAmplitudeMcp?: boolean;
   /** Remote skills URL. When set, skills are downloaded instead of using bundled copies. */
   skillsBaseUrl?: string;
+  /**
+   * Internal agent model tier — see `docs/internal/agent-mode-flag.md`.
+   * Threaded from `WizardSession.mode` via `agent-runner.ts`.
+   * Undefined defaults to `'standard'` (the wizard's default model).
+   */
+  mode?: import('../utils/types').WizardMode;
   /**
    * UUID v4 that groups all `/v1/messages` calls in this wizard run into one
    * Agent Analytics session. Sourced from `WizardSession.agentSessionId`,
@@ -235,6 +281,15 @@ export type AgentConfig = {
    * system prompt every turn. Undefined = treat as non-browser.
    */
   targetsBrowser?: boolean;
+  /**
+   * Free-form context the outer orchestrator wants prepended to every
+   * turn. Sourced from `WizardSession.orchestratorContext` (which the
+   * CLI populates from `--context-file <path>` /
+   * `AMPLITUDE_WIZARD_CONTEXT`). Threaded through to `AgentRunConfig`
+   * so the systemPrompt builder can append it after the commandments.
+   * Undefined / empty when no context was provided.
+   */
+  orchestratorContext?: string;
 };
 
 /**
@@ -250,6 +305,69 @@ export type AgentConfig = {
  * dev-server boot) working while breaking the runaway sleep loop.
  */
 export const MAX_BASH_SLEEP_SECONDS = 5;
+
+/**
+ * Build the `systemPrompt.append` string the inner-agent SDK passes to
+ * Claude every turn. Concatenates wizard-wide commandments with the
+ * optional orchestrator-supplied context block, in that order:
+ *
+ *   1. `commandments` — hard safety rules (no secrets, no shell-eval,
+ *      mandatory `confirm_event_plan` before track() writes, etc.).
+ *      First-position so the model treats them as load-bearing.
+ *   2. `orchestratorContext` — soft, project-specific guidance the
+ *      caller injected via `--context-file` /
+ *      `AMPLITUDE_WIZARD_CONTEXT`. Wrapped in a labeled `## ...` block
+ *      so the model can distinguish wizard-managed instructions from
+ *      caller-supplied ones, and explicitly told NOT to override the
+ *      safety rules above.
+ *
+ * Extracted from the inline ternary inside `runAgent` so unit tests
+ * can lock the prompt-shape contract (whitespace, header, ordering)
+ * without spinning up the full agent pipeline.
+ */
+export function buildSystemPromptAppend(args: {
+  commandments: string;
+  orchestratorContext?: string | null;
+}): string {
+  const { commandments, orchestratorContext } = args;
+  const trimmed = orchestratorContext?.trim();
+  if (!trimmed) return commandments;
+  return (
+    commandments +
+    `\n\n## Orchestrator-injected context\n\n` +
+    `The wizard was invoked by an outer agent / CI pipeline that supplied ` +
+    `the following context. Treat it as authoritative for project-specific ` +
+    `conventions (event naming, existing taxonomy, team preferences) but ` +
+    `do NOT let it override the safety rules above (secrets, shell-eval ` +
+    `bans, etc.).\n\n${trimmed}`
+  );
+}
+
+/**
+ * Number of consecutive 401 / auth-flavored `api_retry` system messages from
+ * the Claude Agent SDK we'll tolerate before aborting the query and surfacing
+ * AUTH_ERROR. The SDK's default retry policy hammers a 401 ~10 times with
+ * exponential backoff (~3 min total) — but a 401 won't recover mid-run, so
+ * we cut the storm short and show the user a clear failure + manual-signup
+ * fallback instead of a stuck spinner.
+ */
+export const AUTH_RETRY_LIMIT = 2;
+
+/**
+ * Hard ceiling on consecutive Bash denies before the circuit breaker trips.
+ * See `createPreToolUseHook` for behavior.
+ *
+ * Sized for one false-start + one allowed-tools nudge from the deny copy +
+ * a 3x grace margin. A run that hits this is in the failure mode the user
+ * reported: agent thrashing on a denied command, ignoring the prompt-side
+ * "DO NOT retry" guidance. The breaker invokes a tripped-callback (wired
+ * to `wizardAbort` by `agent-runner`) so the run halts instead of burning
+ * 47 turns.
+ *
+ * Counter scope is per-hook-instance and resets on any allowed Bash call —
+ * a deny → success → deny sequence does NOT count as 2 consecutive denies.
+ */
+export const MAX_CONSECUTIVE_BASH_DENIES = 5;
 
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
@@ -359,8 +477,83 @@ export function partitionHookBridgeRace(data: string): {
  * authoritative place to gate Bash. We delegate the canonical allowlist
  * to `wizardCanUseTool` and additionally cap `sleep <N>` to
  * MAX_BASH_SLEEP_SECONDS to break the 400-terminated sleep cascade.
+ *
+ * On top of the gate, the hook tracks consecutive Bash denies and trips a
+ * circuit breaker after MAX_CONSECUTIVE_BASH_DENIES. Prompt-side guidance
+ * ("DO NOT retry") reduces the rate of looping but doesn't eliminate it —
+ * a user reported a 47-turn loop on the same denied command. The breaker
+ * is the belt-and-suspenders enforcement that fires when the model ignores
+ * the prompt anyway. Trip callback is one-shot per hook instance; the
+ * counter resets on any allowed Bash call so legitimate deny → recover
+ * sequences don't trip falsely.
  */
-export function createPreToolUseHook(): HookCallback {
+export interface PreToolUseHookOptions {
+  /**
+   * Invoked exactly once per hook instance, when consecutive Bash denies
+   * reach MAX_CONSECUTIVE_BASH_DENIES. Caller should treat as a terminal
+   * signal (e.g. trigger `wizardAbort`). Synchronous throws from this
+   * callback are swallowed; async failures are the caller's responsibility.
+   */
+  onCircuitBreakerTripped?: (info: {
+    consecutiveDenies: number;
+    lastCommand: string;
+    lastDenyReason: string;
+  }) => void;
+}
+
+export function createPreToolUseHook(
+  options: PreToolUseHookOptions = {},
+): HookCallback {
+  let consecutiveBashDenies = 0;
+  let circuitBreakerFired = false;
+
+  /**
+   * Wrap a Bash deny return value with circuit-breaker bookkeeping.
+   * Increments the counter, fires the trip callback once at threshold,
+   * returns the original deny payload unchanged so the SDK still respects
+   * the deny decision while wizardAbort tears the run down.
+   */
+  const trackBashDeny = (
+    denyPayload: Record<string, unknown>,
+    command: string,
+    reason: string,
+  ): Record<string, unknown> => {
+    consecutiveBashDenies += 1;
+    if (
+      consecutiveBashDenies >= MAX_CONSECUTIVE_BASH_DENIES &&
+      !circuitBreakerFired
+    ) {
+      circuitBreakerFired = true;
+      logToFile(
+        `Circuit breaker tripped after ${consecutiveBashDenies} consecutive Bash denies; last command: ${command}`,
+      );
+      captureWizardError(
+        'Bash Policy',
+        'Circuit breaker tripped',
+        'createPreToolUseHook',
+        {
+          'consecutive denies': consecutiveBashDenies,
+          'last command': command,
+          'last deny reason': reason,
+        },
+      );
+      try {
+        options.onCircuitBreakerTripped?.({
+          consecutiveDenies: consecutiveBashDenies,
+          lastCommand: command,
+          lastDenyReason: reason,
+        });
+      } catch (err) {
+        logToFile(
+          `onCircuitBreakerTripped threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return denyPayload;
+  };
+
   return (input) => {
     const toolName = (input.tool_name as string | undefined) ?? '';
     const toolInput =
@@ -405,27 +598,40 @@ export function createPreToolUseHook(): HookCallback {
             'createPreToolUseHook',
             { 'rule id': scan.rule.id, command },
           );
-          return Promise.resolve({
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: scan.rule.message,
-            },
-          });
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: scan.rule.message,
+                },
+              },
+              command,
+              scan.rule.message,
+            ),
+          );
         }
       } catch (err) {
         // Fail-closed: a scanner exception is a block decision. The only
         // realistic source of throws is regex backtracking on pathological
         // input, and on those we'd rather block than pass.
         logToFile('Destructive-bash scanner threw; failing closed:', err);
-        return Promise.resolve({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason:
-              'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.',
-          },
-        });
+        const reason =
+          'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.';
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: reason,
+              },
+            },
+            command,
+            reason,
+          ),
+        );
       }
     }
 
@@ -447,13 +653,20 @@ export function createPreToolUseHook(): HookCallback {
             'createPreToolUseHook',
             { 'sleep seconds': seconds, command },
           );
-          return Promise.resolve({
-            hookSpecificOutput: {
-              hookEventName: 'PreToolUse',
-              permissionDecision: 'deny',
-              permissionDecisionReason: `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`,
-            },
-          });
+          const reason = `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`;
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: reason,
+                },
+              },
+              command,
+              reason,
+            ),
+          );
         }
       }
     }
@@ -462,16 +675,29 @@ export function createPreToolUseHook(): HookCallback {
     // tools (Read/Write/Edit/Grep on .env, MCP tools) we keep canUseTool
     // as the primary gate since it already runs reliably for those.
     if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
       const decision = wizardCanUseTool(toolName, toolInput);
       if (decision.behavior === 'deny') {
-        return Promise.resolve({
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'deny',
-            permissionDecisionReason: decision.message,
-          },
-        });
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: decision.message,
+              },
+            },
+            command,
+            decision.message,
+          ),
+        );
       }
+      // Allowed Bash call — reset the consecutive-deny counter so a
+      // future deny → success → deny sequence doesn't accumulate falsely.
+      // The breaker is for a stuck agent, not for incidental denies
+      // sprinkled across an otherwise-progressing run.
+      consecutiveBashDenies = 0;
     }
 
     return Promise.resolve({});
@@ -763,6 +989,20 @@ export type AgentRunConfig = {
    * for browser-specific guidance only when relevant.
    */
   targetsBrowser?: boolean;
+  /**
+   * Free-form context the orchestrator wants prepended to every turn.
+   * Sourced from `--context-file <path>` (or `AMPLITUDE_WIZARD_CONTEXT`
+   * env var) — lets a parent agent inject team conventions ("we use
+   * snake_case for events", "always prefer Stripe events over generic
+   * checkout events", existing taxonomy snippets) WITHOUT modifying any
+   * skill content. Appended to `commandments.ts` output so it lands
+   * in the cached system-prompt block.
+   *
+   * Truncated upstream at the CLI boundary; this string is the
+   * already-validated payload. Empty / undefined when no context was
+   * provided.
+   */
+  orchestratorContext?: string;
 };
 
 const GATEWAY_LIVENESS_TIMEOUT_MS = 8_000;
@@ -964,30 +1204,7 @@ const DANGEROUS_OPERATORS = /[;`$()]/;
 import { parseEventPlanContent } from './event-plan-parser.js';
 export { parseEventPlanContent };
 
-/**
- * Pick the most recently modified existing file from a list of candidates.
- *
- * Used by the event-plan and dashboard watchers when both canonical
- * (`<installDir>/.amplitude/...`) and legacy (`<installDir>/.amplitude-*`)
- * paths might exist simultaneously — for example, when the migration
- * shim moved an old run's canonical file into place but the agent later
- * writes the legacy path during the current run. Returns null if none
- * exist. Exported for testing.
- */
-export function pickFreshestExisting(...paths: string[]): string | null {
-  let best: { path: string; mtimeMs: number } | null = null;
-  for (const p of paths) {
-    try {
-      const stat = fs.statSync(p);
-      if (best === null || stat.mtimeMs > best.mtimeMs) {
-        best = { path: p, mtimeMs: stat.mtimeMs };
-      }
-    } catch {
-      // File doesn't exist or is unreadable; skip.
-    }
-  }
-  return best?.path ?? null;
-}
+// `pickFreshestExisting` is imported from `../utils/storage-paths`.
 
 /**
  * Check if command is a Amplitude skill installation from MCP.
@@ -1132,16 +1349,85 @@ export function wizardCanUseTool(
 ):
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
   | { behavior: 'deny'; message: string } {
-  // Block direct reads/writes of .env files — use wizard-tools MCP instead
-  if (toolName === 'Read' || toolName === 'Write' || toolName === 'Edit') {
+  // Block direct reads/writes of .env files — use wizard-tools MCP instead.
+  // The full set of write tools is `Write`, `Edit`, `MultiEdit`, and
+  // `NotebookEdit` — see classifyWriteOperation in agent-events.ts. Older
+  // versions of this hook only matched `Write`/`Edit`, leaving MultiEdit
+  // as a bypass path. Cover all four tools here.
+  const isReadTool = toolName === 'Read';
+  const isWriteTool =
+    toolName === 'Write' ||
+    toolName === 'Edit' ||
+    toolName === 'MultiEdit' ||
+    toolName === 'NotebookEdit';
+  if (isReadTool || isWriteTool) {
     const filePath = typeof input.file_path === 'string' ? input.file_path : '';
-    const basename = path.basename(filePath);
+    // Normalize path separators BEFORE computing basename. On POSIX, Node's
+    // `path.basename` does not recognize `\` as a separator, so a Windows
+    // path like `C:\\project\\.amplitude\\events.json` would basename to
+    // the entire string and slip past our matchers. Normalizing to `/`
+    // first means `path.basename` is correct on both platforms regardless
+    // of which slash style the agent passed.
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const basename = path.basename(normalizedPath);
     if (basename.startsWith('.env')) {
       logToFile(`Denying ${toolName} on env file: ${filePath}`);
       return {
         behavior: 'deny',
         message: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
       };
+    }
+    // Block direct writes to the wizard-managed event-plan and dashboard
+    // artifacts. These files are owned by `confirm_event_plan` and the
+    // dashboard watcher — direct writes are the source of two recurring
+    // bugs: (1) the file already exists from a prior run and Write errors
+    // out (Write requires a prior Read of an existing file), forcing the
+    // agent into a confused "stale file" recovery loop; (2) the agent
+    // writes a different shape (event_name, file_path, etc.) than the
+    // wizard UI expects, so the manifest drifts from real track() calls.
+    // The integration skills owned by context-hub still instruct agents
+    // to write `.amplitude-events.json` directly — denying here is
+    // defense in depth that lands today, in advance of the upstream
+    // skill refresh.
+    if (isWriteTool) {
+      const lower = basename.toLowerCase();
+      const isEventsFile =
+        lower === '.amplitude-events.json' || lower === 'events.json';
+      const isDashboardFile =
+        lower === '.amplitude-dashboard.json' || lower === 'dashboard.json';
+      // For the bare `events.json` / `dashboard.json` cases, only deny
+      // when the path is inside `.amplitude/` (the wizard's metadata
+      // dir). A user codebase might legitimately have an unrelated
+      // `events.json` somewhere else. We use the already-normalized
+      // path (forward slashes) computed at the top of this branch so
+      // the substring check is consistent across POSIX and Windows.
+      const insideMetaDir = normalizedPath.includes('/.amplitude/');
+      const isLegacyDotfile =
+        lower === '.amplitude-events.json' ||
+        lower === '.amplitude-dashboard.json';
+      const isCanonicalInMetaDir =
+        (lower === 'events.json' || lower === 'dashboard.json') &&
+        insideMetaDir;
+      if (isLegacyDotfile || isCanonicalInMetaDir) {
+        const which = isEventsFile ? 'event plan' : 'dashboard';
+        const tool =
+          which === 'event plan'
+            ? 'mcp__wizard-tools__confirm_event_plan'
+            : 'the dashboard watcher (which mirrors writes from the Amplitude MCP `create_dashboard` call)';
+        logToFile(
+          `Denying ${toolName} on wizard-managed ${which} file: ${filePath}`,
+        );
+        return {
+          behavior: 'deny',
+          message: `Direct ${toolName} of ${basename} is not allowed. The ${which} file is owned by ${tool}. Call that tool with the proposed plan instead — it persists the file in the canonical shape the wizard UI expects, so the manifest never drifts from real track() calls. ${
+            isDashboardFile
+              ? ''
+              : 'If a stale ' +
+                basename +
+                ' is on disk from a prior run, ignore it and call confirm_event_plan; the wizard atomically replaces it.'
+          }`,
+        };
+      }
     }
     return { behavior: 'allow', updatedInput: input };
   }
@@ -1408,16 +1694,18 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
-      // Gateway expects 'anthropic/claude-sonnet-4-6'; direct Anthropic API expects 'claude-sonnet-4-6'
-      model: useDirectApiKey
-        ? 'claude-sonnet-4-6'
-        : 'anthropic/claude-sonnet-4-6',
+      // Mode → model alias. Default 'standard' = current behavior;
+      // see `docs/internal/agent-mode-flag.md` for the full mapping.
+      // Gateway expects the `anthropic/<alias>` prefix; direct API expects
+      // the bare alias — `selectModel` handles both.
+      model: selectModel(config.mode ?? 'standard', useDirectApiKey),
       wizardFlags: config.wizardFlags,
       wizardMetadata: config.wizardMetadata,
       useLocalClaude,
       useDirectApiKey,
       agentSessionId: config.agentSessionId,
       targetsBrowser: config.targetsBrowser,
+      orchestratorContext: config.orchestratorContext,
     };
 
     logToFile('Agent config:', {
@@ -1461,7 +1749,10 @@ function buildDefaultAgentConfig(): AgentConfig {
       : DEFAULT_AMPLITUDE_ZONE;
   const storedToken = getStoredToken(storedUser?.id, zone)?.accessToken ?? '';
   const host = getHostFromRegion(zone);
-  const mcpUrl = process.env.MCP_URL ?? 'https://mcp.amplitude.com/mcp';
+  // Region-aware MCP URL: an EU stored user must talk to the EU MCP host,
+  // not US. The MCP_URL env override (test/dev) is honored inside the
+  // helper.
+  const mcpUrl = getMcpUrlFromZone(zone);
   return {
     workingDirectory: process.cwd(),
     amplitudeMcpUrl: mcpUrl,
@@ -1519,7 +1810,11 @@ export async function runAgentLocally(
   successMessage: string,
   errorMessage: string,
 ): Promise<{ error?: AgentErrorType; message?: string }> {
-  const { spawn } = await import('child_process');
+  // Use the cross-platform shim wrapper — `claude` ships as `claude.cmd`
+  // when installed via npm on Windows, and `child_process.spawn` would
+  // ENOENT on the bare name (it doesn't consult PATHEXT). See
+  // `src/utils/cross-platform-spawn.ts`.
+  const { spawn } = await import('../utils/cross-platform-spawn.js');
 
   logToFile('Running agent via local claude CLI');
 
@@ -1533,12 +1828,101 @@ export async function runAgentLocally(
     proc.stdout.setEncoding('utf8');
     proc.stderr.setEncoding('utf8');
 
+    // Rate-limit how often raw stdout chunks become user-visible status
+    // updates. Each pushStatus mutates the store and triggers a full TUI
+    // re-render; under stream-json output that fires hundreds of times a
+    // second and stalls the UI. We keep the most recent line (so the
+    // status reflects "now") but only forward it to the UI on a fixed
+    // cadence. Logging stays per-line for full fidelity in the log file.
+    const PUSH_INTERVAL_MS = 150;
+    let pendingLine: string | null = null;
+    let pushTimer: ReturnType<typeof setTimeout> | null = null;
+    const flushPending = () => {
+      pushTimer = null;
+      if (pendingLine === null) return;
+      const line = pendingLine;
+      pendingLine = null;
+      spinner.message(line);
+      getUI().pushStatus(line);
+    };
+
+    /**
+     * Detect Anthropic stream-event protocol JSON. These lines
+     * (`{"type":"message_start",...}`, `{"type":"content_block_delta",...}`,
+     * etc.) leak into stdout when claude is invoked with a streaming output
+     * format. They're useful in the log file but pure garbage in the status
+     * pill — the user sees raw protocol noise and the long, unbounded JSON
+     * also pushes the progress counter past terminal width and folds the
+     * header layout (see RunScreen.tsx `truncateStatus`). Drop them from
+     * the user-facing status; they're already captured in the per-line log.
+     */
+    const STREAM_EVENT_TYPES = new Set([
+      'message_start',
+      'message_delta',
+      'message_stop',
+      'content_block_start',
+      'content_block_delta',
+      'content_block_stop',
+      'ping',
+      'stream_event',
+    ]);
+    /**
+     * Belt-and-braces signature match for partial / pre-buffer protocol
+     * JSON. `JSON.parse` only succeeds on complete lines, so a chunk that
+     * splits mid-payload (very common for `content_block_delta`, which
+     * carries large strings) would otherwise slip past the strict check
+     * and reach the status pill as truncated noise like
+     * `{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delt…`.
+     * Anchor on the `{"type":"<known>"` prefix to catch those before they
+     * paint to the UI.
+     */
+    const STREAM_EVENT_PREFIXES = Array.from(STREAM_EVENT_TYPES).map(
+      (t) => `{"type":"${t}"`,
+    );
+    const looksLikeStreamEvent = (line: string): boolean => {
+      if (line.length < 9 || line[0] !== '{') return false;
+      // Fast path: signature match on the prefix. Survives partial lines.
+      for (const prefix of STREAM_EVENT_PREFIXES) {
+        if (line.startsWith(prefix)) return true;
+      }
+      // Slow path: full parse for completeness (handles odd whitespace).
+      try {
+        const obj = JSON.parse(line) as { type?: unknown };
+        return typeof obj.type === 'string' && STREAM_EVENT_TYPES.has(obj.type);
+      } catch {
+        return false;
+      }
+    };
+
+    /**
+     * Line buffer for stdout. The OS pipes stdout in arbitrary-sized
+     * chunks — a single `data` event may carry multiple lines, half a
+     * line, or several lines plus a partial trailing one. Splitting each
+     * raw chunk on `\n` and treating every result as a complete line was
+     * the root cause of `{"type":"content_block_delta",…` leaking past
+     * the filter: the trailing fragment couldn't `JSON.parse`, so the
+     * strict signature check missed it. Buffer until we see a newline,
+     * emit only complete lines, and stash the remainder for the next
+     * chunk. (The prefix match above is a second line of defense if a
+     * line is genuinely longer than the pipe buffer.)
+     */
+    let stdoutBuffer = '';
+    const consumeLine = (line: string) => {
+      logToFile('claude stdout:', line);
+      if (looksLikeStreamEvent(line)) return;
+      pendingLine = line.slice(0, 80);
+      if (pushTimer === null) {
+        pushTimer = setTimeout(flushPending, PUSH_INTERVAL_MS);
+      }
+    };
+
     proc.stdout.on('data', (chunk: string) => {
-      const lines = chunk.split('\n').filter((l) => l.trim());
-      for (const line of lines) {
-        logToFile('claude stdout:', line);
-        spinner.message(line.slice(0, 80));
-        getUI().pushStatus(line.slice(0, 80));
+      stdoutBuffer += chunk;
+      let nl: number;
+      while ((nl = stdoutBuffer.indexOf('\n')) !== -1) {
+        const line = stdoutBuffer.slice(0, nl);
+        stdoutBuffer = stdoutBuffer.slice(nl + 1);
+        if (line.trim()) consumeLine(line);
       }
     });
 
@@ -1547,6 +1931,18 @@ export async function runAgentLocally(
     });
 
     proc.on('close', (code) => {
+      // Flush any line still buffered without a trailing newline so the
+      // final partial line isn't dropped on close.
+      if (stdoutBuffer.trim()) {
+        consumeLine(stdoutBuffer);
+        stdoutBuffer = '';
+      }
+      // Flush any pending status update so the very last line the user
+      // sees reflects what actually happened just before exit.
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        flushPending();
+      }
       if (code === 0) {
         spinner.stop(successMessage);
         resolve({});
@@ -1557,6 +1953,11 @@ export async function runAgentLocally(
     });
 
     proc.on('error', (err) => {
+      if (pushTimer !== null) {
+        clearTimeout(pushTimer);
+        pushTimer = null;
+        pendingLine = null;
+      }
       spinner.stop(errorMessage);
       reject(err);
     });
@@ -1646,6 +2047,18 @@ export async function runAgent(
      * hook factory — a throwing handler will not abort the compaction.
      */
     onPreCompact?: (input: { trigger: 'manual' | 'auto' }) => void;
+    /**
+     * Fires once per run when the PreToolUse circuit breaker trips —
+     * MAX_CONSECUTIVE_BASH_DENIES consecutive Bash denies have accumulated.
+     * Treat as a terminal signal: trigger graceful run halt
+     * (e.g. `wizardAbort`) so the agent doesn't keep burning turns on a
+     * command that will never be allowed.
+     */
+    onCircuitBreakerTripped?: (info: {
+      consecutiveDenies: number;
+      lastCommand: string;
+      lastDenyReason: string;
+    }) => void;
   },
   middleware?: {
     onMessage(message: SDKMessage): void;
@@ -1711,6 +2124,16 @@ export async function runAgent(
   // outer function scope so both error-emit paths can see them.
   let attemptCount = 0;
   let upstreamGatewayFailures = 0;
+  // Auth tracking — hoisted to function scope so the outer catch can branch
+  // on authErrorDetected. Reset per-attempt inside the retry loop.
+  // - authErrorDetected: a 401 / auth-error result or repeated auth retries
+  //   were observed; route to AUTH_ERROR outro instead of generic API_ERROR.
+  // - authRetryCount: consecutive `api_retry` system messages with
+  //   error_status 401 (or auth-error patterns). When this hits
+  //   AUTH_RETRY_LIMIT we abort the SDK query early so the user isn't
+  //   stuck waiting through ~3 minutes of futile retries.
+  let authErrorDetected = false;
+  let authRetryCount = 0;
 
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
@@ -1777,12 +2200,20 @@ export async function runAgent(
     return { plannedEvents: lastParsedEventPlan };
   };
 
-  // Heartbeat interval — every 10s print the last 3 STATUS messages so the
-  // user can see progress in the CLI without waiting for the next update.
+  // Heartbeat interval — fires unconditionally every 10s so AgentUI's
+  // `progress: heartbeat` NDJSON event lands on a fixed cadence even
+  // when the agent is mid-tool-call and nobody has called pushStatus
+  // recently. Orchestrators treat absence of heartbeat as "the wizard
+  // process hung"; gating on `recentStatuses.length > 0` (the prior
+  // behaviour) made long quiet tool calls look indistinguishable from
+  // a hang. LoggingUI / InkUI continue to short-circuit on an empty
+  // status tail so terminal output stays clean.
   const heartbeatInterval = setInterval(() => {
-    if (recentStatuses.length > 0) {
-      getUI().heartbeat([...recentStatuses]);
-    }
+    getUI().heartbeat({
+      statuses: [...recentStatuses],
+      elapsedMs: Date.now() - startTime,
+      attempt: attemptCount > 0 ? attemptCount : undefined,
+    });
   }, 10_000);
 
   // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
@@ -1832,7 +2263,7 @@ export async function runAgent(
       // would shadow the agent's fresh write to legacy) AND the
       // events.json case where `persistEventPlan` writes both paths
       // atomically.
-      const winner = pickFreshestExisting(eventPlanPath, legacyEventPlanPath);
+      const winner = pickFreshestExisting([eventPlanPath, legacyEventPlanPath]);
       if (!winner) return;
       try {
         const events = parseEventPlanContent(fs.readFileSync(winner, 'utf-8'));
@@ -1876,10 +2307,10 @@ export async function runAgent(
       // run — only the agent writes legacy, so a migrated stale
       // canonical from a prior run would otherwise shadow the agent's
       // fresh URL.
-      const winner = pickFreshestExisting(
+      const winner = pickFreshestExisting([
         dashboardFilePath,
         legacyDashboardFilePath,
-      );
+      ]);
       if (!winner) return;
       try {
         const content = fs.readFileSync(winner, 'utf-8');
@@ -1926,9 +2357,8 @@ export async function runAgent(
     // 20-min fetch timeout).
     const STALL_TIMEOUT_MS = 120_000;
 
-    // Tracks whether an authentication failure was detected in the current attempt.
-    // Passed to createStopHook so it can skip reflection when auth is broken.
-    let authErrorDetected = false;
+    // (Auth tracking declared at outer function scope — see above the try
+    // block — so the outer catch can also branch on authErrorDetected.)
 
     // Tracks whether a post-stream retry banner is currently shown to the user.
     // Mirrors the pattern in src/lib/middleware/retry.ts: set true when we
@@ -2035,6 +2465,7 @@ export async function runAgent(
         collectedText.length = 0;
         recentStatuses.length = 0;
         authErrorDetected = false;
+        authRetryCount = 0;
         reportedError = null;
         // Reset the agent recovery bag too — without this, modifiedFiles /
         // lastStatus / compactionCount accumulated by a stalled attempt
@@ -2181,8 +2612,21 @@ export async function runAgent(
               // SDK init defaults / autocapture redundancy guidance to
               // mobile / server / generic runs that can't use them. Saves
               // several KB of system-prompt bloat on those paths.
-              append: getWizardCommandments({
-                targetsBrowser: agentConfig.targetsBrowser,
+              //
+              // Orchestrator-injected context (from `--context-file <path>`
+              // / `AMPLITUDE_WIZARD_CONTEXT` env var) goes AFTER the
+              // commandments so the orchestrator can reinforce / override
+              // soft guidance ("ignore the autocapture rule for this run,
+              // we want explicit events for our own observability"). Hard
+              // safety rules at the top of `commandments.ts` (no secrets,
+              // no shell-eval of env vars, etc.) still take precedence
+              // because the model treats earlier-positioned instructions as
+              // load-bearing — the order matters here.
+              append: buildSystemPromptAppend({
+                commandments: getWizardCommandments({
+                  targetsBrowser: agentConfig.targetsBrowser,
+                }),
+                orchestratorContext: agentConfig.orchestratorContext,
               }),
               // Move per-session dynamic context (cwd, date, user, etc.) out of
               // the cached system prompt and into the first user message. This
@@ -2249,7 +2693,9 @@ export async function runAgent(
               // allowlist still runs for every tool call.
               const inner = createInnerLifecycleHooks({ phase: 'wizard' });
               const innerHooks = inner.hooks();
-              const gatedPreToolUse = createPreToolUseHook();
+              const gatedPreToolUse = createPreToolUseHook({
+                onCircuitBreakerTripped: config?.onCircuitBreakerTripped,
+              });
               const recordPostToolUse = createPostToolUseHook(agentState);
 
               // Compose: inner observer first (best-effort, never alters
@@ -2398,6 +2844,39 @@ export async function runAgent(
             logToFile('Auth error detected in result message');
           }
 
+          // Short-circuit the SDK's 401 retry storm. The SDK retries 401s up
+          // to 10 times with exponential backoff (~3 minutes total) — but a
+          // 401 is a credential problem that won't recover within the run.
+          // After AUTH_RETRY_LIMIT consecutive auth-flavored api_retry
+          // messages, abort the SDK query and route to the AUTH_ERROR outro
+          // so the user sees a clear failure + manual-signup fallback
+          // instead of a stuck spinner.
+          if (
+            message.type === 'system' &&
+            message.subtype === 'api_retry' &&
+            ((message as unknown as { error_status?: number }).error_status ===
+              401 ||
+              isAuthErrorMessage(JSON.stringify(message)))
+          ) {
+            authRetryCount++;
+            logToFile(
+              `Auth retry observed (${authRetryCount}/${AUTH_RETRY_LIMIT})`,
+            );
+            if (authRetryCount >= AUTH_RETRY_LIMIT) {
+              authErrorDetected = true;
+              logToFile(
+                'Auth retries exceeded threshold — aborting agent query',
+              );
+              analytics.wizardCapture('agent auth retry aborted', {
+                'retry count': authRetryCount,
+                attempt: attempt + 1,
+              });
+              if (!controller.signal.aborted) {
+                controller.abort('auth_failed');
+              }
+            }
+          }
+
           if (message.type === 'system' && message.subtype === 'init') {
             for (const server of (
               message as unknown as {
@@ -2512,6 +2991,16 @@ export async function runAgent(
         if (wizardSignal.aborted) {
           logToFile('Agent loop exiting: wizard signal aborted');
           throw innerError;
+        }
+
+        // Auth-aborted — do not retry. The early-detect block in the message
+        // loop fired controller.abort('auth_failed') after AUTH_RETRY_LIMIT
+        // consecutive 401 retries; falling into the stall-retry branch would
+        // re-run the same broken credentials. Break to the post-loop AUTH_ERROR
+        // path instead.
+        if (authErrorDetected) {
+          logToFile('Agent loop exiting: auth error detected, not retrying');
+          break;
         }
 
         // Stall-aborted or API error with retries remaining — try again
@@ -2695,6 +3184,17 @@ export async function runAgent(
     // Signal done to unblock the async generator
     signalDone();
 
+    // Auth-aborted while the SDK was still streaming — the early-detect path
+    // fired controller.abort('auth_failed') and the resulting AbortError
+    // bubbled up. Surface AUTH_ERROR so agent-runner shows the friendly
+    // re-auth / manual-signup outro instead of a generic API_ERROR.
+    if (authErrorDetected) {
+      logToFile('Agent error (caught): AUTH_ERROR');
+      spinner.stop('Authentication failed');
+      _activeStatusReporter = undefined;
+      return { error: AgentErrorType.AUTH_ERROR };
+    }
+
     // If we already received a successful result, the error is from SDK cleanup
     // This happens due to a race condition: the SDK tries to send a cleanup command
     // after the prompt stream closes, but streaming mode is still active.
@@ -2855,10 +3355,20 @@ function handleSDKMessage(
         // Only show errors to user if we haven't already succeeded.
         // Post-success errors are SDK cleanup noise (telemetry failures, streaming
         // mode race conditions). Full message already logged above via JSON dump.
+        //
+        // Cap the user-visible message at 2KB at the SOURCE — Anthropic
+        // SDK exceptions sometimes include the entire failing SSE stream
+        // (40-50KB of model id, signature blobs, partial JSON deltas)
+        // serialized into a single string. Past sessions surfaced 50KB
+        // `log.message` strings that polluted orchestrator context.
+        // `truncateLogMessage` is the same helper the NDJSON emit layer
+        // uses; capping here keeps the on-disk verbose log bounded too.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       } else if (message.subtype === 'success') {
@@ -2869,11 +3379,16 @@ function handleSDKMessage(
       } else {
         logToFile('Agent result with error:', message.result);
         // Error result - only show to user if we haven't already succeeded.
-        // Full message already logged above via JSON dump.
+        // Full message already logged above via JSON dump. Cap each
+        // error string at 2KB at the source (same rationale as the
+        // `is_error` branch above): Anthropic SDK exceptions sometimes
+        // serialize the entire failing SSE stream into the error text.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
-            getUI().log.error(`Error: ${err}`);
-            logToFile('ERROR:', err);
+            const errStr = typeof err === 'string' ? err : String(err);
+            const capped = truncateLogMessage(errStr);
+            getUI().log.error(`Error: ${capped}`);
+            logToFile('ERROR:', capped);
           }
         }
       }

@@ -14,11 +14,15 @@ import fs from 'fs';
 import path from 'path';
 import { z } from 'zod';
 
-import { callAmplitudeMcp, AMPLITUDE_MCP_URL } from '../lib/mcp-with-fallback';
+import { callAmplitudeMcp } from '../lib/mcp-with-fallback';
 import { parseEventPlanContent } from '../lib/event-plan-parser';
+import { getMcpUrlFromZone } from '../utils/urls';
+import { resolveZone } from '../lib/zone-resolution';
+import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
 import { getUI } from '../ui';
 import { analytics } from '../utils/analytics';
 import { logToFile } from '../utils/debug';
+import { persistDashboard } from '../lib/wizard-tools';
 import type { WizardSession } from '../lib/wizard-session';
 import type { Integration } from '../lib/constants';
 
@@ -153,6 +157,16 @@ export async function createDashboardStep(
     );
   }
 
+  // 3. Mirror to the canonical `<installDir>/.amplitude/dashboard.json`
+  //    path so anything that reads `getDashboardFile()` (the `/diagnostics`
+  //    output, repeat-run plan recovery, skill packs, external integrations)
+  //    finds the file. Pre-#154 the agent wrote this via the file-watcher
+  //    in `agent-interface.ts`; since #154 moved dashboard creation OUT of
+  //    the agent loop, the watcher never fires and the canonical path was
+  //    silently never populated. Best-effort — `persistDashboard` already
+  //    swallows fs errors; a failure here must not fail the wizard.
+  persistDashboard(session.installDir, result);
+
   session.checklistDashboardUrl = result.dashboardUrl;
   ui.setDashboardUrl(result.dashboardUrl);
   spinner.stop('Dashboard ready');
@@ -223,9 +237,13 @@ async function runCreateDashboard(args: {
   session: WizardSession;
 }): Promise<DashboardResult | null> {
   const { accessToken, events, session } = args;
-  const mcpUrl = session.localMcp
-    ? 'http://localhost:8787/mcp'
-    : process.env.MCP_URL || AMPLITUDE_MCP_URL;
+  // Region-aware MCP URL: an EU user's dashboard / chart MCP calls must
+  // route to mcp.eu.amplitude.com so the dashboard lands in the right
+  // data center. readDisk: true — create-dashboard runs post-agent and
+  // can be reached from non-TUI paths (CI, agent mode) where the
+  // RegionSelect tier-1 invariant isn't guaranteed.
+  const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
+  const mcpUrl = getMcpUrlFromZone(zone, { local: session.localMcp });
 
   const agentPrompt = buildAgentPrompt(events, session);
 

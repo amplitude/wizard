@@ -17,6 +17,15 @@ sanitizeNestedClaudeEnv();
 import { installPipeErrorHandlers } from './src/utils/pipe-errors';
 installPipeErrorHandlers();
 
+// Process-level safety net. Without this, a throw inside an agent
+// hook, MCP callback, or stray promise chain crashes Node with a raw
+// stack trace — no Outro, no checkpoint flush, no Sentry. The handler
+// captures the error, saves a checkpoint, and routes through
+// `wizardAbort` so the user lands on the Error outro with recovery
+// affordances (Retry / Resume / Open log / Bug report).
+import { installSafetyNet } from './src/utils/safety-net';
+installSafetyNet();
+
 // Default NODE_ENV based on installation source. Without this, React's CJS
 // entry (node_modules/react/index.js) falls through to react.development.js
 // whenever NODE_ENV is unset — about 10× larger and noticeably slower on Ink
@@ -116,6 +125,7 @@ import {
   defaultCommand,
   loginCommand,
   logoutCommand,
+  resetCommand,
   whoamiCommand,
   feedbackCommand,
   slackCommand,
@@ -166,11 +176,22 @@ import {
 
   // Initialize Sentry error tracking.
   // Respects DO_NOT_TRACK=1 and AMPLITUDE_WIZARD_NO_TELEMETRY=1 for opt-out.
-  initSentry({
+  //
+  // Fire-and-forget: `initSentry` is async because it lazy-imports the
+  // heavy `@sentry/node` module (~80–150 ms saved on cold start). Awaiting
+  // here would re-block the bootstrap; not awaiting means events captured
+  // in the first ~tens of milliseconds before init resolves are silently
+  // dropped — acceptable for a CLI's startup window. A `.catch(() => {})`
+  // tail keeps an unhandled-rejection event from leaking out.
+  void initSentry({
     sessionId: analytics.getAnonymousId(),
     version: WIZARD_VERSION,
     mode,
     debug: isDebug,
+  }).catch(() => {
+    // Sentry init failure is already swallowed inside initSentry — this
+    // catch is belt-and-braces against a future regression that throws
+    // outside the inner try/catch.
   });
 
   // Set session-scoped properties so every event includes mode/version/platform.
@@ -405,6 +426,12 @@ void yargs(hideBin(process.argv))
         return value;
       },
     },
+    'accept-tos': {
+      default: false,
+      describe:
+        'explicitly agree to Amplitude Terms of Service when using --signup in --ci or --agent (non-interactive signup)',
+      type: 'boolean',
+    },
     // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
     // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN / _AGENT / _INSTALL_DIR / _CLASSIC
     // to these option names; declaring them here lets .strict() accept the
@@ -458,10 +485,24 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_SKIP_BOOTSTRAP env-var passthrough',
       type: 'boolean',
     },
+    // Force the env-selection prompt to emit a `needs_input` for
+    // `app_selection` even when there's a single match. The skill
+    // always passes this so the user gets to confirm which app the
+    // wizard is about to write events into — no silent auto-pick.
+    // Honored via `AMPLITUDE_WIZARD_CONFIRM_APP=1` in the spawned
+    // child process so the inner agent's environment-selection path
+    // can read it without reaching back into yargs argv.
+    'confirm-app': {
+      default: false,
+      describe:
+        'Force a needs_input app_selection prompt even when only one app matches',
+      type: 'boolean',
+    },
   })
   .command(defaultCommand)
   .command(loginCommand)
   .command(logoutCommand)
+  .command(resetCommand)
   .command(whoamiCommand)
   .command(feedbackCommand)
   .command(slackCommand)

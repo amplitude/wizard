@@ -108,12 +108,19 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         setPhase(Phase.Success);
         scheduleDismiss(1500);
       } catch (err) {
-        // Clear the stale token so the next wizard run forces fresh browser auth
-        const { clearStoredCredentials } = await import(
-          '../../../utils/ampli-settings.js'
-        );
-        clearStoredCredentials();
+        // Bail BEFORE touching disk if the user already navigated away —
+        // otherwise an in-flight refresh that throws after unmount would
+        // wipe `~/.ampli.json` for an overlay the user can no longer see.
+        // (Pre-fix this could happen on Esc-back-nav, outer screen swap,
+        // ScreenErrorBoundary retry, or any slash command that pops the
+        // overlay before the network call resolves.)
         if (!mountedRef.current) return;
+        // Do NOT call clearStoredCredentials() here. It writes `{}` to
+        // ~/.ampli.json, blowing away every user/zone entry — not just
+        // the one we were trying to refresh. A failed silent refresh is
+        // already handled gracefully on the next run by the AuthScreen
+        // (which falls back to fresh browser auth when the stored token
+        // is invalid). Surfacing the error to the user is enough.
         setErrorMsg(err instanceof Error ? err.message : 'Unknown error');
         setPhase(Phase.Error);
         scheduleDismiss(2500);

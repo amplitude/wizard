@@ -63,6 +63,24 @@ export interface AmpliConfig {
   SourceDirs?: string[];
   /** Named Amplitude SDK instances to generate */
   InstanceNames?: string[];
+  /**
+   * Numeric Amplitude app id (a.k.a. "Project ID" in the Amplitude UI).
+   * Stored as a string for forward compat with non-numeric ids and
+   * because JSON has no integer-vs-string distinction at this scale.
+   * Persisted by the wizard at the end of a successful run so a follow-up
+   * agent session can read it back without re-running env selection —
+   * the source of truth for "which Amplitude app does this codebase
+   * write events into."
+   */
+  AppId?: string;
+  /** Display name for `AppId`. Diagnostic only — `AppId` is the join key. */
+  AppName?: string;
+  /** Amplitude environment label that `AppId` resolved against (Production/Dev/etc). */
+  EnvName?: string;
+  /** Last dashboard URL the wizard created during this codebase's setup. */
+  DashboardUrl?: string;
+  /** Convenience id parsed from `DashboardUrl`. */
+  DashboardId?: string;
 }
 
 export type AmpliConfigParseResult =
@@ -92,6 +110,11 @@ const AmpliConfigSchema = z
     OmitApiKeys: z.boolean().optional(),
     SourceDirs: z.array(z.string()).optional(),
     InstanceNames: z.array(z.string()).optional(),
+    AppId: z.string().optional(),
+    AppName: z.string().optional(),
+    EnvName: z.string().optional(),
+    DashboardUrl: z.string().optional(),
+    DashboardId: z.string().optional(),
   })
   .passthrough();
 
@@ -238,5 +261,16 @@ export function clearAuthFieldsInAmpliConfig(dir: string): void {
   delete next.ProjectId;
   delete next.WorkspaceId;
   delete next.Zone;
+  // The setup_complete fields below are also auth-scoped — they bind
+  // the project to a specific Amplitude app/env that only exists in
+  // the previously authenticated org. On logout, drop them so the
+  // next sign-in starts from a clean scope. Tracking-plan fields
+  // (SourceId, Branch, Version) survive — they belong to the project,
+  // not the user.
+  delete next.AppId;
+  delete next.AppName;
+  delete next.EnvName;
+  delete next.DashboardUrl;
+  delete next.DashboardId;
   writeAmpliConfig(dir, next);
 }

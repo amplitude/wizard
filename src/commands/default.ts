@@ -9,9 +9,93 @@ import {
   buildSessionFromOptions,
   resolveNonInteractiveCredentials,
   runDirectSignupIfRequested,
+  gateCiSignupAcceptToS,
+  gateAgentSignupArguments,
 } from './helpers';
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
+import { ExitCode } from '../lib/exit-codes';
+import {
+  loadOrchestratorContext,
+  resolveOrchestratorContextPath,
+} from '../utils/orchestrator-context';
+import type { WizardSession } from '../lib/wizard-session';
+
+/**
+ * Load `--context-file` (or `AMPLITUDE_WIZARD_CONTEXT`) and stamp the
+ * resulting string onto `session.orchestratorContext`. Centralized here
+ * so all four mode branches (agent / CI / classic / TUI) share one
+ * read+validate path and emit one consistent error envelope.
+ *
+ * On failure: emits a structured NDJSON event in agent mode, plain
+ * stderr in every other mode, then exits with INVALID_ARGS so the
+ * orchestrator can distinguish "your config was bad" from "the wizard
+ * crashed mid-run". Returns void so callers can `return` immediately.
+ */
+function applyOrchestratorContext(
+  session: WizardSession,
+  options: Record<string, unknown>,
+  emitJson: boolean,
+): void {
+  const path = resolveOrchestratorContextPath(
+    options['context-file'] as string | undefined,
+  );
+  if (!path) return;
+
+  const result = loadOrchestratorContext(path, session.installDir);
+  if (!result.ok) {
+    if (emitJson) {
+      process.stdout.write(
+        JSON.stringify({
+          v: 1,
+          '@timestamp': new Date().toISOString(),
+          type: 'error',
+          message: result.message,
+          data: {
+            event: 'context_file_failed',
+            reason: result.reason,
+            sourcePath: result.sourcePath,
+          },
+        }) + '\n',
+      );
+    } else {
+      process.stderr.write(
+        `[wizard] --context-file: ${result.message} (${result.sourcePath})\n`,
+      );
+    }
+    process.exit(ExitCode.INVALID_ARGS);
+  }
+
+  session.orchestratorContext = result.content;
+}
+
+/**
+ * If `--resume` was passed, look up the per-project checkpoint and
+ * restore its fields onto the session BEFORE credentials are
+ * resolved. Silently no-ops when no fresh checkpoint exists so
+ * orchestrators can pass `--resume` unconditionally on every retry
+ * without branching on disk state. Used by the agent / CI mode
+ * branches; TUI mode has its own restore path inside the auth task.
+ *
+ * Telemetry: `loadCheckpoint` emits `progress: checkpoint_loaded` on
+ * success — no extra plumbing needed here.
+ */
+async function maybeResumeFromCheckpoint(
+  session: WizardSession,
+  options: Record<string, unknown>,
+): Promise<void> {
+  if (!options.resume) return;
+  const { loadCheckpoint } = await import('../lib/session-checkpoint.js');
+  const restored = await loadCheckpoint(session.installDir);
+  if (!restored) return;
+  Object.assign(session, restored);
+  // Treat resume as an explicit user action — the intro / region pick
+  // screens shouldn't replay just because the checkpoint had stale
+  // intro state. (TUI mode handles this with its own
+  // `_restoredFromCheckpoint` flag; for headless mode the equivalent
+  // is "we skipped past the screens, don't second-guess.")
+  session.introConcluded = true;
+}
 
 export const defaultCommand: CommandModule = {
   command: ['$0'],
@@ -67,6 +151,19 @@ export const defaultCommand: CommandModule = {
         describe: 'collect performance metrics during the run',
         type: 'boolean',
       },
+      // `--mode` is intentionally hidden. See `docs/internal/agent-mode-flag.md`
+      // for the full rationale and the model mapping. Briefly: this is an
+      // internal performance / capability knob — not advertised in --help,
+      // README, CLAUDE.md, or any agent-facing skill, and not for casual
+      // recommendation. The default ('standard') is the only tier most
+      // users should ever see.
+      mode: {
+        default: 'standard',
+        choices: ['fast', 'standard', 'thorough'] as const,
+        describe: 'internal — see docs/internal/agent-mode-flag.md',
+        type: 'string',
+        hidden: true,
+      },
       agent: {
         default: false,
         describe: 'emit structured NDJSON output for automation',
@@ -75,6 +172,30 @@ export const defaultCommand: CommandModule = {
       classic: {
         default: false,
         describe: 'use the classic prompt-based UI',
+        type: 'boolean',
+      },
+      'context-file': {
+        // Lets an outer agent / CI pipeline inject team conventions
+        // ("we use snake_case for events", existing taxonomy snippets,
+        // project-specific guidance) WITHOUT modifying any skill content.
+        // The file is read once at startup and prepended to every agent
+        // turn's system prompt. 64 KB cap; UTF-8; falls back to
+        // AMPLITUDE_WIZARD_CONTEXT env var when the flag is omitted.
+        describe:
+          'path to a file whose contents are injected into the inner-agent system prompt',
+        type: 'string',
+      },
+      resume: {
+        // In agent / CI mode: load the per-project crash-recovery
+        // checkpoint at startup so a rerun skips already-completed
+        // setup steps (region pick, framework detection, org/project
+        // selection). TUI mode auto-restores; this flag is the
+        // headless equivalent. Silently no-ops when no checkpoint
+        // exists so orchestrators can pass `--resume` unconditionally
+        // without branching on disk state.
+        default: false,
+        describe:
+          'load the saved checkpoint and skip already-completed setup steps',
         type: 'boolean',
       },
     }),
@@ -129,6 +250,12 @@ export const defaultCommand: CommandModule = {
 
         const session = await buildSessionFromOptions(options);
         session.agent = true;
+        applyOrchestratorContext(session, options, true);
+        await maybeResumeFromCheckpoint(session, options);
+
+        if (!gateAgentSignupArguments(session, agentUI)) {
+          return;
+        }
 
         // Attempt direct signup before falling through to cached-token
         // resolution. Agent mode has no browser, so a null result continues
@@ -155,6 +282,12 @@ export const defaultCommand: CommandModule = {
 
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
+        applyOrchestratorContext(session, options, false);
+        await maybeResumeFromCheckpoint(session, options);
+
+        if (!gateCiSignupAcceptToS(session)) {
+          return;
+        }
 
         // Attempt direct signup before falling through to cached-token
         // resolution. CI mode has no browser, so a null result continues to
@@ -176,6 +309,7 @@ export const defaultCommand: CommandModule = {
       // Classic mode: interactive prompts without the rich TUI
       void (async () => {
         const session = await buildSessionFromOptions(options);
+        applyOrchestratorContext(session, options, false);
 
         // Attempt direct signup before falling through to OAuth browser
         // flow. On success, run resolveCredentials so agent-runner's
@@ -214,6 +348,11 @@ export const defaultCommand: CommandModule = {
           // ~seconds it takes to resolve OAuth credentials, until the
           // `tui.store.session = session` swap below runs.
           const session = await buildSessionFromOptions(options);
+          // Loading the orchestrator context BEFORE startTUI so a bad
+          // path fails fast on stderr (no half-rendered TUI to tear
+          // down). The TUI branch keeps NDJSON off — interactive users
+          // get a plain error message they can read.
+          applyOrchestratorContext(session, options, false);
           const tui = startTUI(WIZARD_VERSION, undefined, session);
 
           // Install the SIGINT handler IMMEDIATELY after starting the TUI.
@@ -287,6 +426,23 @@ export const defaultCommand: CommandModule = {
               '../lib/credential-resolution.js'
             );
             await resolveCredentials(session);
+
+            // If resolveCredentials silently picked an org/project from
+            // disk (returning-user path), require an explicit confirmation
+            // before routing the run against it. The Auth flow gate reads
+            // this flag — without it we could silently target a project
+            // the user didn't intend (especially after upgrading from an
+            // old wizard version where project IDs may have rolled over).
+            // Skipped in --ci / --agent mode where there is no interactive
+            // confirm step and the user has already opted into automation.
+            if (
+              session.credentials !== null &&
+              !session.ci &&
+              !session.agent &&
+              (session.selectedOrgId || session.selectedProjectId)
+            ) {
+              session.requiresAccountConfirmation = true;
+            }
 
             // Resolve org/project display names so /whoami shows them.
             // Also extracts the numeric analytics project ID for MCP event detection.
@@ -465,6 +621,27 @@ export const defaultCommand: CommandModule = {
           // AuthScreen calls store.setCredentials() when done, advancing the
           // router past Auth → RegionSelect → DataSetup → to IntroScreen.
           const authTask = (async () => {
+            // If we silently resolved credentials from disk on a returning
+            // run, the user is currently looking at the account-confirm
+            // step inside AuthScreen. Wait for them to either accept (the
+            // task can short-circuit and exit) or reject (credentials get
+            // cleared so we proceed into the OAuth pipeline below). Without
+            // this wait the task would early-return and leave the user
+            // stranded if they pressed [C] to change project.
+            if (tui.store.session.requiresAccountConfirmation) {
+              await new Promise<void>((resolve) => {
+                if (!tui.store.session.requiresAccountConfirmation) {
+                  resolve();
+                  return;
+                }
+                const unsub = tui.store.subscribe(() => {
+                  if (!tui.store.session.requiresAccountConfirmation) {
+                    unsub();
+                    resolve();
+                  }
+                });
+              });
+            }
             // Skip the full OAuth + SUSI flow when credentials were pre-populated
             // from ~/.ampli.json + the saved API key (returning user).
             if (tui.store.session.credentials !== null) return;
@@ -583,12 +760,51 @@ export const defaultCommand: CommandModule = {
                 // redundant network call, no browser fallback needed.
                 userInfo = signupUserInfo;
               } else {
+                // Probe the cached token with a bounded timeout. On a
+                // returning user from an older wizard version,
+                // performAmplitudeAuth can silently reuse a stored token
+                // whose idToken is rejected by the API (or whose call
+                // hangs). Without this bound the user sits on AuthScreen
+                // Step 1 with no URL until the network stack gives up —
+                // that's the "blank auth screen" symptom. Treat a timeout
+                // as a fetch failure and force a fresh OAuth so the
+                // browser opens and setLoginUrl fires immediately.
+                const STALE_TOKEN_PROBE_MS = 8_000;
+                // Capture the current (non-null) auth reference for the
+                // closure — the outer `auth` is typed `T | null` and the
+                // narrowing from the `if (auth === null)` branch above
+                // doesn't propagate into the inner async function. The
+                // catch block below may reassign auth on probe failure.
+                const probeAuth = auth;
+                const probeFetchUser = async () => {
+                  let timer: ReturnType<typeof setTimeout> | undefined;
+                  try {
+                    return await Promise.race([
+                      fetchAmplitudeUser(probeAuth.idToken, cloudRegion),
+                      new Promise<never>((_, reject) => {
+                        timer = setTimeout(() => {
+                          const err = new Error(
+                            `cached-token probe timed out after ${STALE_TOKEN_PROBE_MS}ms`,
+                          );
+                          err.name = 'TimeoutError';
+                          reject(err);
+                        }, STALE_TOKEN_PROBE_MS);
+                      }),
+                    ]);
+                  } finally {
+                    if (timer !== undefined) clearTimeout(timer);
+                  }
+                };
                 try {
-                  userInfo = await fetchAmplitudeUser(
-                    auth.idToken,
-                    cloudRegion,
+                  userInfo = await probeFetchUser();
+                } catch (probeErr) {
+                  const { logToFile: log } = await import('../utils/debug.js');
+                  log(
+                    '[bin] cached-token probe failed; forcing fresh OAuth',
+                    probeErr instanceof Error
+                      ? probeErr.message
+                      : String(probeErr),
                   );
-                } catch {
                   if (signupTokensObtained) {
                     // Signup succeeded moments ago so the tokens can't be
                     // expired — the fetch failure is almost certainly
@@ -654,6 +870,201 @@ export const defaultCommand: CommandModule = {
                   `OAuth setup error: ${
                     err instanceof Error ? err.message : String(err)
                   }`,
+                );
+              }
+            }
+          })();
+
+          // ── Mid-session re-auth watcher (handles /region) ──────────
+          // setRegionForced() clears credentials and pendingOrgs so the
+          // RegionSelect screen re-appears. Once the user picks a new
+          // region, the Auth flow gate would otherwise sit on a blank
+          // AuthScreen because `authTask` is single-shot — it's already
+          // resolved against the OLD region. This watcher re-fires the
+          // OAuth pipeline against the new region so AuthScreen actually
+          // makes progress.
+          //
+          // PR #296 (the bin.ts split) silently dropped this watcher —
+          // /region mid-session has been broken on main since that
+          // refactor. Restoring it here. The probe + bounded fetchUser
+          // (same as authTask) catches stale tokens that would otherwise
+          // leave the new-region AuthScreen blank after a region switch.
+          //
+          // Deferred until authTask resolves so the watcher doesn't add
+          // a second subscribe during the initial-auth window.
+          void (async () => {
+            await authTask;
+            const { Overlay } = await import('../ui/tui/router.js');
+            const { performAmplitudeAuth } = await import('../utils/oauth.js');
+            const { fetchAmplitudeUser } = await import('../lib/api.js');
+            const { storeToken } = await import('../utils/ampli-settings.js');
+            const { resolveZone } = await import('../lib/zone-resolution.js');
+            const { DEFAULT_AMPLITUDE_ZONE } = await import(
+              '../lib/constants.js'
+            );
+
+            const waitForSessionState = (
+              predicate: () => boolean,
+            ): Promise<void> =>
+              new Promise<void>((resolve) => {
+                if (predicate()) {
+                  resolve();
+                  return;
+                }
+                const unsub = tui.store.subscribe(() => {
+                  if (predicate()) {
+                    unsub();
+                    resolve();
+                  }
+                });
+              });
+
+            // Single OAuth + fetchUser + setOAuthComplete cycle against
+            // the currently-selected region. Includes the same
+            // stale-token probe as authTask so a returning user who
+            // switches regions doesn't get stuck on a blank AuthScreen
+            // when their old per-zone token in ~/.ampli.json works for
+            // performAmplitudeAuth's cache check but fails the
+            // fetchAmplitudeUser call against the new zone.
+            const runReauthCycle = async (): Promise<void> => {
+              const zone = resolveZone(
+                tui.store.session,
+                DEFAULT_AMPLITUDE_ZONE,
+                { readDisk: false },
+              );
+
+              let auth = await performAmplitudeAuth({
+                zone,
+                forceFresh: false,
+              });
+              tui.store.setLoginUrl(null);
+
+              const STALE_TOKEN_PROBE_MS = 8_000;
+              const probeAuth = auth;
+              const probeFetchUser = async () => {
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                try {
+                  return await Promise.race([
+                    fetchAmplitudeUser(probeAuth.idToken, zone),
+                    new Promise<never>((_, reject) => {
+                      timer = setTimeout(() => {
+                        const err = new Error(
+                          `cached-token probe timed out after ${STALE_TOKEN_PROBE_MS}ms`,
+                        );
+                        err.name = 'TimeoutError';
+                        reject(err);
+                      }, STALE_TOKEN_PROBE_MS);
+                    }),
+                  ]);
+                } finally {
+                  if (timer !== undefined) clearTimeout(timer);
+                }
+              };
+
+              let userInfo;
+              try {
+                userInfo = await probeFetchUser();
+              } catch (probeErr) {
+                const { logToFile } = await import('../utils/debug.js');
+                logToFile(
+                  '[reauth] cached-token probe failed; forcing fresh OAuth',
+                  probeErr instanceof Error
+                    ? probeErr.message
+                    : String(probeErr),
+                );
+                tui.store.setLoginUrl(null);
+                auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                userInfo = await fetchAmplitudeUser(auth.idToken, zone);
+              }
+
+              storeToken(
+                {
+                  id: userInfo.id,
+                  firstName: userInfo.firstName,
+                  lastName: userInfo.lastName,
+                  email: userInfo.email,
+                  zone: auth.zone,
+                },
+                {
+                  accessToken: auth.accessToken,
+                  idToken: auth.idToken,
+                  refreshToken: auth.refreshToken,
+                  expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+                },
+              );
+
+              tui.store.setUserEmail(userInfo.email);
+              analytics.setDistinctId(userInfo.email);
+              analytics.identifyUser({ email: userInfo.email });
+
+              tui.store.setOAuthComplete({
+                accessToken: auth.accessToken,
+                idToken: auth.idToken,
+                cloudRegion: zone,
+                orgs: userInfo.orgs,
+              });
+            };
+
+            // Bounded retry loop. Three consecutive failures and we
+            // back off until the user takes manual action (/login or
+            // /region) — prevents hot-spinning OAuth attempts when the
+            // new zone keeps rejecting.
+            let consecutiveFailures = 0;
+            while (true) {
+              // Wait for credentials to populate (via initial authTask
+              // or a previous SUSI completion).
+              await waitForSessionState(
+                () => tui.store.session.credentials !== null,
+              );
+
+              // Then wait for them to be cleared AND the user to have
+              // picked a new region. setRegionForced clears credentials;
+              // the subsequent setRegion clears regionForced.
+              //
+              // Skip when /logout is active (loggingOut flag) or an
+              // outro is queued — /logout clears credentials and exits
+              // 1.5s later; without this guard the watcher would race
+              // the exit and pop a browser during "Logged out".
+              await waitForSessionState(
+                () =>
+                  !tui.store.session.loggingOut &&
+                  tui.store.session.credentials === null &&
+                  tui.store.session.region !== null &&
+                  !tui.store.session.regionForced &&
+                  tui.store.session.introConcluded &&
+                  tui.store.currentScreen !== Overlay.Logout &&
+                  tui.store.session.outroData === null,
+              );
+
+              try {
+                await runReauthCycle();
+                consecutiveFailures = 0;
+              } catch (err) {
+                consecutiveFailures += 1;
+                if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
+                  console.error('Re-auth error:', err);
+                }
+                tui.store.setCommandFeedback(
+                  consecutiveFailures === 1
+                    ? "Authentication didn't complete. Retrying — use /login to retry manually."
+                    : `Authentication failed (attempt ${consecutiveFailures}). Use /login to retry manually.`,
+                  consecutiveFailures >= 3 ? 8000 : 4000,
+                );
+                if (consecutiveFailures >= 3) {
+                  // After 3 strikes, stop auto-retrying. The user can
+                  // resume via /login or /region; both clear credentials
+                  // and unblock the watcher.
+                  await waitForSessionState(
+                    () =>
+                      tui.store.currentScreen === Overlay.Login ||
+                      tui.store.session.regionForced,
+                  );
+                  consecutiveFailures = 0;
+                  continue;
+                }
+                // Linear backoff before next attempt.
+                await new Promise<void>((r) =>
+                  setTimeout(r, 1500 * consecutiveFailures),
                 );
               }
             }
@@ -754,17 +1165,17 @@ export const defaultCommand: CommandModule = {
           );
           // After auth completes (most expensive step to repeat)
           tui.store.onEnterScreen(Screen.DataSetup, () => {
-            saveCheckpoint(tui.store.session);
+            saveCheckpoint(tui.store.session, 'screen_data_setup');
           });
           // Before agent starts (captures all setup state)
           tui.store.onEnterScreen(Screen.Run, () => {
-            saveCheckpoint(tui.store.session);
+            saveCheckpoint(tui.store.session, 'screen_run');
           });
           // Clear checkpoint only on successful completion — error/cancel
           // should preserve the checkpoint so users can resume next run.
           tui.store.onEnterScreen(Screen.Outro, () => {
             if (tui.store.session.outroData?.kind === 'success') {
-              clearCheckpoint(tui.store.session.installDir);
+              clearCheckpoint(tui.store.session.installDir, 'success');
             }
           });
 

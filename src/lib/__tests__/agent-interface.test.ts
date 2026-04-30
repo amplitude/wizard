@@ -20,12 +20,14 @@ import {
   WIZARD_SESSION_ID_HEADER,
   matchesAllowedPrefix,
   parseEventPlanContent,
-  pickFreshestExisting,
   MAX_BASH_SLEEP_SECONDS,
+  MAX_CONSECUTIVE_BASH_DENIES,
   isAuthErrorMessage,
   HOOK_BRIDGE_RACE_RE,
   partitionHookBridgeRace,
   AgentErrorType,
+  AUTH_RETRY_LIMIT,
+  selectModel,
 } from '../agent-interface';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -34,6 +36,7 @@ import {
   AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
 } from '../wizard-session';
+import { pickFreshestExisting } from '../../utils/storage-paths';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -472,6 +475,112 @@ describe('runAgent', () => {
 
       expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
+    });
+
+    it('aborts early after AUTH_RETRY_LIMIT consecutive 401 api_retry messages', async () => {
+      // The Claude SDK retries 401s up to ~10 times with exponential backoff
+      // (~3 min total). A 401 won't recover within a run, so we short-circuit
+      // after AUTH_RETRY_LIMIT to surface AUTH_ERROR immediately.
+      let aborted = false;
+      function* authRetryStormGenerator() {
+        for (let i = 0; i < AUTH_RETRY_LIMIT; i++) {
+          yield {
+            type: 'system',
+            subtype: 'api_retry',
+            attempt: i,
+            error_status: 401,
+            error: 'authentication_failed',
+            retry_delay_ms: 1000,
+          };
+        }
+        // After the threshold, the generator should never deliver another
+        // useful message — controller.abort('auth_failed') will cause the
+        // SDK iterator to throw on next iteration in real life.
+        aborted = true;
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      }
+
+      mockQuery.mockReturnValue(authRetryStormGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
+      expect(aborted).toBe(true);
+      expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
+    });
+
+    it('treats api_retry with auth-error pattern (no error_status) as auth retry', async () => {
+      // Some SDK builds put the auth signal in the body without a numeric
+      // error_status — make sure we still detect it via pattern match.
+      function* authPatternGenerator() {
+        for (let i = 0; i < AUTH_RETRY_LIMIT; i++) {
+          yield {
+            type: 'system',
+            subtype: 'api_retry',
+            attempt: i,
+            error: 'authentication_error',
+            retry_delay_ms: 1000,
+          };
+        }
+        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+      }
+
+      mockQuery.mockReturnValue(authPatternGenerator());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
+    });
+
+    it('does not abort early on non-auth api_retry messages (e.g. 503)', async () => {
+      // 5xx retries can recover within the same run — they must keep
+      // streaming through the SDK's retry policy and not trip the auth
+      // short-circuit.
+      function* gateway503Then200() {
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 0,
+          error_status: 503,
+          error: 'gateway_unavailable',
+          retry_delay_ms: 100,
+        };
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 1,
+          error_status: 503,
+          error: 'gateway_unavailable',
+          retry_delay_ms: 100,
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Done',
+        };
+      }
+
+      mockQuery.mockReturnValue(gateway503Then200());
+
+      const result = await runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+      );
+
+      expect(result.error).toBeUndefined();
     });
 
     it('should report AUTH_ERROR when amplitude-wizard MCP has needs-auth status', async () => {
@@ -1275,6 +1384,118 @@ describe('wizardCanUseTool', () => {
     });
   });
 
+  describe('wizard-managed event-plan and dashboard files', () => {
+    // Defense-in-depth: even though the commandments tell agents to use
+    // confirm_event_plan instead of writing the file directly, bundled
+    // integration skills (owned by context-hub) still instruct agents to
+    // Write `.amplitude-events.json` themselves. The hook denies that
+    // path with a message pointing at the MCP tool, so the agent
+    // recovers without entering a "stale file / Write tool error" loop.
+
+    it('denies Write on .amplitude-events.json', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('deny');
+      expect(result.behavior === 'deny' && result.message).toContain(
+        'confirm_event_plan',
+      );
+    });
+
+    it('denies Edit on .amplitude-events.json', () => {
+      const result = wizardCanUseTool('Edit', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on .amplitude/events.json (canonical path)', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude/events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on .amplitude-dashboard.json', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude-dashboard.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on .amplitude/dashboard.json (canonical path)', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/.amplitude/dashboard.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('allows Write on an unrelated `events.json` outside .amplitude/', () => {
+      // A user codebase may legitimately have an `events.json` somewhere
+      // — only the path INSIDE `.amplitude/` is wizard-managed.
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/src/events.json',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows Write on an unrelated `dashboard.json` outside .amplitude/', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: '/project/dashboards/dashboard.json',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows Read on .amplitude-events.json (read-only is fine)', () => {
+      // Reading the file is harmless — only writes are gated. Agents may
+      // legitimately want to read it (e.g. the conclude phase reads back
+      // the persisted plan to format the setup report).
+      const result = wizardCanUseTool('Read', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    // Coverage for the full write-tool set. Pre-fix the deny only matched
+    // `Write` and `Edit`, leaving MultiEdit / NotebookEdit as silent bypass
+    // paths (an agent could MultiEdit `.amplitude-events.json` and the
+    // hook would let it through). Lock these in so a future refactor of
+    // the conditional doesn't regress the bypass.
+    it('denies MultiEdit on .amplitude-events.json', () => {
+      const result = wizardCanUseTool('MultiEdit', {
+        file_path: '/project/.amplitude-events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies NotebookEdit on .amplitude/events.json', () => {
+      const result = wizardCanUseTool('NotebookEdit', {
+        file_path: '/project/.amplitude/events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    // Windows-with-mixed-paths: Claude Code on Windows sometimes passes
+    // forward-slash paths even though `path.sep` is `\\`. The normalized
+    // matcher (`replace(/\\/g, '/')` + `'/.amplitude/'` substring check)
+    // should catch both styles. These tests guard the regression where
+    // the hook used `path.sep` literally and silently allowed Windows
+    // forward-slash paths through.
+    it('denies Write on Windows-style backslash path inside .amplitude/', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: 'C:\\project\\.amplitude\\events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('denies Write on mixed-separator Windows path inside .amplitude/', () => {
+      const result = wizardCanUseTool('Write', {
+        file_path: 'C:\\project/.amplitude/events.json',
+      });
+      expect(result.behavior).toBe('deny');
+    });
+  });
+
   describe('Grep', () => {
     it('denies Grep directly targeting a .env file', () => {
       const result = wizardCanUseTool('Grep', { path: '/project/.env' });
@@ -1673,14 +1894,14 @@ describe('pickFreshestExisting', () => {
   it('returns null when no candidates exist', () => {
     const a = path.join(tmpDir, 'a');
     const b = path.join(tmpDir, 'b');
-    expect(pickFreshestExisting(a, b)).toBeNull();
+    expect(pickFreshestExisting([a, b])).toBeNull();
   });
 
   it('returns the only existing candidate', () => {
     const a = path.join(tmpDir, 'a');
     const b = path.join(tmpDir, 'b');
     fs.writeFileSync(b, '');
-    expect(pickFreshestExisting(a, b)).toBe(b);
+    expect(pickFreshestExisting([a, b])).toBe(b);
   });
 
   // Regression: bugbot caught the stale-canonical bug — the dashboard
@@ -1699,7 +1920,7 @@ describe('pickFreshestExisting', () => {
     fs.utimesSync(canonical, oldTime, oldTime);
     fs.writeFileSync(legacy, 'fresh');
 
-    expect(pickFreshestExisting(canonical, legacy)).toBe(legacy);
+    expect(pickFreshestExisting([canonical, legacy])).toBe(legacy);
   });
 
   it('returns the canonical when it is the freshest', () => {
@@ -1710,7 +1931,7 @@ describe('pickFreshestExisting', () => {
     fs.utimesSync(legacy, oldTime, oldTime);
     fs.writeFileSync(canonical, 'fresh');
 
-    expect(pickFreshestExisting(canonical, legacy)).toBe(canonical);
+    expect(pickFreshestExisting([canonical, legacy])).toBe(canonical);
   });
 });
 
@@ -2188,6 +2409,168 @@ describe('createPreToolUseHook', () => {
       expect(analytics.wizardCapture).not.toHaveBeenCalled();
     });
   });
+
+  describe('circuit breaker', () => {
+    // Real-world repro: a wizard run burned 47 turns looping on
+    // `Hook PreToolUse:Bash denied this tool` while the agent tried
+    // `node -e ...` → `node --eval ...` → `cat .env` → ... in sequence.
+    // Prompt-side "DO NOT retry" guidance reduces the rate but doesn't
+    // eliminate it. The breaker is the belt-and-suspenders enforcement
+    // that fires after MAX_CONSECUTIVE_BASH_DENIES so the run halts
+    // cleanly instead of burning the rest of the turn budget.
+
+    const buildHook = (
+      onCircuitBreakerTripped?: (info: {
+        consecutiveDenies: number;
+        lastCommand: string;
+        lastDenyReason: string;
+      }) => void,
+    ) => {
+      const hook = createPreToolUseHook({ onCircuitBreakerTripped });
+      return (toolName: string, toolInput: Record<string, unknown>) =>
+        hook(
+          { tool_name: toolName, tool_input: toolInput },
+          'tool-use-id',
+          hookOpts,
+        );
+    };
+
+    it('does not fire below the consecutive-deny threshold', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).not.toHaveBeenCalled();
+    });
+
+    it('fires exactly once when consecutive denies hit the threshold', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).toHaveBeenCalledTimes(1);
+      expect(tripped).toHaveBeenCalledWith({
+        consecutiveDenies: MAX_CONSECUTIVE_BASH_DENIES,
+        lastCommand: 'curl example.com',
+        lastDenyReason: expect.stringContaining('Bash command'),
+      });
+    });
+
+    it('does not re-fire on subsequent denies in the same run (idempotent)', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      // Trip the breaker, then keep denying — callback stays at 1 call.
+      // The hook still returns deny payloads; only the trip side-effect
+      // is one-shot.
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES + 10; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).toHaveBeenCalledTimes(1);
+    });
+
+    it('resets the counter on an allowed Bash call', async () => {
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      // threshold-1 denies, then an allow, then another threshold-1 denies.
+      // Total denies = 2*(threshold-1) but they're not consecutive — counter
+      // resets on the allow, so the breaker MUST NOT fire.
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      const allowed = await call('Bash', { command: 'pnpm install' });
+      expect(allowed).toEqual({});
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      expect(tripped).not.toHaveBeenCalled();
+    });
+
+    it('counts long-sleep denies toward the threshold', async () => {
+      // Sleep cap and allowlist denies are equivalent failure modes: both
+      // mean "this command will never run". The breaker counts them
+      // together so a sleep-then-curl-then-sleep sequence still trips after
+      // threshold consecutive denies, regardless of which deny path each
+      // one took.
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES; i++) {
+        await call('Bash', {
+          command: i % 2 === 0 ? 'sleep 60' : 'curl example.com',
+        });
+      }
+      expect(tripped).toHaveBeenCalledTimes(1);
+    });
+
+    it('non-Bash tool calls do not affect the counter', async () => {
+      // The hook only gates Bash. Read / Write / MCP calls pass through
+      // and must not perturb the consecutive-deny counter.
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES - 1; i++) {
+        await call('Bash', { command: 'curl example.com' });
+      }
+      // Slip a non-Bash call in — counter must NOT reset, so the next Bash
+      // deny still trips the breaker.
+      await call('Read', { file_path: '/project/src/index.ts' });
+      await call('mcp__amplitude-wizard__get_events', { reason: 'verify' });
+      await call('TodoWrite', { todos: [] });
+      // One more Bash deny should hit the threshold.
+      await call('Bash', { command: 'curl example.com' });
+      expect(tripped).toHaveBeenCalledTimes(1);
+    });
+
+    it('still returns the deny payload at and after the trip', async () => {
+      // The breaker is a side-channel signal; the hook itself must keep
+      // returning deny payloads for every denied call. Otherwise the SDK
+      // might let a denied command execute while wizardAbort is still
+      // tearing the run down.
+      const tripped = vi.fn();
+      const call = buildHook(tripped);
+      let lastResult: Record<string, unknown> = {};
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES + 2; i++) {
+        lastResult = await call('Bash', { command: 'curl example.com' });
+      }
+      expect(lastResult.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('swallows errors thrown by the trip callback', async () => {
+      // Hook callbacks return Promise<{}>; a throwing trip handler must
+      // not bubble up and break SDK control flow. Logged-and-suppressed.
+      const call = buildHook(() => {
+        throw new Error('handler bug');
+      });
+      let lastResult: Record<string, unknown> = {};
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES; i++) {
+        lastResult = await call('Bash', { command: 'curl example.com' });
+      }
+      // The deny payload still went through; no exception escaped.
+      expect(lastResult.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+    });
+
+    it('default options (no callback) still works without throwing', async () => {
+      // createPreToolUseHook() is called with no args from many places.
+      // The breaker must be a pure side-effect when no callback is wired.
+      const hook = createPreToolUseHook();
+      for (let i = 0; i < MAX_CONSECUTIVE_BASH_DENIES + 5; i++) {
+        await expect(
+          hook(
+            {
+              tool_name: 'Bash',
+              tool_input: { command: 'curl example.com' },
+            },
+            'tool-use-id',
+            hookOpts,
+          ),
+        ).resolves.toBeDefined();
+      }
+    });
+  });
 });
 
 describe('isAuthErrorMessage', () => {
@@ -2600,5 +2983,51 @@ describe('createPostToolUseHook', () => {
       // tooling like the cleanup writer).
       expect(state.snapshot().modifiedFiles).toContain('/project/leaky.ts');
     });
+  });
+});
+
+/**
+ * `selectModel` is the single chokepoint that translates `WizardMode` into
+ * the actual model alias on the wire. Internal — see
+ * `docs/internal/agent-mode-flag.md` for the mapping. These tests pin
+ * three invariants:
+ *
+ *   1. Direct-API calls get the bare alias (no `anthropic/` prefix).
+ *   2. Gateway calls get the `anthropic/<alias>` prefix.
+ *   3. An unknown / undefined mode falls back to the production default
+ *      so a misconfigured caller can't silently route through a different
+ *      tier.
+ *
+ * The exact model strings are intentionally kept inside this file (and
+ * `selectModel`'s implementation) — not duplicated into test names or
+ * stderr messaging.
+ */
+describe('selectModel', () => {
+  it('returns the production-default alias for the default tier', () => {
+    expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
+    expect(selectModel('standard', false)).toBe('anthropic/claude-sonnet-4-6');
+  });
+
+  it('returns the lower-cost alias for the cheap tier', () => {
+    expect(selectModel('fast', true)).toBe('claude-haiku-4-5');
+    expect(selectModel('fast', false)).toBe('anthropic/claude-haiku-4-5');
+  });
+
+  it('returns the higher-capability alias for the expensive tier', () => {
+    // Pinned so the wire format stays consistent. The wire alias is what
+    // the gateway / Anthropic will be asked to serve; nothing else.
+    expect(selectModel('thorough', true)).toBe('claude-opus-4-7');
+    expect(selectModel('thorough', false)).toBe('anthropic/claude-opus-4-7');
+  });
+
+  it('treats an unknown mode as the production default (defensive)', () => {
+    // `bin.ts` rejects unknown values via yargs `choices`, so this branch
+    // is only reachable from internal callers that bypass the CLI parser.
+    // Returning the production default keeps a misconfigured caller on
+    // the safe path instead of silently routing somewhere unexpected.
+    expect(selectModel('bogus' as 'standard', true)).toBe('claude-sonnet-4-6');
+    expect(selectModel('bogus' as 'standard', false)).toBe(
+      'anthropic/claude-sonnet-4-6',
+    );
   });
 });

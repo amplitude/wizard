@@ -115,20 +115,30 @@ export async function resolveCredentials(
       : getStoredToken(undefined, zone);
 
     if (storedToken) {
-      // Apply env-var access token override (AMPLITUDE_TOKEN), if any.
-      // Only overrides the access token; idToken/refreshToken stay from
-      // storage because fetchAmplitudeUser needs a valid idToken.
-      if (options?.accessTokenOverride) {
-        storedToken.accessToken = options.accessTokenOverride;
-      }
+      // Work on a local copy of the stored token. The object returned by
+      // `getStoredToken` is parsed fresh today, but we shouldn't rely on
+      // that contract — mutating the caller's reference here would silently
+      // leak per-run overrides (AMPLITUDE_TOKEN env var, refreshed token
+      // values) to other call sites that share a cached reference, and
+      // would make this function non-idempotent. Spreading once at the top
+      // localizes every subsequent mutation to this run.
+      const tokenForRun: typeof storedToken = {
+        ...storedToken,
+        // Apply env-var access token override (AMPLITUDE_TOKEN), if any.
+        // Only overrides the access token; idToken/refreshToken stay from
+        // storage because fetchAmplitudeUser needs a valid idToken.
+        ...(options?.accessTokenOverride
+          ? { accessToken: options.accessTokenOverride }
+          : {}),
+      };
 
       // Silent token refresh
       const { tryRefreshToken } = await import('../utils/token-refresh.js');
-      const expiresAtMs = new Date(storedToken.expiresAt).getTime();
+      const expiresAtMs = new Date(tokenForRun.expiresAt).getTime();
       const refreshResult = await tryRefreshToken(
         {
-          accessToken: storedToken.accessToken,
-          refreshToken: storedToken.refreshToken,
+          accessToken: tokenForRun.accessToken,
+          refreshToken: tokenForRun.refreshToken,
           expiresAt: expiresAtMs,
         },
         zone,
@@ -137,7 +147,7 @@ export async function resolveCredentials(
         const { storeToken } = await import('../utils/ampli-settings.js');
         if (realUser) {
           storeToken(realUser, {
-            ...storedToken,
+            ...tokenForRun,
             accessToken: refreshResult.accessToken,
             expiresAt: new Date(refreshResult.expiresAt).toISOString(),
             // Persist rotated refresh token if the server issued one
@@ -154,12 +164,12 @@ export async function resolveCredentials(
               : {}),
           });
         }
-        storedToken.accessToken = refreshResult.accessToken;
+        tokenForRun.accessToken = refreshResult.accessToken;
         if (refreshResult.refreshToken) {
-          storedToken.refreshToken = refreshResult.refreshToken;
+          tokenForRun.refreshToken = refreshResult.refreshToken;
         }
         if (refreshResult.idToken) {
-          storedToken.idToken = refreshResult.idToken;
+          tokenForRun.idToken = refreshResult.idToken;
         }
         logToFile(
           '[credential-resolution] silently refreshed expired access token',
@@ -174,8 +184,8 @@ export async function resolveCredentials(
       if (localKey) {
         logToFile('[credential-resolution] using locally stored API key');
         session.credentials = {
-          accessToken: storedToken.accessToken,
-          idToken: storedToken.idToken,
+          accessToken: tokenForRun.accessToken,
+          idToken: tokenForRun.idToken,
           projectApiKey: localKey.key,
           host: getHostFromRegion(zone),
           appId: 0,
@@ -200,7 +210,7 @@ export async function resolveCredentials(
           try {
             const { fetchAmplitudeUser } = await import('./api.js');
             const userInfo = await fetchAmplitudeUser(
-              storedToken.idToken,
+              tokenForRun.idToken,
               zone,
             );
             if (!session.userEmail && userInfo.email) {
@@ -254,9 +264,34 @@ export async function resolveCredentials(
         }
       } else {
         // Fetch user data to check how many environments are available.
+        // Bound the call with a timeout — a stale idToken from an older wizard
+        // version can cause the API to hang or take many seconds to respond,
+        // and the AuthScreen has nothing to show until this resolves. Treat
+        // a timeout as a fetch failure so the caller drops to AuthScreen and
+        // forces a fresh OAuth round-trip via the bin-level probe.
         const { fetchAmplitudeUser } = await import('./api.js');
+        const RESOLVE_PROBE_MS = 8_000;
+        const probeUser = async () => {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            return await Promise.race([
+              fetchAmplitudeUser(tokenForRun.idToken, zone),
+              new Promise<never>((_, reject) => {
+                timer = setTimeout(() => {
+                  const err = new Error(
+                    `fetchAmplitudeUser timed out after ${RESOLVE_PROBE_MS}ms`,
+                  );
+                  err.name = 'TimeoutError';
+                  reject(err);
+                }, RESOLVE_PROBE_MS);
+              }),
+            ]);
+          } finally {
+            if (timer !== undefined) clearTimeout(timer);
+          }
+        };
         try {
-          const userInfo = await fetchAmplitudeUser(storedToken.idToken, zone);
+          const userInfo = await probeUser();
           analytics.setDistinctId(userInfo.email);
           analytics.identifyUser({ email: userInfo.email });
           const projectId = session.selectedProjectId ?? undefined;
@@ -297,7 +332,7 @@ export async function resolveCredentials(
             : options?.org?.toLowerCase();
           const projectIdFilter = appIdFilter ? undefined : options?.projectId;
           const hasSpecificFilter = Boolean(
-            appIdFilter || envMatch || projectIdFilter,
+            appIdFilter || envMatch || projectIdFilter || orgFilter,
           );
           if (hasSpecificFilter) {
             for (const org of userInfo.orgs) {
@@ -337,8 +372,8 @@ export async function resolveCredentials(
                   );
                   persistApiKey(apiKey, installDir);
                   session.credentials = {
-                    accessToken: storedToken.accessToken,
-                    idToken: storedToken.idToken,
+                    accessToken: tokenForRun.accessToken,
+                    idToken: tokenForRun.idToken,
                     projectApiKey: apiKey,
                     host: getHostFromRegion(zone),
                     appId: toCredentialAppId(matchedEnv.app.id),
@@ -364,11 +399,58 @@ export async function resolveCredentials(
               // instead of the misleading `no_stored_credentials` path.
               // The user IS signed in — their filters just didn't match.
               session.pendingOrgs = userInfo.orgs;
-              session.pendingAuthIdToken = storedToken.idToken;
-              session.pendingAuthAccessToken = storedToken.accessToken;
+              session.pendingAuthIdToken = tokenForRun.idToken;
+              session.pendingAuthAccessToken = tokenForRun.accessToken;
+
+              // Stamp the specific filter that mismatched so the agent-mode
+              // emit path can surface a structured rejection (the bad
+              // value the orchestrator passed + the candidate list) in one
+              // `auth_required` event. Order matches the precedence
+              // hasSpecificFilter check above: --app-id wins over the
+              // legacy filters because it's globally unique.
+              if (appIdFilter) {
+                session.scopeFilterMismatch = {
+                  flag: '--app-id',
+                  value: appIdFilter,
+                  reason: `No Amplitude environment with app-id=${appIdFilter}.`,
+                };
+              } else if (projectIdFilter) {
+                session.scopeFilterMismatch = {
+                  flag: '--project-id',
+                  value: projectIdFilter,
+                  reason: `No Amplitude project with project-id=${projectIdFilter}.`,
+                };
+              } else if (envMatch) {
+                session.scopeFilterMismatch = {
+                  flag: '--env',
+                  value: options?.env ?? envMatch,
+                  reason: `No environment named "${
+                    options?.env ?? envMatch
+                  }" in any project.`,
+                };
+              } else if (orgFilter) {
+                session.scopeFilterMismatch = {
+                  flag: '--org',
+                  value: options?.org ?? orgFilter,
+                  reason: `No org name contains "${
+                    options?.org ?? orgFilter
+                  }".`,
+                };
+              }
             }
-          } else if (envsWithKey.length === 1) {
-            // Single environment — auto-select
+          } else if (
+            envsWithKey.length === 1 &&
+            !process.env.AMPLITUDE_WIZARD_CONFIRM_APP
+          ) {
+            // Single environment — auto-select. Skipped when
+            // `--confirm-app` (env-var bridge:
+            // `AMPLITUDE_WIZARD_CONFIRM_APP=1`) is set; in that mode
+            // we DEFER to the caller's env picker so the wizard
+            // emits a `needs_input: environment_selection` even
+            // when there's only one match. The skill always passes
+            // `--confirm-app` so the user is asked "is this the
+            // right app?" before any writes happen — fixes the
+            // "wizard wrote to the wrong project" class of bug.
             const selectedEnv = envsWithKey[0];
             const apiKey = selectedEnv.app!.apiKey!;
             const selectedAppId = selectedEnv.app?.id ?? null;
@@ -399,22 +481,34 @@ export async function resolveCredentials(
             );
             persistApiKey(apiKey, installDir);
             session.credentials = {
-              accessToken: storedToken.accessToken,
-              idToken: storedToken.idToken,
+              accessToken: tokenForRun.accessToken,
+              idToken: tokenForRun.idToken,
               projectApiKey: apiKey,
               host: getHostFromRegion(zone),
               appId: toCredentialAppId(selectedAppId),
             };
             session.activationLevel = 'none';
             session.projectHasData = false;
-          } else if (envsWithKey.length > 1) {
-            // Multiple environments — defer to caller for selection
+          } else if (
+            envsWithKey.length > 1 ||
+            (envsWithKey.length === 1 &&
+              process.env.AMPLITUDE_WIZARD_CONFIRM_APP)
+          ) {
+            // Multiple environments OR a single match while
+            // `--confirm-app` is forcing an explicit confirmation —
+            // defer to caller for selection so the wizard emits a
+            // structured `needs_input` and the user gets to choose
+            // (or confirm) before any writes happen.
             logToFile(
-              `[credential-resolution] ${envsWithKey.length} environments found — deferring to project picker`,
+              `[credential-resolution] ${
+                envsWithKey.length
+              } environments found — deferring to project picker (confirm-app=${
+                process.env.AMPLITUDE_WIZARD_CONFIRM_APP ? 'on' : 'off'
+              })`,
             );
             session.pendingOrgs = userInfo.orgs;
-            session.pendingAuthIdToken = storedToken.idToken;
-            session.pendingAuthAccessToken = storedToken.accessToken;
+            session.pendingAuthIdToken = tokenForRun.idToken;
+            session.pendingAuthAccessToken = tokenForRun.accessToken;
           } else {
             logToFile(
               '[credential-resolution] no environments with API keys — showing apiKeyNotice',
@@ -433,15 +527,15 @@ export async function resolveCredentials(
           // Fall back to getAPIKey for backward compatibility
           const projectApiKey = await getAPIKey({
             installDir,
-            idToken: storedToken.idToken,
+            idToken: tokenForRun.idToken,
             zone: zone,
             projectId: session.selectedProjectId ?? undefined,
           });
           if (projectApiKey) {
             persistApiKey(projectApiKey, installDir);
             session.credentials = {
-              accessToken: storedToken.accessToken,
-              idToken: storedToken.idToken,
+              accessToken: tokenForRun.accessToken,
+              idToken: tokenForRun.idToken,
               projectApiKey,
               host: getHostFromRegion(zone),
               appId: toCredentialAppId(session.selectedAppId),

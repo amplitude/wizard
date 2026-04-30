@@ -12,6 +12,8 @@ export { PickerMenu } from './PickerMenu.js';
 export { ConfirmationInput } from './ConfirmationInput.js';
 export { LogViewer } from './LogViewer.js';
 export { ReportViewer } from './ReportViewer.js';
+export { ChangedFilesView } from './ChangedFilesView.js';
+export type { ChangedFile } from './ChangedFilesView.js';
 export { EventPlanViewer } from './EventPlanViewer.js';
 export { ScreenErrorBoundary } from './ScreenErrorBoundary.js';
 export { TabContainer } from './TabContainer.js';

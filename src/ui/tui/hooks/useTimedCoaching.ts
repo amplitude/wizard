@@ -16,7 +16,7 @@
  *     thresholds: [60, 120, 300],
  *     progressSignal: tasks.length,
  *   });
- *   if (tier >= 1) <Text>Still working — switch to Logs (Tab)…</Text>
+ *   if (tier >= 1) <Text>Still working — press ← / → for Logs…</Text>
  *
  * Reference: DataIngestionCheckScreen has a hand-rolled version of this at
  * 60/90/120/180s; this hook generalises that pattern.

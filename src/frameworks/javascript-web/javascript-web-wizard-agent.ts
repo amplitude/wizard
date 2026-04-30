@@ -5,7 +5,7 @@ import { Integration } from '../../lib/constants';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { hasPackageInstalled } from '../../utils/package-json';
-import { tryGetPackageJson } from '../../utils/setup-utils';
+import { tryGetPackageJson } from '../../utils/package-json-light';
 import {
   FRAMEWORK_PACKAGES,
   detectJsPackageManager,
@@ -13,7 +13,7 @@ import {
   hasIndexHtml,
   type JavaScriptContext,
 } from './utils';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 
 export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
@@ -25,13 +25,13 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
     targetsBrowser: true,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
-    gatherContext: (options: WizardOptions) => {
-      const packageManagerName = detectJsPackageManager(options);
+    gatherContext: async (options: WizardOptions) => {
+      const packageManagerName = await detectJsPackageManager(options);
       const hasTypeScript = fs.existsSync(
         path.join(options.installDir, 'tsconfig.json'),
       );
       const hasBundler = detectBundler(options);
-      return Promise.resolve({ packageManagerName, hasTypeScript, hasBundler });
+      return { packageManagerName, hasTypeScript, hasBundler };
     },
   },
 

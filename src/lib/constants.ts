@@ -4,7 +4,7 @@
 
 // Kept in sync by release-please (x-release-please-version marker).
 // The prebuild script (sync-version.mjs) acts as a safety net.
-const VERSION = '1.9.0'; // x-release-please-version
+const VERSION = '1.10.0'; // x-release-please-version
 
 /** Public alias for the wizard version. Same value as the internal `VERSION`
  * but exported for consumers (e.g. the bug-report module). */
@@ -71,6 +71,8 @@ export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 // ── URLs ─────────────────────────────────────────────────────────────
 
 export const DEFAULT_URL = 'https://amplitude.com';
+export const TERMS_OF_SERVICE_URL = 'https://amplitude.com/terms';
+export const PRIVACY_POLICY_URL = 'https://amplitude.com/privacy';
 /**
  * Default Amplitude data ingestion host used when region resolution isn't
  * available (e.g. CI mode without OAuth, --api-key path). Always points at
