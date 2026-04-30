@@ -12,6 +12,7 @@ import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
+import { NoOrgsError } from './utils/zone-probe';
 import { getVersionCheckInfo } from './lib/version-check';
 import { initFeatureFlags } from './lib/feature-flags';
 import { autoEnableOptInFeatures } from './lib/feature-discovery';
@@ -165,6 +166,16 @@ export async function runWizard(
       logToFile(`[Wizard run.ts] ERROR MESSAGE: ${errorMessage} `);
       if (errorStack) {
         logToFile(`[Wizard run.ts] ERROR STACK: ${errorStack}`);
+      }
+
+      // NoOrgsError is a terminal condition (user has no orgs on this zone).
+      // Retrying cannot fix it — abort immediately with cleanup.
+      if (error instanceof NoOrgsError) {
+        await wizardAbort({
+          message: errorMessage,
+          error,
+        });
+        return;
       }
 
       const debugInfo = session.debug && errorStack ? `\n\n${errorStack}` : '';

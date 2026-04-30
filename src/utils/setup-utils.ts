@@ -621,9 +621,9 @@ async function askForWizardLogin(
         `${chalk.red('No Amplitude organization found.')}\n\n` +
           chalk.dim(message),
       );
-      // Wrap the new-style typed error and rethrow so abort() can carry the
-      // metadata. Falling through to abort() preserves the existing exit
-      // contract (rejected promise, exit code) for callers.
+      // Throw a typed error so the caller (run.ts) can identify this
+      // terminal condition and route it through wizardAbort() directly,
+      // bypassing the retry loop.
       throw new NoOrgsError(
         message,
         cloudRegion as AmplitudeZone,
