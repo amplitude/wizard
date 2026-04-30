@@ -16,7 +16,14 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
 import { Colors, Icons } from '../styles.js';
-import { PickerMenu, ReportViewer, TerminalLink } from '../primitives/index.js';
+import {
+  ChangedFilesView,
+  PickerMenu,
+  ReportViewer,
+  TerminalLink,
+} from '../primitives/index.js';
+import { buildChangedFileList } from '../primitives/ChangedFilesView.js';
+import { peekSetupComplete } from '../../../lib/setup-complete-registry.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
   DEFAULT_AMPLITUDE_ZONE,
@@ -85,6 +92,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   }, [store]);
 
   const [showReport, setShowReport] = useState(false);
+  const [showChangedFiles, setShowChangedFiles] = useState(false);
   const [bugReportPathState, setBugReportPathState] = useState<string | null>(
     null,
   );
@@ -161,6 +169,27 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       return;
     }
     if (showReport && key.escape) setShowReport(false);
+    // `D` while the success picker is showing pops the changed-files
+    // view as a parallel review surface to the setup report. Cheap
+    // shortcut so users can audit what was touched without leaving the
+    // picker. ChangedFilesView owns Esc/scroll once it's mounted.
+    if (
+      isSuccess &&
+      !showReport &&
+      !showChangedFiles &&
+      (input === 'd' || input === 'D')
+    ) {
+      const peeked = peekSetupComplete();
+      const written = peeked?.files?.written ?? [];
+      const modified = peeked?.files?.modified ?? [];
+      if (written.length + modified.length > 0) {
+        analytics.wizardCapture('view changes opened', {
+          'file count': written.length + modified.length,
+          source: 'keystroke',
+        });
+        setShowChangedFiles(true);
+      }
+    }
   });
 
   const rawOutroData = store.session.outroData;
@@ -229,6 +258,30 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       setReportExists(false);
     }
   }, [reportPath]);
+
+  // ── Changed files (peeked, not consumed) ─────────────────────────────
+  // We peek the registry rather than consume so the downstream
+  // wizardSuccessExit emission of `setup_complete` still gets the full
+  // payload. The peek returns a live reference — treated read-only here.
+  const setupCompleteSnapshot = peekSetupComplete();
+  const changedFiles = buildChangedFileList(
+    setupCompleteSnapshot?.files?.written ?? [],
+    setupCompleteSnapshot?.files?.modified ?? [],
+  );
+
+  // ── Changed-files sub-view ───────────────────────────────────────────
+
+  if (showChangedFiles && isSuccess) {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <ChangedFilesView
+          files={changedFiles}
+          cwd={installDir}
+          onClose={() => setShowChangedFiles(false)}
+        />
+      </Box>
+    );
+  }
 
   // ── Report sub-view ──────────────────────────────────────────────────
 
@@ -355,6 +408,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
             </Box>
           )}
+
+          {/* Discovery hint for the keystroke shortcut. The picker also
+              has an entry for this, but a one-liner here builds trust
+              that the wizard has nothing to hide — every file change is
+              one keystroke away from inspection. */}
+          {changedFiles.length > 0 && (
+            <Box marginTop={reportExists ? 0 : 1}>
+              <Text color={Colors.muted}>
+                Press <Text bold color={Colors.accent}>D</Text> to review the{' '}
+                {changedFiles.length} file
+                {changedFiles.length === 1 ? '' : 's'} changed.
+              </Text>
+            </Box>
+          )}
         </Box>
       )}
 
@@ -466,6 +533,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                 ...(reportExists
                   ? [{ label: 'View setup report', value: 'report' }]
                   : []),
+                // Conditional on a non-empty file list — empty entry is
+                // a dead-end, hide it. Hint shows the count so users
+                // know what to expect before they enter the view.
+                ...(changedFiles.length > 0
+                  ? [
+                      {
+                        label: 'View files changed',
+                        value: 'changes',
+                        hint: `${changedFiles.length} file${
+                          changedFiles.length === 1 ? '' : 's'
+                        }`,
+                      },
+                    ]
+                  : []),
                 { label: 'Exit', value: 'exit' },
               ];
             })()}
@@ -477,6 +558,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               });
               if (choice === 'report') {
                 setShowReport(true);
+              } else if (choice === 'changes') {
+                analytics.wizardCapture('view changes opened', {
+                  'file count': changedFiles.length,
+                  source: 'picker',
+                });
+                setShowChangedFiles(true);
               } else if (choice === 'dashboard') {
                 // readDisk: false — outro runs at the end of the wizard, far
                 // past the RegionSelect gate. Tier 1 is authoritative.

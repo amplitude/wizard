@@ -13,6 +13,7 @@ import {
   consumeSetupComplete,
   resetSetupComplete,
   dashboardIdFromUrl,
+  peekSetupComplete,
   _peekSetupCompleteForTests,
 } from '../setup-complete-registry.js';
 
@@ -78,6 +79,36 @@ describe('setup-complete-registry', () => {
     registerSetupComplete({ amplitude: { appId: 'app-7' } });
     expect(consumeSetupComplete()).not.toBeNull();
     expect(consumeSetupComplete()).toBeNull();
+  });
+
+  it('peekSetupComplete returns the same shape as consume without resetting', () => {
+    registerSetupComplete({
+      amplitude: { region: 'us', appId: 'app-7' },
+      files: { written: ['a.ts'], modified: ['b.ts'] },
+    });
+
+    const peeked = peekSetupComplete();
+    expect(peeked).not.toBeNull();
+    expect(peeked?.amplitude.appId).toBe('app-7');
+    expect(peeked?.files?.written).toEqual(['a.ts']);
+    expect(peeked?.files?.modified).toEqual(['b.ts']);
+
+    // A second peek returns the same payload — non-consuming.
+    const peeked2 = peekSetupComplete();
+    expect(peeked2?.amplitude.appId).toBe('app-7');
+
+    // After peek, consume still drains the payload exactly once. This
+    // is the load-bearing invariant: OutroScreen peeks for display, then
+    // wizardSuccessExit consumes for emission downstream — they MUST NOT
+    // step on each other.
+    const consumed = consumeSetupComplete();
+    expect(consumed?.amplitude.appId).toBe('app-7');
+    expect(consumed?.files?.written).toEqual(['a.ts']);
+    expect(peekSetupComplete()).toBeNull();
+  });
+
+  it('peekSetupComplete returns null when nothing has been registered', () => {
+    expect(peekSetupComplete()).toBeNull();
   });
 
   it('reset() drops a pending payload without emitting', () => {

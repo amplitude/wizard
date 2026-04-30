@@ -30,6 +30,10 @@ import {
 import { OutroKind } from '../../session-constants.js';
 import { toWizardDashboardOpenUrl } from '../../../../utils/dashboard-open-url.js';
 import { ExitCode } from '../../../../lib/exit-codes.js';
+import {
+  registerSetupComplete,
+  resetSetupComplete,
+} from '../../../../lib/setup-complete-registry.js';
 
 const GATEWAY_DOWN_MESSAGE = `Amplitude LLM gateway unavailable
 
@@ -221,6 +225,69 @@ describe('OutroScreen — error variants', () => {
     // Old copy used the generic phrase "setup resource" which doesn't
     // mean anything to a user trying to install Amplitude.
     expect(frame).not.toContain('the setup resource');
+  });
+
+  // ── "View files changed" picker entry ───────────────────────────────────
+  //
+  // The success outro should advertise a review step so the user can audit
+  // exactly what the wizard touched. Two invariants:
+  //   1. When the registry has tracked files, the picker option AND the
+  //      `Press D` discovery hint both appear.
+  //   2. When the registry is empty, NEITHER appears — a dead-end picker
+  //      option ("View files changed → 0 files") is worse than no option
+  //      at all.
+
+  it('shows "View files changed" picker option and D-hint when files were tracked', () => {
+    resetSetupComplete();
+    registerSetupComplete({
+      files: {
+        written: ['src/instrument.ts'],
+        modified: ['src/App.tsx'],
+      },
+    });
+    try {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('View files changed');
+      expect(frame).toContain('2 files');
+      // The discovery hint above the picker — equally load-bearing.
+      expect(frame).toContain('Press');
+      expect(frame).toMatch(/D[^a-zA-Z]/); // 'D' as a standalone keystroke
+    } finally {
+      resetSetupComplete();
+    }
+  });
+
+  it('hides "View files changed" when the registry is empty', () => {
+    resetSetupComplete();
+    const store = makeStoreForSnapshot({
+      outroData: { kind: OutroKind.Success, changes: ['x'] },
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).not.toContain('View files changed');
+    // The D-hint copy is gated on the same condition — make sure it's
+    // gone too. Use the full sentence so we don't false-positive on
+    // bare "Press" anywhere else.
+    expect(frame).not.toMatch(/Press .* D .* to review/);
+  });
+
+  it('singularizes the count when exactly one file was changed', () => {
+    resetSetupComplete();
+    registerSetupComplete({
+      files: { written: ['src/instrument.ts'], modified: [] },
+    });
+    try {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+      });
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('1 file');
+      expect(frame).not.toContain('1 files');
+    } finally {
+      resetSetupComplete();
+    }
   });
 
   it('shows event count + env name in success summary when events were planned', () => {
