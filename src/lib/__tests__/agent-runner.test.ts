@@ -18,6 +18,7 @@ import { vi } from 'vitest';
 import {
   agentArtifactsLookComplete,
   agentEventsInstrumented,
+  classifyAgentOutcome,
   classifyApiErrorSubtype,
   refreshTokenIfStale,
 } from '../agent-runner.js';
@@ -268,6 +269,56 @@ describe('agentEventsInstrumented', () => {
       installDir: '/dev/null/does-not-exist',
     });
     expect(agentEventsInstrumented(session)).toBe(false);
+  });
+});
+
+// ── classifyAgentOutcome ─────────────────────────────────────────────
+//
+// Single decision point used by both the MCP_MISSING / RESOURCE_MISSING
+// branch and the API_ERROR / RATE_LIMIT branch in `runAgentWizardBody`.
+// Pre-PR these were inlined separately; the API branch only checked
+// dashboard URL while the MCP branch checked dashboard OR events. A
+// rate limit during dashboard creation hard-aborted even when events
+// had been instrumented. Lock down the unified rule.
+
+describe('classifyAgentOutcome', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'classify-outcome-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('returns soft when dashboard URL is set', () => {
+    const session = buildSession({ installDir: tmpDir });
+    session.checklistDashboardUrl = 'https://app.amplitude.com/x/y';
+    const result = classifyAgentOutcome(session);
+    expect(result.severity).toBe('soft');
+    expect(result.dashboardComplete).toBe(true);
+  });
+
+  it('returns soft when events file is present even without dashboard URL', () => {
+    fs.mkdirSync(path.join(tmpDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.amplitude', 'events.json'),
+      JSON.stringify([{ name: 'X', description: 'Y' }]),
+    );
+    const session = buildSession({ installDir: tmpDir });
+    const result = classifyAgentOutcome(session);
+    expect(result.severity).toBe('soft');
+    expect(result.eventsInstrumented).toBe(true);
+    expect(result.dashboardComplete).toBe(false);
+  });
+
+  it('returns hard when neither dashboard nor events are present', () => {
+    const session = buildSession({ installDir: tmpDir });
+    const result = classifyAgentOutcome(session);
+    expect(result.severity).toBe('hard');
+    expect(result.dashboardComplete).toBe(false);
+    expect(result.eventsInstrumented).toBe(false);
   });
 });
 

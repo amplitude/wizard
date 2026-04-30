@@ -3,6 +3,7 @@ import {
   callAmplitudeMcp,
   AMPLITUDE_MCP_URL,
   _clearMcpSessionCacheForTesting,
+  invalidateMcpSessionsForToken,
 } from '../mcp-with-fallback';
 
 vi.mock('../../utils/debug');
@@ -437,6 +438,43 @@ describe('callAmplitudeMcp', () => {
       // Release the generator so the call can finish
       releaseGenerator();
       await callPromise;
+    });
+
+    it('forces a fresh handshake after invalidateMcpSessionsForToken', async () => {
+      // First call: full handshake (initialize, notifications/initialized,
+      // tools/call) seeds the cache.
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(makeFetchResponse(sseResult({ v: 1 })));
+      await callAmplitudeMcp({
+        accessToken: 'old-tok',
+        direct: async (callTool) => {
+          const text = await callTool(1, 't', {});
+          return text ? JSON.parse(text) : null;
+        },
+        agentPrompt: 'p',
+        parseAgent: () => null,
+      });
+
+      // Drop cached sessions bound to the now-stale token (mirrors what
+      // refreshTokenIfStale does after rotating the bearer).
+      invalidateMcpSessionsForToken('old-tok');
+
+      // Second call with the SAME token: should re-handshake (3 fetches),
+      // not reuse the dropped session (which would have been 1 fetch).
+      mockFetch.mockReset();
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(makeFetchResponse(sseResult({ v: 2 })));
+      await callAmplitudeMcp({
+        accessToken: 'old-tok',
+        direct: async (callTool) => {
+          const text = await callTool(1, 't', {});
+          return text ? JSON.parse(text) : null;
+        },
+        agentPrompt: 'p',
+        parseAgent: () => null,
+      });
+
+      expect(mockFetch.mock.calls.length).toBe(3);
     });
 
     it('defaults to the wizard-wide abort signal when none is provided', async () => {
