@@ -19,7 +19,7 @@ const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
 const OAuthProvisioningSchema = z.object({
   type: z.literal('oauth'),
   oauth: z.object({ code: z.string().min(1) }),
-  dashboard_url: z.string().min(1).optional(),
+  dashboard_url: z.string().min(1).nullish(),
 });
 
 const RedirectSchema = z.object({

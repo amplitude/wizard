@@ -70,6 +70,26 @@ describe('performDirectSignup', () => {
     }
   });
 
+  it('accepts null dashboard_url from provisioning', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'oauth',
+          oauth: { code: 'auth-code-xyz' },
+          dashboard_url: null,
+        }),
+      ),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.dashboardUrl).toBeNull();
+    }
+  });
+
   it('returns requires_redirect on requires_auth response', async () => {
     server.use(
       http.post(PROVISIONING_URL, () =>
