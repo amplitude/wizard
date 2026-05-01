@@ -92,12 +92,14 @@ export function detectBundler(
       .object({
         dependencies: z.record(z.string(), z.string()).optional(),
         devDependencies: z.record(z.string(), z.string()).optional(),
+        optionalDependencies: z.record(z.string(), z.string()).optional(),
       })
       .passthrough()
       .parse(JSON.parse(content));
     const allDeps: Record<string, string> = {
-      ...pkg.dependencies,
+      ...pkg.optionalDependencies,
       ...pkg.devDependencies,
+      ...pkg.dependencies,
     };
 
     if (allDeps['vite']) return 'vite';

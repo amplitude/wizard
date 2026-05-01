@@ -27,6 +27,21 @@ describe('getPackageVersion', () => {
     expect(getPackageVersion('react', pkg)).toBe('^18.0.0');
   });
 
+  it('returns optionalDependencies when not in deps or devDeps', () => {
+    const pkg: PackageDotJson = {
+      optionalDependencies: { fsevents: '^2.3.0' },
+    };
+    expect(getPackageVersion('fsevents', pkg)).toBe('^2.3.0');
+  });
+
+  it('prefers devDependencies over optionalDependencies', () => {
+    const pkg: PackageDotJson = {
+      devDependencies: { foo: '^1.0.0' },
+      optionalDependencies: { foo: '^0.9.0' },
+    };
+    expect(getPackageVersion('foo', pkg)).toBe('^1.0.0');
+  });
+
   it('returns undefined when package is not found', () => {
     const pkg: PackageDotJson = { dependencies: { react: '^18.0.0' } };
     expect(getPackageVersion('vue', pkg)).toBeUndefined();
@@ -53,6 +68,13 @@ describe('hasPackageInstalled', () => {
   it('returns false when package is absent', () => {
     const pkg: PackageDotJson = { dependencies: { react: '^18.0.0' } };
     expect(hasPackageInstalled('vue', pkg)).toBe(false);
+  });
+
+  it('returns true when package is only in optionalDependencies', () => {
+    const pkg: PackageDotJson = {
+      optionalDependencies: { sharp: '^0.33.0' },
+    };
+    expect(hasPackageInstalled('sharp', pkg)).toBe(true);
   });
 });
 

@@ -108,10 +108,16 @@ describe('DataIngestionCheckScreen catalog hang', () => {
     for (let i = 0; i < 5; i++) {
       await Promise.resolve();
     }
-    await vi.advanceTimersByTimeAsync(16_000);
+    // Advance in slices so nested timer/setup chains settle; a single
+    // 16s jump can leave the timeout promise unraced when this file is the
+    // only test in a Vitest worker (full-suite order masks the bug).
+    for (let ms = 0; ms < 16_000; ms += 1000) {
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    await vi.runOnlyPendingTimersAsync();
     // One more microtask drain so the catch handler sets eventTypes=[]
     // and React flushes the re-render.
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 10; i++) {
       await Promise.resolve();
     }
 
