@@ -220,6 +220,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(result.kind).toBe('success');

@@ -767,7 +767,8 @@ export const defaultCommand: CommandModule = {
                 isCreateAccountOnboarding(s) &&
                 s.signupEmail &&
                 s.signupFullName &&
-                !s.signupTokensObtained
+                !s.signupTokensObtained &&
+                s.signupAuth === null
               ) {
                 const { performSignupOrAuth } = await import(
                   '../utils/signup-or-auth.js'
