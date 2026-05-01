@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  AuthOnboardingPath,
   OutroKind,
   AdditionalFeature,
   SlackOutcome,
@@ -914,6 +915,68 @@ describe('WizardStore', () => {
 
       expect(listener).toHaveBeenCalled();
       expect(store.getVersion()).toBeGreaterThan(before);
+    });
+  });
+
+  describe('backToWelcome', () => {
+    it('is a no-op when regionForced', () => {
+      const store = createStore();
+      store.session.introConcluded = true;
+      store.session.regionForced = true;
+      store.session.region = 'us';
+
+      store.backToWelcome();
+
+      expect(store.session.introConcluded).toBe(true);
+      expect(store.session.region).toBe('us');
+    });
+
+    it('rewinds intro and region and clears create-account draft', () => {
+      const store = createStore();
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.introConcluded = true;
+      store.session.region = 'eu';
+      store.session.emailCaptureComplete = true;
+      store.session.tosAccepted = false;
+      store.session.signupEmail = 'x@y.co';
+      store.session.signupFullName = 'X Y';
+      store.session.signupTokensObtained = true;
+
+      store.backToWelcome();
+
+      expect(store.session.introConcluded).toBe(false);
+      expect(store.session.region).toBeNull();
+      expect(store.session.emailCaptureComplete).toBe(false);
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.signupTokensObtained).toBe(false);
+      expect(wizardCaptureMock).toHaveBeenCalledWith('back navigation', {
+        to: 'welcome',
+      });
+    });
+
+    it('keeps create-account onboarding path after rewind', () => {
+      const store = createStore();
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.introConcluded = true;
+      store.session.region = 'us';
+
+      store.backToWelcome();
+
+      expect(store.session.authOnboardingPath).toBe(
+        AuthOnboardingPath.CreateAccount,
+      );
+    });
+
+    it('sets lastNavDirection to pop so back transitions animate correctly', () => {
+      const store = createStore();
+      store.session.introConcluded = true;
+      store.session.region = 'us';
+
+      store.backToWelcome();
+
+      expect(store.lastNavDirection).toBe('pop');
     });
   });
 

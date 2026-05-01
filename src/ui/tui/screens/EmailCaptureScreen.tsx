@@ -7,7 +7,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -27,11 +27,6 @@ import { PickerMenu } from '../primitives/index.js';
 import { analytics } from '../../../utils/analytics.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 
-const EMAIL_HINTS: readonly KeyHint[] = Object.freeze([
-  { key: 'Enter', label: 'Continue' },
-  { key: 'Esc', label: 'Back' },
-]);
-
 const EXISTING_USER_OPTIONS = [
   { label: 'Log in with existing account', value: 'login' },
   { label: 'Use a different email', value: 'retry' },
@@ -44,7 +39,6 @@ interface EmailCaptureScreenProps {
 
 export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
   useWizardStore(store);
-  useScreenHints(EMAIL_HINTS);
 
   const { session } = store;
   const [email, setEmail] = useState(session.signupEmail ?? '');
@@ -54,7 +48,22 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
   const [inputKey, setInputKey] = useState(0);
 
   // TextInput from @inkjs/ui does not surface Esc — handle it here so the user
-  // can return to the name step or exit to the welcome screen.
+  // can return to the name step, router-back, or rewind to Welcome (draft cleared).
+
+  const routerCanGoBack = store.canGoBack();
+  const hints = useMemo<readonly KeyHint[]>(() => {
+    const base: KeyHint[] = [{ key: 'Enter', label: 'Continue' }];
+    if (step === 'name' || step === 'existing_user') {
+      base.push({ key: 'Esc', label: 'Back' });
+    } else if (routerCanGoBack) {
+      base.push({ key: 'Esc', label: 'Back' });
+    } else {
+      base.push({ key: 'Esc', label: 'Welcome' });
+    }
+    return base;
+  }, [step, routerCanGoBack]);
+  useScreenHints(hints);
+
   useScreenInput(
     (_input, key) => {
       if (!key.escape || isChecking) return;
@@ -71,7 +80,11 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
         return;
       }
       analytics.wizardCapture('signup email screen back', {});
-      store.rewindIntro();
+      if (store.canGoBack()) {
+        store.goBack();
+        return;
+      }
+      store.backToWelcome();
     },
     { isActive: !isChecking },
   );
