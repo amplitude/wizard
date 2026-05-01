@@ -19,7 +19,10 @@ import {
   loadOrchestratorContext,
   resolveOrchestratorContextPath,
 } from '../utils/orchestrator-context';
-import type { WizardSession } from '../lib/wizard-session';
+import {
+  type WizardSession,
+  isCreateAccountOnboarding,
+} from '../lib/wizard-session';
 
 /**
  * Load `--context-file` (or `AMPLITUDE_WIZARD_CONTEXT`) and stamp the
@@ -120,7 +123,7 @@ export const defaultCommand: CommandModule = {
   builder: (yargs) =>
     yargs.options({
       region: {
-        // Required for --signup in non-TUI modes: the backend does
+        // Required for --auth-onboarding create-account in non-TUI modes: the backend does
         // not route across regions, so the client must POST to the
         // correct provisioning endpoint (us or eu). In the TUI this
         // is covered by the RegionSelect screen; agent/CI/classic
@@ -129,7 +132,8 @@ export const defaultCommand: CommandModule = {
         // TUI mode, pre-populates the region and skips RegionSelect.
         // `--zone` is accepted as an alias for consistency with the
         // `wizard login` subcommand.
-        describe: 'data center region for --signup in non-interactive modes',
+        describe:
+          'data center region for --auth-onboarding create-account in non-interactive modes',
         choices: ['us', 'eu'] as const,
         type: 'string',
         alias: 'zone',
@@ -693,7 +697,7 @@ export const defaultCommand: CommandModule = {
               // setRegion() flips regionForced back to false once the new
               // region is chosen, releasing the wait against the right zone.
               //
-              // For --signup, also wait for ToS acceptance. Otherwise the
+              // For create-account onboarding, also wait for ToS acceptance. Otherwise the
               // auth task races past EmailCapture / ToS and opens the OAuth
               // browser before the user has filled in their email or
               // accepted the terms — which is the entire point of the
@@ -728,7 +732,7 @@ export const defaultCommand: CommandModule = {
                 { readDisk: false },
               );
 
-              // Try direct signup first when --signup + email + fullName are provided
+              // Try direct signup first when create-account + email + fullName are provided
               // and the feature flag is enabled. performSignupOrAuth returns null when
               // any of those gates are missing, or when the server returns a non-success
               // response — in which case we fall through to the existing OAuth flow
@@ -755,7 +759,7 @@ export const defaultCommand: CommandModule = {
               );
               const s = tui.store.session;
               if (
-                s.accountCreationFlow &&
+                isCreateAccountOnboarding(s) &&
                 s.signupEmail &&
                 s.signupFullName &&
                 !s.signupTokensObtained

@@ -10,9 +10,23 @@ import { analytics } from '../utils/analytics';
 import type { AmplitudeZone } from '../lib/constants';
 import { TERMS_OF_SERVICE_URL } from '../lib/constants.js';
 import { accountCreationProvisioningInputsReady } from '../lib/account-creation-flow.js';
+import {
+  AuthOnboardingPath,
+  isCreateAccountOnboarding,
+} from '../lib/wizard-session.js';
 import { setProjectLogFile } from '../lib/observability';
 import { runMigrationShim } from '../utils/storage-migration';
 import { CLI_INVOCATION } from './context';
+
+function authOnboardingPathFromArgv(
+  options: Record<string, unknown>,
+): AuthOnboardingPath | undefined {
+  const raw = options.authOnboarding as string | undefined;
+  if (raw === 'create-account') return AuthOnboardingPath.CreateAccount;
+  if (raw === 'sign-in') return AuthOnboardingPath.SignIn;
+  if (options.signup === true) return AuthOnboardingPath.CreateAccount;
+  return undefined;
+}
 
 // Dynamic import to avoid preloading wizard-session.ts as CJS, which
 // prevents the TUI's ESM dynamic imports from resolving named exports.
@@ -72,7 +86,7 @@ export const buildSessionFromOptions = async (
     forceInstall: options.forceInstall as boolean | undefined,
     installDir: options.installDir as string | undefined,
     ci: overrides?.ci ?? false,
-    accountCreationFlow: options.signup as boolean | undefined,
+    authOnboardingPath: authOnboardingPathFromArgv(options),
     localMcp: options.localMcp as boolean | undefined,
     apiKey: options.apiKey as string | undefined,
     menu: options.menu as boolean | undefined,
@@ -527,14 +541,14 @@ export const resolveNonInteractiveCredentials = async (
 };
 
 /**
- * `@returns` false when signup cannot proceed (--agent mode: emitted
- * `signup_input_required`; tests mock `process.exit` — see caller).
+ * `@returns` false when create-account inputs cannot proceed (--agent mode:
+ * emitted `signup_input_required`; tests mock `process.exit` — see caller).
  */
 export function gateAgentSignupArguments(
   session: import('../lib/wizard-session').WizardSession,
   agentUI: AgentUI,
 ): boolean {
-  if (!session.accountCreationFlow || !session.agent) return true;
+  if (!isCreateAccountOnboarding(session) || !session.agent) return true;
 
   type MissingFlag = {
     flag: string;
@@ -580,7 +594,8 @@ export function gateAgentSignupArguments(
     missing,
     resumeCommand: [
       ...invocationParts,
-      '--signup',
+      '--auth-onboarding',
+      'create-account',
       '--agent',
       '--install-dir',
       session.installDir,
@@ -601,7 +616,7 @@ export function gateCiSignupAcceptToS(
 ): boolean {
   if (
     !session.ci ||
-    !session.accountCreationFlow ||
+    !isCreateAccountOnboarding(session) ||
     !session.signupEmail ||
     !session.signupFullName ||
     session.region == null
@@ -610,7 +625,7 @@ export function gateCiSignupAcceptToS(
   }
   if (session.tosAccepted !== true) {
     process.stderr.write(
-      `${CLI_INVOCATION}: --signup in non-interactive mode requires agreeing ` +
+      `${CLI_INVOCATION}: --auth-onboarding create-account in non-interactive mode requires agreeing ` +
         `to the Amplitude Terms of Service (${TERMS_OF_SERVICE_URL}). ` +
         `Pass --accept-tos alongside --region, --email, and --full-name.\n`,
     );
@@ -628,7 +643,7 @@ export function gateCiSignupAcceptToS(
  *   - Intro is dismissed  (so the logo / welcome stays visible)
  *   - Region is picked    (so the OAuth URL targets the right zone)
  *   - regionForced is off (so /region mid-session doesn't race the new pick)
- *   - With --signup, ToS is accepted (so the browser doesn't open before
+ *   - On the create-account path, ToS is accepted (so the browser doesn't open before
  *     EmailCapture / ToS finish — tosAccepted=true implies email capture
  *     is complete since ToS only renders after EmailCapture)
  *
@@ -642,7 +657,8 @@ export function isAuthTaskGateReady(
   if (!session.introConcluded) return false;
   if (session.region === null) return false;
   if (session.regionForced) return false;
-  if (session.accountCreationFlow && session.tosAccepted !== true) return false;
+  if (isCreateAccountOnboarding(session) && session.tosAccepted !== true)
+    return false;
   return true;
 }
 
@@ -678,7 +694,7 @@ export const runDirectSignupIfRequested = async (
   const zone = tryResolveZone(session);
   if (zone == null) {
     getUI().log.error(
-      'Cannot determine data center region for --signup. Pass --region us or --region eu.',
+      'Cannot determine data center region for account creation. Pass --region us or --region eu.',
     );
     process.exit(ExitCode.AUTH_REQUIRED);
   }

@@ -143,7 +143,7 @@ describe('login flow — org resolution', () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([]));
 
       await expect(
-        getOrAskForProjectData({ signup: false, ci: false }),
+        getOrAskForProjectData({ authOnboardingPath: 'sign_in', ci: false }),
       ).rejects.toThrow(NoOrgsError);
 
       const ui = getUI();
@@ -156,7 +156,7 @@ describe('login flow — org resolution', () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([]));
 
       await expect(
-        getOrAskForProjectData({ signup: false, ci: false }),
+        getOrAskForProjectData({ authOnboardingPath: 'sign_in', ci: false }),
       ).rejects.toThrow();
 
       const ui = getUI();
@@ -174,7 +174,10 @@ describe('login flow — org resolution', () => {
 
       let caught: NoOrgsError | undefined;
       try {
-        await getOrAskForProjectData({ signup: false, ci: false });
+        await getOrAskForProjectData({
+          authOnboardingPath: 'sign_in',
+          ci: false,
+        });
       } catch (err) {
         caught = err as NoOrgsError;
       }
@@ -196,7 +199,10 @@ describe('login flow — org resolution', () => {
 
       let caught: NoOrgsError | undefined;
       try {
-        await getOrAskForProjectData({ signup: false, ci: false });
+        await getOrAskForProjectData({
+          authOnboardingPath: 'sign_in',
+          ci: false,
+        });
       } catch (err) {
         caught = err as NoOrgsError;
       }
@@ -217,7 +223,10 @@ describe('login flow — org resolution', () => {
 
       let caught: NoOrgsError | undefined;
       try {
-        await getOrAskForProjectData({ signup: false, ci: false });
+        await getOrAskForProjectData({
+          authOnboardingPath: 'sign_in',
+          ci: false,
+        });
       } catch (err) {
         caught = err as NoOrgsError;
       }
@@ -236,7 +245,10 @@ describe('login flow — org resolution', () => {
     it('auto-selects the org without prompting', async () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
 
-      await getOrAskForProjectData({ signup: false, ci: false });
+      await getOrAskForProjectData({
+        authOnboardingPath: 'sign_in',
+        ci: false,
+      });
 
       expect(mockSelect).not.toHaveBeenCalled();
     });
@@ -244,7 +256,10 @@ describe('login flow — org resolution', () => {
     it('shows the org name in the success message', async () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
 
-      await getOrAskForProjectData({ signup: false, ci: false });
+      await getOrAskForProjectData({
+        authOnboardingPath: 'sign_in',
+        ci: false,
+      });
 
       const ui = getUI();
       expect(ui.log.success).toHaveBeenCalledWith(
@@ -258,7 +273,10 @@ describe('login flow — org resolution', () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A, ORG_B]));
       mockSelect.mockResolvedValue(ORG_B);
 
-      await getOrAskForProjectData({ signup: false, ci: false });
+      await getOrAskForProjectData({
+        authOnboardingPath: 'sign_in',
+        ci: false,
+      });
 
       expect(mockSelect).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -275,7 +293,10 @@ describe('login flow — org resolution', () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A, ORG_B]));
       mockSelect.mockResolvedValue(ORG_B);
 
-      await getOrAskForProjectData({ signup: false, ci: false });
+      await getOrAskForProjectData({
+        authOnboardingPath: 'sign_in',
+        ci: false,
+      });
 
       const ui = getUI();
       expect(ui.log.success).toHaveBeenCalledWith(
@@ -288,7 +309,10 @@ describe('login flow — org resolution', () => {
     it('calls storeToken with user details after successful auth', async () => {
       mockFetchAmplitudeUser.mockResolvedValue(makeUser([ORG_A]));
 
-      await getOrAskForProjectData({ signup: false, ci: false });
+      await getOrAskForProjectData({
+        authOnboardingPath: 'sign_in',
+        ci: false,
+      });
 
       expect(mockStoreToken).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -317,7 +341,10 @@ describe('login flow — zone / region detection', () => {
   it('returns the detected cloud region in the result', async () => {
     mockDetectRegion.mockResolvedValue('eu');
 
-    const result = await getOrAskForProjectData({ signup: false, ci: false });
+    const result = await getOrAskForProjectData({
+      authOnboardingPath: 'sign_in',
+      ci: false,
+    });
 
     expect(result.cloudRegion).toBe('eu');
   });
@@ -325,7 +352,7 @@ describe('login flow — zone / region detection', () => {
   it('passes the detected region to fetchAmplitudeUser', async () => {
     mockDetectRegion.mockResolvedValue('eu');
 
-    await getOrAskForProjectData({ signup: false, ci: false });
+    await getOrAskForProjectData({ authOnboardingPath: 'sign_in', ci: false });
 
     expect(mockFetchAmplitudeUser).toHaveBeenCalledWith(
       AUTH_RESULT.idToken,
@@ -336,7 +363,10 @@ describe('login flow — zone / region detection', () => {
   it('falls back to "us" when region detection throws', async () => {
     mockDetectRegion.mockRejectedValue(new Error('network error'));
 
-    const result = await getOrAskForProjectData({ signup: false, ci: false });
+    const result = await getOrAskForProjectData({
+      authOnboardingPath: 'sign_in',
+      ci: false,
+    });
 
     expect(result.cloudRegion).toBe('us');
   });
@@ -344,7 +374,10 @@ describe('login flow — zone / region detection', () => {
   it('uses "us" region by default when detection succeeds with us', async () => {
     mockDetectRegion.mockResolvedValue('us');
 
-    const result = await getOrAskForProjectData({ signup: false, ci: false });
+    const result = await getOrAskForProjectData({
+      authOnboardingPath: 'sign_in',
+      ci: false,
+    });
 
     expect(result.cloudRegion).toBe('us');
   });
@@ -360,7 +393,10 @@ describe('login flow — fetchAmplitudeUser failure', () => {
   it('logs a warning and continues when user info fetch fails', async () => {
     mockFetchAmplitudeUser.mockRejectedValue(new Error('API unavailable'));
 
-    const result = await getOrAskForProjectData({ signup: false, ci: false });
+    const result = await getOrAskForProjectData({
+      authOnboardingPath: 'sign_in',
+      ci: false,
+    });
 
     const ui = getUI();
     expect(ui.log.warn).toHaveBeenCalled();
@@ -371,7 +407,7 @@ describe('login flow — fetchAmplitudeUser failure', () => {
   it('does not call storeToken when user info fetch fails', async () => {
     mockFetchAmplitudeUser.mockRejectedValue(new Error('API unavailable'));
 
-    await getOrAskForProjectData({ signup: false, ci: false });
+    await getOrAskForProjectData({ authOnboardingPath: 'sign_in', ci: false });
 
     expect(mockStoreToken).not.toHaveBeenCalled();
   });
@@ -382,7 +418,7 @@ describe('login flow — CI mode', () => {
     const result = await getOrAskForProjectData({
       ci: true,
       apiKey: 'phx_test_key',
-      signup: false,
+      authOnboardingPath: 'sign_in',
     });
 
     expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
@@ -394,7 +430,7 @@ describe('login flow — CI mode', () => {
     const result = await getOrAskForProjectData({
       ci: true,
       apiKey: 'phx_test_key',
-      signup: false,
+      authOnboardingPath: 'sign_in',
     });
 
     expect(result.cloudRegion).toBe('us');

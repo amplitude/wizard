@@ -18,6 +18,23 @@ import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 import { resolveInstallDir } from '../utils/install-dir';
 
+/**
+ * Whether the user is signing into an existing Amplitude account or
+ * provisioning a new one during onboarding (TUI picker or non-interactive flags).
+ */
+export const AuthOnboardingPath = {
+  SignIn: 'sign_in',
+  CreateAccount: 'create_account',
+} as const;
+export type AuthOnboardingPath =
+  (typeof AuthOnboardingPath)[keyof typeof AuthOnboardingPath];
+
+export function isCreateAccountOnboarding(session: {
+  authOnboardingPath: AuthOnboardingPath;
+}): boolean {
+  return session.authOnboardingPath === AuthOnboardingPath.CreateAccount;
+}
+
 // ── Branded ID types ─────────────────────────────────────────────────────
 //
 // Why brand: prior bugs (see PR #62, "org data mapping") were caused by
@@ -116,7 +133,7 @@ export const CliArgsSchema = z.object({
   ci: z.boolean().default(false),
   agent: z.boolean().default(false),
   forceInstall: z.boolean().default(false),
-  signup: z.boolean().default(false),
+  authOnboardingPath: z.enum(['sign_in', 'create_account']).default('sign_in'),
   localMcp: z.boolean().default(false),
   menu: z.boolean().default(false),
   benchmark: z.boolean().default(false),
@@ -345,10 +362,10 @@ export interface WizardSession {
   ci: boolean;
   agent: boolean;
   /**
-   * User is creating a new Amplitude account (`--signup` / TUI), including
-   * pre-provisioning steps — not "account creation finished."
+   * Sign in to an existing Amplitude account vs create a new one during
+   * onboarding (includes email capture + ToS on the create-account path).
    */
-  accountCreationFlow: boolean;
+  authOnboardingPath: AuthOnboardingPath;
   signupEmail: string | null;
   signupFullName: string | null;
   localMcp: boolean;
@@ -731,7 +748,7 @@ export interface WizardSession {
   dashboardFallbackPhase: 'in_progress' | 'completed' | null;
 
   /**
-   * Browser magic-link URL from `--signup` provisioning (`dashboard_url` on
+   * Browser magic-link URL from direct account provisioning (`dashboard_url` on
    * the agentic signup API). Never log or NDJSON (query may contain secrets).
    */
   signupMagicLinkUrl: string | null;
@@ -747,7 +764,7 @@ export interface WizardSession {
   _restoredFromCheckpoint: boolean;
 
   /**
-   * Terms of Service acceptance state for --signup flow.
+   * Terms of Service acceptance state for the create-account onboarding path.
    * null = not yet shown/needed (default)
    * false = shown but not yet accepted
    * true = accepted by user
@@ -755,7 +772,7 @@ export interface WizardSession {
   tosAccepted: boolean | null;
 
   /**
-   * True once the email capture step is complete in the --signup flow.
+   * True once the email capture step is complete on the create-account path.
    * Email is required before showing ToS.
    */
   emailCaptureComplete: boolean;
@@ -867,6 +884,30 @@ export function isRunning(session: WizardSession): session is RunningSession {
   );
 }
 
+function resolveAuthOnboardingPathFromArgs(args: {
+  authOnboardingPath?: AuthOnboardingPath;
+  /** yargs camelCase for `--auth-onboarding <choice>`. */
+  authOnboarding?: 'sign-in' | 'create-account';
+  /** @deprecated Hidden env/compat — prefer `authOnboardingPath`. */
+  signup?: boolean;
+  /** @deprecated Prefer `authOnboardingPath`. */
+  accountCreationFlow?: boolean;
+}): AuthOnboardingPath {
+  if (args.authOnboardingPath !== undefined) {
+    return args.authOnboardingPath;
+  }
+  if (args.authOnboarding === 'create-account') {
+    return AuthOnboardingPath.CreateAccount;
+  }
+  if (args.authOnboarding === 'sign-in') {
+    return AuthOnboardingPath.SignIn;
+  }
+  if (args.accountCreationFlow === true || args.signup === true) {
+    return AuthOnboardingPath.CreateAccount;
+  }
+  return AuthOnboardingPath.SignIn;
+}
+
 /**
  * Build a WizardSession from CLI args, pre-populating whatever is known.
  */
@@ -876,11 +917,12 @@ export function buildSession(args: {
   forceInstall?: boolean;
   installDir?: string;
   ci?: boolean;
-  /**
-   * @deprecated Prefer `accountCreationFlow`. Both merge into the internal
-   * CLI parse field before validation.
-   */
+  authOnboardingPath?: AuthOnboardingPath;
+  /** From `--auth-onboarding` (yargs camelCase: `authOnboarding`). */
+  authOnboarding?: 'sign-in' | 'create-account';
+  /** @deprecated Hidden env/compat — maps to create-account. */
   signup?: boolean;
+  /** @deprecated Prefer `authOnboardingPath`. */
   accountCreationFlow?: boolean;
   localMcp?: boolean;
   apiKey?: string;
@@ -898,9 +940,10 @@ export function buildSession(args: {
   /**
    * From --accept-tos CLI flag. Explicit consent to the Amplitude Terms of
    * Service. Required (alongside --email / --full-name / --region) when
-   * --signup is used in --ci or --agent modes; in TUI mode the ToSScreen
-   * still owns the consent UI, so this flag pre-accepts and skips that
-   * screen. Pre-populates `session.tosAccepted = true` when passed.
+   * `--auth-onboarding create-account` is used in --ci or --agent modes; in
+   * TUI mode the ToSScreen still owns the consent UI, so this flag
+   * pre-accepts and skips that screen. Pre-populates `session.tosAccepted =
+   * true` when passed.
    */
   acceptTos?: boolean;
   /**
@@ -911,11 +954,11 @@ export function buildSession(args: {
    */
   region?: AmplitudeZone;
 }): WizardSession {
-  const mergedSignupCliFlag = args.accountCreationFlow ?? args.signup ?? false;
+  const resolvedAuthPath = resolveAuthOnboardingPathFromArgs(args);
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
   const parsed = CliArgsSchema.safeParse({
     ...args,
-    signup: mergedSignupCliFlag,
+    authOnboardingPath: resolvedAuthPath,
   });
   if (!parsed.success) {
     console.warn(
@@ -935,9 +978,9 @@ export function buildSession(args: {
     installDir: resolveInstallDir(validated.installDir),
     ci: validated.ci ?? false,
     agent: false,
-    accountCreationFlow: parsed.success
-      ? parsed.data.signup ?? false
-      : Boolean(args.accountCreationFlow ?? args.signup),
+    authOnboardingPath: parsed.success
+      ? parsed.data.authOnboardingPath
+      : resolveAuthOnboardingPathFromArgs(args),
     // On parse failure we intentionally reject raw args for the signup
     // fields — otherwise a malformed email would skip zod's .email() check
     // via the fallback and reach the signup endpoint. Null here means the

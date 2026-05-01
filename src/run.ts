@@ -1,4 +1,9 @@
-import { type WizardSession, buildSession } from './lib/wizard-session';
+import {
+  AuthOnboardingPath,
+  type WizardSession,
+  buildSession,
+  isCreateAccountOnboarding,
+} from './lib/wizard-session';
 
 import { Integration, DETECTION_TIMEOUT_MS } from './lib/constants';
 import { readEnvironment } from './utils/environment';
@@ -26,6 +31,7 @@ type Args = {
   installDir?: string;
   default?: boolean;
   signup?: boolean;
+  authOnboarding?: 'sign-in' | 'create-account';
   signupEmail?: string;
   signupFullName?: string;
   localMcp?: boolean;
@@ -74,7 +80,8 @@ export async function runWizard(
       forceInstall: finalArgs.forceInstall,
       installDir: resolveInstallDir(finalArgs.installDir),
       ci: finalArgs.ci,
-      accountCreationFlow: finalArgs.signup,
+      authOnboarding: finalArgs.authOnboarding,
+      signup: finalArgs.signup,
       signupEmail: finalArgs.signupEmail,
       signupFullName: finalArgs.signupFullName,
       localMcp: finalArgs.localMcp,
@@ -101,7 +108,7 @@ export async function runWizard(
   analytics.wizardCapture('session started', {
     integration,
     ci: session.ci ?? false,
-    'account creation flow': session.accountCreationFlow ?? false,
+    'account creation flow': isCreateAccountOnboarding(session),
   });
 
   // Non-interactive modes (CI / agent) auto-enable every discovered
@@ -130,7 +137,7 @@ export async function runWizard(
         debug: session.debug,
         forceInstall: session.forceInstall,
         default: false,
-        accountCreationFlow: session.accountCreationFlow,
+        authOnboardingPath: session.authOnboardingPath,
         localMcp: session.localMcp,
         ci: session.ci,
         menu: session.menu,
@@ -292,7 +299,7 @@ export async function detectAllFrameworks(
                 debug: false,
                 forceInstall: false,
                 default: false,
-                accountCreationFlow: false,
+                authOnboardingPath: AuthOnboardingPath.SignIn,
                 localMcp: false,
                 ci: false,
                 menu: false,

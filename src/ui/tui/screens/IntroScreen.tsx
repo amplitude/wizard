@@ -18,6 +18,7 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
+import { AuthOnboardingPath } from '../../../lib/wizard-session.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { analyzeWorkspace } from '../../../lib/workspace-analysis.js';
 import { ampliConfigExists } from '../../../lib/ampli-config.js';
@@ -385,6 +386,34 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
             }}
           />
         )}
+
+      {/* Account path — explicit choice before Continue (non-interactive
+          flows use `--auth-onboarding` instead). */}
+      {showContinue && !changingDirectory && (
+        <Box marginTop={compact ? 0 : 1}>
+          <PickerMenu
+            message="How do you want to get started with Amplitude?"
+            options={[
+              {
+                label: 'Sign in with my existing account',
+                value: AuthOnboardingPath.SignIn,
+              },
+              {
+                label: 'Create a new Amplitude account',
+                value: AuthOnboardingPath.CreateAccount,
+              },
+            ]}
+            onSelect={(value) => {
+              const choice = Array.isArray(value) ? value[0] : value;
+              store.setAuthOnboardingPath(choice);
+              analytics.wizardCapture('intro auth onboarding path', {
+                'auth onboarding path': choice,
+                integration: session.integration,
+              });
+            }}
+          />
+        </Box>
+      )}
 
       {/* Action picker — Continue is always first; the rest are escape
           hatches grouped together so a hurried user with the wrong

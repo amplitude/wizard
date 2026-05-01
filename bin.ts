@@ -314,10 +314,18 @@ void yargs(hideBin(process.argv))
       describe: 'use default options for all prompts',
       type: 'boolean',
     },
+    'auth-onboarding': {
+      describe:
+        'sign in to an existing Amplitude account or create a new one (non-interactive; default sign-in)',
+      choices: ['sign-in', 'create-account'] as const,
+      type: 'string',
+    },
+    // Hidden: AMPLITUDE_WIZARD_SIGNUP=1 still maps via argv for strict env mode.
     signup: {
       default: false,
-      describe: 'create a new Amplitude account during setup',
       type: 'boolean',
+      hidden: true,
+      describe: 'deprecated: use --auth-onboarding create-account',
     },
     'local-mcp': {
       default: false,
@@ -425,7 +433,8 @@ void yargs(hideBin(process.argv))
       type: 'boolean',
     },
     email: {
-      describe: 'email to use when creating a new account (requires --signup)',
+      describe:
+        'email to use when creating a new account (requires --auth-onboarding create-account)',
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;
@@ -437,7 +446,7 @@ void yargs(hideBin(process.argv))
     },
     'full-name': {
       describe:
-        'full name to use when creating a new account (requires --signup)',
+        'full name to use when creating a new account (requires --auth-onboarding create-account)',
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;
@@ -450,7 +459,7 @@ void yargs(hideBin(process.argv))
     'accept-tos': {
       default: false,
       describe:
-        'explicitly agree to Amplitude Terms of Service when using --signup in --ci or --agent (non-interactive signup)',
+        'explicitly agree to Amplitude Terms of Service when using --auth-onboarding create-account in --ci or --agent',
       type: 'boolean',
     },
     // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps

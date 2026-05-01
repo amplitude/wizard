@@ -13,6 +13,7 @@
 import { atom, map } from 'nanostores';
 import { TaskStatus, type EventPlanDecision } from '../wizard-ui.js';
 import {
+  AuthOnboardingPath,
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
@@ -672,8 +673,16 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setAuthOnboardingPath(path: WizardSession['authOnboardingPath']): void {
+    this.$session.setKey('authOnboardingPath', path);
+    analytics.wizardCapture('auth onboarding path selected', {
+      'auth onboarding path': path,
+    });
+    this.emitChange();
+  }
+
   switchToLogin(): void {
-    this.$session.setKey('accountCreationFlow', false);
+    this.$session.setKey('authOnboardingPath', AuthOnboardingPath.SignIn);
     this.$session.setKey('signupEmail', null);
     this.$session.setKey('signupFullName', null);
     analytics.wizardCapture('signup switched to login', {

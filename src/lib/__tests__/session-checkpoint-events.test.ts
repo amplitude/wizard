@@ -38,7 +38,7 @@ function makeSession(installDir: string): WizardSession {
     forceInstall: false,
     ci: false,
     agent: false,
-    signup: false,
+    authOnboardingPath: 'sign_in',
     signupEmail: null,
     signupFullName: null,
     localMcp: false,
