@@ -162,14 +162,14 @@ describe('browser-only commandment gating', () => {
     // Sample a few rules that must appear on every run regardless of
     // platform: the package-manager tool requirement, the retry budget,
     // the Read-before-Write rule, and the post-instrumentation events
-    // file write (which the wizard's post-agent dashboard step depends
-    // on). If any of these silently moves into the browser-only block,
+    // post-instrumentation report guidance (which the wizard's post-agent
+    // dashboard step depends on). If any of these silently moves into the browser-only block,
     // this test fails and the omission is caught before it ships.
     const universalSentinels = [
       'detect_package_manager',
       'Retry budget for ANY tool failure',
       'Before writing to any file',
-      '.amplitude-events.json',
+      '.amplitude/events.json',
       'amplitude-setup-report.md',
     ];
     for (const phrase of universalSentinels) {

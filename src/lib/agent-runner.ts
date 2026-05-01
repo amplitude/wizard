@@ -150,11 +150,9 @@ export function agentArtifactsLookComplete(session: WizardSession): boolean {
  * events, even if it didn't reach the dashboard creation step?
  *
  * The wizard's `confirm_event_plan` MCP tool persists the approved
- * event plan to `<installDir>/.amplitude/events.json` (canonical) and
- * mirrors it to `<installDir>/.amplitude-events.json` (legacy, kept
- * during the rollout window for older skills — see `persistEventPlan`
- * in `wizard-tools.ts`). The presence of either file with non-empty
- * content is a hard signal that:
+ * event plan to `<installDir>/.amplitude/events.json`. Legacy
+ * `<installDir>/.amplitude-events.json` is still read when present. The
+ * presence of either location with non-empty parseable content is a hard signal that:
  *
  *   - The user approved an instrumentation plan
  *   - The agent reached the post-confirmation phase
@@ -175,12 +173,8 @@ export function agentArtifactsLookComplete(session: WizardSession): boolean {
  * app.amplitude.com.
  */
 export function agentEventsInstrumented(session: WizardSession): boolean {
-  // Try canonical location first, then fall back to the legacy mirror.
-  // `persistEventPlan` writes both, but the legacy write is best-effort
-  // and is planned to be dropped — reading only the legacy path (the
-  // pre-fix behavior) means a successful canonical write with a failed
-  // legacy mirror would falsely report "not instrumented" and trigger
-  // the soft-error abort path on an already-instrumented project.
+  // Try canonical location first, then fall back to the legacy dotfile
+  // for older runs (`readLocalEventPlan` uses the same ordering by mtime).
   const candidates = [
     getEventsFile(session.installDir),
     path.join(session.installDir, '.amplitude-events.json'),
@@ -516,7 +510,7 @@ export async function runAgentWizard(
   registerCleanup(tryWriteFallback);
 
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
-  // preserve the wizard's working artifacts (`.amplitude-events.json`,
+  // preserve the wizard's working artifacts (`.amplitude/` metadata,
   // installed integration skills) so a re-run can pick up where the user
   // left off without re-confirming the event plan or re-downloading
   // skills. The gitignore (`ensureWizardArtifactsIgnored` above) keeps
