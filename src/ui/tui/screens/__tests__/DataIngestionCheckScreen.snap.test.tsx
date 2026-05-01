@@ -42,8 +42,10 @@ describe('DataIngestionCheckScreen snapshots', () => {
     expect(frame).toContain('Start your dev server, then visit it and click');
     // Restart-reminder shown in interactive mode (not agent mode)
     expect(frame).toContain('restart it so the new env values load');
-    // Exit-and-resume hint
+    // Skip verification vs exit hints
     expect(frame).toContain('[q]');
+    expect(frame).toContain('Skip verification');
+    expect(frame).toContain('[x]');
     expect(frame).toContain('Exit and resume later');
   });
 

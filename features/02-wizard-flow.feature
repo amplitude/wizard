@@ -168,7 +168,7 @@ Feature: Wizard flow
 
   Scenario: User exits DataIngestionCheck and returns later
     Given I am on the DataIngestionCheck screen
-    When I press "q" to exit
+    When I press "x" to exit
     Then I should be taken to the Outro with a cancel state
 
   Scenario: Run screen is shown before the agent starts

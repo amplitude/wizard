@@ -571,7 +571,7 @@ Then('I should be taken to the Outro with a cancel state', function () {
 });
 
 When('I press {string} to exit', function (_key: string) {
-  // Simulates the user pressing q/Esc on the DataIngestionCheck screen
+  // Simulates the user pressing x on the DataIngestionCheck screen (cancel outro)
   session.outroData = {
     kind: OutroKind.Cancel,
     message: 'Come back once your app is running and sending events.',
