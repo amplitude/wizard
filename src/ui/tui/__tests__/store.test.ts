@@ -967,6 +967,16 @@ describe('WizardStore', () => {
         AuthOnboardingPath.CreateAccount,
       );
     });
+
+    it('sets lastNavDirection to pop so back transitions animate correctly', () => {
+      const store = createStore();
+      store.session.introConcluded = true;
+      store.session.region = 'us';
+
+      store.backToWelcome();
+
+      expect(store.lastNavDirection).toBe('pop');
+    });
   });
 
   // ── Setter analytics events ────────────────────────────────────

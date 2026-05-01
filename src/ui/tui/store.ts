@@ -824,6 +824,12 @@ export class WizardStore {
     if (this.session.regionForced) {
       return;
     }
+    // Same navigation contract as rewindIntro(): Esc-back must animate as a
+    // pop — emitChange() would force 'push' and DissolveTransition slides the
+    // wrong way (Bugbot: backToWelcome transition direction).
+    if (!this._reverting) {
+      this.router._setDirection('pop');
+    }
     this.$session.setKey('introConcluded', false);
     this.$session.setKey('region', null);
 
@@ -840,7 +846,10 @@ export class WizardStore {
     }
 
     analytics.wizardCapture('back navigation', { to: 'welcome' });
-    this.emitChange();
+    this.$version.set(this.$version.get() + 1);
+    if (!this._reverting) {
+      this._detectTransition();
+    }
   }
 
   private _retryResolve: (() => void) | null = null;
