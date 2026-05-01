@@ -265,7 +265,11 @@ export function readAmpliConfig(dir: string): AmpliConfigParseResult {
   }
 
   if (merged !== undefined) {
-    if (legacyResult.ok && bindingResult.error === 'not_found') {
+    if (
+      legacyResult.ok &&
+      !bindingResult.ok &&
+      bindingResult.error === 'not_found'
+    ) {
       try {
         ensureDir(getProjectMetaDir(dir));
         atomicWriteJSON(bindingPath, merged, 0o644);
@@ -279,7 +283,9 @@ export function readAmpliConfig(dir: string): AmpliConfigParseResult {
   }
 
   if (
+    !bindingResult.ok &&
     bindingResult.error === 'not_found' &&
+    !legacyResult.ok &&
     legacyResult.error === 'not_found'
   ) {
     return { ok: false, error: 'not_found' };
