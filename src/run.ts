@@ -260,6 +260,29 @@ export async function detectAllFrameworks(
     }));
   }
 
+  try {
+    const st = await fs.stat(installDir);
+    if (!st.isDirectory()) {
+      logToFile(`[detection] installDir is not a directory: ${installDir}`);
+      return Object.values(Integration).map((integration) => ({
+        integration,
+        detected: false,
+        durationMs: 0,
+        timedOut: false,
+        error: 'installDir not a directory',
+      }));
+    }
+  } catch {
+    logToFile(`[detection] installDir stat failed: ${installDir}`);
+    return Object.values(Integration).map((integration) => ({
+      integration,
+      detected: false,
+      durationMs: 0,
+      timedOut: false,
+      error: 'installDir stat failed',
+    }));
+  }
+
   const integrations = Object.values(Integration);
 
   const promises = integrations.map(
