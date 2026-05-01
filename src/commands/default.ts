@@ -796,6 +796,18 @@ export const defaultCommand: CommandModule = {
                   auth = null;
                 }
               } else if (s.signupTokensObtained) {
+                const { getStoredToken } = await import(
+                  '../utils/ampli-settings.js'
+                );
+                const storedToken = getStoredToken(undefined, zone);
+                if (storedToken) {
+                  auth = {
+                    idToken: storedToken.idToken,
+                    accessToken: storedToken.accessToken,
+                    refreshToken: storedToken.refreshToken,
+                    zone,
+                  };
+                }
                 signupTokensObtained = true;
                 getUI().log.info(
                   'Using signup tokens obtained during email capture.',
