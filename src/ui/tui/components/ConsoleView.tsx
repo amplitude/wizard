@@ -371,16 +371,14 @@ export const ConsoleView = ({
 
   // Watch for activation keys while the input is dormant.
   //
-  // The event-plan feedback box has its own text-input handler below; if we
-  // also activated the slash console on `/` while the user is typing
-  // free-text feedback, every "/" mid-sentence would pop the command palette
-  // (e.g. "press / for help" or "use the doc/text together" would trigger
-  // it). Skip activation when the event-plan feedback prompt is the active
-  // text-entry surface so its own handler can take the keystroke verbatim.
-  const eventPlanFeedbackActive =
-    !!pendingPrompt &&
-    pendingPrompt.kind === 'event-plan' &&
-    planInputMode === 'feedback';
+  // The event-plan UI has two phases: Y/S/F options and optional free-text
+  // feedback. While EITHER is showing, do not activate the slash console on
+  // `/` or Tab — only feedback mode used to block those keys, so Tab during
+  // options mode stole focus, stranded `confirm_event_plan`, and could tear
+  // down the run with AGENT_FAILED (stdin / agent subprocess conflict).
+  // Feedback typing still uses the dedicated handler below (verbatim chars).
+  const eventPlanPromptShowing =
+    !!pendingPrompt && pendingPrompt.kind === 'event-plan';
 
   useInput(
     (char, key) => {
@@ -424,7 +422,7 @@ export const ConsoleView = ({
         activate('');
       }
     },
-    { isActive: !inputActive && !eventPlanFeedbackActive },
+    { isActive: !inputActive && !eventPlanPromptShowing },
   );
 
   const handleSubmit = (value: string) => {
@@ -723,7 +721,9 @@ export const ConsoleView = ({
             hints={effectiveHints as KeyHint[] | undefined}
             width={innerWidth}
             showAskHint={
-              store.session.credentials !== null && store.session.introConcluded
+              store.session.credentials !== null &&
+              store.session.introConcluded &&
+              !eventPlanPromptShowing
             }
           />
           <Box paddingX={Layout.paddingX}>
@@ -743,9 +743,11 @@ export const ConsoleView = ({
               <Text color={Colors.disabled}>
                 {store.session.credentials !== null &&
                 store.session.introConcluded
-                  ? visibleHistory.length > 0
-                    ? 'Press / for commands · Tab to ask · Esc to hide answer'
-                    : 'Press / for commands or Tab to ask a question'
+                  ? eventPlanPromptShowing
+                    ? 'Finish the plan above ([Y]/[S]/[F]) — / and Tab resume after.'
+                    : visibleHistory.length > 0
+                      ? 'Press / for commands · Tab to ask · Esc to hide answer'
+                      : 'Press / for commands or Tab to ask a question'
                   : 'Press / for commands'}
               </Text>
             )}
