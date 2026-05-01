@@ -16,6 +16,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -161,6 +162,27 @@ export const McpScreen = ({
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
+  /** Esc on the install confirm: router back when possible, else skip MCP. */
+  const escCancelOrRouterBack = () => {
+    if (store.canGoBack()) {
+      store.goBack();
+    } else {
+      handleSkip();
+    }
+  };
+
+  // Esc → goBack on spinner / client picker / pre-detected choice. Disabled on
+  // Ask because ConfirmationInput owns Esc there (wired to escCancelOrRouterBack
+  // so we don't double-fire with this hook).
+  const escapeBackEnabled =
+    !standalone &&
+    !isOverlay &&
+    phase !== Phase.Ask &&
+    phase !== Phase.Working &&
+    phase !== Phase.Done;
+
+  useEscapeBack(store, { enabled: escapeBackEnabled });
+
   const doInstall = async (names: string[]) => {
     setPhase(Phase.Working);
     let result: string[] = [];
@@ -301,9 +323,9 @@ export const McpScreen = ({
                         : 'Install the Amplitude MCP server to your editor?'
                     }
                     confirmLabel={isRemove ? 'Remove MCP' : 'Install MCP'}
-                    cancelLabel="No thanks"
+                    cancelLabel={store.canGoBack() ? 'Back' : 'No thanks'}
                     onConfirm={handleConfirm}
-                    onCancel={handleSkip}
+                    onCancel={escCancelOrRouterBack}
                   />
                 </Box>
               </>

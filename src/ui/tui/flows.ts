@@ -91,6 +91,9 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     {
       screen: Screen.Intro,
       isComplete: (s) => s.introConcluded,
+      revert: (store) => {
+        store.rewindIntro();
+      },
     },
     // 2. Region selection — must know US vs EU before opening OAuth URL.
     //    Skipped for returning users (zone resolvable from ampli.json or

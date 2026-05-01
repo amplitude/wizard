@@ -43,13 +43,19 @@ Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanosto
 | `screen-registry.tsx` | Maps all 24 screen/overlay names (18 `Screen` + 6 `Overlay`) to React components |
 | `screens/` | 17 screen components (Auth, Run, Outro, MCP, Slack, etc.) — `Screen.Options` resolves to `null` and has no component file |
 | `components/` | `ConsoleView`, `JourneyStepper`, `HeaderBar`, `KeyHintBar`, `AmplitudeLogo`, `BrailleSpinner` |
-| `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useStdoutDimensions` |
+| `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useEscapeBack`, `useStdoutDimensions` |
 | `utils/` | `withTimeout`, `withRetry`, `classifyError`, `diagnostics` (flow evaluation + sanitized snapshots) |
 | `styles.ts` | Design tokens and color palette |
 | `console-commands.ts` | Slash command registration and dispatch |
 | `context/` | React context providers |
 | `primitives/` | Low-level UI building blocks |
 | `services/` | TUI-specific service modules |
+
+**Esc / back-navigation (Ink):**
+
+- **`@inkjs/ui` `TextInput`** wires its own stdin handler; Esc does not surface as router back by default. Parent screens must use **`useScreenInput`** (or equivalent) if users should leave the step with Esc.
+- **`ConfirmationInput`** maps Esc to **`onCancel`**. Combining it with **`useEscapeBack`** on the same surface causes double handling unless you gate **`useEscapeBack`** to phases without the confirm UI, or implement **`onCancel`** as “**`store.canGoBack()` → `store.goBack()`**, else skip/cancel” (see **`McpScreen`** / **`SlackScreen`**).
+- Prefer **`useScreenInput`** over Ink’s raw **`useInput`** on wizard screens so input respects **`CommandModeContext`** while the slash command bar is active.
 
 ### Agent mode (`--agent`)
 
@@ -142,6 +148,19 @@ The `/diagnostics` slash command prints the full layout for the current project 
 - Config scoping validates org ID against live data to prevent cross-project leakage
 - Zone priority: CLI flag > env var > stored config (prevents env var pollution across projects)
 
+## Pull requests
+
+- Run the **`/reflect`** skill on the session and paste the numbered checklist into the PR description (or link to it). Treat that as part of the PR artifact, not optional narration. Human-oriented PR steps also live in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- After changing **`src/ui/tui/`** screens, **`flows.ts`**, **`router.ts`**, or **`store.ts`** navigation-related code, run Vitest in a stable pool before pushing (avoids fork timeouts / flakes on wide runs):
+
+  ```bash
+  pnpm exec vitest run --pool=forks --maxWorkers=1 \
+    src/ui/tui/__tests__/router.test.ts \
+    src/ui/tui/__tests__/flow-invariants.test.ts
+  ```
+
+  Add any **`src/ui/tui/screens/__tests__/`** files that cover screens you edited.
+
 ## Commit conventions
 
 This repo enforces **conventional commit** PR titles and commit messages. The type prefix must be one of: `feat`, `fix`, `docs`, `test`, `ci`, `refactor`, `perf`, `chore`, `revert`. Example: `feat: add org picker to auth flow`.
@@ -183,6 +202,9 @@ pnpm skills:refresh # pull all skills from context-hub (integration, instrumenta
 
 ## Testing
 
+- **Focused TUI runs:** when iterating on Ink screens or the router, prefer  
+  `pnpm exec vitest run --pool=forks --maxWorkers=1 <paths…>`  
+  so workers stay predictable; use full `pnpm test` before merge when practical.
 - **Unit tests:** `src/**/__tests__/` — vitest, run with `pnpm test`
 - **Router + flow tests:** `src/ui/tui/__tests__/router.test.ts` — parameterized router resolution tests. `src/ui/tui/__tests__/flow-invariants.test.ts` — fast-check property-based tests verifying flow invariants (24 tests: no backward navigation, unauthenticated users never see Run, error state skips post-success screens, etc.)
 - **BDD tests:** `features/` — Cucumber.js feature files and step definitions, run with `pnpm test:bdd`

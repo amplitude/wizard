@@ -273,6 +273,20 @@ export class WizardStore {
   }
 
   /**
+   * Return to the welcome (Intro) screen. Used by Esc on RegionSelect and by
+   * signup EmailCapture when the user backs out before entering an account.
+   * Does not clear region or framework — Continue from Intro re-resolves the
+   * same downstream gates.
+   */
+  rewindIntro(): void {
+    this.router._setDirection('pop');
+    this.$session.setKey('introConcluded', false);
+    analytics.wizardCapture('back navigation', { to: 'intro' });
+    this.$version.set(this.$version.get() + 1);
+    this._detectTransition();
+  }
+
+  /**
    * Unblocks bin.ts via the setupComplete promise, signalling that the agent
    * can start. Called by bin.ts via onEnterScreen(Screen.Run) so it fires at
    * the right point in the flow — after auth, data check, and setup questions.

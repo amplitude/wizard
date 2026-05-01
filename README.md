@@ -435,6 +435,8 @@ pnpm try          # run the wizard from source (no build needed)
 
 See [CLAUDE.md](./CLAUDE.md) for full architecture documentation.
 
+**Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md) — setup, tests, and PR workflow (including AI-assisted changes and when to attach a **`/reflect`** checklist).
+
 ### Testing
 
 ```bash

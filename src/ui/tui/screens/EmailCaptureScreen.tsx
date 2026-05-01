@@ -10,6 +10,7 @@ import { useState } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors, Icons } from '../styles.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
@@ -27,7 +28,7 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 
 const EMAIL_HINTS: readonly KeyHint[] = Object.freeze([
   { key: 'Enter', label: 'Continue' },
-  { key: 'Esc', label: 'Cancel' },
+  { key: 'Esc', label: 'Back' },
 ]);
 
 const EXISTING_USER_OPTIONS = [
@@ -50,6 +51,29 @@ export const EmailCaptureScreen = ({ store }: EmailCaptureScreenProps) => {
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [inputKey, setInputKey] = useState(0);
+
+  // TextInput from @inkjs/ui does not surface Esc — handle it here so the user
+  // can return to the name step or exit to the welcome screen.
+  useScreenInput(
+    (_input, key) => {
+      if (!key.escape || isChecking) return;
+      if (step === 'name') {
+        setStep('email');
+        setError(null);
+        setInputKey((k) => k + 1);
+        return;
+      }
+      if (step === 'existing_user') {
+        setEmail('');
+        setError(null);
+        setStep('email');
+        return;
+      }
+      analytics.wizardCapture('signup email screen back', {});
+      store.rewindIntro();
+    },
+    { isActive: !isChecking },
+  );
 
   const handleEmailSubmit = (value: string) => {
     const trimmed = value.trim();

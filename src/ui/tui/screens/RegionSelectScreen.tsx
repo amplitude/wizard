@@ -13,9 +13,9 @@
 import { Box, Text } from 'ink';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
-import { useScreenHints } from '../hooks/useScreenHints.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
 
@@ -43,7 +43,7 @@ const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
 
 export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
   useWizardStore(store);
-  useScreenHints(REGION_HINTS);
+  useEscapeBack(store, { extraHints: REGION_HINTS });
 
   const { session } = store;
 
