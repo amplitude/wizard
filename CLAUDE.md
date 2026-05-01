@@ -137,7 +137,7 @@ The `/diagnostics` slash command prints the full layout for the current project 
 
 **Security invariants:**
 - Credential files use `0o600` permissions (owner read/write only)
-- Security- and recovery-sensitive JSON uses `atomicWriteJSON()` (temp-file + rename) so a crash mid-write leaves the prior file intact. Append-only logs (`log.txt` / `log.ndjson`), directory creation, streamed or editor-facing writes, and intentional exceptions (e.g. `.env.local` handling per platform/editor constraints) are outside that contract.
+- Security- and recovery-sensitive JSON uses `atomicWriteJSON()` (temp-file + rename) so a crash mid-write leaves the prior file intact — including OAuth tokens, API key store, checkpoints, plans, agent recovery snapshots, and update-check cache. Append-only logs (`log.txt` / `log.ndjson`), directory creation, streamed or editor-facing writes, and intentional exceptions (e.g. `.env.local` handling per platform/editor constraints) are outside that contract. Concurrent wizard runs coordinate via the apply lock (separate from JSON atomic writes).
 - Checkpoint files never contain tokens, API keys, or access tokens
 - Config scoping validates org ID against live data to prevent cross-project leakage
 - Zone priority: CLI flag > env var > stored config (prevents env var pollution across projects)
