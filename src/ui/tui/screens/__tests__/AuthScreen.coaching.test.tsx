@@ -37,13 +37,28 @@ describe('AuthScreen — browser-fallback coaching', () => {
     });
     const { lastFrame } = render(<AuthScreen store={store} />);
     const frame = lastFrame() ?? '';
-    expect(frame).toContain('Waiting for authentication');
+    expect(frame).toContain('Signing you in');
     // [R] only renders once we have a loginUrl — and we do here.
     expect(frame).toContain('Retry browser');
     expect(frame).toContain('Enter API key manually');
     expect(frame).toContain('Cancel');
     // Tier-1 emphatic coaching is silent before 15s.
     expect(frame).not.toContain('Still waiting');
+  });
+
+  it('uses signup-aware copy after --signup email capture', () => {
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      signup: true,
+      emailCaptureComplete: true,
+      tosAccepted: true,
+      loginUrl: 'https://app.amplitude.com/oauth?x=y',
+      pendingOrgs: null,
+    });
+    const { lastFrame } = render(<AuthScreen store={store} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Complete sign-in in your browser');
   });
 
   it('hides [R] until a loginUrl is generated, but always offers [M] and [Esc]', () => {
@@ -60,6 +75,21 @@ describe('AuthScreen — browser-fallback coaching', () => {
     expect(frame).not.toContain('Retry browser');
     expect(frame).toContain('Enter API key manually');
     expect(frame).toContain('Cancel');
+  });
+
+  it('uses signup-aware placeholder before loginUrl exists', () => {
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      signup: true,
+      emailCaptureComplete: true,
+      tosAccepted: true,
+      loginUrl: null,
+      pendingOrgs: null,
+    });
+    const { lastFrame } = render(<AuthScreen store={store} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Opening your Amplitude sign-in page');
   });
 
   it('layers an emphatic "Still waiting…" coaching line at 15s', async () => {
