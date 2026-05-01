@@ -733,7 +733,7 @@ async function runAgentWizardBody(
   } = session.credentials;
   // The TUI's AuthScreen may have stored the id_token instead of the
   // OAuth access token (the field names were swapped historically).
-  // Always prefer the real OAuth access token from ~/.ampli.json for Hydra auth.
+  // Always prefer the real OAuth access token from the wizard session store for Hydra auth.
   let accessToken = await refreshTokenIfStale(rawAccessToken, 'pre-run');
   // Mirror the freshest token onto the session so SlackScreen / OutroScreen
   // and any other late screen that reads `session.credentials.accessToken`

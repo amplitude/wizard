@@ -1,16 +1,13 @@
 /**
- * Reads and writes OAuth tokens from/to ~/.ampli.json, the same file used by
- * the ampli CLI. This lets users who are already logged in via `ampli login`
- * skip re-authenticating in the wizard.
+ * Reads and writes OAuth tokens and wizard-scoped session data under
+ * `~/.amplitude/wizard/oauth-session.json` (canonical). Migrates from legacy
+ * `~/.ampli.json` on first read when the canonical file has no OAuth entries.
  *
- * The ampli CLI stores tokens using the `conf` package (v6) with
- * accessPropertiesByDotNotation:true, which nests keys by dot segments:
- *   "User-{userId}.OAuthAccessToken" → { "User-{userId}": { "OAuthAccessToken": "..." } }
+ * JSON shape matches the historical on-disk format (nested `User-*` entries
+ * with OAuth* keys) so tokens remain portable across wizard versions.
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
 import { z } from 'zod';
 import {
   AMPLITUDE_ZONE_SETTINGS,
@@ -20,10 +17,17 @@ import {
 import { createLogger } from '../lib/observability/logger.js';
 import { atomicWriteJSON } from './atomic-write.js';
 import { decodeJwtIssAud } from './jwt-exp.js';
+import {
+  ensureDir,
+  getCacheRoot,
+  getLegacyAmpliHomeOAuthPath,
+  getOAuthSettingsFile,
+} from './storage-paths.js';
 
 const log = createLogger('ampli-settings');
 
-export const AMPLI_CONFIG_PATH = path.join(os.homedir(), '.ampli.json');
+/** @deprecated Use {@link getOAuthSettingsFile} — kept for tests and imports. */
+export const AMPLI_CONFIG_PATH = getLegacyAmpliHomeOAuthPath();
 
 export interface StoredOAuthToken {
   accessToken: string;
@@ -44,9 +48,9 @@ export interface StoredUser {
 
 const AmpliSettingsFileSchema = z.record(z.string(), z.unknown());
 
-function readConfig(configPath = AMPLI_CONFIG_PATH): Record<string, unknown> {
+function readConfigFileDisk(pathname: string): Record<string, unknown> {
   try {
-    const raw = fs.readFileSync(configPath, 'utf-8');
+    const raw = fs.readFileSync(pathname, 'utf-8');
     const result = AmpliSettingsFileSchema.safeParse(JSON.parse(raw));
     return result.success ? result.data : {};
   } catch {
@@ -54,12 +58,71 @@ function readConfig(configPath = AMPLI_CONFIG_PATH): Record<string, unknown> {
   }
 }
 
+function oauthEntriesPresent(config: Record<string, unknown>): boolean {
+  return Object.keys(config).some((k) => isUserKey(k));
+}
+
+/**
+ * When `explicitPath` is set, only that file is read (tests / special cases).
+ * Otherwise merge canonical + legacy: prefer canonical when it already holds
+ * OAuth user keys; otherwise load legacy, migrate forward best-effort.
+ */
+function readConfig(explicitPath?: string): Record<string, unknown> {
+  if (explicitPath) {
+    return readConfigFileDisk(explicitPath);
+  }
+  const primaryPath = getOAuthSettingsFile();
+  const legacyPath = getLegacyAmpliHomeOAuthPath();
+  const primary = readConfigFileDisk(primaryPath);
+  const legacy = readConfigFileDisk(legacyPath);
+
+  if (oauthEntriesPresent(primary)) {
+    return primary;
+  }
+  // Only migrate from legacy when the primary file doesn't exist on disk.
+  // If primary exists (even as `{}`), it was written intentionally (e.g. by
+  // clearStoredCredentials) and legacy data must not be resurrected.
+  const primaryFileExists = fs.existsSync(primaryPath);
+  if (!primaryFileExists && oauthEntriesPresent(legacy)) {
+    const merged: Record<string, unknown> = { ...legacy, ...primary };
+    try {
+      ensureDir(getCacheRoot());
+      atomicWriteJSON(primaryPath, merged, 0o600);
+    } catch (err) {
+      log.debug('readConfig: could not migrate legacy OAuth file forward', {
+        'error message': err instanceof Error ? err.message : String(err),
+      });
+    }
+    return merged;
+  }
+  return Object.keys(primary).length > 0 ? primary : legacy;
+}
+
 function writeConfig(
   data: Record<string, unknown>,
-  configPath = AMPLI_CONFIG_PATH,
+  explicitPath?: string,
 ): void {
-  // Atomic write: temp file + rename prevents corruption if process dies mid-write
-  atomicWriteJSON(configPath, data, 0o600);
+  if (explicitPath) {
+    atomicWriteJSON(explicitPath, data, 0o600);
+    return;
+  }
+  const primaryPath = getOAuthSettingsFile();
+  const legacyPath = getLegacyAmpliHomeOAuthPath();
+  try {
+    ensureDir(getCacheRoot());
+    atomicWriteJSON(primaryPath, data, 0o600);
+  } catch (err) {
+    log.warn('writeConfig: failed to write canonical OAuth session file', {
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+  }
+  try {
+    atomicWriteJSON(legacyPath, data, 0o600);
+  } catch (err) {
+    log.debug('writeConfig: legacy OAuth mirror write failed (non-fatal)', {
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 function userKey(userId: string, zone: AmplitudeZone): string {
@@ -74,7 +137,7 @@ function isUserKey(key: string): boolean {
 }
 
 /**
- * True iff a given ~/.ampli.json key belongs to the requested zone.
+ * True iff a given session-store key belongs to the requested zone.
  *
  * Key shapes:
  *   - US (the default zone): `User-<userId>`
@@ -242,7 +305,7 @@ export function getStoredToken(
   return undefined;
 }
 
-/** Persists an OAuth token to ~/.ampli.json in the same format as the ampli CLI. */
+/** Persists OAuth tokens to the wizard session store (and legacy mirror). */
 export function storeToken(
   user: StoredUser,
   token: StoredOAuthToken,
@@ -301,9 +364,8 @@ export function clearStoredCredentials(configPath?: string): void {
 
 // ── Wizard-scoped settings namespace ──────────────────────────────────
 //
-// `~/.ampli.json` is shared with the ampli CLI; reserved keys at the top
-// level are owned by ampli (User-*, etc.). Wizard-only settings live under
-// the `wizard` key so we never collide with ampli's schema.
+// Reserved top-level keys use the `User-*` prefix for OAuth entries.
+// Wizard-only settings live under the `wizard` key.
 
 const WizardNamespaceSchema = z
   .object({
@@ -382,7 +444,7 @@ export function storeLastUsedSelection(
 }
 
 /**
- * Updates the stored user's zone in ~/.ampli.json, migrating the entry to the
+ * Updates the stored user's zone in the session store, migrating the entry to the
  * new zone key. Returns the updated user, or undefined if no user is stored.
  */
 export function updateStoredUserZone(

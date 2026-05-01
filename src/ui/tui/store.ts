@@ -581,13 +581,13 @@ export class WizardStore {
     this.$session.setKey('regionForced', false);
     analytics.wizardCapture('region selected', { region });
 
-    // Persist the chosen zone to project-level ampli.json so the next
-    // wizard run uses the right zone — even if the user exits before
-    // completing SUSI. When the user is switching regions via /region the
-    // prior OrgId/ProjectId are invalid in the new zone; drop them so
+    // Persist the chosen zone to project binding files (`project-binding.json`
+    // and mirrored `ampli.json`) so the next wizard run uses the right zone —
+    // even if the user exits before completing SUSI. When switching regions via
+    // /region, prior OrgId/ProjectId are invalid in the new zone; drop them so
     // resolveCredentials doesn't silently steer back to a stale project.
     //
-    // Only updates an existing ampli.json; never creates one. Fresh
+    // Only updates when a binding already exists; never creates one. Fresh
     // projects have their zone persisted later by setOrgAndProject()
     // once the full SUSI flow completes.
     const session = this.$session.get();
@@ -598,7 +598,7 @@ export class WizardStore {
           '../../lib/ampli-config.js'
         );
         const prior = readAmpliConfig(session.installDir);
-        if (!prior.ok) return; // no existing ampli.json — nothing to update
+        if (!prior.ok) return; // no existing binding — nothing to update
         const next = { ...prior.config, Zone: typedZone };
         if (session.selectedOrgId && session.selectedProjectId) {
           next.OrgId = session.selectedOrgId;
@@ -608,20 +608,22 @@ export class WizardStore {
           delete next.OrgId;
           delete next.ProjectId;
         }
-        writeAmpliConfig(session.installDir, next);
+        const persisted = writeAmpliConfig(session.installDir, next);
+        if (!persisted) {
+          this.setCommandFeedback(
+            "Region updated for this session, but couldn't persist to project binding files. Re-pick if it sticks to the old zone next run.",
+            6000,
+          );
+        }
       } catch (err) {
-        // Non-fatal: ampli.json persistence is best-effort. On read-only
+        // Non-fatal: project persistence is best-effort. On read-only
         // filesystems or permission errors we'd leave the old Zone in place
         // and users can still complete the current session.
         analytics.captureException(
           err instanceof Error ? err : new Error(String(err)),
         );
-        // Surface a non-blocking notice in the command bar so the user
-        // knows the region change wasn't persisted to ampli.json — the
-        // next wizard run won't auto-pick this zone. The session itself
-        // is fine; only on-disk persistence failed.
         this.setCommandFeedback(
-          "Region updated for this session, but couldn't persist to ampli.json. Re-pick if it sticks to the old zone next run.",
+          "Region updated for this session, but couldn't persist project binding files. Re-pick if it sticks to the old zone next run.",
           6000,
         );
       }
@@ -703,9 +705,9 @@ export class WizardStore {
    * in against the other data center: OAuth tokens are zone-scoped, and every
    * org/workspace/environment the user has picked lives in the old region.
    * Clear all of that so the Auth screen reappears once a new region is
-   * picked, forcing a fresh login. Stored tokens in ~/.ampli.json are kept
-   * per-zone and will be silently reused if the user already signed into the
-   * target region previously.
+   * picked, forcing a fresh login. OAuth tokens in the wizard session store
+   * are kept per-zone and will be silently reused if the user already signed
+   * into the target region previously.
    */
   setRegionForced(): void {
     this.$session.setKey('regionForced', true);

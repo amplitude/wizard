@@ -11,8 +11,10 @@ import {
   readAmpliConfig,
   writeAmpliConfig,
   clearAuthFieldsInAmpliConfig,
+  ampliConfigPath,
   type AmpliConfig,
 } from '../ampli-config.js';
+import { getProjectBindingFile } from '../../utils/storage-paths.js';
 
 // ── parseAmpliConfig ──────────────────────────────────────────────────────────
 
@@ -274,15 +276,61 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
     expect(parsed.config.ProjectId).toBe('legacy-ws-id');
     expect(parsed.config.WorkspaceId).toBeUndefined();
 
-    // Write back: the file is now in the new format, no WorkspaceId.
+    // Write back: both canonical binding and legacy mirror hold the new shape.
     writeAmpliConfig(tmpDir, parsed.config);
-    const rawOnDisk = fs.readFileSync(legacyPath, 'utf-8');
-    const json = JSON.parse(rawOnDisk) as Record<string, unknown>;
-    expect(json.ProjectId).toBe('legacy-ws-id');
-    expect(json.WorkspaceId).toBeUndefined();
-    expect(json.OrgId).toBe('36958');
-    expect(json.SourceId).toBe('src-1');
-    expect(json.Zone).toBe('us');
+    const bindingPath = getProjectBindingFile(tmpDir);
+    const legacyResolved = ampliConfigPath(tmpDir);
+    for (const p of [bindingPath, legacyResolved]) {
+      const rawOnDisk = fs.readFileSync(p, 'utf-8');
+      const json = JSON.parse(rawOnDisk) as Record<string, unknown>;
+      expect(json.ProjectId).toBe('legacy-ws-id');
+      expect(json.WorkspaceId).toBeUndefined();
+      expect(json.OrgId).toBe('36958');
+      expect(json.SourceId).toBe('src-1');
+      expect(json.Zone).toBe('us');
+    }
+  });
+
+  it('reads legacy ampli.json alone and creates project-binding.json on read', () => {
+    const legacyPath = path.join(tmpDir, 'ampli.json');
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        OrgId: 'o1',
+        ProjectId: 'p1',
+        SourceId: 's1',
+      }),
+      'utf-8',
+    );
+    const bindingPath = getProjectBindingFile(tmpDir);
+    expect(fs.existsSync(bindingPath)).toBe(false);
+
+    const parsed = readAmpliConfig(tmpDir);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.config.OrgId).toBe('o1');
+
+    expect(fs.existsSync(bindingPath)).toBe(true);
+  });
+
+  it('merges binding over legacy when both exist', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'ampli.json'),
+      JSON.stringify({ OrgId: 'from-legacy', ProjectId: 'p', SourceId: 's' }),
+      'utf-8',
+    );
+    fs.mkdirSync(path.join(tmpDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      getProjectBindingFile(tmpDir),
+      JSON.stringify({ OrgId: 'from-binding' }),
+      'utf-8',
+    );
+    const parsed = readAmpliConfig(tmpDir);
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) return;
+    expect(parsed.config.OrgId).toBe('from-binding');
+    expect(parsed.config.ProjectId).toBe('p');
+    expect(parsed.config.SourceId).toBe('s');
   });
 });
 
@@ -316,18 +364,22 @@ describe('clearAuthFieldsInAmpliConfig', () => {
 
     clearAuthFieldsInAmpliConfig(tmpDir);
 
-    const rawOnDisk = fs.readFileSync(path.join(tmpDir, 'ampli.json'), 'utf-8');
-    const json = JSON.parse(rawOnDisk) as Record<string, unknown>;
-    expect(json.OrgId).toBeUndefined();
-    expect(json.ProjectId).toBeUndefined();
-    expect(json.WorkspaceId).toBeUndefined();
-    expect(json.Zone).toBeUndefined();
-    // Tracking-plan fields are preserved.
-    expect(json.SourceId).toBe('src-1');
-    expect(json.Branch).toBe('main');
+    for (const p of [
+      getProjectBindingFile(tmpDir),
+      path.join(tmpDir, 'ampli.json'),
+    ]) {
+      const rawOnDisk = fs.readFileSync(p, 'utf-8');
+      const json = JSON.parse(rawOnDisk) as Record<string, unknown>;
+      expect(json.OrgId).toBeUndefined();
+      expect(json.ProjectId).toBeUndefined();
+      expect(json.WorkspaceId).toBeUndefined();
+      expect(json.Zone).toBeUndefined();
+      expect(json.SourceId).toBe('src-1');
+      expect(json.Branch).toBe('main');
+    }
   });
 
-  it('is a no-op when ampli.json is missing', () => {
+  it('is a no-op when neither binding nor ampli.json exists', () => {
     expect(() => clearAuthFieldsInAmpliConfig(tmpDir)).not.toThrow();
     expect(fs.existsSync(path.join(tmpDir, 'ampli.json'))).toBe(false);
   });

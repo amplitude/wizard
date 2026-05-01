@@ -486,18 +486,19 @@ export const PREVIOUS_SETUP_REPORT_FILENAME =
  *
  * The list is broader than what `cleanupWizardArtifacts` removes on exit:
  * several entries are kept on disk on purpose (the user-facing setup report,
- * the canonical `.amplitude/` metadata dir, optional legacy dotfiles from
- * older runs) but should still never end up in source control.
+ * canonical `.amplitude/` metadata, optional legacy dotfiles from older runs)
+ * but selected paths should still never be committed.
  *
  * Notes on each entry:
- *   - `.amplitude/` — per-project metadata dir holding `events.json` (the
- *     approved event plan, kept across runs for re-instrumentation) and
- *     `dashboard.json` (the URL of the dashboard the agent created). Useful
- *     to keep on disk but never belongs in source control.
+ *   - `.amplitude/dashboard.json` — dashboard URL; often treated as
+ *     machine-local. Other `.amplitude/*` files (`events.json`,
+ *     `project-binding.json`) are intentionally not gitignored here so teams
+ *     can commit metadata when they want.
  *   - `.amplitude-events.json` / `.amplitude-dashboard.json` — legacy paths
- *     from older wizard or skill versions. The wizard writes only under
- *     `.amplitude/` now but still reads these when present; keep them
- *     gitignored so stray copies never get committed.
+ *     from older wizard or skill versions. The wizard writes the canonical
+ *     plan under `.amplitude/events.json` (see `persistEventPlan`) but still
+ *     reads these when present; keep them gitignored so stray copies never get
+ *     committed.
  *   - `amplitude-setup-report.previous.md` — wizard-managed archive of the
  *     prior run's setup report. The CURRENT report
  *     (`amplitude-setup-report.md`) is intentionally NOT gitignored —
@@ -511,7 +512,7 @@ export const PREVIOUS_SETUP_REPORT_FILENAME =
  *     diff and surprise users who run `git add .` after the wizard.
  */
 export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
-  '.amplitude/',
+  '.amplitude/dashboard.json',
   '.amplitude-events.json',
   '.amplitude-dashboard.json',
   // Note: amplitude-setup-report.md (the CURRENT report) is intentionally
@@ -678,11 +679,12 @@ export function restoreSetupReportIfMissing(installDir: string): void {
  *
  * Notes on what's intentionally PRESERVED on every exit (success, cancel,
  * error):
- *   - `<installDir>/.amplitude/events.json` and `dashboard.json` —
- *     the canonical project metadata. `events.json` is the authoritative
- *     record of the user's confirmed event plan and is reused across
- *     runs for re-instrumentation. Both are gitignored via the
- *     `.amplitude/` pattern so they can't pollute commits.
+ *   - `<installDir>/.amplitude/events.json`, `project-binding.json`, and
+ *     `dashboard.json` — canonical project metadata. `events.json` is the
+ *     authoritative record of the user's confirmed event plan and is reused
+ *     across runs for re-instrumentation. `dashboard.json` is gitignored via
+ *     `.amplitude/dashboard.json` so machine-local URLs do not pollute commits;
+ *     other `.amplitude/*` files may be committed when teams want.
  *   - Legacy `<installDir>/.amplitude-events.json` and
  *     `.amplitude-dashboard.json` when they already exist — the wizard no
  *     longer writes these paths but does not delete them; readers prefer
