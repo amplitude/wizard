@@ -113,17 +113,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     };
   }, [session.userEmail, session.installDir]);
 
-  /** Second line of WelcomeBackPanel — used to avoid duplicating Region in TargetSummary. */
-  const welcomeBackProjectLine = useMemo(() => {
-    if (!welcomeBack) return null;
-    const projectName = session.selectedProjectName;
-    const region = session.region;
-    if (projectName) {
-      return region ? `${projectName} · ${region.toUpperCase()}` : projectName;
-    }
-    return region ? region.toUpperCase() : null;
-  }, [welcomeBack, session.selectedProjectName, session.region]);
-
   const config = session.frameworkConfig;
   const frameworkLabel =
     session.detectedFrameworkLabel ?? config?.metadata.name;
@@ -332,14 +321,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               : ''
           }
           region={session.region}
-          hideRegionRow={
-            Boolean(
-              welcomeBack &&
-                !compact &&
-                welcomeBackProjectLine &&
-                session.region,
-            )
-          }
+          hideRegionRow={Boolean(welcomeBack && !compact && session.region)}
           detecting={detecting}
         />
       )}
@@ -418,8 +400,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                   ? 'Signed in — continue or new org'
                   : `You're signed in as ${session.userEmail}. Continue to workspace setup, or create a new Amplitude organization.`
                 : narrow
-                  ? 'Sign in or create account'
-                  : 'Sign in to an existing Amplitude account, or create a new one'
+                ? 'Sign in or create account'
+                : 'Sign in to an existing Amplitude account, or create a new one'
             }
             options={[
               {
@@ -428,8 +410,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     ? 'Continue'
                     : 'Continue — workspace setup'
                   : narrow
-                    ? 'Continue — sign in'
-                    : 'Continue — sign in to Amplitude',
+                  ? 'Continue — sign in'
+                  : 'Continue — sign in to Amplitude',
                 value: 'continue_signin',
                 ...(!narrow
                   ? {
@@ -445,8 +427,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     ? 'New organization'
                     : 'Continue — create new organization'
                   : narrow
-                    ? 'Continue — new account'
-                    : 'Continue — create a new account',
+                  ? 'Continue — new account'
+                  : 'Continue — create a new account',
                 value: 'continue_create',
                 ...(!narrow
                   ? {
@@ -490,7 +472,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 'is monorepo': workspace.isMonorepo,
               };
 
-              if (choice === 'continue_signin' || choice === 'continue_create') {
+              if (
+                choice === 'continue_signin' ||
+                choice === 'continue_create'
+              ) {
                 const path =
                   choice === 'continue_create'
                     ? AuthOnboardingPath.CreateAccount
