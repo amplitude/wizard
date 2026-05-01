@@ -78,7 +78,7 @@ export type DirectSignupResult =
       dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; code?: string };
 
 /**
  * Attempts to create an Amplitude account and obtain tokens directly via the
@@ -126,7 +126,11 @@ export async function performDirectSignup(
 
   const parsedError = ErrorSchema.safeParse(response.data);
   if (parsedError.success) {
-    return { kind: 'error', message: parsedError.data.error.message };
+    return {
+      kind: 'error',
+      message: parsedError.data.error.message,
+      code: parsedError.data.error.code,
+    };
   }
 
   const parsedCode = OAuthProvisioningSchema.safeParse(response.data);

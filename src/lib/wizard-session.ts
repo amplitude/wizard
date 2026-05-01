@@ -757,6 +757,12 @@ export interface WizardSession {
   emailCaptureComplete: boolean;
 
   /**
+   * True if signup tokens were already obtained during EmailCaptureScreen
+   * (to skip duplicate signup attempt in bin.ts)
+   */
+  signupTokensObtained: boolean;
+
+  /**
    * Create-project flow state.
    *
    * `pending` = the user has chosen "Create new project…" from the Auth
@@ -1010,6 +1016,7 @@ export function buildSession(args: {
     // and skips. Email capture is independently flagged below.
     tosAccepted: validated.acceptTos === true ? true : null,
     emailCaptureComplete: false,
+    signupTokensObtained: false,
 
     createProject: {
       pending: false,

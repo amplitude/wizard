@@ -649,6 +649,11 @@ export class WizardStore {
     this.emitChange();
   }
 
+  markSignupTokensObtained(): void {
+    this.$session.setKey('signupTokensObtained', true);
+    this.emitChange();
+  }
+
   acceptTermsOfService(): void {
     this.$session.setKey('tosAccepted', true);
     analytics.wizardCapture('terms of service accepted');
@@ -664,6 +669,16 @@ export class WizardStore {
   resetToS(): void {
     this.$session.setKey('tosAccepted', null);
     analytics.wizardCapture('back navigation', { to: 'tos' });
+    this.emitChange();
+  }
+
+  switchToLogin(): void {
+    this.$session.setKey('signup', false);
+    this.$session.setKey('signupEmail', null);
+    this.$session.setKey('signupFullName', null);
+    analytics.wizardCapture('signup switched to login', {
+      reason: 'existing user',
+    });
     this.emitChange();
   }
 

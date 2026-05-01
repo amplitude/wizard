@@ -760,7 +760,12 @@ export const defaultCommand: CommandModule = {
                 '../utils/signup-or-auth.js'
               );
               const s = tui.store.session;
-              if (s.signup && s.signupEmail && s.signupFullName) {
+              if (
+                s.signup &&
+                s.signupEmail &&
+                s.signupFullName &&
+                !s.signupTokensObtained
+              ) {
                 const { performSignupOrAuth } = await import(
                   '../utils/signup-or-auth.js'
                 );
@@ -790,6 +795,11 @@ export const defaultCommand: CommandModule = {
                   );
                   auth = null;
                 }
+              } else if (s.signupTokensObtained) {
+                signupTokensObtained = true;
+                getUI().log.info(
+                  'Using signup tokens obtained during email capture.',
+                );
               }
 
               if (auth === null) {

@@ -21,6 +21,7 @@ export default tseslint.config(
       'coverage/**',
       'e2e-tests/test-applications/**',
       '.claude/worktrees/**',
+      '.claude/knowledge/**',
     ],
   },
 
