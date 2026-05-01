@@ -1,5 +1,6 @@
 import type { WizardSession } from '../lib/wizard-session.js';
 import { EMAIL_REGEX } from '../lib/constants.js';
+import { tryResolveZone } from '../lib/zone-resolution.js';
 
 export async function promptForMissingSignupFields(
   session: WizardSession,
@@ -8,7 +9,7 @@ export async function promptForMissingSignupFields(
 
   const { select, input } = await import('@inquirer/prompts');
 
-  if (session.region === null) {
+  if (tryResolveZone(session) === null) {
     const region = await select({
       message: 'Which Amplitude data region should your new account live in?',
       choices: [

@@ -13,7 +13,7 @@ vi.mock('../../../../utils/signup-or-auth.js', () => ({
 
 function makeStore(fullName: string | null = null) {
   return makeScreenTestStore({
-    signup: true,
+    accountCreationFlow: true,
     signupEmail: 'jane@example.com',
     signupFullName: fullName,
     region: 'us',
@@ -133,7 +133,7 @@ describe('SigningUpScreen — render states', () => {
     // Post-name-screen state: signupRequiredFields still contains 'full_name',
     // signupFullName is now set.
     const store = makeScreenTestStore({
-      signup: true,
+      accountCreationFlow: true,
       signupEmail: 'jane@example.com',
       signupFullName: 'Jane Doe',
       signupRequiredFields: ['full_name'],

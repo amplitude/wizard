@@ -22,7 +22,7 @@ vi.mock('../../../../utils/analytics.js', () => ({
 describe('SignupFullNameScreen', () => {
   it('renders the heading', () => {
     const store = makeScreenTestStore({
-      signup: true,
+      accountCreationFlow: true,
       signupRequiredFields: ['full_name'],
     });
     const { lastFrame } = render(<SignupFullNameScreen store={store} />);
@@ -31,7 +31,7 @@ describe('SignupFullNameScreen', () => {
 
   it('rejects empty input with an inline error', async () => {
     const store = makeScreenTestStore({
-      signup: true,
+      accountCreationFlow: true,
       signupRequiredFields: ['full_name'],
     });
     const { lastFrame, stdin } = render(<SignupFullNameScreen store={store} />);
@@ -45,7 +45,7 @@ describe('SignupFullNameScreen', () => {
 
   it('writes trimmed value to session on valid submit', async () => {
     const store = makeScreenTestStore({
-      signup: true,
+      accountCreationFlow: true,
       signupRequiredFields: ['full_name'],
     });
     const { stdin } = render(<SignupFullNameScreen store={store} />);

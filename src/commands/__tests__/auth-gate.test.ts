@@ -108,7 +108,7 @@ describe('isAuthTaskGateReady', () => {
         s({
           introConcluded: true,
           region: 'us',
-          signup: true,
+          accountCreationFlow: true,
           emailCaptureComplete: true,
           tosAccepted: true,
           signupAuth: {
@@ -132,7 +132,7 @@ describe('isAuthTaskGateReady', () => {
         s({
           introConcluded: true,
           region: 'us',
-          signup: true,
+          accountCreationFlow: true,
           emailCaptureComplete: true,
           tosAccepted: true,
           signupAuth: null,

@@ -357,7 +357,7 @@ describe('WizardRouter flow invariants (property-based)', () => {
             ...buildSession({}),
             introConcluded: true,
             region: 'us',
-            signup: true,
+            accountCreationFlow: true,
             signupEmail,
             signupFullName,
             signupRequiredFields,
@@ -376,7 +376,7 @@ describe('WizardRouter flow invariants (property-based)', () => {
       ...buildSession({}),
       introConcluded: true,
       region: 'us',
-      signup: true,
+      accountCreationFlow: true,
       signupEmail: 'x@y.com',
       signupFullName: 'Jane',
       signupRequiredFields: [],
@@ -387,6 +387,7 @@ describe('WizardRouter flow invariants (property-based)', () => {
         refreshToken: 'ref',
         zone: 'us',
         userInfo: null,
+        dashboardUrl: null,
       },
       signupAbandoned: false,
     };
@@ -409,7 +410,7 @@ describe('WizardRouter flow invariants (property-based)', () => {
             ...buildSession({}),
             introConcluded: true,
             region: 'us',
-            signup: true,
+            accountCreationFlow: true,
             signupEmail: 'x@y.com',
             signupFullName: 'Jane',
             signupRequiredFields: ['full_name', unknownField],
@@ -705,12 +706,12 @@ describe('WizardRouter overlay behavior', () => {
 
 describe('WizardRouter signup field-collection invariants', () => {
   /**
-   * Invariant 1 (property): signup=true with signupEmail=null never resolves
-   * to Auth, regardless of signupFullName value.
+   * Invariant 1 (property): --signup (accountCreationFlow) with signupEmail=null
+   * never resolves to Auth, regardless of signupFullName value.
    *
    * The SignupEmail screen must gate Auth: no email collected = Auth not reached.
    */
-  it('signup=true, signupEmail=null never resolves to Auth (any signupFullName)', () => {
+  it('--signup (accountCreationFlow), signupEmail=null never resolves to Auth (any signupFullName)', () => {
     fc.assert(
       fc.property(
         fc.option(fc.string({ minLength: 1 }), { nil: null }),
@@ -724,7 +725,7 @@ describe('WizardRouter signup field-collection invariants', () => {
           session.regionForced = false;
 
           // Signup mode with email still missing
-          session.signup = true;
+          session.accountCreationFlow = true;
           session.signupEmail = null;
           session.signupFullName = signupFullName;
 
@@ -743,18 +744,18 @@ describe('WizardRouter signup field-collection invariants', () => {
   });
 
   /**
-   * Invariant 2 (point check): signup=true with all three signup fields
+   * Invariant 2 (point check): --signup with all three signup fields
    * populated (region, signupFullName, signupEmail) must not resolve to
    * SignupFullName or SignupEmail — those collection screens are complete.
    */
-  it('signup=true with all signup fields collected never resolves to SignupFullName or SignupEmail', () => {
+  it('--signup (accountCreationFlow) with all signup fields collected never resolves to SignupFullName or SignupEmail', () => {
     const session = buildSession({});
     const router = new WizardRouter(Flow.Wizard);
 
     session.introConcluded = true;
     session.region = 'us';
     session.regionForced = false;
-    session.signup = true;
+    session.accountCreationFlow = true;
     session.signupFullName = 'Jane Smith';
     session.signupEmail = 'jane@example.com';
 

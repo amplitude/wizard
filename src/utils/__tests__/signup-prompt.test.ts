@@ -1,6 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { promptForMissingSignupFields } from '../signup-prompt';
 
+vi.mock('../../lib/zone-resolution.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../lib/zone-resolution.js')
+  >();
+  return {
+    ...actual,
+    /** Tier 1 only — keeps signup prompts isolated from disk (`readAmpliConfig`, `getStoredUser`). */
+    tryResolveZone: vi.fn(
+      (session: { region: 'us' | 'eu' | null }) => session.region ?? null,
+    ),
+  };
+});
+
 const mockSelect = vi.fn();
 const mockInput = vi.fn();
 
@@ -11,14 +24,14 @@ vi.mock('@inquirer/prompts', () => ({
 
 function makeSession(
   overrides: Partial<{
-    signup: boolean;
+    accountCreationFlow: boolean;
     signupEmail: string | null;
     signupFullName: string | null;
     region: 'us' | 'eu' | null;
   }> = {},
 ) {
   return {
-    signup: true,
+    accountCreationFlow: true,
     signupEmail: null,
     signupFullName: null,
     region: null,
@@ -27,7 +40,11 @@ function makeSession(
 }
 
 describe('promptForMissingSignupFields', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockSelect.mockReset();
+    mockInput.mockReset();
+  });
 
   it('prompts for all three fields when all are missing, in order region → full name → email', async () => {
     const session = makeSession();
@@ -60,8 +77,8 @@ describe('promptForMissingSignupFields', () => {
     expect(session.signupEmail).toBe('jane@example.com');
   });
 
-  it('does nothing when signup is false', async () => {
-    const session = makeSession({ signup: false });
+  it('does nothing when accountCreationFlow is false', async () => {
+    const session = makeSession({ accountCreationFlow: false });
 
     await promptForMissingSignupFields(session as never);
 

@@ -21,13 +21,13 @@ vi.mock('../../../../utils/analytics.js', () => ({
 
 describe('SignupEmailScreen', () => {
   it('renders the heading', () => {
-    const store = makeScreenTestStore({ signup: true });
+    const store = makeScreenTestStore({ accountCreationFlow: true });
     const { lastFrame } = render(<SignupEmailScreen store={store} />);
     expect(lastFrame()).toContain('Enter the email for your new account');
   });
 
   it('rejects invalid email with an inline error', async () => {
-    const store = makeScreenTestStore({ signup: true });
+    const store = makeScreenTestStore({ accountCreationFlow: true });
     const { lastFrame, stdin } = render(<SignupEmailScreen store={store} />);
     stdin.write('not-an-email');
     await new Promise((r) => setTimeout(r, 10));
@@ -38,7 +38,7 @@ describe('SignupEmailScreen', () => {
   });
 
   it('writes email to session on valid submit', async () => {
-    const store = makeScreenTestStore({ signup: true });
+    const store = makeScreenTestStore({ accountCreationFlow: true });
     const { stdin } = render(<SignupEmailScreen store={store} />);
     stdin.write('jane@example.com');
     await new Promise((r) => setTimeout(r, 10));
