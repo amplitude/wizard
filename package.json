@@ -41,7 +41,7 @@
     "@amplitude/analytics-browser": "2.36.2",
     "@amplitude/analytics-node": "1.5.51",
     "@amplitude/experiment-node-server": "1.13.4",
-    "@anthropic-ai/claude-agent-sdk": "0.2.121",
+    "@anthropic-ai/claude-agent-sdk": "0.2.126",
     "@inkjs/ui": "2.0.0",
     "@inquirer/prompts": "8.3.0",
     "@modelcontextprotocol/sdk": "1.29.0",
@@ -78,7 +78,7 @@
     "zod-to-json-schema": "3.25.1"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "0.91.1",
+    "@anthropic-ai/sdk": "0.92.0",
     "@cucumber/cucumber": "12.7.0",
     "@eslint/js": "10.0.1",
     "@types/adm-zip": "~0.5.8",
