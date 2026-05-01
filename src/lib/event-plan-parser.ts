@@ -42,7 +42,7 @@ const eventPlanSchema = z.array(
     event_description: z.string().optional(),
     eventDescription: z.string().optional(),
     eventDescriptionAndReasoning: z.string().optional(),
-    /** Wizard-proxy dashboard planner — must match Thunder enum when set. */
+    /** Wizard-proxy dashboard planner — must match App API enum when set. */
     category: z.string().optional(),
   }),
 );

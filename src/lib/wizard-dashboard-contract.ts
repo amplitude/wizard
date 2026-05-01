@@ -1,5 +1,5 @@
 /**
- * Shared contract bits for Thunder wizard-proxy `POST /dashboards`.
+ * Shared contract bits for the wizard-proxy `POST /dashboards`.
  * Keep in sync with `wizard-proxy/create-dashboard.ts` (javascript monorepo).
  */
 

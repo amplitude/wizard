@@ -5,7 +5,7 @@
  *
  * Dashboard creation previously used an MCP sub-agent loop
  * (`create_chart` + `create_dashboard`). That path is replaced by a single
- * Thunder RPC aligned with the instrumented event plan.
+ * wizard-proxy RPC aligned with the instrumented event plan.
  */
 
 import fs from 'fs';
@@ -35,7 +35,7 @@ import type { WizardSession } from '../lib/wizard-session';
 /** Legacy dashboard dotfile — read-only fallback for older runs. */
 const LEGACY_DASHBOARD_FILE = '.amplitude-dashboard.json';
 
-/** Client timeout slightly above Thunder's dashboard RPC ceiling. */
+/** Client timeout slightly above the wizard-proxy's dashboard RPC ceiling. */
 const DASHBOARD_TIMEOUT_MS = 36_000;
 
 interface EventsFile {
