@@ -80,10 +80,13 @@ export const McpScreen = ({
 
   const isRemove = mode === 'remove';
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
 
-  // Clear any pending timer on unmount
+  // Clear any pending timer on unmount and flag as unmounted so late-resolving
+  // async work (e.g. detectClients) won't schedule new timers or call markDone.
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, []);
@@ -108,6 +111,7 @@ export const McpScreen = ({
     void (async () => {
       try {
         const detected = await installer.detectClients();
+        if (unmountedRef.current) return;
         if (detected.length === 0) {
           analytics.wizardCapture('MCP No Clients Detected', { mode });
           setPhase(Phase.None);
@@ -126,6 +130,7 @@ export const McpScreen = ({
           setPhase(Phase.Ask);
         }
       } catch {
+        if (unmountedRef.current) return;
         captureWizardError(
           'MCP Client Detection',
           'Editor client detection failed',
