@@ -55,6 +55,25 @@ describe('VUE_AGENT_CONFIG.detection.detect', () => {
     expect(detected).toBe(false);
   });
 
+  it('ignores VitePress docs sites even when vue is present', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({
+        devDependencies: {
+          vue: '^3.5.0',
+          vitepress: '^1.6.0',
+          vite: '^6.0.0',
+        },
+      }),
+    );
+    fs.writeFileSync(path.join(tmpDir, 'pnpm-lock.yaml'), '');
+
+    const detected = await VUE_AGENT_CONFIG.detection.detect(
+      makeOptions(tmpDir),
+    );
+    expect(detected).toBe(false);
+  });
+
   it('falls back to .vue file sniff when package.json is missing', async () => {
     fs.mkdirSync(path.join(tmpDir, 'src'));
     fs.writeFileSync(
