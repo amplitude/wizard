@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import axios, { AxiosError } from 'axios';
 import { z } from 'zod';
 import { analytics } from '../utils/analytics.js';
@@ -471,6 +473,232 @@ export async function createAmplitudeApp(
 
     const apiError = new ApiError(
       `Unexpected error creating project: ${
+        error instanceof Error ? error.message : 'Unknown error'
+      }`,
+      undefined,
+      url,
+      'INTERNAL',
+    );
+    analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
+    throw apiError;
+  }
+}
+
+// ── Create dashboard (wizard proxy) ───────────────────────────────────────
+
+/**
+ * Error codes returned by Thunder `POST /dashboards` on the wizard proxy.
+ * Mirrors `WizardDashboardErrorCode` in `wizard-proxy/create-dashboard.ts`.
+ */
+export type CreateDashboardErrorCode =
+  | 'INVALID_REQUEST'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'QUOTA_REACHED'
+  | 'RATE_LIMITED'
+  | 'UNAVAILABLE'
+  | 'INTERNAL';
+
+const CreateWizardDashboardChartSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  type: z.string(),
+  section: z.string().optional(),
+  skipped: z.boolean().optional(),
+});
+
+const CreateWizardDashboardSuccessSchema = z.object({
+  dashboard: z.object({
+    id: z.string(),
+    url: z.string().url(),
+    name: z.string(),
+  }),
+  charts: z.array(CreateWizardDashboardChartSchema),
+});
+
+const CreateWizardDashboardErrorSchema = z.object({
+  error: z.object({
+    code: z.enum([
+      'INVALID_REQUEST',
+      'UNAUTHENTICATED',
+      'FORBIDDEN',
+      'QUOTA_REACHED',
+      'RATE_LIMITED',
+      'UNAVAILABLE',
+      'INTERNAL',
+    ]),
+    message: z.string(),
+  }),
+});
+
+export interface CreateWizardDashboardInput {
+  orgId: string;
+  appId: string;
+  product: { name: string; framework: string; sdkVersion?: string };
+  events: Array<{ name: string; description?: string }>;
+  autocaptureEnabled: boolean;
+  dryRun?: boolean;
+}
+
+/** Normalized shape persisted to `.amplitude/dashboard.json`. */
+export interface CreateWizardDashboardResult {
+  dashboardUrl: string;
+  dashboardId: string;
+  charts: Array<{ id: string; title: string; type: string }>;
+}
+
+function fallbackCreateDashboardErrorForStatus(
+  status: number,
+  url: string,
+): ApiError {
+  if (status === 400) {
+    return new ApiError(
+      'Invalid request while creating dashboard',
+      status,
+      url,
+      'INVALID_REQUEST',
+    );
+  }
+  if (status === 401) {
+    return new ApiError(
+      'Authentication failed while creating dashboard',
+      status,
+      url,
+      'UNAUTHENTICATED',
+    );
+  }
+  if (status === 403) {
+    return new ApiError(
+      "You don't have permission to create dashboards for this app.",
+      status,
+      url,
+      'FORBIDDEN',
+    );
+  }
+  if (status === 409) {
+    return new ApiError(
+      'Quota reached — cannot create dashboard for this org.',
+      status,
+      url,
+      'QUOTA_REACHED',
+    );
+  }
+  if (status === 429) {
+    return new ApiError(
+      'Rate limited while creating dashboard. Wait a moment and retry.',
+      status,
+      url,
+      'RATE_LIMITED',
+    );
+  }
+  if (status === 503) {
+    return new ApiError(
+      'Amplitude is temporarily unavailable. Retry shortly.',
+      status,
+      url,
+      'UNAVAILABLE',
+    );
+  }
+  return new ApiError(
+    `Failed to create dashboard (HTTP ${status})`,
+    status,
+    url,
+    'INTERNAL',
+  );
+}
+
+/**
+ * Create a starter dashboard via the wizard proxy (`POST /dashboards`).
+ *
+ * Uses the OAuth access token (Hydra-introspectable), same as
+ * {@link createAmplitudeApp}. Sends a fresh `Idempotency-Key` per call.
+ */
+export async function createWizardDashboard(
+  accessToken: string,
+  zone: AmplitudeZone,
+  input: CreateWizardDashboardInput,
+  options?: { signal?: AbortSignal },
+): Promise<CreateWizardDashboardResult> {
+  const base = getWizardProxyBase(zone);
+  const url = `${base}/dashboards`;
+
+  try {
+    const response = await axios.post(url, input, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        'User-Agent': WIZARD_USER_AGENT,
+        'Idempotency-Key': randomUUID(),
+      },
+      timeout: 35_000,
+      signal: options?.signal,
+    });
+
+    const parsed = CreateWizardDashboardSuccessSchema.safeParse(response.data);
+    if (!parsed.success) {
+      const apiError = new ApiError(
+        'Invalid response from create-dashboard endpoint',
+        response.status,
+        url,
+        'INTERNAL',
+      );
+      analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
+      throw apiError;
+    }
+
+    const { dashboard, charts } = parsed.data;
+    const chartRows = charts
+      .filter((c) => c.skipped !== true)
+      .map((c) => ({
+        id: c.id,
+        title: c.title,
+        type: c.type,
+      }));
+
+    return {
+      dashboardUrl: dashboard.url,
+      dashboardId: dashboard.id,
+      charts: chartRows,
+    };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      analytics.captureException(error, { endpoint: url, code: error.code });
+      throw error;
+    }
+
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status;
+      if (status) {
+        const errBody = CreateWizardDashboardErrorSchema.safeParse(
+          error.response?.data,
+        );
+        if (errBody.success) {
+          const { code, message } = errBody.data.error;
+          const apiError = new ApiError(message, status, url, code);
+          analytics.captureException(apiError, { endpoint: url, code });
+          throw apiError;
+        }
+
+        const apiError = fallbackCreateDashboardErrorForStatus(status, url);
+        analytics.captureException(apiError, {
+          endpoint: url,
+          code: apiError.code,
+        });
+        throw apiError;
+      }
+
+      const apiError = new ApiError(
+        error.message || 'Network error creating dashboard',
+        undefined,
+        url,
+        'INTERNAL',
+      );
+      analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
+      throw apiError;
+    }
+
+    const apiError = new ApiError(
+      `Unexpected error creating dashboard: ${
         error instanceof Error ? error.message : 'Unknown error'
       }`,
       undefined,

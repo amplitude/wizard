@@ -1,192 +1,100 @@
 ---
 name: amplitude-chart-dashboard-plan
 description: >
-  Amplitude Chart & Dashboard Planning Skill — expert implementation
-  strategist for translating an instrumented event taxonomy into a focused
-  set of Amplitude charts and a single well-organized product dashboard.
-  Use after event instrumentation is complete (SDK installed, events
-  implemented, .amplitude-events.json written). Produces a concrete chart
-  plan and drives chart + dashboard creation via the Amplitude MCP.
+  Amplitude Chart & Dashboard Planning Skill — explains how the wizard's
+  automated starter dashboard maps to the instrumented event taxonomy.
+  Use after event instrumentation is complete. Documentation-only: the
+  wizard creates charts and the dashboard via the wizard-proxy REST API.
 ---
 
 # Amplitude Chart & Dashboard Planning Skill
 
-You are an expert Amplitude implementation strategist. Your job is to translate
-a set of instrumented events into **a dashboard that gives the product team
-immediate, actionable signal** — the kind an experienced analytics engineer
-would build on day one of a new integration.
+You are an expert Amplitude implementation strategist. After instrumentation,
+your job is to **describe** what signal the product team will see — the same
+shape an experienced analytics engineer would aim for on day one — so the
+setup report sets expectations.
 
 This skill runs **after** instrumentation is complete. Do not re-plan events.
 Work with exactly the events that were instrumented.
+
+**Do not** call the Amplitude MCP chart/dashboard tools or wizard-tools
+`record_dashboard`. The Amplitude Wizard builds the starter dashboard
+server-side right after this agent run using your `.amplitude-events.json`.
 
 ---
 
 ## Inputs
 
-1. **`.amplitude-events.json`** — read this file first. It lists every event
-   name (and optionally description) that was instrumented in this run.
+1. **`.amplitude-events.json`** — lists every event name (and optionally
+   description) that was instrumented.
 
-2. **Taxonomy funnels** — from the `amplitude-quickstart-taxonomy-agent` skill
-   output or your own knowledge of the instrumented events. Identify 2–5
-   product funnels (e.g. Onboarding, Core Feature Loop, Conversion).
+2. **Taxonomy funnels** — from `amplitude-quickstart-taxonomy-agent` or your
+   own read of the events. Identify 2–5 product funnels (Onboarding, Core Loop,
+   Conversion, …).
 
-3. **Autocapture** — assume Amplitude Autocapture is enabled. It automatically
-   tracks `[Amplitude] Page Viewed`, `[Amplitude] Element Clicked`, and
-   `[Amplitude] Form Started/Submitted`. These are available for charts even
-   before any custom instrumentation fires.
-
----
-
-## Chart planning process
-
-### Step 1 — Group events by funnel
-
-Map every instrumented event to one of the funnels you identified. An event
-can belong to more than one funnel.
-
-### Step 2 — Select chart types per funnel
-
-For **each funnel** (up to 5 total funnels):
-
-| Insight need              | Chart type          | Notes                                   |
-| ------------------------- | ------------------- | --------------------------------------- |
-| Conversion rate           | Funnel              | All steps in order; measure drop-off    |
-| Volume trend              | Line (event totals) | Daily uniques for the funnel's key event|
-
-Priority rule: **conversion funnel first**, then volume. If you only have
-budget for one chart per funnel, pick the funnel chart.
-
-### Step 3 — Add Autocapture charts
-
-Always include at least **one Autocapture chart** regardless of custom events:
-
-| Chart                        | Event(s) used                                                  | Why                                          |
-| ---------------------------- | -------------------------------------------------------------- | -------------------------------------------- |
-| Top pages by volume          | `[Amplitude] Page Viewed` — group by `[Amplitude] Page URL`   | Immediate traffic insight without waiting for custom events |
-| Click heatmap (if web)       | `[Amplitude] Element Clicked` — group by element text/class   | Engagement signal before custom events fire  |
-
-### Step 4 — Add one retention chart
-
-Pick the single most important **activation event** (the moment a user gets
-value — e.g. `Order Completed`, `Feature Used`, `Content Consumed`) as the
-return-on event for a **Retention** chart. Use the N-day retention template.
-
-### Step 5 — Finalize the chart list
-
-Cap at **8 charts total** (enough to fill one dashboard without overwhelming):
-
-```
-Funnels:      1 per funnel (2–5 charts)
-Volume trend: 1–2 charts for key events
-Autocapture:  1–2 charts
-Retention:    1 chart
-─────────────────────────────────
-Total:        5–8 charts
-```
+3. **Autocapture** — when relevant for web SDKs, note Amplitude Autocapture
+   (`[Amplitude] Page Viewed`, `[Amplitude] Element Clicked`, …). The server's
+   planner may include autocapture segmentation when enabled.
 
 ---
 
-## Dashboard structure
+## What to document for the setup report
 
-Name the dashboard: **"[Product/Framework] Analytics — [YYYY]"** — e.g.
-`"Next.js App Analytics — 2025"`. If the product name is available from the
-package.json `name` field or the app's title, use it.
+Explain how events roll up into the automated starter dashboard:
 
-Organize the dashboard sections (layouts) in this order:
+### Acquisition / activation signal
 
-1. **Acquisition** — Autocapture page views, top landing pages
-2. **Activation** — first-run funnel, onboarding steps
-3. **Core Loop** — the product's primary value action, frequency
-4. **Conversion** — checkout / upgrade / subscription funnel (if present)
-5. **Retention** — N-day retention anchored on activation event
+- Which instrumented events represent signup vs activation.
+- Which funnel the wizard is likely to emphasize given ordering + categories.
 
-Only include sections for which you have at least one chart.
+### Core loop + conversion
 
----
+- Primary value actions and any checkout / upgrade events worth calling out.
 
-## Dashboard description
+### Retention anchor
 
-Set the dashboard description to:
+- Which event best represents "got value" for retention (activation anchor).
 
-> "Auto-generated by the Amplitude Wizard. Charts are tied to the events
-> instrumented in [date]. Autocapture charts will populate immediately;
-> custom event charts populate once users trigger those flows."
+### Autocapture vs custom events
+
+- Which panels populate immediately (traffic / Autocapture) vs after users hit
+  specific flows (custom events).
 
 ---
 
 ## Autocapture + future events
 
-Some charts may show zero data today because:
+Some charts may show zero data early because:
+
 1. The app hasn't been used since instrumentation.
-2. The instrumented events require specific user actions.
+2. Instrumented events require specific user actions.
 
-This is expected. Add a comment in the setup report explaining which charts
-rely on custom events vs Autocapture, and note that Autocapture charts
-(Page Viewed, Element Clicked) will populate as soon as any user visits
-the app — no deployment required.
+Call this out explicitly in the setup report.
 
 ---
 
-## MCP call sequence
+## Dashboard naming / sections (reference only)
 
-Use the Amplitude MCP to create charts and dashboard, then hand the result
-back to the wizard. Order:
-
-1. Call `create_chart` (or equivalent Amplitude MCP tool) for each chart in
-   the plan. Collect the returned chart IDs.
-2. Call `create_dashboard` with all chart IDs and the dashboard metadata.
-3. Call the wizard-tools `record_dashboard` MCP tool with the dashboard URL,
-   ID, and chart metadata. **This is required** — `record_dashboard` is
-   what makes the dashboard visible to the wizard outro and to downstream
-   tooling. It also short-circuits the wizard's slow post-agent fallback
-   step. Skipping it is the most common bug in this skill.
-
-**Use exact event names** from `.amplitude-events.json` — do not
-normalize, lowercase, or rename them when constructing chart definitions.
-The event names must match exactly what was instrumented.
-
----
-
-## Output: hand the dashboard back to the wizard
-
-Call the `record_dashboard` MCP tool (server: `wizard-tools`) immediately
-after `create_dashboard` returns. Required argument: `dashboardUrl`.
-Recommended: `dashboardId`, `charts` (array of `{ id, title, type }`).
-Always include a brief `reason` per the wizard's tool-call convention.
-
-```jsonc
-// Example call shape
-{
-  "dashboardUrl": "https://app.amplitude.com/123456/dashboard/abc",
-  "dashboardId": "abc",
-  "charts": [
-    { "id": "chart-id-1", "title": "Onboarding Funnel", "type": "funnel" },
-    { "id": "chart-id-2", "title": "Daily Actives", "type": "line" }
-  ],
-  "reason": "Persisting the starter dashboard so the wizard outro links to it."
-}
-```
-
-`record_dashboard` writes both the canonical
-`<projectRoot>/.amplitude/dashboard.json` and the legacy
-`<projectRoot>/.amplitude-dashboard.json` mirror. Do NOT write either
-file yourself — that path drifts from the canonical schema and the wizard
-will silently re-run the dashboard step from scratch.
-
-After the call returns `"ok"`, mark the "Build your starter dashboard" todo
-completed.
+The server names the dashboard deterministically (product-derived). Sections
+typically follow **Acquisition → Activation → Engagement → Retention** style
+layouts — describe that structure qualitatively so stakeholders know what to
+open first.
 
 ---
 
 ## Quality bar
 
-An expert implementation strategist would ask:
+An expert implementation strategist would verify:
 
-- Does every funnel have a conversion chart? ✓
-- Is the dashboard named after the product, not a generic placeholder? ✓
-- Does at least one chart use Autocapture so it populates on day one? ✓
-- Is there a retention chart anchored on a meaningful activation event? ✓
-- Are event names exactly as implemented in code? ✓
-- Is the dashboard description set to explain what was auto-generated? ✓
+- Event names in prose match **exact** `track()` / instrumentation strings.
+- At least one narrative ties Autocapture / traffic to “signal without waiting
+  for rare events”.
+- Retention language anchors on a meaningful activation moment when one exists
+  in the plan.
 
-If any of these are missing, add them before finalizing.
+---
+
+## Todo / checklist
+
+Mark **Build your starter dashboard** complete once this documentation is
+reflected in `amplitude-setup-report.md` — not after MCP calls.

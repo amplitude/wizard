@@ -1652,13 +1652,13 @@ ${appIdGuidance}
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
   }${additionalContext}
 
-Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, \`record_dashboard\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
+Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
 
 ${integrationSkillStep}
 
 STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
 
-STEP 3–5 (env, instrumentation, dashboard): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\`, \`.claude/skills/add-analytics-instrumentation/SKILL.md\`, \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap, \`confirm_event_plan\` timing, and \`record_dashboard\` + todo gating are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
+STEP 3–5 (env, instrumentation, dashboard docs): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\`, \`.claude/skills/add-analytics-instrumentation/SKILL.md\`, \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. The wizard creates the starter dashboard server-side after this run — do **not** call Amplitude MCP \`create_chart\` / \`create_dashboard\` or wizard-tools \`record_dashboard\`. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
 
 
 `;
