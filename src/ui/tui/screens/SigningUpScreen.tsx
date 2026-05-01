@@ -37,7 +37,7 @@ import {
   performSignupOrAuth,
   trackSignupAttempt,
 } from '../../../utils/signup-or-auth.js';
-import { KNOWN_REQUIRED_FIELDS, fieldPresentOnSession } from '../flows.js';
+import { KNOWN_REQUIRED_FIELDS } from '../flows.js';
 
 interface SigningUpScreenProps {
   store: WizardStore;
@@ -117,18 +117,13 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             store.setSignupAbandoned(true);
             return;
           }
-          // Re-read the live session for the unmet-field check —
-          // a slash command (e.g. /region) could in principle have
-          // mutated session during the await, and we want the freshest
-          // view when deciding whether to abandon vs continue.
-          const live = store.session;
-          const unmet = result.requiredFields.filter(
-            (f) => !fieldPresentOnSession(live, f),
-          );
-          if (unmet.length === 0) {
-            store.setSignupAbandoned(true);
-            return;
-          }
+          // setSignupRequiredFields nulls the matching session values so
+          // the flow re-resolves back to the corresponding collection
+          // screen for a re-prompt. The SignupFullName predicate gates on
+          // `signupFullName === null`; without that clear, the session
+          // still carries the value we just sent, the predicate skips
+          // SignupFullName, and the router lands back on SigningUp with
+          // no way to gather a fresh value (-> infinite spinner).
           store.setSignupRequiredFields(result.requiredFields);
           return;
         }

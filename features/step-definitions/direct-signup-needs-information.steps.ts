@@ -101,10 +101,10 @@ When(
   'the first signup POST returns needs_information for {string}',
   function (field: string) {
     // Mirrors what SigningUpScreen does on a needs_information response
-    // with a known, unmet field: store.setSignupRequiredFields([...]).
+    // with a known, unmet field: store.setSignupRequiredFields([...]),
+    // which both records the requirement and nulls the matching session
+    // value so the flow re-resolves back to the collection screen.
     session.signupRequiredFields = [field];
-    // fieldPresentOnSession treats an existing signupFullName as satisfied;
-    // clear it so the router returns to SignupFullName like a fresh ask.
     if (field === 'full_name') {
       session.signupFullName = null;
     }
