@@ -1,52 +1,34 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { createHash } from 'node:crypto';
-
-vi.mock('node:child_process', () => ({
-  execFileSync: vi.fn(),
-}));
-
-import { execFileSync } from 'node:child_process';
+import {
+  CACHE_ROOT_OVERRIDE_ENV,
+  getCheckpointFile,
+} from '../storage-paths.js';
+import { persistApiKey, readApiKey } from '../api-key-store.js';
 import { clearStaleProjectState } from '../clear-stale-project-state.js';
-
-// Implementation uses execFileSync (PR #223 swapped from execSync for shell-
-// injection safety). Keep the local name `mockExecSync` to match the sibling
-// api-key-store.test.ts convention.
-const mockExecSync = vi.mocked(execFileSync);
-const originalPlatform = process.platform;
-
-function setPlatform(platform: NodeJS.Platform) {
-  Object.defineProperty(process, 'platform', {
-    value: platform,
-    configurable: true,
-  });
-}
-
-function checkpointPathFor(installDir: string): string {
-  const hash = createHash('sha256')
-    .update(installDir)
-    .digest('hex')
-    .slice(0, 12);
-  return path.join(os.tmpdir(), `amplitude-wizard-checkpoint-${hash}.json`);
-}
 
 describe('clearStaleProjectState', () => {
   let tmpDir: string;
-  let checkpointPath: string;
+  let cacheRoot: string;
+  let prevCache: string | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'clear-stale-test-'));
-    checkpointPath = checkpointPathFor(tmpDir);
-    mockExecSync.mockReset();
-    setPlatform('darwin');
+    cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'clear-stale-cache-'));
+    prevCache = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
   });
 
   afterEach(() => {
+    if (prevCache === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = prevCache;
+    }
     fs.rmSync(tmpDir, { recursive: true, force: true });
-    if (fs.existsSync(checkpointPath)) fs.unlinkSync(checkpointPath);
-    setPlatform(originalPlatform);
+    fs.rmSync(cacheRoot, { recursive: true, force: true });
   });
 
   it('strips AMPLITUDE_API_KEY from .env.local while preserving other vars', () => {
@@ -65,6 +47,8 @@ describe('clearStaleProjectState', () => {
   });
 
   it('deletes the checkpoint file at the per-installDir hashed path', () => {
+    const checkpointPath = getCheckpointFile(tmpDir);
+    fs.mkdirSync(path.dirname(checkpointPath), { recursive: true });
     fs.writeFileSync(
       checkpointPath,
       JSON.stringify({ installDir: tmpDir, savedAt: new Date().toISOString() }),
@@ -101,31 +85,18 @@ describe('clearStaleProjectState', () => {
     expect(result.Version).toBe('42.0.0');
   });
 
-  it('attempts to delete the keychain entry on macOS', () => {
-    mockExecSync.mockReturnValue('' as ReturnType<typeof execFileSync>);
+  it('clears persisted API key from the per-user cache', () => {
+    persistApiKey('stale-key-123', tmpDir);
+    expect(readApiKey(tmpDir)).toBe('stale-key-123');
 
     clearStaleProjectState(tmpDir);
 
-    // execFileSync(file, args) — verify a `security` invocation with
-    // `delete-generic-password` and our service name.
-    expect(
-      mockExecSync.mock.calls.some(([file, args]) => {
-        if (file !== 'security' || !Array.isArray(args)) return false;
-        return (
-          args.includes('delete-generic-password') &&
-          args.includes('amplitude-wizard')
-        );
-      }),
-    ).toBe(true);
+    expect(readApiKey(tmpDir)).toBe(null);
   });
 
   it('is a no-op when no prior state exists', () => {
-    mockExecSync.mockImplementation(() => {
-      throw new Error('not found');
-    });
-
     expect(() => clearStaleProjectState(tmpDir)).not.toThrow();
-    expect(fs.existsSync(checkpointPath)).toBe(false);
+    expect(fs.existsSync(getCheckpointFile(tmpDir))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, '.env.local'))).toBe(false);
     expect(fs.existsSync(path.join(tmpDir, 'ampli.json'))).toBe(false);
   });
