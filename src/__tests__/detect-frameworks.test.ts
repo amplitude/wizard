@@ -1,4 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Integration } from '../lib/constants';
 import type { FrameworkConfig } from '../lib/framework-config';
 
@@ -248,6 +251,28 @@ describe('detectAllFrameworks', () => {
     // No detect() functions should have been called
     for (const mock of detectorMocks.values()) {
       expect(mock.detect).not.toHaveBeenCalled();
+    }
+  });
+
+  test('returns all errors when installDir is a file, not a directory', async () => {
+    registry = buildRegistry();
+    const file = path.join(
+      os.tmpdir(),
+      `wizard-detect-not-dir-${Date.now()}.txt`,
+    );
+    fs.writeFileSync(file, 'x');
+    try {
+      const results = await detectAllFrameworks(file);
+      expect(results).toHaveLength(Object.values(Integration).length);
+      expect(results.every((r) => r.detected === false)).toBe(true);
+      expect(
+        results.every((r) => r.error === 'installDir not a directory'),
+      ).toBe(true);
+      for (const mock of detectorMocks.values()) {
+        expect(mock.detect).not.toHaveBeenCalled();
+      }
+    } finally {
+      fs.unlinkSync(file);
     }
   });
 
