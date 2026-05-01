@@ -1,19 +1,15 @@
 /**
- * Types and logic for the project-level ~/.ampli.json configuration file.
+ * Types and logic for the wizard's project-level Amplitude binding.
  *
- * The ampli CLI reads and writes this file (named "ampli.json") in the project
- * directory to track which Amplitude project (formerly "workspace"), source,
- * and branch a project is connected to. The wizard creates or updates this
- * file during setup.
- *
- * Types are modelled after the ampli CLI's Settings class
- * (ampli/src/settings/index.ts) and are intentionally kept compatible.
+ * The canonical on-disk location is `<installDir>/.amplitude/project-binding.json`.
+ * Legacy `ampli.json` in the project root remains readable (and is written
+ * during transition) for older workflows.
  *
  * UNIT-TESTABLE SURFACE (pure, no I/O):
  *   parseAmpliConfig, validateAmpliConfig, mergeAmpliConfig,
  *   isConfigured, isMinimllyConfigured
  *
- * I/O SURFACE (not unit-testable in isolation):
+ * I/O SURFACE:
  *   readAmpliConfig, writeAmpliConfig, ampliConfigExists
  */
 
@@ -21,6 +17,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { AmplitudeZone } from './constants.js';
+import { atomicWriteJSON } from '../utils/atomic-write.js';
+import {
+  ensureDir,
+  getProjectBindingFile,
+  getProjectMetaDir,
+} from '../utils/storage-paths.js';
+import { createLogger } from './observability/logger.js';
+
+const log = createLogger('ampli-config');
 
 export const AMPLI_CONFIG_FILENAME = 'ampli.json';
 
@@ -211,35 +216,115 @@ export function ampliConfigPath(dir: string): string {
  * Returns true if ampli.json exists in the given directory.
  */
 export function ampliConfigExists(dir: string): boolean {
-  return fs.existsSync(ampliConfigPath(dir));
+  return (
+    fs.existsSync(getProjectBindingFile(dir)) ||
+    fs.existsSync(ampliConfigPath(dir))
+  );
 }
 
 /**
- * Read and parse ampli.json from the given directory.
+ * Read and parse a single binding JSON file.
  * Returns a typed result; never throws.
  */
-export function readAmpliConfig(dir: string): AmpliConfigParseResult {
-  const filePath = ampliConfigPath(dir);
+function readAmpliConfigFile(filePath: string): AmpliConfigParseResult {
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, 'utf-8');
-  } catch {
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== 'ENOENT') {
+      log.debug('readAmpliConfigFile: read failed', {
+        path: filePath,
+        'error message': err instanceof Error ? err.message : String(err),
+      });
+    }
     return { ok: false, error: 'not_found' };
   }
   return parseAmpliConfig(raw);
 }
 
 /**
- * Write an AmpliConfig object to ampli.json in the given directory.
- * Creates the directory if it does not exist.
+ * Read project binding from `.amplitude/project-binding.json`, falling back to
+ * legacy root `ampli.json`, merging when both exist (binding overrides).
  */
-export function writeAmpliConfig(dir: string, config: AmpliConfig): void {
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    ampliConfigPath(dir),
-    JSON.stringify(config, null, 2),
-    'utf-8',
-  );
+export function readAmpliConfig(dir: string): AmpliConfigParseResult {
+  const bindingPath = getProjectBindingFile(dir);
+  const legacyPath = ampliConfigPath(dir);
+  const bindingResult = readAmpliConfigFile(bindingPath);
+  const legacyResult = readAmpliConfigFile(legacyPath);
+
+  let merged: AmpliConfig | undefined;
+
+  if (legacyResult.ok) {
+    merged = legacyResult.config;
+  }
+  if (bindingResult.ok) {
+    merged = merged
+      ? mergeAmpliConfig(merged, bindingResult.config)
+      : bindingResult.config;
+  }
+
+  if (merged !== undefined) {
+    if (legacyResult.ok && bindingResult.error === 'not_found') {
+      try {
+        ensureDir(getProjectMetaDir(dir));
+        atomicWriteJSON(bindingPath, merged, 0o644);
+      } catch (err) {
+        log.debug('readAmpliConfig: could not migrate binding file forward', {
+          'error message': err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return { ok: true, config: merged };
+  }
+
+  if (
+    bindingResult.error === 'not_found' &&
+    legacyResult.error === 'not_found'
+  ) {
+    return { ok: false, error: 'not_found' };
+  }
+  if (!legacyResult.ok && legacyResult.error !== 'not_found') {
+    return legacyResult;
+  }
+  if (!bindingResult.ok && bindingResult.error !== 'not_found') {
+    return bindingResult;
+  }
+  return { ok: false, error: 'not_found' };
+}
+
+/**
+ * Write an AmpliConfig to the canonical binding path and mirror to legacy
+ * `ampli.json` for transition compatibility.
+ *
+ * @returns true if at least one destination was written successfully.
+ */
+export function writeAmpliConfig(dir: string, config: AmpliConfig): boolean {
+  const bindingPath = getProjectBindingFile(dir);
+  let anyOk = false;
+  try {
+    ensureDir(getProjectMetaDir(dir));
+    atomicWriteJSON(bindingPath, config, 0o644);
+    anyOk = true;
+  } catch (err) {
+    log.warn('writeAmpliConfig: canonical binding write failed', {
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+  }
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      ampliConfigPath(dir),
+      JSON.stringify(config, null, 2),
+      'utf-8',
+    );
+    anyOk = true;
+  } catch (err) {
+    log.warn('writeAmpliConfig: legacy ampli.json write failed', {
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+  }
+  return anyOk;
 }
 
 /**

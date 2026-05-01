@@ -4,7 +4,7 @@ import { getUI } from './helpers';
 export const resetCommand: CommandModule = {
   command: 'reset',
   describe:
-    'Remove wizard-managed artifacts from the current project (events plan, dashboard URL, setup report, ampli.json scope). Leaves your auth + tracking-plan fields intact.',
+    'Remove wizard-managed artifacts from the current project (events plan, dashboard URL, setup report, org/project binding in ampli.json). Leaves OAuth, API keys, and tracking-plan fields intact.',
   builder: (yargs) =>
     yargs.options({
       'install-dir': {
@@ -30,7 +30,7 @@ export const resetCommand: CommandModule = {
       });
       // Targets to remove:
       //   - `.amplitude/` directory (canonical: events.json, dashboard.json,
-      //      product-map.json, etc. — all metadata produced by past runs)
+      //      project-binding.json, etc. — all metadata produced by past runs)
       //   - `.amplitude-events.json` / `.amplitude-dashboard.json` (legacy
       //      dotfile mirrors that older skill packs still write)
       //   - `amplitude-setup-report.md` (human-readable recap)
@@ -38,6 +38,16 @@ export const resetCommand: CommandModule = {
       // logout --clean` is the command for that. Reset is the "I want
       // a fresh setup run on this codebase" gesture, not "I'm done with
       // Amplitude entirely."
+      //
+      // Strip auth from ampli.json / project-binding **before** deleting
+      // `.amplitude/`, otherwise `readAmpliConfig` would migrate legacy
+      // `ampli.json` back onto disk and recreate the directory.
+      try {
+        clearAuthFieldsInAmpliConfig(installDir);
+      } catch {
+        /* best-effort */
+      }
+
       const targets = [
         { path: path.join(installDir, '.amplitude'), kind: 'dir' as const },
         {
@@ -86,13 +96,6 @@ export const resetCommand: CommandModule = {
             );
           }
         }
-      }
-      // Also strip auth-scoped fields from ampli.json so a follow-up
-      // wizard run doesn't reuse the prior org/app binding.
-      try {
-        clearAuthFieldsInAmpliConfig(installDir);
-      } catch {
-        /* best-effort */
       }
       if (jsonOutput) {
         process.stdout.write(

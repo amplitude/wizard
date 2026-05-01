@@ -2,8 +2,9 @@
  * Amplitude OAuth2/PKCE flow — adapted from Amplitude wizard's oauth.ts but
  * hitting Amplitude's auth endpoints (same as the ampli CLI).
  *
- * Key difference from Amplitude: checks ~/.ampli.json for an existing ampli CLI
- * session first, so users who ran `ampli login` can skip re-authenticating.
+ * Key difference from a bare OAuth client: checks the wizard session store
+ * for an existing session first (migrates legacy `~/.ampli.json` on read),
+ * so returning users skip re-authenticating when tokens are still valid.
  */
 
 import * as crypto from 'node:crypto';
@@ -339,10 +340,10 @@ export interface AmplitudeAuthResult {
 /**
  * Performs the Amplitude OAuth2/PKCE flow.
  *
- * 1. Checks ~/.ampli.json for a valid existing session (shared with ampli CLI),
- *    unless forceFresh is true (used for new projects with no local ampli.json).
+ * 1. Checks the wizard OAuth session file for a valid existing session,
+ *    unless forceFresh is true (used for new projects with no local binding).
  * 2. If none, opens the browser to auth.amplitude.com and awaits callback.
- * 3. Stores the resulting tokens back to ~/.ampli.json.
+ * 3. Stores the resulting tokens in the wizard session store.
  */
 export async function performAmplitudeAuth(options: {
   zone?: AmplitudeZone;
@@ -373,7 +374,7 @@ async function performAmplitudeAuthInner(options: {
 }): Promise<AmplitudeAuthResult> {
   const zone = options.zone ?? DEFAULT_AMPLITUDE_ZONE;
 
-  // ── 1. Try existing ampli CLI session ────────────────────────────
+  // ── 1. Try existing cached session ────────────────────────────
   // Skip when forceFresh — used for new projects where we don't know
   // which org applies, so the user must explicitly authenticate.
   logToFile('[oauth] performAmplitudeAuth called', {
@@ -395,9 +396,9 @@ async function performAmplitudeAuthInner(options: {
     );
     if (existing) {
       getUI().log.info(
-        chalk.dim('Using existing Amplitude session from ~/.ampli.json'),
+        chalk.dim('Using existing Amplitude session (wizard credentials)'),
       );
-      addBreadcrumb('auth', 'Reused cached ampli session');
+      addBreadcrumb('auth', 'Reused cached OAuth session');
       return {
         idToken: existing.idToken,
         accessToken: existing.accessToken,
@@ -519,7 +520,7 @@ async function performAmplitudeAuthInner(options: {
       zone,
     };
 
-    // ── 3. Persist to ~/.ampli.json (shared with ampli CLI) ──────────
+    // ── 3. Persist to wizard session store (canonical + legacy mirror) ───
     // User details (name/email) are filled in after fetchAmplitudeUser().
     // storeToken() uses atomicWriteJSON (temp + rename) — concurrent wizard
     // runs cannot corrupt the file. Last-writer-wins for the access token
@@ -550,7 +551,7 @@ async function performAmplitudeAuthInner(options: {
       refreshToken: tokenResponse.refresh_token,
       expiresAt,
     });
-    logToFile('[oauth] token stored to ~/.ampli.json, returning result', {
+    logToFile('[oauth] token stored to wizard session file, returning result', {
       zone,
       expiresAt,
     });

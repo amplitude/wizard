@@ -125,12 +125,12 @@ The wizard persists state across several layers, each with different scope and l
 
 | Layer | File / Location | Scope | Lifetime | Contents |
 |-------|----------------|-------|----------|----------|
-| **OAuth tokens** | `~/.ampli.json` | Per user | Until expiry (silent refresh via `token-refresh.ts`) | Access token, refresh token, expiry timestamp. Written with `atomicWriteJSON()`. |
+| **OAuth tokens** | `~/.amplitude/wizard/oauth-session.json` (legacy read: `~/.ampli.json`) | Per user | Until expiry (silent refresh via `token-refresh.ts`) | Access token, refresh token, expiry timestamp. Written with `atomicWriteJSON()` at `0o600`. |
 | **API key store** | `~/.amplitude/wizard/credentials.json` (fallback `<project>/.env.local`) | Per project | Persistent | Amplitude project API key. Mode `0o600`, keyed by hashed install-dir. Replaces the previous keychain backend, which triggered an OS unlock prompt on every launch. |
 | **Per-project debug log** | `~/.amplitude/wizard/runs/<sha256(installDir)>/log.txt` (+ `log.ndjson`) | Per project | 5 MB rotation | Structured wizard logs. Two parallel runs in different directories no longer collide. |
 | **Session checkpoint** | `~/.amplitude/wizard/runs/<sha256(installDir)>/checkpoint.json` | Per install directory | 24 hours | Intro state, region, org/project selection, framework detection. Zod-validated on load. No credentials. |
 | **Plans + agent state** | `~/.amplitude/wizard/plans/<planId>.json`, `~/.amplitude/wizard/state/<attemptId>.json` | Per plan / per attempt | 24 h / per-run | `wizard plan` output and agent compaction-recovery snapshots. |
-| **Project metadata** | `<installDir>/.amplitude/events.json`, `<installDir>/.amplitude/dashboard.json` | Per project | Persistent (gitignored as `.amplitude/`) | Approved event plan (preserved across runs) + URL of the dashboard the agent created. |
+| **Project metadata** | `<installDir>/.amplitude/events.json`, `<installDir>/.amplitude/project-binding.json`, `<installDir>/.amplitude/dashboard.json` (dashboard path gitignored; `ampli.json` mirror during transition) | Per project | Persistent | Approved event plan + org/project binding + dashboard URL. |
 | **In-memory store** | `WizardStore` (nanostores) | Per run | Process lifetime | Full session state, tasks, prompts, overlays, UI state |
 
 The `/diagnostics` slash command prints the full layout for the current project — useful when filing a bug report.

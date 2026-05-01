@@ -521,10 +521,12 @@ describe('ensureWizardArtifactsIgnored', () => {
     expect(content).toContain('.env.local');
     // And the wizard block was appended
     expect(content).toContain('# Amplitude wizard');
-    // Canonical `.amplitude/` covers events.json + dashboard.json.
-    expect(content).toContain('.amplitude/');
+    // Dashboard JSON is gitignored; other `.amplitude/*` paths are not blanket-ignored.
+    expect(content).toContain('.amplitude/dashboard.json');
+    expect(content).not.toMatch(/^\.amplitude\/$/m);
     // Legacy dotfiles stay gitignored for older runs / external tools that
-    // may still create them; the wizard writes only under `.amplitude/`.
+    // may still create them; the wizard writes the canonical plan under
+    // `.amplitude/events.json` (see `persistEventPlan`).
     expect(content).toContain('.amplitude-events.json');
     expect(content).toContain('.amplitude-dashboard.json');
     // PR 316 design: the CURRENT user-facing setup report
@@ -600,6 +602,22 @@ describe('ensureWizardArtifactsIgnored', () => {
     // Marker still appears exactly once
     const occurrences = (content.match(/# Amplitude wizard/g) ?? []).length;
     expect(occurrences).toBe(1);
+  });
+
+  it('replaces an older wizard block that used blanket `.amplitude/`', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.gitignore'),
+      'node_modules\n# Amplitude wizard\n.amplitude/\n',
+      'utf8',
+    );
+    ensureWizardArtifactsIgnored(tmpDir);
+    const content = readGitignore();
+    expect(content).not.toMatch(/^\.amplitude\/$/m);
+    expect(content).toContain('.amplitude/dashboard.json');
+    for (const pattern of WIZARD_GITIGNORE_PATTERNS) {
+      expect(content).toContain(pattern);
+    }
+    expect(content).toContain('node_modules');
   });
 
   it('survives an unwritable .gitignore without throwing', () => {
@@ -751,7 +769,8 @@ describe('cleanupWizardArtifacts', () => {
     // Current policy: only the single-use integration skill is removed on
     // success; the canonical `.amplitude/` files, the legacy dotfile
     // mirrors, and the user-facing setup report all stay on disk. They're
-    // listed in WIZARD_GITIGNORE_PATTERNS so they can't pollute commits.
+    // listed in WIZARD_GITIGNORE_PATTERNS where needed so `git add .`
+    // doesn't pick up machine-local or generated paths.
     const skillDir = path.join(
       tmpDir,
       '.claude',
@@ -828,8 +847,8 @@ describe('cleanupWizardArtifacts', () => {
 
   it('preserves the canonical .amplitude/ dir across cleanup', () => {
     // The canonical paths are intentionally kept across runs — events.json
-    // is useful for re-instrumentation, dashboard.json is gitignored under
-    // `.amplitude/` so committing isn't a risk.
+    // is useful for re-instrumentation, dashboard.json is gitignored explicitly
+    // (`.amplitude/dashboard.json`) so committing isn't a risk for teams that use gitignore.
     const metaDir = path.join(tmpDir, '.amplitude');
     fs.mkdirSync(metaDir, { recursive: true });
     fs.writeFileSync(
