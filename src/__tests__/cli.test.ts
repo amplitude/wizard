@@ -27,7 +27,7 @@ const {
   mockTrackWizardFeedback,
 } = vi.hoisted(() => {
   const mockStore = {
-    session: {} as Record<string, unknown>,
+    session: { signupAuth: null } as Record<string, unknown>,
     subscribe: vi.fn(() => vi.fn()),
     setLoginUrl: vi.fn(),
     setOAuthComplete: vi.fn(),
@@ -118,7 +118,11 @@ vi.mock('../lib/wizard-session', async (importOriginal) => {
       frameworkContext: {},
       frameworkContextAnswerOrder: [],
       apiKeyNotice: null,
+      signupAuth: null,
       ...args,
+      accountCreationFlow: Boolean(
+        args.accountCreationFlow ?? args.signup ?? false,
+      ),
       tosAccepted: args.acceptTos === true ? true : null,
     }),
   };
@@ -220,7 +224,11 @@ vi.mock('../utils/signup-or-auth', async () => {
   >('../utils/signup-or-auth');
   return {
     ...actual,
-    performSignupOrAuth: vi.fn(),
+    // Default to the `error` arm so `runDirectSignupIfRequested` falls through
+    // to the mode's fallback auth path. Individual tests override with
+    // `mockResolvedValueOnce`/`mockRejectedValueOnce` when they need to
+    // exercise success, redirect, or throw behavior.
+    performSignupOrAuth: vi.fn().mockResolvedValue({ kind: 'error' }),
   };
 });
 vi.mock('node:os', async () => {

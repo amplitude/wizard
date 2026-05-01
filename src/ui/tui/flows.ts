@@ -19,6 +19,52 @@ import type { WizardStore } from './store.js';
 import { RunPhase } from './session-constants.js';
 import { tryResolveZone } from '../../lib/zone-resolution.js';
 
+// ── Signup required-field helpers ────────────────────────────────────
+
+/**
+ * The set of `needs_information` field names the wizard knows how to
+ * collect locally. Fields outside this set cause the signup flow to
+ * abandon to browser OAuth — we can't prompt for something we don't
+ * have a screen for.
+ */
+export const KNOWN_REQUIRED_FIELDS: ReadonlySet<string> = new Set([
+  'full_name',
+]);
+
+/**
+ * Returns true when the session already carries a value for `field`.
+ * Used by SigningUpScreen to detect the "server asked for a field we
+ * already sent" case — indicates the server rejected our value, so we
+ * bail to browser OAuth instead of re-prompting in a loop.
+ */
+export function fieldPresentOnSession(
+  s: { signupFullName: string | null },
+  field: string,
+): boolean {
+  if (!KNOWN_REQUIRED_FIELDS.has(field)) return false;
+  switch (field) {
+    case 'full_name':
+      return s.signupFullName !== null;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Returns true when the session carries a value for every field the
+ * server has (so far) asked for via `needs_information`. Gates the
+ * SigningUpScreen POST — we only retry once all outstanding fields
+ * have been collected.
+ */
+export function allRequiredFieldsCollected(s: {
+  signupRequiredFields: string[];
+  signupFullName: string | null;
+}): boolean {
+  return s.signupRequiredFields.every((field) =>
+    fieldPresentOnSession(s, field),
+  );
+}
+
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
 /** Screens that participate in linear flows */
@@ -30,6 +76,9 @@ export enum Screen {
   RegionSelect = 'region-select',
   EmailCapture = 'email-capture',
   ToS = 'tos',
+  SignupEmail = 'signup-email',
+  SigningUp = 'signing-up',
+  SignupFullName = 'signup-full-name',
   DataSetup = 'data-setup',
   Options = 'options',
   ActivationOptions = 'activation-options',
@@ -117,10 +166,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetAuthForRegionChange();
       },
     },
-    // 2a. Email capture — create-account path only, before ToS.
+    // 2a. Email capture — Intro menu create-account path only (not `--signup`,
+    //     which uses SignupFullName / SignupEmail below).
     {
       screen: Screen.EmailCapture,
-      show: (s) => isCreateAccountOnboarding(s) && !s.emailCaptureComplete,
+      show: (s) =>
+        isCreateAccountOnboarding(s) &&
+        !s.accountCreationFlow &&
+        !s.emailCaptureComplete,
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) || s.emailCaptureComplete,
       revert: (store) => {
@@ -128,18 +181,80 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetEmailCapture();
       },
     },
-    // 2b. Terms of Service — create-account path after email capture.
+    // 2b. Terms of Service — after EmailCapture on the menu path, or once
+    //     `--signup` has collected both email + full name on the session.
     {
       screen: Screen.ToS,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
-        s.emailCaptureComplete &&
-        s.tosAccepted !== true,
+        s.tosAccepted !== true &&
+        (s.emailCaptureComplete ||
+          (s.accountCreationFlow &&
+            s.signupFullName !== null &&
+            s.signupEmail !== null)),
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) || s.tosAccepted === true,
       revert: (store) => {
         if (!isCreateAccountOnboarding(store.session)) return false;
         store.resetToS();
+      },
+    },
+    // 2c. Full-name collection for `--signup`: before email so the TUI matches
+    //     the direct-signup prompt order. Also handles `needs_information`
+    //     retries when the server asks for `full_name`.
+    {
+      screen: Screen.SignupFullName,
+      show: (s) =>
+        s.accountCreationFlow &&
+        !s.signupAbandoned &&
+        s.signupFullName === null &&
+        (s.signupRequiredFields.length === 0 ||
+          s.signupRequiredFields.includes('full_name')),
+      isComplete: (s) => !s.accountCreationFlow || s.signupFullName !== null,
+      revert: (store) => {
+        if (!store.session.accountCreationFlow) return false;
+        return false;
+      },
+    },
+    // 2d. Email collection for `--signup` after full name is on the session.
+    {
+      screen: Screen.SignupEmail,
+      show: (s) =>
+        s.accountCreationFlow &&
+        !s.signupAbandoned &&
+        s.signupEmail === null &&
+        s.signupFullName !== null,
+      isComplete: (s) => !s.accountCreationFlow || s.signupEmail !== null,
+      revert: (store) => {
+        if (!store.session.accountCreationFlow) return false;
+        return false;
+      },
+    },
+    // 2e. Signup POST firing point. Mounts whenever we have an email,
+    //     a region (so we know which provisioning host to hit), no
+    //     tokens yet, haven't abandoned, and every field the server has
+    //     asked for so far is present on the session. The region check
+    //     is redundant in normal flow ordering (RegionSelect's
+    //     isComplete already gates this) but making it local lets
+    //     SigningUpScreen rely on `s.region !== null` without chasing
+    //     the invariant across files.
+    {
+      screen: Screen.SigningUp,
+      show: (s) =>
+        s.accountCreationFlow &&
+        s.signupEmail !== null &&
+        s.region !== null &&
+        s.signupAuth === null &&
+        !s.signupAbandoned &&
+        allRequiredFieldsCollected(s),
+      isComplete: (s) =>
+        !s.accountCreationFlow ||
+        s.signupAuth !== null ||
+        s.signupAbandoned ||
+        !allRequiredFieldsCollected(s),
+      revert: (store) => {
+        if (!store.session.accountCreationFlow) return false;
+        return false;
       },
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).

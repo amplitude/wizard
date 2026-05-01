@@ -316,6 +316,129 @@ describe('performDirectSignup', () => {
     expect(result.kind).toBe('error');
   });
 
+  describe('needs_information arm', () => {
+    it('parses a needs_information response with required: ["full_name"]', async () => {
+      server.use(
+        http.post(PROVISIONING_URL, () =>
+          HttpResponse.json({
+            type: 'needs_information',
+            needs_information: {
+              schema: {
+                type: 'object',
+                required: ['full_name'],
+                properties: {
+                  full_name: { type: 'string', description: 'Full Name' },
+                },
+              },
+            },
+          }),
+        ),
+      );
+
+      const result = await performDirectSignup({
+        email: 'new@acme.com',
+        fullName: null,
+        zone: 'us',
+      });
+
+      expect(result).toEqual({
+        kind: 'needs_information',
+        requiredFields: ['full_name'],
+      });
+    });
+
+    it('rejects a needs_information response with empty required array', async () => {
+      server.use(
+        http.post(PROVISIONING_URL, () =>
+          HttpResponse.json({
+            type: 'needs_information',
+            needs_information: { schema: { type: 'object', required: [] } },
+          }),
+        ),
+      );
+
+      const result = await performDirectSignup({
+        email: 'new@acme.com',
+        fullName: null,
+        zone: 'us',
+      });
+
+      expect(result.kind).toBe('error');
+    });
+
+    it('passes through extra fields in the schema envelope', async () => {
+      server.use(
+        http.post(PROVISIONING_URL, () =>
+          HttpResponse.json({
+            type: 'needs_information',
+            needs_information: {
+              schema: {
+                type: 'object',
+                required: ['full_name'],
+                title: 'Sign up',
+                properties: {},
+                someNewField: { anything: 'goes' },
+              },
+              futureTopLevelField: 'extension point',
+            },
+          }),
+        ),
+      );
+
+      const result = await performDirectSignup({
+        email: 'new@acme.com',
+        fullName: null,
+        zone: 'us',
+      });
+
+      expect(result).toEqual({
+        kind: 'needs_information',
+        requiredFields: ['full_name'],
+      });
+    });
+  });
+
+  describe('fullName nullability', () => {
+    it('omits full_name from the body when fullName is null', async () => {
+      let capturedBody: Record<string, unknown> | undefined;
+      server.use(
+        http.post(PROVISIONING_URL, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ type: 'oauth', oauth: { code: 'abc' } });
+        }),
+        http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+      );
+
+      await performDirectSignup({
+        email: 'x@y.com',
+        fullName: null,
+        zone: 'us',
+      });
+
+      expect(capturedBody).toBeDefined();
+      expect(capturedBody).not.toHaveProperty('full_name');
+    });
+
+    it('includes full_name when fullName is provided', async () => {
+      let capturedBody: Record<string, unknown> | undefined;
+      server.use(
+        http.post(PROVISIONING_URL, async ({ request }) => {
+          capturedBody = (await request.json()) as Record<string, unknown>;
+          return HttpResponse.json({ type: 'oauth', oauth: { code: 'abc' } });
+        }),
+        http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+      );
+
+      await performDirectSignup({
+        email: 'x@y.com',
+        fullName: 'Jane',
+        zone: 'us',
+      });
+
+      expect(capturedBody?.full_name).toBe('Jane');
+    });
+  });
+
   it('honors AMPLITUDE_WIZARD_SIGNUP_URL override', async () => {
     const original = process.env.AMPLITUDE_WIZARD_SIGNUP_URL;
     process.env.AMPLITUDE_WIZARD_SIGNUP_URL =

@@ -700,6 +700,13 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               {Icons.ellipsis}
             </Text>
           </Box>
+          {session.accountCreationFlow && (
+            <Box marginTop={1}>
+              <Text color={Colors.body}>
+                Please sign up or log in from the browser to continue.
+              </Text>
+            </Box>
+          )}
           <Box marginTop={1} flexDirection="column">
             {session.loginUrl ? (
               <>

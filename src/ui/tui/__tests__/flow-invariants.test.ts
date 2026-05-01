@@ -338,6 +338,91 @@ describe('WizardRouter flow invariants (property-based)', () => {
       { numRuns: 500 },
     );
   });
+
+  it('SigningUp is never resolved when signupAbandoned=true', () => {
+    fc.assert(
+      fc.property(
+        fc.record({
+          signupEmail: fc.oneof(fc.string({ minLength: 1 }), fc.constant(null)),
+          signupFullName: fc.oneof(
+            fc.string({ minLength: 1 }),
+            fc.constant(null),
+          ),
+          signupRequiredFields: fc.array(
+            fc.constantFrom('full_name', 'department'),
+          ),
+        }),
+        ({ signupEmail, signupFullName, signupRequiredFields }) => {
+          const session: WizardSession = {
+            ...buildSession({}),
+            introConcluded: true,
+            region: 'us',
+            accountCreationFlow: true,
+            signupEmail,
+            signupFullName,
+            signupRequiredFields,
+            signupAuth: null,
+            signupAbandoned: true,
+          };
+          const router = new WizardRouter(Flow.Wizard);
+          return router.resolve(session) !== Screen.SigningUp;
+        },
+      ),
+    );
+  });
+
+  it('SigningUp is never resolved when signupAuth is non-null', () => {
+    const session: WizardSession = {
+      ...buildSession({}),
+      introConcluded: true,
+      region: 'us',
+      accountCreationFlow: true,
+      signupEmail: 'x@y.com',
+      signupFullName: 'Jane',
+      signupRequiredFields: [],
+      signupAuth: {
+        kind: 'success',
+        idToken: 'id',
+        accessToken: 'acc',
+        refreshToken: 'ref',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      },
+      signupAbandoned: false,
+    };
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).not.toBe(Screen.SigningUp);
+  });
+
+  it('SigningUp never fires when any requiredField is unknown', () => {
+    fc.assert(
+      fc.property(
+        fc.constantFrom(
+          'department',
+          'company',
+          'phone',
+          'unknown_field',
+          'role',
+        ),
+        (unknownField) => {
+          const session: WizardSession = {
+            ...buildSession({}),
+            introConcluded: true,
+            region: 'us',
+            accountCreationFlow: true,
+            signupEmail: 'x@y.com',
+            signupFullName: 'Jane',
+            signupRequiredFields: ['full_name', unknownField],
+            signupAuth: null,
+            signupAbandoned: false,
+          };
+          const router = new WizardRouter(Flow.Wizard);
+          return router.resolve(session) !== Screen.SigningUp;
+        },
+      ),
+    );
+  });
 });
 
 // ── Parameterized happy path ─────────────────────────────────────────
@@ -614,6 +699,70 @@ describe('WizardRouter overlay behavior', () => {
     // After pop, cancel kicks in
     router.popOverlay();
     expect(router.resolve(session)).toBe(Screen.Outro);
+  });
+});
+
+// ── Signup field-collection invariants ──────────────────────────────
+
+describe('WizardRouter signup field-collection invariants', () => {
+  /**
+   * Invariant 1 (property): --signup (accountCreationFlow) with signupEmail=null
+   * never resolves to Auth, regardless of signupFullName value.
+   *
+   * The SignupEmail screen must gate Auth: no email collected = Auth not reached.
+   */
+  it('--signup (accountCreationFlow), signupEmail=null never resolves to Auth (any signupFullName)', () => {
+    fc.assert(
+      fc.property(
+        fc.option(fc.string({ minLength: 1 }), { nil: null }),
+        (signupFullName) => {
+          const session = buildSession({});
+          const router = new WizardRouter(Flow.Wizard);
+
+          // Baseline: past Intro + RegionSelect so those gates don't block
+          session.introConcluded = true;
+          session.region = 'us';
+          session.regionForced = false;
+
+          // Signup mode with email still missing
+          session.accountCreationFlow = true;
+          session.signupEmail = null;
+          session.signupFullName = signupFullName;
+
+          const resolved = router.resolve(session);
+
+          expect(
+            resolved,
+            `Expected router NOT to resolve to Auth when signupEmail=null (signupFullName=${JSON.stringify(
+              signupFullName,
+            )}), got ${resolved}`,
+          ).not.toBe(Screen.Auth);
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  /**
+   * Invariant 2 (point check): --signup with all three signup fields
+   * populated (region, signupFullName, signupEmail) must not resolve to
+   * SignupFullName or SignupEmail — those collection screens are complete.
+   */
+  it('--signup (accountCreationFlow) with all signup fields collected never resolves to SignupFullName or SignupEmail', () => {
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    session.regionForced = false;
+    session.accountCreationFlow = true;
+    session.signupFullName = 'Jane Smith';
+    session.signupEmail = 'jane@example.com';
+
+    const resolved = router.resolve(session);
+
+    expect(resolved).not.toBe(Screen.SignupFullName);
+    expect(resolved).not.toBe(Screen.SignupEmail);
   });
 });
 

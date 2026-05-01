@@ -17,6 +17,7 @@ import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 import { resolveInstallDir } from '../utils/install-dir';
+import type { SignupSuccessResult } from '../utils/signup-or-auth.js';
 
 /**
  * Whether the user is signing into an existing Amplitude account or
@@ -133,6 +134,8 @@ export const CliArgsSchema = z.object({
   ci: z.boolean().default(false),
   agent: z.boolean().default(false),
   forceInstall: z.boolean().default(false),
+  /** `--signup` / legacy accountCreationFlow — direct signup / SigningUp ceremony. */
+  signup: z.boolean().default(false),
   authOnboardingPath: z.enum(['sign_in', 'create_account']).default('sign_in'),
   localMcp: z.boolean().default(false),
   menu: z.boolean().default(false),
@@ -362,12 +365,37 @@ export interface WizardSession {
   ci: boolean;
   agent: boolean;
   /**
+   * User invoked `--signup` (or legacy accountCreationFlow). Drives the
+   * direct-signup / SigningUpScreen path distinct from menu create-account.
+   */
+  accountCreationFlow: boolean;
+  /**
    * Sign in to an existing Amplitude account vs create a new one during
    * onboarding (includes email capture + ToS on the create-account path).
    */
   authOnboardingPath: AuthOnboardingPath;
   signupEmail: string | null;
   signupFullName: string | null;
+  /**
+   * Field names the signup endpoint requires before it can provision
+   * (e.g. `['full_name']`). Set when performSignupOrAuth returns
+   * `{ kind: 'needs_information' }`. Read by flow predicates that route
+   * the user into the appropriate collection screen.
+   */
+  signupRequiredFields: string[];
+  /**
+   * Success payload from direct signup — tokens + userInfo. Set by
+   * SigningUpScreen on the `success` arm of performSignupOrAuth; read by
+   * bin.ts to skip the OAuth browser flow. Narrowed to the success arm
+   * because only that case is ever written here.
+   */
+  signupAuth: SignupSuccessResult | null;
+  /**
+   * True once the direct-signup path has been abandoned for this run
+   * (e.g. endpoint bounced to redirect, returned an unknown required field,
+   * or errored). Read by the flow to fall through to the normal AuthScreen.
+   */
+  signupAbandoned: boolean;
   localMcp: boolean;
   apiKey?: string;
   menu: boolean;
@@ -962,9 +990,11 @@ export function buildSession(args: {
 }): WizardSession {
   const resolvedAuthPath = resolveAuthOnboardingPathFromArgs(args);
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
+  const mergedSignupCliFlag = Boolean(args.accountCreationFlow ?? args.signup);
   const parsed = CliArgsSchema.safeParse({
     ...args,
     authOnboardingPath: resolvedAuthPath,
+    signup: mergedSignupCliFlag,
   });
   if (!parsed.success) {
     console.warn(
@@ -984,6 +1014,9 @@ export function buildSession(args: {
     installDir: resolveInstallDir(validated.installDir),
     ci: validated.ci ?? false,
     agent: false,
+    accountCreationFlow: parsed.success
+      ? parsed.data.signup
+      : mergedSignupCliFlag,
     authOnboardingPath: parsed.success
       ? parsed.data.authOnboardingPath
       : resolveAuthOnboardingPathFromArgs(args),
@@ -993,6 +1026,9 @@ export function buildSession(args: {
     // signup wrapper short-circuits with "missing email or fullName".
     signupEmail: parsed.success ? validated.signupEmail ?? null : null,
     signupFullName: parsed.success ? validated.signupFullName ?? null : null,
+    signupRequiredFields: [],
+    signupAuth: null,
+    signupAbandoned: false,
     localMcp: validated.localMcp ?? false,
     apiKey: validated.apiKey,
     menu: validated.menu ?? false,
