@@ -616,6 +616,17 @@ export class WizardStore {
   }
 
   setSignupRequiredFields(fields: string[]): void {
+    // Null out the previously-submitted value for any field the server is
+    // re-requesting so the flow re-resolves back to its collection screen
+    // (e.g. SignupFullName, whose `show` predicate gates on
+    // `signupFullName === null`). Without this, SigningUpScreen would
+    // record the requirement but the flow would skip the collection
+    // screen, leaving the user stuck on SigningUp with no way forward.
+    for (const field of fields) {
+      if (field === 'full_name') {
+        this.$session.setKey('signupFullName', null);
+      }
+    }
     this.$session.setKey('signupRequiredFields', fields);
     this.emitChange();
   }
