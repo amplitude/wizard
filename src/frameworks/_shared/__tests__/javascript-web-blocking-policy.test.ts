@@ -20,6 +20,16 @@ describe('javascriptWebBlockedByFrameworkPackage', () => {
     expect(javascriptWebBlockedByFrameworkPackage(pkg)).toBe(false);
   });
 
+  it('does not block Slidev + vue', () => {
+    const pkg: PackageDotJson = {
+      devDependencies: {
+        vue: '^3.5.0',
+        slidev: '^52.0.0',
+      },
+    };
+    expect(javascriptWebBlockedByFrameworkPackage(pkg)).toBe(false);
+  });
+
   it('still blocks plain vue SPA', () => {
     const pkg: PackageDotJson = {
       dependencies: { vue: '^3.5.0' },
