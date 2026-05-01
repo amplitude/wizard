@@ -316,7 +316,7 @@ void yargs(hideBin(process.argv))
     },
     'auth-onboarding': {
       describe:
-        'sign in to an existing Amplitude account or create a new one (non-interactive; default sign-in)',
+        'sign-in (default) or create-account — same choice as the first two Intro menu items; use in CI/agent when there is no TUI',
       choices: ['sign-in', 'create-account'] as const,
       type: 'string',
     },

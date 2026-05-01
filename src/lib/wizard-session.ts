@@ -910,6 +910,12 @@ function resolveAuthOnboardingPathFromArgs(args: {
 
 /**
  * Build a WizardSession from CLI args, pre-populating whatever is known.
+ *
+ * **Auth path (`sign_in` vs `create_account`):** Prefer `authOnboarding` /
+ * `authOnboardingPath` from `--auth-onboarding` (or the Intro menu in TUI).
+ * `signup` / `accountCreationFlow` are legacy boolean inputs still merged
+ * here so older scripts and env-injected argv keep working; both map to
+ * create-account when true.
  */
 export function buildSession(args: {
   debug?: boolean;
@@ -920,9 +926,9 @@ export function buildSession(args: {
   authOnboardingPath?: AuthOnboardingPath;
   /** From `--auth-onboarding` (yargs camelCase: `authOnboarding`). */
   authOnboarding?: 'sign-in' | 'create-account';
-  /** @deprecated Hidden env/compat — maps to create-account. */
+  /** @deprecated Hidden argv/env compat — maps to create-account when true. */
   signup?: boolean;
-  /** @deprecated Prefer `authOnboardingPath`. */
+  /** @deprecated Internal/legacy compat — maps to create-account when true. */
   accountCreationFlow?: boolean;
   localMcp?: boolean;
   apiKey?: string;

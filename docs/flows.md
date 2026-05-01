@@ -126,7 +126,7 @@ flowchart TD
 title: Wizard flow
 ---
 flowchart TD
-    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected)<br/>User picks Sign in vs Create new Amplitude account, then Continue<br/>(non-interactive: --auth-onboarding sign-in or create-account)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
+    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected)<br/>One menu: Continue — sign in vs Continue — create account, then framework/region/directory/cancel<br/>(non-interactive: --auth-onboarding sign-in or create-account)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
     INTRO --> REGION_SELECT
 
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]

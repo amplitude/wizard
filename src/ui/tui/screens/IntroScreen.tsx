@@ -387,43 +387,32 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           />
         )}
 
-      {/* Account path — explicit choice before Continue (non-interactive
-          flows use `--auth-onboarding` instead). */}
+      {/* Single picker: sign-in vs create-account (same session field as
+          `--auth-onboarding` in CI/agent) plus escape hatches. Two menus
+          would both bind useInput and steal each other's keystrokes. */}
       {showContinue && !changingDirectory && (
         <Box marginTop={compact ? 0 : 1}>
           <PickerMenu
-            message="How do you want to get started with Amplitude?"
+            message={
+              narrow
+                ? 'Sign in or create account'
+                : 'Sign in to an existing Amplitude account, or create a new one'
+            }
             options={[
               {
-                label: 'Sign in with my existing account',
-                value: AuthOnboardingPath.SignIn,
+                label: narrow
+                  ? 'Continue — sign in'
+                  : 'Continue — sign in to Amplitude',
+                value: 'continue_signin',
+                ...(!narrow ? { hint: 'existing account' } : {}),
               },
               {
-                label: 'Create a new Amplitude account',
-                value: AuthOnboardingPath.CreateAccount,
+                label: narrow
+                  ? 'Continue — new account'
+                  : 'Continue — create a new account',
+                value: 'continue_create',
+                ...(!narrow ? { hint: 'new org signup' } : {}),
               },
-            ]}
-            onSelect={(value) => {
-              const choice = Array.isArray(value) ? value[0] : value;
-              store.setAuthOnboardingPath(choice);
-              analytics.wizardCapture('intro auth onboarding path', {
-                'auth onboarding path': choice,
-                integration: session.integration,
-              });
-            }}
-          />
-        </Box>
-      )}
-
-      {/* Action picker — Continue is always first; the rest are escape
-          hatches grouped together so a hurried user with the wrong
-          directory doesn't have to scan past meaningless options
-          (region, framework) to find the way out. */}
-      {showContinue && !changingDirectory && (
-        <Box marginTop={compact ? 0 : 1}>
-          <PickerMenu
-            options={[
-              { label: 'Continue', value: 'continue' },
               {
                 label: 'Change framework',
                 value: 'framework',
@@ -451,12 +440,31 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
             ]}
             onSelect={(value) => {
               const choice = Array.isArray(value) ? value[0] : value;
-              analytics.wizardCapture('intro action', {
-                action: choice,
+              const analyticsBase = {
                 integration: session.integration,
                 'detected framework': session.detectedFrameworkLabel,
                 'has manifest': workspace.hasManifest,
                 'is monorepo': workspace.isMonorepo,
+              };
+
+              if (choice === 'continue_signin' || choice === 'continue_create') {
+                const path =
+                  choice === 'continue_create'
+                    ? AuthOnboardingPath.CreateAccount
+                    : AuthOnboardingPath.SignIn;
+                store.setAuthOnboardingPath(path);
+                analytics.wizardCapture('intro action', {
+                  ...analyticsBase,
+                  action: 'continue',
+                  'auth onboarding path': path,
+                });
+                store.concludeIntro();
+                return;
+              }
+
+              analytics.wizardCapture('intro action', {
+                ...analyticsBase,
+                action: choice,
               });
               if (choice === 'cancel') {
                 store.setOutroData({
@@ -472,8 +480,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 // conclude the intro so the main flow advances past it
                 // into the (now re-shown) RegionSelect screen.
                 store.setRegionForced();
-                store.concludeIntro();
-              } else {
                 store.concludeIntro();
               }
             }}

@@ -675,9 +675,6 @@ export class WizardStore {
 
   setAuthOnboardingPath(path: WizardSession['authOnboardingPath']): void {
     this.$session.setKey('authOnboardingPath', path);
-    analytics.wizardCapture('auth onboarding path selected', {
-      'auth onboarding path': path,
-    });
     this.emitChange();
   }
 
